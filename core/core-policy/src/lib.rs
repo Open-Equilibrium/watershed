@@ -64,6 +64,16 @@ pub struct PolicyArtifact {
     pub target: PolicyTarget,
 }
 
+impl PolicyArtifact {
+    pub fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
+        for command in &self.commands {
+            command.validate()?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PolicyTarget {
@@ -84,6 +94,12 @@ pub struct CommandPolicy {
     pub script_runtime: Option<String>,
     pub tool_id: String,
     pub tool_kind: ToolKind,
+}
+
+impl CommandPolicy {
+    fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
+        self.environment.validate(&self.tool_id)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -126,10 +142,140 @@ pub struct EnvironmentPolicy {
     pub default: EnvironmentDefault,
 }
 
+impl EnvironmentPolicy {
+    fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
+        match self.default {
+            EnvironmentDefault::Clear => {}
+        }
+
+        for name in &self.allow {
+            validate_environment_allow_name(tool_id, name)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EnvironmentDefault {
     Clear,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyArtifactValidationError {
+    message: String,
+}
+
+impl fmt::Display for PolicyArtifactValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for PolicyArtifactValidationError {}
+
+fn validate_environment_allow_name(
+    tool_id: &str,
+    name: &str,
+) -> Result<(), PolicyArtifactValidationError> {
+    if !has_valid_environment_allow_name_shape(name) {
+        return Err(policy_artifact_error(format!(
+            "tool {tool_id} environment allow entry {name:?} must match ^[A-Z_][A-Z0-9_]{{0,63}}$"
+        )));
+    }
+
+    if is_forbidden_environment_allow_name(name) {
+        return Err(policy_artifact_error(format!(
+            "tool {tool_id} environment allow entry {name:?} is forbidden by SECURITY.md"
+        )));
+    }
+
+    Ok(())
+}
+
+fn has_valid_environment_allow_name_shape(name: &str) -> bool {
+    if name.is_empty() || name.len() > 64 {
+        return false;
+    }
+
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    if first != b'_' && !first.is_ascii_uppercase() {
+        return false;
+    }
+
+    bytes.all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
+fn is_forbidden_environment_allow_name(name: &str) -> bool {
+    const EXACT: &[&str] = &[
+        "ALL_PROXY",
+        "BASH_ENV",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CDPATH",
+        "DOCKER_CONFIG",
+        "DOCKER_HOST",
+        "ENV",
+        "FTP_PROXY",
+        "GIT_ASKPASS",
+        "GIT_EXEC_PATH",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSH_COMMAND",
+        "GIT_TEMPLATE_DIR",
+        "GIT_TERMINAL_PROMPT",
+        "GLOBIGNORE",
+        "GPG_AGENT_INFO",
+        "GPG_TTY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "IFS",
+        "JAVA_TOOL_OPTIONS",
+        "KRB5CCNAME",
+        "KUBECONFIG",
+        "NETRC",
+        "NODE_OPTIONS",
+        "NO_PROXY",
+        "NPM_CONFIG_USERCONFIG",
+        "PATH",
+        "PATHEXT",
+        "PERL5LIB",
+        "PERL5OPT",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "RUBYOPT",
+        "RUSTC_WRAPPER",
+        "SHELLOPTS",
+        "SSH_ASKPASS",
+        "SSH_AUTH_SOCK",
+    ];
+    const PREFIXES: &[&str] = &[
+        "ANTHROPIC_",
+        "AWS_",
+        "AZURE_",
+        "CF_",
+        "DYLD_",
+        "GCP_",
+        "GH_",
+        "GITHUB_",
+        "GIT_CONFIG_",
+        "KUBE",
+        "LD_",
+        "OPENAI_",
+    ];
+    const SUFFIXES: &[&str] = &["_KEY", "_PASSWORD", "_SECRET", "_TOKEN"];
+
+    EXACT.contains(&name)
+        || PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+        || SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+        || name.contains("_CREDENTIAL")
+        || (name.starts_with("CARGO_TARGET_") && name.ends_with("_RUNNER"))
+}
+
+fn policy_artifact_error(message: String) -> PolicyArtifactValidationError {
+    PolicyArtifactValidationError { message }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -206,6 +352,11 @@ impl ExpectedDecision {
                 expected.name(),
                 self.reason_code.name()
             )));
+        }
+        if self.side_effects_allowed {
+            return Err(expected_decision_error(
+                "expected denials must set side_effects_allowed to false".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -572,6 +723,9 @@ mod tests {
 
             let artifact: PolicyArtifact = serde_json::from_str(&text)
                 .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+            artifact
+                .validate()
+                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
             assert_eq!(artifact.policy_version, POLICY_VERSION_V0);
             for command in &artifact.commands {
                 assert_eq!(
@@ -587,6 +741,52 @@ mod tests {
                 text,
                 "{} must be canonical",
                 path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_forbidden_environment_allow_entries() {
+        let forbidden_names = [
+            "AWS_REGION",
+            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
+            "GIT_CONFIG_GLOBAL",
+            "HTTP_PROXY",
+            "KUBECONFIG",
+            "LD_PRELOAD",
+            "MY_CREDENTIALS",
+            "OPENAI_API_KEY",
+            "PATH",
+            "SERVICE_TOKEN",
+        ];
+
+        for name in forbidden_names {
+            let artifact = policy_artifact_with_environment_allow(name);
+
+            let err = artifact
+                .validate()
+                .expect_err("forbidden environment allow entry must fail validation");
+
+            assert!(
+                err.to_string().contains(name),
+                "{name} should be named in {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_malformed_environment_allow_entries() {
+        let too_long = "A".repeat(65);
+        for name in ["", "lowercase", "A-B", "1INVALID", too_long.as_str()] {
+            let artifact = policy_artifact_with_environment_allow(name);
+
+            let err = artifact
+                .validate()
+                .expect_err("malformed environment allow entry must fail validation");
+
+            assert!(
+                err.to_string().contains("^[A-Z_][A-Z0-9_]{0,63}$"),
+                "{name:?} should report the environment allow grammar"
             );
         }
     }
@@ -868,6 +1068,32 @@ mod tests {
     }
 
     #[test]
+    fn expected_decision_rejects_allowed_side_effects() {
+        let expected = ExpectedDecision {
+            attempt: DeniedAttempt::Network {
+                destination: "example.com".to_owned(),
+                port: 443,
+                tool_id: "negative".to_owned(),
+                transport: NetworkTransport::Tcp,
+            },
+            expected: ExpectedDecisionKind::Deny,
+            fixture_name: "sandbox-negative-network".to_owned(),
+            reason_code: DenyReasonCode::NetworkDenied,
+            side_effects_allowed: true,
+            target: PolicyTarget::LinuxLandlockSeccomp,
+        };
+
+        let err = expected
+            .validate()
+            .expect_err("expected denials must not allow side effects");
+
+        assert_eq!(
+            err.to_string(),
+            "expected denials must set side_effects_allowed to false"
+        );
+    }
+
+    #[test]
     fn policy_artifact_canonical_json_sorts_schema_arrays() {
         let artifact = PolicyArtifact {
             commands: vec![
@@ -941,7 +1167,7 @@ mod tests {
         assert_eq!(canonical.commands[0].network.allow[0].cidr, "10.0.0.0/24");
         assert_eq!(
             canonical.commands[0].environment.allow,
-            vec!["LANG", "PATH"]
+            vec!["LANG", "TERM"]
         );
         assert_eq!(
             canonical
@@ -988,7 +1214,7 @@ mod tests {
             argv: vec!["--second".to_owned(), "--first".to_owned()],
             command_id: format!("{tool_id}-command"),
             environment: EnvironmentPolicy {
-                allow: vec!["PATH".to_owned(), "LANG".to_owned()],
+                allow: vec!["TERM".to_owned(), "LANG".to_owned()],
                 default: EnvironmentDefault::Clear,
             },
             executable: format!("/bin/{tool_id}"),
@@ -1022,6 +1248,31 @@ mod tests {
             tool_id: tool_id.to_owned(),
             tool_kind: ToolKind::PredefinedCommand,
         }
+    }
+
+    fn policy_artifact_with_environment_allow(name: &str) -> PolicyArtifact {
+        let mut artifact = PolicyArtifact {
+            commands: vec![command_policy(
+                "environment-tool",
+                vec!["a"],
+                vec!["workspace"],
+            )],
+            fixture_name: "environment-contract".to_owned(),
+            phase_scope: vec![PhaseScope {
+                phase_id: "inspect".to_owned(),
+                tool_ids: vec!["environment-tool".to_owned()],
+            }],
+            policy_version: POLICY_VERSION_V0.to_owned(),
+            runtime_limits: RuntimeLimits {
+                headless: true,
+                timeout_ms: 1000,
+            },
+            source_loop_definition_id: "environment-contract".to_owned(),
+            target: PolicyTarget::LinuxLandlockSeccomp,
+        };
+
+        artifact.commands[0].environment.allow = vec![name.to_owned()];
+        artifact
     }
 
     fn fixture_files(suffix: &str) -> Vec<std::path::PathBuf> {
