@@ -19,7 +19,7 @@ sandbox_mode = "workspace-write"
 web_search = "disabled"
 
 [sandbox_workspace_write]
-network_access = true
+network_access = false
 
 [features]
 multi_agent = true        # subagents for parallel scoped work
