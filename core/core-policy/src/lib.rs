@@ -485,12 +485,7 @@ impl FilesystemPolicy {
             )));
         }
 
-        let scopes = self
-            .read_roots
-            .iter()
-            .chain(self.write_roots.iter())
-            .filter_map(|root| normalize_policy_relative_path(root))
-            .collect::<Vec<_>>();
+        let scopes = self.validate_roots(tool_id)?;
 
         for grant in &self.protected_path_grants {
             let Some(normalized_grant) = normalize_policy_relative_path(grant) else {
@@ -510,6 +505,20 @@ impl FilesystemPolicy {
         }
 
         Ok(())
+    }
+
+    fn validate_roots(&self, tool_id: &str) -> Result<Vec<String>, PolicyArtifactValidationError> {
+        let mut scopes = Vec::new();
+        for root in self.read_roots.iter().chain(self.write_roots.iter()) {
+            let Some(normalized_root) = normalize_policy_relative_path(root) else {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} filesystem root {root:?} must be a safe relative path"
+                )));
+            };
+            scopes.push(normalized_root);
+        }
+
+        Ok(scopes)
     }
 }
 
@@ -541,7 +550,12 @@ fn normalize_policy_relative_path(value: &str) -> Option<String> {
         return None;
     }
 
-    Some(components.join("/"))
+    let canonical = components.join("/");
+    if canonical != value {
+        return None;
+    }
+
+    Some(canonical)
 }
 
 fn has_windows_drive_prefix(value: &str) -> bool {
@@ -1324,6 +1338,45 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_unsafe_filesystem_roots() {
+        for root in ["/workspace", "C:/workspace", "workspace/../out"] {
+            let mut artifact = valid_policy_artifact("filesystem-tool");
+            artifact.commands[0].filesystem.read_roots = vec![root.to_owned()];
+            artifact.commands[0]
+                .filesystem
+                .protected_path_grants
+                .clear();
+
+            let err = artifact
+                .validate()
+                .expect_err("read roots must be safe relative paths");
+
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "tool filesystem-tool filesystem root {root:?} must be a safe relative path"
+                )
+            );
+        }
+
+        let mut artifact = valid_policy_artifact("filesystem-tool");
+        artifact.commands[0].filesystem.write_roots = vec!["../out".to_owned()];
+        artifact.commands[0]
+            .filesystem
+            .protected_path_grants
+            .clear();
+
+        let err = artifact
+            .validate()
+            .expect_err("write roots must be safe relative paths");
+
+        assert_eq!(
+            err.to_string(),
+            "tool filesystem-tool filesystem root \"../out\" must be a safe relative path"
+        );
     }
 
     #[test]
