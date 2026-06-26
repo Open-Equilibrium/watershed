@@ -33,10 +33,10 @@
       </article>
       <article id="d-021" class="decision">
         <h3>D-021 - Meta-Harness Packaging</h3>
-        <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> What product form ships in the MVP?</p>
-        <ul><li><strong>A:</strong> Headless CLI plus service/daemon. Pro: useful without Liquid and easy to test. Con: no rich GUI.</li><li><strong>B:</strong> Include a small standalone GUI. Pro: easier demos. Con: duplicates Liquid too early.</li></ul>
-        <p><strong>Recommendation:</strong> A; keep any UI to minimal status/admin only after the control plane works.</p>
+        <p><strong>Status:</strong> Open implementation detail before M2 implementation; the headless control-plane baseline is accepted in ADR-0018.</p>
+        <p><strong>Question:</strong> Which CLI/service/daemon packaging shape ships first for the already-decided headless MVP?</p>
+        <ul><li><strong>A:</strong> Headless CLI plus service/daemon. Pro: useful without Liquid and easy to test. Con: no rich GUI.</li><li><strong>B:</strong> Include only a small status/admin UI after the control plane works. Pro: easier demos. Con: extra packaging surface.</li></ul>
+        <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
       </article>
       <article id="d-022" class="decision">
         <h3>D-022 - Meta-Harness Deployment Modes</h3>
@@ -61,10 +61,10 @@
       </article>
       <article id="d-025" class="decision">
         <h3>D-025 - Liquid/Meta-Harness Boundary</h3>
-        <p><strong>Status:</strong> Open before Liquid integration work.</p>
-        <p><strong>Question:</strong> Which capabilities are owned by Meta-Harness versus rendered by Liquid?</p>
-        <ul><li><strong>A:</strong> Meta-Harness owns session/config/metrics backend; Liquid consumes it. Pro: one source of truth. Con: Liquid must wait for API coverage.</li><li><strong>B:</strong> Liquid duplicates selected backend state. Pro: faster UI prototypes. Con: drift and hidden authority.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
+        <p><strong>Status:</strong> Open implementation detail before Liquid integration work; the one-backend boundary is accepted in ADR-0018.</p>
+        <p><strong>Question:</strong> Which API/data slices expose Meta-Harness-owned capabilities for Liquid to render?</p>
+        <ul><li><strong>A:</strong> Meta-Harness exposes session/config/metrics capabilities through its public surfaces; Liquid consumes those surfaces. Pro: one source of truth. Con: Liquid must wait for API coverage.</li><li><strong>B:</strong> Liquid keeps temporary local projections that sync from Meta-Harness without becoming authority. Pro: faster UI prototypes. Con: sync rules need care.</li></ul>
+        <p><strong>Recommendation:</strong> A first; any projection must remain non-authoritative.</p>
       </article>
     </div>
   </section>
@@ -116,9 +116,9 @@
       </article>
       <article id="d-030" class="decision">
         <h3>D-030 - External-Agent Permissions</h3>
-        <p><strong>Status:</strong> Open before CLI/API mutation access.</p>
-        <p><strong>Question:</strong> How are external agents allowed to read or mutate Liquid workspace data?</p>
-        <ul><li><strong>A:</strong> Scoped grants with approval for sensitive writes. Pro: clear blast radius. Con: more permission UX.</li><li><strong>B:</strong> Workspace-wide tokens. Pro: simple. Con: too broad.</li></ul>
+        <p><strong>Status:</strong> Open implementation detail before CLI/API mutation access; scoped, auditable access is the security baseline.</p>
+        <p><strong>Question:</strong> Which scoped grant model allows external actors to read or mutate Liquid workspace data?</p>
+        <ul><li><strong>A:</strong> Resource/action-scoped grants with approval for sensitive writes. Pro: clear blast radius. Con: more permission UX.</li><li><strong>B:</strong> Capability bundles scoped by workspace area and command family. Pro: easier administration. Con: coarser permissions.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-031" class="decision">
@@ -130,9 +130,9 @@
       </article>
       <article id="d-032" class="decision">
         <h3>D-032 - Shared Mutation Pipeline</h3>
-        <p><strong>Status:</strong> Open before any Liquid write surface ships.</p>
-        <p><strong>Question:</strong> How do UI, CLI/API, Liquid AI and external agents share one mutation path?</p>
-        <ul><li><strong>A:</strong> One typed command/mutation pipeline. Pro: no hidden writes. Con: stricter component contracts.</li><li><strong>B:</strong> Separate write paths with reconciliation. Pro: faster prototypes. Con: drift and audit gaps.</li></ul>
+        <p><strong>Status:</strong> Open implementation detail before any Liquid write surface ships; one recorded mutation path is the accepted product invariant.</p>
+        <p><strong>Question:</strong> Which typed command model lets UI, CLI/API, Liquid AI and external actors share that mutation path?</p>
+        <ul><li><strong>A:</strong> One typed command/mutation pipeline. Pro: no hidden writes. Con: stricter component contracts.</li><li><strong>B:</strong> Per-surface adapters that normalize into the same internal command log. Pro: flexible integration. Con: adapters must prove equivalence.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-033" class="decision">
