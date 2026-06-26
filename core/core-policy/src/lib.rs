@@ -448,6 +448,30 @@ impl FilesystemPolicy {
             )));
         }
 
+        let scopes = self
+            .read_roots
+            .iter()
+            .chain(self.write_roots.iter())
+            .filter_map(|root| normalize_policy_relative_path(root))
+            .collect::<Vec<_>>();
+
+        for grant in &self.protected_path_grants {
+            let Some(normalized_grant) = normalize_policy_relative_path(grant) else {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path"
+                )));
+            };
+
+            if !scopes
+                .iter()
+                .any(|scope| path_is_inside_scope(&normalized_grant, scope))
+            {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} protected_path_grant {grant:?} must stay inside read_roots/write_roots"
+                )));
+            }
+        }
+
         Ok(())
     }
 }
@@ -458,6 +482,41 @@ fn matches_default_protected_paths(paths: &[String]) -> bool {
             .iter()
             .map(String::as_str)
             .eq(DEFAULT_PROTECTED_PATHS.iter().copied())
+}
+
+fn normalize_policy_relative_path(value: &str) -> Option<String> {
+    let normalized = value.replace('\\', "/");
+    if normalized.is_empty() || normalized.starts_with('/') || has_windows_drive_prefix(&normalized)
+    {
+        return None;
+    }
+
+    let mut components = Vec::new();
+    for component in normalized.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => return None,
+            component => components.push(component),
+        }
+    }
+
+    if components.is_empty() {
+        return None;
+    }
+
+    Some(components.join("/"))
+}
+
+fn has_windows_drive_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+fn path_is_inside_scope(path: &str, scope: &str) -> bool {
+    path == scope
+        || path
+            .strip_prefix(scope)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1194,6 +1253,40 @@ mod tests {
             err.to_string(),
             "tool filesystem-tool filesystem protected_paths must match SECURITY.md defaults"
         );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_protected_path_grants_outside_scope() {
+        let mut artifact = valid_policy_artifact("filesystem-tool");
+        artifact.commands[0].filesystem.protected_path_grants = vec!["secrets/.env".to_owned()];
+
+        let err = artifact
+            .validate()
+            .expect_err("protected path grants must stay inside tool scopes");
+
+        assert_eq!(
+            err.to_string(),
+            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside read_roots/write_roots"
+        );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_unsafe_protected_path_grants() {
+        for grant in ["workspace/../.env", "/workspace/.env", "C:/workspace/.env"] {
+            let mut artifact = valid_policy_artifact("filesystem-tool");
+            artifact.commands[0].filesystem.protected_path_grants = vec![grant.to_owned()];
+
+            let err = artifact
+                .validate()
+                .expect_err("protected path grants must be safe relative paths");
+
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "tool filesystem-tool protected_path_grant {grant:?} must be a safe relative path"
+                )
+            );
+        }
     }
 
     #[test]
