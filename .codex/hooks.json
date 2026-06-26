@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".codex/hooks/pre_tool_use_guard.py\"",
+            "statusMessage": "Checking command against protected-path policy",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \".codex/hooks/stop_closeout_check.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

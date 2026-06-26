@@ -1,0 +1,37 @@
+# Codex project config for Watershed (applies when the project is trusted).
+# Posture: max review/reasoning quality, workspace-confined writes, no live web.
+# Rules and read order live in AGENTS.md; do not duplicate them here.
+
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+model_verbosity = "low"
+personality = "pragmatic"
+
+# Keep big logs and diagnostics out of future turns.
+tool_output_token_limit = 6000
+
+# Auto-compact well before GPT's >272K premium-pricing zone.
+model_auto_compact_token_limit = 150000
+
+# Security: Pause for privileged actions; writes confined to the workspace.
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "disabled"
+
+[sandbox_workspace_write]
+network_access = true
+
+[features]
+multi_agent = true        # subagents for parallel scoped work
+undo = true               # per-turn ghost snapshots; cheap local revert
+codex_git_commit = false  # commits stay human-authored with DCO sign-off (CONTRIBUTING.md)
+hooks = true
+prevent_idle_sleep = true
+personality = true
+fast_mode = false
+terminal_resize_reflow = true
+goals = true
+
+[agents]
+max_threads = 6
+max_depth = 1

@@ -1,0 +1,26 @@
+[workspace]
+members = [
+    "core/core-policy",
+    "core/core-script",
+    "loop-agent/loop-agent-cli",
+    "loop-agent/loop-agent-core",
+    "proto/proto",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.81"
+license = "AGPL-3.0-only"
+repository = "https://github.com/Open-Equilibrium/watershed"
+publish = false
+
+[workspace.dependencies]
+core-policy = { path = "core/core-policy", version = "0.0.0" }
+core-script = { path = "core/core-script", version = "0.0.0" }
+loop-agent-core = { path = "loop-agent/loop-agent-core", version = "0.0.0" }
+proto = { path = "proto/proto", version = "0.0.0" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+unicode-normalization = "0.1.24"

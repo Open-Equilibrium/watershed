@@ -1,0 +1,6 @@
+loop:
+  id: hello-loop
+  name: HelloLoop
+  phase_refs: [inspect, summarize]
+  subloop_refs: [hello-subloop, hello-subloop]
+  connection_refs: [inspect-data, inspect-trigger, summary-refresh]

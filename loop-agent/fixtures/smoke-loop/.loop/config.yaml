@@ -1,0 +1,3 @@
+fixture_profile: stub-model
+registry_root: registry
+stub_model: deterministic

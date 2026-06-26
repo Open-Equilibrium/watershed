@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watershed - Open Decisions</title>
+<style>
+:root{--bg:#101317;--panel:#171b21;--panel2:#20262e;--text:#eef1f5;--muted:#a8b1bd;--line:#303844;--accent:#6db7ff;--warn:#ffd37a;--good:#8ce8aa;--r:8px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 var(--font)}a{color:var(--accent)}main{max-width:1180px;margin:0 auto;padding:28px}.hero{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:20px}h1{font-size:40px;line-height:1.05;margin:0 0 10px}h2{font-size:22px;margin:28px 0 12px}h3{font-size:18px;margin:0 0 8px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.decision{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}.decision p{margin:8px 0}.decision ul{margin:8px 0 0 20px;padding:0}.tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:2px 8px;margin:0 4px 8px 0;color:var(--muted);font-size:12px}.m1{color:var(--good)}.m2{color:var(--warn)}nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}nav a{border:1px solid var(--line);border-radius:999px;padding:5px 10px;text-decoration:none;color:var(--muted)}nav a:hover{background:var(--panel2);color:var(--text)}@media(max-width:820px){main{padding:18px}.grid{grid-template-columns:1fr}h1{font-size:32px}}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <h1>Watershed - Open Decisions</h1>
+    <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
+    <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
+    <nav aria-label="Decision links">
+      <a href="#m2">M2</a>
+      <a href="#m3">M3</a>
+      <a href="#post-m1">Post-M1</a>
+    </nav>
+  </header>
+
+  <section id="m2">
+    <h2>M2 - Meta-Harness And AgentPulse</h2>
+    <div class="grid">
+      <article id="d-010" class="decision">
+        <h3>D-010 - AgentPulse v0 Formulas</h3>
+        <p><strong>Status:</strong> Open, M2 blocker.</p>
+        <p><strong>Question:</strong> Which exact event-derived formulas define rework ratio, first-attempt success and cost-per-productive-outcome?</p>
+        <ul><li><strong>A:</strong> Conservative event-derived formulas only. Pro: deterministic and auditable. Con: less nuanced at first.</li><li><strong>B:</strong> Add model-scored quality labels. Pro: richer signal. Con: more subjective and harder to test.</li></ul>
+        <p><strong>Recommendation:</strong> A for M2; reserve model-scored labels for later evaluation.</p>
+      </article>
+      <article id="d-021" class="decision">
+        <h3>D-021 - Meta-Harness Packaging</h3>
+        <p><strong>Status:</strong> Open before M2 implementation.</p>
+        <p><strong>Question:</strong> What product form ships in the MVP?</p>
+        <ul><li><strong>A:</strong> Headless CLI plus service/daemon. Pro: useful without Liquid and easy to test. Con: no rich GUI.</li><li><strong>B:</strong> Include a small standalone GUI. Pro: easier demos. Con: duplicates Liquid too early.</li></ul>
+        <p><strong>Recommendation:</strong> A; keep any UI to minimal status/admin only after the control plane works.</p>
+      </article>
+      <article id="d-022" class="decision">
+        <h3>D-022 - Meta-Harness Deployment Modes</h3>
+        <p><strong>Status:</strong> Open before M2 implementation.</p>
+        <p><strong>Question:</strong> Which modes are required for the first control-plane MVP?</p>
+        <ul><li><strong>A:</strong> Local daemon/sidecar plus CLI. Pro: simplest and matches local agents. Con: remote teams wait.</li><li><strong>B:</strong> Local plus remote server. Pro: broader use. Con: pulls in auth, hosting and network trust.</li></ul>
+        <p><strong>Recommendation:</strong> A; preserve remote-capable protocol seams.</p>
+      </article>
+      <article id="d-023" class="decision">
+        <h3>D-023 - Meta-Harness Service/API Transport</h3>
+        <p><strong>Status:</strong> Open before M2 implementation.</p>
+        <p><strong>Question:</strong> Which local service transport should clients use?</p>
+        <ul><li><strong>A:</strong> JSON-RPC over local socket/named pipe with event streaming. Pro: small and local-first. Con: browser clients need a bridge.</li><li><strong>B:</strong> HTTP plus server-sent events/WebSocket. Pro: easy for Liquid and tooling. Con: more exposed surface.</li><li><strong>C:</strong> Hybrid: HTTP streaming for Liquid live sync, with JSON-RPC/local commands for CLI and BYOA where useful. Pro: matches both client types. Con: two transport paths need clear ownership.</li></ul>
+        <p><strong>Recommendation:</strong> C for the design direction; keep protocol payloads transport-neutral and pick the smallest M2 subset that serves Liquid live sync plus CLI/BYOA control.</p>
+      </article>
+      <article id="d-024" class="decision">
+        <h3>D-024 - Meta-Harness State Storage</h3>
+        <p><strong>Status:</strong> Open before M2 implementation.</p>
+        <p><strong>Question:</strong> Where do session registry, config proposals, audit records and metrics live?</p>
+        <ul><li><strong>A:</strong> SQLite plus append-only transcript/log files. Pro: queryable and local. Con: migration discipline needed.</li><li><strong>B:</strong> JSONL/files only. Pro: transparent. Con: weaker queries and concurrency.</li></ul>
+        <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
+      </article>
+      <article id="d-025" class="decision">
+        <h3>D-025 - Liquid/Meta-Harness Boundary</h3>
+        <p><strong>Status:</strong> Open before Liquid integration work.</p>
+        <p><strong>Question:</strong> Which capabilities are owned by Meta-Harness versus rendered by Liquid?</p>
+        <ul><li><strong>A:</strong> Meta-Harness owns session/config/metrics backend; Liquid consumes it. Pro: one source of truth. Con: Liquid must wait for API coverage.</li><li><strong>B:</strong> Liquid duplicates selected backend state. Pro: faster UI prototypes. Con: drift and hidden authority.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="m3">
+    <h2>M3 - Liquid</h2>
+    <div class="grid">
+      <article id="d-005" class="decision">
+        <h3>D-005 - Liquid Navigation And Layout</h3>
+        <p><strong>Status:</strong> Open before Liquid UI implementation.</p>
+        <p><strong>Question:</strong> What navigation model should the first Liquid workspace use?</p>
+        <ul><li><strong>A:</strong> Workspace sidebar plus command-first PowerBar. Pro: scalable and agent-friendly. Con: more interaction design.</li><li><strong>B:</strong> Dashboard-first tabs. Pro: simple. Con: weaker for many workspaces/actions.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-009" class="decision">
+        <h3>D-009 - Liquid UI Framework</h3>
+        <p><strong>Status:</strong> Open before Liquid app shell work.</p>
+        <p><strong>Question:</strong> Which Dart/native UI stack should implement Liquid?</p>
+        <ul><li><strong>A:</strong> Flutter. Pro: mature cross-platform tooling. Con: larger runtime surface.</li><li><strong>B:</strong> Lower-level native/Dart stack. Pro: tighter control. Con: higher implementation cost.</li></ul>
+        <p><strong>Recommendation:</strong> Flutter unless a concrete MVP requirement rules it out.</p>
+      </article>
+      <article id="d-026" class="decision">
+        <h3>D-026 - Liquid Standalone MVP Scope</h3>
+        <p><strong>Status:</strong> Open before M3 scoping freeze.</p>
+        <p><strong>Question:</strong> Which Liquid capabilities are required when no agents are installed?</p>
+        <ul><li><strong>A:</strong> Dashboard/component workspace, local scripts, PowerBar and action history. Pro: proves standalone value. Con: narrower integrations.</li><li><strong>B:</strong> Include rich agent integration first. Pro: stronger platform demo. Con: weakens standalone proof.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-027" class="decision">
+        <h3>D-027 - Liquid CLI/API Surface</h3>
+        <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
+        <p><strong>Question:</strong> Which workspace read/write commands and API calls are stable in the MVP?</p>
+        <ul><li><strong>A:</strong> Small typed CRUD/mutation surface. Pro: testable and permissionable. Con: less flexible.</li><li><strong>B:</strong> Broad generic document API. Pro: flexible. Con: harder to secure and version.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-028" class="decision">
+        <h3>D-028 - Liquid Action History Model</h3>
+        <p><strong>Status:</strong> Open before M3 storage work.</p>
+        <p><strong>Question:</strong> What is the internal workspace history model?</p>
+        <ul><li><strong>A:</strong> Append-only action log plus snapshots/checkpoints. Pro: auditable and revertible. Con: compaction work later.</li><li><strong>B:</strong> Mutable state plus periodic backups. Pro: simpler storage. Con: weak audit/revert.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-029" class="decision">
+        <h3>D-029 - Liquid Storage Model</h3>
+        <p><strong>Status:</strong> Open before M3 storage work.</p>
+        <p><strong>Question:</strong> Which local-first store backs workspace state and history?</p>
+        <ul><li><strong>A:</strong> SQLite-backed local store. Pro: reliable local queries. Con: schema migrations.</li><li><strong>B:</strong> File tree plus JSON. Pro: transparent. Con: weaker consistency and indexing.</li></ul>
+        <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
+      </article>
+      <article id="d-030" class="decision">
+        <h3>D-030 - External-Agent Permissions</h3>
+        <p><strong>Status:</strong> Open before CLI/API mutation access.</p>
+        <p><strong>Question:</strong> How are external agents allowed to read or mutate Liquid workspace data?</p>
+        <ul><li><strong>A:</strong> Scoped grants with approval for sensitive writes. Pro: clear blast radius. Con: more permission UX.</li><li><strong>B:</strong> Workspace-wide tokens. Pro: simple. Con: too broad.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-031" class="decision">
+        <h3>D-031 - Revert Semantics</h3>
+        <p><strong>Status:</strong> Open before action-history implementation.</p>
+        <p><strong>Question:</strong> How does Liquid undo faulty or unwanted mutations?</p>
+        <ul><li><strong>A:</strong> Compensating actions, with checkpoint restore on conflicts. Pro: preserves history. Con: conflict handling needed.</li><li><strong>B:</strong> Destructive rollback. Pro: simple. Con: weaker audit trail.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-032" class="decision">
+        <h3>D-032 - Shared Mutation Pipeline</h3>
+        <p><strong>Status:</strong> Open before any Liquid write surface ships.</p>
+        <p><strong>Question:</strong> How do UI, CLI/API, Liquid AI and external agents share one mutation path?</p>
+        <ul><li><strong>A:</strong> One typed command/mutation pipeline. Pro: no hidden writes. Con: stricter component contracts.</li><li><strong>B:</strong> Separate write paths with reconciliation. Pro: faster prototypes. Con: drift and audit gaps.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-033" class="decision">
+        <h3>D-033 - Component Runtime Contract</h3>
+        <p><strong>Status:</strong> Open before component implementation.</p>
+        <p><strong>Question:</strong> What typed contract do dashboard components expose?</p>
+        <ul><li><strong>A:</strong> Minimal typed props/data/events contract. Pro: stable and testable. Con: less expressive initially.</li><li><strong>B:</strong> Open component object model. Pro: flexible. Con: hard to sandbox and version.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-034" class="decision">
+        <h3>D-034 - Script Component Runtime</h3>
+        <p><strong>Status:</strong> Open before script components.</p>
+        <p><strong>Question:</strong> What sandbox/runtime executes Liquid script components?</p>
+        <ul><li><strong>A:</strong> Capability-scoped local runtime. Pro: useful offline and auditable. Con: sandbox work.</li><li><strong>B:</strong> Remote execution only. Pro: isolates local device. Con: weaker local-first story.</li></ul>
+        <p><strong>Recommendation:</strong> A, with the exact runtime chosen during M3 design.</p>
+      </article>
+      <article id="d-035" class="decision">
+        <h3>D-035 - Sync And Collaboration</h3>
+        <p><strong>Status:</strong> Open before shared-workspace work.</p>
+        <p><strong>Question:</strong> Which sync/collaboration model supports multiple users and agents?</p>
+        <ul><li><strong>A:</strong> Local-first action log with view-scoped subscriptions. Pro: matches performance targets. Con: harder conflict logic.</li><li><strong>B:</strong> Central server as source of truth. Pro: simpler multi-user authority. Con: weaker offline/local-first posture.</li></ul>
+        <p><strong>Recommendation:</strong> A, unless M3 constraints force a narrower local-only MVP.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="post-m1">
+    <h2>Post-M1 Loop Agent Seams</h2>
+    <div class="grid">
+      <article id="d-019" class="decision">
+        <h3>D-019 - Loop Agent RPC Command Shape</h3>
+        <p><strong>Status:</strong> Open, not an M1 blocker.</p>
+        <p><strong>Question:</strong> What JSON-RPC methods, parameters and error mapping does the future control surface expose?</p>
+        <ul><li><strong>A:</strong> Minimal start/status/cancel/tail/export set. Pro: stable and small. Con: fewer steering commands.</li><li><strong>B:</strong> Broad interactive control API. Pro: richer integrations. Con: premature stability burden.</li></ul>
+        <p><strong>Recommendation:</strong> A after M1 validates the event stream.</p>
+      </article>
+      <article id="d-020" class="decision">
+        <h3>D-020 - Loop Agent Embedded Core API</h3>
+        <p><strong>Status:</strong> Open, not an M1 blocker.</p>
+        <p><strong>Question:</strong> Which Rust API becomes stable for embedding Loop Agent?</p>
+        <ul><li><strong>A:</strong> Keep internals private through M1, then stabilize a small `loop-agent-core` API. Pro: avoids freezing early mistakes. Con: embedding waits.</li><li><strong>B:</strong> Stabilize the API during M1. Pro: earlier integration. Con: high churn risk.</li></ul>
+        <p><strong>Recommendation:</strong> A.</p>
+      </article>
+      <article id="d-046" class="decision">
+        <h3>D-046 - Positive CIDR Egress Enforcement</h3>
+        <p><strong>Status:</strong> Open, post-M1.</p>
+        <p><strong>Question:</strong> Which Linux backend enforces positive CIDR/port network allow entries after ADR-0051's M1 deny-all behavior?</p>
+        <ul><li><strong>A:</strong> Network namespace plus firewall rules. Pro: common Linux primitives. Con: needs privilege and CI setup.</li><li><strong>B:</strong> Broker or seccomp user notification. Pro: fine-grained decisions. Con: more moving parts to prove.</li><li><strong>C:</strong> eBPF/cgroup networking. Pro: kernel-level filtering. Con: higher operational complexity and privileges.</li></ul>
+        <p><strong>Recommendation:</strong> Keep M1 fail-closed per ADR-0051; choose the post-M1 backend before allowing non-empty network allowlists in OS-enforced runs.</p>
+      </article>
+    </div>
+  </section>
+</main>
+</body>
+</html>

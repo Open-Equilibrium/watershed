@@ -1,0 +1,4 @@
+instruction:
+  id: write-output
+  name: WriteOutput
+  prompt: "Write the deterministic summary artifact."

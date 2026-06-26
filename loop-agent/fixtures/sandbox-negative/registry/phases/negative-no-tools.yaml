@@ -1,0 +1,8 @@
+phase:
+  id: negative-no-tools
+  name: NegativeNoTools
+  instruction_refs: [deny-attempt]
+  tool_refs: []
+  steps:
+    - id: attempt
+      name: Attempt

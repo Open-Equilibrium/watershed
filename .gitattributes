@@ -1,0 +1,10 @@
+# Normalize line endings: store text as LF in the repo and check out LF on every
+# platform. Prevents CRLF churn between the Windows dev box and the Linux/macOS CI.
+* text=auto eol=lf
+
+# Windows-only scripts must stay CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must stay LF
+*.sh  text eol=lf

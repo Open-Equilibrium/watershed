@@ -1,0 +1,6 @@
+loop:
+  id: sandbox-negative-network
+  name: SandboxNegativeNetwork
+  phase_refs: [negative]
+  subloop_refs: []
+  connection_refs: []
