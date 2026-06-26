@@ -193,6 +193,12 @@ impl CommandPolicy {
                         self.tool_id, OWN_SCRIPT_RUNNER_POSIX_SH
                     )));
                 }
+                if !self.argv.is_empty() {
+                    return Err(policy_artifact_error(format!(
+                        "own-script tool {} must omit argv",
+                        self.tool_id
+                    )));
+                }
             }
         }
 
@@ -1253,6 +1259,16 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "own-script tool write-summary must use script_runtime posix-sh"
+        );
+
+        let mut own_script_argv = own_script_policy_artifact("write-summary");
+        own_script_argv.commands[0].argv = vec!["-c".to_owned()];
+        let err = own_script_argv
+            .validate()
+            .expect_err("own-script must not supply runner arguments");
+        assert_eq!(
+            err.to_string(),
+            "own-script tool write-summary must omit argv"
         );
     }
 
