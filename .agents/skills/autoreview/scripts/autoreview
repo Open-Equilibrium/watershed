@@ -843,7 +843,20 @@ def parse_json_candidate(text: str) -> Any | None:
     return parsed
 
 
+def normalize_review_path(path: str) -> str:
+    normalized = path.strip().replace("\\", "/")
+    while True:
+        previous = normalized
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        if normalized.startswith(("a/", "b/")):
+            normalized = normalized[2:]
+        if normalized == previous:
+            return normalized
+
+
 def validate_report(report: dict[str, Any], repo: Path, changed_paths: set[str], required: list[str]) -> None:
+    normalized_changed_paths = {normalize_review_path(path) for path in changed_paths}
     allowed_top = {"findings", "overall_correctness", "overall_explanation", "overall_confidence"}
     extra_top = set(report) - allowed_top
     if extra_top:
@@ -891,13 +904,14 @@ def validate_report(report: dict[str, Any], repo: Path, changed_paths: set[str],
         location = finding.get("code_location")
         if not isinstance(location, dict):
             raise SystemExit(f"finding {index} missing code_location")
-        rel = str(location.get("file_path", "")).strip()
+        rel = normalize_review_path(str(location.get("file_path", "")).strip())
         line = location.get("line")
         if not rel or not isinstance(line, int) or line < 1:
             raise SystemExit(f"finding {index} has invalid location: {location}")
         if Path(rel).is_absolute() or ".." in Path(rel).parts:
             raise SystemExit(f"finding {index} uses invalid file path: {rel}")
-        if rel not in changed_paths:
+        location["file_path"] = rel
+        if rel not in normalized_changed_paths:
             ignored_findings.append((index, finding, rel, line))
             continue
         kept_findings.append(finding)

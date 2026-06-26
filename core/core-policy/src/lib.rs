@@ -197,7 +197,17 @@ pub struct ExpectedDecision {
 
 impl ExpectedDecision {
     pub fn validate(&self) -> Result<(), ExpectedDecisionValidationError> {
-        self.attempt.validate()
+        self.attempt.validate()?;
+        let expected = self.attempt.expected_reason_code();
+        if self.reason_code != expected {
+            return Err(expected_decision_error(format!(
+                "{} attempts must use reason_code {}, got {}",
+                self.attempt.kind_name(),
+                expected.name(),
+                self.reason_code.name()
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -290,6 +300,30 @@ impl DeniedAttempt {
             | Self::InterpreterEscape { .. } => Ok(()),
         }
     }
+
+    fn expected_reason_code(&self) -> DenyReasonCode {
+        match self {
+            Self::Write { .. } => DenyReasonCode::WriteDenied,
+            Self::Network { .. } => DenyReasonCode::NetworkDenied,
+            Self::Environment { .. } => DenyReasonCode::EnvironmentDenied,
+            Self::ToolOutOfPhase { .. } => DenyReasonCode::ToolOutOfPhase,
+            Self::ProtectedPath { .. } => DenyReasonCode::ProtectedPathDenied,
+            Self::SymlinkEscape { .. } => DenyReasonCode::SymlinkEscapeDenied,
+            Self::InterpreterEscape { .. } => DenyReasonCode::InterpreterEscapeDenied,
+        }
+    }
+
+    fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Write { .. } => "write",
+            Self::Network { .. } => "network",
+            Self::Environment { .. } => "environment",
+            Self::ToolOutOfPhase { .. } => "tool_out_of_phase",
+            Self::ProtectedPath { .. } => "protected_path",
+            Self::SymlinkEscape { .. } => "symlink_escape",
+            Self::InterpreterEscape { .. } => "interpreter_escape",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -359,6 +393,20 @@ pub enum DenyReasonCode {
     ProtectedPathDenied,
     SymlinkEscapeDenied,
     InterpreterEscapeDenied,
+}
+
+impl DenyReasonCode {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::WriteDenied => "write_denied",
+            Self::NetworkDenied => "network_denied",
+            Self::EnvironmentDenied => "environment_denied",
+            Self::ToolOutOfPhase => "tool_out_of_phase",
+            Self::ProtectedPathDenied => "protected_path_denied",
+            Self::SymlinkEscapeDenied => "symlink_escape_denied",
+            Self::InterpreterEscapeDenied => "interpreter_escape_denied",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -726,6 +774,97 @@ mod tests {
             err.to_string(),
             "protected_path rename attempts must include from_path and to_path and omit path"
         );
+    }
+
+    #[test]
+    fn expected_decision_rejects_reason_code_mismatches() {
+        let cases = vec![
+            (
+                DeniedAttempt::Write {
+                    from_path: None,
+                    operation: "create".to_owned(),
+                    path: Some("../outside.txt".to_owned()),
+                    to_path: None,
+                    tool_id: "negative".to_owned(),
+                },
+                DenyReasonCode::NetworkDenied,
+                "write attempts must use reason_code write_denied, got network_denied",
+            ),
+            (
+                DeniedAttempt::Network {
+                    destination: "example.com".to_owned(),
+                    port: 443,
+                    tool_id: "negative".to_owned(),
+                    transport: NetworkTransport::Tcp,
+                },
+                DenyReasonCode::WriteDenied,
+                "network attempts must use reason_code network_denied, got write_denied",
+            ),
+            (
+                DeniedAttempt::Environment {
+                    name: "OPENAI_API_KEY".to_owned(),
+                    tool_id: "negative".to_owned(),
+                },
+                DenyReasonCode::WriteDenied,
+                "environment attempts must use reason_code environment_denied, got write_denied",
+            ),
+            (
+                DeniedAttempt::ToolOutOfPhase {
+                    phase_id: "negative-no-tools".to_owned(),
+                    tool_id: "negative".to_owned(),
+                },
+                DenyReasonCode::WriteDenied,
+                "tool_out_of_phase attempts must use reason_code tool_out_of_phase, got write_denied",
+            ),
+            (
+                DeniedAttempt::ProtectedPath {
+                    from_path: None,
+                    operation: "read".to_owned(),
+                    path: Some(".env".to_owned()),
+                    to_path: None,
+                    tool_id: "negative".to_owned(),
+                },
+                DenyReasonCode::WriteDenied,
+                "protected_path attempts must use reason_code protected_path_denied, got write_denied",
+            ),
+            (
+                DeniedAttempt::SymlinkEscape {
+                    operation: "create".to_owned(),
+                    path: "links/outside.txt".to_owned(),
+                    symlink_path: "links".to_owned(),
+                    symlink_target: "../outside".to_owned(),
+                    tool_id: "negative".to_owned(),
+                },
+                DenyReasonCode::WriteDenied,
+                "symlink_escape attempts must use reason_code symlink_escape_denied, got write_denied",
+            ),
+            (
+                DeniedAttempt::InterpreterEscape {
+                    argv: vec!["-c".to_owned(), "cat .env".to_owned()],
+                    executable: "python".to_owned(),
+                    tool_id: "negative".to_owned(),
+                },
+                DenyReasonCode::WriteDenied,
+                "interpreter_escape attempts must use reason_code interpreter_escape_denied, got write_denied",
+            ),
+        ];
+
+        for (attempt, reason_code, expected_message) in cases {
+            let expected = ExpectedDecision {
+                attempt,
+                expected: ExpectedDecisionKind::Deny,
+                fixture_name: "sandbox-negative".to_owned(),
+                reason_code,
+                side_effects_allowed: false,
+                target: PolicyTarget::LinuxLandlockSeccomp,
+            };
+
+            let err = expected
+                .validate()
+                .expect_err("mismatched reason_code must fail");
+
+            assert_eq!(err.to_string(), expected_message);
+        }
     }
 
     #[test]
