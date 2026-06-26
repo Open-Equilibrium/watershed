@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fmt;
+use std::{
+    fmt,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 
 pub const POLICY_VERSION_V0: &str = "0";
 pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
@@ -98,7 +101,10 @@ pub struct CommandPolicy {
 
 impl CommandPolicy {
     fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
-        self.environment.validate(&self.tool_id)
+        self.environment.validate(&self.tool_id)?;
+        self.network.validate(&self.tool_id)?;
+
+        Ok(())
     }
 }
 
@@ -292,6 +298,37 @@ pub struct NetworkPolicy {
     pub default: NetworkDefault,
 }
 
+impl NetworkPolicy {
+    fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
+        match self.default {
+            NetworkDefault::Deny => {}
+        }
+
+        for entry in &self.allow {
+            match entry.kind {
+                NetworkAllowKind::Cidr => {}
+            }
+            match entry.transport {
+                NetworkTransport::Tcp | NetworkTransport::Udp => {}
+            }
+            if !is_valid_canonical_cidr(&entry.cidr) {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} network allow entry {:?} must use a canonical CIDR",
+                    entry.cidr
+                )));
+            }
+            if entry.port == 0 {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} network allow entry {} must use port 1-65535",
+                    entry.cidr
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkDefault {
@@ -317,6 +354,59 @@ pub enum NetworkAllowKind {
 pub enum NetworkTransport {
     Tcp,
     Udp,
+}
+
+fn is_valid_canonical_cidr(value: &str) -> bool {
+    let Some((addr, prefix)) = value.split_once('/') else {
+        return false;
+    };
+    if prefix.len() > 1 && prefix.starts_with('0') {
+        return false;
+    }
+    if value.matches('/').count() != 1 {
+        return false;
+    }
+
+    let Ok(prefix) = prefix.parse::<u8>() else {
+        return false;
+    };
+    match addr.parse::<IpAddr>() {
+        Ok(IpAddr::V4(addr)) => {
+            prefix <= 32
+                && host_bits_are_zero_v4(addr, prefix)
+                && value == format!("{addr}/{prefix}")
+        }
+        Ok(IpAddr::V6(addr)) => {
+            prefix <= 128
+                && host_bits_are_zero_v6(addr, prefix)
+                && value == format!("{addr}/{prefix}")
+        }
+        Err(_) => false,
+    }
+}
+
+fn host_bits_are_zero_v4(addr: Ipv4Addr, prefix: u8) -> bool {
+    let value = u32::from(addr);
+    match 32 - prefix {
+        0 => true,
+        32 => value == 0,
+        host_bits => {
+            let host_mask = (1u32 << host_bits) - 1;
+            value & host_mask == 0
+        }
+    }
+}
+
+fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
+    let value = u128::from(addr);
+    match 128 - prefix {
+        0 => true,
+        128 => value == 0,
+        host_bits => {
+            let host_mask = (1u128 << host_bits) - 1;
+            value & host_mask == 0
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -789,6 +879,48 @@ mod tests {
                 "{name:?} should report the environment allow grammar"
             );
         }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_malformed_network_allow_entries() {
+        for cidr in [
+            "example.com",
+            "192.0.2.42",
+            "192.0.2.42/24",
+            "192.0.2.0/33",
+            "10.0.0.0/01",
+            "2001:db8::1/32",
+            "2001:DB8::/32",
+        ] {
+            let artifact = policy_artifact_with_network_allow(cidr, 443);
+
+            let err = artifact
+                .validate()
+                .expect_err("malformed network allow entry must fail validation");
+
+            assert!(
+                err.to_string().contains(cidr),
+                "{cidr:?} should be named in {err}"
+            );
+            assert!(
+                err.to_string().contains("canonical CIDR"),
+                "{cidr:?} should report the CIDR contract"
+            );
+        }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_zero_network_allow_port() {
+        let artifact = policy_artifact_with_network_allow("192.0.2.0/24", 0);
+
+        let err = artifact
+            .validate()
+            .expect_err("port zero must fail validation");
+
+        assert_eq!(
+            err.to_string(),
+            "tool network-tool network allow entry 192.0.2.0/24 must use port 1-65535"
+        );
     }
 
     #[test]
@@ -1272,6 +1404,32 @@ mod tests {
         };
 
         artifact.commands[0].environment.allow = vec![name.to_owned()];
+        artifact
+    }
+
+    fn policy_artifact_with_network_allow(cidr: &str, port: u16) -> PolicyArtifact {
+        let mut artifact = PolicyArtifact {
+            commands: vec![command_policy("network-tool", vec!["a"], vec!["workspace"])],
+            fixture_name: "network-contract".to_owned(),
+            phase_scope: vec![PhaseScope {
+                phase_id: "inspect".to_owned(),
+                tool_ids: vec!["network-tool".to_owned()],
+            }],
+            policy_version: POLICY_VERSION_V0.to_owned(),
+            runtime_limits: RuntimeLimits {
+                headless: true,
+                timeout_ms: 1000,
+            },
+            source_loop_definition_id: "network-contract".to_owned(),
+            target: PolicyTarget::LinuxLandlockSeccomp,
+        };
+
+        artifact.commands[0].network.allow = vec![NetworkAllowEntry {
+            cidr: cidr.to_owned(),
+            kind: NetworkAllowKind::Cidr,
+            port,
+            transport: NetworkTransport::Tcp,
+        }];
         artifact
     }
 
