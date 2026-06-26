@@ -378,7 +378,6 @@ def local_bundle(repo: Path) -> str:
 
 
 def branch_bundle(repo: Path, base_ref: str) -> str:
-    git(repo, "fetch", "origin", "--quiet", check=False)
     return "\n\n".join(
         [
             "# Branch Diff",
