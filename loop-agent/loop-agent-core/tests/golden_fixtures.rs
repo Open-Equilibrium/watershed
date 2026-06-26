@@ -1,3 +1,7 @@
+use core_script::{
+    validate_registry_block_semantics, BlockIdentity, LoopBlock, NetworkDeny, NetworkPolicy,
+    PhaseBlock, RegistryBlock, StepBlock, ToolBlock, ToolCommand, ToolKind,
+};
 use proto::{EventEnvelope, EventType};
 use std::{collections::HashSet, fs, path::Path};
 
@@ -411,12 +415,15 @@ fn out_of_phase_fixture_uses_phase_without_attempted_tool() {
     let phase_file = fixture_root()
         .join("sandbox-negative")
         .join("registry/phases/negative-no-tools.yaml");
-    let phase_refs = yaml_inline_list_field(&loop_file, "loop", "phase_refs");
-    let tool_refs = yaml_inline_list_field(&phase_file, "phase", "tool_refs");
+    let loop_block = load_loop_block(&loop_file);
+    let phase_block = load_phase_block(&phase_file);
 
-    assert_eq!(phase_refs, vec!["negative-no-tools"]);
-    assert_eq!(tool_refs, Vec::<String>::new());
-    assert!(!tool_refs.iter().any(|tool_ref| tool_ref == "negative-tool"));
+    assert_eq!(loop_block.phase_refs, vec!["negative-no-tools"]);
+    assert_eq!(phase_block.tool_refs, Vec::<String>::new());
+    assert!(!phase_block
+        .tool_refs
+        .iter()
+        .any(|tool_ref| tool_ref == "negative-tool"));
 }
 
 #[test]
@@ -430,13 +437,13 @@ fn symlink_fixture_uses_tool_scoped_to_lexical_link_path() {
     let tool_file = fixture_root()
         .join("sandbox-negative")
         .join("registry/tools/symlink-tool.yaml");
-    let phase_refs = yaml_inline_list_field(&loop_file, "loop", "phase_refs");
-    let tool_refs = yaml_inline_list_field(&phase_file, "phase", "tool_refs");
-    let write_scope = yaml_inline_list_field(&tool_file, "tool", "write_scope");
+    let loop_block = load_loop_block(&loop_file);
+    let phase_block = load_phase_block(&phase_file);
+    let tool_block = load_tool_block(&tool_file);
 
-    assert_eq!(phase_refs, vec!["negative-symlink"]);
-    assert_eq!(tool_refs, vec!["symlink-tool"]);
-    assert_eq!(write_scope, vec!["workspace/links"]);
+    assert_eq!(loop_block.phase_refs, vec!["negative-symlink"]);
+    assert_eq!(phase_block.tool_refs, vec!["symlink-tool"]);
+    assert_eq!(tool_block.write_scope, vec!["workspace/links"]);
 }
 
 fn sandbox_negative_attempts_tool_launch(path: &Path) -> bool {
@@ -508,7 +515,94 @@ where
         .collect()
 }
 
+fn load_loop_block(path: &Path) -> LoopBlock {
+    let block = LoopBlock {
+        identity: BlockIdentity {
+            id: yaml_scalar_field(path, "loop", "id"),
+            name: yaml_scalar_field(path, "loop", "name"),
+        },
+        phase_refs: yaml_inline_list_field(path, "loop", "phase_refs"),
+        subloop_refs: yaml_inline_list_field(path, "loop", "subloop_refs"),
+        connection_refs: yaml_inline_list_field(path, "loop", "connection_refs"),
+    };
+    validate_registry_block_semantics(&RegistryBlock::Loop(block.clone()))
+        .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    block
+}
+
+fn load_phase_block(path: &Path) -> PhaseBlock {
+    let block = PhaseBlock {
+        identity: BlockIdentity {
+            id: yaml_scalar_field(path, "phase", "id"),
+            name: yaml_scalar_field(path, "phase", "name"),
+        },
+        instruction_refs: yaml_inline_list_field(path, "phase", "instruction_refs"),
+        tool_refs: yaml_inline_list_field(path, "phase", "tool_refs"),
+        steps: yaml_phase_steps(path),
+    };
+    validate_registry_block_semantics(&RegistryBlock::Phase(block.clone()))
+        .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    block
+}
+
+fn load_tool_block(path: &Path) -> ToolBlock {
+    let block = ToolBlock {
+        identity: BlockIdentity {
+            id: yaml_scalar_field(path, "tool", "id"),
+            name: yaml_scalar_field(path, "tool", "name"),
+        },
+        tool_kind: match yaml_scalar_field(path, "tool", "tool_kind").as_str() {
+            "predefined-command" => ToolKind::PredefinedCommand,
+            other => panic!("{}: unsupported tool_kind {other:?}", path.display()),
+        },
+        command: ToolCommand::Predefined {
+            command_id: yaml_nested_scalar_field(path, "tool", "command", "command_id"),
+            argv: yaml_nested_inline_list_field(path, "tool", "command", "argv"),
+        },
+        script_runtime: None,
+        script_body: None,
+        allowed_parameters: Vec::new(),
+        read_scope: yaml_inline_list_field(path, "tool", "read_scope"),
+        write_scope: yaml_inline_list_field(path, "tool", "write_scope"),
+        protected_path_grants: yaml_inline_list_field(path, "tool", "protected_path_grants"),
+        network: match yaml_scalar_field(path, "tool", "network").as_str() {
+            "deny" => NetworkPolicy::Deny(NetworkDeny),
+            other => panic!("{}: unsupported network policy {other:?}", path.display()),
+        },
+    };
+    validate_registry_block_semantics(&RegistryBlock::Tool(block.clone()))
+        .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    block
+}
+
+fn yaml_scalar_field(path: &Path, section: &str, field: &str) -> String {
+    yaml_field_value(path, section, field)
+        .unwrap_or_else(|| panic!("{}: missing {section}.{field}", path.display()))
+}
+
 fn yaml_inline_list_field(path: &Path, section: &str, field: &str) -> Vec<String> {
+    let value = yaml_field_value(path, section, field)
+        .unwrap_or_else(|| panic!("{}: missing {section}.{field}", path.display()));
+    parse_inline_yaml_list(path, field, &value)
+}
+
+fn yaml_nested_scalar_field(path: &Path, section: &str, parent: &str, field: &str) -> String {
+    yaml_nested_field_value(path, section, parent, field)
+        .unwrap_or_else(|| panic!("{}: missing {section}.{parent}.{field}", path.display()))
+}
+
+fn yaml_nested_inline_list_field(
+    path: &Path,
+    section: &str,
+    parent: &str,
+    field: &str,
+) -> Vec<String> {
+    let value = yaml_nested_field_value(path, section, parent, field)
+        .unwrap_or_else(|| panic!("{}: missing {section}.{parent}.{field}", path.display()));
+    parse_inline_yaml_list(path, field, &value)
+}
+
+fn yaml_field_value(path: &Path, section: &str, field: &str) -> Option<String> {
     let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     let section_header = format!("{section}:");
     let field_prefix = format!("{field}:");
@@ -516,7 +610,7 @@ fn yaml_inline_list_field(path: &Path, section: &str, field: &str) -> Vec<String
     let mut parsed = None;
 
     for raw_line in text.lines() {
-        let without_comment = raw_line.split_once('#').map_or(raw_line, |(line, _)| line);
+        let without_comment = strip_yaml_comment(raw_line);
         let line = without_comment.trim_end();
         if line.trim().is_empty() {
             continue;
@@ -528,13 +622,137 @@ fn yaml_inline_list_field(path: &Path, section: &str, field: &str) -> Vec<String
         if !in_section {
             continue;
         }
+        if !line.starts_with("  ") || line.starts_with("    ") {
+            continue;
+        }
         let trimmed = line.trim();
         if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-            parsed = Some(parse_inline_yaml_list(path, field, value.trim()));
+            if parsed.is_some() {
+                panic!("{}: duplicate {section}.{field}", path.display());
+            }
+            let value = value.trim();
+            if value.is_empty() || value == "|" || value == ">" {
+                panic!("{}: {section}.{field} must be scalar", path.display());
+            }
+            parsed = Some(value.to_owned());
         }
     }
 
-    parsed.unwrap_or_else(|| panic!("{}: missing {section}.{field}", path.display()))
+    parsed
+}
+
+fn yaml_nested_field_value(
+    path: &Path,
+    section: &str,
+    parent: &str,
+    field: &str,
+) -> Option<String> {
+    let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    let section_header = format!("{section}:");
+    let parent_header = format!("{parent}:");
+    let field_prefix = format!("{field}:");
+    let mut in_section = false;
+    let mut in_parent = false;
+    let mut parsed = None;
+
+    for raw_line in text.lines() {
+        let without_comment = strip_yaml_comment(raw_line);
+        let line = without_comment.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_section = line.trim() == section_header;
+            in_parent = false;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if line.starts_with("  ") && !line.starts_with("    ") {
+            in_parent = line.trim() == parent_header;
+            continue;
+        }
+        if !in_parent || !line.starts_with("    ") || line.starts_with("      ") {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix(&field_prefix) {
+            if parsed.is_some() {
+                panic!("{}: duplicate {section}.{parent}.{field}", path.display());
+            }
+            parsed = Some(value.trim().to_owned());
+        }
+    }
+
+    parsed
+}
+
+fn yaml_phase_steps(path: &Path) -> Vec<StepBlock> {
+    let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    let mut in_phase = false;
+    let mut in_steps = false;
+    let mut steps = Vec::new();
+    let mut current_id: Option<String> = None;
+    let mut current_name: Option<String> = None;
+
+    for raw_line in text.lines() {
+        let without_comment = strip_yaml_comment(raw_line);
+        let line = without_comment.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_phase = line.trim() == "phase:";
+            in_steps = false;
+            continue;
+        }
+        if !in_phase {
+            continue;
+        }
+        if line == "  steps:" {
+            in_steps = true;
+            continue;
+        }
+        if !in_steps {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("- id:") {
+            if let (Some(id), Some(name)) = (current_id.take(), current_name.take()) {
+                steps.push(StepBlock {
+                    id,
+                    name,
+                    connection_refs: Vec::new(),
+                });
+            }
+            current_id = Some(value.trim().to_owned());
+        } else if let Some(value) = trimmed.strip_prefix("name:") {
+            if current_name.is_some() {
+                panic!("{}: duplicate phase.steps.name", path.display());
+            }
+            current_name = Some(value.trim().to_owned());
+        } else if let Some(value) = trimmed.strip_prefix("connection_refs:") {
+            let connection_refs = parse_inline_yaml_list(path, "connection_refs", value.trim());
+            if connection_refs.is_empty() {
+                continue;
+            }
+            panic!(
+                "{}: fixture parser expected no step connection_refs in this test helper",
+                path.display()
+            );
+        }
+    }
+
+    if let (Some(id), Some(name)) = (current_id, current_name) {
+        steps.push(StepBlock {
+            id,
+            name,
+            connection_refs: Vec::new(),
+        });
+    }
+
+    steps
 }
 
 fn parse_inline_yaml_list(path: &Path, field: &str, value: &str) -> Vec<String> {
@@ -555,6 +773,20 @@ fn parse_inline_yaml_list(path: &Path, field: &str, value: &str) -> Vec<String> 
         .split(',')
         .map(|item| item.trim().trim_matches('"').trim_matches('\'').to_owned())
         .collect()
+}
+
+fn strip_yaml_comment(line: &str) -> &str {
+    let mut in_double_quotes = false;
+    let mut in_single_quotes = false;
+    for (index, ch) in line.char_indices() {
+        match ch {
+            '"' if !in_single_quotes => in_double_quotes = !in_double_quotes,
+            '\'' if !in_double_quotes => in_single_quotes = !in_single_quotes,
+            '#' if !in_double_quotes && !in_single_quotes => return &line[..index],
+            _ => {}
+        }
+    }
+    line
 }
 
 fn load_stream(fixture: &str, name: &str) -> Vec<EventEnvelope> {
