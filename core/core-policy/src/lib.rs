@@ -787,6 +787,18 @@ mod tests {
             canonical.commands[0].filesystem.read_roots,
             vec!["workspace/a", "workspace/b"]
         );
+        assert_eq!(
+            canonical.commands[0].filesystem.protected_path_grants,
+            vec!["workspace/a.env", "workspace/z.env"]
+        );
+        assert_eq!(
+            canonical.commands[0].filesystem.protected_paths,
+            vec!["**/.env", "**/.ssh"]
+        );
+        assert_eq!(
+            canonical.commands[0].filesystem.write_roots,
+            vec!["workspace/a-out", "workspace/z-out"]
+        );
         assert_eq!(canonical.commands[0].network.allow[0].cidr, "10.0.0.0/24");
         assert_eq!(
             canonical.commands[0].environment.allow,

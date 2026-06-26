@@ -22,6 +22,7 @@ pub struct EventEnvelope {
         serialize_with = "serialize_payload_object"
     )]
     pub payload: Value,
+    #[serde(deserialize_with = "deserialize_protocol_version_v0")]
     pub protocol_version: String,
     pub sequence: u64,
     pub session_id: String,
@@ -57,6 +58,11 @@ impl EventEnvelope {
     pub fn canonical_jsonl(&self) -> Result<String, CanonicalJsonError> {
         if !self.payload.is_object() {
             return Err(CanonicalJsonError::NonObjectPayload);
+        }
+        if self.protocol_version != PROTOCOL_VERSION_V0 {
+            return Err(CanonicalJsonError::UnsupportedProtocolVersion {
+                protocol_version: self.protocol_version.clone(),
+            });
         }
 
         let value = serde_json::to_value(self).map_err(CanonicalJsonError::Serialize)?;
@@ -187,6 +193,7 @@ impl std::error::Error for UnknownEventType {}
 pub enum CanonicalJsonError {
     Serialize(serde_json::Error),
     NonObjectPayload,
+    UnsupportedProtocolVersion { protocol_version: String },
     DuplicateNormalizedObjectKey { key: String },
 }
 
@@ -195,6 +202,10 @@ impl fmt::Display for CanonicalJsonError {
         match self {
             Self::Serialize(err) => write!(f, "failed to serialize canonical JSON: {err}"),
             Self::NonObjectPayload => write!(f, "event payload must be a JSON object"),
+            Self::UnsupportedProtocolVersion { protocol_version } => write!(
+                f,
+                "unsupported protocol_version {protocol_version:?}; expected {PROTOCOL_VERSION_V0:?}"
+            ),
             Self::DuplicateNormalizedObjectKey { key } => {
                 write!(f, "normalized object key collision: {key}")
             }
@@ -291,6 +302,20 @@ where
         Ok(value)
     } else {
         Err(serde::de::Error::custom("payload must be a JSON object"))
+    }
+}
+
+fn deserialize_protocol_version_v0<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    if value == PROTOCOL_VERSION_V0 {
+        Ok(value)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "unsupported protocol_version {value:?}; expected {PROTOCOL_VERSION_V0:?}"
+        )))
     }
 }
 
@@ -460,6 +485,29 @@ mod tests {
     }
 
     #[test]
+    fn canonical_event_jsonl_rejects_unsupported_protocol_version() {
+        let mut event = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "smoke001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            json!({"reason": "fixture-start"}),
+        );
+        event.protocol_version = "1".to_owned();
+
+        let err = event
+            .canonical_jsonl()
+            .expect_err("unsupported protocol version must fail");
+
+        assert!(matches!(
+            err,
+            CanonicalJsonError::UnsupportedProtocolVersion { .. }
+        ));
+    }
+
+    #[test]
     fn event_envelope_deserialization_rejects_non_object_payload() {
         let err = serde_json::from_str::<EventEnvelope>(
             "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":null,\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"loop-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
@@ -467,5 +515,15 @@ mod tests {
         .expect_err("non-object payload must fail");
 
         assert!(err.to_string().contains("payload must be a JSON object"));
+    }
+
+    #[test]
+    fn event_envelope_deserialization_rejects_unsupported_protocol_version() {
+        let err = serde_json::from_str::<EventEnvelope>(
+            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{},\"protocol_version\":\"1\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"loop-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
+        )
+        .expect_err("unsupported protocol version must fail");
+
+        assert!(err.to_string().contains("unsupported protocol_version"));
     }
 }

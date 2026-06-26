@@ -381,6 +381,29 @@ fn expected_stream_filter_rejects_missing_matches() {
 }
 
 #[test]
+fn expected_stream_filter_ignores_checkout_parent_names() {
+    let root = Path::new("checkout-missing-sandbox-negative").join("fixtures");
+    let sandbox_stream = root
+        .join("sandbox-negative")
+        .join("expected/sandbox-negative.jsonl");
+    let smoke_stream = root.join("smoke-loop").join("expected/smoke-loop.jsonl");
+
+    let matches = streams_matching_fixture_relative(
+        vec![sandbox_stream.clone(), smoke_stream],
+        &root,
+        "sandbox-negative",
+    );
+
+    assert_eq!(matches, vec![sandbox_stream]);
+    assert!(streams_matching_fixture_relative(
+        vec![root.join("smoke-loop").join("expected/smoke-loop.jsonl")],
+        &root,
+        "missing-sandbox-negative",
+    )
+    .is_empty());
+}
+
+#[test]
 fn out_of_phase_fixture_uses_phase_without_attempted_tool() {
     let loop_file = fixture_root()
         .join("sandbox-negative")
@@ -388,12 +411,12 @@ fn out_of_phase_fixture_uses_phase_without_attempted_tool() {
     let phase_file = fixture_root()
         .join("sandbox-negative")
         .join("registry/phases/negative-no-tools.yaml");
-    let loop_text = fs::read_to_string(&loop_file).expect("loop fixture readable");
-    let phase_text = fs::read_to_string(&phase_file).expect("phase fixture readable");
+    let phase_refs = yaml_inline_list_field(&loop_file, "loop", "phase_refs");
+    let tool_refs = yaml_inline_list_field(&phase_file, "phase", "tool_refs");
 
-    assert!(loop_text.contains("phase_refs: [negative-no-tools]"));
-    assert!(phase_text.contains("tool_refs: []"));
-    assert!(!phase_text.contains("negative-tool"));
+    assert_eq!(phase_refs, vec!["negative-no-tools"]);
+    assert_eq!(tool_refs, Vec::<String>::new());
+    assert!(!tool_refs.iter().any(|tool_ref| tool_ref == "negative-tool"));
 }
 
 #[test]
@@ -407,14 +430,13 @@ fn symlink_fixture_uses_tool_scoped_to_lexical_link_path() {
     let tool_file = fixture_root()
         .join("sandbox-negative")
         .join("registry/tools/symlink-tool.yaml");
-    let loop_text = fs::read_to_string(&loop_file).expect("loop fixture readable");
-    let phase_text = fs::read_to_string(&phase_file).expect("phase fixture readable");
-    let tool_text = fs::read_to_string(&tool_file).expect("tool fixture readable");
+    let phase_refs = yaml_inline_list_field(&loop_file, "loop", "phase_refs");
+    let tool_refs = yaml_inline_list_field(&phase_file, "phase", "tool_refs");
+    let write_scope = yaml_inline_list_field(&tool_file, "tool", "write_scope");
 
-    assert!(loop_text.contains("phase_refs: [negative-symlink]"));
-    assert!(phase_text.contains("tool_refs: [symlink-tool]"));
-    assert!(tool_text.contains("write_scope: [\"workspace/links\"]"));
-    assert!(!tool_text.contains("write_scope: []"));
+    assert_eq!(phase_refs, vec!["negative-symlink"]);
+    assert_eq!(tool_refs, vec!["symlink-tool"]);
+    assert_eq!(write_scope, vec!["workspace/links"]);
 }
 
 fn sandbox_negative_attempts_tool_launch(path: &Path) -> bool {
@@ -455,10 +477,8 @@ fn expected_streams() -> Vec<std::path::PathBuf> {
 }
 
 fn expected_streams_matching(fragment: &str) -> Result<Vec<std::path::PathBuf>, String> {
-    let streams = expected_streams()
-        .into_iter()
-        .filter(|path| path.to_string_lossy().contains(fragment))
-        .collect::<Vec<_>>();
+    let root = fixture_root();
+    let streams = streams_matching_fixture_relative(expected_streams(), &root, fragment);
 
     if streams.is_empty() {
         Err(format!(
@@ -467,6 +487,74 @@ fn expected_streams_matching(fragment: &str) -> Result<Vec<std::path::PathBuf>, 
     } else {
         Ok(streams)
     }
+}
+
+fn streams_matching_fixture_relative<I>(
+    streams: I,
+    root: &Path,
+    fragment: &str,
+) -> Vec<std::path::PathBuf>
+where
+    I: IntoIterator<Item = std::path::PathBuf>,
+{
+    streams
+        .into_iter()
+        .filter(|path| {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .contains(fragment)
+        })
+        .collect()
+}
+
+fn yaml_inline_list_field(path: &Path, section: &str, field: &str) -> Vec<String> {
+    let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    let section_header = format!("{section}:");
+    let field_prefix = format!("{field}:");
+    let mut in_section = false;
+    let mut parsed = None;
+
+    for raw_line in text.lines() {
+        let without_comment = raw_line.split_once('#').map_or(raw_line, |(line, _)| line);
+        let line = without_comment.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_section = line.trim() == section_header;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix(&field_prefix) {
+            parsed = Some(parse_inline_yaml_list(path, field, value.trim()));
+        }
+    }
+
+    parsed.unwrap_or_else(|| panic!("{}: missing {section}.{field}", path.display()))
+}
+
+fn parse_inline_yaml_list(path: &Path, field: &str, value: &str) -> Vec<String> {
+    let inner = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: {field} must use inline YAML list syntax",
+                path.display()
+            )
+        });
+    if inner.trim().is_empty() {
+        return Vec::new();
+    }
+
+    inner
+        .split(',')
+        .map(|item| item.trim().trim_matches('"').trim_matches('\'').to_owned())
+        .collect()
 }
 
 fn load_stream(fixture: &str, name: &str) -> Vec<EventEnvelope> {
