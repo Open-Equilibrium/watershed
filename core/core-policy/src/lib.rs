@@ -8,6 +8,7 @@ pub const POLICY_VERSION_V0: &str = "0";
 pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/*.env",
     "**/*.key",
+    "**/*.local",
     "**/*.p12",
     "**/*.pem",
     "**/*.pfx",

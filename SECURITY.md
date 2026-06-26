@@ -128,6 +128,6 @@ Protected-path matching semantics:
 - Explicit grants are tool-scoped entries in `commands[].filesystem.protected_path_grants`. A grant only removes the protected-path deny for that tool; the path must still be inside the same tool's declared read/write scope.
 
 - repo/runtime metadata: `**/.git`, `**/.git/**`, `**/.loop`, `**/.loop/**`, legacy `**/.flow`, legacy `**/.flow/**`;
-- env/credential files: `**/.env`, `**/.env.*`, `**/*.env`, `**/.npmrc`, `**/.pypirc`, `**/.netrc`, `**/.git-credentials`;
+- env/credential files: `**/.env`, `**/.env.*`, `**/*.env`, `**/*.local`, `**/.npmrc`, `**/.pypirc`, `**/.netrc`, `**/.git-credentials`;
 - key material: `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx`, `**/id_rsa`, `**/id_dsa`, `**/id_ecdsa`, `**/id_ed25519`, `**/id_ecdsa_sk`, `**/id_ed25519_sk`;
 - credential stores/directories: `**/.ssh`, `**/.ssh/**`, `**/.gnupg`, `**/.gnupg/**`, `**/.aws`, `**/.aws/**`, `**/.azure`, `**/.azure/**`, `**/.docker`, `**/.docker/**`, `**/.kube`, `**/.kube/**`, `**/.config/gcloud`, `**/.config/gcloud/**`, `**/.config/gh`, `**/.config/gh/**`, `**/credentials`, `**/credentials/**`, `**/credentials.toml`, `**/secrets`, `**/secrets/**`.
