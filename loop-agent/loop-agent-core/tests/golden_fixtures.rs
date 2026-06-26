@@ -1,6 +1,7 @@
 use core_script::{
-    validate_registry_block_semantics, BlockIdentity, LoopBlock, NetworkDeny, NetworkPolicy,
-    PhaseBlock, RegistryBlock, StepBlock, ToolBlock, ToolCommand, ToolKind,
+    validate_registry_block_semantics, AllowedParameter, BlockIdentity, LoopBlock, NetworkDeny,
+    NetworkPolicy, ParameterValueType, PhaseBlock, RegistryBlock, ScriptRuntime, StepBlock,
+    ToolBlock, ToolCommand, ToolKind,
 };
 use proto::{EventEnvelope, EventType};
 use std::{collections::HashSet, fs, path::Path};
@@ -303,6 +304,77 @@ fn hello_loop_tracks_own_script_write_root() {
 }
 
 #[test]
+fn hello_loop_source_tools_cover_m0_contract() {
+    let fixture = fixture_root().join("hello-loop");
+    let loop_block = load_loop_block(&fixture.join("registry/loops/hello-loop.yaml"));
+    let inspect_phase = load_phase_block(&fixture.join("registry/phases/inspect.yaml"));
+    let summarize_phase = load_phase_block(&fixture.join("registry/phases/summarize.yaml"));
+    let read_file = load_tool_block(&fixture.join("registry/tools/read-file.yaml"));
+    let write_summary = load_tool_block(&fixture.join("registry/tools/write-summary.yaml"));
+
+    assert_eq!(loop_block.phase_refs, vec!["inspect", "summarize"]);
+    assert_eq!(
+        loop_block.connection_refs,
+        vec!["inspect-data", "inspect-trigger", "summary-refresh"]
+    );
+    assert_eq!(inspect_phase.tool_refs, vec!["read-file"]);
+    assert_eq!(
+        inspect_phase.steps,
+        vec![StepBlock {
+            id: "gather".to_owned(),
+            name: "Gather".to_owned(),
+            connection_refs: vec!["inspect-data".to_owned()],
+        }]
+    );
+    assert_eq!(summarize_phase.tool_refs, vec!["write-summary"]);
+    assert_eq!(
+        summarize_phase.steps,
+        vec![StepBlock {
+            id: "write".to_owned(),
+            name: "Write".to_owned(),
+            connection_refs: vec!["inspect-trigger".to_owned(), "summary-refresh".to_owned()],
+        }]
+    );
+
+    assert_eq!(read_file.tool_kind, ToolKind::PredefinedCommand);
+    assert_eq!(
+        read_file.command,
+        ToolCommand::Predefined {
+            command_id: "agent-read".to_owned(),
+            argv: Vec::new(),
+        }
+    );
+    assert_eq!(
+        read_file.allowed_parameters,
+        vec![AllowedParameter {
+            name: "--file".to_owned(),
+            value_type: ParameterValueType::WorkspaceRelativePath,
+            required: true,
+            allowed_values: Vec::new(),
+            value_pattern: Some("^[A-Za-z0-9_./-]+$".to_owned()),
+            max_length: Some(128),
+            min: None,
+            max: None,
+        }]
+    );
+    assert_eq!(read_file.read_scope, vec!["workspace"]);
+    assert!(read_file.write_scope.is_empty());
+
+    assert_eq!(write_summary.tool_kind, ToolKind::OwnScript);
+    assert_eq!(
+        write_summary.command,
+        ToolCommand::OwnScript("script:write-summary".to_owned())
+    );
+    assert_eq!(write_summary.script_runtime, Some(ScriptRuntime::PosixSh));
+    assert_eq!(
+        write_summary.script_body.as_deref(),
+        Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#)
+    );
+    assert!(write_summary.allowed_parameters.is_empty());
+    assert_eq!(write_summary.write_scope, vec!["workspace/out"]);
+}
+
+#[test]
 fn sandbox_negative_streams_fail_without_completion_events() {
     for stream_path in
         expected_streams_matching("sandbox-negative").unwrap_or_else(|err| panic!("{err}"))
@@ -546,22 +618,28 @@ fn load_phase_block(path: &Path) -> PhaseBlock {
 }
 
 fn load_tool_block(path: &Path) -> ToolBlock {
+    let tool_kind = match yaml_scalar_field(path, "tool", "tool_kind").as_str() {
+        "predefined-command" => ToolKind::PredefinedCommand,
+        "own-script" => ToolKind::OwnScript,
+        other => panic!("{}: unsupported tool_kind {other:?}", path.display()),
+    };
+    let command = match tool_kind {
+        ToolKind::PredefinedCommand => ToolCommand::Predefined {
+            command_id: yaml_nested_scalar_field(path, "tool", "command", "command_id"),
+            argv: yaml_nested_inline_list_field(path, "tool", "command", "argv"),
+        },
+        ToolKind::OwnScript => ToolCommand::OwnScript(yaml_scalar_field(path, "tool", "command")),
+    };
     let block = ToolBlock {
         identity: BlockIdentity {
             id: yaml_scalar_field(path, "tool", "id"),
             name: yaml_scalar_field(path, "tool", "name"),
         },
-        tool_kind: match yaml_scalar_field(path, "tool", "tool_kind").as_str() {
-            "predefined-command" => ToolKind::PredefinedCommand,
-            other => panic!("{}: unsupported tool_kind {other:?}", path.display()),
-        },
-        command: ToolCommand::Predefined {
-            command_id: yaml_nested_scalar_field(path, "tool", "command", "command_id"),
-            argv: yaml_nested_inline_list_field(path, "tool", "command", "argv"),
-        },
-        script_runtime: None,
-        script_body: None,
-        allowed_parameters: Vec::new(),
+        tool_kind,
+        command,
+        script_runtime: yaml_optional_script_runtime(path),
+        script_body: yaml_optional_scalar_field(path, "tool", "script_body"),
+        allowed_parameters: yaml_allowed_parameters(path),
         read_scope: yaml_inline_list_field(path, "tool", "read_scope"),
         write_scope: yaml_inline_list_field(path, "tool", "write_scope"),
         protected_path_grants: yaml_inline_list_field(path, "tool", "protected_path_grants"),
@@ -578,6 +656,19 @@ fn load_tool_block(path: &Path) -> ToolBlock {
 fn yaml_scalar_field(path: &Path, section: &str, field: &str) -> String {
     yaml_field_value(path, section, field)
         .unwrap_or_else(|| panic!("{}: missing {section}.{field}", path.display()))
+}
+
+fn yaml_optional_scalar_field(path: &Path, section: &str, field: &str) -> Option<String> {
+    yaml_field_value(path, section, field)
+}
+
+fn yaml_optional_script_runtime(path: &Path) -> Option<ScriptRuntime> {
+    yaml_optional_scalar_field(path, "tool", "script_runtime").map(|runtime| {
+        match runtime.as_str() {
+            "posix-sh" => ScriptRuntime::PosixSh,
+            other => panic!("{}: unsupported script_runtime {other:?}", path.display()),
+        }
+    })
 }
 
 fn yaml_inline_list_field(path: &Path, section: &str, field: &str) -> Vec<String> {
@@ -634,7 +725,7 @@ fn yaml_field_value(path: &Path, section: &str, field: &str) -> Option<String> {
             if value.is_empty() || value == "|" || value == ">" {
                 panic!("{}: {section}.{field} must be scalar", path.display());
             }
-            parsed = Some(value.to_owned());
+            parsed = Some(unquote_yaml_scalar(value));
         }
     }
 
@@ -681,11 +772,171 @@ fn yaml_nested_field_value(
             if parsed.is_some() {
                 panic!("{}: duplicate {section}.{parent}.{field}", path.display());
             }
-            parsed = Some(value.trim().to_owned());
+            parsed = Some(unquote_yaml_scalar(value.trim()));
         }
     }
 
     parsed
+}
+
+#[derive(Default)]
+struct PartialAllowedParameter {
+    name: Option<String>,
+    value_type: Option<ParameterValueType>,
+    required: Option<bool>,
+    allowed_values: Vec<String>,
+    value_pattern: Option<String>,
+    max_length: Option<u16>,
+    min: Option<i64>,
+    max: Option<i64>,
+}
+
+impl PartialAllowedParameter {
+    fn finish(self, path: &Path) -> AllowedParameter {
+        AllowedParameter {
+            name: self
+                .name
+                .unwrap_or_else(|| panic!("{}: missing allowed_parameters.name", path.display())),
+            value_type: self.value_type.unwrap_or_else(|| {
+                panic!("{}: missing allowed_parameters.value_type", path.display())
+            }),
+            required: self.required.unwrap_or_else(|| {
+                panic!("{}: missing allowed_parameters.required", path.display())
+            }),
+            allowed_values: self.allowed_values,
+            value_pattern: self.value_pattern,
+            max_length: self.max_length,
+            min: self.min,
+            max: self.max,
+        }
+    }
+}
+
+fn yaml_allowed_parameters(path: &Path) -> Vec<AllowedParameter> {
+    let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    let mut in_tool = false;
+    let mut in_parameters = false;
+    let mut parameters = Vec::new();
+    let mut current: Option<PartialAllowedParameter> = None;
+
+    for raw_line in text.lines() {
+        let without_comment = strip_yaml_comment(raw_line);
+        let line = without_comment.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_tool = line.trim() == "tool:";
+            in_parameters = false;
+            continue;
+        }
+        if !in_tool {
+            continue;
+        }
+        if line.starts_with("  ") && !line.starts_with("    ") {
+            let trimmed = line.trim();
+            if let Some(value) = trimmed.strip_prefix("allowed_parameters:") {
+                let value = value.trim();
+                if value == "[]" {
+                    return Vec::new();
+                }
+                if !value.is_empty() {
+                    panic!(
+                        "{}: allowed_parameters must be [] or block list",
+                        path.display()
+                    );
+                }
+                in_parameters = true;
+                continue;
+            }
+            if in_parameters {
+                break;
+            }
+            continue;
+        }
+        if !in_parameters {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix("- name:") {
+            if let Some(parameter) = current.take() {
+                parameters.push(parameter.finish(path));
+            }
+            let parameter = PartialAllowedParameter {
+                name: Some(unquote_yaml_scalar(value.trim())),
+                ..PartialAllowedParameter::default()
+            };
+            current = Some(parameter);
+            continue;
+        }
+        let Some(parameter) = current.as_mut() else {
+            panic!(
+                "{}: allowed_parameters field appeared before name",
+                path.display()
+            );
+        };
+        if let Some(value) = trimmed.strip_prefix("value_type:") {
+            set_once(
+                path,
+                "allowed_parameters.value_type",
+                &mut parameter.value_type,
+                parse_parameter_value_type(path, value.trim()),
+            );
+        } else if let Some(value) = trimmed.strip_prefix("required:") {
+            set_once(
+                path,
+                "allowed_parameters.required",
+                &mut parameter.required,
+                parse_bool(path, "required", value.trim()),
+            );
+        } else if let Some(value) = trimmed.strip_prefix("allowed_values:") {
+            if !parameter.allowed_values.is_empty() {
+                panic!(
+                    "{}: duplicate allowed_parameters.allowed_values",
+                    path.display()
+                );
+            }
+            parameter.allowed_values = parse_inline_yaml_list(path, "allowed_values", value.trim());
+        } else if let Some(value) = trimmed.strip_prefix("value_pattern:") {
+            set_once(
+                path,
+                "allowed_parameters.value_pattern",
+                &mut parameter.value_pattern,
+                unquote_yaml_scalar(value.trim()),
+            );
+        } else if let Some(value) = trimmed.strip_prefix("max_length:") {
+            set_once(
+                path,
+                "allowed_parameters.max_length",
+                &mut parameter.max_length,
+                parse_u16(path, "max_length", value.trim()),
+            );
+        } else if let Some(value) = trimmed.strip_prefix("min:") {
+            set_once(
+                path,
+                "allowed_parameters.min",
+                &mut parameter.min,
+                parse_i64(path, "min", value.trim()),
+            );
+        } else if let Some(value) = trimmed.strip_prefix("max:") {
+            set_once(
+                path,
+                "allowed_parameters.max",
+                &mut parameter.max,
+                parse_i64(path, "max", value.trim()),
+            );
+        } else {
+            panic!(
+                "{}: unsupported allowed_parameters field {trimmed:?}",
+                path.display()
+            );
+        }
+    }
+
+    if let Some(parameter) = current {
+        parameters.push(parameter.finish(path));
+    }
+    parameters
 }
 
 fn yaml_phase_steps(path: &Path) -> Vec<StepBlock> {
@@ -695,6 +946,7 @@ fn yaml_phase_steps(path: &Path) -> Vec<StepBlock> {
     let mut steps = Vec::new();
     let mut current_id: Option<String> = None;
     let mut current_name: Option<String> = None;
+    let mut current_connection_refs: Option<Vec<String>> = None;
 
     for raw_line in text.lines() {
         let without_comment = strip_yaml_comment(raw_line);
@@ -723,24 +975,25 @@ fn yaml_phase_steps(path: &Path) -> Vec<StepBlock> {
                 steps.push(StepBlock {
                     id,
                     name,
-                    connection_refs: Vec::new(),
+                    connection_refs: current_connection_refs.take().unwrap_or_default(),
                 });
             }
             current_id = Some(value.trim().to_owned());
+            current_connection_refs = None;
         } else if let Some(value) = trimmed.strip_prefix("name:") {
             if current_name.is_some() {
                 panic!("{}: duplicate phase.steps.name", path.display());
             }
             current_name = Some(value.trim().to_owned());
         } else if let Some(value) = trimmed.strip_prefix("connection_refs:") {
-            let connection_refs = parse_inline_yaml_list(path, "connection_refs", value.trim());
-            if connection_refs.is_empty() {
-                continue;
+            if current_connection_refs.is_some() {
+                panic!("{}: duplicate phase.steps.connection_refs", path.display());
             }
-            panic!(
-                "{}: fixture parser expected no step connection_refs in this test helper",
-                path.display()
-            );
+            current_connection_refs = Some(parse_inline_yaml_list(
+                path,
+                "connection_refs",
+                value.trim(),
+            ));
         }
     }
 
@@ -748,7 +1001,7 @@ fn yaml_phase_steps(path: &Path) -> Vec<StepBlock> {
         steps.push(StepBlock {
             id,
             name,
-            connection_refs: Vec::new(),
+            connection_refs: current_connection_refs.unwrap_or_default(),
         });
     }
 
@@ -773,6 +1026,55 @@ fn parse_inline_yaml_list(path: &Path, field: &str, value: &str) -> Vec<String> 
         .split(',')
         .map(|item| item.trim().trim_matches('"').trim_matches('\'').to_owned())
         .collect()
+}
+
+fn set_once<T>(path: &Path, field: &str, slot: &mut Option<T>, value: T) {
+    if slot.replace(value).is_some() {
+        panic!("{}: duplicate {field}", path.display());
+    }
+}
+
+fn parse_parameter_value_type(path: &Path, value: &str) -> ParameterValueType {
+    match value {
+        "none" => ParameterValueType::None,
+        "string" => ParameterValueType::String,
+        "integer" => ParameterValueType::Integer,
+        "workspace-relative-path" => ParameterValueType::WorkspaceRelativePath,
+        "enum" => ParameterValueType::Enum,
+        other => panic!(
+            "{}: unsupported allowed_parameters.value_type {other:?}",
+            path.display()
+        ),
+    }
+}
+
+fn parse_bool(path: &Path, field: &str, value: &str) -> bool {
+    value
+        .parse::<bool>()
+        .unwrap_or_else(|err| panic!("{}: {field} must be bool: {err}", path.display()))
+}
+
+fn parse_u16(path: &Path, field: &str, value: &str) -> u16 {
+    value
+        .parse::<u16>()
+        .unwrap_or_else(|err| panic!("{}: {field} must be u16: {err}", path.display()))
+}
+
+fn parse_i64(path: &Path, field: &str, value: &str) -> i64 {
+    value
+        .parse::<i64>()
+        .unwrap_or_else(|err| panic!("{}: {field} must be i64: {err}", path.display()))
+}
+
+fn unquote_yaml_scalar(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        return value[1..value.len() - 1].replace("\\\"", "\"");
+    }
+    if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        return value[1..value.len() - 1].replace("''", "'");
+    }
+    value.to_owned()
 }
 
 fn strip_yaml_comment(line: &str) -> &str {
