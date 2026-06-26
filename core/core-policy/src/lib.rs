@@ -8,6 +8,8 @@ use std::{
 };
 
 pub const POLICY_VERSION_V0: &str = "0";
+const SCRIPT_RUNTIME_POSIX_SH: &str = "posix-sh";
+const OWN_SCRIPT_RUNNER_POSIX_SH: &str = "runner:posix-sh";
 pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/*.env",
     "**/*.key",
@@ -69,6 +71,12 @@ pub struct PolicyArtifact {
 
 impl PolicyArtifact {
     pub fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
+        if self.policy_version != POLICY_VERSION_V0 {
+            return Err(policy_artifact_error(
+                "policy_version must be fixed string \"0\"".to_owned(),
+            ));
+        }
+
         for command in &self.commands {
             command.validate()?;
         }
@@ -101,8 +109,55 @@ pub struct CommandPolicy {
 
 impl CommandPolicy {
     fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
+        self.validate_command_shape()?;
+        for parameter in &self.allowed_parameters {
+            parameter.validate(&self.tool_id)?;
+        }
         self.environment.validate(&self.tool_id)?;
+        self.filesystem.validate(&self.tool_id)?;
         self.network.validate(&self.tool_id)?;
+
+        Ok(())
+    }
+
+    fn validate_command_shape(&self) -> Result<(), PolicyArtifactValidationError> {
+        match self.tool_kind {
+            ToolKind::PredefinedCommand => {
+                if !has_valid_command_id_shape(&self.command_id) {
+                    return Err(policy_artifact_error(format!(
+                        "predefined-command tool {} command_id {:?} must match ^[a-z][a-z0-9_-]{{0,63}}$",
+                        self.tool_id, self.command_id
+                    )));
+                }
+                if self.script_runtime.is_some() {
+                    return Err(policy_artifact_error(format!(
+                        "predefined-command tool {} must omit script_runtime",
+                        self.tool_id
+                    )));
+                }
+            }
+            ToolKind::OwnScript => {
+                let expected_command_id = format!("script:{}", self.tool_id);
+                if self.command_id != expected_command_id {
+                    return Err(policy_artifact_error(format!(
+                        "own-script tool {} command_id must be {}",
+                        self.tool_id, expected_command_id
+                    )));
+                }
+                if self.script_runtime.as_deref() != Some(SCRIPT_RUNTIME_POSIX_SH) {
+                    return Err(policy_artifact_error(format!(
+                        "own-script tool {} must use script_runtime {}",
+                        self.tool_id, SCRIPT_RUNTIME_POSIX_SH
+                    )));
+                }
+                if self.executable != OWN_SCRIPT_RUNNER_POSIX_SH {
+                    return Err(policy_artifact_error(format!(
+                        "own-script tool {} executable must be {}",
+                        self.tool_id, OWN_SCRIPT_RUNNER_POSIX_SH
+                    )));
+                }
+            }
+        }
 
         Ok(())
     }
@@ -123,6 +178,72 @@ pub struct AllowedParameterPolicy {
     pub value_type: ParameterValueType,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_values: Vec<String>,
+}
+
+impl AllowedParameterPolicy {
+    fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
+        if !has_valid_parameter_name_shape(&self.name) {
+            return Err(policy_artifact_error(format!(
+                "tool {tool_id} parameter name {:?} must match ^--[A-Za-z0-9][A-Za-z0-9_-]*$",
+                self.name
+            )));
+        }
+
+        match self.value_type {
+            ParameterValueType::String => {
+                if self.value_pattern.is_none() || self.max_length.is_none() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} string parameter {} must set value_pattern and max_length",
+                        self.name
+                    )));
+                }
+                if !self.allowed_values.is_empty() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} non-enum parameter {} must omit allowed_values",
+                        self.name
+                    )));
+                }
+            }
+            ParameterValueType::Enum => {
+                if self.allowed_values.is_empty() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} enum parameter {} must set allowed_values",
+                        self.name
+                    )));
+                }
+            }
+            ParameterValueType::Integer => {
+                if !self.allowed_values.is_empty() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} non-enum parameter {} must omit allowed_values",
+                        self.name
+                    )));
+                }
+                if self.value_pattern.is_some() || self.max_length.is_some() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} integer parameter {} must omit value_pattern and max_length",
+                        self.name
+                    )));
+                }
+                if matches!((self.min, self.max), (Some(min), Some(max)) if min > max) {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} integer parameter {} min must be <= max",
+                        self.name
+                    )));
+                }
+            }
+            ParameterValueType::None | ParameterValueType::WorkspaceRelativePath => {
+                if !self.allowed_values.is_empty() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} non-enum parameter {} must omit allowed_values",
+                        self.name
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -216,6 +337,33 @@ fn has_valid_environment_allow_name_shape(name: &str) -> bool {
     bytes.all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
 }
 
+fn has_valid_command_id_shape(value: &str) -> bool {
+    if value.is_empty() || value.len() > 64 {
+        return false;
+    }
+
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
+        })
+}
+
+fn has_valid_parameter_name_shape(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix("--") else {
+        return false;
+    };
+    let mut bytes = rest.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_alphanumeric())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 fn is_forbidden_environment_allow_name(name: &str) -> bool {
     const EXACT: &[&str] = &[
         "ALL_PROXY",
@@ -290,6 +438,26 @@ pub struct FilesystemPolicy {
     pub protected_paths: Vec<String>,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
+}
+
+impl FilesystemPolicy {
+    fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
+        if !matches_default_protected_paths(&self.protected_paths) {
+            return Err(policy_artifact_error(format!(
+                "tool {tool_id} filesystem protected_paths must match SECURITY.md defaults"
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+fn matches_default_protected_paths(paths: &[String]) -> bool {
+    paths.len() == DEFAULT_PROTECTED_PATHS.len()
+        && paths
+            .iter()
+            .map(String::as_str)
+            .eq(DEFAULT_PROTECTED_PATHS.iter().copied())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -924,6 +1092,111 @@ mod tests {
     }
 
     #[test]
+    fn policy_artifact_rejects_unsupported_policy_version() {
+        let mut artifact = valid_policy_artifact("version-tool");
+        artifact.policy_version = "1".to_owned();
+
+        let err = artifact
+            .validate()
+            .expect_err("unsupported policy version must fail validation");
+
+        assert_eq!(err.to_string(), "policy_version must be fixed string \"0\"");
+    }
+
+    #[test]
+    fn policy_artifact_rejects_mismatched_command_shapes() {
+        let mut predefined_runtime = valid_policy_artifact("read-file");
+        predefined_runtime.commands[0].script_runtime = Some("posix-sh".to_owned());
+        let err = predefined_runtime
+            .validate()
+            .expect_err("predefined-command must omit script_runtime");
+        assert_eq!(
+            err.to_string(),
+            "predefined-command tool read-file must omit script_runtime"
+        );
+
+        let mut predefined_command_id = valid_policy_artifact("read-file");
+        predefined_command_id.commands[0].command_id = "1-agent-read".to_owned();
+        let err = predefined_command_id
+            .validate()
+            .expect_err("predefined-command id must follow the command id grammar");
+        assert_eq!(
+            err.to_string(),
+            "predefined-command tool read-file command_id \"1-agent-read\" must match ^[a-z][a-z0-9_-]{0,63}$"
+        );
+
+        let mut own_script_command_id = own_script_policy_artifact("write-summary");
+        own_script_command_id.commands[0].command_id = "script:other-tool".to_owned();
+        let err = own_script_command_id
+            .validate()
+            .expect_err("own-script command_id must match tool_id");
+        assert_eq!(
+            err.to_string(),
+            "own-script tool write-summary command_id must be script:write-summary"
+        );
+
+        let mut own_script_runtime = own_script_policy_artifact("write-summary");
+        own_script_runtime.commands[0].script_runtime = None;
+        let err = own_script_runtime
+            .validate()
+            .expect_err("own-script must declare posix-sh runtime");
+        assert_eq!(
+            err.to_string(),
+            "own-script tool write-summary must use script_runtime posix-sh"
+        );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_malformed_allowed_parameters() {
+        let mut bad_name = valid_policy_artifact("parameter-tool");
+        bad_name.commands[0].allowed_parameters[0].name = "file".to_owned();
+        let err = bad_name
+            .validate()
+            .expect_err("parameter names must be exact flags");
+        assert_eq!(
+            err.to_string(),
+            "tool parameter-tool parameter name \"file\" must match ^--[A-Za-z0-9][A-Za-z0-9_-]*$"
+        );
+
+        let mut string_without_constraints = valid_policy_artifact("parameter-tool");
+        string_without_constraints.commands[0].allowed_parameters[1].max_length = None;
+        let err = string_without_constraints
+            .validate()
+            .expect_err("string parameters require length and pattern constraints");
+        assert_eq!(
+            err.to_string(),
+            "tool parameter-tool string parameter --alpha must set value_pattern and max_length"
+        );
+
+        let mut enum_without_values = valid_policy_artifact("parameter-tool");
+        enum_without_values.commands[0].allowed_parameters[0]
+            .allowed_values
+            .clear();
+        let err = enum_without_values
+            .validate()
+            .expect_err("enum parameters require allowed values");
+        assert_eq!(
+            err.to_string(),
+            "tool parameter-tool enum parameter --beta must set allowed_values"
+        );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_non_default_protected_paths() {
+        let mut artifact = valid_policy_artifact("filesystem-tool");
+        artifact.commands[0].filesystem.protected_paths = vec!["**/.env".to_owned()];
+
+        let err = artifact
+            .validate()
+            .expect_err("protected paths must match the SECURITY.md default set");
+
+        assert_eq!(
+            err.to_string(),
+            "tool filesystem-tool filesystem protected_paths must match SECURITY.md defaults"
+        );
+    }
+
+    #[test]
     fn expected_decision_fixture_files_are_canonical_and_deny_side_effects() {
         for path in fixture_files("expected.json") {
             let text = fs::read_to_string(&path).expect("fixture is readable");
@@ -1274,7 +1547,7 @@ mod tests {
                 .iter()
                 .map(|param| param.name.as_str())
                 .collect::<Vec<_>>(),
-            vec!["alpha", "beta"]
+            vec!["--alpha", "--beta"]
         );
         assert_eq!(
             canonical.commands[0].allowed_parameters[1].allowed_values,
@@ -1320,7 +1593,7 @@ mod tests {
         CommandPolicy {
             allowed_parameters: vec![
                 AllowedParameterPolicy {
-                    name: "beta".to_owned(),
+                    name: "--beta".to_owned(),
                     required: false,
                     max: None,
                     max_length: None,
@@ -1333,7 +1606,7 @@ mod tests {
                         .collect(),
                 },
                 AllowedParameterPolicy {
-                    name: "alpha".to_owned(),
+                    name: "--alpha".to_owned(),
                     required: true,
                     max: None,
                     max_length: Some(128),
@@ -1383,53 +1656,55 @@ mod tests {
     }
 
     fn policy_artifact_with_environment_allow(name: &str) -> PolicyArtifact {
-        let mut artifact = PolicyArtifact {
-            commands: vec![command_policy(
-                "environment-tool",
-                vec!["a"],
-                vec!["workspace"],
-            )],
-            fixture_name: "environment-contract".to_owned(),
-            phase_scope: vec![PhaseScope {
-                phase_id: "inspect".to_owned(),
-                tool_ids: vec!["environment-tool".to_owned()],
-            }],
-            policy_version: POLICY_VERSION_V0.to_owned(),
-            runtime_limits: RuntimeLimits {
-                headless: true,
-                timeout_ms: 1000,
-            },
-            source_loop_definition_id: "environment-contract".to_owned(),
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
+        let mut artifact = valid_policy_artifact("environment-tool");
         artifact.commands[0].environment.allow = vec![name.to_owned()];
         artifact
     }
 
     fn policy_artifact_with_network_allow(cidr: &str, port: u16) -> PolicyArtifact {
-        let mut artifact = PolicyArtifact {
-            commands: vec![command_policy("network-tool", vec!["a"], vec!["workspace"])],
-            fixture_name: "network-contract".to_owned(),
-            phase_scope: vec![PhaseScope {
-                phase_id: "inspect".to_owned(),
-                tool_ids: vec!["network-tool".to_owned()],
-            }],
-            policy_version: POLICY_VERSION_V0.to_owned(),
-            runtime_limits: RuntimeLimits {
-                headless: true,
-                timeout_ms: 1000,
-            },
-            source_loop_definition_id: "network-contract".to_owned(),
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
+        let mut artifact = valid_policy_artifact("network-tool");
         artifact.commands[0].network.allow = vec![NetworkAllowEntry {
             cidr: cidr.to_owned(),
             kind: NetworkAllowKind::Cidr,
             port,
             transport: NetworkTransport::Tcp,
         }];
+        artifact
+    }
+
+    fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
+        PolicyArtifact {
+            commands: vec![valid_command_policy(tool_id)],
+            fixture_name: format!("{tool_id}-fixture"),
+            phase_scope: vec![PhaseScope {
+                phase_id: "inspect".to_owned(),
+                tool_ids: vec![tool_id.to_owned()],
+            }],
+            policy_version: POLICY_VERSION_V0.to_owned(),
+            runtime_limits: RuntimeLimits {
+                headless: true,
+                timeout_ms: 1000,
+            },
+            source_loop_definition_id: format!("{tool_id}-loop"),
+            target: PolicyTarget::LinuxLandlockSeccomp,
+        }
+    }
+
+    fn valid_command_policy(tool_id: &str) -> CommandPolicy {
+        let mut command = command_policy(tool_id, vec!["a"], vec!["workspace"]);
+        command.filesystem.protected_paths = DEFAULT_PROTECTED_PATHS
+            .iter()
+            .map(|path| (*path).to_owned())
+            .collect();
+        command
+    }
+
+    fn own_script_policy_artifact(tool_id: &str) -> PolicyArtifact {
+        let mut artifact = valid_policy_artifact(tool_id);
+        artifact.commands[0].command_id = format!("script:{tool_id}");
+        artifact.commands[0].executable = "runner:posix-sh".to_owned();
+        artifact.commands[0].script_runtime = Some("posix-sh".to_owned());
+        artifact.commands[0].tool_kind = ToolKind::OwnScript;
         artifact
     }
 
