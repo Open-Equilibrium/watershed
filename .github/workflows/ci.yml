@@ -22,6 +22,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Validate Codex harness
+        run: python -m unittest discover -s tests -p "test_*.py"
+
       - name: Install Rust
         run: >-
           rustup toolchain install 1.81.0

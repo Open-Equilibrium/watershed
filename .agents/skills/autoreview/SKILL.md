@@ -17,6 +17,7 @@ Use when:
 
 ## Contract
 
+- In this repository, follow `AGENTS.md` and the `git` skill for branch closeout.
 - Treat review output as advisory. Never blindly apply it.
 - Verify every finding by reading the real code path and adjacent files.
 - Read dependency docs/source/types when the finding depends on external behavior.

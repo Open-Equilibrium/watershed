@@ -42,7 +42,8 @@ def main() -> int:
     except Exception:
         return 0  # cannot parse -> fail open (guard is advisory only)
 
-    cmd = ((data.get("tool_input") or {}).get("command")) or ""
+    tool_input = data.get("tool_input") or {}
+    cmd = tool_input.get("command") or tool_input.get("cmd") or ""
 
     for rx, reason in DENY:
         if rx.search(cmd):

@@ -5,6 +5,8 @@
   "description": "Dev-only tooling manifest. Not part of the product: Watershed ships no Node runtime (ADR-0001). clawpatch is the PR-readiness review gate (see .agents/skills/clawpatch).",
   "license": "AGPL-3.0-only",
   "scripts": {
+    "codex-harness:test": "python -m unittest discover -s tests -p \"test_*.py\"",
+    "codex-harness:validate": "python scripts/validate_codex_harness.py",
     "docs:render-check": "node scripts/check-html-render.mjs"
   },
   "devDependencies": {
