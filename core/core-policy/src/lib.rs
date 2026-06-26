@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::BTreeSet,
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
@@ -79,6 +80,42 @@ impl PolicyArtifact {
 
         for command in &self.commands {
             command.validate()?;
+        }
+        self.validate_phase_scope()?;
+
+        Ok(())
+    }
+
+    fn validate_phase_scope(&self) -> Result<(), PolicyArtifactValidationError> {
+        let mut command_tool_ids = BTreeSet::new();
+        for command in &self.commands {
+            if !command_tool_ids.insert(command.tool_id.as_str()) {
+                return Err(policy_artifact_error(format!(
+                    "duplicate command tool_id {}",
+                    command.tool_id
+                )));
+            }
+        }
+
+        let mut scoped_tool_ids = BTreeSet::new();
+        for phase in &self.phase_scope {
+            for tool_id in &phase.tool_ids {
+                if !command_tool_ids.contains(tool_id.as_str()) {
+                    return Err(policy_artifact_error(format!(
+                        "phase_scope {} references unknown tool_id {}",
+                        phase.phase_id, tool_id
+                    )));
+                }
+                scoped_tool_ids.insert(tool_id.as_str());
+            }
+        }
+
+        for tool_id in command_tool_ids {
+            if !scoped_tool_ids.contains(tool_id) {
+                return Err(policy_artifact_error(format!(
+                    "command {tool_id} must appear in phase_scope"
+                )));
+            }
         }
 
         Ok(())
@@ -1287,6 +1324,38 @@ mod tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_phase_scope_unknown_tool_ids() {
+        let mut artifact = valid_policy_artifact("read-file");
+        artifact.phase_scope[0].tool_ids = vec!["missing-tool".to_owned()];
+
+        let err = artifact
+            .validate()
+            .expect_err("phase scope must reference existing commands");
+
+        assert_eq!(
+            err.to_string(),
+            "phase_scope inspect references unknown tool_id missing-tool"
+        );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_commands_missing_from_phase_scope() {
+        let mut artifact = valid_policy_artifact("read-file");
+        artifact
+            .commands
+            .push(valid_command_policy("write-summary"));
+
+        let err = artifact
+            .validate()
+            .expect_err("every command must appear in phase scope");
+
+        assert_eq!(
+            err.to_string(),
+            "command write-summary must appear in phase_scope"
+        );
     }
 
     #[test]
