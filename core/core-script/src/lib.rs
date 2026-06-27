@@ -608,13 +608,26 @@ fn insert_named_block<T>(
     names: &mut BTreeMap<&'static str, BTreeSet<String>>,
     block: T,
 ) -> Result<(), RegistryError> {
+    let names_for_kind = names.entry(kind).or_default();
     if blocks.contains_key(&identity.id) {
         return Err(RegistryError::DuplicateId {
             kind,
             id: identity.id,
         });
     }
-    if !names.entry(kind).or_default().insert(identity.name.clone()) {
+    if names_for_kind.contains(&identity.id) {
+        return Err(RegistryError::AmbiguousReference {
+            kind,
+            reference: identity.id,
+        });
+    }
+    if blocks.contains_key(&identity.name) {
+        return Err(RegistryError::AmbiguousReference {
+            kind,
+            reference: identity.name,
+        });
+    }
+    if !names_for_kind.insert(identity.name.clone()) {
         return Err(RegistryError::DuplicateId {
             kind,
             id: identity.name,
@@ -644,6 +657,10 @@ pub enum RegistryError {
         kind: &'static str,
         id: String,
     },
+    AmbiguousReference {
+        kind: &'static str,
+        reference: String,
+    },
     MissingReference {
         from_kind: &'static str,
         from_id: String,
@@ -669,6 +686,10 @@ impl fmt::Display for RegistryError {
                 message,
             } => write!(f, "{source_name}: {message}"),
             Self::DuplicateId { kind, id } => write!(f, "duplicate {kind} id: {id}"),
+            Self::AmbiguousReference { kind, reference } => write!(
+                f,
+                "ambiguous {kind} reference {reference} matches both an id and a name"
+            ),
             Self::MissingReference {
                 from_kind,
                 from_id,
@@ -696,6 +717,7 @@ impl std::error::Error for RegistryError {
             | Self::InvalidCommandId(_)
             | Self::Parse { .. }
             | Self::DuplicateId { .. }
+            | Self::AmbiguousReference { .. }
             | Self::MissingReference { .. }
             | Self::LoopCycle { .. } => None,
         }
@@ -1655,10 +1677,85 @@ fn parse_inline_yaml_list(
     if inner.trim().is_empty() {
         return Ok(Vec::new());
     }
-    Ok(inner
-        .split(',')
-        .map(|part| unquote_yaml_scalar(part.trim()))
-        .collect())
+    let mut items = Vec::new();
+    let mut current = String::new();
+    let mut quote = None::<char>;
+    let mut escaped = false;
+
+    for ch in inner.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if quote == Some('"') && ch == '\\' {
+            current.push(ch);
+            escaped = true;
+            continue;
+        }
+
+        if quote == Some(ch) {
+            quote = None;
+            current.push(ch);
+            continue;
+        }
+
+        if quote.is_none() && (ch == '"' || ch == '\'') && current.trim().is_empty() {
+            quote = Some(ch);
+            current.push(ch);
+            continue;
+        }
+
+        if quote.is_none() && ch == ',' {
+            push_inline_list_item(source_name, field, &mut items, &current)?;
+            current.clear();
+            continue;
+        }
+
+        current.push(ch);
+    }
+
+    if let Some(quote) = quote {
+        return Err(parse_error(
+            source_name,
+            format!("{field} contains an unterminated {quote}-quoted scalar"),
+        ));
+    }
+    if escaped {
+        return Err(parse_error(
+            source_name,
+            format!("{field} contains a dangling escape"),
+        ));
+    }
+
+    push_inline_list_item(source_name, field, &mut items, &current)?;
+    Ok(items)
+}
+
+fn push_inline_list_item(
+    source_name: &str,
+    field: &str,
+    items: &mut Vec<String>,
+    value: &str,
+) -> Result<(), RegistryError> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("{field} contains an empty list item"),
+        ));
+    }
+    for quote in ['"', '\''] {
+        if value.starts_with(quote) && !value.ends_with(quote) {
+            return Err(parse_error(
+                source_name,
+                format!("{field} contains a malformed quoted scalar"),
+            ));
+        }
+    }
+    items.push(unquote_yaml_scalar(value));
+    Ok(())
 }
 
 fn parse_bool(source_name: &str, field: &str, value: &str) -> Result<bool, RegistryError> {
@@ -1987,6 +2084,35 @@ mod tests {
     }
 
     #[test]
+    fn registry_rejects_ambiguous_same_kind_id_name_references() {
+        let err = ResolvedRegistry::from_blocks([
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "alpha".to_owned(),
+                    name: "Alpha".to_owned(),
+                },
+                prompt: "first".to_owned(),
+            }),
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "beta".to_owned(),
+                    name: "alpha".to_owned(),
+                },
+                prompt: "second".to_owned(),
+            }),
+        ])
+        .expect_err("ambiguous same-kind id/name reference rejected");
+
+        assert!(matches!(
+            err,
+            RegistryError::AmbiguousReference {
+                kind: "instruction",
+                reference,
+            } if reference == "alpha"
+        ));
+    }
+
+    #[test]
     fn parser_defaults_optional_loop_reference_lists() {
         let block = parse_registry_block(
             "minimal-loop.yaml",
@@ -1999,6 +2125,38 @@ mod tests {
         };
         assert!(loop_block.subloop_refs.is_empty());
         assert!(loop_block.connection_refs.is_empty());
+    }
+
+    #[test]
+    fn parser_preserves_commas_inside_quoted_inline_list_scalars() {
+        let block = parse_registry_block(
+            "comma-argv.yaml",
+            r#"tool:
+  id: comma-tool
+  name: CommaTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: ["--expr=a,b"]
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("tool with quoted comma parses");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.command,
+            ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv: vec!["--expr=a,b".to_owned()],
+            }
+        );
     }
 
     #[test]

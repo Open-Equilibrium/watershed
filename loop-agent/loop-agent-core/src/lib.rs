@@ -175,7 +175,13 @@ pub fn run_loop(
         }
         let failed = runtime.failed;
         if failed {
-            validate_failed_sandbox_decisions(&loop_block.identity.id, &events)?;
+            let fixture_name = runtime.sandbox_decision_fixture.ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "failed loop {} did not record an expected sandbox decision fixture",
+                    loop_block.identity.id
+                ))
+            })?;
+            validate_failed_sandbox_decisions(fixture_name, &events)?;
         }
         write_reserved_session_log(&reservation, &session_id, &stream, events.len())?;
 
@@ -648,6 +654,7 @@ fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
 struct RuntimeExecution {
     events: Vec<EventEnvelope>,
     failed: bool,
+    sandbox_decision_fixture: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -659,6 +666,7 @@ struct LoopInvocation {
 struct RuntimeFailure {
     reason: String,
     message: &'static str,
+    sandbox_decision_fixture: &'static str,
     tool_id: Option<String>,
 }
 
@@ -742,6 +750,7 @@ fn execute_loop(
 
     let failed = emit_loop_block(workspace, registry, policy, root_loop, None, &mut builder)?;
     if let Some(failure) = failed {
+        let sandbox_decision_fixture = Some(failure.sandbox_decision_fixture);
         builder.emit(
             None,
             EventType::SessionFailed,
@@ -750,12 +759,14 @@ fn execute_loop(
         Ok(RuntimeExecution {
             events: builder.events,
             failed: true,
+            sandbox_decision_fixture,
         })
     } else {
         builder.emit(None, EventType::SessionCompleted, serde_json::json!({}));
         Ok(RuntimeExecution {
             events: builder.events,
             failed: false,
+            sandbox_decision_fixture: None,
         })
     }
 }
@@ -778,7 +789,7 @@ fn emit_loop_block(
         }),
     );
 
-    if let Some(failure) = sandbox_runtime_failure(&loop_block.identity.id)? {
+    if let Some(failure) = sandbox_runtime_failure(registry, policy, loop_block)? {
         emit_runtime_failure(loop_block, &invocation, &failure, builder);
         return Ok(Some(failure));
     }
@@ -1249,18 +1260,29 @@ fn emit_runtime_failure(
     );
 }
 
-fn sandbox_runtime_failure(loop_id: &str) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    let Some(text) = linux_sandbox_expected_decision_text(loop_id) else {
+fn sandbox_runtime_failure(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    let Some(fixture_name) = sandbox_negative_fixture_for_loop_name(&loop_block.identity.name)
+    else {
+        return Ok(None);
+    };
+    let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
         return Ok(None);
     };
     let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
     decision.validate().map_err(|err| {
-        RuntimeError::Protocol(format!("{loop_id} linux expected decision: {err}"))
+        RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
     })?;
-    if decision.fixture_name != loop_id {
+    if decision.fixture_name != fixture_name {
         return Err(RuntimeError::Protocol(format!(
-            "{loop_id} expected decision fixture_name must match loop id"
+            "{fixture_name} expected decision fixture_name mismatch"
         )));
+    }
+    if !sandbox_loop_matches_decision(registry, policy, loop_block, &decision.attempt)? {
+        return Ok(None);
     }
     let reason = decision.reason_code.as_str().to_owned();
     let tool_id = if matches!(
@@ -1275,8 +1297,170 @@ fn sandbox_runtime_failure(loop_id: &str) -> Result<Option<RuntimeFailure>, Runt
     Ok(Some(RuntimeFailure {
         reason,
         message: denial_message(decision.reason_code),
+        sandbox_decision_fixture: fixture_name,
         tool_id,
     }))
+}
+
+fn sandbox_negative_fixture_for_loop_name(loop_name: &str) -> Option<&'static str> {
+    match loop_name {
+        "SandboxNegativeEnvironment" => Some("sandbox-negative-environment"),
+        "SandboxNegativeInterpreter" => Some("sandbox-negative-interpreter"),
+        "SandboxNegativeNetwork" => Some("sandbox-negative-network"),
+        "SandboxNegativeProtectedPath" => Some("sandbox-negative-protected-path"),
+        "SandboxNegativeSymlink" => Some("sandbox-negative-symlink"),
+        "SandboxNegativeToolOutOfPhase" => Some("sandbox-negative-tool-out-of-phase"),
+        "SandboxNegativeWrite" => Some("sandbox-negative-write"),
+        _ => None,
+    }
+}
+
+fn sandbox_loop_matches_decision(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
+    attempt: &core_policy::DeniedAttempt,
+) -> Result<bool, RuntimeError> {
+    match attempt {
+        core_policy::DeniedAttempt::Write { tool_id, .. } => sandbox_loop_has_agent_negative_tool(
+            registry,
+            policy,
+            loop_block,
+            "negative",
+            tool_id,
+            |tool| tool.write_scope.is_empty(),
+        ),
+        core_policy::DeniedAttempt::Network { tool_id, .. }
+        | core_policy::DeniedAttempt::Environment { tool_id, .. }
+        | core_policy::DeniedAttempt::ProtectedPath { tool_id, .. }
+        | core_policy::DeniedAttempt::InterpreterEscape { tool_id, .. } => {
+            sandbox_loop_has_agent_negative_tool(
+                registry,
+                policy,
+                loop_block,
+                "negative",
+                tool_id,
+                |tool| {
+                    tool.write_scope.is_empty()
+                        && matches!(tool.network, core_script::NetworkPolicy::Deny(_))
+                },
+            )
+        }
+        core_policy::DeniedAttempt::SymlinkEscape { tool_id, .. } => {
+            sandbox_loop_has_agent_negative_tool(
+                registry,
+                policy,
+                loop_block,
+                "negative-symlink",
+                tool_id,
+                |tool| {
+                    tool.write_scope
+                        .iter()
+                        .any(|scope| scope == "workspace/links")
+                },
+            )
+        }
+        core_policy::DeniedAttempt::ToolOutOfPhase { phase_id, tool_id } => {
+            sandbox_loop_has_out_of_phase_tool(registry, policy, loop_block, phase_id, tool_id)
+        }
+    }
+}
+
+fn sandbox_loop_has_agent_negative_tool<F>(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
+    phase_id: &str,
+    tool_id: &str,
+    tool_predicate: F,
+) -> Result<bool, RuntimeError>
+where
+    F: Fn(&core_script::ToolBlock) -> bool,
+{
+    for phase_ref in &loop_block.phase_refs {
+        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
+        })?;
+        if phase.identity.id != phase_id || !policy_phase_contains_tool(policy, phase_id, tool_id) {
+            continue;
+        }
+        for tool_ref in &phase.tool_refs {
+            let tool = registry.tool_block(tool_ref).ok_or_else(|| {
+                RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
+            })?;
+            if tool.identity.id == tool_id
+                && tool_predefined_command_id(tool) == Some("agent-negative")
+                && policy_command_matches_tool(policy, tool_id, "agent-negative")
+                && tool_predicate(tool)
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn sandbox_loop_has_out_of_phase_tool(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
+    phase_id: &str,
+    tool_id: &str,
+) -> Result<bool, RuntimeError> {
+    for phase_ref in &loop_block.phase_refs {
+        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
+        })?;
+        if phase.identity.id != phase_id {
+            continue;
+        }
+        let phase_contains_tool = phase
+            .tool_refs
+            .iter()
+            .map(|tool_ref| {
+                registry
+                    .tool_block(tool_ref)
+                    .map(|tool| tool.identity.id == tool_id)
+                    .ok_or_else(|| {
+                        RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
+                    })
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?
+            .into_iter()
+            .any(|matches| matches);
+        return Ok(!phase_contains_tool && !policy_phase_contains_tool(policy, phase_id, tool_id));
+    }
+    Ok(false)
+}
+
+fn policy_phase_contains_tool(
+    policy: &core_policy::PolicyArtifact,
+    phase_id: &str,
+    tool_id: &str,
+) -> bool {
+    policy
+        .phase_scope
+        .iter()
+        .any(|phase| phase.phase_id == phase_id && phase.tool_ids.iter().any(|id| id == tool_id))
+}
+
+fn policy_command_matches_tool(
+    policy: &core_policy::PolicyArtifact,
+    tool_id: &str,
+    command_id: &str,
+) -> bool {
+    policy.commands.iter().any(|command| {
+        command.tool_id == tool_id
+            && command.command_id == command_id
+            && command.tool_kind == core_policy::ToolKind::PredefinedCommand
+    })
+}
+
+fn tool_predefined_command_id(tool: &core_script::ToolBlock) -> Option<&str> {
+    match &tool.command {
+        core_script::ToolCommand::Predefined { command_id, .. } => Some(command_id.as_str()),
+        core_script::ToolCommand::OwnScript(_) => None,
+    }
 }
 
 fn linux_sandbox_expected_decision_text(loop_id: &str) -> Option<&'static str> {
@@ -1333,19 +1517,32 @@ fn session_id_for_loop(loop_id: &str) -> String {
         "sandbox-negative-tool-out-of-phase" => "negphase001".to_owned(),
         "sandbox-negative-write" => "negwrite001".to_owned(),
         _ => {
-            let mut token = loop_id
-                .bytes()
-                .filter(|byte| byte.is_ascii_alphanumeric())
-                .map(|byte| byte.to_ascii_lowercase() as char)
-                .collect::<String>();
+            let mut token = loop_id.to_ascii_lowercase();
+            token.retain(|ch| {
+                ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-'
+            });
             if token.is_empty() {
                 token.push_str("session");
             }
-            token.truncate(125);
-            token.push_str("001");
+            let suffix = if token.len() <= 125 {
+                "001".to_owned()
+            } else {
+                format!("-{:016x}001", stable_hash64(loop_id.as_bytes()))
+            };
+            token.truncate(128 - suffix.len());
+            token.push_str(&suffix);
             token
         }
     }
+}
+
+fn stable_hash64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn event_timestamp(sequence: u64) -> String {
@@ -1382,46 +1579,48 @@ fn connection_kind_name(kind: &core_script::ConnectionKind) -> &'static str {
 }
 
 fn validate_failed_sandbox_decisions(
-    loop_id: &str,
+    fixture_name: &str,
     events: &[EventEnvelope],
 ) -> Result<(), RuntimeError> {
-    let Some(decision_texts) = sandbox_expected_decision_texts(loop_id) else {
+    let Some(decision_texts) = sandbox_expected_decision_texts(fixture_name) else {
         return Ok(());
     };
     let reason = terminal_failure_reason(events).ok_or_else(|| {
         RuntimeError::Protocol(format!(
-            "sandbox-negative loop {loop_id} must end with session.failed reason"
+            "sandbox-negative fixture {fixture_name} must end with session.failed reason"
         ))
     })?;
 
     for (target, text) in decision_texts {
         let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
         decision.validate().map_err(|err| {
-            RuntimeError::Protocol(format!("{loop_id} {target:?} expected decision: {err}"))
+            RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision: {err}"
+            ))
         })?;
-        if decision.fixture_name != loop_id {
+        if decision.fixture_name != fixture_name {
             return Err(RuntimeError::Protocol(format!(
-                "{loop_id} {target:?} expected decision fixture_name must match loop id"
+                "{fixture_name} {target:?} expected decision fixture_name mismatch"
             )));
         }
         if decision.target != target {
             return Err(RuntimeError::Protocol(format!(
-                "{loop_id} {target:?} expected decision target mismatch"
+                "{fixture_name} {target:?} expected decision target mismatch"
             )));
         }
         if decision.expected != core_policy::ExpectedDecisionKind::Deny {
             return Err(RuntimeError::Protocol(format!(
-                "{loop_id} {target:?} expected decision must deny"
+                "{fixture_name} {target:?} expected decision must deny"
             )));
         }
         if decision.side_effects_allowed {
             return Err(RuntimeError::Protocol(format!(
-                "{loop_id} {target:?} expected decision must disallow side effects"
+                "{fixture_name} {target:?} expected decision must disallow side effects"
             )));
         }
         if decision.reason_code.as_str() != reason {
             return Err(RuntimeError::Protocol(format!(
-                "{loop_id} {target:?} expected decision reason {} does not match stream reason {reason}",
+                "{fixture_name} {target:?} expected decision reason {} does not match stream reason {reason}",
                 decision.reason_code.as_str()
             )));
         }
@@ -1893,6 +2092,23 @@ mod tests {
     }
 
     #[test]
+    fn fallback_session_ids_preserve_valid_loop_id_separators() {
+        assert_eq!(session_id_for_loop("foo-bar"), "foo-bar001");
+        assert_eq!(session_id_for_loop("foo_bar"), "foo_bar001");
+        assert_eq!(session_id_for_loop("foobar"), "foobar001");
+        assert_ne!(
+            session_id_for_loop("foo-bar"),
+            session_id_for_loop("foo_bar")
+        );
+
+        let long = "a".repeat(128);
+        let session_id = session_id_for_loop(&long);
+        assert!(validate_session_id(&session_id));
+        assert!(session_id.len() <= 128);
+        assert_ne!(session_id, session_id_for_loop(&format!("{long}b")));
+    }
+
+    #[test]
     fn registry_root_must_stay_inside_workspace() {
         let workspace = workspace_copy("smoke-loop");
         fs::write(
@@ -2016,6 +2232,48 @@ mod tests {
             .join("hello001.jsonl")
             .exists());
         assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn sandbox_denial_follows_resolved_operation_not_loop_id() {
+        let workspace = workspace_copy("sandbox-negative");
+        let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
+        let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+        fs::write(
+            &loop_path,
+            source.replace("id: sandbox-negative-write", "id: renamed-negative-write"),
+        )
+        .expect("loop fixture rewritten");
+
+        let output = run_loop(&workspace, "renamed-negative-write", EmitMode::Jsonl)
+            .expect("renamed negative operation runs");
+
+        assert!(output.failed);
+        assert!(output.stdout.contains("\"reason\":\"write_denied\""));
+        assert!(output
+            .stdout
+            .contains("\"loop_definition_id\":\"renamed-negative-write\""));
+    }
+
+    #[test]
+    fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
+        let workspace = workspace_copy("sandbox-negative");
+        let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
+        let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+        fs::write(
+            &loop_path,
+            source.replace("phase_refs: [negative]", "phase_refs: []"),
+        )
+        .expect("loop fixture rewritten");
+
+        let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+            .expect("loop with reused fixture id runs");
+
+        assert!(!output.failed);
+        assert!(output
+            .stdout
+            .contains("\"event_type\":\"session.completed\""));
+        assert!(!output.stdout.contains("write_denied"));
     }
 
     #[test]
