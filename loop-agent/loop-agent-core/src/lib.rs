@@ -142,7 +142,8 @@ pub fn run_loop(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
-    let registry = core_script::load_registry_root(workspace.join(&config.registry_root))?;
+    let registry_path = registry_root_path(workspace, &config.registry_root)?;
+    let registry = core_script::load_registry_root(registry_path)?;
     let loop_block = registry
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
@@ -150,36 +151,49 @@ pub fn run_loop(
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
     let policy = runtime_policy_artifact(&artifacts)?;
     let expected_session_id = session_id_for_loop(&loop_block.identity.id);
-    let session_path = preflight_session_log(workspace, &expected_session_id)?;
-    let runtime = execute_loop(workspace, &registry, policy, loop_block)?;
-    let stream = canonical_event_stream(&runtime.events)?;
-    let events = validate_protocol_jsonl_text(Path::new("runtime.jsonl"), &stream)?;
-    let session_id = events
-        .first()
-        .expect("validated streams contain at least one event")
-        .session_id
-        .clone();
-    if session_id != expected_session_id {
-        return Err(RuntimeError::Protocol(format!(
-            "runtime emitted session_id {session_id:?}, expected {expected_session_id:?}"
-        )));
-    }
-    let failed = runtime.failed;
-    if failed {
-        validate_failed_sandbox_decisions(&loop_block.identity.id, &events)?;
-    }
-    write_session_log(workspace, &session_id, &stream, events.len())?;
+    let reservation = reserve_session_log(workspace, &expected_session_id)?;
+    let runtime = match execute_loop(workspace, &registry, policy, loop_block) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            reservation.rollback();
+            return Err(err);
+        }
+    };
 
-    Ok(RunOutput {
-        event_count: events.len(),
-        failed,
-        session_id,
-        session_path,
-        stdout: match emit {
-            EmitMode::Jsonl => stream,
-            EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
-        },
-    })
+    let result = (|| {
+        let stream = canonical_event_stream(&runtime.events)?;
+        let events = validate_protocol_jsonl_text(Path::new("runtime.jsonl"), &stream)?;
+        let session_id = events
+            .first()
+            .expect("validated streams contain at least one event")
+            .session_id
+            .clone();
+        if session_id != expected_session_id {
+            return Err(RuntimeError::Protocol(format!(
+                "runtime emitted session_id {session_id:?}, expected {expected_session_id:?}"
+            )));
+        }
+        let failed = runtime.failed;
+        if failed {
+            validate_failed_sandbox_decisions(&loop_block.identity.id, &events)?;
+        }
+        write_reserved_session_log(&reservation, &session_id, &stream, events.len())?;
+
+        Ok(RunOutput {
+            event_count: events.len(),
+            failed,
+            session_id,
+            session_path: reservation.session_path.clone(),
+            stdout: match emit {
+                EmitMode::Jsonl => stream,
+                EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
+            },
+        })
+    })();
+    if result.is_err() {
+        reservation.rollback();
+    }
+    result
 }
 
 pub fn replay_session(
@@ -390,23 +404,54 @@ fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeEr
         .join(format!("{session_id}.jsonl")))
 }
 
-fn preflight_session_log(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
+#[derive(Debug)]
+struct SessionReservation {
+    log_path: PathBuf,
+    session_path: PathBuf,
+}
+
+impl SessionReservation {
+    fn rollback(&self) {
+        let _ = fs::remove_file(&self.session_path);
+        let _ = fs::remove_file(&self.log_path);
+    }
+}
+
+fn reserve_session_log(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<SessionReservation, RuntimeError> {
     let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
     let log_path = log_dir.join(format!("{session_id}.log"));
-    ensure_session_leaf_available(&session_path, session_id)?;
-    ensure_new_leaf_available(&log_path)?;
-    Ok(session_path)
+    reserve_session_file(&session_path, session_id)?;
+    if let Err(err) = reserve_new_file(&log_path) {
+        let _ = fs::remove_file(&session_path);
+        return Err(err);
+    }
+    Ok(SessionReservation {
+        log_path,
+        session_path,
+    })
 }
 
-fn ensure_session_leaf_available(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
+fn reserve_session_file(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
             "{} must not be a symlink",
             path.display()
         ))),
         Ok(_) => Err(RuntimeError::SessionLogExists(session_id.to_owned())),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            reserve_new_file(path).map_err(|err| match err {
+                RuntimeError::Io { source, .. }
+                    if source.kind() == io::ErrorKind::AlreadyExists =>
+                {
+                    RuntimeError::SessionLogExists(session_id.to_owned())
+                }
+                other => other,
+            })
+        }
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
             source,
@@ -414,20 +459,43 @@ fn ensure_session_leaf_available(path: &Path, session_id: &str) -> Result<(), Ru
     }
 }
 
+fn reserve_new_file(path: &Path) -> Result<(), RuntimeError> {
+    ensure_new_leaf_available(path)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map(|_| ())
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })
+}
+
+#[cfg(test)]
 fn write_session_log(
     workspace: &Path,
     session_id: &str,
     stream: &str,
     event_count: usize,
 ) -> Result<(), RuntimeError> {
-    let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
-    let session_path = session_dir.join(format!("{session_id}.jsonl"));
-    let log_path = log_dir.join(format!("{session_id}.log"));
-    ensure_new_leaf_available(&session_path)?;
-    ensure_new_leaf_available(&log_path)?;
-    write_new_file(&session_path, stream.as_bytes())?;
-    write_new_file(
-        &log_path,
+    let reservation = reserve_session_log(workspace, session_id)?;
+    let result = write_reserved_session_log(&reservation, session_id, stream, event_count);
+    if result.is_err() {
+        reservation.rollback();
+    }
+    result
+}
+
+fn write_reserved_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    write_existing_file(&reservation.session_path, stream.as_bytes())?;
+    write_existing_file(
+        &reservation.log_path,
         format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
     )
 }
@@ -507,11 +575,11 @@ fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), R
     Ok(())
 }
 
-fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    ensure_new_leaf_available(path)?;
+fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    ensure_real_file(path)?;
     let mut file = fs::OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .truncate(true)
         .open(path)
         .map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
@@ -760,14 +828,40 @@ fn emit_phase(
     invocation: &LoopInvocation,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
+    let instruction_ids = phase
+        .instruction_refs
+        .iter()
+        .map(|instruction_ref| {
+            registry
+                .instruction_block(instruction_ref)
+                .map(|instruction| instruction.identity.id.clone())
+                .ok_or_else(|| {
+                    RuntimeError::Protocol(format!(
+                        "resolved registry missing instruction {instruction_ref}"
+                    ))
+                })
+        })
+        .collect::<Result<Vec<_>, RuntimeError>>()?;
+    let tool_ids = phase
+        .tool_refs
+        .iter()
+        .map(|tool_ref| {
+            registry
+                .tool_block(tool_ref)
+                .map(|tool| tool.identity.id.clone())
+                .ok_or_else(|| {
+                    RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
+                })
+        })
+        .collect::<Result<Vec<_>, RuntimeError>>()?;
     builder.emit(
         Some(invocation),
         EventType::PhaseEntered,
         serde_json::json!({
-            "instruction_ids": phase.instruction_refs,
+            "instruction_ids": instruction_ids,
             "phase_id": phase.identity.id,
             "phase_name": phase.identity.name,
-            "tool_ids": phase.tool_refs,
+            "tool_ids": tool_ids,
         }),
     );
 
@@ -837,12 +931,26 @@ fn step_payload(
                 Ok(connection_kind_name(&connection.connection_kind))
             })
             .collect::<Result<Vec<_>, RuntimeError>>()?;
+        let connection_ids = step
+            .connection_refs
+            .iter()
+            .map(|connection_ref| {
+                registry
+                    .connection_block(connection_ref)
+                    .map(|connection| connection.identity.id.clone())
+                    .ok_or_else(|| {
+                        RuntimeError::Protocol(format!(
+                            "resolved registry missing connection {connection_ref}"
+                        ))
+                    })
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?;
         let object = payload
             .as_object_mut()
             .expect("step payload is constructed as an object");
         object.insert(
             "connection_ids".to_owned(),
-            serde_json::json!(step.connection_refs),
+            serde_json::json!(connection_ids),
         );
         object.insert(
             "connection_kinds".to_owned(),
@@ -1422,6 +1530,41 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
     Ok(WorkspaceConfig { registry_root })
 }
 
+fn registry_root_path(workspace: &Path, registry_root: &Path) -> Result<PathBuf, RuntimeError> {
+    let mut path = workspace.to_path_buf();
+    for component in registry_root.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => {
+                path.push(segment);
+                let metadata = fs::symlink_metadata(&path).map_err(|source| RuntimeError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+                if metadata.file_type().is_symlink() {
+                    return Err(RuntimeError::Usage(
+                        ".loop/config.yaml registry_root must not contain symlinks".to_owned(),
+                    ));
+                }
+                if !metadata.is_dir() {
+                    return Err(RuntimeError::Usage(
+                        ".loop/config.yaml registry_root must resolve through directories"
+                            .to_owned(),
+                    ));
+                }
+            }
+            std::path::Component::ParentDir
+            | std::path::Component::Prefix(_)
+            | std::path::Component::RootDir => {
+                return Err(RuntimeError::Usage(
+                    ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(path)
+}
+
 fn config_value(text: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}:");
     for line in text.lines() {
@@ -1765,6 +1908,31 @@ mod tests {
         assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn registry_root_rejects_symlinked_path_components() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = workspace_copy("smoke-loop");
+        let outside = empty_workspace("outside-registry-root");
+        copy_dir(
+            &fixture_dir("smoke-loop").join("registry"),
+            &outside.join("registry"),
+        );
+        symlink(&outside, workspace.join("link")).expect("registry root symlink created");
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            "fixture_profile: stub-model\nregistry_root: link/registry\nstub_model: deterministic\n",
+        )
+        .expect("config rewrite succeeds");
+
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("symlinked registry root component must fail");
+
+        assert!(matches!(err, RuntimeError::Usage(message) if message.contains("symlink")));
+        assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    }
+
     #[test]
     fn run_loop_executes_registry_without_expected_streams() {
         let workspace = workspace_copy("smoke-loop");
@@ -1778,6 +1946,35 @@ mod tests {
         assert_eq!(
             output.stdout,
             expected_stream("smoke-loop", "smoke-loop.jsonl")
+        );
+    }
+
+    #[test]
+    fn run_loop_emits_resolved_ids_for_name_references() {
+        let workspace = workspace_copy("hello-loop");
+        let phase_path = workspace.join("registry/phases/inspect.yaml");
+        let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+        fs::write(
+            &phase_path,
+            source
+                .replace(
+                    "instruction_refs: [inspect-input]",
+                    "instruction_refs: [InspectInput]",
+                )
+                .replace("tool_refs: [read-file]", "tool_refs: [ReadFile]")
+                .replace(
+                    "connection_refs: [inspect-data]",
+                    "connection_refs: [InspectData]",
+                ),
+        )
+        .expect("phase fixture rewritten");
+
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("loop executes with name refs");
+
+        assert_eq!(
+            output.stdout,
+            expected_stream("hello-loop", "hello-loop.jsonl")
         );
     }
 
@@ -1841,6 +2038,23 @@ mod tests {
                 before
             );
         }
+    }
+
+    #[test]
+    fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
+        let workspace = empty_workspace("reservation");
+        let first =
+            reserve_session_log(&workspace, "reserve001").expect("first reservation succeeds");
+
+        let err = reserve_session_log(&workspace, "reserve001")
+            .expect_err("second reservation must fail atomically");
+
+        assert!(
+            matches!(err, RuntimeError::SessionLogExists(session_id) if session_id == "reserve001")
+        );
+        assert!(first.session_path.exists());
+        assert!(first.log_path.exists());
+        first.rollback();
     }
 
     #[test]

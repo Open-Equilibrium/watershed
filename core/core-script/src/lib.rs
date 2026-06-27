@@ -767,6 +767,10 @@ pub enum SemanticValidationError {
         tool_id: String,
         tool_kind: ToolKind,
     },
+    ToolSchemaViolation {
+        tool_id: String,
+        message: String,
+    },
     OwnScriptCommandIdMismatch {
         command: String,
         tool_id: String,
@@ -785,6 +789,9 @@ impl fmt::Display for SemanticValidationError {
                     f,
                     "tool command shape does not match {tool_kind:?}: {tool_id}"
                 )
+            }
+            Self::ToolSchemaViolation { tool_id, message } => {
+                write!(f, "tool schema violation for {tool_id}: {message}")
             }
             Self::OwnScriptCommandIdMismatch { command, tool_id } => write!(
                 f,
@@ -821,8 +828,28 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
                     tool_id: tool.identity.id.clone(),
                 });
             }
+            if tool.script_runtime.as_ref() != Some(&ScriptRuntime::PosixSh) {
+                return Err(SemanticValidationError::ToolSchemaViolation {
+                    tool_id: tool.identity.id.clone(),
+                    message: "own-script tools must set script_runtime: posix-sh".to_owned(),
+                });
+            }
+            if tool.script_body.is_none() {
+                return Err(SemanticValidationError::ToolSchemaViolation {
+                    tool_id: tool.identity.id.clone(),
+                    message: "own-script tools must set script_body".to_owned(),
+                });
+            }
         }
-        (ToolKind::PredefinedCommand, ToolCommand::Predefined { .. }) => {}
+        (ToolKind::PredefinedCommand, ToolCommand::Predefined { .. }) => {
+            if tool.script_runtime.is_some() || tool.script_body.is_some() {
+                return Err(SemanticValidationError::ToolSchemaViolation {
+                    tool_id: tool.identity.id.clone(),
+                    message: "predefined-command tools must omit script_runtime and script_body"
+                        .to_owned(),
+                });
+            }
+        }
         _ => {
             return Err(SemanticValidationError::ToolCommandKindMismatch {
                 tool_id: tool.identity.id.clone(),
@@ -1048,8 +1075,8 @@ fn parse_loop_block(source_name: &str, source: &str) -> Result<LoopBlock, Regist
             name: required_scalar(source_name, source, "loop", "name")?,
         },
         phase_refs: inline_list(source_name, source, "loop", "phase_refs")?,
-        subloop_refs: inline_list(source_name, source, "loop", "subloop_refs")?,
-        connection_refs: inline_list(source_name, source, "loop", "connection_refs")?,
+        subloop_refs: optional_inline_list(source_name, source, "loop", "subloop_refs")?,
+        connection_refs: optional_inline_list(source_name, source, "loop", "connection_refs")?,
     })
 }
 
@@ -1313,6 +1340,17 @@ fn inline_list(
 ) -> Result<Vec<String>, RegistryError> {
     let value = required_scalar(source_name, source, section, field)?;
     parse_inline_yaml_list(source_name, field, &value)
+}
+
+fn optional_inline_list(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<Vec<String>, RegistryError> {
+    raw_section_field_value(source, section, field)
+        .map(|value| parse_inline_yaml_list(source_name, field, &unquote_yaml_scalar(&value)))
+        .unwrap_or_else(|| Ok(Vec::new()))
 }
 
 fn nested_inline_list(
@@ -1949,6 +1987,21 @@ mod tests {
     }
 
     #[test]
+    fn parser_defaults_optional_loop_reference_lists() {
+        let block = parse_registry_block(
+            "minimal-loop.yaml",
+            "loop:\n  id: minimal-loop\n  name: MinimalLoop\n  phase_refs: []\n",
+        )
+        .expect("minimal loop parses");
+
+        let RegistryBlock::Loop(loop_block) = block else {
+            panic!("expected loop block");
+        };
+        assert!(loop_block.subloop_refs.is_empty());
+        assert!(loop_block.connection_refs.is_empty());
+    }
+
+    #[test]
     fn ids_follow_v0_token_rules() {
         assert!(is_valid_block_id("hello-loop"));
         assert!(is_valid_block_id("read_file_1"));
@@ -2110,6 +2163,49 @@ mod tests {
 
         tool.command = ToolCommand::OwnScript("script:write-summary".to_owned());
         validate_tool_semantics(&tool).expect("matching script id accepted");
+    }
+
+    #[test]
+    fn semantic_validation_enforces_tool_kind_specific_script_fields() {
+        let mut missing_runtime = own_script_tool("write-summary", "script:write-summary");
+        missing_runtime.script_runtime = None;
+
+        let err =
+            validate_tool_semantics(&missing_runtime).expect_err("own-script runtime is required");
+
+        assert!(matches!(
+            err,
+            SemanticValidationError::ToolSchemaViolation { message, .. }
+                if message.contains("script_runtime")
+        ));
+
+        let predefined = ToolBlock {
+            allowed_parameters: Vec::new(),
+            command: ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv: Vec::new(),
+            },
+            identity: BlockIdentity {
+                id: "echo".to_owned(),
+                name: "Echo".to_owned(),
+            },
+            network: NetworkPolicy::Deny(NetworkDeny),
+            protected_path_grants: Vec::new(),
+            read_scope: Vec::new(),
+            script_body: Some("echo unexpected".to_owned()),
+            script_runtime: None,
+            tool_kind: ToolKind::PredefinedCommand,
+            write_scope: Vec::new(),
+        };
+
+        let err = validate_tool_semantics(&predefined)
+            .expect_err("predefined tools must omit script fields");
+
+        assert!(matches!(
+            err,
+            SemanticValidationError::ToolSchemaViolation { message, .. }
+                if message.contains("omit script_runtime")
+        ));
     }
 
     #[test]
