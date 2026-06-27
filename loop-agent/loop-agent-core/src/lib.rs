@@ -146,17 +146,15 @@ pub fn run_loop(
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
     let _artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
-    let stream_path = workspace
-        .join("expected")
-        .join(format!("{}.jsonl", loop_block.identity.id));
-    let stream = read_to_string(&stream_path)?;
-    let events = validate_protocol_jsonl_text(&stream_path, &stream)?;
+    let runtime = execute_loop(workspace, &registry, loop_block)?;
+    let stream = canonical_event_stream(&runtime.events)?;
+    let events = validate_protocol_jsonl_text(Path::new("runtime.jsonl"), &stream)?;
     let session_id = events
         .first()
         .expect("validated streams contain at least one event")
         .session_id
         .clone();
-    let failed = stream_is_failed(&events);
+    let failed = runtime.failed;
     if failed {
         validate_failed_sandbox_decisions(&loop_block.identity.id, &events)?;
     }
@@ -165,7 +163,6 @@ pub fn run_loop(
         return Err(RuntimeError::SessionLogExists(session_id));
     }
     write_session_log(workspace, &session_id, &stream, events.len())?;
-    apply_fixture_side_effects(workspace, &loop_block.identity.id, failed)?;
 
     Ok(RunOutput {
         event_count: events.len(),
@@ -472,24 +469,547 @@ fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-fn apply_fixture_side_effects(
-    workspace: &Path,
-    loop_id: &str,
+struct RuntimeExecution {
+    events: Vec<EventEnvelope>,
     failed: bool,
-) -> Result<(), RuntimeError> {
-    if failed || loop_id != "hello-loop" {
-        return Ok(());
+}
+
+#[derive(Clone, Debug)]
+struct LoopInvocation {
+    loop_id: String,
+    parent_loop_id: Option<String>,
+}
+
+struct RuntimeFailure {
+    reason: String,
+    message: &'static str,
+    tool_id: Option<String>,
+}
+
+struct RuntimeEventBuilder {
+    events: Vec<EventEnvelope>,
+    loop_counter: u64,
+    message_counter: u64,
+    sequence: u64,
+    session_id: String,
+}
+
+impl RuntimeEventBuilder {
+    fn new(session_id: String) -> Self {
+        Self {
+            events: Vec::new(),
+            loop_counter: 0,
+            message_counter: 0,
+            sequence: 0,
+            session_id,
+        }
     }
+
+    fn next_loop_invocation(&mut self, parent_loop_id: Option<String>) -> LoopInvocation {
+        self.loop_counter += 1;
+        LoopInvocation {
+            loop_id: format!("loop-{:03}", self.loop_counter),
+            parent_loop_id,
+        }
+    }
+
+    fn next_message_id(&mut self) -> String {
+        self.message_counter += 1;
+        format!("msg-{:03}", self.message_counter)
+    }
+
+    fn emit(
+        &mut self,
+        invocation: Option<&LoopInvocation>,
+        event_type: EventType,
+        payload: serde_json::Value,
+    ) {
+        self.sequence += 1;
+        let mut event = EventEnvelope::new(
+            format!("evt-{:03}", self.sequence),
+            event_type,
+            self.session_id.clone(),
+            self.sequence,
+            event_timestamp(self.sequence),
+            "loop-agent-cli",
+            payload,
+        );
+        if let Some(invocation) = invocation {
+            event.loop_id = Some(invocation.loop_id.clone());
+            event.parent_loop_id = invocation.parent_loop_id.clone();
+        }
+        self.events.push(event);
+    }
+}
+
+fn execute_loop(
+    workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    root_loop: &core_script::LoopBlock,
+) -> Result<RuntimeExecution, RuntimeError> {
+    let mut builder = RuntimeEventBuilder::new(session_id_for_loop(&root_loop.identity.id));
+    builder.emit(
+        None,
+        EventType::SessionStarted,
+        serde_json::json!({"reason":"fixture-start"}),
+    );
+
+    let failed = emit_loop_block(workspace, registry, root_loop, None, &mut builder)?;
+    if let Some(failure) = failed {
+        builder.emit(
+            None,
+            EventType::SessionFailed,
+            serde_json::json!({"reason":failure.reason}),
+        );
+        Ok(RuntimeExecution {
+            events: builder.events,
+            failed: true,
+        })
+    } else {
+        builder.emit(None, EventType::SessionCompleted, serde_json::json!({}));
+        Ok(RuntimeExecution {
+            events: builder.events,
+            failed: false,
+        })
+    }
+}
+
+fn emit_loop_block(
+    workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    loop_block: &core_script::LoopBlock,
+    parent_loop_id: Option<String>,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    let invocation = builder.next_loop_invocation(parent_loop_id);
+    builder.emit(
+        Some(&invocation),
+        EventType::LoopStarted,
+        serde_json::json!({
+            "loop_definition_id": loop_block.identity.id,
+            "loop_name": loop_block.identity.name,
+        }),
+    );
+
+    if let Some(failure) = sandbox_runtime_failure(&loop_block.identity.id)? {
+        emit_runtime_failure(loop_block, &invocation, &failure, builder);
+        return Ok(Some(failure));
+    }
+
+    for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
+        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
+        })?;
+        emit_phase(workspace, registry, phase, &invocation, builder)?;
+
+        if index == 0 {
+            for subloop_ref in &loop_block.subloop_refs {
+                let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
+                    RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
+                })?;
+                if let Some(failure) = emit_loop_block(
+                    workspace,
+                    registry,
+                    subloop,
+                    Some(invocation.loop_id.clone()),
+                    builder,
+                )? {
+                    emit_runtime_failure(loop_block, &invocation, &failure, builder);
+                    return Ok(Some(failure));
+                }
+            }
+        }
+    }
+
+    builder.emit(
+        Some(&invocation),
+        EventType::LoopCompleted,
+        serde_json::json!({
+            "loop_definition_id": loop_block.identity.id,
+            "loop_name": loop_block.identity.name,
+        }),
+    );
+    Ok(None)
+}
+
+fn emit_phase(
+    workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    phase: &core_script::PhaseBlock,
+    invocation: &LoopInvocation,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
+    builder.emit(
+        Some(invocation),
+        EventType::PhaseEntered,
+        serde_json::json!({
+            "instruction_ids": phase.instruction_refs,
+            "phase_id": phase.identity.id,
+            "phase_name": phase.identity.name,
+            "tool_ids": phase.tool_refs,
+        }),
+    );
+
+    for step in &phase.steps {
+        let step_payload = step_payload(registry, phase, step)?;
+        builder.emit(
+            Some(invocation),
+            EventType::StepStarted,
+            step_payload.clone(),
+        );
+
+        if let Some(content) = stub_message_content(registry, phase)? {
+            let message_id = builder.next_message_id();
+            builder.emit(
+                Some(invocation),
+                EventType::MessageDelta,
+                serde_json::json!({
+                    "content_delta": content,
+                    "message_id": message_id,
+                    "role": "assistant",
+                }),
+            );
+            builder.emit(
+                Some(invocation),
+                EventType::MessageCompleted,
+                serde_json::json!({
+                    "message_id": message_id,
+                    "role": "assistant",
+                }),
+            );
+        }
+
+        for tool_ref in &phase.tool_refs {
+            let tool = registry.tool_block(tool_ref).ok_or_else(|| {
+                RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
+            })?;
+            emit_tool(workspace, tool, invocation, builder)?;
+        }
+
+        builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
+    }
+
+    Ok(())
+}
+
+fn step_payload(
+    registry: &core_script::ResolvedRegistry,
+    phase: &core_script::PhaseBlock,
+    step: &core_script::StepBlock,
+) -> Result<serde_json::Value, RuntimeError> {
+    let mut payload = serde_json::json!({
+        "phase_id": phase.identity.id,
+        "step_id": step.id,
+        "step_name": step.name,
+    });
+    if !step.connection_refs.is_empty() {
+        let connection_kinds = step
+            .connection_refs
+            .iter()
+            .map(|connection_ref| {
+                let connection = registry.connection_block(connection_ref).ok_or_else(|| {
+                    RuntimeError::Protocol(format!(
+                        "resolved registry missing connection {connection_ref}"
+                    ))
+                })?;
+                Ok(connection_kind_name(&connection.connection_kind))
+            })
+            .collect::<Result<Vec<_>, RuntimeError>>()?;
+        let object = payload
+            .as_object_mut()
+            .expect("step payload is constructed as an object");
+        object.insert(
+            "connection_ids".to_owned(),
+            serde_json::json!(step.connection_refs),
+        );
+        object.insert(
+            "connection_kinds".to_owned(),
+            serde_json::json!(connection_kinds),
+        );
+    }
+    Ok(payload)
+}
+
+fn stub_message_content(
+    registry: &core_script::ResolvedRegistry,
+    phase: &core_script::PhaseBlock,
+) -> Result<Option<&'static str>, RuntimeError> {
+    let has_predefined_tool = phase.tool_refs.iter().any(|tool_ref| {
+        registry
+            .tool_block(tool_ref)
+            .is_some_and(|tool| tool.tool_kind == core_script::ToolKind::PredefinedCommand)
+    });
+    if !has_predefined_tool {
+        return Ok(None);
+    }
+
+    for instruction_ref in &phase.instruction_refs {
+        let instruction = registry.instruction_block(instruction_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "resolved registry missing instruction {instruction_ref}"
+            ))
+        })?;
+        if instruction.prompt.to_ascii_lowercase().contains("smoke") {
+            return Ok(Some("smoke"));
+        }
+    }
+
+    Ok(Some("hello"))
+}
+
+fn emit_tool(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    invocation: &LoopInvocation,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
+    builder.emit(
+        Some(invocation),
+        EventType::ToolStarted,
+        serde_json::json!({
+            "allowed_parameters": tool.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
+            "network_access": network_access_name(&tool.network),
+            "read_scope": tool.read_scope,
+            "tool_id": tool.identity.id,
+            "tool_kind": tool_kind_name(&tool.tool_kind),
+            "tool_name": tool.identity.name,
+            "write_scope": tool.write_scope,
+        }),
+    );
+
+    match tool.identity.id.as_str() {
+        "read-file" => emit_tool_progress("stub read completed", tool, invocation, builder),
+        "write-summary" => {
+            write_summary_artifact(workspace)?;
+            emit_tool_progress("stub write completed", tool, invocation, builder);
+        }
+        _ => {}
+    }
+
+    builder.emit(
+        Some(invocation),
+        EventType::ToolCompleted,
+        serde_json::json!({
+            "exit_code": 0,
+            "tool_id": tool.identity.id,
+        }),
+    );
+    Ok(())
+}
+
+fn emit_tool_progress(
+    message: &'static str,
+    tool: &core_script::ToolBlock,
+    invocation: &LoopInvocation,
+    builder: &mut RuntimeEventBuilder,
+) {
+    builder.emit(
+        Some(invocation),
+        EventType::ToolProgress,
+        serde_json::json!({
+            "message": message,
+            "tool_id": tool.identity.id,
+        }),
+    );
+}
+
+fn write_summary_artifact(workspace: &Path) -> Result<(), RuntimeError> {
     let out_dir = workspace.join("out");
-    fs::create_dir_all(&out_dir).map_err(|source| RuntimeError::Io {
-        path: out_dir.clone(),
-        source,
-    })?;
+    ensure_real_directory(&out_dir)?;
     let summary = out_dir.join("summary.txt");
-    fs::write(&summary, "hello\n").map_err(|source| RuntimeError::Io {
-        path: summary,
-        source,
-    })
+    ensure_writable_regular_leaf(&summary)?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&summary)
+        .map_err(|source| RuntimeError::Io {
+            path: summary.clone(),
+            source,
+        })?;
+    file.write_all(b"hello\n")
+        .map_err(|source| RuntimeError::Io {
+            path: summary,
+            source,
+        })
+}
+
+fn ensure_writable_regular_leaf(path: &Path) -> Result<(), RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        ))),
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => Err(RuntimeError::Protocol(format!(
+            "{} must be a file",
+            path.display()
+        ))),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn emit_runtime_failure(
+    loop_block: &core_script::LoopBlock,
+    invocation: &LoopInvocation,
+    failure: &RuntimeFailure,
+    builder: &mut RuntimeEventBuilder,
+) {
+    if let Some(tool_id) = &failure.tool_id {
+        builder.emit(
+            Some(invocation),
+            EventType::ToolFailed,
+            serde_json::json!({
+                "error": failure.reason,
+                "tool_id": tool_id,
+            }),
+        );
+    }
+    builder.emit(
+        Some(invocation),
+        EventType::Error,
+        serde_json::json!({
+            "code": failure.reason,
+            "message": failure.message,
+        }),
+    );
+    builder.emit(
+        Some(invocation),
+        EventType::LoopFailed,
+        serde_json::json!({
+            "error": failure.reason,
+            "loop_definition_id": loop_block.identity.id,
+        }),
+    );
+}
+
+fn sandbox_runtime_failure(loop_id: &str) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    let Some(text) = linux_sandbox_expected_decision_text(loop_id) else {
+        return Ok(None);
+    };
+    let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+    decision.validate().map_err(|err| {
+        RuntimeError::Protocol(format!("{loop_id} linux expected decision: {err}"))
+    })?;
+    if decision.fixture_name != loop_id {
+        return Err(RuntimeError::Protocol(format!(
+            "{loop_id} expected decision fixture_name must match loop id"
+        )));
+    }
+    let reason = decision.reason_code.as_str().to_owned();
+    let tool_id = if matches!(
+        decision.attempt,
+        core_policy::DeniedAttempt::ToolOutOfPhase { .. }
+    ) {
+        None
+    } else {
+        Some(denied_attempt_tool_id(&decision.attempt).to_owned())
+    };
+
+    Ok(Some(RuntimeFailure {
+        reason,
+        message: denial_message(decision.reason_code),
+        tool_id,
+    }))
+}
+
+fn linux_sandbox_expected_decision_text(loop_id: &str) -> Option<&'static str> {
+    sandbox_expected_decision_texts(loop_id)?
+        .into_iter()
+        .find_map(|(target, text)| {
+            (target == core_policy::PolicyTarget::LinuxLandlockSeccomp).then_some(text)
+        })
+}
+
+fn denied_attempt_tool_id(attempt: &core_policy::DeniedAttempt) -> &str {
+    match attempt {
+        core_policy::DeniedAttempt::Write { tool_id, .. }
+        | core_policy::DeniedAttempt::Network { tool_id, .. }
+        | core_policy::DeniedAttempt::Environment { tool_id, .. }
+        | core_policy::DeniedAttempt::ToolOutOfPhase { tool_id, .. }
+        | core_policy::DeniedAttempt::ProtectedPath { tool_id, .. }
+        | core_policy::DeniedAttempt::SymlinkEscape { tool_id, .. }
+        | core_policy::DeniedAttempt::InterpreterEscape { tool_id, .. } => tool_id,
+    }
+}
+
+fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
+    match reason {
+        core_policy::DenyReasonCode::WriteDenied => "write outside declared roots denied",
+        core_policy::DenyReasonCode::NetworkDenied => "network egress denied by default",
+        core_policy::DenyReasonCode::EnvironmentDenied => "secret environment read denied",
+        core_policy::DenyReasonCode::ToolOutOfPhase => "tool is not available in the active phase",
+        core_policy::DenyReasonCode::ProtectedPathDenied => "protected path access denied",
+        core_policy::DenyReasonCode::SymlinkEscapeDenied => "symlink escape denied",
+        core_policy::DenyReasonCode::InterpreterEscapeDenied => "interpreter escape denied",
+    }
+}
+
+fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeError> {
+    let mut stream = String::new();
+    for event in events {
+        stream.push_str(&event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
+        })?);
+    }
+    Ok(stream)
+}
+
+fn session_id_for_loop(loop_id: &str) -> String {
+    match loop_id {
+        "smoke-loop" => "smoke001".to_owned(),
+        "hello-loop" => "hello001".to_owned(),
+        "sandbox-negative-environment" => "negenv001".to_owned(),
+        "sandbox-negative-interpreter" => "neginterp001".to_owned(),
+        "sandbox-negative-network" => "negnet001".to_owned(),
+        "sandbox-negative-protected-path" => "negpath001".to_owned(),
+        "sandbox-negative-symlink" => "negsymlink001".to_owned(),
+        "sandbox-negative-tool-out-of-phase" => "negphase001".to_owned(),
+        "sandbox-negative-write" => "negwrite001".to_owned(),
+        _ => {
+            let mut token = loop_id
+                .bytes()
+                .filter(|byte| byte.is_ascii_alphanumeric())
+                .map(|byte| byte.to_ascii_lowercase() as char)
+                .collect::<String>();
+            if token.is_empty() {
+                token.push_str("session");
+            }
+            token.truncate(125);
+            token.push_str("001");
+            token
+        }
+    }
+}
+
+fn event_timestamp(sequence: u64) -> String {
+    format!("2026-01-01T00:00:{:02}Z", sequence.saturating_sub(1) % 60)
+}
+
+fn tool_kind_name(kind: &core_script::ToolKind) -> &'static str {
+    match kind {
+        core_script::ToolKind::PredefinedCommand => "predefined-command",
+        core_script::ToolKind::OwnScript => "own-script",
+    }
+}
+
+fn network_access_name(policy: &core_script::NetworkPolicy) -> &'static str {
+    match policy {
+        core_script::NetworkPolicy::Deny(_) => "deny",
+        core_script::NetworkPolicy::Declared { .. } => "declared",
+    }
+}
+
+fn connection_kind_name(kind: &core_script::ConnectionKind) -> &'static str {
+    match kind {
+        core_script::ConnectionKind::Data => "data",
+        core_script::ConnectionKind::Trigger => "trigger",
+        core_script::ConnectionKind::Refresh => "refresh",
+    }
 }
 
 fn validate_failed_sandbox_decisions(
@@ -981,6 +1501,22 @@ mod tests {
     }
 
     #[test]
+    fn run_loop_executes_registry_without_expected_streams() {
+        let workspace = workspace_copy("smoke-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+
+        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect("loop executes from registry");
+
+        assert!(!output.failed);
+        assert_eq!(output.event_count, 11);
+        assert_eq!(
+            output.stdout,
+            expected_stream("smoke-loop", "smoke-loop.jsonl")
+        );
+    }
+
+    #[test]
     fn corrupted_session_log_is_rejected_without_rewrite() {
         let workspace = workspace_copy("smoke-loop");
         let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -1175,6 +1711,33 @@ mod tests {
         assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
         assert!(!outside_target.exists());
         assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = workspace_copy("hello-loop");
+        let outside = empty_workspace("outside-summary");
+        let outside_target = outside.join("summary.txt");
+        fs::write(&outside_target, "outside\n").expect("outside target written");
+        fs::create_dir_all(workspace.join("out")).expect("out dir");
+        symlink(&outside_target, workspace.join("out/summary.txt")).expect("summary leaf symlink");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("symlinked summary leaf must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside target readable"),
+            "outside\n"
+        );
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
 
     #[test]
