@@ -1896,6 +1896,7 @@ pub fn validate_protocol_jsonl_text(
                 path.display()
             )));
         }
+        validate_event_payload(path, line_number, &event)?;
         if event.event_type == EventType::LoopStarted {
             let loop_id = event.loop_id.as_deref().ok_or_else(|| {
                 RuntimeError::Protocol(format!(
@@ -1929,6 +1930,415 @@ pub fn validate_protocol_jsonl_text(
         )));
     }
     Ok(events)
+}
+
+fn validate_event_payload(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+) -> Result<(), RuntimeError> {
+    let payload = event.payload.as_object().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number} {} payload must be an object",
+            path.display(),
+            event.event_type.as_str()
+        ))
+    })?;
+
+    match event.event_type {
+        EventType::SessionStarted
+        | EventType::SessionPaused
+        | EventType::SessionResumed
+        | EventType::SessionCompleted => {
+            optional_payload_string(path, line_number, event.event_type, payload, "reason")?;
+        }
+        EventType::SessionFailed => {
+            require_payload_string(path, line_number, event.event_type, payload, "reason")?;
+        }
+        EventType::LoopStarted | EventType::LoopCompleted => {
+            require_payload_string(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "loop_definition_id",
+            )?;
+            optional_payload_string(path, line_number, event.event_type, payload, "loop_name")?;
+        }
+        EventType::LoopFailed => {
+            require_payload_string(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "loop_definition_id",
+            )?;
+            optional_payload_string(path, line_number, event.event_type, payload, "loop_name")?;
+            require_payload_string(path, line_number, event.event_type, payload, "error")?;
+        }
+        EventType::PhaseEntered => {
+            require_payload_string(path, line_number, event.event_type, payload, "phase_id")?;
+            require_payload_string(path, line_number, event.event_type, payload, "phase_name")?;
+            require_payload_string_array(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "instruction_ids",
+            )?;
+            require_payload_string_array(path, line_number, event.event_type, payload, "tool_ids")?;
+        }
+        EventType::StepStarted | EventType::StepCompleted => {
+            require_payload_string(path, line_number, event.event_type, payload, "step_id")?;
+            require_payload_string(path, line_number, event.event_type, payload, "step_name")?;
+            optional_payload_string(path, line_number, event.event_type, payload, "phase_id")?;
+            optional_payload_string(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "instruction_id",
+            )?;
+            let connection_ids = optional_payload_string_array(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "connection_ids",
+            )?;
+            let connection_kinds = optional_payload_string_array(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "connection_kinds",
+            )?;
+            match (connection_ids, connection_kinds) {
+                (Some(ids), Some(kinds)) => {
+                    if ids.len() != kinds.len() {
+                        return Err(payload_contract_error(
+                            path,
+                            line_number,
+                            event.event_type,
+                            "payload connection arrays must have the same length",
+                        ));
+                    }
+                    for kind in kinds {
+                        if !matches!(kind, "data" | "trigger" | "refresh") {
+                            return Err(payload_contract_error(
+                                path,
+                                line_number,
+                                event.event_type,
+                                "payload.connection_kinds values must be data, trigger, or refresh",
+                            ));
+                        }
+                    }
+                }
+                (None, None) => {}
+                _ => {
+                    return Err(payload_contract_error(
+                        path,
+                        line_number,
+                        event.event_type,
+                        "payload connection arrays must be present together",
+                    ));
+                }
+            }
+        }
+        EventType::MessageDelta => {
+            require_payload_string(path, line_number, event.event_type, payload, "message_id")?;
+            require_payload_role(path, line_number, event.event_type, payload)?;
+            require_payload_string(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "content_delta",
+            )?;
+        }
+        EventType::MessageCompleted => {
+            require_payload_string(path, line_number, event.event_type, payload, "message_id")?;
+            require_payload_role(path, line_number, event.event_type, payload)?;
+        }
+        EventType::ToolStarted => {
+            require_payload_string(path, line_number, event.event_type, payload, "tool_id")?;
+            require_payload_string(path, line_number, event.event_type, payload, "tool_name")?;
+            let tool_kind =
+                require_payload_string(path, line_number, event.event_type, payload, "tool_kind")?;
+            if !matches!(tool_kind, "predefined-command" | "own-script") {
+                return Err(payload_contract_error(
+                    path,
+                    line_number,
+                    event.event_type,
+                    "payload.tool_kind must be predefined-command or own-script",
+                ));
+            }
+            require_payload_string_array(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "read_scope",
+            )?;
+            require_payload_string_array(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "write_scope",
+            )?;
+            require_payload_string_array(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "allowed_parameters",
+            )?;
+            let network_access = require_payload_string(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "network_access",
+            )?;
+            if !matches!(network_access, "deny" | "declared") {
+                return Err(payload_contract_error(
+                    path,
+                    line_number,
+                    event.event_type,
+                    "payload.network_access must be deny or declared",
+                ));
+            }
+        }
+        EventType::ToolProgress => {
+            require_payload_string(path, line_number, event.event_type, payload, "tool_id")?;
+            require_payload_string(path, line_number, event.event_type, payload, "message")?;
+        }
+        EventType::ToolCompleted => {
+            require_payload_string(path, line_number, event.event_type, payload, "tool_id")?;
+            optional_payload_integer(path, line_number, event.event_type, payload, "exit_code")?;
+        }
+        EventType::ToolFailed | EventType::ToolTimedOut => {
+            require_payload_string(path, line_number, event.event_type, payload, "tool_id")?;
+            require_payload_string(path, line_number, event.event_type, payload, "error")?;
+        }
+        EventType::ArtifactLogged => {
+            require_payload_string(path, line_number, event.event_type, payload, "artifact_id")?;
+            require_payload_string(
+                path,
+                line_number,
+                event.event_type,
+                payload,
+                "artifact_type",
+            )?;
+            require_payload_string(path, line_number, event.event_type, payload, "uri")?;
+        }
+        EventType::AttentionRequested => {
+            require_payload_string(path, line_number, event.event_type, payload, "request_id")?;
+            require_payload_string(path, line_number, event.event_type, payload, "reason")?;
+        }
+        EventType::MetricSample => {
+            require_payload_string(path, line_number, event.event_type, payload, "metric_name")?;
+            require_payload_number(path, line_number, event.event_type, payload, "value")?;
+        }
+        EventType::Error => {
+            require_payload_string(path, line_number, event.event_type, payload, "code")?;
+            require_payload_string(path, line_number, event.event_type, payload, "message")?;
+            optional_payload_object(path, line_number, event.event_type, payload, "data")?;
+        }
+    }
+
+    Ok(())
+}
+
+fn require_payload_string<'a>(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<&'a str, RuntimeError> {
+    match payload.get(field).and_then(serde_json::Value::as_str) {
+        Some(value) if !value.is_empty() => Ok(value),
+        _ => Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            &format!("payload.{field} must be a non-empty string"),
+        )),
+    }
+}
+
+fn optional_payload_string(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<(), RuntimeError> {
+    if payload.contains_key(field) {
+        require_payload_string(path, line_number, event_type, payload, field)?;
+    }
+    Ok(())
+}
+
+fn require_payload_role(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), RuntimeError> {
+    let role = require_payload_string(path, line_number, event_type, payload, "role")?;
+    if matches!(role, "system" | "user" | "assistant" | "tool") {
+        Ok(())
+    } else {
+        Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            "payload.role must be system, user, assistant, or tool",
+        ))
+    }
+}
+
+fn require_payload_string_array<'a>(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<Vec<&'a str>, RuntimeError> {
+    let Some(value) = payload.get(field) else {
+        return Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            &format!("payload.{field} must be a string array"),
+        ));
+    };
+    payload_string_array(path, line_number, event_type, field, value)
+}
+
+fn optional_payload_string_array<'a>(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &'a serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<Option<Vec<&'a str>>, RuntimeError> {
+    payload
+        .get(field)
+        .map(|value| payload_string_array(path, line_number, event_type, field, value))
+        .transpose()
+}
+
+fn payload_string_array<'a>(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    field: &str,
+    value: &'a serde_json::Value,
+) -> Result<Vec<&'a str>, RuntimeError> {
+    let Some(values) = value.as_array() else {
+        return Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            &format!("payload.{field} must be a string array"),
+        ));
+    };
+    values
+        .iter()
+        .map(|value| {
+            value.as_str().ok_or_else(|| {
+                payload_contract_error(
+                    path,
+                    line_number,
+                    event_type,
+                    &format!("payload.{field} must contain only strings"),
+                )
+            })
+        })
+        .collect()
+}
+
+fn optional_payload_integer(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<(), RuntimeError> {
+    if let Some(value) = payload.get(field) {
+        let Some(number) = value.as_number() else {
+            return Err(payload_contract_error(
+                path,
+                line_number,
+                event_type,
+                &format!("payload.{field} must be an integer"),
+            ));
+        };
+        if number.as_i64().is_none() && number.as_u64().is_none() {
+            return Err(payload_contract_error(
+                path,
+                line_number,
+                event_type,
+                &format!("payload.{field} must be an integer"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_payload_number(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<(), RuntimeError> {
+    if payload.get(field).is_some_and(serde_json::Value::is_number) {
+        Ok(())
+    } else {
+        Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            &format!("payload.{field} must be a number"),
+        ))
+    }
+}
+
+fn optional_payload_object(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    payload: &serde_json::Map<String, serde_json::Value>,
+    field: &str,
+) -> Result<(), RuntimeError> {
+    if payload.get(field).is_some_and(|value| !value.is_object()) {
+        Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            &format!("payload.{field} must be an object"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn payload_contract_error(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    message: &str,
+) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "{} line {line_number} {} {message}",
+        path.display(),
+        event_type.as_str()
+    ))
 }
 
 fn validate_session_log_text(
@@ -2262,9 +2672,14 @@ mod tests {
         let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
         fs::write(
             &loop_path,
-            source.replace("phase_refs: [negative]", "phase_refs: []"),
+            source.replace("phase_refs: [negative]", "phase_refs: [benign]"),
         )
         .expect("loop fixture rewritten");
+        fs::write(
+            workspace.join("registry/phases/benign.yaml"),
+            "phase:\n  id: benign\n  name: Benign\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  steps:\n    - id: attempt\n      name: Attempt\n",
+        )
+        .expect("benign phase written");
 
         let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
             .expect("loop with reused fixture id runs");
@@ -2509,6 +2924,58 @@ mod tests {
             "empty-parent-loop-id.jsonl",
             empty_parent_loop_id,
             "parent_loop_id",
+        );
+    }
+
+    #[test]
+    fn protocol_validator_rejects_event_payload_contract_violations() {
+        let mut missing_reason = base_event();
+        missing_reason.event_type = EventType::SessionFailed;
+        missing_reason.payload = serde_json::json!({});
+        assert_invalid_event(
+            "missing-session-failed-reason.jsonl",
+            missing_reason,
+            "session.failed payload.reason",
+        );
+
+        let mut incomplete_tool = base_event();
+        incomplete_tool.event_type = EventType::ToolStarted;
+        incomplete_tool.payload = serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "tool_id": "read-file",
+            "tool_kind": "predefined-command",
+            "tool_name": "ReadFile",
+        });
+        assert_invalid_event(
+            "incomplete-tool-started.jsonl",
+            incomplete_tool,
+            "tool.started payload.read_scope",
+        );
+
+        let mut mismatched_connections = base_event();
+        mismatched_connections.event_type = EventType::StepStarted;
+        mismatched_connections.payload = serde_json::json!({
+            "connection_ids": ["inspect-data"],
+            "step_id": "inspect",
+            "step_name": "Inspect",
+        });
+        assert_invalid_event(
+            "mismatched-step-connections.jsonl",
+            mismatched_connections,
+            "connection arrays",
+        );
+
+        let mut non_numeric_metric = base_event();
+        non_numeric_metric.event_type = EventType::MetricSample;
+        non_numeric_metric.payload = serde_json::json!({
+            "metric_name": "fsm.p95",
+            "value": "1",
+        });
+        assert_invalid_event(
+            "non-numeric-metric.jsonl",
+            non_numeric_metric,
+            "metric.sample payload.value",
         );
     }
 

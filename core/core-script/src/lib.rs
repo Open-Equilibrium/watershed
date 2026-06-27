@@ -1051,6 +1051,14 @@ fn parse_instruction_block(
 }
 
 fn parse_phase_block(source_name: &str, source: &str) -> Result<PhaseBlock, RegistryError> {
+    let steps = phase_steps(source_name, source)?;
+    if steps.is_empty() {
+        return Err(parse_error(
+            source_name,
+            "phase.steps must contain at least one item".to_owned(),
+        ));
+    }
+
     Ok(PhaseBlock {
         identity: BlockIdentity {
             id: validated_block_id(source_name, source, "phase")?,
@@ -1058,7 +1066,7 @@ fn parse_phase_block(source_name: &str, source: &str) -> Result<PhaseBlock, Regi
         },
         instruction_refs: inline_list(source_name, source, "phase", "instruction_refs")?,
         tool_refs: inline_list(source_name, source, "phase", "tool_refs")?,
-        steps: phase_steps(source_name, source)?,
+        steps,
     })
 }
 
@@ -1091,12 +1099,20 @@ fn parse_connection_block(
 }
 
 fn parse_loop_block(source_name: &str, source: &str) -> Result<LoopBlock, RegistryError> {
+    let phase_refs = inline_list(source_name, source, "loop", "phase_refs")?;
+    if phase_refs.is_empty() {
+        return Err(parse_error(
+            source_name,
+            "loop.phase_refs must contain at least one item".to_owned(),
+        ));
+    }
+
     Ok(LoopBlock {
         identity: BlockIdentity {
             id: validated_block_id(source_name, source, "loop")?,
             name: required_scalar(source_name, source, "loop", "name")?,
         },
-        phase_refs: inline_list(source_name, source, "loop", "phase_refs")?,
+        phase_refs,
         subloop_refs: optional_inline_list(source_name, source, "loop", "subloop_refs")?,
         connection_refs: optional_inline_list(source_name, source, "loop", "connection_refs")?,
     })
@@ -1185,7 +1201,7 @@ fn phase_steps(source_name: &str, source: &str) -> Result<Vec<StepBlock>, Regist
 }
 
 fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, RegistryError> {
-    match raw_section_field_value(source, "tool", "network") {
+    match raw_section_field_value(source_name, source, "tool", "network")? {
         Some(value) if !value.is_empty() => {
             let value = unquote_yaml_scalar(&value);
             if value == "deny" {
@@ -1305,7 +1321,7 @@ fn required_scalar(
     section: &str,
     field: &str,
 ) -> Result<String, RegistryError> {
-    let value = raw_section_field_value(source, section, field)
+    let value = raw_section_field_value(source_name, source, section, field)?
         .ok_or_else(|| parse_error(source_name, format!("missing {section}.{field}")))?;
     if value.is_empty() {
         return Err(parse_error(
@@ -1322,7 +1338,7 @@ fn optional_scalar(
     section: &str,
     field: &str,
 ) -> Result<Option<String>, RegistryError> {
-    raw_section_field_value(source, section, field)
+    raw_section_field_value(source_name, source, section, field)?
         .map(|value| {
             if value.is_empty() {
                 Err(parse_error(
@@ -1343,7 +1359,7 @@ fn required_nested_scalar(
     parent: &str,
     field: &str,
 ) -> Result<String, RegistryError> {
-    let value = raw_nested_field_value(source, section, parent, field)
+    let value = raw_nested_field_value(source_name, source, section, parent, field)?
         .ok_or_else(|| parse_error(source_name, format!("missing {section}.{parent}.{field}")))?;
     if value.is_empty() {
         return Err(parse_error(
@@ -1370,7 +1386,7 @@ fn optional_inline_list(
     section: &str,
     field: &str,
 ) -> Result<Vec<String>, RegistryError> {
-    raw_section_field_value(source, section, field)
+    raw_section_field_value(source_name, source, section, field)?
         .map(|value| parse_inline_yaml_list(source_name, field, &unquote_yaml_scalar(&value)))
         .unwrap_or_else(|| Ok(Vec::new()))
 }
@@ -1386,10 +1402,16 @@ fn nested_inline_list(
     parse_inline_yaml_list(source_name, field, &value)
 }
 
-fn raw_section_field_value(source: &str, section: &str, field: &str) -> Option<String> {
+fn raw_section_field_value(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<Option<String>, RegistryError> {
     let section_header = format!("{section}:");
     let field_prefix = format!("{field}:");
     let mut in_section = false;
+    let mut found = None::<String>;
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1405,23 +1427,30 @@ fn raw_section_field_value(source: &str, section: &str, field: &str) -> Option<S
         }
         let trimmed = line.trim();
         if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-            return Some(value.trim().to_owned());
+            if found.replace(value.trim().to_owned()).is_some() {
+                return Err(parse_error(
+                    source_name,
+                    format!("duplicate {section}.{field}"),
+                ));
+            }
         }
     }
-    None
+    Ok(found)
 }
 
 fn raw_nested_field_value(
+    source_name: &str,
     source: &str,
     section: &str,
     parent: &str,
     field: &str,
-) -> Option<String> {
+) -> Result<Option<String>, RegistryError> {
     let section_header = format!("{section}:");
     let parent_header = format!("{parent}:");
     let field_prefix = format!("{field}:");
     let mut in_section = false;
     let mut in_parent = false;
+    let mut found = None::<String>;
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1445,10 +1474,15 @@ fn raw_nested_field_value(
         }
         let trimmed = line.trim();
         if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-            return Some(value.trim().to_owned());
+            if found.replace(value.trim().to_owned()).is_some() {
+                return Err(parse_error(
+                    source_name,
+                    format!("duplicate {section}.{parent}.{field}"),
+                ));
+            }
         }
     }
-    None
+    Ok(found)
 }
 
 fn section_list_objects(
@@ -2116,7 +2150,7 @@ mod tests {
     fn parser_defaults_optional_loop_reference_lists() {
         let block = parse_registry_block(
             "minimal-loop.yaml",
-            "loop:\n  id: minimal-loop\n  name: MinimalLoop\n  phase_refs: []\n",
+            "loop:\n  id: minimal-loop\n  name: MinimalLoop\n  phase_refs: [phase-a]\n",
         )
         .expect("minimal loop parses");
 
@@ -2125,6 +2159,78 @@ mod tests {
         };
         assert!(loop_block.subloop_refs.is_empty());
         assert!(loop_block.connection_refs.is_empty());
+    }
+
+    #[test]
+    fn parser_rejects_schema_invalid_empty_loop_phase_refs() {
+        let err = parse_registry_block(
+            "empty-loop.yaml",
+            "loop:\n  id: empty-loop\n  name: EmptyLoop\n  phase_refs: []\n",
+        )
+        .expect_err("empty phase_refs rejected");
+
+        assert!(err.to_string().contains("loop.phase_refs"));
+    }
+
+    #[test]
+    fn parser_rejects_schema_invalid_empty_phase_steps() {
+        let err = parse_registry_block(
+            "empty-phase.yaml",
+            "phase:\n  id: empty-phase\n  name: EmptyPhase\n  instruction_refs: []\n  tool_refs: []\n  steps: []\n",
+        )
+        .expect_err("empty steps rejected");
+
+        assert!(err.to_string().contains("phase.steps"));
+    }
+
+    #[test]
+    fn parser_rejects_duplicate_section_scalar_fields() {
+        let err = parse_registry_block(
+            "duplicate-write-scope.yaml",
+            r#"tool:
+  id: duplicate-tool
+  name: DuplicateTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: ["workspace"]
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("duplicate section field rejected");
+
+        assert!(err.to_string().contains("duplicate tool.write_scope"));
+    }
+
+    #[test]
+    fn parser_rejects_duplicate_nested_scalar_fields() {
+        let err = parse_registry_block(
+            "duplicate-command-id.yaml",
+            r#"tool:
+  id: duplicate-command
+  name: DuplicateCommand
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    command_id: agent-read
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("duplicate nested field rejected");
+
+        assert!(err
+            .to_string()
+            .contains("duplicate tool.command.command_id"));
     }
 
     #[test]
