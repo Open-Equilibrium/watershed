@@ -3,7 +3,8 @@
 use proto::{EventEnvelope, EventType};
 use std::{
     collections::BTreeSet,
-    fmt, fs, io,
+    fmt, fs,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
@@ -195,10 +196,17 @@ pub fn tail_session(
 }
 
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
-    let dir = workspace.as_ref().join(LOCAL_SESSION_DIR);
+    let workspace = workspace.as_ref();
+    let loop_dir = workspace.join(".loop");
+    if !loop_dir.exists() {
+        return Ok(Vec::new());
+    }
+    ensure_existing_real_directory(&loop_dir)?;
+    let dir = workspace.join(LOCAL_SESSION_DIR);
     if !dir.exists() {
         return Ok(Vec::new());
     }
+    ensure_existing_real_directory(&dir)?;
     let mut sessions = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|source| RuntimeError::Io {
         path: dir.clone(),
@@ -230,6 +238,7 @@ pub fn resume_session(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
+    ensure_existing_session_log_path(workspace, &path)?;
     let before = read_to_string(&path)?;
     let mut events = validate_session_log_text(&path, session_id, &before)?;
     if stream_is_failed(&events) || stream_is_completed(&events) {
@@ -242,7 +251,7 @@ pub fn resume_session(
         .sequence
         + 1;
     let event = EventEnvelope::new(
-        format!("evt-{sequence:03}"),
+        next_event_id(sequence, &events),
         EventType::SessionResumed,
         session_id.to_owned(),
         sequence,
@@ -253,10 +262,9 @@ pub fn resume_session(
     let line = event.canonical_jsonl().map_err(|err| {
         RuntimeError::Protocol(format!("failed to serialize session.resumed event: {err}"))
     })?;
-    fs::write(&path, format!("{before}{line}")).map_err(|source| RuntimeError::Io {
-        path: path.clone(),
-        source,
-    })?;
+    let combined = format!("{before}{line}");
+    validate_session_log_text(&path, session_id, &combined)?;
+    append_session_log_line(&path, &line)?;
     events.push(event);
 
     Ok(RunOutput {
@@ -277,6 +285,7 @@ fn read_existing_session(
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
     let path = session_path(workspace, session_id)?;
+    ensure_existing_session_log_path(workspace, &path)?;
     let stream = read_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &stream)?;
     Ok(RunOutput {
@@ -308,30 +317,142 @@ fn write_session_log(
     stream: &str,
     event_count: usize,
 ) -> Result<(), RuntimeError> {
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    let log_dir = workspace.join(LOCAL_LOG_DIR);
-    fs::create_dir_all(&session_dir).map_err(|source| RuntimeError::Io {
-        path: session_dir.clone(),
-        source,
-    })?;
-    fs::create_dir_all(&log_dir).map_err(|source| RuntimeError::Io {
-        path: log_dir.clone(),
-        source,
-    })?;
+    let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
-    fs::write(&session_path, stream).map_err(|source| RuntimeError::Io {
-        path: session_path,
+    write_new_file(&session_path, stream.as_bytes())?;
+    let log_path = log_dir.join(format!("{session_id}.log"));
+    write_new_file(
+        &log_path,
+        format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
+    )
+}
+
+fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {
+    let loop_dir = workspace.join(".loop");
+    ensure_real_directory(&loop_dir)?;
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    ensure_real_directory(&session_dir)?;
+    let log_dir = workspace.join(LOCAL_LOG_DIR);
+    ensure_real_directory(&log_dir)?;
+    Ok((session_dir, log_dir))
+}
+
+fn ensure_existing_session_log_path(workspace: &Path, path: &Path) -> Result<(), RuntimeError> {
+    ensure_existing_real_directory(&workspace.join(".loop"))?;
+    ensure_existing_real_directory(&workspace.join(LOCAL_SESSION_DIR))?;
+    ensure_real_file(path)
+}
+
+fn ensure_existing_real_directory(path: &Path) -> Result<(), RuntimeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
         source,
     })?;
-    let log_path = log_dir.join(format!("{session_id}.log"));
-    fs::write(
-        &log_path,
-        format!("session_id={session_id}\nevents={event_count}\n"),
-    )
-    .map_err(|source| RuntimeError::Io {
-        path: log_path,
+    validate_real_directory(path, &metadata)
+}
+
+fn ensure_real_directory(path: &Path) -> Result<(), RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => validate_real_directory(path, &metadata),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+            let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+            validate_real_directory(path, &metadata)
+        }
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
+    if metadata.file_type().is_symlink() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        )));
+    }
+    if !metadata.is_dir() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a directory",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    reject_symlink_leaf(path)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    file.write_all(contents).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
         source,
     })
+}
+
+fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
+    ensure_real_file(path)?;
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    file.write_all(line.as_bytes())
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })
+}
+
+fn reject_symlink_leaf(path: &Path) -> Result<(), RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        ))),
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a file",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 fn apply_fixture_side_effects(
@@ -574,6 +695,54 @@ pub fn validate_protocol_jsonl_text(
                 path.display()
             )));
         }
+        if event.source.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty source",
+                path.display()
+            )));
+        }
+        if !is_rfc3339_utc_timestamp(&event.timestamp) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use an RFC3339 UTC timestamp",
+                path.display()
+            )));
+        }
+        if event
+            .correlation_id
+            .as_ref()
+            .is_some_and(|correlation_id| correlation_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty correlation_id",
+                path.display()
+            )));
+        }
+        if event
+            .loop_id
+            .as_ref()
+            .is_some_and(|loop_id| loop_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty loop_id",
+                path.display()
+            )));
+        }
+        if event
+            .parent_loop_id
+            .as_ref()
+            .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty parent_loop_id",
+                path.display()
+            )));
+        }
+        if line_number == 1 && event.sequence != 1 {
+            return Err(RuntimeError::Protocol(format!(
+                "{} first sequence must be 1",
+                path.display()
+            )));
+        }
         if event.sequence <= previous_sequence {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} sequence must increase",
@@ -655,6 +824,99 @@ fn stream_is_completed(events: &[EventEnvelope]) -> bool {
 
 fn resume_timestamp(sequence: u64) -> String {
     format!("2026-01-01T00:00:{:02}Z", (sequence.saturating_sub(1)) % 60)
+}
+
+fn next_event_id(sequence: u64, events: &[EventEnvelope]) -> String {
+    let existing = events
+        .iter()
+        .map(|event| event.event_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut candidate_sequence = sequence;
+    loop {
+        let candidate = format!("evt-{candidate_sequence:03}");
+        if !existing.contains(candidate.as_str()) {
+            return candidate;
+        }
+        candidate_sequence += 1;
+    }
+}
+
+fn is_rfc3339_utc_timestamp(value: &str) -> bool {
+    let Some(value) = value.strip_suffix('Z') else {
+        return false;
+    };
+    let Some((date, time)) = value.split_once('T') else {
+        return false;
+    };
+
+    let mut date_parts = date.split('-');
+    let Some(year) = date_parts.next().and_then(|part| parse_digits(part, 4)) else {
+        return false;
+    };
+    let Some(month) = date_parts.next().and_then(|part| parse_digits(part, 2)) else {
+        return false;
+    };
+    let Some(day) = date_parts.next().and_then(|part| parse_digits(part, 2)) else {
+        return false;
+    };
+    if date_parts.next().is_some() || !(1..=12).contains(&month) {
+        return false;
+    }
+    if day == 0 || day > days_in_month(year, month) {
+        return false;
+    }
+
+    let mut time_parts = time.split(':');
+    let Some(hour) = time_parts.next().and_then(|part| parse_digits(part, 2)) else {
+        return false;
+    };
+    let Some(minute) = time_parts.next().and_then(|part| parse_digits(part, 2)) else {
+        return false;
+    };
+    let Some(second_part) = time_parts.next() else {
+        return false;
+    };
+    if time_parts.next().is_some() {
+        return false;
+    }
+
+    let (second, fraction) = second_part
+        .split_once('.')
+        .map_or((second_part, None), |(second, fraction)| {
+            (second, Some(fraction))
+        });
+    let Some(second) = parse_digits(second, 2) else {
+        return false;
+    };
+    if fraction
+        .is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return false;
+    }
+
+    hour <= 23 && minute <= 59 && second <= 59
+}
+
+fn parse_digits(value: &str, len: usize) -> Option<u16> {
+    if value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit()) {
+        value.parse().ok()
+    } else {
+        None
+    }
+}
+
+fn days_in_month(year: u16, month: u16) -> u16 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: u16) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
 #[cfg(test)]
@@ -774,6 +1036,128 @@ mod tests {
             .len(),
             2
         );
+    }
+
+    #[test]
+    fn resume_generates_unique_event_id_before_append() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let event = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionStarted,
+            "partial002",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("event serializes");
+        let path = session_dir.join("partial002.jsonl");
+        fs::write(&path, event).expect("partial log written");
+
+        let output =
+            resume_session(&workspace, "partial002", EmitMode::Jsonl).expect("session resumes");
+
+        assert!(output.stdout.contains("\"event_id\":\"evt-003\""));
+        assert_eq!(
+            validate_session_log_text(
+                &path,
+                "partial002",
+                &fs::read_to_string(&path).expect("resumed log readable"),
+            )
+            .expect("resumed log remains valid")
+            .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn protocol_validator_rejects_sequence_that_does_not_start_at_one() {
+        let event = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "meta001",
+            2,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        );
+
+        assert_invalid_event("bad-sequence.jsonl", event, "first sequence");
+    }
+
+    #[test]
+    fn protocol_validator_rejects_required_envelope_metadata() {
+        let mut empty_source = base_event();
+        empty_source.source.clear();
+        assert_invalid_event("empty-source.jsonl", empty_source, "source");
+
+        let mut invalid_timestamp = base_event();
+        invalid_timestamp.timestamp = "not-a-time".to_owned();
+        assert_invalid_event("invalid-timestamp.jsonl", invalid_timestamp, "timestamp");
+
+        let mut empty_correlation_id = base_event();
+        empty_correlation_id.correlation_id = Some(String::new());
+        assert_invalid_event(
+            "empty-correlation-id.jsonl",
+            empty_correlation_id,
+            "correlation_id",
+        );
+
+        let mut empty_loop_id = base_event();
+        empty_loop_id.loop_id = Some(String::new());
+        assert_invalid_event("empty-loop-id.jsonl", empty_loop_id, "loop_id");
+
+        let mut empty_parent_loop_id = base_event();
+        empty_parent_loop_id.parent_loop_id = Some(String::new());
+        assert_invalid_event(
+            "empty-parent-loop-id.jsonl",
+            empty_parent_loop_id,
+            "parent_loop_id",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_loop_rejects_symlinked_log_dir_without_side_effects() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = workspace_copy("smoke-loop");
+        let outside = empty_workspace("outside-log");
+        fs::create_dir_all(workspace.join(".loop")).expect("loop dir");
+        symlink(&outside, workspace.join(LOCAL_LOG_DIR)).expect("log dir symlink");
+
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("symlinked log dir must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
+        assert!(!outside.join("smoke001.log").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_loop_rejects_symlinked_session_leaf_without_side_effects() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = workspace_copy("smoke-loop");
+        let outside = empty_workspace("outside-session");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let outside_target = outside.join("victim.jsonl");
+        symlink(&outside_target, session_dir.join("smoke001.jsonl")).expect("session leaf symlink");
+
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("symlinked session leaf must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
+        assert!(!outside_target.exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
     }
 
     #[test]
@@ -912,6 +1296,26 @@ mod tests {
             .expect("stream has first event")
             .to_owned()
             + "\n"
+    }
+
+    fn base_event() -> EventEnvelope {
+        EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "meta001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+    }
+
+    fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
+        let text = event.canonical_jsonl().expect("event serializes");
+        let err = validate_protocol_jsonl_text(Path::new(name), &text)
+            .expect_err("invalid event must fail");
+
+        assert!(err.to_string().contains(expected), "{err}");
     }
 
     fn clear_runtime_state(workspace: &Path) {
