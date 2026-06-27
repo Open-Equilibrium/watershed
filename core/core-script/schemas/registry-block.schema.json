@@ -1,0 +1,223 @@
+{
+  "$id": "https://open-equilibrium.org/watershed/schemas/script/v0/registry-block.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "M0 contract schema for one Watershed registry block file. M1 implements strict YAML 1.2 parsing before validating this model.",
+  "oneOf": [
+    { "required": ["tool"] },
+    { "required": ["instruction"] },
+    { "required": ["phase"] },
+    { "required": ["connection"] },
+    { "required": ["loop"] }
+  ],
+  "properties": {
+    "connection": { "$ref": "#/$defs/connection" },
+    "instruction": { "$ref": "#/$defs/instruction" },
+    "loop": { "$ref": "#/$defs/loop" },
+    "phase": { "$ref": "#/$defs/phase" },
+    "tool": { "$ref": "#/$defs/tool" }
+  },
+  "$defs": {
+    "allowed_parameter": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "value_type": { "const": "string" } },
+            "required": ["value_type"]
+          },
+          "then": { "required": ["value_pattern", "max_length"] }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "enum" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "properties": {
+              "allowed_values": { "items": { "type": "string" }, "minItems": 1, "type": "array" }
+            },
+            "required": ["allowed_values"]
+          },
+          "else": {
+            "not": { "required": ["allowed_values"] }
+          }
+        }
+      ],
+      "properties": {
+        "allowed_values": { "items": { "type": "string" }, "type": "array" },
+        "max": { "type": "integer" },
+        "max_length": { "maximum": 65535, "minimum": 0, "type": "integer" },
+        "min": { "type": "integer" },
+        "name": { "pattern": "^--[A-Za-z0-9][A-Za-z0-9_-]*$", "type": "string" },
+        "required": { "type": "boolean" },
+        "value_pattern": { "type": "string" },
+        "value_type": { "enum": ["none", "string", "integer", "workspace-relative-path", "enum"] }
+      },
+      "required": ["name", "value_type", "required"],
+      "type": "object"
+    },
+    "block_id": { "pattern": "^[a-z0-9_-]{1,128}$", "type": "string" },
+    "block_name": { "minLength": 1, "type": "string" },
+    "cidr_allow": {
+      "additionalProperties": false,
+      "properties": {
+        "cidr": { "$ref": "#/$defs/cidr" },
+        "kind": { "const": "cidr" },
+        "port": { "maximum": 65535, "minimum": 1, "type": "integer" },
+        "transport": { "enum": ["tcp", "udp"] }
+      },
+      "required": ["kind", "transport", "cidr", "port"],
+      "type": "object"
+    },
+    "cidr": {
+      "anyOf": [
+        { "$ref": "#/$defs/ipv4_cidr" },
+        { "$ref": "#/$defs/ipv6_cidr" }
+      ]
+    },
+    "connection": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_kind": { "enum": ["data", "trigger", "refresh"] },
+        "from_ref": { "minLength": 1, "type": "string" },
+        "id": { "$ref": "#/$defs/block_id" },
+        "name": { "$ref": "#/$defs/block_name" },
+        "to_ref": { "minLength": 1, "type": "string" }
+      },
+      "required": ["id", "name", "connection_kind", "from_ref", "to_ref"],
+      "type": "object"
+    },
+    "instruction": {
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/block_id" },
+        "name": { "$ref": "#/$defs/block_name" },
+        "prompt": { "minLength": 1, "type": "string" }
+      },
+      "required": ["id", "name", "prompt"],
+      "type": "object"
+    },
+    "ipv4_cidr": {
+      "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])$",
+      "type": "string"
+    },
+    "ipv6_cidr": {
+      "pattern": "^((([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,7}:)|(([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2})|(([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3})|(([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4})|(([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5})|([0-9A-Fa-f]{1,4}:)((:[0-9A-Fa-f]{1,4}){1,6})|(:((:[0-9A-Fa-f]{1,4}){1,7}|:)))/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$",
+      "type": "string"
+    },
+    "loop": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_refs": { "items": { "type": "string" }, "type": "array" },
+        "id": { "$ref": "#/$defs/block_id" },
+        "name": { "$ref": "#/$defs/block_name" },
+        "phase_refs": { "items": { "type": "string" }, "minItems": 1, "type": "array" },
+        "subloop_refs": { "items": { "type": "string" }, "type": "array" }
+      },
+      "required": ["id", "name", "phase_refs"],
+      "type": "object"
+    },
+    "network": {
+      "oneOf": [
+        { "const": "deny" },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "allow": { "items": { "$ref": "#/$defs/cidr_allow" }, "type": "array" },
+            "default": { "const": "deny" }
+          },
+          "required": ["default", "allow"],
+          "type": "object"
+        }
+      ]
+    },
+    "own_script_command": { "pattern": "^script:[a-z0-9_-]{1,128}$", "type": "string" },
+    "phase": {
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/block_id" },
+        "instruction_refs": { "items": { "type": "string" }, "type": "array" },
+        "name": { "$ref": "#/$defs/block_name" },
+        "steps": { "items": { "$ref": "#/$defs/step" }, "minItems": 1, "type": "array" },
+        "tool_refs": { "items": { "type": "string" }, "type": "array" }
+      },
+      "required": ["id", "name", "instruction_refs", "tool_refs", "steps"],
+      "type": "object"
+    },
+    "predefined_command": {
+      "additionalProperties": false,
+      "properties": {
+        "argv": { "items": { "type": "string" }, "type": "array" },
+        "command_id": { "pattern": "^[a-z][a-z0-9_-]{0,63}$", "type": "string" }
+      },
+      "required": ["command_id", "argv"],
+      "type": "object"
+    },
+    "step": {
+      "additionalProperties": false,
+      "properties": {
+        "connection_refs": { "items": { "type": "string" }, "type": "array" },
+        "id": { "$ref": "#/$defs/block_id" },
+        "name": { "$ref": "#/$defs/block_name" }
+      },
+      "required": ["id", "name"],
+      "type": "object"
+    },
+    "tool": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "tool_kind": { "const": "predefined-command" } },
+            "required": ["tool_kind"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["script_runtime"] },
+                { "required": ["script_body"] }
+              ]
+            },
+            "properties": { "command": { "$ref": "#/$defs/predefined_command" } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "tool_kind": { "const": "own-script" } },
+            "required": ["tool_kind"]
+          },
+          "then": {
+            "properties": {
+              "command": { "$ref": "#/$defs/own_script_command" },
+              "script_body": { "minLength": 1, "type": "string" },
+              "script_runtime": { "const": "posix-sh" }
+            },
+            "required": ["script_runtime", "script_body"]
+          }
+        }
+      ],
+      "properties": {
+        "allowed_parameters": { "items": { "$ref": "#/$defs/allowed_parameter" }, "type": "array" },
+        "command": {
+          "oneOf": [
+            { "$ref": "#/$defs/predefined_command" },
+            { "$ref": "#/$defs/own_script_command" }
+          ]
+        },
+        "id": { "$ref": "#/$defs/block_id" },
+        "name": { "$ref": "#/$defs/block_name" },
+        "network": { "$ref": "#/$defs/network" },
+        "protected_path_grants": { "items": { "type": "string" }, "type": "array" },
+        "read_scope": { "items": { "type": "string" }, "type": "array" },
+        "script_body": { "type": "string" },
+        "script_runtime": { "const": "posix-sh" },
+        "tool_kind": { "enum": ["predefined-command", "own-script"] },
+        "write_scope": { "items": { "type": "string" }, "type": "array" }
+      },
+      "required": ["id", "name", "tool_kind", "command", "allowed_parameters", "read_scope", "write_scope", "protected_path_grants", "network"],
+      "type": "object"
+    }
+  },
+  "type": "object"
+}

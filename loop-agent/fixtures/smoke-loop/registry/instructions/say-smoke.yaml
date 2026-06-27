@@ -1,0 +1,4 @@
+instruction:
+  id: say-smoke
+  name: SaySmoke
+  prompt: "Emit the deterministic smoke response from the stub model."

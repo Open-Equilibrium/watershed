@@ -1,0 +1,1 @@
+{"attempt":{"kind":"protected_path","operation":"read","path":".env","tool_id":"negative-tool"},"expected":"deny","fixture_name":"sandbox-negative-protected-path","reason_code":"protected_path_denied","side_effects_allowed":false,"target":"linux-landlock-seccomp"}

@@ -1,0 +1,4 @@
+instruction:
+  id: inspect-input
+  name: InspectInput
+  prompt: "Read the selected input and report only deterministic facts."

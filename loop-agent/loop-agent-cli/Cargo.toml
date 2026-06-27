@@ -1,0 +1,16 @@
+[package]
+name = "loop-agent-cli"
+description = "Loop Agent CLI M0 walking skeleton."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+loop-agent-core.workspace = true
+
+[[bin]]
+name = "loop"
+path = "src/main.rs"

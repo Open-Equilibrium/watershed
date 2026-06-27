@@ -1,0 +1,1 @@
+{"attempt":{"kind":"environment","name":"OPENAI_API_KEY","tool_id":"negative-tool"},"expected":"deny","fixture_name":"sandbox-negative-environment","reason_code":"environment_denied","side_effects_allowed":false,"target":"linux-landlock-seccomp"}

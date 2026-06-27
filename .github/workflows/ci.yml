@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  m0:
+    name: M0 gates (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate Codex harness
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Install Rust
+        run: >-
+          rustup toolchain install 1.81.0
+          --profile minimal
+          --component clippy
+          --component rustfmt
+          --component llvm-tools-preview
+
+      - name: Install Rust gate tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest,cargo-llvm-cov,cargo-audit,cargo-deny
+
+      - name: Install lychee
+        uses: taiki-e/install-action@v2
+        with:
+          tool: lychee
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check lints
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo nextest run --locked --workspace --all-targets
+
+      - name: Run coverage harness
+        run: cargo llvm-cov nextest --locked --workspace --no-report
+
+      - name: Check RustSec advisories
+        run: cargo audit
+
+      - name: Check dependency policy
+        run: cargo deny check
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install Node dev tools
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium dependencies
+        if: runner.os == 'Linux'
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Install Playwright Chromium
+        if: runner.os != 'Linux'
+        run: pnpm exec playwright install chromium
+
+      - name: Render HTML docs
+        run: pnpm run docs:render-check
+
+      - name: Check documentation links
+        run: >-
+          lychee
+          --no-progress
+          --include-fragments
+          README.md
+          PLAN.md
+          VISION.md
+          PROTOCOL.md
+          SECURITY.md
+          TESTING.md
+          PERFORMANCE.md
+          GLOSSARY.md
+          CONTRIBUTING.md
+          CHANGELOG.md
+          docs/**/*.html

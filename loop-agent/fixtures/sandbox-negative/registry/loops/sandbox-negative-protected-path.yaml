@@ -1,0 +1,6 @@
+loop:
+  id: sandbox-negative-protected-path
+  name: SandboxNegativeProtectedPath
+  phase_refs: [negative]
+  subloop_refs: []
+  connection_refs: []

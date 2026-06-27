@@ -1,0 +1,17 @@
+tool:
+  id: read-file
+  name: ReadFile
+  tool_kind: predefined-command
+  command:
+    command_id: agent-read
+    argv: []
+  allowed_parameters:
+    - name: "--file"
+      value_type: workspace-relative-path
+      required: true
+      value_pattern: "^[A-Za-z0-9_./-]+$"
+      max_length: 128
+  read_scope: ["workspace"]
+  write_scope: []
+  protected_path_grants: []
+  network: deny

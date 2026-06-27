@@ -1,0 +1,35 @@
+# Codex project config for trusted Watershed checkouts.
+# Canonical repo rules live in AGENTS.md; security details live in SECURITY.md.
+
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+model_verbosity = "low"
+personality = "pragmatic"
+
+# Keep big logs and diagnostics out of future turns.
+tool_output_token_limit = 6000
+
+# Auto-compact well before GPT's >272K premium-pricing zone.
+model_auto_compact_token_limit = 150000
+
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+web_search = "disabled"
+
+[sandbox_workspace_write]
+network_access = false
+
+[features]
+multi_agent = true
+undo = true
+codex_git_commit = false
+hooks = true
+prevent_idle_sleep = true
+personality = true
+fast_mode = false
+terminal_resize_reflow = true
+goals = true
+
+[agents]
+max_threads = 6
+max_depth = 1

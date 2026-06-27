@@ -1,0 +1,91 @@
+# Glossary
+
+Canonical terms. Use these exactly; do not introduce synonyms. Tool names are final.
+
+## Platform & strategy
+
+- **Platform** — Watershed as a whole: one AGPL/free-software AI-native work platform for reusable, measurable and reversible agent workflows, composed of three independently usable layers.
+- **Platform layer** — One independently usable part of the Watershed platform. There are three: execution, control and workspace/action.
+- **Execution layer** — Loop Agent's role: running repeatable, auditable agent workflows.
+- **Control layer** — Meta-Harness's role: controlling, observing, measuring and governing many agents.
+- **Workspace/action layer** — Liquid's role: human/agent workspace co-editing with reversible action history.
+- **Agent workflow** — A structured unit of AI-agent work that can be run, observed, measured and improved (in Loop Agent, realized as a Loop).
+- **Reversible agent action** — An attributed workspace mutation that can be inspected and reverted (see Action, Workspace action history).
+- **Wedge** — The first narrow adoption path used to validate and grow the platform. Loop Agent is the developer/open-source execution wedge, Meta-Harness the team/control/governance wedge, Liquid the long-term workspace/action wedge.
+- **AGPL/free-software posture** — The project's commitment to transparent, inspectable, self-hostable software under the repository's `AGPL-3.0-only` license; not a proprietary/open-core monetization stance.
+- **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main` (ADR-0046).
+- **Git upstream** — Remote-tracking branch a local branch uses by default for pull/push; topic branches must not use `origin/main` (ADR-0048).
+- **Commit metadata** — Commit subject, body, comment text and trailers; metadata changes must not change file content (ADR-0048).
+- **Unpublished commit** — Commit not yet pushed or otherwise shared; only these commits may be reworded for metadata corrections (ADR-0048).
+
+## Tools
+
+- **Liquid** — Standalone native workspace and app-building product (dashboards, views, components, scripts, sources, automations) with local workspace data, an internal workspace action history/VCS and a workspace CLI/API. Useful without Loop Agent or Meta-Harness; integrates them optionally. Also the unifying UI surface for them when present. CLI binary: `liq` (ADR-0013).
+- **Loop Agent** — CLI-only, Rust-core, script-driven, event-based deterministic agent-loop harness (not a generic coding agent). CLI binary: `loop` (ADR-0013).
+- **Meta-Harness** — Self-contained headless control plane over many agents (session registry, central config resolution, scheduling/automations, artifact indexing, AgentPulse), reachable via CLI/API/service. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta` (ADR-0013).
+- **Pi Agent** — The Pi CLI agent integration target. Use the full term "Pi Agent" in docs; avoid bare "Pi" except when quoting an external CLI/product name.
+
+## Roles & layers
+
+- **Core** — Shared libraries used by all tools: building-block/script format, identity/permissions, policy→sandbox compiler and config/protocol helpers.
+- **Protocol** — The versioned contract over which the tools communicate (the integration seam).
+- **Meta-Agent** — The agent that _operates_ the Meta-Harness; either Liquid-native or BYOA. May reconfigure underlying agents under policy + audit control.
+- **BYOA** — "Bring Your Own Agent"; plugging an external agent in as the Meta-Agent.
+- **AgentPulse** — Meta-Harness component measuring rework ratio, first-attempt success rate, and cost-per-productive-outcome. Meta-Harness computes/stores the metrics; Liquid only renders them.
+- **Adapter** — A Meta-Harness component that translates an external agent (Codex CLI, Claude Code, Pi Agent, etc.) into the normalized protocol events/commands. Native agent shapes do not leak past the adapter.
+
+## Loop Agent primitives
+
+- **Building Block** — The flexible, modular and recursive unit of configuration; every Tool, Instruction, Phase and Loop is a building block. Loops can contain loops.
+- **Building-block registry** — The resolver for addressable Tools, Instructions, Phases, Loops and Connections. In v0 it discovers one-block YAML entries under a configured registry root, resolves explicit by-name/id references, validates recursion and rejects duplicates, ambiguity and cycles.
+- **Canonical serialization** — Deterministic UTF-8 JSON of the parsed, schema-validated and registry-resolved building-block model; equivalent scripts serialize to the same bytes for review, audit and golden tests.
+- **Tool** — A capability with a description, an exact command identity (predefined or own script), and allowed/forbidden parameters, directories and patterns. Nothing outside the declared command is permitted.
+- **Policy artifact** — The canonical JSON output produced by `core-policy` in M0 to show tool-scoped capabilities for a target sandbox backend, including deterministic object-key and array ordering; review/test artifact only until M1 OS enforcement.
+- **Predefined-command registry** — The trusted id-to-executable map used by predefined-command Tools. A script names a `command_id`; Loop Agent resolves it to one executable identity and combines it with the script's literal base `argv` without PATH lookup or shell parsing.
+- **Predefined-command Tool** — A Tool that calls a fixed command id declared by the script, resolved through the predefined-command registry and constrained by policy.
+- **Allowed parameter** — A reviewed parameter spec for a Tool: exact name, typed value shape, required flag and type-specific constraints such as enum values, string pattern/length or integer range. Unknown parameters and values that fail validation are denied before tool launch.
+- **Own-script Tool** — A Tool whose reviewed inline `script_body` is supplied by the building-block script, executed through the fixed v0 `posix-sh` runner and constrained by the same policy model.
+- **Instruction** — A modular prompt primitive (name, description, prompt, tools). Carries no phase binding; phases reference instructions.
+- **Connection** — A declared relation between building blocks, data sources, events or outputs. Connections make data/control flow explicit instead of hiding it in agent-specific terminology.
+- **Phase** — A workflow stage; declares the tools and instructions available within it and contains ordered steps. Authored as a script; a visual graph is a view over that script.
+- **Loop** — A fully configured, deterministic AI-native process: a state machine composed of phases and building blocks (1…n agents). A loop is itself a building block.
+- **Subloop** — A loop used inside another loop.
+
+## Loop Agent runtime surfaces
+
+- **Session** — One Loop Agent run, identified by a lowercase path-safe `session_id` token per `PROTOCOL.md`; the unit that is started, resumed, tailed and persisted.
+- **Transcript** — The ordered record of a session's messages and runtime events; persisted to the local session store and reconstructable by replay.
+- **Runtime event** — One normalized event Loop Agent emits over its public contract (see `PROTOCOL.md`); the same events feed JSONL mode, future RPC mode and the session store.
+- **JSONL event stream** — Loop Agent's headless mode that streams newline-delimited JSON runtime events to stdout for automation/CI/consumers.
+- **RPC mode** — Loop Agent's designed-for bidirectional stdin/stdout control mode. D-019 decides the command/request shape; runtime events remain the public event contract.
+- **Session store** — Loop Agent's local append-only transcript persistence (e.g. `.loop/sessions/<session_id>.jsonl`). Runtime state only; **not** a project VCS/history engine.
+- **Loop registry** — The name/id index used by `loop run <name>` and interactive slash commands such as `/hello-loop` inside `loop chat` to resolve a loop definition without requiring a path.
+- **Fixture workspace** — A checked-in test workspace for a golden loop; D-047 decides how it points Loop Agent at the fixture registry and deterministic stub-model profile.
+- **Loop definition ID** — The registry/building-block id of a Loop definition; carried in event payloads as `loop_definition_id`.
+- **Runtime loop invocation ID** — The `loop_id` assigned to one root-loop or subloop invocation in a session; distinct from the Loop definition ID and linked to a parent by `parent_loop_id`.
+- **Stub model** — A deterministic model double used by tests so golden event streams are byte-stable in CI.
+- **Golden loop** — A checked-in loop fixture with a deterministic expected event stream used for capture-and-diff validation.
+- **Golden event stream** — A checked-in JSONL event stream with fixed fixture IDs, timestamps, sequence values and canonical event JSONL bytes per `PROTOCOL.md`.
+- **Environment allowlist** — Tool-scoped list of non-secret environment variable names copied into an otherwise cleared process environment; execution-control, proxy, helper-control, config-injection and credential-handle variables are denied unless a future explicit capability models them.
+- **Network allow entry** — A typed CIDR/IP egress rule with transport and port; the only v0 way to declare network access. Linux M1 OS enforcement rejects non-empty allowlists until D-046 selects a positive egress backend.
+- **Protected path** — A path pattern denied by default even inside a declared root unless a loop explicitly grants it.
+- **Protected-path grant** — A tool-scoped exception that removes the protected-path deny only when the path is still inside that tool's declared read/write scope.
+- **Smoke-loop** — The smallest golden loop: one phase, one tool and one instruction, used as the first localizable gate.
+- **Hello-loop** — The showcase golden loop that exercises phases, scoped instructions/tools, connections and subloop reuse.
+- **Sandbox-negative fixture** — A tiny loop that intentionally attempts a forbidden operation and must be rejected.
+- **HTML render gate** — The CI validation that browser-renders self-contained HTML docs; `pnpm run docs:render-check` invokes `scripts/check-html-render.mjs` at `1440x900` and `390x844` (ADR-0043, ADR-0045).
+
+## Liquid primitives
+
+- **Workspace** — Top-level container owned by users/agents.
+- **Source** — Anything addressable in a workspace; either a **Link** (reference to an external source) or a **Dashboard**.
+- **Dashboard** — A composition of **Views**.
+- **View** — A representation of one or more **Components**.
+- **Component** — A functional unit (editor, table, script, etc.); the smallest composable element.
+- **Connection** — An explicit data/control relation between components, scripts, sources or loops (source, target, mapping, trigger/refresh behavior).
+- **Workspace action history / workspace VCS** — Liquid's internal append-only record of workspace mutations, with snapshots/checkpoints, enabling attribution, diff and revert. A VCS over Liquid's own workspace data — **not** a project-code VCS and not Loop Agent's session store.
+- **Action** — One recorded workspace mutation: actor (human/liquid-ai/external-agent/meta-harness/system), origin (ui/cli/api/automation/import/sync), target, operation, before/after-or-patch, permission result, review status, correlation_id and revert metadata.
+- **Mutation pipeline** — The single permissioned path (validate → permission check → diff → apply → append action → emit event) every workspace write takes, regardless of whether it originates from the UI, Liquid AI, the CLI/API or an external agent. No hidden writes bypass it.
+- **Workspace CLI/API** — Liquid's external surface (`liq …` CLI and local API/service) through which external agents and tools read and edit workspace data via the mutation pipeline.
+- **Liquid AI** — Liquid's built-in workspace assistant; uses the same mutation/action-history pipeline as external agents and calls Loop Agent/Meta-Harness only through their public surfaces.
+- **External agent** — Any agent or tool (incl. BYOA, Meta-Harness-orchestrated) that reads/edits a Liquid workspace through the workspace CLI/API; writes are scoped, attributed and revertible.

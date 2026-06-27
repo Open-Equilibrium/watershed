@@ -1,0 +1,6 @@
+connection:
+  id: inspect-trigger
+  name: InspectTrigger
+  connection_kind: trigger
+  from_ref: inspect.gather
+  to_ref: summarize.write
