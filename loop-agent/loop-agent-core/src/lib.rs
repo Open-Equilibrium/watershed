@@ -198,15 +198,13 @@ pub fn tail_session(
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
     let workspace = workspace.as_ref();
     let loop_dir = workspace.join(".loop");
-    if !loop_dir.exists() {
+    if !ensure_optional_real_directory(&loop_dir)? {
         return Ok(Vec::new());
     }
-    ensure_existing_real_directory(&loop_dir)?;
     let dir = workspace.join(LOCAL_SESSION_DIR);
-    if !dir.exists() {
+    if !ensure_optional_real_directory(&dir)? {
         return Ok(Vec::new());
     }
-    ensure_existing_real_directory(&dir)?;
     let mut sessions = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|source| RuntimeError::Io {
         path: dir.clone(),
@@ -319,8 +317,10 @@ fn write_session_log(
 ) -> Result<(), RuntimeError> {
     let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
-    write_new_file(&session_path, stream.as_bytes())?;
     let log_path = log_dir.join(format!("{session_id}.log"));
+    ensure_new_leaf_available(&session_path)?;
+    ensure_new_leaf_available(&log_path)?;
+    write_new_file(&session_path, stream.as_bytes())?;
     write_new_file(
         &log_path,
         format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
@@ -349,6 +349,20 @@ fn ensure_existing_real_directory(path: &Path) -> Result<(), RuntimeError> {
         source,
     })?;
     validate_real_directory(path, &metadata)
+}
+
+fn ensure_optional_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            validate_real_directory(path, &metadata)?;
+            Ok(true)
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
 }
 
 fn ensure_real_directory(path: &Path) -> Result<(), RuntimeError> {
@@ -389,7 +403,7 @@ fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), R
 }
 
 fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    reject_symlink_leaf(path)?;
+    ensure_new_leaf_available(path)?;
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -402,6 +416,24 @@ fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
         path: path.to_owned(),
         source,
     })
+}
+
+fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        ))),
+        Ok(_) => Err(RuntimeError::Protocol(format!(
+            "{} must not already exist",
+            path.display()
+        ))),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
 }
 
 fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
@@ -418,21 +450,6 @@ fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> 
             path: path.to_owned(),
             source,
         })
-}
-
-fn reject_symlink_leaf(path: &Path) -> Result<(), RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
-            path.display()
-        ))),
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
 }
 
 fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
