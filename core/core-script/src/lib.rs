@@ -1,8 +1,12 @@
 //! Building-block script model contracts for M0.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::{Path, PathBuf};
 
 pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
 pub const YAML_VERSION: &str = "1.2";
@@ -234,11 +238,476 @@ pub trait ScriptParser {
     ) -> Result<RegistryBlock, ParseError>;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V0ScriptParser;
+
+impl ScriptParser for V0ScriptParser {
+    fn parse_registry_block(
+        &self,
+        source_name: &str,
+        source: &str,
+    ) -> Result<RegistryBlock, ParseError> {
+        parse_registry_block(source_name, source).map_err(ParseError::from)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ResolvedRegistry {
+    pub connections: BTreeMap<String, ConnectionBlock>,
+    pub instructions: BTreeMap<String, InstructionBlock>,
+    pub loops: BTreeMap<String, LoopBlock>,
+    pub phases: BTreeMap<String, PhaseBlock>,
+    pub tools: BTreeMap<String, ToolBlock>,
+}
+
+impl ResolvedRegistry {
+    pub fn load(root: &Path) -> Result<Self, RegistryError> {
+        let mut paths = Vec::new();
+        collect_registry_files(root, &mut paths)?;
+        paths.sort();
+        let mut blocks = Vec::new();
+
+        for path in paths {
+            let source = fs::read_to_string(&path).map_err(|source| RegistryError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let source_name = path
+                .strip_prefix(root)
+                .unwrap_or(path.as_path())
+                .to_string_lossy()
+                .replace('\\', "/");
+            let block = parse_registry_block(&source_name, &source)?;
+            blocks.push(block);
+        }
+
+        Self::from_blocks(blocks)
+    }
+
+    pub fn from_blocks(
+        blocks: impl IntoIterator<Item = RegistryBlock>,
+    ) -> Result<Self, RegistryError> {
+        let mut registry = Self {
+            connections: BTreeMap::new(),
+            instructions: BTreeMap::new(),
+            loops: BTreeMap::new(),
+            phases: BTreeMap::new(),
+            tools: BTreeMap::new(),
+        };
+        let mut names: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
+
+        for block in blocks {
+            registry.insert(block, &mut names)?;
+        }
+
+        registry.validate_references()?;
+        Ok(registry)
+    }
+
+    pub fn canonical_json(&self) -> Result<String, RegistryError> {
+        let mut out = canonical_resolved_registry_json(self)?;
+        if out.ends_with('\n') {
+            out.pop();
+        }
+        Ok(out)
+    }
+
+    pub fn loop_block(&self, reference: &str) -> Option<&LoopBlock> {
+        self.loops.get(reference).or_else(|| {
+            self.loops
+                .values()
+                .find(|block| block.identity.name == reference)
+        })
+    }
+
+    pub fn phase_block(&self, reference: &str) -> Option<&PhaseBlock> {
+        self.phases.get(reference).or_else(|| {
+            self.phases
+                .values()
+                .find(|block| block.identity.name == reference)
+        })
+    }
+
+    pub fn tool_block(&self, reference: &str) -> Option<&ToolBlock> {
+        self.tools.get(reference).or_else(|| {
+            self.tools
+                .values()
+                .find(|block| block.identity.name == reference)
+        })
+    }
+
+    pub fn instruction_block(&self, reference: &str) -> Option<&InstructionBlock> {
+        self.instructions.get(reference).or_else(|| {
+            self.instructions
+                .values()
+                .find(|block| block.identity.name == reference)
+        })
+    }
+
+    pub fn connection_block(&self, reference: &str) -> Option<&ConnectionBlock> {
+        self.connections.get(reference).or_else(|| {
+            self.connections
+                .values()
+                .find(|block| block.identity.name == reference)
+        })
+    }
+
+    fn insert(
+        &mut self,
+        block: RegistryBlock,
+        names: &mut BTreeMap<&'static str, BTreeSet<String>>,
+    ) -> Result<(), RegistryError> {
+        match block {
+            RegistryBlock::Tool(block) => {
+                validate_registry_block_semantics(&RegistryBlock::Tool(block.clone()))?;
+                insert_named_block(
+                    "tool",
+                    block.identity.clone(),
+                    &mut self.tools,
+                    names,
+                    block,
+                )
+            }
+            RegistryBlock::Instruction(block) => insert_named_block(
+                "instruction",
+                block.identity.clone(),
+                &mut self.instructions,
+                names,
+                block,
+            ),
+            RegistryBlock::Phase(block) => insert_named_block(
+                "phase",
+                block.identity.clone(),
+                &mut self.phases,
+                names,
+                block,
+            ),
+            RegistryBlock::Connection(block) => insert_named_block(
+                "connection",
+                block.identity.clone(),
+                &mut self.connections,
+                names,
+                block,
+            ),
+            RegistryBlock::Loop(block) => insert_named_block(
+                "loop",
+                block.identity.clone(),
+                &mut self.loops,
+                names,
+                block,
+            ),
+        }
+    }
+
+    fn validate_references(&self) -> Result<(), RegistryError> {
+        for phase in self.phases.values() {
+            for reference in &phase.instruction_refs {
+                self.require_instruction(reference, "phase", &phase.identity.id)?;
+            }
+            for reference in &phase.tool_refs {
+                self.require_tool(reference, "phase", &phase.identity.id)?;
+            }
+            for step in &phase.steps {
+                if !is_valid_block_id(&step.id) {
+                    return Err(RegistryError::InvalidBlockId(step.id.clone()));
+                }
+            }
+        }
+
+        for connection in self.connections.values() {
+            self.require_endpoint(&connection.from_ref, &connection.identity.id)?;
+            self.require_endpoint(&connection.to_ref, &connection.identity.id)?;
+        }
+
+        for loop_block in self.loops.values() {
+            for reference in &loop_block.phase_refs {
+                self.require_phase(reference, "loop", &loop_block.identity.id)?;
+            }
+            for reference in &loop_block.subloop_refs {
+                self.require_loop(reference, "loop", &loop_block.identity.id)?;
+            }
+            for reference in &loop_block.connection_refs {
+                self.require_connection(reference, "loop", &loop_block.identity.id)?;
+            }
+            let loop_connection_ids = loop_block
+                .connection_refs
+                .iter()
+                .map(|reference| {
+                    self.require_connection(reference, "loop", &loop_block.identity.id)
+                        .map(|connection| connection.identity.id.as_str())
+                })
+                .collect::<Result<BTreeSet<_>, RegistryError>>()?;
+
+            for phase_ref in &loop_block.phase_refs {
+                let phase = self.require_phase(phase_ref, "loop", &loop_block.identity.id)?;
+                for step in &phase.steps {
+                    for connection_ref in &step.connection_refs {
+                        let connection =
+                            self.require_connection(connection_ref, "step", &step.id)?;
+                        if !loop_connection_ids.contains(connection.identity.id.as_str()) {
+                            return Err(RegistryError::MissingReference {
+                                from_kind: "loop",
+                                from_id: loop_block.identity.id.clone(),
+                                reference_kind: "step connection",
+                                reference: connection_ref.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        self.validate_loop_cycles()
+    }
+
+    fn require_tool(
+        &self,
+        reference: &str,
+        from_kind: &'static str,
+        from_id: &str,
+    ) -> Result<&ToolBlock, RegistryError> {
+        self.tool_block(reference)
+            .ok_or_else(|| RegistryError::MissingReference {
+                from_kind,
+                from_id: from_id.to_owned(),
+                reference_kind: "tool",
+                reference: reference.to_owned(),
+            })
+    }
+
+    fn require_instruction(
+        &self,
+        reference: &str,
+        from_kind: &'static str,
+        from_id: &str,
+    ) -> Result<&InstructionBlock, RegistryError> {
+        self.instruction_block(reference)
+            .ok_or_else(|| RegistryError::MissingReference {
+                from_kind,
+                from_id: from_id.to_owned(),
+                reference_kind: "instruction",
+                reference: reference.to_owned(),
+            })
+    }
+
+    fn require_phase(
+        &self,
+        reference: &str,
+        from_kind: &'static str,
+        from_id: &str,
+    ) -> Result<&PhaseBlock, RegistryError> {
+        self.phase_block(reference)
+            .ok_or_else(|| RegistryError::MissingReference {
+                from_kind,
+                from_id: from_id.to_owned(),
+                reference_kind: "phase",
+                reference: reference.to_owned(),
+            })
+    }
+
+    fn require_loop(
+        &self,
+        reference: &str,
+        from_kind: &'static str,
+        from_id: &str,
+    ) -> Result<&LoopBlock, RegistryError> {
+        self.loop_block(reference)
+            .ok_or_else(|| RegistryError::MissingReference {
+                from_kind,
+                from_id: from_id.to_owned(),
+                reference_kind: "loop",
+                reference: reference.to_owned(),
+            })
+    }
+
+    fn require_connection(
+        &self,
+        reference: &str,
+        from_kind: &'static str,
+        from_id: &str,
+    ) -> Result<&ConnectionBlock, RegistryError> {
+        self.connection_block(reference)
+            .ok_or_else(|| RegistryError::MissingReference {
+                from_kind,
+                from_id: from_id.to_owned(),
+                reference_kind: "connection",
+                reference: reference.to_owned(),
+            })
+    }
+
+    fn require_endpoint(&self, reference: &str, connection_id: &str) -> Result<(), RegistryError> {
+        if let Some((phase_ref, step_id)) = reference.split_once('.') {
+            let phase = self.require_phase(phase_ref, "connection", connection_id)?;
+            if phase.steps.iter().any(|step| step.id == step_id) {
+                return Ok(());
+            }
+            return Err(RegistryError::MissingReference {
+                from_kind: "connection",
+                from_id: connection_id.to_owned(),
+                reference_kind: "step",
+                reference: reference.to_owned(),
+            });
+        }
+
+        if self.tool_block(reference).is_some()
+            || self.instruction_block(reference).is_some()
+            || self.phase_block(reference).is_some()
+            || self.loop_block(reference).is_some()
+        {
+            Ok(())
+        } else {
+            Err(RegistryError::MissingReference {
+                from_kind: "connection",
+                from_id: connection_id.to_owned(),
+                reference_kind: "endpoint",
+                reference: reference.to_owned(),
+            })
+        }
+    }
+
+    fn validate_loop_cycles(&self) -> Result<(), RegistryError> {
+        let mut visiting = BTreeSet::new();
+        let mut visited = BTreeSet::new();
+        for loop_id in self.loops.keys() {
+            self.visit_loop(loop_id, &mut visiting, &mut visited)?;
+        }
+        Ok(())
+    }
+
+    fn visit_loop(
+        &self,
+        loop_id: &str,
+        visiting: &mut BTreeSet<String>,
+        visited: &mut BTreeSet<String>,
+    ) -> Result<(), RegistryError> {
+        if visited.contains(loop_id) {
+            return Ok(());
+        }
+        if !visiting.insert(loop_id.to_owned()) {
+            return Err(RegistryError::LoopCycle {
+                loop_id: loop_id.to_owned(),
+            });
+        }
+
+        let loop_block = self.require_loop(loop_id, "loop", loop_id)?;
+        for subloop_ref in &loop_block.subloop_refs {
+            let subloop = self.require_loop(subloop_ref, "loop", loop_id)?;
+            self.visit_loop(&subloop.identity.id, visiting, visited)?;
+        }
+
+        visiting.remove(loop_id);
+        visited.insert(loop_id.to_owned());
+        Ok(())
+    }
+}
+
+fn insert_named_block<T>(
+    kind: &'static str,
+    identity: BlockIdentity,
+    blocks: &mut BTreeMap<String, T>,
+    names: &mut BTreeMap<&'static str, BTreeSet<String>>,
+    block: T,
+) -> Result<(), RegistryError> {
+    if blocks.contains_key(&identity.id) {
+        return Err(RegistryError::DuplicateId {
+            kind,
+            id: identity.id,
+        });
+    }
+    if !names.entry(kind).or_default().insert(identity.name.clone()) {
+        return Err(RegistryError::DuplicateId {
+            kind,
+            id: identity.name,
+        });
+    }
+    blocks.insert(identity.id, block);
+    Ok(())
+}
+
+#[derive(Debug)]
+pub enum RegistryError {
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    InvalidBlockId(String),
+    InvalidCommandId(String),
+    Parse {
+        source_name: String,
+        message: String,
+    },
+    DuplicateId {
+        kind: &'static str,
+        id: String,
+    },
+    MissingReference {
+        from_kind: &'static str,
+        from_id: String,
+        reference_kind: &'static str,
+        reference: String,
+    },
+    LoopCycle {
+        loop_id: String,
+    },
+    Semantic(SemanticValidationError),
+    Serialize(serde_json::Error),
+}
+
+impl fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
+            Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
+            Self::Parse {
+                source_name,
+                message,
+            } => write!(f, "{source_name}: {message}"),
+            Self::DuplicateId { kind, id } => write!(f, "duplicate {kind} id: {id}"),
+            Self::MissingReference {
+                from_kind,
+                from_id,
+                reference_kind,
+                reference,
+            } => write!(
+                f,
+                "{from_kind} {from_id} references missing {reference_kind} {reference}"
+            ),
+            Self::LoopCycle { loop_id } => write!(f, "loop cycle includes {loop_id}"),
+            Self::Semantic(err) => write!(f, "{err}"),
+            Self::Serialize(err) => write!(f, "failed to serialize resolved registry: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for RegistryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Semantic(err) => Some(err),
+            Self::Serialize(err) => Some(err),
+            Self::InvalidBlockId(_)
+            | Self::InvalidCommandId(_)
+            | Self::Parse { .. }
+            | Self::DuplicateId { .. }
+            | Self::MissingReference { .. }
+            | Self::LoopCycle { .. } => None,
+        }
+    }
+}
+
+impl From<SemanticValidationError> for RegistryError {
+    fn from(err: SemanticValidationError) -> Self {
+        Self::Semantic(err)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseError {
     ContractOnly,
     InvalidBlockId(String),
     InvalidCommandId(String),
+    Parse(String),
     Semantic(SemanticValidationError),
 }
 
@@ -251,6 +720,7 @@ impl fmt::Display for ParseError {
             ),
             Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
             Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
+            Self::Parse(message) => f.write_str(message),
             Self::Semantic(err) => write!(f, "{err}"),
         }
     }
@@ -260,7 +730,10 @@ impl std::error::Error for ParseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Semantic(err) => Some(err),
-            Self::ContractOnly | Self::InvalidBlockId(_) | Self::InvalidCommandId(_) => None,
+            Self::ContractOnly
+            | Self::InvalidBlockId(_)
+            | Self::InvalidCommandId(_)
+            | Self::Parse(_) => None,
         }
     }
 }
@@ -268,6 +741,17 @@ impl std::error::Error for ParseError {
 impl From<SemanticValidationError> for ParseError {
     fn from(err: SemanticValidationError) -> Self {
         Self::Semantic(err)
+    }
+}
+
+impl From<RegistryError> for ParseError {
+    fn from(err: RegistryError) -> Self {
+        match err {
+            RegistryError::InvalidBlockId(value) => Self::InvalidBlockId(value),
+            RegistryError::InvalidCommandId(value) => Self::InvalidCommandId(value),
+            RegistryError::Semantic(err) => Self::Semantic(err),
+            other => Self::Parse(other.to_string()),
+        }
     }
 }
 
@@ -355,6 +839,902 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
     Ok(())
 }
 
+pub fn load_registry_root(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
+    ResolvedRegistry::load(root.as_ref())
+}
+
+pub fn parse_registry_block(
+    source_name: &str,
+    source: &str,
+) -> Result<RegistryBlock, RegistryError> {
+    reject_unsupported_yaml(source_name, source)?;
+    let section = top_section(source_name, source)?;
+    let block = match section {
+        "tool" => RegistryBlock::Tool(parse_tool_block(source_name, source)?),
+        "instruction" => RegistryBlock::Instruction(parse_instruction_block(source_name, source)?),
+        "phase" => RegistryBlock::Phase(parse_phase_block(source_name, source)?),
+        "connection" => RegistryBlock::Connection(parse_connection_block(source_name, source)?),
+        "loop" => RegistryBlock::Loop(parse_loop_block(source_name, source)?),
+        other => {
+            return Err(parse_error(
+                source_name,
+                format!("unsupported registry block kind {other:?}"),
+            ));
+        }
+    };
+    validate_registry_block_semantics(&block)?;
+    Ok(block)
+}
+
+pub fn canonical_resolved_registry_json(
+    registry: &ResolvedRegistry,
+) -> Result<String, RegistryError> {
+    let mut value = serde_json::to_value(registry).map_err(RegistryError::Serialize)?;
+    materialize_registry_defaults(&mut value);
+    sort_allowed_parameters(&mut value);
+    let mut out = canonical_json(&value);
+    out.push('\n');
+    Ok(out)
+}
+
+fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), RegistryError> {
+    for entry in fs::read_dir(dir).map_err(|source| RegistryError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| RegistryError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_registry_files(&path, out)?;
+        } else if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn parse_tool_block(source_name: &str, source: &str) -> Result<ToolBlock, RegistryError> {
+    let id = validated_block_id(source_name, source, "tool")?;
+    let tool_kind = match required_scalar(source_name, source, "tool", "tool_kind")?.as_str() {
+        "predefined-command" => ToolKind::PredefinedCommand,
+        "own-script" => ToolKind::OwnScript,
+        other => {
+            return Err(parse_error(
+                source_name,
+                format!("unsupported tool_kind {other:?}"),
+            ))
+        }
+    };
+    let command = match tool_kind {
+        ToolKind::PredefinedCommand => {
+            let command_id =
+                required_nested_scalar(source_name, source, "tool", "command", "command_id")?;
+            if !is_valid_command_id(&command_id) {
+                return Err(RegistryError::InvalidCommandId(command_id));
+            }
+            ToolCommand::Predefined {
+                command_id,
+                argv: nested_inline_list(source_name, source, "tool", "command", "argv")?,
+            }
+        }
+        ToolKind::OwnScript => {
+            ToolCommand::OwnScript(required_scalar(source_name, source, "tool", "command")?)
+        }
+    };
+
+    Ok(ToolBlock {
+        identity: BlockIdentity {
+            id,
+            name: required_scalar(source_name, source, "tool", "name")?,
+        },
+        tool_kind,
+        command,
+        script_runtime: optional_scalar(source_name, source, "tool", "script_runtime")?
+            .map(|runtime| match runtime.as_str() {
+                "posix-sh" => Ok(ScriptRuntime::PosixSh),
+                other => Err(parse_error(
+                    source_name,
+                    format!("unsupported script_runtime {other:?}"),
+                )),
+            })
+            .transpose()?,
+        script_body: optional_scalar(source_name, source, "tool", "script_body")?,
+        allowed_parameters: allowed_parameters(source_name, source)?,
+        read_scope: inline_list(source_name, source, "tool", "read_scope")?,
+        write_scope: inline_list(source_name, source, "tool", "write_scope")?,
+        protected_path_grants: inline_list(source_name, source, "tool", "protected_path_grants")?,
+        network: network_policy(source_name, source)?,
+    })
+}
+
+fn parse_instruction_block(
+    source_name: &str,
+    source: &str,
+) -> Result<InstructionBlock, RegistryError> {
+    Ok(InstructionBlock {
+        identity: BlockIdentity {
+            id: validated_block_id(source_name, source, "instruction")?,
+            name: required_scalar(source_name, source, "instruction", "name")?,
+        },
+        prompt: required_scalar(source_name, source, "instruction", "prompt")?,
+    })
+}
+
+fn parse_phase_block(source_name: &str, source: &str) -> Result<PhaseBlock, RegistryError> {
+    Ok(PhaseBlock {
+        identity: BlockIdentity {
+            id: validated_block_id(source_name, source, "phase")?,
+            name: required_scalar(source_name, source, "phase", "name")?,
+        },
+        instruction_refs: inline_list(source_name, source, "phase", "instruction_refs")?,
+        tool_refs: inline_list(source_name, source, "phase", "tool_refs")?,
+        steps: phase_steps(source_name, source)?,
+    })
+}
+
+fn parse_connection_block(
+    source_name: &str,
+    source: &str,
+) -> Result<ConnectionBlock, RegistryError> {
+    let connection_kind =
+        match required_scalar(source_name, source, "connection", "connection_kind")?.as_str() {
+            "data" => ConnectionKind::Data,
+            "trigger" => ConnectionKind::Trigger,
+            "refresh" => ConnectionKind::Refresh,
+            other => {
+                return Err(parse_error(
+                    source_name,
+                    format!("unsupported connection_kind {other:?}"),
+                ));
+            }
+        };
+
+    Ok(ConnectionBlock {
+        identity: BlockIdentity {
+            id: validated_block_id(source_name, source, "connection")?,
+            name: required_scalar(source_name, source, "connection", "name")?,
+        },
+        connection_kind,
+        from_ref: required_scalar(source_name, source, "connection", "from_ref")?,
+        to_ref: required_scalar(source_name, source, "connection", "to_ref")?,
+    })
+}
+
+fn parse_loop_block(source_name: &str, source: &str) -> Result<LoopBlock, RegistryError> {
+    Ok(LoopBlock {
+        identity: BlockIdentity {
+            id: validated_block_id(source_name, source, "loop")?,
+            name: required_scalar(source_name, source, "loop", "name")?,
+        },
+        phase_refs: inline_list(source_name, source, "loop", "phase_refs")?,
+        subloop_refs: inline_list(source_name, source, "loop", "subloop_refs")?,
+        connection_refs: inline_list(source_name, source, "loop", "connection_refs")?,
+    })
+}
+
+fn validated_block_id(
+    source_name: &str,
+    source: &str,
+    section: &str,
+) -> Result<String, RegistryError> {
+    let id = required_scalar(source_name, source, section, "id")?;
+    if !is_valid_block_id(&id) {
+        return Err(RegistryError::InvalidBlockId(id));
+    }
+    Ok(id)
+}
+
+fn allowed_parameters(
+    source_name: &str,
+    source: &str,
+) -> Result<Vec<AllowedParameter>, RegistryError> {
+    let objects = section_list_objects(source_name, source, "tool", "allowed_parameters")?;
+    objects
+        .into_iter()
+        .map(|object| {
+            let value_type =
+                match required_object_scalar(source_name, &object, "value_type")?.as_str() {
+                    "none" => ParameterValueType::None,
+                    "string" => ParameterValueType::String,
+                    "integer" => ParameterValueType::Integer,
+                    "workspace-relative-path" => ParameterValueType::WorkspaceRelativePath,
+                    "enum" => ParameterValueType::Enum,
+                    other => {
+                        return Err(parse_error(
+                            source_name,
+                            format!("unsupported parameter value_type {other:?}"),
+                        ));
+                    }
+                };
+            Ok(AllowedParameter {
+                name: required_object_scalar(source_name, &object, "name")?,
+                value_type,
+                required: parse_bool(
+                    source_name,
+                    "allowed_parameters.required",
+                    &required_object_scalar(source_name, &object, "required")?,
+                )?,
+                allowed_values: object
+                    .get("allowed_values")
+                    .map(|value| parse_inline_yaml_list(source_name, "allowed_values", value))
+                    .transpose()?
+                    .unwrap_or_default(),
+                value_pattern: object.get("value_pattern").cloned(),
+                max_length: object
+                    .get("max_length")
+                    .map(|value| parse_u16(source_name, "allowed_parameters.max_length", value))
+                    .transpose()?,
+                min: object
+                    .get("min")
+                    .map(|value| parse_i64(source_name, "allowed_parameters.min", value))
+                    .transpose()?,
+                max: object
+                    .get("max")
+                    .map(|value| parse_i64(source_name, "allowed_parameters.max", value))
+                    .transpose()?,
+            })
+        })
+        .collect()
+}
+
+fn phase_steps(source_name: &str, source: &str) -> Result<Vec<StepBlock>, RegistryError> {
+    section_list_objects(source_name, source, "phase", "steps")?
+        .into_iter()
+        .map(|object| {
+            Ok(StepBlock {
+                id: required_object_scalar(source_name, &object, "id")?,
+                name: required_object_scalar(source_name, &object, "name")?,
+                connection_refs: object
+                    .get("connection_refs")
+                    .map(|value| parse_inline_yaml_list(source_name, "connection_refs", value))
+                    .transpose()?
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, RegistryError> {
+    match raw_section_field_value(source, "tool", "network") {
+        Some(value) if !value.is_empty() => {
+            let value = unquote_yaml_scalar(&value);
+            if value == "deny" {
+                Ok(NetworkPolicy::Deny(NetworkDeny))
+            } else {
+                Err(parse_error(
+                    source_name,
+                    format!("unsupported network policy {value:?}"),
+                ))
+            }
+        }
+        Some(_) => {
+            let default =
+                required_nested_scalar(source_name, source, "tool", "network", "default")?;
+            let default = match default.as_str() {
+                "deny" => NetworkDefault::Deny,
+                other => {
+                    return Err(parse_error(
+                        source_name,
+                        format!("unsupported network default {other:?}"),
+                    ));
+                }
+            };
+            let allow = nested_list_objects(source_name, source, "tool", "network", "allow")?
+                .into_iter()
+                .map(|object| {
+                    Ok(NetworkAllowEntry {
+                        kind: match required_object_scalar(source_name, &object, "kind")?.as_str() {
+                            "cidr" => NetworkAllowKind::Cidr,
+                            other => {
+                                return Err(parse_error(
+                                    source_name,
+                                    format!("unsupported network allow kind {other:?}"),
+                                ));
+                            }
+                        },
+                        transport: match required_object_scalar(source_name, &object, "transport")?
+                            .as_str()
+                        {
+                            "tcp" => NetworkTransport::Tcp,
+                            "udp" => NetworkTransport::Udp,
+                            other => {
+                                return Err(parse_error(
+                                    source_name,
+                                    format!("unsupported network transport {other:?}"),
+                                ));
+                            }
+                        },
+                        cidr: required_object_scalar(source_name, &object, "cidr")?,
+                        port: parse_u16(
+                            source_name,
+                            "network.allow.port",
+                            &required_object_scalar(source_name, &object, "port")?,
+                        )?,
+                    })
+                })
+                .collect::<Result<Vec<_>, RegistryError>>()?;
+            Ok(NetworkPolicy::Declared { default, allow })
+        }
+        None => Err(parse_error(source_name, "missing tool.network".to_owned())),
+    }
+}
+
+fn reject_unsupported_yaml(source_name: &str, source: &str) -> Result<(), RegistryError> {
+    for (index, line) in source.lines().enumerate() {
+        if line.contains('\t') {
+            return Err(parse_error(
+                source_name,
+                format!("line {} uses a tab indentation character", index + 1),
+            ));
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("---")
+            || trimmed.starts_with("...")
+            || trimmed.starts_with('&')
+            || trimmed.starts_with('*')
+            || trimmed.starts_with("<<:")
+        {
+            return Err(parse_error(
+                source_name,
+                format!("line {} uses unsupported YAML syntax", index + 1),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn top_section<'a>(source_name: &str, source: &'a str) -> Result<&'a str, RegistryError> {
+    let mut section = None;
+    for line in source.lines() {
+        let line = line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if line.starts_with(' ') {
+            continue;
+        }
+        let Some(name) = line.strip_suffix(':') else {
+            return Err(parse_error(
+                source_name,
+                format!("top-level line {line:?} must be a block section"),
+            ));
+        };
+        if section.replace(name).is_some() {
+            return Err(parse_error(
+                source_name,
+                "registry files must contain exactly one top-level block".to_owned(),
+            ));
+        }
+    }
+    section.ok_or_else(|| parse_error(source_name, "empty registry block".to_owned()))
+}
+
+fn required_scalar(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<String, RegistryError> {
+    let value = raw_section_field_value(source, section, field)
+        .ok_or_else(|| parse_error(source_name, format!("missing {section}.{field}")))?;
+    if value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("{section}.{field} must be a scalar"),
+        ));
+    }
+    Ok(unquote_yaml_scalar(&value))
+}
+
+fn optional_scalar(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<Option<String>, RegistryError> {
+    raw_section_field_value(source, section, field)
+        .map(|value| {
+            if value.is_empty() {
+                Err(parse_error(
+                    source_name,
+                    format!("{section}.{field} must be a scalar"),
+                ))
+            } else {
+                Ok(unquote_yaml_scalar(&value))
+            }
+        })
+        .transpose()
+}
+
+fn required_nested_scalar(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    parent: &str,
+    field: &str,
+) -> Result<String, RegistryError> {
+    let value = raw_nested_field_value(source, section, parent, field)
+        .ok_or_else(|| parse_error(source_name, format!("missing {section}.{parent}.{field}")))?;
+    if value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("{section}.{parent}.{field} must be a scalar"),
+        ));
+    }
+    Ok(unquote_yaml_scalar(&value))
+}
+
+fn inline_list(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<Vec<String>, RegistryError> {
+    let value = required_scalar(source_name, source, section, field)?;
+    parse_inline_yaml_list(source_name, field, &value)
+}
+
+fn nested_inline_list(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    parent: &str,
+    field: &str,
+) -> Result<Vec<String>, RegistryError> {
+    let value = required_nested_scalar(source_name, source, section, parent, field)?;
+    parse_inline_yaml_list(source_name, field, &value)
+}
+
+fn raw_section_field_value(source: &str, section: &str, field: &str) -> Option<String> {
+    let section_header = format!("{section}:");
+    let field_prefix = format!("{field}:");
+    let mut in_section = false;
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_section = line.trim() == section_header;
+            continue;
+        }
+        if !in_section || !line.starts_with("  ") || line.starts_with("    ") {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix(&field_prefix) {
+            return Some(value.trim().to_owned());
+        }
+    }
+    None
+}
+
+fn raw_nested_field_value(
+    source: &str,
+    section: &str,
+    parent: &str,
+    field: &str,
+) -> Option<String> {
+    let section_header = format!("{section}:");
+    let parent_header = format!("{parent}:");
+    let field_prefix = format!("{field}:");
+    let mut in_section = false;
+    let mut in_parent = false;
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_section = line.trim() == section_header;
+            in_parent = false;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if line.starts_with("  ") && !line.starts_with("    ") {
+            in_parent = line.trim() == parent_header;
+            continue;
+        }
+        if !in_parent || !line.starts_with("    ") || line.starts_with("      ") {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(value) = trimmed.strip_prefix(&field_prefix) {
+            return Some(value.trim().to_owned());
+        }
+    }
+    None
+}
+
+fn section_list_objects(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<Vec<BTreeMap<String, String>>, RegistryError> {
+    list_objects(
+        source_name,
+        source,
+        ListObjectShape {
+            section,
+            parent: None,
+            field,
+            field_indent: 2,
+            item_indent: 4,
+            property_indent: 6,
+        },
+    )
+}
+
+fn nested_list_objects(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    parent: &str,
+    field: &str,
+) -> Result<Vec<BTreeMap<String, String>>, RegistryError> {
+    list_objects(
+        source_name,
+        source,
+        ListObjectShape {
+            section,
+            parent: Some(parent),
+            field,
+            field_indent: 4,
+            item_indent: 6,
+            property_indent: 8,
+        },
+    )
+}
+
+#[derive(Clone, Copy)]
+struct ListObjectShape<'a> {
+    section: &'a str,
+    parent: Option<&'a str>,
+    field: &'a str,
+    field_indent: usize,
+    item_indent: usize,
+    property_indent: usize,
+}
+
+fn list_objects(
+    source_name: &str,
+    source: &str,
+    shape: ListObjectShape<'_>,
+) -> Result<Vec<BTreeMap<String, String>>, RegistryError> {
+    let section_header = format!("{}:", shape.section);
+    let parent_header = shape.parent.map(|parent| format!("{parent}:"));
+    let field_prefix = format!("{}:", shape.field);
+    let mut in_section = false;
+    let mut in_parent = shape.parent.is_none();
+    let mut in_list = false;
+    let mut found = false;
+    let mut items = Vec::new();
+    let mut current = None::<BTreeMap<String, String>>;
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = leading_spaces(line);
+        let trimmed = line.trim();
+
+        if indent == 0 {
+            if in_list {
+                break;
+            }
+            in_section = trimmed == section_header;
+            in_parent = shape.parent.is_none();
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+
+        if let Some(parent_header) = &parent_header {
+            if indent == 2 {
+                if in_list {
+                    break;
+                }
+                in_parent = trimmed == parent_header;
+                continue;
+            }
+            if !in_parent {
+                continue;
+            }
+        }
+
+        if !in_list && indent == shape.field_indent {
+            if let Some(value) = trimmed.strip_prefix(&field_prefix) {
+                found = true;
+                let value = value.trim();
+                if value == "[]" {
+                    return Ok(Vec::new());
+                }
+                if !value.is_empty() {
+                    return Err(parse_error(
+                        source_name,
+                        format!("{}.{} must be a list", shape.section, shape.field),
+                    ));
+                }
+                in_list = true;
+                continue;
+            }
+        }
+
+        if !in_list {
+            continue;
+        }
+        if indent <= shape.field_indent {
+            break;
+        }
+        if indent == shape.item_indent && trimmed.starts_with("- ") {
+            if let Some(item) = current.take() {
+                items.push(item);
+            }
+            let mut item = BTreeMap::new();
+            let rest = trimmed.trim_start_matches("- ").trim();
+            if !rest.is_empty() {
+                parse_object_property(source_name, rest, &mut item)?;
+            }
+            current = Some(item);
+        } else if indent == shape.property_indent {
+            let Some(item) = &mut current else {
+                return Err(parse_error(
+                    source_name,
+                    format!(
+                        "{}.{} property appears before list item",
+                        shape.section, shape.field
+                    ),
+                ));
+            };
+            parse_object_property(source_name, trimmed, item)?;
+        } else {
+            return Err(parse_error(
+                source_name,
+                format!(
+                    "{}.{} uses unsupported indentation",
+                    shape.section, shape.field
+                ),
+            ));
+        }
+    }
+
+    if let Some(item) = current.take() {
+        items.push(item);
+    }
+    if found {
+        Ok(items)
+    } else {
+        Err(parse_error(
+            source_name,
+            format!("missing {}.{}", shape.section, shape.field),
+        ))
+    }
+}
+
+fn parse_object_property(
+    source_name: &str,
+    line: &str,
+    item: &mut BTreeMap<String, String>,
+) -> Result<(), RegistryError> {
+    let Some((field, value)) = line.split_once(':') else {
+        return Err(parse_error(
+            source_name,
+            format!("list object property {line:?} must use key: value"),
+        ));
+    };
+    let field = field.trim();
+    let value = value.trim();
+    if field.is_empty() || value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("list object property {line:?} must use key: value"),
+        ));
+    }
+    if item
+        .insert(field.to_owned(), unquote_yaml_scalar(value))
+        .is_some()
+    {
+        return Err(parse_error(
+            source_name,
+            format!("duplicate list object property {field}"),
+        ));
+    }
+    Ok(())
+}
+
+fn required_object_scalar(
+    source_name: &str,
+    object: &BTreeMap<String, String>,
+    field: &str,
+) -> Result<String, RegistryError> {
+    object
+        .get(field)
+        .cloned()
+        .ok_or_else(|| parse_error(source_name, format!("missing list object property {field}")))
+}
+
+fn parse_inline_yaml_list(
+    source_name: &str,
+    field: &str,
+    value: &str,
+) -> Result<Vec<String>, RegistryError> {
+    let value = value.trim();
+    if !(value.starts_with('[') && value.ends_with(']')) {
+        return Err(parse_error(
+            source_name,
+            format!("{field} must be an inline YAML list"),
+        ));
+    }
+    let inner = &value[1..value.len() - 1];
+    if inner.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(inner
+        .split(',')
+        .map(|part| unquote_yaml_scalar(part.trim()))
+        .collect())
+}
+
+fn parse_bool(source_name: &str, field: &str, value: &str) -> Result<bool, RegistryError> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(parse_error(
+            source_name,
+            format!("{field} must be true or false, got {other:?}"),
+        )),
+    }
+}
+
+fn parse_u16(source_name: &str, field: &str, value: &str) -> Result<u16, RegistryError> {
+    value.parse().map_err(|_| {
+        parse_error(
+            source_name,
+            format!("{field} must be an unsigned 16-bit integer, got {value:?}"),
+        )
+    })
+}
+
+fn parse_i64(source_name: &str, field: &str, value: &str) -> Result<i64, RegistryError> {
+    value.parse().map_err(|_| {
+        parse_error(
+            source_name,
+            format!("{field} must be a 64-bit integer, got {value:?}"),
+        )
+    })
+}
+
+fn unquote_yaml_scalar(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        let mut out = String::new();
+        let mut chars = value[1..value.len() - 1].chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                match chars.next() {
+                    Some('"') => out.push('"'),
+                    Some('\\') => out.push('\\'),
+                    Some(other) => {
+                        out.push('\\');
+                        out.push(other);
+                    }
+                    None => out.push('\\'),
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
+    } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        value[1..value.len() - 1].to_owned()
+    } else {
+        value.to_owned()
+    }
+}
+
+fn leading_spaces(value: &str) -> usize {
+    value.bytes().take_while(|byte| *byte == b' ').count()
+}
+
+fn canonical_json(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => serde_json::to_string(value).expect("string serialization"),
+        Value::Array(values) => {
+            let body = values
+                .iter()
+                .map(canonical_json)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("[{body}]")
+        }
+        Value::Object(map) => {
+            let mut entries = map.iter().collect::<Vec<_>>();
+            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+            let body = entries
+                .into_iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}:{}",
+                        serde_json::to_string(key).expect("key serialization"),
+                        canonical_json(value)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{{{body}}}")
+        }
+    }
+}
+
+fn materialize_registry_defaults(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(materialize_registry_defaults),
+        Value::Object(map) => {
+            if map.contains_key("phase_refs") {
+                map.entry("connection_refs".to_owned())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                map.entry("subloop_refs".to_owned())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+            }
+            if let Some(Value::Array(steps)) = map.get_mut("steps") {
+                for step in steps {
+                    if let Value::Object(step) = step {
+                        step.entry("connection_refs".to_owned())
+                            .or_insert_with(|| Value::Array(Vec::new()));
+                    }
+                }
+            }
+            for child in map.values_mut() {
+                materialize_registry_defaults(child);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn sort_allowed_parameters(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(sort_allowed_parameters),
+        Value::Object(map) => {
+            if let Some(Value::Array(parameters)) = map.get_mut("allowed_parameters") {
+                parameters.sort_by(|left, right| {
+                    left.get("name")
+                        .and_then(Value::as_str)
+                        .cmp(&right.get("name").and_then(Value::as_str))
+                });
+            }
+            for child in map.values_mut() {
+                sort_allowed_parameters(child);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn parse_error(source_name: &str, message: String) -> RegistryError {
+    RegistryError::Parse {
+        source_name: source_name.to_owned(),
+        message,
+    }
+}
+
 pub fn is_valid_block_id(value: &str) -> bool {
     matches_lower_token(value, 1, 128)
 }
@@ -428,6 +1808,7 @@ fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn parser_contract_records_decided_m0_shape() {
@@ -438,6 +1819,83 @@ mod tests {
         assert!(contract.one_block_per_file);
         assert!(contract.semantic_validation.contains("post-schema"));
         assert!(contract.canonical_serialization.contains("resolved model"));
+    }
+
+    #[test]
+    fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
+        let registry = load_registry_root(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../loop-agent/fixtures/hello-loop/registry"),
+        )
+        .expect("hello-loop registry loads");
+
+        assert!(registry.loop_block("hello-loop").is_some());
+        assert!(registry.loop_block("HelloLoop").is_some());
+        assert_eq!(
+            registry
+                .phase_block("inspect")
+                .expect("inspect phase")
+                .tool_refs,
+            vec!["read-file"]
+        );
+
+        let canonical =
+            canonical_resolved_registry_json(&registry).expect("resolved registry serializes");
+        assert!(canonical.ends_with('\n'));
+        assert_eq!(
+            canonical,
+            canonical_resolved_registry_json(&registry).expect("canonical output repeats")
+        );
+        assert!(canonical.contains("\"hello-loop\""));
+        assert!(canonical.contains("\"write-summary\""));
+    }
+
+    #[test]
+    fn parser_reads_own_script_body_without_relicensing_or_runtime_escape() {
+        let block = parse_registry_block(
+            "write-summary.yaml",
+            include_str!(
+                "../../../loop-agent/fixtures/hello-loop/registry/tools/write-summary.yaml"
+            ),
+        )
+        .expect("write-summary parses");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+
+        assert_eq!(tool.script_runtime, Some(ScriptRuntime::PosixSh));
+        assert_eq!(
+            tool.script_body.as_deref(),
+            Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#)
+        );
+    }
+
+    #[test]
+    fn registry_reference_validation_rejects_loop_cycles() {
+        let err = ResolvedRegistry::from_blocks([
+            RegistryBlock::Loop(LoopBlock {
+                identity: BlockIdentity {
+                    id: "a".to_owned(),
+                    name: "A".to_owned(),
+                },
+                phase_refs: Vec::new(),
+                subloop_refs: vec!["b".to_owned()],
+                connection_refs: Vec::new(),
+            }),
+            RegistryBlock::Loop(LoopBlock {
+                identity: BlockIdentity {
+                    id: "b".to_owned(),
+                    name: "B".to_owned(),
+                },
+                phase_refs: Vec::new(),
+                subloop_refs: vec!["a".to_owned()],
+                connection_refs: Vec::new(),
+            }),
+        ])
+        .expect_err("cycle rejected");
+
+        assert!(matches!(err, RegistryError::LoopCycle { .. }));
     }
 
     #[test]

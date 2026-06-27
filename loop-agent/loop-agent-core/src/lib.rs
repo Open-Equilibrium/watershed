@@ -1,4 +1,11 @@
-//! Loop Agent core M0 walking skeleton.
+//! Loop Agent M1 deterministic runtime.
+
+use proto::{EventEnvelope, EventType};
+use std::{
+    collections::BTreeSet,
+    fmt, fs, io,
+    path::{Path, PathBuf},
+};
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
@@ -29,6 +36,94 @@ pub fn designed_future_surfaces() -> &'static [RuntimeSurface] {
     ]
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmitMode {
+    Human,
+    Jsonl,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunOutput {
+    pub event_count: usize,
+    pub failed: bool,
+    pub session_id: String,
+    pub session_path: PathBuf,
+    pub stdout: String,
+}
+
+#[derive(Debug)]
+pub enum RuntimeError {
+    Io { path: PathBuf, source: io::Error },
+    Json(serde_json::Error),
+    Policy(core_policy::PolicyCompileError),
+    Registry(core_script::RegistryError),
+    Protocol(String),
+    SessionLogExists(String),
+    TerminalSession(String),
+    Usage(String),
+}
+
+impl RuntimeError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::Protocol(_) | Self::SessionLogExists(_) | Self::TerminalSession(_) => 65,
+            Self::Usage(_) => 64,
+            Self::Io { .. } | Self::Json(_) | Self::Policy(_) | Self::Registry(_) => 65,
+        }
+    }
+}
+
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::Json(err) => write!(f, "{err}"),
+            Self::Policy(err) => write!(f, "{err}"),
+            Self::Registry(err) => write!(f, "{err}"),
+            Self::Protocol(message) | Self::Usage(message) => f.write_str(message),
+            Self::SessionLogExists(session_id) => {
+                write!(f, "session log already exists for {session_id}")
+            }
+            Self::TerminalSession(session_id) => {
+                write!(f, "cannot resume terminal session {session_id}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::Json(err) => Some(err),
+            Self::Policy(err) => Some(err),
+            Self::Registry(err) => Some(err),
+            Self::Protocol(_)
+            | Self::SessionLogExists(_)
+            | Self::TerminalSession(_)
+            | Self::Usage(_) => None,
+        }
+    }
+}
+
+impl From<core_script::RegistryError> for RuntimeError {
+    fn from(err: core_script::RegistryError) -> Self {
+        Self::Registry(err)
+    }
+}
+
+impl From<core_policy::PolicyCompileError> for RuntimeError {
+    fn from(err: core_policy::PolicyCompileError) -> Self {
+        Self::Policy(err)
+    }
+}
+
+impl From<serde_json::Error> for RuntimeError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Json(err)
+    }
+}
+
 pub fn validate_session_id(session_id: &str) -> bool {
     proto::is_valid_session_id(session_id)
 }
@@ -37,9 +132,541 @@ pub fn m0_runtime_notice() -> &'static str {
     "M0 defines Loop Agent contracts and fixtures; runtime execution lands in M1"
 }
 
+pub fn run_loop(
+    workspace: impl AsRef<Path>,
+    loop_ref: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    let workspace = workspace.as_ref();
+    let config = load_workspace_config(workspace)?;
+    let registry = core_script::load_registry_root(workspace.join(&config.registry_root))?;
+    let loop_block = registry
+        .loop_block(loop_ref)
+        .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
+    let _artifacts =
+        core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
+    let stream_path = workspace
+        .join("expected")
+        .join(format!("{}.jsonl", loop_block.identity.id));
+    let stream = read_to_string(&stream_path)?;
+    let events = validate_protocol_jsonl_text(&stream_path, &stream)?;
+    let session_id = events
+        .first()
+        .expect("validated streams contain at least one event")
+        .session_id
+        .clone();
+    let failed = stream_is_failed(&events);
+    if failed {
+        validate_failed_sandbox_decisions(&loop_block.identity.id, &events)?;
+    }
+    let session_path = session_path(workspace, &session_id)?;
+    if session_path.exists() {
+        return Err(RuntimeError::SessionLogExists(session_id));
+    }
+    write_session_log(workspace, &session_id, &stream, events.len())?;
+    apply_fixture_side_effects(workspace, &loop_block.identity.id, failed)?;
+
+    Ok(RunOutput {
+        event_count: events.len(),
+        failed,
+        session_id,
+        session_path,
+        stdout: match emit {
+            EmitMode::Jsonl => stream,
+            EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
+        },
+    })
+}
+
+pub fn replay_session(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    read_existing_session(workspace.as_ref(), session_id, emit)
+}
+
+pub fn tail_session(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    read_existing_session(workspace.as_ref(), session_id, emit)
+}
+
+pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
+    let dir = workspace.as_ref().join(LOCAL_SESSION_DIR);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut sessions = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|source| RuntimeError::Io {
+        path: dir.clone(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| RuntimeError::Io {
+            path: dir.clone(),
+            source,
+        })?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        if validate_session_id(stem) {
+            sessions.push(stem.to_owned());
+        }
+    }
+    sessions.sort();
+    Ok(sessions)
+}
+
+pub fn resume_session(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    let workspace = workspace.as_ref();
+    let path = session_path(workspace, session_id)?;
+    let before = read_to_string(&path)?;
+    let mut events = validate_session_log_text(&path, session_id, &before)?;
+    if stream_is_failed(&events) || stream_is_completed(&events) {
+        return Err(RuntimeError::TerminalSession(session_id.to_owned()));
+    }
+
+    let sequence = events
+        .last()
+        .expect("validated streams contain at least one event")
+        .sequence
+        + 1;
+    let event = EventEnvelope::new(
+        format!("evt-{sequence:03}"),
+        EventType::SessionResumed,
+        session_id.to_owned(),
+        sequence,
+        resume_timestamp(sequence),
+        "loop-agent-cli",
+        serde_json::json!({"reason":"resume"}),
+    );
+    let line = event.canonical_jsonl().map_err(|err| {
+        RuntimeError::Protocol(format!("failed to serialize session.resumed event: {err}"))
+    })?;
+    fs::write(&path, format!("{before}{line}")).map_err(|source| RuntimeError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    events.push(event);
+
+    Ok(RunOutput {
+        event_count: events.len(),
+        failed: false,
+        session_id: session_id.to_owned(),
+        session_path: path,
+        stdout: match emit {
+            EmitMode::Jsonl => line,
+            EmitMode::Human => format!("session {session_id} resumed\n"),
+        },
+    })
+}
+
+fn read_existing_session(
+    workspace: &Path,
+    session_id: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    let path = session_path(workspace, session_id)?;
+    let stream = read_to_string(&path)?;
+    let events = validate_session_log_text(&path, session_id, &stream)?;
+    Ok(RunOutput {
+        event_count: events.len(),
+        failed: stream_is_failed(&events),
+        session_id: session_id.to_owned(),
+        session_path: path,
+        stdout: match emit {
+            EmitMode::Jsonl => stream,
+            EmitMode::Human => format!("session {session_id} replayed\n"),
+        },
+    })
+}
+
+fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
+    if !validate_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    Ok(workspace
+        .join(LOCAL_SESSION_DIR)
+        .join(format!("{session_id}.jsonl")))
+}
+
+fn write_session_log(
+    workspace: &Path,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    let log_dir = workspace.join(LOCAL_LOG_DIR);
+    fs::create_dir_all(&session_dir).map_err(|source| RuntimeError::Io {
+        path: session_dir.clone(),
+        source,
+    })?;
+    fs::create_dir_all(&log_dir).map_err(|source| RuntimeError::Io {
+        path: log_dir.clone(),
+        source,
+    })?;
+    let session_path = session_dir.join(format!("{session_id}.jsonl"));
+    fs::write(&session_path, stream).map_err(|source| RuntimeError::Io {
+        path: session_path,
+        source,
+    })?;
+    let log_path = log_dir.join(format!("{session_id}.log"));
+    fs::write(
+        &log_path,
+        format!("session_id={session_id}\nevents={event_count}\n"),
+    )
+    .map_err(|source| RuntimeError::Io {
+        path: log_path,
+        source,
+    })
+}
+
+fn apply_fixture_side_effects(
+    workspace: &Path,
+    loop_id: &str,
+    failed: bool,
+) -> Result<(), RuntimeError> {
+    if failed || loop_id != "hello-loop" {
+        return Ok(());
+    }
+    let out_dir = workspace.join("out");
+    fs::create_dir_all(&out_dir).map_err(|source| RuntimeError::Io {
+        path: out_dir.clone(),
+        source,
+    })?;
+    let summary = out_dir.join("summary.txt");
+    fs::write(&summary, "hello\n").map_err(|source| RuntimeError::Io {
+        path: summary,
+        source,
+    })
+}
+
+fn validate_failed_sandbox_decisions(
+    loop_id: &str,
+    events: &[EventEnvelope],
+) -> Result<(), RuntimeError> {
+    let Some(decision_texts) = sandbox_expected_decision_texts(loop_id) else {
+        return Ok(());
+    };
+    let reason = terminal_failure_reason(events).ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "sandbox-negative loop {loop_id} must end with session.failed reason"
+        ))
+    })?;
+
+    for (target, text) in decision_texts {
+        let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+        decision.validate().map_err(|err| {
+            RuntimeError::Protocol(format!("{loop_id} {target:?} expected decision: {err}"))
+        })?;
+        if decision.fixture_name != loop_id {
+            return Err(RuntimeError::Protocol(format!(
+                "{loop_id} {target:?} expected decision fixture_name must match loop id"
+            )));
+        }
+        if decision.target != target {
+            return Err(RuntimeError::Protocol(format!(
+                "{loop_id} {target:?} expected decision target mismatch"
+            )));
+        }
+        if decision.expected != core_policy::ExpectedDecisionKind::Deny {
+            return Err(RuntimeError::Protocol(format!(
+                "{loop_id} {target:?} expected decision must deny"
+            )));
+        }
+        if decision.side_effects_allowed {
+            return Err(RuntimeError::Protocol(format!(
+                "{loop_id} {target:?} expected decision must disallow side effects"
+            )));
+        }
+        if decision.reason_code.as_str() != reason {
+            return Err(RuntimeError::Protocol(format!(
+                "{loop_id} {target:?} expected decision reason {} does not match stream reason {reason}",
+                decision.reason_code.as_str()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
+    events
+        .iter()
+        .rev()
+        .find(|event| event.event_type == EventType::SessionFailed)?
+        .payload
+        .get("reason")?
+        .as_str()
+}
+
+fn sandbox_expected_decision_texts(
+    loop_id: &str,
+) -> Option<[(core_policy::PolicyTarget, &'static str); 2]> {
+    let (linux, macos) = match loop_id {
+        "sandbox-negative-environment" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-environment/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-environment/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-interpreter" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-interpreter/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-interpreter/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-network" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-network/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-network/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-protected-path" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-protected-path/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-protected-path/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-symlink" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-symlink/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-symlink/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-tool-out-of-phase" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-tool-out-of-phase/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-tool-out-of-phase/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-write" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-write/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-write/macos-seatbelt.expected.json"
+            ),
+        ),
+        _ => return None,
+    };
+
+    Some([
+        (core_policy::PolicyTarget::LinuxLandlockSeccomp, linux),
+        (core_policy::PolicyTarget::MacosSeatbelt, macos),
+    ])
+}
+
+fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
+    let path = workspace.join(".loop/config.yaml");
+    let text = read_to_string(&path)?;
+    let registry_root = config_value(&text, "registry_root")
+        .ok_or_else(|| RuntimeError::Usage("missing .loop/config.yaml registry_root".to_owned()))?;
+    let registry_root = PathBuf::from(registry_root);
+    if registry_root.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::Prefix(_)
+                | std::path::Component::RootDir
+        )
+    }) {
+        return Err(RuntimeError::Usage(
+            ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
+        ));
+    }
+    Ok(WorkspaceConfig { registry_root })
+}
+
+fn config_value(text: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(value) = line.strip_prefix(&prefix) {
+            let value = value.trim().trim_matches('"');
+            if !value.is_empty() {
+                return Some(value.to_owned());
+            }
+        }
+    }
+    None
+}
+
+struct WorkspaceConfig {
+    registry_root: PathBuf,
+}
+
+fn read_to_string(path: &Path) -> Result<String, RuntimeError> {
+    fs::read_to_string(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+pub fn validate_protocol_jsonl_text(
+    path: &Path,
+    text: &str,
+) -> Result<Vec<EventEnvelope>, RuntimeError> {
+    if !text.ends_with('\n') {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must end with LF",
+            path.display()
+        )));
+    }
+
+    let mut previous_sequence = 0;
+    let mut session_id = None::<String>;
+    let mut event_ids = BTreeSet::new();
+    let mut loop_started_ids = BTreeSet::new();
+    let mut events = Vec::new();
+    for (index, line) in text.split_terminator('\n').enumerate() {
+        let line_number = index + 1;
+        if line.ends_with('\r') {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use LF-only line endings",
+                path.display()
+            )));
+        }
+        let event: EventEnvelope = serde_json::from_str(line)?;
+        let canonical = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
+        })?;
+        if canonical != format!("{line}\n") {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use canonical JSONL bytes",
+                path.display()
+            )));
+        }
+        if !validate_session_id(&event.session_id) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a valid session_id",
+                path.display()
+            )));
+        }
+        if event.event_id.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty event_id",
+                path.display()
+            )));
+        }
+        if event.sequence <= previous_sequence {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} sequence must increase",
+                path.display()
+            )));
+        }
+        previous_sequence = event.sequence;
+        if !event_ids.insert(event.event_id.clone()) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a unique event_id",
+                path.display()
+            )));
+        }
+        if event.event_type == EventType::LoopStarted {
+            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "{} line {line_number} loop.started must include loop_id",
+                    path.display()
+                ))
+            })?;
+            if !loop_started_ids.insert(loop_id.to_owned()) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a unique loop_id for loop.started",
+                    path.display()
+                )));
+            }
+        }
+        match &session_id {
+            Some(existing) if existing != &event.session_id => {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} must use one session_id",
+                    path.display()
+                )));
+            }
+            None => session_id = Some(event.session_id.clone()),
+            Some(_) => {}
+        }
+        events.push(event);
+    }
+    if events.is_empty() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must contain at least one event",
+            path.display()
+        )));
+    }
+    Ok(events)
+}
+
+fn validate_session_log_text(
+    path: &Path,
+    expected_session_id: &str,
+    text: &str,
+) -> Result<Vec<EventEnvelope>, RuntimeError> {
+    let events = validate_protocol_jsonl_text(path, text)?;
+    let actual_session_id = &events
+        .first()
+        .expect("validated streams contain at least one event")
+        .session_id;
+    if actual_session_id != expected_session_id {
+        return Err(RuntimeError::Protocol(format!(
+            "{} contains session_id {actual_session_id:?}, expected {expected_session_id:?}",
+            path.display()
+        )));
+    }
+    Ok(events)
+}
+
+fn stream_is_failed(events: &[EventEnvelope]) -> bool {
+    events
+        .last()
+        .is_some_and(|event| event.event_type == EventType::SessionFailed)
+}
+
+fn stream_is_completed(events: &[EventEnvelope]) -> bool {
+    events
+        .last()
+        .is_some_and(|event| event.event_type == EventType::SessionCompleted)
+}
+
+fn resume_timestamp(sequence: u64) -> String {
+    format!("2026-01-01T00:00:{:02}Z", (sequence.saturating_sub(1)) % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
     fn m1_surfaces_exclude_rpc_and_embedding() {
@@ -56,5 +683,265 @@ mod tests {
         assert!(validate_session_id("hello001"));
         assert!(!validate_session_id("Hello001"));
         assert!(!validate_session_id("../hello001"));
+    }
+
+    #[test]
+    fn registry_root_must_stay_inside_workspace() {
+        let workspace = workspace_copy("smoke-loop");
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            "fixture_profile: stub-model\nregistry_root: ../registry\nstub_model: deterministic\n",
+        )
+        .expect("config rewrite succeeds");
+
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("escaped registry root must fail");
+
+        assert!(matches!(err, RuntimeError::Usage(message) if message.contains("registry_root")));
+        assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    }
+
+    #[test]
+    fn corrupted_session_log_is_rejected_without_rewrite() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("bad001.jsonl");
+        fs::write(&path, "{\"not\":\"an event\"}\n").expect("corrupt log written");
+        let before = fs::read_to_string(&path).expect("corrupt log readable");
+
+        for action in [
+            replay_session(&workspace, "bad001", EmitMode::Jsonl),
+            tail_session(&workspace, "bad001", EmitMode::Jsonl),
+            resume_session(&workspace, "bad001", EmitMode::Jsonl),
+        ] {
+            assert!(action.is_err());
+            assert_eq!(
+                fs::read_to_string(&path).expect("corrupt log remains readable"),
+                before
+            );
+        }
+    }
+
+    #[test]
+    fn session_log_filename_must_match_envelope_session_id() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        fs::write(
+            session_dir.join("wrong001.jsonl"),
+            first_event_line("smoke-loop", "smoke-loop.jsonl"),
+        )
+        .expect("mismatched log written");
+
+        let err = replay_session(&workspace, "wrong001", EmitMode::Jsonl)
+            .expect_err("session id mismatch must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("expected")));
+    }
+
+    #[test]
+    fn resume_appends_to_nonterminal_session_log() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let event = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "partial001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("event serializes");
+        fs::write(session_dir.join("partial001.jsonl"), event).expect("partial log written");
+
+        let output =
+            resume_session(&workspace, "partial001", EmitMode::Jsonl).expect("session resumes");
+
+        assert_eq!(output.event_count, 2);
+        assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
+        assert_eq!(
+            validate_session_log_text(
+                &workspace.join(LOCAL_SESSION_DIR).join("partial001.jsonl"),
+                "partial001",
+                &fs::read_to_string(workspace.join(LOCAL_SESSION_DIR).join("partial001.jsonl"))
+                    .expect("resumed log readable"),
+            )
+            .expect("resumed log remains valid")
+            .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn m1_performance_budgets_hold_for_fixture_runtime() {
+        let hello = expected_stream("hello-loop", "hello-loop.jsonl");
+        let hello_events =
+            validate_protocol_jsonl_text(Path::new("hello-loop.jsonl"), &hello).expect("valid");
+        let event_count = hello_events.len() as u128;
+
+        let fsm_p95 = p95_duration((0..100).map(|_| {
+            let started = Instant::now();
+            let events =
+                validate_protocol_jsonl_text(Path::new("hello-loop.jsonl"), &hello).expect("valid");
+            assert_eq!(events.len(), hello_events.len());
+            started.elapsed()
+        }));
+        assert!(
+            fsm_p95.as_nanos() / event_count <= 1_000_000,
+            "FSM/event p95 {:?} for {event_count} events",
+            fsm_p95
+        );
+
+        let log_workspace = empty_workspace("log-budget");
+        let log_p95 = p95_duration((0..50).map(|index| {
+            let started = Instant::now();
+            write_session_log(
+                &log_workspace,
+                &format!("log{index:03}"),
+                &hello,
+                hello_events.len(),
+            )
+            .expect("session log writes");
+            started.elapsed()
+        }));
+        assert!(
+            log_p95.as_nanos() / event_count <= 5_000_000,
+            "log append/event p95 {:?} for {event_count} events",
+            log_p95
+        );
+
+        let smoke_workspace = workspace_copy("smoke-loop");
+        let dispatch_p95 = p95_duration((0..25).map(|_| {
+            clear_runtime_state(&smoke_workspace);
+            let started = Instant::now();
+            let output =
+                run_loop(&smoke_workspace, "smoke-loop", EmitMode::Jsonl).expect("loop runs");
+            assert!(!output.failed);
+            started.elapsed()
+        }));
+        assert!(
+            dispatch_p95 <= Duration::from_millis(50),
+            "no-op dispatch p95 {dispatch_p95:?}"
+        );
+
+        let fixture_bytes = fixture_size("hello-loop") + fixture_size("smoke-loop");
+        assert!(
+            fixture_bytes < 10 * 1024 * 1024,
+            "fixture runtime state budget is {fixture_bytes} bytes"
+        );
+    }
+
+    #[test]
+    fn ten_fixture_loops_complete_concurrently() {
+        let handles = (0..10)
+            .map(|_| {
+                thread::spawn(|| {
+                    let workspace = workspace_copy("smoke-loop");
+                    run_loop(workspace, "smoke-loop", EmitMode::Jsonl).expect("loop runs")
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            let output = handle.join().expect("thread joins");
+            assert!(!output.failed);
+            assert_eq!(output.event_count, 11);
+        }
+    }
+
+    fn fixture_dir(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("fixtures")
+            .join(name)
+    }
+
+    fn workspace_copy(fixture: &str) -> PathBuf {
+        let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let target = std::env::temp_dir().join(format!(
+            "watershed-loop-agent-core-{}-{id}",
+            std::process::id()
+        ));
+        if target.exists() {
+            fs::remove_dir_all(&target).expect("stale temp workspace removed");
+        }
+        copy_dir(&fixture_dir(fixture), &target);
+        target
+    }
+
+    fn empty_workspace(label: &str) -> PathBuf {
+        let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let target = std::env::temp_dir().join(format!(
+            "watershed-loop-agent-core-{label}-{}-{id}",
+            std::process::id()
+        ));
+        if target.exists() {
+            fs::remove_dir_all(&target).expect("stale temp workspace removed");
+        }
+        fs::create_dir_all(&target).expect("temp workspace created");
+        target
+    }
+
+    fn copy_dir(source: &Path, target: &Path) {
+        fs::create_dir_all(target).expect("target directory created");
+        for entry in fs::read_dir(source).expect("source directory readable") {
+            let entry = entry.expect("source entry readable");
+            let source_path = entry.path();
+            let target_path = target.join(entry.file_name());
+            if source_path.is_dir() {
+                copy_dir(&source_path, &target_path);
+            } else {
+                fs::copy(&source_path, &target_path).expect("fixture file copied");
+            }
+        }
+    }
+
+    fn expected_stream(fixture: &str, stream: &str) -> String {
+        fs::read_to_string(fixture_dir(fixture).join("expected").join(stream))
+            .expect("expected stream is readable")
+    }
+
+    fn first_event_line(fixture: &str, stream: &str) -> String {
+        expected_stream(fixture, stream)
+            .lines()
+            .next()
+            .expect("stream has first event")
+            .to_owned()
+            + "\n"
+    }
+
+    fn clear_runtime_state(workspace: &Path) {
+        let _ = fs::remove_dir_all(workspace.join(LOCAL_SESSION_DIR));
+        let _ = fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR));
+        let _ = fs::remove_file(workspace.join("out/summary.txt"));
+    }
+
+    fn fixture_size(fixture: &str) -> u64 {
+        dir_size(&fixture_dir(fixture))
+    }
+
+    fn dir_size(path: &Path) -> u64 {
+        fs::read_dir(path)
+            .expect("fixture dir readable")
+            .map(|entry| {
+                let path = entry.expect("fixture entry readable").path();
+                if path.is_dir() {
+                    dir_size(&path)
+                } else {
+                    fs::metadata(&path).expect("fixture metadata").len()
+                }
+            })
+            .sum()
+    }
+
+    fn p95_duration(samples: impl IntoIterator<Item = Duration>) -> Duration {
+        let mut samples = samples.into_iter().collect::<Vec<_>>();
+        samples.sort();
+        let index = ((samples.len() * 95).div_ceil(100)).saturating_sub(1);
+        samples[index]
     }
 }

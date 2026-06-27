@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
@@ -127,6 +127,262 @@ impl PolicyArtifact {
 pub enum PolicyTarget {
     LinuxLandlockSeccomp,
     MacosSeatbelt,
+}
+
+#[derive(Debug)]
+pub enum PolicyCompileError {
+    MissingLoop(String),
+    MissingPhase(String),
+    MissingTool(String),
+    NonEmptyNetworkAllowlist { tool_id: String },
+    InvalidArtifact(PolicyArtifactValidationError),
+}
+
+impl fmt::Display for PolicyCompileError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingLoop(reference) => {
+                write!(f, "policy compile references missing loop {reference}")
+            }
+            Self::MissingPhase(reference) => {
+                write!(f, "policy compile references missing phase {reference}")
+            }
+            Self::MissingTool(reference) => {
+                write!(f, "policy compile references missing tool {reference}")
+            }
+            Self::NonEmptyNetworkAllowlist { tool_id } => write!(
+                f,
+                "OS-enforced M1 policy for tool {tool_id} must use a deny-all network allowlist"
+            ),
+            Self::InvalidArtifact(err) => write!(f, "{err}"),
+        }
+    }
+}
+
+impl std::error::Error for PolicyCompileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidArtifact(err) => Some(err),
+            Self::MissingLoop(_)
+            | Self::MissingPhase(_)
+            | Self::MissingTool(_)
+            | Self::NonEmptyNetworkAllowlist { .. } => None,
+        }
+    }
+}
+
+pub fn compile_policy_artifacts(
+    fixture_name: &str,
+    registry: &core_script::ResolvedRegistry,
+    loop_ref: &str,
+) -> Result<Vec<PolicyArtifact>, PolicyCompileError> {
+    Ok(vec![
+        compile_policy_artifact(
+            fixture_name,
+            registry,
+            loop_ref,
+            PolicyTarget::LinuxLandlockSeccomp,
+        )?,
+        compile_policy_artifact(
+            fixture_name,
+            registry,
+            loop_ref,
+            PolicyTarget::MacosSeatbelt,
+        )?,
+    ])
+}
+
+pub fn compile_policy_artifact(
+    fixture_name: &str,
+    registry: &core_script::ResolvedRegistry,
+    loop_ref: &str,
+    target: PolicyTarget,
+) -> Result<PolicyArtifact, PolicyCompileError> {
+    let loop_block = registry
+        .loop_block(loop_ref)
+        .ok_or_else(|| PolicyCompileError::MissingLoop(loop_ref.to_owned()))?;
+    let mut phase_tools = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut tool_ids = BTreeSet::<String>::new();
+    let mut visited_loops = BTreeSet::<String>::new();
+    collect_loop_policy_scope(
+        registry,
+        loop_block,
+        &mut phase_tools,
+        &mut tool_ids,
+        &mut visited_loops,
+    )?;
+
+    let mut commands = Vec::new();
+    for tool_id in tool_ids {
+        let tool = registry
+            .tool_block(&tool_id)
+            .ok_or_else(|| PolicyCompileError::MissingTool(tool_id.clone()))?;
+        commands.push(command_policy_from_tool(tool)?);
+    }
+
+    let artifact = PolicyArtifact {
+        commands,
+        fixture_name: fixture_name.to_owned(),
+        phase_scope: phase_tools
+            .into_iter()
+            .map(|(phase_id, tool_ids)| PhaseScope {
+                phase_id,
+                tool_ids: tool_ids.into_iter().collect(),
+            })
+            .collect(),
+        policy_version: POLICY_VERSION_V0.to_owned(),
+        runtime_limits: RuntimeLimits {
+            headless: true,
+            timeout_ms: if loop_block.phase_refs.len() > 1 || !loop_block.subloop_refs.is_empty() {
+                60_000
+            } else {
+                30_000
+            },
+        },
+        source_loop_definition_id: loop_block.identity.id.clone(),
+        target,
+    };
+    artifact
+        .validate()
+        .map_err(PolicyCompileError::InvalidArtifact)?;
+    Ok(artifact)
+}
+
+fn collect_loop_policy_scope(
+    registry: &core_script::ResolvedRegistry,
+    loop_block: &core_script::LoopBlock,
+    phase_tools: &mut BTreeMap<String, BTreeSet<String>>,
+    tool_ids: &mut BTreeSet<String>,
+    visited_loops: &mut BTreeSet<String>,
+) -> Result<(), PolicyCompileError> {
+    if !visited_loops.insert(loop_block.identity.id.clone()) {
+        return Ok(());
+    }
+
+    for phase_ref in &loop_block.phase_refs {
+        let phase = registry
+            .phase_block(phase_ref)
+            .ok_or_else(|| PolicyCompileError::MissingPhase(phase_ref.clone()))?;
+        let scoped_tools = phase_tools.entry(phase.identity.id.clone()).or_default();
+        for tool_ref in &phase.tool_refs {
+            let tool = registry
+                .tool_block(tool_ref)
+                .ok_or_else(|| PolicyCompileError::MissingTool(tool_ref.clone()))?;
+            scoped_tools.insert(tool.identity.id.clone());
+            tool_ids.insert(tool.identity.id.clone());
+        }
+    }
+
+    for subloop_ref in &loop_block.subloop_refs {
+        let subloop = registry
+            .loop_block(subloop_ref)
+            .ok_or_else(|| PolicyCompileError::MissingLoop(subloop_ref.clone()))?;
+        collect_loop_policy_scope(registry, subloop, phase_tools, tool_ids, visited_loops)?;
+    }
+
+    Ok(())
+}
+
+fn command_policy_from_tool(
+    tool: &core_script::ToolBlock,
+) -> Result<CommandPolicy, PolicyCompileError> {
+    let (command_id, argv, executable, script_runtime) = match (&tool.tool_kind, &tool.command) {
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) => (
+            command_id.clone(),
+            argv.clone(),
+            format!("registry:{command_id}"),
+            None,
+        ),
+        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id)) => (
+            command_id.clone(),
+            Vec::new(),
+            OWN_SCRIPT_RUNNER_POSIX_SH.to_owned(),
+            Some(SCRIPT_RUNTIME_POSIX_SH.to_owned()),
+        ),
+        _ => {
+            return Err(PolicyCompileError::InvalidArtifact(
+                PolicyArtifactValidationError {
+                    message: format!(
+                        "tool {} command shape does not match tool_kind",
+                        tool.identity.id
+                    ),
+                },
+            ));
+        }
+    };
+
+    let network = match &tool.network {
+        core_script::NetworkPolicy::Deny(_) => NetworkPolicy {
+            allow: Vec::new(),
+            default: NetworkDefault::Deny,
+        },
+        core_script::NetworkPolicy::Declared { allow, .. } => {
+            if !allow.is_empty() {
+                return Err(PolicyCompileError::NonEmptyNetworkAllowlist {
+                    tool_id: tool.identity.id.clone(),
+                });
+            }
+            NetworkPolicy {
+                allow: Vec::new(),
+                default: NetworkDefault::Deny,
+            }
+        }
+    };
+
+    Ok(CommandPolicy {
+        allowed_parameters: tool
+            .allowed_parameters
+            .iter()
+            .map(allowed_parameter_policy)
+            .collect(),
+        argv,
+        command_id,
+        environment: EnvironmentPolicy {
+            allow: Vec::new(),
+            default: EnvironmentDefault::Clear,
+        },
+        executable,
+        filesystem: FilesystemPolicy {
+            protected_path_grants: tool.protected_path_grants.clone(),
+            protected_paths: DEFAULT_PROTECTED_PATHS
+                .iter()
+                .map(|path| (*path).to_owned())
+                .collect(),
+            read_roots: tool.read_scope.clone(),
+            write_roots: tool.write_scope.clone(),
+        },
+        network,
+        script_runtime,
+        tool_id: tool.identity.id.clone(),
+        tool_kind: match tool.tool_kind {
+            core_script::ToolKind::PredefinedCommand => ToolKind::PredefinedCommand,
+            core_script::ToolKind::OwnScript => ToolKind::OwnScript,
+        },
+    })
+}
+
+fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> AllowedParameterPolicy {
+    AllowedParameterPolicy {
+        name: parameter.name.clone(),
+        required: parameter.required,
+        max: parameter.max,
+        max_length: parameter.max_length,
+        min: parameter.min,
+        value_pattern: parameter.value_pattern.clone(),
+        value_type: match parameter.value_type {
+            core_script::ParameterValueType::None => ParameterValueType::None,
+            core_script::ParameterValueType::String => ParameterValueType::String,
+            core_script::ParameterValueType::Integer => ParameterValueType::Integer,
+            core_script::ParameterValueType::WorkspaceRelativePath => {
+                ParameterValueType::WorkspaceRelativePath
+            }
+            core_script::ParameterValueType::Enum => ParameterValueType::Enum,
+        },
+        allowed_values: parameter.allowed_values.clone(),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -921,6 +1177,10 @@ pub enum DenyReasonCode {
 }
 
 impl DenyReasonCode {
+    pub fn as_str(&self) -> &'static str {
+        self.name()
+    }
+
     fn name(&self) -> &'static str {
         match self {
             Self::WriteDenied => "write_denied",
@@ -1117,6 +1377,72 @@ mod tests {
                 path.display()
             );
         }
+    }
+
+    #[test]
+    fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
+        for fixture in ["smoke-loop", "hello-loop"] {
+            let registry = core_script::load_registry_root(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../loop-agent/fixtures")
+                    .join(fixture)
+                    .join("registry"),
+            )
+            .expect("fixture registry loads");
+
+            for (target, file_name) in [
+                (
+                    PolicyTarget::LinuxLandlockSeccomp,
+                    "linux-landlock-seccomp.policy.json",
+                ),
+                (PolicyTarget::MacosSeatbelt, "macos-seatbelt.policy.json"),
+            ] {
+                let artifact = compile_policy_artifact(fixture, &registry, fixture, target.clone())
+                    .expect("policy artifact compiles");
+                let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
+                let expected = fs::read_to_string(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("fixtures")
+                        .join(fixture)
+                        .join(file_name),
+                )
+                .expect("expected policy fixture is readable");
+
+                assert_eq!(actual, expected, "{fixture} {file_name}");
+            }
+        }
+    }
+
+    #[test]
+    fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
+        let mut registry = core_script::load_registry_root(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../loop-agent/fixtures/smoke-loop/registry"),
+        )
+        .expect("smoke-loop registry loads");
+        registry.tools.get_mut("echo").expect("echo tool").network =
+            core_script::NetworkPolicy::Declared {
+                default: core_script::NetworkDefault::Deny,
+                allow: vec![core_script::NetworkAllowEntry {
+                    kind: core_script::NetworkAllowKind::Cidr,
+                    transport: core_script::NetworkTransport::Tcp,
+                    cidr: "192.0.2.0/24".to_owned(),
+                    port: 443,
+                }],
+            };
+
+        let err = compile_policy_artifact(
+            "smoke-loop",
+            &registry,
+            "smoke-loop",
+            PolicyTarget::LinuxLandlockSeccomp,
+        )
+        .expect_err("network allowlist is rejected");
+
+        assert!(matches!(
+            err,
+            PolicyCompileError::NonEmptyNetworkAllowlist { .. }
+        ));
     }
 
     #[test]
