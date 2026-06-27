@@ -6,6 +6,8 @@ use std::{
     fmt, fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
@@ -144,9 +146,12 @@ pub fn run_loop(
     let loop_block = registry
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
-    let _artifacts =
+    let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
-    let runtime = execute_loop(workspace, &registry, loop_block)?;
+    let policy = runtime_policy_artifact(&artifacts)?;
+    let expected_session_id = session_id_for_loop(&loop_block.identity.id);
+    let session_path = preflight_session_log(workspace, &expected_session_id)?;
+    let runtime = execute_loop(workspace, &registry, policy, loop_block)?;
     let stream = canonical_event_stream(&runtime.events)?;
     let events = validate_protocol_jsonl_text(Path::new("runtime.jsonl"), &stream)?;
     let session_id = events
@@ -154,13 +159,14 @@ pub fn run_loop(
         .expect("validated streams contain at least one event")
         .session_id
         .clone();
+    if session_id != expected_session_id {
+        return Err(RuntimeError::Protocol(format!(
+            "runtime emitted session_id {session_id:?}, expected {expected_session_id:?}"
+        )));
+    }
     let failed = runtime.failed;
     if failed {
         validate_failed_sandbox_decisions(&loop_block.identity.id, &events)?;
-    }
-    let session_path = session_path(workspace, &session_id)?;
-    if session_path.exists() {
-        return Err(RuntimeError::SessionLogExists(session_id));
     }
     write_session_log(workspace, &session_id, &stream, events.len())?;
 
@@ -189,7 +195,56 @@ pub fn tail_session(
     session_id: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    read_existing_session(workspace.as_ref(), session_id, emit)
+    let mut stdout = Vec::new();
+    let mut output = tail_session_to_writer(workspace, session_id, emit, &mut stdout)?;
+    output.stdout = String::from_utf8(stdout)
+        .map_err(|err| RuntimeError::Protocol(format!("tail output was not valid UTF-8: {err}")))?;
+    Ok(output)
+}
+
+pub fn tail_session_to_writer(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+    writer: &mut impl Write,
+) -> Result<RunOutput, RuntimeError> {
+    let workspace = workspace.as_ref();
+    let path = session_path(workspace, session_id)?;
+    ensure_existing_session_log_path(workspace, &path)?;
+    let mut stream = read_to_string(&path)?;
+    let mut events = validate_session_log_text(&path, session_id, &stream)?;
+    write_tail_chunk(writer, emit, session_id, &stream)?;
+
+    while !stream_is_failed(&events) && !stream_is_completed(&events) {
+        thread::sleep(Duration::from_millis(25));
+        let current = read_to_string(&path)?;
+        if current.len() < stream.len() || !current.starts_with(&stream) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} changed outside append-only tail semantics",
+                path.display()
+            )));
+        }
+        if current.len() == stream.len() {
+            continue;
+        }
+        let appended = &current[stream.len()..];
+        let current_events = validate_session_log_text(&path, session_id, &current)?;
+        write_tail_chunk(writer, emit, session_id, appended)?;
+        stream = current;
+        events = current_events;
+    }
+
+    if emit == EmitMode::Human {
+        write_tail_chunk(writer, emit, session_id, "")?;
+    }
+
+    Ok(RunOutput {
+        event_count: events.len(),
+        failed: stream_is_failed(&events),
+        session_id: session_id.to_owned(),
+        session_path: path,
+        stdout: String::new(),
+    })
 }
 
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
@@ -295,6 +350,35 @@ fn read_existing_session(
     })
 }
 
+fn write_tail_chunk(
+    writer: &mut impl Write,
+    emit: EmitMode,
+    session_id: &str,
+    jsonl: &str,
+) -> Result<(), RuntimeError> {
+    match emit {
+        EmitMode::Jsonl => writer
+            .write_all(jsonl.as_bytes())
+            .and_then(|_| writer.flush())
+            .map_err(|source| RuntimeError::Io {
+                path: PathBuf::from("<tail>"),
+                source,
+            }),
+        EmitMode::Human => {
+            if jsonl.is_empty() {
+                writer
+                    .write_all(format!("session {session_id} tailed\n").as_bytes())
+                    .and_then(|_| writer.flush())
+                    .map_err(|source| RuntimeError::Io {
+                        path: PathBuf::from("<tail>"),
+                        source,
+                    })?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
     if !validate_session_id(session_id) {
         return Err(RuntimeError::Usage(format!(
@@ -304,6 +388,30 @@ fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeEr
     Ok(workspace
         .join(LOCAL_SESSION_DIR)
         .join(format!("{session_id}.jsonl")))
+}
+
+fn preflight_session_log(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
+    let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
+    let session_path = session_dir.join(format!("{session_id}.jsonl"));
+    let log_path = log_dir.join(format!("{session_id}.log"));
+    ensure_session_leaf_available(&session_path, session_id)?;
+    ensure_new_leaf_available(&log_path)?;
+    Ok(session_path)
+}
+
+fn ensure_session_leaf_available(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        ))),
+        Ok(_) => Err(RuntimeError::SessionLogExists(session_id.to_owned())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
 }
 
 fn write_session_log(
@@ -486,6 +594,15 @@ struct RuntimeFailure {
     tool_id: Option<String>,
 }
 
+fn runtime_policy_artifact(
+    artifacts: &[core_policy::PolicyArtifact],
+) -> Result<&core_policy::PolicyArtifact, RuntimeError> {
+    artifacts
+        .iter()
+        .find(|artifact| artifact.target == core_policy::PolicyTarget::LinuxLandlockSeccomp)
+        .ok_or_else(|| RuntimeError::Protocol("missing linux runtime policy artifact".to_owned()))
+}
+
 struct RuntimeEventBuilder {
     events: Vec<EventEnvelope>,
     loop_counter: u64,
@@ -545,6 +662,7 @@ impl RuntimeEventBuilder {
 fn execute_loop(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
     root_loop: &core_script::LoopBlock,
 ) -> Result<RuntimeExecution, RuntimeError> {
     let mut builder = RuntimeEventBuilder::new(session_id_for_loop(&root_loop.identity.id));
@@ -554,7 +672,7 @@ fn execute_loop(
         serde_json::json!({"reason":"fixture-start"}),
     );
 
-    let failed = emit_loop_block(workspace, registry, root_loop, None, &mut builder)?;
+    let failed = emit_loop_block(workspace, registry, policy, root_loop, None, &mut builder)?;
     if let Some(failure) = failed {
         builder.emit(
             None,
@@ -577,6 +695,7 @@ fn execute_loop(
 fn emit_loop_block(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
     parent_loop_id: Option<String>,
     builder: &mut RuntimeEventBuilder,
@@ -600,7 +719,7 @@ fn emit_loop_block(
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        emit_phase(workspace, registry, phase, &invocation, builder)?;
+        emit_phase(workspace, registry, policy, phase, &invocation, builder)?;
 
         if index == 0 {
             for subloop_ref in &loop_block.subloop_refs {
@@ -610,6 +729,7 @@ fn emit_loop_block(
                 if let Some(failure) = emit_loop_block(
                     workspace,
                     registry,
+                    policy,
                     subloop,
                     Some(invocation.loop_id.clone()),
                     builder,
@@ -635,6 +755,7 @@ fn emit_loop_block(
 fn emit_phase(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
     phase: &core_script::PhaseBlock,
     invocation: &LoopInvocation,
     builder: &mut RuntimeEventBuilder,
@@ -683,7 +804,8 @@ fn emit_phase(
             let tool = registry.tool_block(tool_ref).ok_or_else(|| {
                 RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
             })?;
-            emit_tool(workspace, tool, invocation, builder)?;
+            let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
+            emit_tool(workspace, tool, command_policy, invocation, builder)?;
         }
 
         builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
@@ -757,33 +879,151 @@ fn stub_message_content(
     Ok(Some("hello"))
 }
 
+fn command_policy_for_phase<'a>(
+    policy: &'a core_policy::PolicyArtifact,
+    phase_id: &str,
+    tool: &core_script::ToolBlock,
+) -> Result<&'a core_policy::CommandPolicy, RuntimeError> {
+    let scoped = policy
+        .phase_scope
+        .iter()
+        .find(|phase| phase.phase_id == phase_id)
+        .is_some_and(|phase| {
+            phase
+                .tool_ids
+                .iter()
+                .any(|tool_id| tool_id == &tool.identity.id)
+        });
+    if !scoped {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} is not available in phase {phase_id}",
+            tool.identity.id
+        )));
+    }
+    policy
+        .commands
+        .iter()
+        .find(|command| command.tool_id == tool.identity.id)
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "runtime policy missing command for tool {}",
+                tool.identity.id
+            ))
+        })
+}
+
+fn ensure_tool_matches_policy(
+    tool: &core_script::ToolBlock,
+    policy: &core_policy::CommandPolicy,
+) -> Result<(), RuntimeError> {
+    if policy.tool_id != tool.identity.id {
+        return Err(RuntimeError::Protocol(format!(
+            "runtime policy tool_id {} does not match tool {}",
+            policy.tool_id, tool.identity.id
+        )));
+    }
+    if policy_tool_kind_name(&policy.tool_kind) != tool_kind_name(&tool.tool_kind) {
+        return Err(RuntimeError::Protocol(format!(
+            "runtime policy kind does not match tool {}",
+            tool.identity.id
+        )));
+    }
+    if policy.network.default != core_policy::NetworkDefault::Deny
+        || !policy.network.allow.is_empty()
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} must use deny-all network policy",
+            tool.identity.id
+        )));
+    }
+
+    match (&tool.tool_kind, &tool.command) {
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) => {
+            if policy.command_id != *command_id
+                || policy.executable != format!("registry:{command_id}")
+                || policy.argv != *argv
+                || policy.script_runtime.is_some()
+            {
+                return Err(RuntimeError::Protocol(format!(
+                    "runtime policy command does not match tool {}",
+                    tool.identity.id
+                )));
+            }
+        }
+        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id)) => {
+            if policy.command_id != *command_id
+                || policy.executable != "runner:posix-sh"
+                || policy.script_runtime.as_deref() != Some("posix-sh")
+                || !policy.argv.is_empty()
+            {
+                return Err(RuntimeError::Protocol(format!(
+                    "runtime policy script command does not match tool {}",
+                    tool.identity.id
+                )));
+            }
+        }
+        _ => {
+            return Err(RuntimeError::Protocol(format!(
+                "tool command shape does not match {}",
+                tool.identity.id
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn emit_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
+    policy: &core_policy::CommandPolicy,
     invocation: &LoopInvocation,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
+    ensure_tool_matches_policy(tool, policy)?;
     builder.emit(
         Some(invocation),
         EventType::ToolStarted,
         serde_json::json!({
-            "allowed_parameters": tool.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
-            "network_access": network_access_name(&tool.network),
-            "read_scope": tool.read_scope,
+            "allowed_parameters": policy.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
+            "network_access": tool_network_access_name(&tool.network),
+            "read_scope": policy.filesystem.read_roots,
             "tool_id": tool.identity.id,
-            "tool_kind": tool_kind_name(&tool.tool_kind),
+            "tool_kind": policy_tool_kind_name(&policy.tool_kind),
             "tool_name": tool.identity.name,
-            "write_scope": tool.write_scope,
+            "write_scope": policy.filesystem.write_roots,
         }),
     );
 
-    match tool.identity.id.as_str() {
-        "read-file" => emit_tool_progress("stub read completed", tool, invocation, builder),
-        "write-summary" => {
-            write_summary_artifact(workspace)?;
+    match (&tool.tool_kind, &tool.command) {
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) if command_id == "agent-read" && argv.is_empty() => {
+            emit_tool_progress("stub read completed", tool, invocation, builder)
+        }
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) if command_id == "agent-echo" && argv.is_empty() => {}
+        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id))
+            if command_id == "script:write-summary"
+                && tool.script_runtime == Some(core_script::ScriptRuntime::PosixSh)
+                && tool.script_body.as_deref()
+                    == Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#) =>
+        {
+            write_summary_artifact(workspace, policy)?;
             emit_tool_progress("stub write completed", tool, invocation, builder);
         }
-        _ => {}
+        _ => {
+            return Err(RuntimeError::Protocol(format!(
+                "unsupported tool command for {}",
+                tool.identity.id
+            )));
+        }
     }
 
     builder.emit(
@@ -813,7 +1053,21 @@ fn emit_tool_progress(
     );
 }
 
-fn write_summary_artifact(workspace: &Path) -> Result<(), RuntimeError> {
+fn write_summary_artifact(
+    workspace: &Path,
+    policy: &core_policy::CommandPolicy,
+) -> Result<(), RuntimeError> {
+    if !policy
+        .filesystem
+        .write_roots
+        .iter()
+        .any(|root| root == "workspace/out")
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} lacks write scope workspace/out",
+            policy.tool_id
+        )));
+    }
     let out_dir = workspace.join("out");
     ensure_real_directory(&out_dir)?;
     let summary = out_dir.join("summary.txt");
@@ -997,7 +1251,14 @@ fn tool_kind_name(kind: &core_script::ToolKind) -> &'static str {
     }
 }
 
-fn network_access_name(policy: &core_script::NetworkPolicy) -> &'static str {
+fn policy_tool_kind_name(kind: &core_policy::ToolKind) -> &'static str {
+    match kind {
+        core_policy::ToolKind::PredefinedCommand => "predefined-command",
+        core_policy::ToolKind::OwnScript => "own-script",
+    }
+}
+
+fn tool_network_access_name(policy: &core_script::NetworkPolicy) -> &'static str {
     match policy {
         core_script::NetworkPolicy::Deny(_) => "deny",
         core_script::NetworkPolicy::Declared { .. } => "declared",
@@ -1460,7 +1721,11 @@ fn is_leap_year(year: u16) -> bool {
 mod tests {
     use super::*;
     use std::{
-        sync::atomic::{AtomicUsize, Ordering},
+        io::{self, Write},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Arc, Mutex,
+        },
         thread,
         time::{Duration, Instant},
     };
@@ -1514,6 +1779,46 @@ mod tests {
             output.stdout,
             expected_stream("smoke-loop", "smoke-loop.jsonl")
         );
+    }
+
+    #[test]
+    fn run_loop_preflights_existing_session_before_tool_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        fs::write(session_dir.join("hello001.jsonl"), "reserved\n").expect("session reserved");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("existing session must fail before execution");
+
+        assert!(
+            matches!(err, RuntimeError::SessionLogExists(session_id) if session_id == "hello001")
+        );
+        assert!(!workspace.join("out/summary.txt").exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn run_loop_rejects_write_summary_without_declared_write_scope() {
+        let workspace = workspace_copy("hello-loop");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source.replace(r#"write_scope: ["workspace/out"]"#, "write_scope: []"),
+        )
+        .expect("tool fixture rewritten");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("undeclared write scope must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("write scope")));
+        assert!(!workspace.join("out/summary.txt").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
 
     #[test]
@@ -1623,6 +1928,69 @@ mod tests {
             .expect("resumed log remains valid")
             .len(),
             2
+        );
+    }
+
+    #[test]
+    fn tail_session_streams_current_prefix_then_appended_events() {
+        let workspace = empty_workspace("tail-follow");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("tail001.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "tail001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("started event serializes");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "tail001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        fs::write(&path, &started).expect("initial session log written");
+
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = mpsc::channel();
+        let mut writer = NotifyingWriter {
+            bytes: Arc::clone(&bytes),
+            first_write: Some(tx),
+        };
+        let tail_workspace = workspace.clone();
+        let handle = thread::spawn(move || {
+            tail_session_to_writer(&tail_workspace, "tail001", EmitMode::Jsonl, &mut writer)
+        });
+
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("tail writes current prefix before append");
+        assert_eq!(
+            String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+                .expect("tail prefix is utf8"),
+            started
+        );
+        append_session_log_line(&path, &completed).expect("terminal event appended");
+
+        let output = handle
+            .join()
+            .expect("tail thread joins")
+            .expect("tail succeeds");
+        assert_eq!(output.event_count, 2);
+        assert!(!output.failed);
+        assert_eq!(
+            String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+                .expect("tail stream is utf8"),
+            format!("{started}{completed}")
         );
     }
 
@@ -1906,6 +2274,28 @@ mod tests {
 
     fn fixture_size(fixture: &str) -> u64 {
         dir_size(&fixture_dir(fixture))
+    }
+
+    struct NotifyingWriter {
+        bytes: Arc<Mutex<Vec<u8>>>,
+        first_write: Option<mpsc::Sender<()>>,
+    }
+
+    impl Write for NotifyingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.bytes
+                .lock()
+                .expect("tail bytes lock")
+                .extend_from_slice(buf);
+            if let Some(sender) = self.first_write.take() {
+                let _ = sender.send(());
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 
     fn dir_size(path: &Path) -> u64 {

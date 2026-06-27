@@ -64,8 +64,8 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
         "tail" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
-            let output = loop_agent_core::tail_session(workspace, session_id, emit)?;
-            print!("{}", output.stdout);
+            let mut stdout = io::stdout().lock();
+            loop_agent_core::tail_session_to_writer(workspace, session_id, emit, &mut stdout)?;
             Ok(())
         }
         "resume" => {

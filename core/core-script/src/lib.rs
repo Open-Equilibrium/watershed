@@ -630,6 +630,10 @@ pub enum RegistryError {
         path: PathBuf,
         source: std::io::Error,
     },
+    UnsafePath {
+        path: PathBuf,
+        message: String,
+    },
     InvalidBlockId(String),
     InvalidCommandId(String),
     Parse {
@@ -657,6 +661,7 @@ impl fmt::Display for RegistryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
+            Self::UnsafePath { path, message } => write!(f, "{}: {message}", path.display()),
             Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
             Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
             Self::Parse {
@@ -686,7 +691,8 @@ impl std::error::Error for RegistryError {
             Self::Io { source, .. } => Some(source),
             Self::Semantic(err) => Some(err),
             Self::Serialize(err) => Some(err),
-            Self::InvalidBlockId(_)
+            Self::UnsafePath { .. }
+            | Self::InvalidBlockId(_)
             | Self::InvalidCommandId(_)
             | Self::Parse { .. }
             | Self::DuplicateId { .. }
@@ -878,6 +884,23 @@ pub fn canonical_resolved_registry_json(
 }
 
 fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), RegistryError> {
+    let dir_metadata = fs::symlink_metadata(dir).map_err(|source| RegistryError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    if dir_metadata.file_type().is_symlink() {
+        return Err(RegistryError::UnsafePath {
+            path: dir.to_path_buf(),
+            message: "registry paths must not be symlinks".to_owned(),
+        });
+    }
+    if !dir_metadata.is_dir() {
+        return Err(RegistryError::UnsafePath {
+            path: dir.to_path_buf(),
+            message: "registry path must be a directory".to_owned(),
+        });
+    }
+
     for entry in fs::read_dir(dir).map_err(|source| RegistryError::Io {
         path: dir.to_path_buf(),
         source,
@@ -887,12 +910,23 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Regi
             source,
         })?;
         let path = entry.path();
-        if path.is_dir() {
+        let metadata = fs::symlink_metadata(&path).map_err(|source| RegistryError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(RegistryError::UnsafePath {
+                path,
+                message: "registry paths must not be symlinks".to_owned(),
+            });
+        }
+        if metadata.is_dir() {
             collect_registry_files(&path, out)?;
-        } else if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
+        } else if metadata.is_file()
+            && path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
         {
             out.push(path);
         }
@@ -1850,6 +1884,22 @@ mod tests {
         assert!(canonical.contains("\"write-summary\""));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn registry_loader_rejects_symlinked_registry_entries() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_registry_dir("symlink-root");
+        let outside = temp_registry_dir("symlink-outside");
+        symlink(&outside, root.join("linked")).expect("registry symlink created");
+
+        let err = load_registry_root(&root).expect_err("registry symlink must be rejected");
+
+        assert!(
+            matches!(err, RegistryError::UnsafePath { message, .. } if message.contains("symlink"))
+        );
+    }
+
     #[test]
     fn parser_reads_own_script_body_without_relicensing_or_runtime_escape() {
         let block = parse_registry_block(
@@ -2152,5 +2202,18 @@ mod tests {
     fn registry_schema() -> serde_json::Value {
         serde_json::from_str(include_str!("../schemas/registry-block.schema.json"))
             .expect("schema is valid JSON")
+    }
+
+    #[cfg(unix)]
+    fn temp_registry_dir(label: &str) -> std::path::PathBuf {
+        let target = std::env::temp_dir().join(format!(
+            "watershed-core-script-{label}-{}",
+            std::process::id()
+        ));
+        if target.exists() {
+            std::fs::remove_dir_all(&target).expect("stale temp registry removed");
+        }
+        std::fs::create_dir_all(&target).expect("temp registry created");
+        target
     }
 }
