@@ -361,6 +361,7 @@ pub fn resume_session(
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
+    let _lock = acquire_session_lock(workspace, session_id)?;
     let before = read_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &before)?;
     if stream_is_failed(&events) || stream_is_completed(&events) {
@@ -592,6 +593,7 @@ fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeEr
 #[derive(Debug)]
 struct SessionReservation {
     log_path: PathBuf,
+    lock_path: PathBuf,
     session_path: PathBuf,
     session_id: String,
 }
@@ -600,6 +602,24 @@ impl SessionReservation {
     fn rollback(&self) {
         let _ = fs::remove_file(&self.session_path);
         let _ = fs::remove_file(&self.log_path);
+        let _ = fs::remove_file(&self.lock_path);
+    }
+
+    fn release_lock(&self) -> Result<(), RuntimeError> {
+        fs::remove_file(&self.lock_path).map_err(|source| RuntimeError::Io {
+            path: self.lock_path.clone(),
+            source,
+        })
+    }
+}
+
+struct SessionLockGuard {
+    path: PathBuf,
+}
+
+impl Drop for SessionLockGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -610,13 +630,20 @@ fn reserve_session_log(
     let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
     let log_path = log_dir.join(format!("{session_id}.log"));
+    let lock_path = session_lock_path(workspace, session_id)?;
     reserve_session_file(&session_path, session_id)?;
     if let Err(err) = reserve_new_file(&log_path) {
         let _ = fs::remove_file(&session_path);
         return Err(err);
     }
+    if let Err(err) = reserve_session_lock_file(&lock_path, session_id) {
+        let _ = fs::remove_file(&session_path);
+        let _ = fs::remove_file(&log_path);
+        return Err(err);
+    }
     Ok(SessionReservation {
         log_path,
+        lock_path,
         session_path,
         session_id: session_id.to_owned(),
     })
@@ -696,6 +723,44 @@ fn reserve_new_file(path: &Path) -> Result<(), RuntimeError> {
         })
 }
 
+fn session_lock_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
+    if !validate_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    Ok(workspace
+        .join(LOCAL_SESSION_DIR)
+        .join(format!("{session_id}.lock")))
+}
+
+fn reserve_session_lock_file(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Err(RuntimeError::Protocol(
+            format!("session {session_id} is already active"),
+        )),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn acquire_session_lock(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<SessionLockGuard, RuntimeError> {
+    let path = session_lock_path(workspace, session_id)?;
+    ensure_existing_real_directory(&workspace.join(LOCAL_SESSION_DIR))?;
+    reserve_session_lock_file(&path, session_id)?;
+    Ok(SessionLockGuard { path })
+}
+
 #[cfg(test)]
 fn write_session_log(
     workspace: &Path,
@@ -752,14 +817,22 @@ fn complete_reserved_session_log(
     let first_line_end = stream.find('\n').ok_or_else(|| {
         RuntimeError::Protocol("validated runtime stream must contain an initial event".to_owned())
     })?;
-    append_existing_file(
+    let append_result = append_existing_file(
         &reservation.session_path,
         &stream.as_bytes()[first_line_end + 1..],
-    )?;
-    write_existing_file(
-        &reservation.log_path,
-        format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
-    )
+    );
+    let metadata_result = if append_result.is_ok() {
+        write_existing_file(
+            &reservation.log_path,
+            format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
+        )
+    } else {
+        Ok(())
+    };
+    let release_result = reservation.release_lock();
+    append_result?;
+    metadata_result?;
+    release_result
 }
 
 fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {
@@ -1497,8 +1570,14 @@ fn emit_tool(
         }),
     );
 
-    let completed_sequence = builder.sequence + u64::from(planned_progress.is_some()) + 1;
-    let progress = if side_effect_mode.should_execute_tool(completed_sequence) {
+    let side_effect_sequence = builder.sequence + 1;
+    let completed_sequence = side_effect_sequence + u64::from(planned_progress.is_some());
+    let replay_guard_sequence = if planned_progress.is_some() {
+        side_effect_sequence
+    } else {
+        completed_sequence
+    };
+    let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
         execute_tool(workspace, tool, policy, timeout_ms, builder.sequence)?
     } else {
         planned_progress
@@ -4403,6 +4482,54 @@ mod tests {
         assert!(!workspace.join("out/summary.txt").exists());
     }
 
+    #[test]
+    fn resume_rejects_active_session_lock_without_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        let reservation =
+            reserve_session_log(&workspace, "hello001").expect("reservation succeeds");
+        write_initial_session_log(&reservation, "hello001").expect("initial log writes");
+
+        let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+            .expect_err("active session must not resume concurrently");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("already active"))
+        );
+        assert!(!workspace.join("out/summary.txt").exists());
+        reservation.rollback();
+    }
+
+    #[test]
+    fn resume_does_not_rerun_tool_after_progress_prefix() {
+        let workspace = workspace_copy("hello-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let prefix = prefix_through_tool_progress(
+            &expected_stream("hello-loop", "hello-loop.jsonl"),
+            "write-summary",
+        );
+        let path = session_dir.join("hello001.jsonl");
+        fs::write(&path, prefix).expect("progress prefix written");
+        fs::create_dir_all(workspace.join("out")).expect("output dir created");
+        fs::write(workspace.join("out/summary.txt"), "already-written\n")
+            .expect("sentinel summary written");
+
+        let output =
+            resume_session(&workspace, "hello001", EmitMode::Jsonl).expect("session resumes");
+
+        assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
+        assert!(output.stdout.contains("\"event_type\":\"tool.completed\""));
+        assert_eq!(
+            fs::read_to_string(workspace.join("out/summary.txt"))
+                .expect("summary remains readable"),
+            "already-written\n"
+        );
+        let resumed = fs::read_to_string(&path).expect("resumed log readable");
+        let events = validate_session_log_text(&path, "hello001", &resumed)
+            .expect("resumed log remains valid");
+        assert!(stream_is_completed(&events));
+    }
+
     #[cfg(not(unix))]
     #[test]
     fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
@@ -4958,6 +5085,20 @@ mod tests {
     fn expected_stream(fixture: &str, stream: &str) -> String {
         fs::read_to_string(fixture_dir(fixture).join("expected").join(stream))
             .expect("expected stream is readable")
+    }
+
+    fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {
+        let event_marker = "\"event_type\":\"tool.progress\"";
+        let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
+        let mut prefix = String::new();
+        for line in stream.lines() {
+            prefix.push_str(line);
+            prefix.push('\n');
+            if line.contains(event_marker) && line.contains(&tool_marker) {
+                return prefix;
+            }
+        }
+        panic!("missing tool.progress for {tool_id}");
     }
 
     fn first_event_line(fixture: &str, stream: &str) -> String {
