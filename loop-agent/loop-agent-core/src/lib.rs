@@ -688,6 +688,9 @@ fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), R
 
 fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_real_file(path)?;
+    if !hard_link_count_is_verifiable() {
+        return replace_existing_file_without_link_count(path, contents);
+    }
     let mut file = fs::OpenOptions::new()
         .write(true)
         .open(path)
@@ -1517,10 +1520,10 @@ fn write_script_output(
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
     let path = ensure_real_workspace_write_path(workspace, target)?;
-    let leaf_existed = ensure_writable_regular_leaf(&path)?;
-    if leaf_existed && !hard_link_count_is_verifiable() {
+    if !hard_link_count_is_verifiable() {
         return replace_script_output_without_link_count(workspace, target, &path, contents);
     }
+    ensure_writable_regular_leaf(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -1547,6 +1550,7 @@ fn replace_script_output_without_link_count(
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
     ensure_real_workspace_write_path(workspace, target)?;
+    let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
     let (temp_path, mut temp_file) = create_replacement_temp(path)?;
     if let Err(err) = temp_file
         .write_all(contents)
@@ -1561,13 +1565,18 @@ fn replace_script_output_without_link_count(
     drop(temp_file);
 
     ensure_real_workspace_write_path(workspace, target)?;
-    ensure_writable_regular_leaf(path)?;
-    if let Err(source) = fs::remove_file(path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        });
+    if initial_leaf_existed {
+        if ensure_writable_regular_leaf(path)? {
+            if let Err(source) = fs::remove_file(path) {
+                let _ = fs::remove_file(&temp_path);
+                return Err(RuntimeError::Io {
+                    path: path.to_owned(),
+                    source,
+                });
+            }
+        }
+    } else {
+        ensure_new_leaf_available(path)?;
     }
     ensure_real_workspace_write_path(workspace, target)?;
     if let Err(source) = fs::rename(&temp_path, path) {
@@ -1706,7 +1715,7 @@ fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 
 #[cfg(not(unix))]
 fn same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
+    false
 }
 
 #[cfg(unix)]
@@ -3690,6 +3699,21 @@ mod tests {
             "**/*.local",
             "workspace/out/README.LOCAL"
         ));
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn unverifiable_file_identity_does_not_report_different_files_as_same() {
+        let workspace = empty_workspace("file-identity");
+        let first = workspace.join("first.txt");
+        let second = workspace.join("second.txt");
+        fs::write(&first, "first\n").expect("first file written");
+        fs::write(&second, "second\n").expect("second file written");
+
+        let first_metadata = fs::metadata(first).expect("first metadata readable");
+        let second_metadata = fs::metadata(second).expect("second metadata readable");
+
+        assert!(!same_file_metadata(&first_metadata, &second_metadata));
     }
 
     #[test]
