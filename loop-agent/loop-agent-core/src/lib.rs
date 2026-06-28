@@ -1860,6 +1860,7 @@ pub fn validate_protocol_jsonl_text(
     let mut session_id = None::<String>;
     let mut event_ids = BTreeSet::new();
     let mut loop_started_ids = BTreeSet::new();
+    let mut terminal_line = None::<usize>;
     let mut events = Vec::new();
     for (index, line) in text.split_terminator('\n').enumerate() {
         let line_number = index + 1;
@@ -1952,6 +1953,12 @@ pub fn validate_protocol_jsonl_text(
                 path.display()
             )));
         }
+        if let Some(terminal_line) = terminal_line {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} appears after terminal session event on line {terminal_line}",
+                path.display()
+            )));
+        }
         validate_event_payload(path, line_number, &event)?;
         if event.event_type == EventType::LoopStarted {
             let loop_id = event.loop_id.as_deref().ok_or_else(|| {
@@ -1976,6 +1983,12 @@ pub fn validate_protocol_jsonl_text(
             }
             None => session_id = Some(event.session_id.clone()),
             Some(_) => {}
+        }
+        if matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        ) {
+            terminal_line = Some(line_number);
         }
         events.push(event);
     }
@@ -2858,6 +2871,60 @@ mod tests {
             .expect_err("session id mismatch must fail");
 
         assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("expected")));
+    }
+
+    #[test]
+    fn resume_rejects_events_after_terminal_without_rewriting_log() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("terminal-plus.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "terminal-plus",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("started event serializes");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "terminal-plus",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        let appended = EventEnvelope::new(
+            "evt-003",
+            EventType::SessionPaused,
+            "terminal-plus",
+            3,
+            "2026-01-01T00:00:02Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"external-append"}),
+        )
+        .canonical_jsonl()
+        .expect("appended event serializes");
+        let before = format!("{started}{completed}{appended}");
+        fs::write(&path, &before).expect("malformed terminal log written");
+
+        let err = resume_session(&workspace, "terminal-plus", EmitMode::Jsonl)
+            .expect_err("terminal-plus log must not resume");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal"))
+        );
+        assert_eq!(
+            fs::read_to_string(&path).expect("malformed terminal log remains readable"),
+            before
+        );
     }
 
     #[test]
