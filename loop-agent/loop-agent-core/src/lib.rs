@@ -3555,7 +3555,37 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
         }
     }
 
+    if events.last().is_some_and(|event| {
+        matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        )
+    }) {
+        for loop_id in &started_loops {
+            if !terminal_loops.contains_key(loop_id) {
+                return Err(open_lifecycle_error(path, "loop", loop_id));
+            }
+        }
+        for step in &started_steps {
+            if !terminal_steps.contains_key(step) {
+                return Err(open_lifecycle_error(path, "step", &step.2));
+            }
+        }
+        for tool in &started_tools {
+            if !terminal_tools.contains_key(tool) {
+                return Err(open_lifecycle_error(path, "tool", &tool.3));
+            }
+        }
+    }
+
     Ok(())
+}
+
+fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "{} terminal session has open {kind} {id:?}",
+        path.display()
+    ))
 }
 
 fn started_tool_without_progress(events: &[EventEnvelope]) -> Option<String> {
@@ -4743,6 +4773,43 @@ mod tests {
         assert!(
             matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal tool"))
         );
+    }
+
+    #[test]
+    fn session_log_rejects_terminal_session_with_open_lifecycle_state() {
+        let stream = [
+            event_line(
+                "evt-001",
+                EventType::SessionStarted,
+                "open-lifecycle",
+                1,
+                None,
+                serde_json::json!({"reason":"fixture-start"}),
+            ),
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "open-lifecycle",
+                2,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            event_line(
+                "evt-003",
+                EventType::SessionCompleted,
+                "open-lifecycle",
+                3,
+                None,
+                serde_json::json!({}),
+            ),
+        ]
+        .concat();
+
+        let err =
+            validate_session_log_text(Path::new("open-lifecycle.jsonl"), "open-lifecycle", &stream)
+                .expect_err("terminal session must close active loops first");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("open loop")));
     }
 
     #[test]
