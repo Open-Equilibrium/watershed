@@ -4,7 +4,7 @@ use proto::{EventEnvelope, EventType};
 use std::{
     collections::BTreeSet,
     fmt, fs,
-    io::{self, Write},
+    io::{self, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     thread,
     time::Duration,
@@ -671,8 +671,17 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
     ensure_real_file(path)?;
     let mut file = fs::OpenOptions::new()
         .write(true)
-        .truncate(true)
         .open(path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    ensure_opened_regular_leaf_matches_path(path, &file)?;
+    file.set_len(0).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    file.seek(SeekFrom::Start(0))
         .map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
@@ -692,6 +701,7 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
             path: path.to_owned(),
             source,
         })?;
+    ensure_opened_regular_leaf_matches_path(path, &file)?;
     file.write_all(contents).map_err(|source| RuntimeError::Io {
         path: path.to_owned(),
         source,
@@ -717,19 +727,7 @@ fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
 }
 
 fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
-    ensure_real_file(path)?;
-    let mut file = fs::OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    file.write_all(line.as_bytes())
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })
+    append_existing_file(path, line.as_bytes())
 }
 
 fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
@@ -3752,6 +3750,28 @@ mod tests {
         );
         fs::remove_dir_all(&reservation.log_path).expect("log directory cleanup");
         reservation.rollback();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_existing_file_rejects_hardlinked_leaf_without_truncating_target() {
+        let workspace = empty_workspace("session-hardlink");
+        let outside = empty_workspace("outside-session-hardlink");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let outside_target = outside.join("victim.jsonl");
+        fs::write(&outside_target, "outside\n").expect("outside target written");
+        let session_path = session_dir.join("race001.jsonl");
+        fs::hard_link(&outside_target, &session_path).expect("session hard link");
+
+        let err = write_existing_file(&session_path, b"changed\n")
+            .expect_err("hard-linked session leaf must reject before truncate");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside target readable"),
+            "outside\n"
+        );
     }
 
     #[test]
