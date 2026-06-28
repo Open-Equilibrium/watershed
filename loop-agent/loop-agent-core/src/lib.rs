@@ -2744,9 +2744,10 @@ fn registry_root_path(workspace: &Path, registry_root: &Path) -> Result<PathBuf,
                     path: path.clone(),
                     source,
                 })?;
-                if metadata.file_type().is_symlink() {
+                if metadata.file_type().is_symlink() || has_windows_reparse_point(&metadata) {
                     return Err(RuntimeError::Usage(
-                        ".loop/config.yaml registry_root must not contain symlinks".to_owned(),
+                        ".loop/config.yaml registry_root must not contain symlinks or reparse points"
+                            .to_owned(),
                     ));
                 }
                 if !metadata.is_dir() {
@@ -3943,6 +3944,29 @@ mod tests {
             .expect_err("symlinked registry root component must fail");
 
         assert!(matches!(err, RuntimeError::Usage(message) if message.contains("symlink")));
+        assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn registry_root_rejects_junction_path_components() {
+        let workspace = workspace_copy("smoke-loop");
+        let outside = empty_workspace("outside-registry-root-junction");
+        copy_dir(
+            &fixture_dir("smoke-loop").join("registry"),
+            &outside.join("registry"),
+        );
+        create_windows_junction(&workspace.join("link"), &outside);
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            "fixture_profile: stub-model\nregistry_root: link/registry\nstub_model: deterministic\n",
+        )
+        .expect("config rewrite succeeds");
+
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("junction registry root component must fail");
+
+        assert!(matches!(err, RuntimeError::Usage(message) if message.contains("reparse")));
         assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
     }
 
