@@ -3383,6 +3383,8 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
     let mut terminal_steps = BTreeMap::new();
     let mut started_tools = BTreeSet::new();
     let mut terminal_tools = BTreeMap::new();
+    let mut active_phases = BTreeMap::new();
+    let mut active_steps = BTreeMap::new();
 
     for (index, event) in events.iter().enumerate() {
         let line_number = index + 1;
@@ -3430,29 +3432,39 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                 }
                 terminal_loops.insert(loop_id, line_number);
             }
+            EventType::PhaseEntered => {
+                if let Some(loop_id) = &event.loop_id {
+                    active_phases
+                        .insert(loop_id.clone(), lifecycle_payload_string(event, "phase_id"));
+                    active_steps.remove(loop_id);
+                }
+            }
             EventType::StepStarted => {
-                let step = lifecycle_payload_key(event, "step_id");
+                let step = lifecycle_step_key(event, &active_phases);
                 if let Some(terminal_line) = terminal_steps.get(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "step",
-                        &step.1,
+                        &step.2,
                         *terminal_line,
                     ));
+                }
+                if let Some(loop_id) = &event.loop_id {
+                    active_steps.insert(loop_id.clone(), step.clone());
                 }
                 started_steps.insert(step);
             }
             EventType::StepCompleted => {
-                let step = lifecycle_payload_key(event, "step_id");
+                let step = lifecycle_step_key(event, &active_phases);
                 if let Some(terminal_line) = terminal_steps.get(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "step",
-                        &step.1,
+                        &step.2,
                         *terminal_line,
                     ));
                 }
@@ -3460,34 +3472,37 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
                         path.display(),
-                        step.1
+                        step.2
                     )));
+                }
+                if let Some(loop_id) = &event.loop_id {
+                    active_steps.remove(loop_id);
                 }
                 terminal_steps.insert(step, line_number);
             }
             EventType::ToolStarted => {
-                let tool = lifecycle_payload_key(event, "tool_id");
+                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
                 if let Some(terminal_line) = terminal_tools.get(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "tool",
-                        &tool.1,
+                        &tool.3,
                         *terminal_line,
                     ));
                 }
                 started_tools.insert(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
-                let tool = lifecycle_payload_key(event, "tool_id");
+                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
                 if let Some(terminal_line) = terminal_tools.get(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "tool",
-                        &tool.1,
+                        &tool.3,
                         *terminal_line,
                     ));
                 }
@@ -3496,7 +3511,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         "{} line {line_number} {} must follow tool.started for tool_id {:?}",
                         path.display(),
                         event.event_type.as_str(),
-                        tool.1
+                        tool.3
                     )));
                 }
                 if matches!(
@@ -3508,14 +3523,14 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             }
             EventType::ToolFailed => {
                 // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
-                let tool = lifecycle_payload_key(event, "tool_id");
+                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
                 if let Some(terminal_line) = terminal_tools.get(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "tool",
-                        &tool.1,
+                        &tool.3,
                         *terminal_line,
                     ));
                 }
@@ -3526,7 +3541,6 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             | EventType::SessionResumed
             | EventType::SessionCompleted
             | EventType::SessionFailed
-            | EventType::PhaseEntered
             | EventType::MessageDelta
             | EventType::MessageCompleted
             | EventType::ArtifactLogged
@@ -3568,14 +3582,63 @@ fn require_lifecycle_loop_id(
     })
 }
 
-fn lifecycle_payload_key(event: &EventEnvelope, field: &str) -> (Option<String>, String) {
-    let value = event
+type StepLifecycleKey = (Option<String>, Option<String>, String);
+type ToolLifecycleKey = (Option<String>, Option<String>, Option<String>, String);
+
+fn lifecycle_step_key(
+    event: &EventEnvelope,
+    active_phases: &BTreeMap<String, String>,
+) -> StepLifecycleKey {
+    let loop_id = event.loop_id.clone();
+    let phase_id = event
+        .payload
+        .get("phase_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            loop_id
+                .as_ref()
+                .and_then(|loop_id| active_phases.get(loop_id))
+                .cloned()
+        });
+    (
+        loop_id,
+        phase_id,
+        lifecycle_payload_string(event, "step_id"),
+    )
+}
+
+fn lifecycle_tool_key(
+    event: &EventEnvelope,
+    active_phases: &BTreeMap<String, String>,
+    active_steps: &BTreeMap<String, StepLifecycleKey>,
+) -> ToolLifecycleKey {
+    let loop_id = event.loop_id.clone();
+    let active_step = loop_id
+        .as_ref()
+        .and_then(|loop_id| active_steps.get(loop_id));
+    let phase_id = active_step.and_then(|step| step.1.clone()).or_else(|| {
+        loop_id
+            .as_ref()
+            .and_then(|loop_id| active_phases.get(loop_id))
+            .cloned()
+    });
+    let step_id = active_step.map(|step| step.2.clone());
+    (
+        loop_id,
+        phase_id,
+        step_id,
+        lifecycle_payload_string(event, "tool_id"),
+    )
+}
+
+fn lifecycle_payload_string(event: &EventEnvelope, field: &str) -> String {
+    event
         .payload
         .get(field)
         .and_then(serde_json::Value::as_str)
         .expect("payload contract validation ensures lifecycle key fields are strings")
-        .to_owned();
-    (event.loop_id.clone(), value)
+        .to_owned()
 }
 
 fn stream_is_failed(events: &[EventEnvelope]) -> bool {
@@ -4620,6 +4683,158 @@ mod tests {
         assert!(
             matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal tool"))
         );
+    }
+
+    #[test]
+    fn session_log_allows_step_and_tool_reuse_in_later_phase() {
+        let stream = [
+            event_line(
+                "evt-001",
+                EventType::SessionStarted,
+                "reuse-lifecycle",
+                1,
+                None,
+                serde_json::json!({"reason":"fixture-start"}),
+            ),
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "reuse-lifecycle",
+                2,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"reuse-loop"}),
+            ),
+            event_line(
+                "evt-003",
+                EventType::PhaseEntered,
+                "reuse-lifecycle",
+                3,
+                Some("loop-001"),
+                serde_json::json!({
+                    "instruction_ids": [],
+                    "phase_id": "phase-a",
+                    "phase_name": "PhaseA",
+                    "tool_ids": ["echo"],
+                }),
+            ),
+            event_line(
+                "evt-004",
+                EventType::StepStarted,
+                "reuse-lifecycle",
+                4,
+                Some("loop-001"),
+                serde_json::json!({"phase_id":"phase-a","step_id":"attempt","step_name":"Attempt"}),
+            ),
+            event_line(
+                "evt-005",
+                EventType::ToolStarted,
+                "reuse-lifecycle",
+                5,
+                Some("loop-001"),
+                serde_json::json!({
+                    "allowed_parameters": [],
+                    "network_access": "deny",
+                    "read_scope": [],
+                    "tool_id": "echo",
+                    "tool_kind": "predefined-command",
+                    "tool_name": "Echo",
+                    "write_scope": [],
+                }),
+            ),
+            event_line(
+                "evt-006",
+                EventType::ToolCompleted,
+                "reuse-lifecycle",
+                6,
+                Some("loop-001"),
+                serde_json::json!({"exit_code":0,"tool_id":"echo"}),
+            ),
+            event_line(
+                "evt-007",
+                EventType::StepCompleted,
+                "reuse-lifecycle",
+                7,
+                Some("loop-001"),
+                serde_json::json!({"phase_id":"phase-a","step_id":"attempt","step_name":"Attempt"}),
+            ),
+            event_line(
+                "evt-008",
+                EventType::PhaseEntered,
+                "reuse-lifecycle",
+                8,
+                Some("loop-001"),
+                serde_json::json!({
+                    "instruction_ids": [],
+                    "phase_id": "phase-b",
+                    "phase_name": "PhaseB",
+                    "tool_ids": ["echo"],
+                }),
+            ),
+            event_line(
+                "evt-009",
+                EventType::StepStarted,
+                "reuse-lifecycle",
+                9,
+                Some("loop-001"),
+                serde_json::json!({"phase_id":"phase-b","step_id":"attempt","step_name":"Attempt"}),
+            ),
+            event_line(
+                "evt-010",
+                EventType::ToolStarted,
+                "reuse-lifecycle",
+                10,
+                Some("loop-001"),
+                serde_json::json!({
+                    "allowed_parameters": [],
+                    "network_access": "deny",
+                    "read_scope": [],
+                    "tool_id": "echo",
+                    "tool_kind": "predefined-command",
+                    "tool_name": "Echo",
+                    "write_scope": [],
+                }),
+            ),
+            event_line(
+                "evt-011",
+                EventType::ToolCompleted,
+                "reuse-lifecycle",
+                11,
+                Some("loop-001"),
+                serde_json::json!({"exit_code":0,"tool_id":"echo"}),
+            ),
+            event_line(
+                "evt-012",
+                EventType::StepCompleted,
+                "reuse-lifecycle",
+                12,
+                Some("loop-001"),
+                serde_json::json!({"phase_id":"phase-b","step_id":"attempt","step_name":"Attempt"}),
+            ),
+            event_line(
+                "evt-013",
+                EventType::LoopCompleted,
+                "reuse-lifecycle",
+                13,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"reuse-loop"}),
+            ),
+            event_line(
+                "evt-014",
+                EventType::SessionCompleted,
+                "reuse-lifecycle",
+                14,
+                None,
+                serde_json::json!({}),
+            ),
+        ]
+        .concat();
+
+        validate_session_log_text(
+            Path::new("reuse-lifecycle.jsonl"),
+            "reuse-lifecycle",
+            &stream,
+        )
+        .expect("phase-local step ids and tool invocations may be reused in later phases");
     }
 
     #[test]
