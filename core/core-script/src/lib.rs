@@ -7,6 +7,7 @@ use std::fmt;
 use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
 
 pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
 pub const YAML_VERSION: &str = "1.2";
@@ -316,7 +317,7 @@ impl ResolvedRegistry {
         self.loops.get(reference).or_else(|| {
             self.loops
                 .values()
-                .find(|block| block.identity.name == reference)
+                .find(|block| normalized_eq(&block.identity.name, reference))
         })
     }
 
@@ -324,7 +325,7 @@ impl ResolvedRegistry {
         self.phases.get(reference).or_else(|| {
             self.phases
                 .values()
-                .find(|block| block.identity.name == reference)
+                .find(|block| normalized_eq(&block.identity.name, reference))
         })
     }
 
@@ -332,7 +333,7 @@ impl ResolvedRegistry {
         self.tools.get(reference).or_else(|| {
             self.tools
                 .values()
-                .find(|block| block.identity.name == reference)
+                .find(|block| normalized_eq(&block.identity.name, reference))
         })
     }
 
@@ -340,7 +341,7 @@ impl ResolvedRegistry {
         self.instructions.get(reference).or_else(|| {
             self.instructions
                 .values()
-                .find(|block| block.identity.name == reference)
+                .find(|block| normalized_eq(&block.identity.name, reference))
         })
     }
 
@@ -348,7 +349,7 @@ impl ResolvedRegistry {
         self.connections.get(reference).or_else(|| {
             self.connections
                 .values()
-                .find(|block| block.identity.name == reference)
+                .find(|block| normalized_eq(&block.identity.name, reference))
         })
     }
 
@@ -635,7 +636,7 @@ fn insert_named_block<T>(
             reference: identity.name,
         });
     }
-    if !names_for_kind.insert(identity.name.clone()) {
+    if !names_for_kind.insert(normalize_string(&identity.name)) {
         return Err(RegistryError::DuplicateId {
             kind,
             id: identity.name,
@@ -643,6 +644,14 @@ fn insert_named_block<T>(
     }
     blocks.insert(identity.id, block);
     Ok(())
+}
+
+fn normalize_string(value: &str) -> String {
+    value.nfc().collect()
+}
+
+fn normalized_eq(left: &str, right: &str) -> bool {
+    normalize_string(left) == normalize_string(right)
 }
 
 #[derive(Debug)]
@@ -2575,7 +2584,9 @@ fn canonical_json(value: &Value) -> String {
         Value::Null => "null".to_owned(),
         Value::Bool(value) => value.to_string(),
         Value::Number(value) => value.to_string(),
-        Value::String(value) => serde_json::to_string(value).expect("string serialization"),
+        Value::String(value) => {
+            serde_json::to_string(&normalize_string(value)).expect("string serialization")
+        }
         Value::Array(values) => {
             let body = values
                 .iter()
@@ -2592,7 +2603,7 @@ fn canonical_json(value: &Value) -> String {
                 .map(|(key, value)| {
                     format!(
                         "{}:{}",
-                        serde_json::to_string(key).expect("key serialization"),
+                        serde_json::to_string(&normalize_string(key)).expect("key serialization"),
                         canonical_json(value)
                     )
                 })
@@ -3007,6 +3018,35 @@ mod tests {
     }
 
     #[test]
+    fn registry_rejects_normalized_duplicate_names() {
+        let err = ResolvedRegistry::from_blocks([
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "composed".to_owned(),
+                    name: "Café".to_owned(),
+                },
+                prompt: "Inspect".to_owned(),
+            }),
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "decomposed".to_owned(),
+                    name: "Cafe\u{301}".to_owned(),
+                },
+                prompt: "Inspect".to_owned(),
+            }),
+        ])
+        .expect_err("canonically equivalent names are duplicates");
+
+        assert!(matches!(
+            err,
+            RegistryError::DuplicateId {
+                kind: "instruction",
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn parser_defaults_optional_loop_reference_lists() {
         let block = parse_registry_block(
             "minimal-loop.yaml",
@@ -3352,6 +3392,19 @@ mod tests {
         assert!(is_valid_command_id("agent-read"));
         assert!(!is_valid_command_id("1-agent-read"));
         assert!(!is_valid_command_id("agent.read"));
+    }
+
+    #[test]
+    fn canonical_json_normalizes_string_values_to_nfc() {
+        let value = serde_json::json!({
+            "name": "Cafe\u{301}",
+            "items": ["A\u{30a}"],
+        });
+
+        assert_eq!(
+            canonical_json(&value),
+            "{\"items\":[\"Å\"],\"name\":\"Café\"}"
+        );
     }
 
     #[test]

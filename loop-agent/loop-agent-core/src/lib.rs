@@ -153,6 +153,10 @@ pub fn run_loop(
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
+    if let Err(err) = write_initial_session_log(&reservation, &expected_session_id) {
+        reservation.rollback();
+        return Err(err);
+    }
     let runtime = match execute_loop(
         workspace,
         &registry,
@@ -190,7 +194,7 @@ pub fn run_loop(
             })?;
             validate_failed_sandbox_decisions(fixture_name, &events)?;
         }
-        write_reserved_session_log(&reservation, &session_id, &stream, events.len())?;
+        complete_reserved_session_log(&reservation, &session_id, &stream, events.len())?;
 
         Ok(RunOutput {
             event_count: events.len(),
@@ -204,9 +208,6 @@ pub fn run_loop(
             },
         })
     })();
-    if result.is_err() {
-        reservation.rollback();
-    }
     result
 }
 
@@ -553,6 +554,43 @@ fn write_reserved_session_log(
     )
 }
 
+fn write_initial_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    let stream = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        session_id.to_owned(),
+        1,
+        event_timestamp(1),
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+    .canonical_jsonl()
+    .map_err(|err| RuntimeError::Protocol(format!("failed to serialize initial event: {err}")))?;
+    write_reserved_session_log(reservation, session_id, &stream, 1)
+}
+
+fn complete_reserved_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    let first_line_end = stream.find('\n').ok_or_else(|| {
+        RuntimeError::Protocol("validated runtime stream must contain an initial event".to_owned())
+    })?;
+    append_existing_file(
+        &reservation.session_path,
+        &stream.as_bytes()[first_line_end + 1..],
+    )?;
+    write_existing_file(
+        &reservation.log_path,
+        format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
+    )
+}
+
 fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {
     let loop_dir = workspace.join(".loop");
     ensure_real_directory(&loop_dir)?;
@@ -633,6 +671,21 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
     let mut file = fs::OpenOptions::new()
         .write(true)
         .truncate(true)
+        .open(path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    file.write_all(contents).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    ensure_real_file(path)?;
+    let mut file = fs::OpenOptions::new()
+        .append(true)
         .open(path)
         .map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
@@ -2854,6 +2907,43 @@ mod tests {
         assert!(first.session_path.exists());
         assert!(first.log_path.exists());
         first.rollback();
+    }
+
+    #[test]
+    fn completed_session_log_append_keeps_audit_when_log_update_fails() {
+        let workspace = empty_workspace("audit-retained");
+        let reservation =
+            reserve_session_log(&workspace, "audit001").expect("reservation succeeds");
+        write_initial_session_log(&reservation, "audit001").expect("initial audit writes");
+        let initial =
+            fs::read_to_string(&reservation.session_path).expect("initial audit readable");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "audit001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        let stream = format!("{initial}{completed}");
+        fs::remove_file(&reservation.log_path).expect("reserved log removed");
+        fs::create_dir(&reservation.log_path).expect("log path replaced by directory");
+
+        let err = complete_reserved_session_log(&reservation, "audit001", &stream, 2)
+            .expect_err("log metadata update fails");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file"))
+        );
+        assert_eq!(
+            fs::read_to_string(&reservation.session_path).expect("audit stream remains readable"),
+            stream
+        );
+        fs::remove_dir_all(&reservation.log_path).expect("log directory cleanup");
+        reservation.rollback();
     }
 
     #[test]
