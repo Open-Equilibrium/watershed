@@ -1,6 +1,6 @@
 loop:
   id: sandbox-negative-environment
   name: SandboxNegativeEnvironment
-  phase_refs: [negative]
+  phase_refs: [negative-environment]
   subloop_refs: []
   connection_refs: []

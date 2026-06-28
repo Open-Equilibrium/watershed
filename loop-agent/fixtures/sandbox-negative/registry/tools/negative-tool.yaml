@@ -4,7 +4,7 @@ tool:
   tool_kind: predefined-command
   command:
     command_id: agent-negative
-    argv: []
+    argv: ["write"]
   allowed_parameters: []
   read_scope: ["workspace"]
   write_scope: []

@@ -1899,190 +1899,137 @@ fn sandbox_runtime_failure(
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    for fixture_name in sandbox_negative_fixture_candidates(loop_block) {
-        let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
-            continue;
-        };
-        let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
-        decision.validate().map_err(|err| {
-            RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
-        })?;
-        if decision.fixture_name != fixture_name {
-            return Err(RuntimeError::Protocol(format!(
-                "{fixture_name} expected decision fixture_name mismatch"
-            )));
-        }
-        if !sandbox_loop_matches_decision(registry, policy, loop_block, &decision.attempt)? {
-            continue;
-        }
-        return Ok(Some(runtime_failure_for_decision(fixture_name, decision)));
-    }
-
-    Ok(None)
-}
-
-fn runtime_failure_for_decision(
-    fixture_name: &'static str,
-    decision: core_policy::ExpectedDecision,
-) -> RuntimeFailure {
-    let reason = decision.reason_code.as_str().to_owned();
-    let tool_id = if matches!(
-        decision.attempt,
-        core_policy::DeniedAttempt::ToolOutOfPhase { .. }
-    ) {
-        None
-    } else {
-        Some(denied_attempt_tool_id(&decision.attempt).to_owned())
-    };
-
-    RuntimeFailure {
-        reason,
-        message: denial_message(decision.reason_code),
-        sandbox_decision_fixture: fixture_name,
-        tool_id,
-    }
-}
-
-const SANDBOX_NEGATIVE_FIXTURES: &[&str] = &[
-    "sandbox-negative-environment",
-    "sandbox-negative-interpreter",
-    "sandbox-negative-network",
-    "sandbox-negative-protected-path",
-    "sandbox-negative-symlink",
-    "sandbox-negative-tool-out-of-phase",
-    "sandbox-negative-write",
-];
-
-fn sandbox_negative_fixture_candidates(loop_block: &core_script::LoopBlock) -> Vec<&'static str> {
-    let loop_id = loop_block.identity.id.as_str();
-    SANDBOX_NEGATIVE_FIXTURES
-        .iter()
-        .copied()
-        .filter(|fixture| {
-            loop_id == *fixture
-                || fixture
-                    .strip_prefix("sandbox-")
-                    .is_some_and(|suffix| loop_id.ends_with(suffix))
-        })
-        .collect()
-}
-
-fn sandbox_loop_matches_decision(
-    registry: &core_script::ResolvedRegistry,
-    policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
-    attempt: &core_policy::DeniedAttempt,
-) -> Result<bool, RuntimeError> {
-    match attempt {
-        core_policy::DeniedAttempt::Write { tool_id, .. } => sandbox_loop_has_agent_negative_tool(
-            registry,
-            policy,
-            loop_block,
-            "negative",
-            tool_id,
-            |tool| tool.write_scope.is_empty(),
-        ),
-        core_policy::DeniedAttempt::Network { tool_id, .. }
-        | core_policy::DeniedAttempt::Environment { tool_id, .. }
-        | core_policy::DeniedAttempt::ProtectedPath { tool_id, .. }
-        | core_policy::DeniedAttempt::InterpreterEscape { tool_id, .. } => {
-            sandbox_loop_has_agent_negative_tool(
-                registry,
-                policy,
-                loop_block,
-                "negative",
-                tool_id,
-                |tool| {
-                    tool.write_scope.is_empty()
-                        && matches!(tool.network, core_script::NetworkPolicy::Deny(_))
-                },
-            )
-        }
-        core_policy::DeniedAttempt::SymlinkEscape { tool_id, .. } => {
-            sandbox_loop_has_agent_negative_tool(
-                registry,
-                policy,
-                loop_block,
-                "negative-symlink",
-                tool_id,
-                |tool| {
-                    tool.write_scope
-                        .iter()
-                        .any(|scope| scope == "workspace/links")
-                },
-            )
-        }
-        core_policy::DeniedAttempt::ToolOutOfPhase { phase_id, tool_id } => {
-            sandbox_loop_has_out_of_phase_tool(registry, policy, loop_block, phase_id, tool_id)
-        }
-    }
-}
-
-fn sandbox_loop_has_agent_negative_tool<F>(
-    registry: &core_script::ResolvedRegistry,
-    policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
-    phase_id: &str,
-    tool_id: &str,
-    tool_predicate: F,
-) -> Result<bool, RuntimeError>
-where
-    F: Fn(&core_script::ToolBlock) -> bool,
-{
     for phase_ref in &loop_block.phase_refs {
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        if phase.identity.id != phase_id || !policy_phase_contains_tool(policy, phase_id, tool_id) {
-            continue;
+        if let Some(failure) = sandbox_out_of_phase_failure(policy, phase)? {
+            return Ok(Some(failure));
         }
         for tool_ref in &phase.tool_refs {
             let tool = registry.tool_block(tool_ref).ok_or_else(|| {
                 RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
             })?;
-            if tool.identity.id == tool_id
-                && tool_predefined_command_id(tool) == Some("agent-negative")
-                && policy_command_matches_tool(policy, tool_id, "agent-negative")
-                && tool_predicate(tool)
-            {
-                return Ok(true);
+            let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
+            if let Some(failure) = sandbox_tool_dispatch_failure(tool, command_policy)? {
+                return Ok(Some(failure));
             }
         }
     }
-    Ok(false)
+
+    Ok(None)
 }
 
-fn sandbox_loop_has_out_of_phase_tool(
-    registry: &core_script::ResolvedRegistry,
+fn sandbox_tool_dispatch_failure(
+    tool: &core_script::ToolBlock,
+    command_policy: &core_policy::CommandPolicy,
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    ensure_tool_matches_policy(tool, command_policy)?;
+    let Some(fixture_name) = sandbox_negative_fixture_for_tool(tool)? else {
+        return Ok(None);
+    };
+    let decision = linux_sandbox_expected_decision(fixture_name)?;
+    Ok(Some(runtime_failure_for_decision(
+        fixture_name,
+        decision,
+        Some(tool.identity.id.clone()),
+    )))
+}
+
+fn sandbox_out_of_phase_failure(
     policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
-    phase_id: &str,
-    tool_id: &str,
-) -> Result<bool, RuntimeError> {
-    for phase_ref in &loop_block.phase_refs {
-        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
-            RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
-        })?;
-        if phase.identity.id != phase_id {
-            continue;
-        }
-        let phase_contains_tool = phase
-            .tool_refs
-            .iter()
-            .map(|tool_ref| {
-                registry
-                    .tool_block(tool_ref)
-                    .map(|tool| tool.identity.id == tool_id)
-                    .ok_or_else(|| {
-                        RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
-                    })
-            })
-            .collect::<Result<Vec<_>, RuntimeError>>()?
-            .into_iter()
-            .any(|matches| matches);
-        return Ok(!phase_contains_tool && !policy_phase_contains_tool(policy, phase_id, tool_id));
+    phase: &core_script::PhaseBlock,
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    let fixture_name = "sandbox-negative-tool-out-of-phase";
+    let decision = linux_sandbox_expected_decision(fixture_name)?;
+    let core_policy::DeniedAttempt::ToolOutOfPhase { phase_id, tool_id } = &decision.attempt else {
+        return Err(RuntimeError::Protocol(format!(
+            "{fixture_name} expected decision must describe an out-of-phase tool"
+        )));
+    };
+    if phase.identity.id == *phase_id && !policy_phase_contains_tool(policy, phase_id, tool_id) {
+        return Ok(Some(runtime_failure_for_decision(
+            fixture_name,
+            decision,
+            None,
+        )));
     }
-    Ok(false)
+    Ok(None)
+}
+
+fn sandbox_negative_fixture_for_tool(
+    tool: &core_script::ToolBlock,
+) -> Result<Option<&'static str>, RuntimeError> {
+    let (
+        core_script::ToolKind::PredefinedCommand,
+        core_script::ToolCommand::Predefined { command_id, argv },
+    ) = (&tool.tool_kind, &tool.command)
+    else {
+        return Ok(None);
+    };
+    if command_id != "agent-negative" {
+        return Ok(None);
+    }
+    let [operation] = argv.as_slice() else {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} agent-negative command must declare one denied operation",
+            tool.identity.id
+        )));
+    };
+    sandbox_negative_fixture_for_operation(operation)
+        .map(Some)
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "tool {} declares unsupported sandbox-negative operation {operation:?}",
+                tool.identity.id
+            ))
+        })
+}
+
+fn sandbox_negative_fixture_for_operation(operation: &str) -> Option<&'static str> {
+    match operation {
+        "environment" => Some("sandbox-negative-environment"),
+        "interpreter" => Some("sandbox-negative-interpreter"),
+        "network" => Some("sandbox-negative-network"),
+        "protected-path" => Some("sandbox-negative-protected-path"),
+        "symlink" => Some("sandbox-negative-symlink"),
+        "write" => Some("sandbox-negative-write"),
+        _ => None,
+    }
+}
+
+fn runtime_failure_for_decision(
+    fixture_name: &'static str,
+    decision: core_policy::ExpectedDecision,
+    tool_id: Option<String>,
+) -> RuntimeFailure {
+    let reason_code = decision.reason_code.clone();
+    RuntimeFailure {
+        reason: reason_code.as_str().to_owned(),
+        message: denial_message(reason_code),
+        sandbox_decision_fixture: fixture_name,
+        tool_id,
+    }
+}
+
+fn linux_sandbox_expected_decision(
+    fixture_name: &'static str,
+) -> Result<core_policy::ExpectedDecision, RuntimeError> {
+    let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
+        return Err(RuntimeError::Protocol(format!(
+            "missing linux expected decision for {fixture_name}"
+        )));
+    };
+    let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+    decision.validate().map_err(|err| {
+        RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
+    })?;
+    if decision.fixture_name != fixture_name {
+        return Err(RuntimeError::Protocol(format!(
+            "{fixture_name} expected decision fixture_name mismatch"
+        )));
+    }
+    Ok(decision)
 }
 
 fn policy_phase_contains_tool(
@@ -2096,43 +2043,12 @@ fn policy_phase_contains_tool(
         .any(|phase| phase.phase_id == phase_id && phase.tool_ids.iter().any(|id| id == tool_id))
 }
 
-fn policy_command_matches_tool(
-    policy: &core_policy::PolicyArtifact,
-    tool_id: &str,
-    command_id: &str,
-) -> bool {
-    policy.commands.iter().any(|command| {
-        command.tool_id == tool_id
-            && command.command_id == command_id
-            && command.tool_kind == core_policy::ToolKind::PredefinedCommand
-    })
-}
-
-fn tool_predefined_command_id(tool: &core_script::ToolBlock) -> Option<&str> {
-    match &tool.command {
-        core_script::ToolCommand::Predefined { command_id, .. } => Some(command_id.as_str()),
-        core_script::ToolCommand::OwnScript(_) => None,
-    }
-}
-
 fn linux_sandbox_expected_decision_text(loop_id: &str) -> Option<&'static str> {
     sandbox_expected_decision_texts(loop_id)?
         .into_iter()
         .find_map(|(target, text)| {
             (target == core_policy::PolicyTarget::LinuxLandlockSeccomp).then_some(text)
         })
-}
-
-fn denied_attempt_tool_id(attempt: &core_policy::DeniedAttempt) -> &str {
-    match attempt {
-        core_policy::DeniedAttempt::Write { tool_id, .. }
-        | core_policy::DeniedAttempt::Network { tool_id, .. }
-        | core_policy::DeniedAttempt::Environment { tool_id, .. }
-        | core_policy::DeniedAttempt::ToolOutOfPhase { tool_id, .. }
-        | core_policy::DeniedAttempt::ProtectedPath { tool_id, .. }
-        | core_policy::DeniedAttempt::SymlinkEscape { tool_id, .. }
-        | core_policy::DeniedAttempt::InterpreterEscape { tool_id, .. } => tool_id,
-    }
 }
 
 fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
@@ -3663,18 +3579,18 @@ mod tests {
         let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
         fs::write(
             &loop_path,
-            source.replace("id: sandbox-negative-write", "id: renamed-negative-write"),
+            source.replace("id: sandbox-negative-write", "id: custom-denied-write"),
         )
         .expect("loop fixture rewritten");
 
-        let output = run_loop(&workspace, "renamed-negative-write", EmitMode::Jsonl)
+        let output = run_loop(&workspace, "custom-denied-write", EmitMode::Jsonl)
             .expect("renamed negative operation runs");
 
         assert!(output.failed);
         assert!(output.stdout.contains("\"reason\":\"write_denied\""));
         assert!(output
             .stdout
-            .contains("\"loop_definition_id\":\"renamed-negative-write\""));
+            .contains("\"loop_definition_id\":\"custom-denied-write\""));
     }
 
     #[test]
@@ -3705,7 +3621,7 @@ mod tests {
         let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
         fs::write(
             &loop_path,
-            source.replace("phase_refs: [negative]", "phase_refs: [benign]"),
+            source.replace("phase_refs: [negative-write]", "phase_refs: [benign]"),
         )
         .expect("loop fixture rewritten");
         fs::write(

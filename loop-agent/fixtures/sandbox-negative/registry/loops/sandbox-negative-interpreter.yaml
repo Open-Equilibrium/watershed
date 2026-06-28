@@ -1,6 +1,6 @@
 loop:
   id: sandbox-negative-interpreter
   name: SandboxNegativeInterpreter
-  phase_refs: [negative]
+  phase_refs: [negative-interpreter]
   subloop_refs: []
   connection_refs: []

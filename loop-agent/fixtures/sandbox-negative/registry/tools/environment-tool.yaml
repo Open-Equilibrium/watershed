@@ -1,12 +1,12 @@
 tool:
-  id: symlink-tool
-  name: SymlinkTool
+  id: environment-tool
+  name: EnvironmentTool
   tool_kind: predefined-command
   command:
     command_id: agent-negative
-    argv: ["symlink"]
+    argv: ["environment"]
   allowed_parameters: []
   read_scope: ["workspace"]
-  write_scope: ["workspace/links"]
+  write_scope: []
   protected_path_grants: []
   network: deny
