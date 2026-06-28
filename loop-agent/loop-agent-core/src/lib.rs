@@ -1224,14 +1224,15 @@ fn write_summary_artifact(
     workspace: &Path,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
+    let summary_scope_path = "workspace/out/summary.txt";
     if !policy
         .filesystem
         .write_roots
         .iter()
-        .any(|root| root == "workspace/out")
+        .any(|root| workspace_scope_contains(root, summary_scope_path))
     {
         return Err(RuntimeError::Protocol(format!(
-            "tool {} lacks write scope workspace/out",
+            "tool {} lacks write scope {summary_scope_path}",
             policy.tool_id
         )));
     }
@@ -1253,6 +1254,13 @@ fn write_summary_artifact(
             path: summary,
             source,
         })
+}
+
+fn workspace_scope_contains(root: &str, path: &str) -> bool {
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn ensure_writable_regular_leaf(path: &Path) -> Result<(), RuntimeError> {
@@ -2723,6 +2731,30 @@ mod tests {
             .join("hello001.jsonl")
             .exists());
         assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
+        let workspace = workspace_copy("hello-loop");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source.replace(
+                r#"write_scope: ["workspace/out"]"#,
+                r#"write_scope: ["workspace"]"#,
+            ),
+        )
+        .expect("tool fixture rewritten");
+
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("enclosing write scope permits summary artifact");
+
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
+            "hello\n"
+        );
     }
 
     #[test]

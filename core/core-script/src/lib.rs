@@ -549,19 +549,27 @@ impl ResolvedRegistry {
             });
         }
 
-        if self.tool_block(reference).is_some()
-            || self.instruction_block(reference).is_some()
-            || self.phase_block(reference).is_some()
-            || self.loop_block(reference).is_some()
-        {
-            Ok(())
-        } else {
-            Err(RegistryError::MissingReference {
+        let matches = [
+            self.tool_block(reference).is_some(),
+            self.instruction_block(reference).is_some(),
+            self.phase_block(reference).is_some(),
+            self.loop_block(reference).is_some(),
+        ]
+        .into_iter()
+        .filter(|matched| *matched)
+        .count();
+        match matches {
+            1 => Ok(()),
+            0 => Err(RegistryError::MissingReference {
                 from_kind: "connection",
                 from_id: connection_id.to_owned(),
                 reference_kind: "endpoint",
                 reference: reference.to_owned(),
-            })
+            }),
+            _ => Err(RegistryError::AmbiguousReference {
+                kind: "endpoint",
+                reference: reference.to_owned(),
+            }),
         }
     }
 
@@ -1340,7 +1348,13 @@ fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, Regi
 }
 
 fn reject_unsupported_yaml(source_name: &str, source: &str) -> Result<(), RegistryError> {
+    let mut block_scalar_indent = None::<usize>;
     for (index, line) in source.lines().enumerate() {
+        if let Some(indent) = block_scalar_indent {
+            if line.trim().is_empty() || leading_spaces(line) > indent {
+                continue;
+            }
+        }
         if line.contains('\t') {
             return Err(parse_error(
                 source_name,
@@ -1359,14 +1373,25 @@ fn reject_unsupported_yaml(source_name: &str, source: &str) -> Result<(), Regist
                 format!("line {} uses unsupported YAML syntax", index + 1),
             ));
         }
+        block_scalar_indent = block_scalar_parent_indent(line);
     }
     Ok(())
 }
 
 fn strip_yaml_comments(source: &str) -> String {
     let mut out = String::new();
+    let mut block_scalar_indent = None::<usize>;
     for line in source.lines() {
-        out.push_str(&strip_yaml_comment(line));
+        if let Some(indent) = block_scalar_indent {
+            if line.trim().is_empty() || leading_spaces(line) > indent {
+                out.push_str(line.trim_end());
+                out.push('\n');
+                continue;
+            }
+        }
+        let line = strip_yaml_comment(line);
+        block_scalar_indent = block_scalar_parent_indent(&line);
+        out.push_str(&line);
         out.push('\n');
     }
     out
@@ -1417,6 +1442,14 @@ fn literal_block_scalar_marker(value: &str) -> Option<&str> {
 
 fn folded_block_scalar_marker(value: &str) -> Option<&str> {
     matches!(value, ">" | ">-" | ">+").then_some(value)
+}
+
+fn block_scalar_parent_indent(line: &str) -> Option<usize> {
+    let trimmed = line.trim();
+    let (_, value) = trimmed.split_once(':')?;
+    let value = value.trim();
+    (literal_block_scalar_marker(value).is_some() || folded_block_scalar_marker(value).is_some())
+        .then_some(leading_spaces(line))
 }
 
 fn parse_literal_block_scalar(
@@ -2806,6 +2839,38 @@ mod tests {
     }
 
     #[test]
+    fn parser_preserves_literal_block_script_body_comments() {
+        let block = parse_registry_block(
+            "literal-script-body-comments.yaml",
+            r#"tool:
+  id: commented-script
+  name: CommentedScript
+  tool_kind: own-script
+  command: script:commented-script
+  script_runtime: posix-sh
+  script_body: |
+    #!/bin/sh
+    echo ok # keep
+    ---
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("literal block script comments are script source");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.script_body.as_deref(),
+            Some("#!/bin/sh\necho ok # keep\n---\n")
+        );
+    }
+
+    #[test]
     fn parser_rejects_empty_or_misrepresented_own_script_body() {
         let err = parse_registry_block(
             "empty-script-body.yaml",
@@ -2845,6 +2910,44 @@ mod tests {
         )
         .expect_err("folded script body rejected");
         assert!(err.to_string().contains("folded block scalar"));
+    }
+
+    #[test]
+    fn connection_endpoints_reject_cross_kind_ambiguous_references() {
+        let err = ResolvedRegistry::from_blocks([
+            RegistryBlock::Tool(own_script_tool("build", "script:build")),
+            RegistryBlock::Phase(PhaseBlock {
+                identity: BlockIdentity {
+                    id: "build".to_owned(),
+                    name: "BuildPhase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                tool_refs: Vec::new(),
+                steps: vec![StepBlock {
+                    id: "step".to_owned(),
+                    name: "Step".to_owned(),
+                    connection_refs: Vec::new(),
+                }],
+            }),
+            RegistryBlock::Connection(ConnectionBlock {
+                identity: BlockIdentity {
+                    id: "ambiguous-endpoint".to_owned(),
+                    name: "AmbiguousEndpoint".to_owned(),
+                },
+                connection_kind: ConnectionKind::Data,
+                from_ref: "build".to_owned(),
+                to_ref: "build.step".to_owned(),
+            }),
+        ])
+        .expect_err("cross-kind endpoint ambiguity rejected");
+
+        assert!(matches!(
+            err,
+            RegistryError::AmbiguousReference {
+                kind: "endpoint",
+                reference
+            } if reference == "build"
+        ));
     }
 
     #[test]
