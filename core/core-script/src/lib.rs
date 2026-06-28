@@ -408,9 +408,16 @@ impl ResolvedRegistry {
             for reference in &phase.tool_refs {
                 self.require_tool(reference, "phase", &phase.identity.id)?;
             }
+            let mut step_ids = BTreeSet::new();
             for step in &phase.steps {
                 if !is_valid_block_id(&step.id) {
                     return Err(RegistryError::InvalidBlockId(step.id.clone()));
+                }
+                if !step_ids.insert(step.id.as_str()) {
+                    return Err(RegistryError::DuplicateId {
+                        kind: "step",
+                        id: format!("{}.{}", phase.identity.id, step.id),
+                    });
                 }
             }
         }
@@ -3117,6 +3124,39 @@ mod tests {
                 .id,
             "inspect"
         );
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_phase_step_ids() {
+        let err = ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
+            identity: BlockIdentity {
+                id: "phase".to_owned(),
+                name: "Phase".to_owned(),
+            },
+            instruction_refs: Vec::new(),
+            tool_refs: Vec::new(),
+            steps: vec![
+                StepBlock {
+                    id: "attempt".to_owned(),
+                    name: "Attempt".to_owned(),
+                    connection_refs: Vec::new(),
+                },
+                StepBlock {
+                    id: "attempt".to_owned(),
+                    name: "Retry".to_owned(),
+                    connection_refs: Vec::new(),
+                },
+            ],
+        })])
+        .expect_err("duplicate phase-local step ids must fail");
+
+        assert!(matches!(
+            err,
+            RegistryError::DuplicateId {
+                kind: "step",
+                id,
+            } if id == "phase.attempt"
+        ));
     }
 
     #[test]
