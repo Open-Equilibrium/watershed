@@ -1253,7 +1253,7 @@ fn execute_tool(
         (
             core_script::ToolKind::PredefinedCommand,
             core_script::ToolCommand::Predefined { command_id, .. },
-        ) => Ok(predefined_command_progress(command_id)),
+        ) => predefined_command_progress(command_id),
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
             execute_own_script(workspace, tool, policy, timeout_ms, sequence)?;
             Ok(Some("stub write completed"))
@@ -1265,10 +1265,13 @@ fn execute_tool(
     }
 }
 
-fn predefined_command_progress(command_id: &str) -> Option<&'static str> {
+fn predefined_command_progress(command_id: &str) -> Result<Option<&'static str>, RuntimeError> {
     match command_id {
-        "agent-read" => Some("stub read completed"),
-        _ => None,
+        "agent-echo" => Ok(None),
+        "agent-read" => Ok(Some("stub read completed")),
+        _ => Err(RuntimeError::Protocol(format!(
+            "unsupported predefined command {command_id:?}"
+        ))),
     }
 }
 
@@ -3291,7 +3294,7 @@ mod tests {
     }
 
     #[test]
-    fn run_loop_executes_non_fixture_predefined_registry_command() {
+    fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
         let workspace = workspace_copy("smoke-loop");
         fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
         let tool_path = workspace.join("registry/tools/echo.yaml");
@@ -3302,13 +3305,17 @@ mod tests {
         )
         .expect("tool fixture rewritten");
 
-        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
-            .expect("custom predefined registry command executes");
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("unknown predefined command must fail closed");
 
-        assert!(!output.failed);
-        assert_eq!(output.event_count, 11);
-        assert!(output.stdout.contains("\"tool_id\":\"echo\""));
-        assert!(!output.stdout.contains("unsupported tool command"));
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported predefined command"))
+        );
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
     }
 
     #[test]
