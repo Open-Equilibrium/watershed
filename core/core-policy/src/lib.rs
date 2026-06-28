@@ -357,7 +357,7 @@ fn command_policy_from_tool(
         network,
         script_runtime,
         tool_id: tool.identity.id.clone(),
-        tool_kind: match tool.tool_kind {
+        tool_kind: match &tool.tool_kind {
             core_script::ToolKind::PredefinedCommand => ToolKind::PredefinedCommand,
             core_script::ToolKind::OwnScript => ToolKind::OwnScript,
         },
@@ -372,7 +372,7 @@ fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> Allowe
         max_length: parameter.max_length,
         min: parameter.min,
         value_pattern: parameter.value_pattern.clone(),
-        value_type: match parameter.value_type {
+        value_type: match &parameter.value_type {
             core_script::ParameterValueType::None => ParameterValueType::None,
             core_script::ParameterValueType::String => ParameterValueType::String,
             core_script::ParameterValueType::Integer => ParameterValueType::Integer,

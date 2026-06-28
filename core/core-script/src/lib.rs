@@ -1171,11 +1171,11 @@ fn allowed_parameters(
                         ));
                     }
                 };
-            if matches!(value_type, ParameterValueType::String) {
+            if matches!(&value_type, ParameterValueType::String) {
                 required_object_scalar(source_name, &object, "value_pattern")?;
                 required_object_scalar(source_name, &object, "max_length")?;
             }
-            if !matches!(value_type, ParameterValueType::Enum) && has_allowed_values {
+            if !matches!(&value_type, ParameterValueType::Enum) && has_allowed_values {
                 return Err(parse_error(
                     source_name,
                     "allowed_values is only valid for enum parameters".to_owned(),
@@ -1209,7 +1209,7 @@ fn allowed_parameters(
                     .transpose()?,
             })
             .and_then(|parameter| {
-                if matches!(parameter.value_type, ParameterValueType::Enum)
+                if matches!(&parameter.value_type, ParameterValueType::Enum)
                     && parameter.allowed_values.is_empty()
                 {
                     Err(parse_error(
