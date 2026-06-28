@@ -2931,7 +2931,7 @@ fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn parser_contract_records_decided_m0_shape() {
@@ -2971,6 +2971,831 @@ mod tests {
         );
         assert!(canonical.contains("\"hello-loop\""));
         assert!(canonical.contains("\"write-summary\""));
+    }
+
+    #[test]
+    fn public_parser_surfaces_resolve_all_block_kinds_and_canonical_output() {
+        assert_eq!(
+            serde_json::to_string(&NetworkDeny).expect("deny serializes"),
+            "\"deny\""
+        );
+        assert_eq!(
+            serde_json::from_str::<NetworkDeny>("\"deny\"").expect("deny deserializes"),
+            NetworkDeny
+        );
+        assert!(serde_json::from_str::<NetworkDeny>("\"allow\"").is_err());
+
+        let parser: &dyn ScriptParser = &V0ScriptParser;
+        let parsed = parser
+            .parse_registry_block(
+                "instruction.yaml",
+                "instruction:\n  id: inspect-instruction\n  name: InspectInstruction\n  prompt: Inspect\n",
+            )
+            .expect("trait parser dispatches to v0 parser");
+        let RegistryBlock::Instruction(instruction) = parsed else {
+            panic!("expected instruction block");
+        };
+
+        let mut tool = own_script_tool("write-summary", "script:write-summary");
+        tool.identity.name = "WriteSummary".to_owned();
+        tool.write_scope = vec!["out".to_owned()];
+        let phase = PhaseBlock {
+            identity: BlockIdentity {
+                id: "inspect-phase".to_owned(),
+                name: "InspectPhase".to_owned(),
+            },
+            instruction_refs: vec!["InspectInstruction".to_owned()],
+            tool_refs: vec!["WriteSummary".to_owned()],
+            steps: vec![StepBlock {
+                id: "collect".to_owned(),
+                name: "Collect".to_owned(),
+                connection_refs: vec!["data-link".to_owned()],
+            }],
+        };
+        let connection = ConnectionBlock {
+            identity: BlockIdentity {
+                id: "data-link".to_owned(),
+                name: "DataLink".to_owned(),
+            },
+            connection_kind: ConnectionKind::Data,
+            from_ref: "WriteSummary".to_owned(),
+            to_ref: "inspect-phase.collect".to_owned(),
+        };
+        let loop_block = LoopBlock {
+            identity: BlockIdentity {
+                id: "hello-loop".to_owned(),
+                name: "HelloLoop".to_owned(),
+            },
+            phase_refs: vec!["InspectPhase".to_owned()],
+            subloop_refs: Vec::new(),
+            connection_refs: vec!["DataLink".to_owned()],
+        };
+
+        let registry = ResolvedRegistry::from_blocks([
+            RegistryBlock::Tool(tool),
+            RegistryBlock::Instruction(instruction),
+            RegistryBlock::Phase(phase),
+            RegistryBlock::Connection(connection),
+            RegistryBlock::Loop(loop_block),
+        ])
+        .expect("all block kinds resolve by id or normalized name");
+
+        assert_eq!(
+            registry
+                .loop_block("HelloLoop")
+                .expect("loop by name")
+                .identity
+                .id,
+            "hello-loop"
+        );
+        assert_eq!(
+            registry
+                .phase_block("inspect-phase")
+                .expect("phase by id")
+                .identity
+                .name,
+            "InspectPhase"
+        );
+        assert_eq!(
+            registry
+                .tool_block("WriteSummary")
+                .expect("tool by name")
+                .identity
+                .id,
+            "write-summary"
+        );
+        assert_eq!(
+            registry
+                .instruction_block("InspectInstruction")
+                .expect("instruction by name")
+                .identity
+                .id,
+            "inspect-instruction"
+        );
+        assert_eq!(
+            registry
+                .connection_block("DataLink")
+                .expect("connection by name")
+                .identity
+                .id,
+            "data-link"
+        );
+
+        let without_newline = registry.canonical_json().expect("registry serializes");
+        assert!(!without_newline.ends_with('\n'));
+        let with_newline =
+            canonical_resolved_registry_json(&registry).expect("canonical registry serializes");
+        assert!(with_newline.ends_with('\n'));
+        assert!(with_newline.contains("\"connection_refs\":[\"DataLink\"]"));
+        assert!(with_newline.contains("\"subloop_refs\":[]"));
+    }
+
+    #[test]
+    fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
+        let root = temp_registry_dir("nested-registry");
+        std::fs::write(root.join("README.txt"), "ignored").expect("ignored file written");
+        std::fs::create_dir_all(root.join("nested")).expect("nested dir created");
+        std::fs::write(
+            root.join("nested").join("instruction.yml"),
+            "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
+        )
+        .expect("registry file written");
+
+        let registry = load_registry_root(root).expect("nested yml registry loads");
+
+        assert!(registry.instruction_block("Inspect").is_some());
+    }
+
+    #[test]
+    fn registry_and_parse_errors_report_sources_and_conversions() {
+        let io_error = RegistryError::Io {
+            path: PathBuf::from("registry"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
+        };
+        assert_eq!(io_error.to_string(), "registry: missing");
+        assert!(std::error::Error::source(&io_error).is_some());
+
+        let unsafe_path = RegistryError::UnsafePath {
+            path: PathBuf::from("registry/link"),
+            message: "symlink".to_owned(),
+        };
+        assert_eq!(unsafe_path.to_string(), "registry/link: symlink");
+        assert!(std::error::Error::source(&unsafe_path).is_none());
+
+        let cases = [
+            (
+                RegistryError::InvalidBlockId("Bad".to_owned()),
+                "invalid block id: Bad",
+            ),
+            (
+                RegistryError::InvalidCommandId("bad command".to_owned()),
+                "invalid command id: bad command",
+            ),
+            (
+                RegistryError::Parse {
+                    source_name: "bad.yaml".to_owned(),
+                    message: "bad shape".to_owned(),
+                },
+                "bad.yaml: bad shape",
+            ),
+            (
+                RegistryError::DuplicateId {
+                    kind: "tool",
+                    id: "echo".to_owned(),
+                },
+                "duplicate tool id: echo",
+            ),
+            (
+                RegistryError::AmbiguousReference {
+                    kind: "endpoint",
+                    reference: "build".to_owned(),
+                },
+                "ambiguous endpoint reference build matches both an id and a name",
+            ),
+            (
+                RegistryError::MissingReference {
+                    from_kind: "phase",
+                    from_id: "inspect".to_owned(),
+                    reference_kind: "tool",
+                    reference: "missing".to_owned(),
+                },
+                "phase inspect references missing tool missing",
+            ),
+            (
+                RegistryError::LoopCycle {
+                    loop_id: "root".to_owned(),
+                },
+                "loop cycle includes root",
+            ),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+            assert!(std::error::Error::source(&err).is_none());
+        }
+
+        let semantic = SemanticValidationError::ToolCommandKindMismatch {
+            tool_id: "bad-tool".to_owned(),
+            tool_kind: ToolKind::OwnScript,
+        };
+        assert_eq!(
+            semantic.to_string(),
+            "tool command shape does not match OwnScript: bad-tool"
+        );
+        let schema = SemanticValidationError::ToolSchemaViolation {
+            tool_id: "bad-tool".to_owned(),
+            message: "bad schema".to_owned(),
+        };
+        assert_eq!(
+            schema.to_string(),
+            "tool schema violation for bad-tool: bad schema"
+        );
+        let semantic_registry = RegistryError::from(schema.clone());
+        assert!(std::error::Error::source(&semantic_registry).is_some());
+        assert_eq!(semantic_registry.to_string(), schema.to_string());
+
+        let serialize_error = RegistryError::Serialize(
+            serde_json::from_str::<Value>("{").expect_err("invalid json produces serde error"),
+        );
+        assert!(serialize_error
+            .to_string()
+            .contains("failed to serialize resolved registry"));
+        assert!(std::error::Error::source(&serialize_error).is_some());
+
+        let parse_cases = [
+            (
+                ParseError::ContractOnly,
+                "M0 defines the parser contract; parser execution lands in M1",
+            ),
+            (
+                ParseError::InvalidBlockId("Bad".to_owned()),
+                "invalid block id: Bad",
+            ),
+            (
+                ParseError::InvalidCommandId("bad command".to_owned()),
+                "invalid command id: bad command",
+            ),
+            (ParseError::Parse("bad shape".to_owned()), "bad shape"),
+        ];
+        for (err, expected) in parse_cases {
+            assert_eq!(err.to_string(), expected);
+            assert!(std::error::Error::source(&err).is_none());
+        }
+        let semantic_parse = ParseError::from(semantic.clone());
+        assert_eq!(semantic_parse.to_string(), semantic.to_string());
+        assert!(std::error::Error::source(&semantic_parse).is_some());
+        assert!(matches!(
+            ParseError::from(RegistryError::InvalidBlockId("Bad".to_owned())),
+            ParseError::InvalidBlockId(value) if value == "Bad"
+        ));
+        assert!(matches!(
+            ParseError::from(RegistryError::InvalidCommandId("bad command".to_owned())),
+            ParseError::InvalidCommandId(value) if value == "bad command"
+        ));
+        assert!(matches!(
+            ParseError::from(RegistryError::from(semantic.clone())),
+            ParseError::Semantic(value) if value == semantic
+        ));
+        assert!(matches!(
+            ParseError::from(RegistryError::Parse {
+                source_name: "bad.yaml".to_owned(),
+                message: "bad shape".to_owned(),
+            }),
+            ParseError::Parse(message) if message == "bad.yaml: bad shape"
+        ));
+    }
+
+    #[test]
+    fn registry_reference_validation_reports_each_missing_reference_shape() {
+        let mut tool = own_script_tool("write-summary", "script:write-summary");
+        tool.script_body = None;
+        let err = validate_tool_semantics(&tool).expect_err("script body is required");
+        assert!(matches!(
+            err,
+            SemanticValidationError::ToolSchemaViolation { message, .. }
+                if message.contains("script_body")
+        ));
+
+        let mut tool = own_script_tool("write-summary", "script:write-summary");
+        tool.script_body = Some("   \n".to_owned());
+        let err = validate_tool_semantics(&tool).expect_err("blank script body is rejected");
+        assert!(matches!(
+            err,
+            SemanticValidationError::ToolSchemaViolation { message, .. }
+                if message.contains("non-empty")
+        ));
+
+        let mut tool = own_script_tool("write-summary", "script:write-summary");
+        tool.tool_kind = ToolKind::PredefinedCommand;
+        let err = validate_tool_semantics(&tool).expect_err("tool kind must match command shape");
+        assert!(matches!(
+            err,
+            SemanticValidationError::ToolCommandKindMismatch { .. }
+        ));
+
+        let missing_instruction =
+            ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
+                identity: BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: vec!["missing-instruction".to_owned()],
+                tool_refs: Vec::new(),
+                steps: vec![StepBlock {
+                    id: "step".to_owned(),
+                    name: "Step".to_owned(),
+                    connection_refs: Vec::new(),
+                }],
+            })])
+            .expect_err("missing instruction rejected");
+        assert!(matches!(
+            missing_instruction,
+            RegistryError::MissingReference {
+                reference_kind: "instruction",
+                ..
+            }
+        ));
+
+        let missing_tool = ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
+            identity: BlockIdentity {
+                id: "phase".to_owned(),
+                name: "Phase".to_owned(),
+            },
+            instruction_refs: Vec::new(),
+            tool_refs: vec!["missing-tool".to_owned()],
+            steps: vec![StepBlock {
+                id: "step".to_owned(),
+                name: "Step".to_owned(),
+                connection_refs: Vec::new(),
+            }],
+        })])
+        .expect_err("missing tool rejected");
+        assert!(matches!(
+            missing_tool,
+            RegistryError::MissingReference {
+                reference_kind: "tool",
+                ..
+            }
+        ));
+
+        let invalid_step = ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
+            identity: BlockIdentity {
+                id: "phase".to_owned(),
+                name: "Phase".to_owned(),
+            },
+            instruction_refs: Vec::new(),
+            tool_refs: Vec::new(),
+            steps: vec![StepBlock {
+                id: "BadStep".to_owned(),
+                name: "Step".to_owned(),
+                connection_refs: Vec::new(),
+            }],
+        })])
+        .expect_err("invalid step id rejected");
+        assert!(matches!(invalid_step, RegistryError::InvalidBlockId(value) if value == "BadStep"));
+
+        let missing_phase = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
+            identity: BlockIdentity {
+                id: "root".to_owned(),
+                name: "Root".to_owned(),
+            },
+            phase_refs: vec!["missing-phase".to_owned()],
+            subloop_refs: Vec::new(),
+            connection_refs: Vec::new(),
+        })])
+        .expect_err("missing phase rejected");
+        assert!(matches!(
+            missing_phase,
+            RegistryError::MissingReference {
+                reference_kind: "phase",
+                ..
+            }
+        ));
+
+        let missing_loop = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
+            identity: BlockIdentity {
+                id: "root".to_owned(),
+                name: "Root".to_owned(),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: vec!["missing-loop".to_owned()],
+            connection_refs: Vec::new(),
+        })])
+        .expect_err("missing loop rejected");
+        assert!(matches!(
+            missing_loop,
+            RegistryError::MissingReference {
+                reference_kind: "loop",
+                ..
+            }
+        ));
+
+        let missing_connection = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
+            identity: BlockIdentity {
+                id: "root".to_owned(),
+                name: "Root".to_owned(),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: Vec::new(),
+            connection_refs: vec!["missing-connection".to_owned()],
+        })])
+        .expect_err("missing connection rejected");
+        assert!(matches!(
+            missing_connection,
+            RegistryError::MissingReference {
+                reference_kind: "connection",
+                ..
+            }
+        ));
+
+        let missing_endpoint =
+            ResolvedRegistry::from_blocks([RegistryBlock::Connection(ConnectionBlock {
+                identity: BlockIdentity {
+                    id: "link".to_owned(),
+                    name: "Link".to_owned(),
+                },
+                connection_kind: ConnectionKind::Data,
+                from_ref: "missing-endpoint".to_owned(),
+                to_ref: "also-missing".to_owned(),
+            })])
+            .expect_err("missing endpoint rejected");
+        assert!(matches!(
+            missing_endpoint,
+            RegistryError::MissingReference {
+                reference_kind: "endpoint",
+                ..
+            }
+        ));
+
+        let missing_step_endpoint = ResolvedRegistry::from_blocks([
+            RegistryBlock::Phase(PhaseBlock {
+                identity: BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                tool_refs: Vec::new(),
+                steps: vec![StepBlock {
+                    id: "step".to_owned(),
+                    name: "Step".to_owned(),
+                    connection_refs: Vec::new(),
+                }],
+            }),
+            RegistryBlock::Connection(ConnectionBlock {
+                identity: BlockIdentity {
+                    id: "link".to_owned(),
+                    name: "Link".to_owned(),
+                },
+                connection_kind: ConnectionKind::Data,
+                from_ref: "phase.missing-step".to_owned(),
+                to_ref: "phase.step".to_owned(),
+            }),
+        ])
+        .expect_err("missing step endpoint rejected");
+        assert!(matches!(
+            missing_step_endpoint,
+            RegistryError::MissingReference {
+                reference_kind: "step",
+                ..
+            }
+        ));
+
+        let step_connection_not_declared_by_loop = ResolvedRegistry::from_blocks([
+            RegistryBlock::Phase(PhaseBlock {
+                identity: BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                tool_refs: Vec::new(),
+                steps: vec![StepBlock {
+                    id: "step".to_owned(),
+                    name: "Step".to_owned(),
+                    connection_refs: vec!["link".to_owned()],
+                }],
+            }),
+            RegistryBlock::Connection(ConnectionBlock {
+                identity: BlockIdentity {
+                    id: "link".to_owned(),
+                    name: "Link".to_owned(),
+                },
+                connection_kind: ConnectionKind::Data,
+                from_ref: "phase.step".to_owned(),
+                to_ref: "phase.step".to_owned(),
+            }),
+            RegistryBlock::Loop(LoopBlock {
+                identity: BlockIdentity {
+                    id: "root".to_owned(),
+                    name: "Root".to_owned(),
+                },
+                phase_refs: vec!["phase".to_owned()],
+                subloop_refs: Vec::new(),
+                connection_refs: Vec::new(),
+            }),
+        ])
+        .expect_err("step connection must be declared by loop");
+        assert!(matches!(
+            step_connection_not_declared_by_loop,
+            RegistryError::MissingReference {
+                reference_kind: "step connection",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
+        fn message<T: std::fmt::Debug>(result: Result<T, RegistryError>) -> String {
+            result.expect_err("expected registry error").to_string()
+        }
+
+        let declared_network = parse_registry_block(
+            "network-tool.yaml",
+            r#"tool:
+  id: network-tool
+  name: NetworkTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --count
+      value_type: integer
+      required: true
+      min: -5
+      max: 10
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network:
+    default: deny
+    allow:
+      - kind: cidr
+        transport: udp
+        cidr: 192.0.2.0/24
+        port: 53
+"#,
+        )
+        .expect("declared deny-default network parses");
+        let RegistryBlock::Tool(tool) = declared_network else {
+            panic!("expected tool block");
+        };
+        assert_eq!(tool.allowed_parameters[0].min, Some(-5));
+        assert!(matches!(
+            tool.network,
+            NetworkPolicy::Declared { allow, .. }
+                if allow[0].transport == NetworkTransport::Udp && allow[0].port == 53
+        ));
+
+        for (name, source, expected) in [
+            ("unsupported-kind.yaml", "unknown:\n  id: bad\n", "unsupported registry block kind"),
+            (
+                "tab.yaml",
+                "instruction:\n\tid: bad\n",
+                "tab indentation character",
+            ),
+            (
+                "anchor.yaml",
+                "instruction:\n  id: bad\n  name: Bad\n  prompt: Inspect\n  <<: *base\n",
+                "unsupported YAML syntax",
+            ),
+            ("bad-top.yaml", "instruction: Bad\n", "top-level line"),
+            (
+                "two-blocks.yaml",
+                "instruction:\n  id: first\n  name: First\n  prompt: Inspect\nloop:\n  id: second\n  name: Second\n  phase_refs: []\n",
+                "exactly one top-level block",
+            ),
+            (
+                "missing-network.yaml",
+                "tool:\n  id: missing-network\n  name: MissingNetwork\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n",
+                "missing tool.network",
+            ),
+            (
+                "bad-network-scalar.yaml",
+                "tool:\n  id: bad-network\n  name: BadNetwork\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: allow\n",
+                "unsupported network policy",
+            ),
+            (
+                "bad-network-default.yaml",
+                "tool:\n  id: bad-default\n  name: BadDefault\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: allow\n    allow: []\n",
+                "unsupported network default",
+            ),
+            (
+                "bad-network-kind.yaml",
+                "tool:\n  id: bad-kind\n  name: BadKind\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: deny\n    allow:\n      - kind: host\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
+                "unsupported network allow kind",
+            ),
+            (
+                "bad-network-transport.yaml",
+                "tool:\n  id: bad-transport\n  name: BadTransport\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: icmp\n        cidr: 192.0.2.0/24\n        port: 443\n",
+                "unsupported network transport",
+            ),
+            (
+                "bad-tool-kind.yaml",
+                "tool:\n  id: bad-tool-kind\n  name: BadToolKind\n  tool_kind: custom\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "unsupported tool_kind",
+            ),
+            (
+                "bad-command-id.yaml",
+                "tool:\n  id: bad-command-id\n  name: BadCommandId\n  tool_kind: predefined-command\n  command:\n    command_id: BadCommand\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "invalid command id",
+            ),
+            (
+                "bad-runtime.yaml",
+                "tool:\n  id: bad-runtime\n  name: BadRuntime\n  tool_kind: own-script\n  command: script:bad-runtime\n  script_runtime: python\n  script_body: echo bad\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "unsupported script_runtime",
+            ),
+            (
+                "bad-connection-kind.yaml",
+                "connection:\n  id: link\n  name: Link\n  connection_kind: control\n  from_ref: a\n  to_ref: b\n",
+                "unsupported connection_kind",
+            ),
+            (
+                "bad-id.yaml",
+                "instruction:\n  id: Bad\n  name: Bad\n  prompt: Inspect\n",
+                "invalid block id",
+            ),
+            (
+                "bad-parameter-type.yaml",
+                "tool:\n  id: bad-parameter\n  name: BadParameter\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --value\n      value_type: bytes\n      required: true\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "unsupported parameter value_type",
+            ),
+            (
+                "enum-without-values.yaml",
+                "tool:\n  id: enum-without-values\n  name: EnumWithoutValues\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --mode\n      value_type: enum\n      required: true\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "enum parameters must declare",
+            ),
+            (
+                "bad-step-id.yaml",
+                "phase:\n  id: phase\n  name: Phase\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: BadStep\n      name: Step\n",
+                "invalid block id",
+            ),
+        ] {
+            assert!(
+                message(parse_registry_block(name, source)).contains(expected),
+                "{name}"
+            );
+        }
+
+        let scalar_shape = ScalarListShape {
+            section: "tool",
+            parent: None,
+            field: "read_scope",
+            field_indent: 2,
+            item_indent: 4,
+        };
+        assert!(
+            block_string_list("empty-list.yaml", "tool:\n  read_scope: []\n", scalar_shape,)
+                .expect("empty list parses")
+                .is_empty()
+        );
+        assert_eq!(
+            block_string_list(
+                "inline-list.yaml",
+                "tool:\n  read_scope: [workspace]\n",
+                scalar_shape,
+            )
+            .expect("inline list parses"),
+            vec!["workspace"]
+        );
+        assert!(message(block_string_list(
+            "bad-list-indent.yaml",
+            "tool:\n  read_scope:\n   - workspace\n",
+            scalar_shape,
+        ))
+        .contains("unsupported list indentation"));
+        assert!(message(block_string_list(
+            "missing-list.yaml",
+            "tool:\n  write_scope: []\n",
+            scalar_shape,
+        ))
+        .contains("missing tool.read_scope"));
+
+        let nested_scalar_shape = ScalarListShape {
+            section: "tool",
+            parent: Some("command"),
+            field: "argv",
+            field_indent: 4,
+            item_indent: 6,
+        };
+        assert_eq!(
+            block_string_list(
+                "nested-inline-list.yaml",
+                "tool:\n  command:\n    argv: [--message]\n",
+                nested_scalar_shape,
+            )
+            .expect("nested inline list parses"),
+            vec!["--message"]
+        );
+
+        assert_eq!(
+            parse_literal_block_scalar(
+                "strip-block.yaml",
+                "tool:\n  script_body: |-\n    echo ok\n\n",
+                "tool",
+                "script_body",
+                "|-",
+            )
+            .expect("strip chomping parses"),
+            "echo ok"
+        );
+        assert!(message(parse_literal_block_scalar(
+            "missing-block.yaml",
+            "tool:\n  script_body: echo ok\n",
+            "tool",
+            "script_body",
+            "|",
+        ))
+        .contains("missing tool.script_body block scalar"));
+        assert!(message(parse_literal_block_scalar(
+            "inconsistent-block.yaml",
+            "tool:\n  script_body: |\n    echo ok\n   bad\n",
+            "tool",
+            "script_body",
+            "|",
+        ))
+        .contains("inconsistent indentation"));
+        assert!(message(parse_literal_block_scalar(
+            "empty-block.yaml",
+            "tool:\n  script_body: |\n\n",
+            "tool",
+            "script_body",
+            "|",
+        ))
+        .contains("must be non-empty"));
+
+        let object_shape = ListObjectShape {
+            section: "phase",
+            parent: None,
+            field: "steps",
+            field_indent: 2,
+            item_indent: 4,
+            property_indent: 6,
+        };
+        let object = list_objects(
+            "step-list.yaml",
+            "phase:\n  steps:\n    - id: step\n      name: Step\n      connection_refs:\n        - link\n",
+            object_shape,
+        )
+        .expect("object list parses");
+        assert_eq!(object[0]["connection_refs"], "[\"link\"]");
+        for (name, source, expected) in [
+            (
+                "steps-not-list.yaml",
+                "phase:\n  steps: bad\n",
+                "phase.steps must be a list",
+            ),
+            (
+                "steps-property-before-item.yaml",
+                "phase:\n  steps:\n      name: Step\n",
+                "property appears before list item",
+            ),
+            (
+                "steps-malformed-property.yaml",
+                "phase:\n  steps:\n    - id step\n",
+                "must use key: value",
+            ),
+            (
+                "steps-empty-property.yaml",
+                "phase:\n  steps:\n    - id:\n",
+                "must use key: value",
+            ),
+            (
+                "steps-duplicate-property.yaml",
+                "phase:\n  steps:\n    - id: step\n      id: again\n",
+                "duplicate list object property id",
+            ),
+            (
+                "steps-bad-indent.yaml",
+                "phase:\n  steps:\n     - id: step\n",
+                "uses unsupported indentation",
+            ),
+            (
+                "steps-missing.yaml",
+                "phase:\n  name: Phase\n",
+                "missing phase.steps",
+            ),
+        ] {
+            assert!(
+                message(list_objects(name, source, object_shape)).contains(expected),
+                "{name}"
+            );
+        }
+
+        for (value, expected) in [
+            ("not-a-list", "must be an inline YAML list"),
+            ("[\"unterminated]", "unterminated"),
+            ("[,]", "empty list item"),
+            ("['unterminated]", "unterminated"),
+            ("[true]", "list items must be strings"),
+        ] {
+            assert!(
+                message(parse_inline_yaml_list("inline-list.yaml", "argv", value))
+                    .contains(expected),
+                "{value}"
+            );
+        }
+        assert_eq!(
+            parse_inline_yaml_list("inline-list.yaml", "argv", r#"["a,b", 'can''t']"#)
+                .expect("quoted list parses"),
+            vec!["a,b", "can't"]
+        );
+
+        for (value, expected) in [
+            ("\"\\q\"", "unsupported escape"),
+            ("\"\\xZ0\"", "invalid \\x escape digit"),
+            ("\"\\u12\"", "incomplete \\u escape"),
+            ("\"\\U00110000\"", "invalid \\U Unicode scalar"),
+            ("'bad'apostrophe'", "malformed single-quoted scalar"),
+        ] {
+            assert!(
+                message(unquote_yaml_scalar("quoted.yaml", "field", value)).contains(expected),
+                "{value}"
+            );
+        }
+
+        assert!(message(parse_bool("bool.yaml", "required", "maybe")).contains("true or false"));
+        assert!(message(parse_u16("port.yaml", "port", "70000")).contains("16-bit integer"));
+        assert!(message(parse_i64("int.yaml", "min", "abc")).contains("64-bit integer"));
     }
 
     #[cfg(unix)]
