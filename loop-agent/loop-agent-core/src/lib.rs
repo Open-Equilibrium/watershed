@@ -6,9 +6,8 @@ use std::{
     fmt, fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
@@ -1277,8 +1276,8 @@ fn execute_own_script(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     policy: &core_policy::CommandPolicy,
-    timeout_ms: u64,
-    sequence: u64,
+    _timeout_ms: u64,
+    _sequence: u64,
 ) -> Result<(), RuntimeError> {
     if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
         return Err(RuntimeError::Protocol(format!(
@@ -1292,87 +1291,47 @@ fn execute_own_script(
             tool.identity.id
         ))
     })?;
-    prepare_own_script_write_targets(workspace, policy, script_body)?;
-
-    let script_dir = workspace.join(LOCAL_LOG_DIR).join("scripts");
-    ensure_real_directory(&script_dir)?;
-    let script_path = script_dir.join(format!("{}-{sequence}.sh", tool.identity.id));
-    ensure_writable_regular_leaf(&script_path)?;
-    fs::write(&script_path, script_body).map_err(|source| RuntimeError::Io {
-        path: script_path.clone(),
-        source,
-    })?;
-
-    let mut child = Command::new("sh")
-        .arg(&script_path)
-        .current_dir(workspace)
-        .env_clear()
-        .env("SUMMARY", "hello")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| RuntimeError::Io {
-            path: PathBuf::from("sh"),
-            source,
-        })?;
-    let deadline = Duration::from_millis(timeout_ms.max(1));
-    let started = Instant::now();
-    loop {
-        if child
-            .try_wait()
-            .map_err(|source| RuntimeError::Io {
-                path: script_path.clone(),
-                source,
-            })?
-            .is_some()
-        {
-            let output = child
-                .wait_with_output()
-                .map_err(|source| RuntimeError::Io {
-                    path: script_path.clone(),
-                    source,
-                })?;
-            if output.status.success() {
-                return Ok(());
+    let operations = compile_own_script_operations(policy, script_body)?;
+    for operation in operations {
+        match operation {
+            ScriptOperation::Noop => {}
+            ScriptOperation::Write { contents, target } => {
+                write_script_output(workspace, &target, &contents)?;
             }
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(RuntimeError::Protocol(format!(
-                "tool {} exited with status {}: {}",
-                tool.identity.id,
-                output.status,
-                stderr.trim()
-            )));
-        }
-        if started.elapsed() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(RuntimeError::Protocol(format!(
-                "tool {} timed out after {timeout_ms} ms",
-                tool.identity.id
-            )));
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-fn prepare_own_script_write_targets(
-    workspace: &Path,
-    policy: &core_policy::CommandPolicy,
-    script_body: &str,
-) -> Result<(), RuntimeError> {
-    for line in script_body.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some(target) = script_redirection_target(line)? {
-            prepare_script_write_target(workspace, policy, &target)?;
         }
     }
     Ok(())
 }
 
-fn script_redirection_target(line: &str) -> Result<Option<String>, RuntimeError> {
+enum ScriptOperation {
+    Noop,
+    Write { contents: Vec<u8>, target: String },
+}
+
+fn compile_own_script_operations(
+    policy: &core_policy::CommandPolicy,
+    script_body: &str,
+) -> Result<Vec<ScriptOperation>, RuntimeError> {
+    let mut operations = Vec::new();
+    for line in script_body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line == "---" {
+            operations.push(ScriptOperation::Noop);
+            continue;
+        }
+        if let Some((command, target)) = script_redirection(line)? {
+            let target = validate_script_write_target(policy, &target)?;
+            let contents = evaluate_script_command(&command)?;
+            operations.push(ScriptOperation::Write { contents, target });
+        } else {
+            evaluate_script_command(line)?;
+            operations.push(ScriptOperation::Noop);
+        }
+    }
+    Ok(operations)
+}
+
+fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
     if line.contains(">>") {
         return Err(RuntimeError::Protocol(
             "own-script append redirection is not supported in M1".to_owned(),
@@ -1386,8 +1345,17 @@ fn script_redirection_target(line: &str) -> Result<Option<String>, RuntimeError>
             "own-script multiple redirections are not supported in M1".to_owned(),
         ));
     }
+    let command = line
+        .split_once('>')
+        .map(|(command, _)| command.trim())
+        .expect("split_once found redirection");
+    if command.is_empty() {
+        return Err(RuntimeError::Protocol(
+            "own-script redirection must include a command".to_owned(),
+        ));
+    }
     let target = unquote_script_path(target.trim())?;
-    Ok(Some(target))
+    Ok(Some((command.to_owned(), target)))
 }
 
 fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
@@ -1406,11 +1374,10 @@ fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
     }
 }
 
-fn prepare_script_write_target(
-    workspace: &Path,
+fn validate_script_write_target(
     policy: &core_policy::CommandPolicy,
     target: &str,
-) -> Result<(), RuntimeError> {
+) -> Result<String, RuntimeError> {
     let relative = normalize_script_write_target(target)?;
     let scoped = format!("workspace/{relative}");
     if !policy
@@ -1424,11 +1391,30 @@ fn prepare_script_write_target(
             policy.tool_id
         )));
     }
-    let path = workspace.join(relative);
+    Ok(relative)
+}
+
+fn write_script_output(
+    workspace: &Path,
+    target: &str,
+    contents: &[u8],
+) -> Result<(), RuntimeError> {
+    let path = workspace.join(target);
     if let Some(parent) = path.parent() {
         ensure_real_directory(parent)?;
     }
-    ensure_writable_regular_leaf(&path)
+    ensure_writable_regular_leaf(&path)?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    file.write_all(contents)
+        .map_err(|source| RuntimeError::Io { path, source })
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
@@ -1454,6 +1440,91 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
         parts.push(part);
     }
     Ok(parts.join("/"))
+}
+
+fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
+    let command = command.trim();
+    if let Some(rest) = command.strip_prefix("printf ") {
+        evaluate_printf_command(rest)
+    } else if let Some(rest) = command.strip_prefix("echo ") {
+        let mut out = unquote_script_argument(rest.trim())?;
+        out.push('\n');
+        Ok(out.into_bytes())
+    } else {
+        Err(RuntimeError::Protocol(format!(
+            "unsupported own-script command {command:?}"
+        )))
+    }
+}
+
+fn evaluate_printf_command(rest: &str) -> Result<Vec<u8>, RuntimeError> {
+    let (format, rest) = parse_single_quoted_argument(rest.trim())?;
+    let rest = rest.trim();
+    let formatted = if rest.is_empty() {
+        decode_printf_escapes(&format)?
+    } else if matches!(rest, "\"$SUMMARY\"" | "$SUMMARY") {
+        decode_printf_escapes(&format)?.replacen("%s", "hello", 1)
+    } else {
+        return Err(RuntimeError::Protocol(format!(
+            "unsupported own-script printf argument {rest:?}"
+        )));
+    };
+    Ok(formatted.into_bytes())
+}
+
+fn parse_single_quoted_argument(value: &str) -> Result<(String, &str), RuntimeError> {
+    let Some(rest) = value.strip_prefix('\'') else {
+        return Err(RuntimeError::Protocol(
+            "own-script printf format must be single-quoted".to_owned(),
+        ));
+    };
+    let Some(end) = rest.find('\'') else {
+        return Err(RuntimeError::Protocol(
+            "own-script printf format is unterminated".to_owned(),
+        ));
+    };
+    Ok((rest[..end].to_owned(), &rest[end + 1..]))
+}
+
+fn decode_printf_escapes(value: &str) -> Result<String, RuntimeError> {
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                return Err(RuntimeError::Protocol(format!(
+                    "unsupported own-script printf escape \\{other}"
+                )));
+            }
+            None => {
+                return Err(RuntimeError::Protocol(
+                    "own-script printf format contains a dangling escape".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        Ok(value[1..value.len() - 1].to_owned())
+    } else if value.contains(['$', '`', '\\']) {
+        Err(RuntimeError::Protocol(format!(
+            "unsupported own-script argument {value:?}"
+        )))
+    } else {
+        Ok(value.to_owned())
+    }
 }
 
 fn emit_tool_progress(
@@ -3126,6 +3197,35 @@ mod tests {
             .expect_err("undeclared write scope must fail");
 
         assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("write scope")));
+        assert!(!workspace.join("out/summary.txt").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn run_loop_rejects_unsupported_own_script_before_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source.replace(
+                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n    cat ../outside.txt",
+            ),
+        )
+        .expect("tool fixture rewritten");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("unsupported own-script command must reject");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
+        );
         assert!(!workspace.join("out/summary.txt").exists());
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
