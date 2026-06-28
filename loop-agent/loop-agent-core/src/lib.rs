@@ -541,6 +541,7 @@ fn write_session_log(
     result
 }
 
+#[cfg(test)]
 fn write_reserved_session_log(
     reservation: &SessionReservation,
     session_id: &str,
@@ -569,7 +570,7 @@ fn write_initial_session_log(
     )
     .canonical_jsonl()
     .map_err(|err| RuntimeError::Protocol(format!("failed to serialize initial event: {err}")))?;
-    write_reserved_session_log(reservation, session_id, &stream, 1)
+    write_existing_file(&reservation.session_path, stream.as_bytes())
 }
 
 fn complete_reserved_session_log(

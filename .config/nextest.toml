@@ -1,0 +1,3 @@
+[[profile.default.overrides]]
+filter = 'test(m1_performance_budgets_hold_for_fixture_runtime) | test(event_validation_p95_stays_under_m1_budget) | test(noop_dispatch_p95_stays_under_m1_budget) | test(hello_loop_log_append_p95_stays_under_m1_budget) | test(ten_fixture_loop_invocations_complete_under_m1_runtime_contract)'
+threads-required = "num-cpus"
