@@ -1670,8 +1670,8 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
 }
 
 fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
-    let pattern = pattern.replace('\\', "/");
-    let path = path.replace('\\', "/");
+    let pattern = normalize_protected_path_match_input(pattern);
+    let path = normalize_protected_path_match_input(path);
     let pattern_segments = pattern
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -1681,6 +1681,10 @@ fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
         .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>();
     protected_segments_match(&pattern_segments, &path_segments)
+}
+
+fn normalize_protected_path_match_input(value: &str) -> String {
+    value.replace('\\', "/").to_ascii_lowercase()
 }
 
 fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
@@ -3541,6 +3545,40 @@ mod tests {
             matches!(err, RuntimeError::Protocol(message) if message.contains("protected path"))
         );
         assert!(!workspace.join(".env").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn run_loop_rejects_protected_own_script_case_variant_without_grant() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source
+                .replace(
+                    "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+                    "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > .ENV",
+                )
+                .replace(
+                    r#"write_scope: ["workspace/out"]"#,
+                    r#"write_scope: ["workspace"]"#,
+                ),
+        )
+        .expect("tool fixture rewritten");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("case variant of a protected path must reject");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("protected path"))
+        );
+        assert!(!workspace.join(".ENV").exists());
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
             .join("hello001.jsonl")
