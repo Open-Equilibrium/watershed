@@ -1495,6 +1495,12 @@ fn ensure_opened_regular_leaf_matches_path(
             path.display()
         )));
     }
+    if hard_link_count(&file_metadata) > 1 {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be hard-linked",
+            path.display()
+        )));
+    }
 
     Ok(())
 }
@@ -1509,6 +1515,18 @@ fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 #[cfg(not(unix))]
 fn same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
     true
+}
+
+#[cfg(unix)]
+fn hard_link_count(metadata: &fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+
+    metadata.nlink()
+}
+
+#[cfg(not(unix))]
+fn hard_link_count(_metadata: &fs::Metadata) -> u64 {
+    1
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
@@ -4057,6 +4075,32 @@ mod tests {
 
         assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
         assert!(!outside.join("summary.txt").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        let outside = empty_workspace("outside-summary-hardlink");
+        let outside_target = outside.join("summary.txt");
+        fs::write(&outside_target, "outside\n").expect("outside target written");
+        fs::create_dir_all(workspace.join("out")).expect("out dir");
+        fs::hard_link(&outside_target, workspace.join("out/summary.txt"))
+            .expect("summary hard link");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("hard-linked summary leaf must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside target readable"),
+            "outside\n"
+        );
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
             .join("hello001.jsonl")
