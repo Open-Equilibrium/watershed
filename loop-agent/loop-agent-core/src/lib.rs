@@ -2480,7 +2480,132 @@ fn validate_session_log_text(
             path.display()
         )));
     }
+    validate_session_lifecycle(path, &events)?;
     Ok(events)
+}
+
+fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(), RuntimeError> {
+    if events
+        .first()
+        .expect("validated streams contain at least one event")
+        .event_type
+        != EventType::SessionStarted
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "{} line 1 must start with session.started",
+            path.display()
+        )));
+    }
+
+    let mut started_loops = BTreeSet::new();
+    let mut started_steps = BTreeSet::new();
+    let mut started_tools = BTreeSet::new();
+
+    for (index, event) in events.iter().enumerate() {
+        let line_number = index + 1;
+        if line_number > 1 && event.event_type == EventType::SessionStarted {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} session.started is only valid as the first event",
+                path.display()
+            )));
+        }
+
+        if event.event_type != EventType::LoopStarted {
+            if let Some(loop_id) = &event.loop_id {
+                if !started_loops.contains(loop_id) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
+                        path.display(),
+                        event.event_type.as_str()
+                    )));
+                }
+            }
+        }
+
+        match event.event_type {
+            EventType::LoopStarted => {
+                started_loops.insert(require_lifecycle_loop_id(path, line_number, event)?);
+            }
+            EventType::LoopCompleted | EventType::LoopFailed => {
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                if !started_loops.contains(&loop_id) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
+                        path.display(),
+                        event.event_type.as_str()
+                    )));
+                }
+            }
+            EventType::StepStarted => {
+                started_steps.insert(lifecycle_payload_key(event, "step_id"));
+            }
+            EventType::StepCompleted => {
+                let step = lifecycle_payload_key(event, "step_id");
+                if !started_steps.contains(&step) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} step.completed must follow step.started for step_id {:?}",
+                        path.display(),
+                        step.1
+                    )));
+                }
+            }
+            EventType::ToolStarted => {
+                started_tools.insert(lifecycle_payload_key(event, "tool_id"));
+            }
+            EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
+                let tool = lifecycle_payload_key(event, "tool_id");
+                if !started_tools.contains(&tool) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} {} must follow tool.started for tool_id {:?}",
+                        path.display(),
+                        event.event_type.as_str(),
+                        tool.1
+                    )));
+                }
+            }
+            EventType::ToolFailed => {
+                // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
+            }
+            EventType::SessionStarted
+            | EventType::SessionPaused
+            | EventType::SessionResumed
+            | EventType::SessionCompleted
+            | EventType::SessionFailed
+            | EventType::PhaseEntered
+            | EventType::MessageDelta
+            | EventType::MessageCompleted
+            | EventType::ArtifactLogged
+            | EventType::AttentionRequested
+            | EventType::MetricSample
+            | EventType::Error => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn require_lifecycle_loop_id(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+) -> Result<String, RuntimeError> {
+    event.loop_id.clone().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number} {} must include loop_id",
+            path.display(),
+            event.event_type.as_str()
+        ))
+    })
+}
+
+fn lifecycle_payload_key(event: &EventEnvelope, field: &str) -> (Option<String>, String) {
+    let value = event
+        .payload
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .expect("payload contract validation ensures lifecycle key fields are strings")
+        .to_owned();
+    (event.loop_id.clone(), value)
 }
 
 fn stream_is_failed(events: &[EventEnvelope]) -> bool {
@@ -2962,6 +3087,105 @@ mod tests {
             .expect_err("session id mismatch must fail");
 
         assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("expected")));
+    }
+
+    #[test]
+    fn resume_rejects_session_log_without_started_event() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("missing-start.jsonl");
+        let event = EventEnvelope::new(
+            "evt-001",
+            EventType::ToolCompleted,
+            "missing-start",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({
+                "exit_code": 0,
+                "tool_id": "read-fixture",
+            }),
+        )
+        .canonical_jsonl()
+        .expect("tool event serializes");
+        fs::write(&path, &event).expect("malformed lifecycle log written");
+
+        let err = resume_session(&workspace, "missing-start", EmitMode::Jsonl)
+            .expect_err("missing-start log must not resume");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("must start with session.started"))
+        );
+        assert_eq!(
+            fs::read_to_string(&path).expect("malformed lifecycle log remains readable"),
+            event
+        );
+    }
+
+    #[test]
+    fn resume_rejects_tool_completion_without_tool_start() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("missing-tool-start.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "missing-tool-start",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("session event serializes");
+        let loop_started = EventEnvelope {
+            loop_id: Some("loop-001".to_owned()),
+            ..EventEnvelope::new(
+                "evt-002",
+                EventType::LoopStarted,
+                "missing-tool-start",
+                2,
+                "2026-01-01T00:00:01Z",
+                "loop-agent-cli",
+                serde_json::json!({
+                    "loop_definition_id": "smoke-loop",
+                }),
+            )
+        }
+        .canonical_jsonl()
+        .expect("loop event serializes");
+        let tool_completed = EventEnvelope {
+            loop_id: Some("loop-001".to_owned()),
+            ..EventEnvelope::new(
+                "evt-003",
+                EventType::ToolCompleted,
+                "missing-tool-start",
+                3,
+                "2026-01-01T00:00:02Z",
+                "loop-agent-cli",
+                serde_json::json!({
+                    "exit_code": 0,
+                    "tool_id": "echo",
+                }),
+            )
+        }
+        .canonical_jsonl()
+        .expect("tool event serializes");
+        let before = format!("{started}{loop_started}{tool_completed}");
+        fs::write(&path, &before).expect("malformed tool lifecycle log written");
+
+        let err = resume_session(&workspace, "missing-tool-start", EmitMode::Jsonl)
+            .expect_err("missing tool start log must not resume");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("tool.completed must follow tool.started"))
+        );
+        assert_eq!(
+            fs::read_to_string(&path).expect("malformed tool lifecycle log remains readable"),
+            before
+        );
     }
 
     #[test]
