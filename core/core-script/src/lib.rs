@@ -2657,10 +2657,34 @@ fn unquote_yaml_scalar(
         }
         Ok(out)
     } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
-        Ok(value[1..value.len() - 1].to_owned())
+        decode_yaml_single_quoted_scalar(source_name, field, value)
     } else {
         Ok(value.to_owned())
     }
+}
+
+fn decode_yaml_single_quoted_scalar(
+    source_name: &str,
+    field: &str,
+    value: &str,
+) -> Result<String, RegistryError> {
+    let mut out = String::new();
+    let mut chars = value[1..value.len() - 1].chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\'' {
+            if chars.next_if_eq(&'\'').is_some() {
+                out.push('\'');
+            } else {
+                return Err(parse_error(
+                    source_name,
+                    format!("{field} contains a malformed single-quoted scalar"),
+                ));
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    Ok(out)
 }
 
 fn decode_yaml_double_quoted_escape(
@@ -3953,6 +3977,62 @@ tool:
                 argv: vec!["1".to_owned(), "false".to_owned()],
             }
         );
+    }
+
+    #[test]
+    fn parser_decodes_yaml_single_quoted_apostrophes() {
+        let block = parse_registry_block(
+            "single-quoted-scalars.yaml",
+            r#"tool:
+  id: single-quoted-tool
+  name: 'Bob''s Tool'
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: ['Bob''s arg']
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("single-quoted scalars parse");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(tool.identity.name, "Bob's Tool");
+        assert_eq!(
+            tool.command,
+            ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv: vec!["Bob's arg".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn parser_rejects_malformed_yaml_single_quoted_apostrophes() {
+        let err = parse_registry_block(
+            "malformed-single-quoted-scalar.yaml",
+            r#"tool:
+  id: malformed-single-quoted-tool
+  name: 'Bob's Tool'
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("single-quoted scalar with bare apostrophe rejected");
+
+        assert!(err.to_string().contains("single-quoted"));
     }
 
     #[test]
