@@ -544,19 +544,6 @@ impl ResolvedRegistry {
     }
 
     fn require_endpoint(&self, reference: &str, connection_id: &str) -> Result<(), RegistryError> {
-        if let Some((phase_ref, step_id)) = reference.split_once('.') {
-            let phase = self.require_phase(phase_ref, "connection", connection_id)?;
-            if phase.steps.iter().any(|step| step.id == step_id) {
-                return Ok(());
-            }
-            return Err(RegistryError::MissingReference {
-                from_kind: "connection",
-                from_id: connection_id.to_owned(),
-                reference_kind: "step",
-                reference: reference.to_owned(),
-            });
-        }
-
         let matches = [
             self.tool_block(reference).is_some(),
             self.instruction_block(reference).is_some(),
@@ -579,6 +566,24 @@ impl ResolvedRegistry {
                 reference: reference.to_owned(),
             }),
         }
+        .or_else(|err| {
+            if !matches!(err, RegistryError::MissingReference { .. }) {
+                return Err(err);
+            }
+            let Some((phase_ref, step_id)) = reference.split_once('.') else {
+                return Err(err);
+            };
+            let phase = self.require_phase(phase_ref, "connection", connection_id)?;
+            if phase.steps.iter().any(|step| step.id == step_id) {
+                return Ok(());
+            }
+            Err(RegistryError::MissingReference {
+                from_kind: "connection",
+                from_id: connection_id.to_owned(),
+                reference_kind: "step",
+                reference: reference.to_owned(),
+            })
+        })
     }
 
     fn validate_loop_cycles(&self) -> Result<(), RegistryError> {
@@ -3007,6 +3012,42 @@ mod tests {
                 reference
             } if reference == "build"
         ));
+    }
+
+    #[test]
+    fn connection_endpoint_resolves_dotted_block_name_before_step_syntax() {
+        let mut tool = own_script_tool("read-file", "script:read-file");
+        tool.identity.name = "Read.File".to_owned();
+
+        let registry = ResolvedRegistry::from_blocks([
+            RegistryBlock::Tool(tool),
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "sink".to_owned(),
+                    name: "Sink".to_owned(),
+                },
+                prompt: "Consume".to_owned(),
+            }),
+            RegistryBlock::Connection(ConnectionBlock {
+                identity: BlockIdentity {
+                    id: "dotted-endpoint".to_owned(),
+                    name: "DottedEndpoint".to_owned(),
+                },
+                connection_kind: ConnectionKind::Data,
+                from_ref: "Read.File".to_owned(),
+                to_ref: "sink".to_owned(),
+            }),
+        ])
+        .expect("dotted exact endpoint name resolves before phase.step syntax");
+
+        assert_eq!(
+            registry
+                .tool_block("Read.File")
+                .expect("dotted name resolves")
+                .identity
+                .id,
+            "read-file"
+        );
     }
 
     #[test]
