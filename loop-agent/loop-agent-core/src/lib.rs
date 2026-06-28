@@ -195,17 +195,13 @@ pub fn run_loop(
 
     let result = (|| {
         let stream = canonical_event_stream(&runtime.events)?;
-        let events = validate_protocol_jsonl_text(Path::new("runtime.jsonl"), &stream)?;
+        let events =
+            validate_session_log_text(Path::new("runtime.jsonl"), &expected_session_id, &stream)?;
         let session_id = events
             .first()
             .expect("validated streams contain at least one event")
             .session_id
             .clone();
-        if session_id != expected_session_id {
-            return Err(RuntimeError::Protocol(format!(
-                "runtime emitted session_id {session_id:?}, expected {expected_session_id:?}"
-            )));
-        }
         let failed = runtime.failed;
         if failed {
             let fixture_name = runtime.sandbox_decision_fixture.ok_or_else(|| {
@@ -230,6 +226,9 @@ pub fn run_loop(
             },
         })
     })();
+    if result.is_err() {
+        reservation.rollback();
+    }
     result
 }
 
@@ -1096,6 +1095,13 @@ struct RuntimeFailure {
     tool_id: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct RuntimeToolPolicy<'a> {
+    command: &'a core_policy::CommandPolicy,
+    target: &'a core_policy::PolicyTarget,
+    timeout_ms: u64,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ToolSideEffectMode {
     ApplyAll,
@@ -1116,10 +1122,40 @@ impl ToolSideEffectMode {
 fn runtime_policy_artifact(
     artifacts: &[core_policy::PolicyArtifact],
 ) -> Result<&core_policy::PolicyArtifact, RuntimeError> {
+    let target = runtime_policy_target();
+    runtime_policy_artifact_for_target(artifacts, &target)
+}
+
+#[cfg(target_os = "macos")]
+fn runtime_policy_target() -> core_policy::PolicyTarget {
+    core_policy::PolicyTarget::MacosSeatbelt
+}
+
+#[cfg(not(target_os = "macos"))]
+fn runtime_policy_target() -> core_policy::PolicyTarget {
+    core_policy::PolicyTarget::LinuxLandlockSeccomp
+}
+
+fn runtime_policy_artifact_for_target<'a>(
+    artifacts: &'a [core_policy::PolicyArtifact],
+    target: &core_policy::PolicyTarget,
+) -> Result<&'a core_policy::PolicyArtifact, RuntimeError> {
     artifacts
         .iter()
-        .find(|artifact| artifact.target == core_policy::PolicyTarget::LinuxLandlockSeccomp)
-        .ok_or_else(|| RuntimeError::Protocol("missing linux runtime policy artifact".to_owned()))
+        .find(|artifact| &artifact.target == target)
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "missing {} runtime policy artifact",
+                policy_target_name(target)
+            ))
+        })
+}
+
+fn policy_target_name(target: &core_policy::PolicyTarget) -> &'static str {
+    match target {
+        core_policy::PolicyTarget::LinuxLandlockSeccomp => "linux",
+        core_policy::PolicyTarget::MacosSeatbelt => "macos",
+    }
 }
 
 struct RuntimeEventBuilder {
@@ -1263,7 +1299,7 @@ fn preflight_phase_tools(
         })?;
         let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
         ensure_tool_matches_policy(tool, command_policy)?;
-        planned_tool_progress(tool, command_policy)?;
+        planned_tool_progress(tool, &policy.target, command_policy)?;
     }
     Ok(())
 }
@@ -1418,11 +1454,15 @@ fn emit_phase(
                 RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
             })?;
             let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
+            let tool_policy = RuntimeToolPolicy {
+                command: command_policy,
+                target: &policy.target,
+                timeout_ms: policy.runtime_limits.timeout_ms,
+            };
             emit_tool(
                 workspace,
                 tool,
-                command_policy,
-                policy.runtime_limits.timeout_ms,
+                tool_policy,
                 invocation,
                 side_effect_mode,
                 builder,
@@ -1614,25 +1654,24 @@ fn ensure_tool_matches_policy(
 fn emit_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
-    policy: &core_policy::CommandPolicy,
-    timeout_ms: u64,
+    policy: RuntimeToolPolicy<'_>,
     invocation: &LoopInvocation,
     side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
-    ensure_tool_matches_policy(tool, policy)?;
-    let planned_progress = planned_tool_progress(tool, policy)?;
+    ensure_tool_matches_policy(tool, policy.command)?;
+    let planned_progress = planned_tool_progress(tool, policy.target, policy.command)?;
     builder.emit(
         Some(invocation),
         EventType::ToolStarted,
         serde_json::json!({
-            "allowed_parameters": policy.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
+            "allowed_parameters": policy.command.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
             "network_access": tool_network_access_name(&tool.network),
-            "read_scope": policy.filesystem.read_roots,
+            "read_scope": policy.command.filesystem.read_roots,
             "tool_id": tool.identity.id,
-            "tool_kind": policy_tool_kind_name(&policy.tool_kind),
+            "tool_kind": policy_tool_kind_name(&policy.command.tool_kind),
             "tool_name": tool.identity.name,
-            "write_scope": policy.filesystem.write_roots,
+            "write_scope": policy.command.filesystem.write_roots,
         }),
     );
 
@@ -1644,7 +1683,14 @@ fn emit_tool(
         completed_sequence
     };
     let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
-        execute_tool(workspace, tool, policy, timeout_ms, builder.sequence)?
+        execute_tool(
+            workspace,
+            tool,
+            policy.target,
+            policy.command,
+            policy.timeout_ms,
+            builder.sequence,
+        )?
     } else {
         planned_progress
     };
@@ -1667,6 +1713,7 @@ fn emit_tool(
 fn execute_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
     timeout_ms: u64,
     sequence: u64,
@@ -1677,7 +1724,7 @@ fn execute_tool(
             core_script::ToolCommand::Predefined { command_id, argv },
         ) => execute_predefined_command(policy, command_id, argv),
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            execute_own_script(workspace, tool, policy, timeout_ms, sequence)?;
+            execute_own_script(workspace, tool, policy_target, policy, timeout_ms, sequence)?;
             Ok(Some("stub write completed"))
         }
         _ => Err(RuntimeError::Protocol(format!(
@@ -1689,6 +1736,7 @@ fn execute_tool(
 
 fn planned_tool_progress(
     tool: &core_script::ToolBlock,
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
 ) -> Result<Option<&'static str>, RuntimeError> {
     match (&tool.tool_kind, &tool.command) {
@@ -1697,7 +1745,7 @@ fn planned_tool_progress(
             core_script::ToolCommand::Predefined { command_id, argv },
         ) => execute_predefined_command(policy, command_id, argv),
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            plan_own_script(tool, policy)?;
+            plan_own_script(tool, policy_target, policy)?;
             Ok(Some("stub write completed"))
         }
         _ => Err(RuntimeError::Protocol(format!(
@@ -1734,6 +1782,7 @@ fn trusted_predefined_command(command_id: &str) -> Option<TrustedPredefinedComma
 fn execute_own_script(
     workspace: &Path,
     tool: &core_script::ToolBlock,
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
     _timeout_ms: u64,
     _sequence: u64,
@@ -1744,7 +1793,7 @@ fn execute_own_script(
             tool.identity.id
         )));
     }
-    let operations = plan_own_script(tool, policy)?;
+    let operations = plan_own_script(tool, policy_target, policy)?;
     for operation in operations {
         match operation {
             ScriptOperation::Noop => {}
@@ -1758,6 +1807,7 @@ fn execute_own_script(
 
 fn plan_own_script(
     tool: &core_script::ToolBlock,
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
 ) -> Result<Vec<ScriptOperation>, RuntimeError> {
     if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
@@ -1772,7 +1822,7 @@ fn plan_own_script(
             tool.identity.id
         ))
     })?;
-    compile_own_script_operations(policy, script_body)
+    compile_own_script_operations(policy_target, policy, script_body)
 }
 
 enum ScriptOperation {
@@ -1781,6 +1831,7 @@ enum ScriptOperation {
 }
 
 fn compile_own_script_operations(
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
     script_body: &str,
 ) -> Result<Vec<ScriptOperation>, RuntimeError> {
@@ -1792,7 +1843,7 @@ fn compile_own_script_operations(
             continue;
         }
         if let Some((command, target)) = script_redirection(line)? {
-            let target = validate_script_write_target(policy, &target)?;
+            let target = validate_script_write_target(policy_target, policy, &target)?;
             let contents = evaluate_script_command(&command)?;
             operations.push(ScriptOperation::Write { contents, target });
         } else {
@@ -1871,6 +1922,7 @@ fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
 }
 
 fn validate_script_write_target(
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
     target: &str,
 ) -> Result<String, RuntimeError> {
@@ -1887,7 +1939,7 @@ fn validate_script_write_target(
             policy.tool_id
         )));
     }
-    ensure_script_target_not_protected(policy, &scoped)?;
+    ensure_script_target_not_protected(policy_target, policy, &scoped)?;
     Ok(relative)
 }
 
@@ -1980,6 +2032,7 @@ fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeEr
 }
 
 fn ensure_script_target_not_protected(
+    policy_target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
     scoped_target: &str,
 ) -> Result<(), RuntimeError> {
@@ -1987,7 +2040,7 @@ fn ensure_script_target_not_protected(
         .filesystem
         .protected_paths
         .iter()
-        .any(|pattern| protected_path_pattern_matches(pattern, scoped_target))
+        .any(|pattern| protected_path_pattern_matches(policy_target, pattern, scoped_target))
     {
         return Ok(());
     }
@@ -1996,7 +2049,7 @@ fn ensure_script_target_not_protected(
         .filesystem
         .protected_path_grants
         .iter()
-        .any(|pattern| protected_path_pattern_matches(pattern, scoped_target))
+        .any(|pattern| protected_path_pattern_matches(policy_target, pattern, scoped_target))
     {
         return Ok(());
     }
@@ -2122,9 +2175,13 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
     Ok(parts.join("/"))
 }
 
-fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
-    let pattern = normalize_protected_path_match_input(pattern);
-    let path = normalize_protected_path_match_input(path);
+fn protected_path_pattern_matches(
+    target: &core_policy::PolicyTarget,
+    pattern: &str,
+    path: &str,
+) -> bool {
+    let pattern = normalize_protected_path_match_input(target, pattern);
+    let path = normalize_protected_path_match_input(target, path);
     let pattern_segments = pattern
         .split('/')
         .filter(|segment| !segment.is_empty())
@@ -2136,8 +2193,12 @@ fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
     protected_segments_match(&pattern_segments, &path_segments)
 }
 
-fn normalize_protected_path_match_input(value: &str) -> String {
-    value.replace('\\', "/")
+fn normalize_protected_path_match_input(target: &core_policy::PolicyTarget, value: &str) -> String {
+    let normalized = value.replace('\\', "/");
+    match target {
+        core_policy::PolicyTarget::LinuxLandlockSeccomp => normalized,
+        core_policy::PolicyTarget::MacosSeatbelt => normalized.to_ascii_lowercase(),
+    }
 }
 
 fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
@@ -4317,9 +4378,12 @@ mod tests {
             Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script command")
         ));
 
-        let operations =
-            compile_own_script_operations(command_policy, "\n# comment\n---\necho noop\n")
-                .expect("noop-like lines and echo compile");
+        let operations = compile_own_script_operations(
+            &policy.target,
+            command_policy,
+            "\n# comment\n---\necho noop\n",
+        )
+        .expect("noop-like lines and echo compile");
         assert_eq!(operations.len(), 4);
         assert!(matches!(operations[0], ScriptOperation::Noop));
         assert!(matches!(operations[1], ScriptOperation::Noop));
@@ -4336,24 +4400,24 @@ mod tests {
             .find(|command| command.tool_id == "write-summary")
             .expect("write-summary policy exists");
         assert_eq!(
-            validate_script_write_target(command_policy, "out/summary.txt")
+            validate_script_write_target(&policy.target, command_policy, "out/summary.txt")
                 .expect("declared write target accepted"),
             "out/summary.txt"
         );
         assert!(matches!(
-            validate_script_write_target(command_policy, "other/summary.txt"),
+            validate_script_write_target(&policy.target, command_policy, "other/summary.txt"),
             Err(RuntimeError::Protocol(message)) if message.contains("lacks write scope")
         ));
 
         let mut broad_policy = command_policy.clone();
         broad_policy.filesystem.write_roots = vec!["workspace".to_owned()];
         assert!(matches!(
-            validate_script_write_target(&broad_policy, ".ssh/id_rsa"),
+            validate_script_write_target(&policy.target, &broad_policy, ".ssh/id_rsa"),
             Err(RuntimeError::Protocol(message)) if message.contains("protected path")
         ));
         broad_policy.filesystem.protected_path_grants = vec!["workspace/.ssh/**".to_owned()];
         assert_eq!(
-            validate_script_write_target(&broad_policy, ".ssh/id_rsa")
+            validate_script_write_target(&policy.target, &broad_policy, ".ssh/id_rsa")
                 .expect("explicit protected grant accepted"),
             ".ssh/id_rsa"
         );
@@ -4368,18 +4432,22 @@ mod tests {
             "workspace/output/summary.txt"
         ));
         assert!(protected_path_pattern_matches(
+            &policy.target,
             r"workspace\.ssh\**",
             "workspace/.ssh/id_rsa"
         ));
         assert!(protected_path_pattern_matches(
+            &policy.target,
             "workspace/*/id_???",
             "workspace/.ssh/id_rsa"
         ));
         assert!(protected_path_pattern_matches(
+            &policy.target,
             "workspace/**/secrets/*",
             "workspace/a/b/secrets/token"
         ));
         assert!(!protected_path_pattern_matches(
+            &policy.target,
             "workspace/.ssh/**",
             "workspace/.config/id_rsa"
         ));
@@ -4474,29 +4542,43 @@ mod tests {
         let mut wrong_runtime = write_tool.clone();
         wrong_runtime.script_runtime = None;
         assert!(matches!(
-            plan_own_script(&wrong_runtime, write_policy),
+            plan_own_script(&wrong_runtime, &policy.target, write_policy),
             Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
         ));
         assert!(matches!(
-            execute_own_script(Path::new("."), &wrong_runtime, write_policy, 100, 1),
+            execute_own_script(
+                Path::new("."),
+                &wrong_runtime,
+                &policy.target,
+                write_policy,
+                100,
+                1
+            ),
             Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
         ));
 
         let mut missing_body = write_tool.clone();
         missing_body.script_body = None;
         assert!(matches!(
-            plan_own_script(&missing_body, write_policy),
+            plan_own_script(&missing_body, &policy.target, write_policy),
             Err(RuntimeError::Protocol(message)) if message.contains("script_body")
         ));
 
         let mut mismatched_shape = write_tool.clone();
         mismatched_shape.tool_kind = core_script::ToolKind::PredefinedCommand;
         assert!(matches!(
-            planned_tool_progress(&mismatched_shape, write_policy),
+            planned_tool_progress(&mismatched_shape, &policy.target, write_policy),
             Err(RuntimeError::Protocol(message)) if message.contains("command shape")
         ));
         assert!(matches!(
-            execute_tool(Path::new("."), &mismatched_shape, write_policy, 100, 1),
+            execute_tool(
+                Path::new("."),
+                &mismatched_shape,
+                &policy.target,
+                write_policy,
+                100,
+                1
+            ),
             Err(RuntimeError::Protocol(message)) if message.contains("command shape")
         ));
     }
@@ -4814,6 +4896,31 @@ mod tests {
     }
 
     #[test]
+    fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
+        let workspace = workspace_copy("smoke-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let loop_path = workspace.join("registry/loops/smoke-loop.yaml");
+        let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+        fs::write(
+            &loop_path,
+            source.replace("phase_refs: [smoke]", "phase_refs: [smoke, smoke]"),
+        )
+        .expect("loop fixture rewritten");
+
+        let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect_err("lifecycle-invalid runtime output must reject");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
+        );
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
+    }
+
+    #[test]
     fn run_loop_rejects_protected_own_script_write_without_grant() {
         let workspace = workspace_copy("hello-loop");
         fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
@@ -4878,14 +4985,50 @@ mod tests {
     }
 
     #[test]
+    fn runtime_policy_artifact_can_select_macos_target() {
+        let workspace = workspace_copy("hello-loop");
+        let config = load_workspace_config(&workspace).expect("workspace config loads");
+        let registry_path =
+            registry_root_path(&workspace, &config.registry_root).expect("registry root resolves");
+        let registry = core_script::load_registry_root(registry_path).expect("registry loads");
+        let artifacts =
+            core_policy::compile_policy_artifacts("hello-loop", &registry, "hello-loop")
+                .expect("policy artifacts compile");
+
+        let policy = runtime_policy_artifact_for_target(
+            &artifacts,
+            &core_policy::PolicyTarget::MacosSeatbelt,
+        )
+        .expect("macos runtime policy exists");
+
+        assert_eq!(policy.target, core_policy::PolicyTarget::MacosSeatbelt);
+    }
+
+    #[test]
     fn protected_path_matching_is_case_sensitive_for_linux_runtime() {
         assert!(protected_path_pattern_matches(
+            &core_policy::PolicyTarget::LinuxLandlockSeccomp,
             "**/*.local",
             "workspace/out/readme.local"
         ));
         assert!(!protected_path_pattern_matches(
+            &core_policy::PolicyTarget::LinuxLandlockSeccomp,
             "**/*.local",
             "workspace/out/README.LOCAL"
+        ));
+    }
+
+    #[test]
+    fn protected_path_matching_is_case_insensitive_for_macos_runtime() {
+        assert!(protected_path_pattern_matches(
+            &core_policy::PolicyTarget::MacosSeatbelt,
+            "**/.env",
+            "workspace/.ENV"
+        ));
+        assert!(protected_path_pattern_matches(
+            &core_policy::PolicyTarget::MacosSeatbelt,
+            "**/.git/**",
+            "workspace/.GIT/config"
         ));
     }
 
