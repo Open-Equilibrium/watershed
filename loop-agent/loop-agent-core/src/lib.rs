@@ -2216,6 +2216,11 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
                 "own-script write target {target:?} must stay inside the workspace"
             )));
         }
+        if part.ends_with('.') || part.ends_with(' ') {
+            return Err(RuntimeError::Protocol(format!(
+                "own-script write target {target:?} must not use a Windows path alias"
+            )));
+        }
         parts.push(part);
     }
     Ok(parts.join("/"))
@@ -2368,17 +2373,20 @@ fn decode_printf_escapes(value: &str) -> Result<String, RuntimeError> {
 }
 
 fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
-    if value.len() >= 2
+    let unquoted = if value.len() >= 2
         && ((value.starts_with('"') && value.ends_with('"'))
             || (value.starts_with('\'') && value.ends_with('\'')))
     {
-        Ok(value[1..value.len() - 1].to_owned())
-    } else if value.chars().any(|ch| matches!(ch, '$' | '`' | '\\')) {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    };
+    if unquoted.chars().any(|ch| matches!(ch, '$' | '`' | '\\')) {
         Err(RuntimeError::Protocol(format!(
             "unsupported own-script argument {value:?}"
         )))
     } else {
-        Ok(value.to_owned())
+        Ok(unquoted.to_owned())
     }
 }
 
@@ -4383,6 +4391,12 @@ mod tests {
                 Err(RuntimeError::Protocol(message)) if message.contains("inside the workspace")
             ));
         }
+        for target in [".ssh./id_rsa", "out./summary.txt", "out/summary.txt."] {
+            assert!(matches!(
+                normalize_script_write_target(target),
+                Err(RuntimeError::Protocol(message)) if message.contains("Windows path alias")
+            ));
+        }
 
         assert_eq!(
             evaluate_script_command("printf 'hi\\n'").expect("printf without args evaluates"),
@@ -4418,6 +4432,10 @@ mod tests {
         ));
         assert!(matches!(
             evaluate_script_command("echo $SUMMARY"),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
+        ));
+        assert!(matches!(
+            evaluate_script_command("echo \"$SUMMARY\""),
             Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
         ));
         assert!(matches!(
