@@ -1332,30 +1332,54 @@ fn compile_own_script_operations(
 }
 
 fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
-    if line.contains(">>") {
-        return Err(RuntimeError::Protocol(
-            "own-script append redirection is not supported in M1".to_owned(),
-        ));
-    }
-    let Some((_, target)) = line.split_once('>') else {
+    let positions = redirection_positions(line)?;
+    let Some(&redirection_index) = positions.first() else {
         return Ok(None);
     };
-    if target.contains('>') {
+    if positions.len() > 1 {
         return Err(RuntimeError::Protocol(
             "own-script multiple redirections are not supported in M1".to_owned(),
         ));
     }
-    let command = line
-        .split_once('>')
-        .map(|(command, _)| command.trim())
-        .expect("split_once found redirection");
+    let command = line[..redirection_index].trim();
     if command.is_empty() {
         return Err(RuntimeError::Protocol(
             "own-script redirection must include a command".to_owned(),
         ));
     }
-    let target = unquote_script_path(target.trim())?;
+    let target = unquote_script_path(line[redirection_index + 1..].trim())?;
     Ok(Some((command.to_owned(), target)))
+}
+
+fn redirection_positions(line: &str) -> Result<Vec<usize>, RuntimeError> {
+    let mut positions = Vec::new();
+    let mut quote = None;
+    let mut chars = line.char_indices().peekable();
+
+    while let Some((index, ch)) = chars.next() {
+        match quote {
+            Some(active) if ch == active => quote = None,
+            Some(_) => {}
+            None if matches!(ch, '\'' | '"') => quote = Some(ch),
+            None if ch == '>' => {
+                if matches!(chars.peek(), Some((_, '>'))) {
+                    return Err(RuntimeError::Protocol(
+                        "own-script append redirection is not supported in M1".to_owned(),
+                    ));
+                }
+                positions.push(index);
+            }
+            None => {}
+        }
+    }
+
+    if quote.is_some() {
+        return Err(RuntimeError::Protocol(
+            "own-script command contains an unterminated quote".to_owned(),
+        ));
+    }
+
+    Ok(positions)
 }
 
 fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
@@ -3310,6 +3334,31 @@ mod tests {
             fs::read_to_string(workspace.join("out/custom-summary.txt"))
                 .expect("custom summary is written"),
             "hello\n"
+        );
+    }
+
+    #[test]
+    fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source.replace(
+                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+                "script_body: |\n    printf '%s > done\\n' \"$SUMMARY\" > out/summary.txt",
+            ),
+        )
+        .expect("tool fixture rewritten");
+
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("quoted redirection marker stays in output");
+
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
+            "hello > done\n"
         );
     }
 
