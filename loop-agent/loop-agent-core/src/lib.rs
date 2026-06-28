@@ -150,9 +150,16 @@ pub fn run_loop(
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
     let policy = runtime_policy_artifact(&artifacts)?;
-    let expected_session_id = session_id_for_loop(&loop_block.identity.id);
-    let reservation = reserve_session_log(workspace, &expected_session_id)?;
-    let runtime = match execute_loop(workspace, &registry, policy, loop_block) {
+    let base_session_id = session_id_for_loop(&loop_block.identity.id);
+    let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
+    let expected_session_id = reservation.session_id.clone();
+    let runtime = match execute_loop(
+        workspace,
+        &registry,
+        policy,
+        loop_block,
+        &expected_session_id,
+    ) {
         Ok(runtime) => runtime,
         Err(err) => {
             reservation.rollback();
@@ -415,6 +422,7 @@ fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeEr
 struct SessionReservation {
     log_path: PathBuf,
     session_path: PathBuf,
+    session_id: String,
 }
 
 impl SessionReservation {
@@ -439,7 +447,45 @@ fn reserve_session_log(
     Ok(SessionReservation {
         log_path,
         session_path,
+        session_id: session_id.to_owned(),
     })
+}
+
+fn reserve_unique_session_log(
+    workspace: &Path,
+    base_session_id: &str,
+) -> Result<SessionReservation, RuntimeError> {
+    for ordinal in 1..=10_000 {
+        let candidate = if ordinal == 1 {
+            base_session_id.to_owned()
+        } else {
+            suffixed_session_id(base_session_id, ordinal)
+        };
+        match reserve_session_log(workspace, &candidate) {
+            Ok(reservation) => return Ok(reservation),
+            Err(RuntimeError::SessionLogExists(_)) => {
+                read_existing_session(workspace, &candidate, EmitMode::Jsonl)?;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err(RuntimeError::Protocol(format!(
+        "could not allocate a unique session_id for {base_session_id}"
+    )))
+}
+
+fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
+    let suffix = format!("-{ordinal}");
+    let prefix_len = 128usize.saturating_sub(suffix.len());
+    let prefix = if base_session_id.len() > prefix_len {
+        &base_session_id[..prefix_len]
+    } else {
+        base_session_id
+    };
+    let candidate = format!("{prefix}{suffix}");
+    debug_assert!(validate_session_id(&candidate));
+    candidate
 }
 
 fn reserve_session_file(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
@@ -741,8 +787,9 @@ fn execute_loop(
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     root_loop: &core_script::LoopBlock,
+    session_id: &str,
 ) -> Result<RuntimeExecution, RuntimeError> {
-    let mut builder = RuntimeEventBuilder::new(session_id_for_loop(&root_loop.identity.id));
+    let mut builder = RuntimeEventBuilder::new(session_id.to_owned());
     builder.emit(
         None,
         EventType::SessionStarted,
@@ -2577,6 +2624,38 @@ mod tests {
     }
 
     #[test]
+    fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
+        let workspace = workspace_copy("smoke-loop");
+
+        let first =
+            run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("first loop run succeeds");
+        let second = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect("second loop run gets a unique session id");
+
+        assert_eq!(first.session_id, "smoke001");
+        assert_eq!(
+            first.stdout,
+            expected_stream("smoke-loop", "smoke-loop.jsonl")
+        );
+        assert_eq!(second.session_id, "smoke001-2");
+        assert!(second.stdout.contains("\"session_id\":\"smoke001-2\""));
+        assert_eq!(
+            validate_protocol_jsonl_text(Path::new("second-run.jsonl"), &second.stdout)
+                .expect("second run stream remains protocol-valid")
+                .len(),
+            first.event_count
+        );
+        assert!(workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .is_file());
+        assert!(workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001-2.jsonl")
+            .is_file());
+    }
+
+    #[test]
     fn run_loop_emits_resolved_ids_for_name_references() {
         let workspace = workspace_copy("hello-loop");
         let phase_path = workspace.join("registry/phases/inspect.yaml");
@@ -2615,9 +2694,10 @@ mod tests {
         let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
             .expect_err("existing session must fail before execution");
 
-        assert!(
-            matches!(err, RuntimeError::SessionLogExists(session_id) if session_id == "hello001")
-        );
+        assert!(matches!(
+            err,
+            RuntimeError::Json(_) | RuntimeError::Protocol(_)
+        ));
         assert!(!workspace.join("out/summary.txt").exists());
         assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }

@@ -110,6 +110,33 @@ fn run_loop_emits_golden_jsonl_and_persists_session_log() {
 }
 
 #[test]
+fn run_loop_can_be_repeated_in_same_workspace() {
+    let workspace = workspace_copy("smoke-loop");
+    let first = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
+    assert!(first.status.success());
+    assert_eq!(
+        String::from_utf8(first.stdout).expect("stdout should be UTF-8"),
+        expected_stream("smoke-loop", "smoke-loop.jsonl")
+    );
+
+    let second = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
+
+    assert!(second.status.success());
+    assert!(second.stderr.is_empty());
+    let stdout = String::from_utf8(second.stdout).expect("stdout should be UTF-8");
+    assert!(stdout.contains("\"session_id\":\"smoke001-2\""));
+    assert!(workspace.join(".loop/sessions/smoke001-2.jsonl").is_file());
+}
+
+#[test]
 fn run_hello_loop_emits_multi_phase_subloop_golden_stream() {
     let workspace = workspace_copy("hello-loop");
     let output = loop_command()
