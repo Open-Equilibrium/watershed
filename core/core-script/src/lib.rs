@@ -2547,8 +2547,28 @@ fn push_inline_list_item(
             ));
         }
     }
+    if !is_quoted_yaml_scalar(value) && plain_yaml_scalar_is_non_string(value) {
+        return Err(parse_error(
+            source_name,
+            format!("{field} list items must be strings; quote YAML non-string scalars"),
+        ));
+    }
     items.push(unquote_yaml_scalar(source_name, field, value)?);
     Ok(())
+}
+
+fn is_quoted_yaml_scalar(value: &str) -> bool {
+    value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+}
+
+fn plain_yaml_scalar_is_non_string(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    matches!(lower.as_str(), "true" | "false" | "null" | "~")
+        || value.parse::<i64>().is_ok()
+        || value.parse::<u64>().is_ok()
+        || value.parse::<f64>().is_ok()
 }
 
 fn parse_bool(source_name: &str, field: &str, value: &str) -> Result<bool, RegistryError> {
@@ -3603,6 +3623,87 @@ mod tests {
             ToolCommand::Predefined {
                 command_id: "agent-echo".to_owned(),
                 argv: vec!["--expr=a,b".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn parser_rejects_non_string_inline_list_scalars() {
+        let err = parse_registry_block(
+            "numeric-argv.yaml",
+            r#"tool:
+  id: numeric-tool
+  name: NumericTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: [1]
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("numeric argv item rejected");
+
+        assert!(err.to_string().contains("argv list items must be strings"));
+
+        let err = parse_registry_block(
+            "boolean-allowed-values.yaml",
+            r#"tool:
+  id: boolean-values-tool
+  name: BooleanValuesTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --mode
+      value_type: enum
+      required: false
+      allowed_values: [false]
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("boolean enum value rejected");
+
+        assert!(err
+            .to_string()
+            .contains("allowed_values list items must be strings"));
+    }
+
+    #[test]
+    fn parser_accepts_quoted_yaml_non_string_scalars_in_string_lists() {
+        let block = parse_registry_block(
+            "quoted-scalar-list.yaml",
+            r#"tool:
+  id: quoted-scalars-tool
+  name: QuotedScalarsTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: ["1", "false"]
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("quoted scalar list items parse as strings");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.command,
+            ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv: vec!["1".to_owned(), "false".to_owned()],
             }
         );
     }
