@@ -409,6 +409,7 @@ pub fn resume_session(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
         )));
     }
+    prepare_session_log_append(&path)?;
 
     let resumed_runtime = execute_loop(
         workspace,
@@ -476,6 +477,10 @@ pub fn resume_session(
 
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
     append_existing_file(path, text.as_bytes())
+}
+
+fn prepare_session_log_append(path: &Path) -> Result<(), RuntimeError> {
+    append_existing_file(path, b"")
 }
 
 fn shift_resumed_suffix_event(mut event: EventEnvelope) -> EventEnvelope {
@@ -6266,6 +6271,30 @@ mod tests {
         let events = validate_session_log_text(&path, "hello001", &resumed)
             .expect("resumed log remains valid");
         assert!(stream_is_completed(&events));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resume_rejects_hardlinked_session_log_before_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        let outside = empty_workspace("outside-resume-hardlink-reject");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let event = first_event_line("hello-loop", "hello-loop.jsonl");
+        let outside_target = outside.join("hello001.jsonl");
+        fs::write(&outside_target, &event).expect("outside log written");
+        let session_path = session_dir.join("hello001.jsonl");
+        fs::hard_link(&outside_target, &session_path).expect("session hard link");
+
+        let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+            .expect_err("hard-linked session log must not resume");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside log readable"),
+            event
+        );
+        assert!(!workspace.join("out/summary.txt").exists());
     }
 
     #[test]
