@@ -4464,6 +4464,12 @@ mod tests {
             execute_predefined_command(read_policy, "agent-read", &["extra".to_owned()]),
             Err(RuntimeError::Protocol(message)) if message.contains("trusted command")
         ));
+        let mut wrong_predefined_command = read_policy.clone();
+        wrong_predefined_command.executable = "registry:custom".to_owned();
+        assert!(matches!(
+            ensure_tool_matches_policy(read_tool, &wrong_predefined_command),
+            Err(RuntimeError::Protocol(message)) if message.contains("runtime policy command")
+        ));
 
         let mut wrong_runtime = write_tool.clone();
         wrong_runtime.script_runtime = None;
@@ -4492,6 +4498,98 @@ mod tests {
         assert!(matches!(
             execute_tool(Path::new("."), &mismatched_shape, write_policy, 100, 1),
             Err(RuntimeError::Protocol(message)) if message.contains("command shape")
+        ));
+    }
+
+    #[test]
+    fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
+        let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+        let loop_block = registry
+            .loop_block("hello-loop")
+            .expect("hello loop exists")
+            .clone();
+
+        let mut missing_phase = registry.clone();
+        missing_phase.phases.remove("inspect");
+        assert!(matches!(
+            preflight_loop_tools(&missing_phase, &policy, &loop_block),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing phase")
+        ));
+        assert!(matches!(
+            execute_loop(
+                Path::new("."),
+                &missing_phase,
+                &policy,
+                &loop_block,
+                "mutated001",
+                ToolSideEffectMode::DryRun,
+            ),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing phase")
+        ));
+
+        let mut missing_subloop = registry.clone();
+        missing_subloop.loops.remove("hello-subloop");
+        assert!(matches!(
+            preflight_loop_tools(&missing_subloop, &policy, &loop_block),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
+        ));
+        assert!(matches!(
+            execute_loop(
+                Path::new("."),
+                &missing_subloop,
+                &policy,
+                &loop_block,
+                "mutated001",
+                ToolSideEffectMode::DryRun,
+            ),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
+        ));
+
+        let inspect_phase = registry
+            .phase_block("inspect")
+            .expect("inspect phase exists")
+            .clone();
+        let mut missing_tool = registry.clone();
+        missing_tool.tools.remove("read-file");
+        assert!(matches!(
+            preflight_phase_tools(&missing_tool, &policy, &inspect_phase),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing tool")
+        ));
+
+        let invocation = LoopInvocation {
+            loop_id: "loop-001".to_owned(),
+            parent_loop_id: None,
+        };
+        let mut missing_instruction = registry.clone();
+        missing_instruction.instructions.remove("inspect-input");
+        let mut builder = RuntimeEventBuilder::new("mutated001".to_owned());
+        assert!(matches!(
+            emit_phase(
+                Path::new("."),
+                &missing_instruction,
+                &policy,
+                &inspect_phase,
+                &invocation,
+                ToolSideEffectMode::DryRun,
+                &mut builder,
+            ),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing instruction")
+        ));
+
+        let mut missing_connection = registry.clone();
+        missing_connection.connections.remove("inspect-data");
+        let mut builder = RuntimeEventBuilder::new("mutated001".to_owned());
+        assert!(matches!(
+            emit_phase(
+                Path::new("."),
+                &missing_connection,
+                &policy,
+                &inspect_phase,
+                &invocation,
+                ToolSideEffectMode::DryRun,
+                &mut builder,
+            ),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing connection")
         ));
     }
 
@@ -6210,6 +6308,85 @@ mod tests {
     }
 
     #[test]
+    fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
+        let workspace = empty_workspace("fallback-file-replacement");
+        let path = workspace.join("file.txt");
+        fs::write(&path, "old").expect("file written");
+
+        append_existing_file_without_link_count(&path, b"+append")
+            .expect("fallback append succeeds");
+        assert_eq!(
+            fs::read_to_string(&path).expect("appended file readable"),
+            "old+append"
+        );
+        replace_existing_file_without_link_count(&path, b"new").expect("fallback replace succeeds");
+        assert_eq!(
+            fs::read_to_string(&path).expect("replaced file readable"),
+            "new"
+        );
+
+        assert!(replacement_temp_path(&path, 7)
+            .expect("temp path derives from file name")
+            .to_string_lossy()
+            .contains(".watershed-"));
+        assert!(matches!(
+            replacement_temp_path(Path::new(""), 0),
+            Err(RuntimeError::Protocol(message)) if message.contains("file name")
+        ));
+
+        for attempt in 0..100 {
+            let temp_path = replacement_temp_path(&path, attempt).expect("temp path");
+            fs::write(temp_path, "held").expect("temp collision file written");
+        }
+        assert!(matches!(
+            create_replacement_temp(&path),
+            Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
+        ));
+
+        let dir_leaf = workspace.join("dir-leaf");
+        fs::create_dir(&dir_leaf).expect("dir leaf written");
+        assert!(matches!(
+            ensure_writable_regular_leaf(&dir_leaf),
+            Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opened_file_identity_guard_detects_symlink_directory_and_replaced_paths() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = empty_workspace("opened-file-identity");
+        let target = workspace.join("target.txt");
+        let link = workspace.join("link.txt");
+        fs::write(&target, "target").expect("target written");
+        symlink(&target, &link).expect("file symlink created");
+        let target_file = fs::File::open(&target).expect("target opens");
+        assert!(matches!(
+            ensure_opened_regular_leaf_matches_path(&link, &target_file),
+            Err(RuntimeError::Protocol(message)) if message.contains("symlink")
+        ));
+
+        let dir = workspace.join("dir");
+        fs::create_dir(&dir).expect("dir created");
+        let dir_file = fs::File::open(&dir).expect("dir opens on unix");
+        assert!(matches!(
+            ensure_opened_regular_leaf_matches_path(&dir, &dir_file),
+            Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
+        ));
+
+        let changing = workspace.join("changing.txt");
+        fs::write(&changing, "old").expect("changing file written");
+        let old_file = fs::File::open(&changing).expect("changing file opens");
+        fs::remove_file(&changing).expect("changing file removed");
+        fs::write(&changing, "new").expect("replacement file written");
+        assert!(matches!(
+            ensure_opened_regular_leaf_matches_path(&changing, &old_file),
+            Err(RuntimeError::Protocol(message)) if message.contains("changed before write")
+        ));
+    }
+
+    #[test]
     fn protocol_validator_rejects_sequence_that_does_not_start_at_one() {
         let event = EventEnvelope::new(
             "evt-001",
@@ -6308,6 +6485,20 @@ mod tests {
             "connection arrays",
         );
 
+        let mut unequal_connections = base_event();
+        unequal_connections.event_type = EventType::StepStarted;
+        unequal_connections.payload = serde_json::json!({
+            "connection_ids": ["inspect-data", "inspect-trigger"],
+            "connection_kinds": ["data"],
+            "step_id": "inspect",
+            "step_name": "Inspect",
+        });
+        assert_invalid_event(
+            "unequal-step-connections.jsonl",
+            unequal_connections,
+            "same length",
+        );
+
         let mut invalid_connection_kind = base_event();
         invalid_connection_kind.event_type = EventType::StepStarted;
         invalid_connection_kind.payload = serde_json::json!({
@@ -6365,6 +6556,40 @@ mod tests {
             "payload.network_access",
         );
 
+        let mut non_array_read_scope = base_event();
+        non_array_read_scope.event_type = EventType::ToolStarted;
+        non_array_read_scope.payload = serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "read_scope": "workspace",
+            "tool_id": "read-file",
+            "tool_kind": "predefined-command",
+            "tool_name": "ReadFile",
+            "write_scope": [],
+        });
+        assert_invalid_event(
+            "non-array-read-scope.jsonl",
+            non_array_read_scope,
+            "payload.read_scope",
+        );
+
+        let mut non_string_allowed_parameter = base_event();
+        non_string_allowed_parameter.event_type = EventType::ToolStarted;
+        non_string_allowed_parameter.payload = serde_json::json!({
+            "allowed_parameters": [1],
+            "network_access": "deny",
+            "read_scope": ["workspace"],
+            "tool_id": "read-file",
+            "tool_kind": "predefined-command",
+            "tool_name": "ReadFile",
+            "write_scope": [],
+        });
+        assert_invalid_event(
+            "non-string-allowed-parameter.jsonl",
+            non_string_allowed_parameter,
+            "contain only strings",
+        );
+
         let mut non_integer_exit_code = base_event();
         non_integer_exit_code.event_type = EventType::ToolCompleted;
         non_integer_exit_code.payload =
@@ -6373,6 +6598,36 @@ mod tests {
             "non-integer-exit-code.jsonl",
             non_integer_exit_code,
             "payload.exit_code",
+        );
+
+        let mut string_exit_code = base_event();
+        string_exit_code.event_type = EventType::ToolCompleted;
+        string_exit_code.payload = serde_json::json!({"exit_code": "0", "tool_id": "read-file"});
+        assert_invalid_event(
+            "string-exit-code.jsonl",
+            string_exit_code,
+            "payload.exit_code",
+        );
+
+        let mut missing_artifact_type = base_event();
+        missing_artifact_type.event_type = EventType::ArtifactLogged;
+        missing_artifact_type.payload = serde_json::json!({
+            "artifact_id": "artifact-001",
+            "uri": "workspace/out/summary.txt",
+        });
+        assert_invalid_event(
+            "missing-artifact-type.jsonl",
+            missing_artifact_type,
+            "artifact_type",
+        );
+
+        let mut missing_attention_reason = base_event();
+        missing_attention_reason.event_type = EventType::AttentionRequested;
+        missing_attention_reason.payload = serde_json::json!({"request_id": "req-001"});
+        assert_invalid_event(
+            "missing-attention-reason.jsonl",
+            missing_attention_reason,
+            "payload.reason",
         );
 
         let mut invalid_error_data = base_event();
@@ -6399,6 +6654,15 @@ mod tests {
             non_numeric_metric,
             "metric.sample payload.value",
         );
+
+        let mut valid_metric = base_event();
+        valid_metric.event_type = EventType::MetricSample;
+        valid_metric.payload = serde_json::json!({
+            "metric_name": "fsm.p95",
+            "value": 1.25,
+        });
+        validate_event_payload(Path::new("valid-metric.jsonl"), 1, &valid_metric)
+            .expect("numeric metric payload is valid");
     }
 
     #[test]
@@ -6528,8 +6792,41 @@ mod tests {
             "must follow loop.started",
         );
 
+        let loop_completed_without_loop_id = event_line(
+            "evt-002",
+            EventType::LoopCompleted,
+            "meta001",
+            2,
+            None,
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        );
+        assert_invalid_session_log(
+            "loop-completed-without-loop-id.jsonl",
+            "meta001",
+            &format!("{canonical}{loop_completed_without_loop_id}"),
+            "must include loop_id",
+        );
+
+        let repeated_session_started = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionStarted,
+            "meta001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"again"}),
+        )
+        .canonical_jsonl()
+        .expect("event serializes");
+        assert_invalid_session_log(
+            "repeated-session-started.jsonl",
+            "meta001",
+            &format!("{canonical}{repeated_session_started}"),
+            "only valid as the first event",
+        );
+
         let open_loop_then_terminal = [
-            canonical,
+            canonical.clone(),
             event_line(
                 "evt-002",
                 EventType::LoopStarted,
@@ -6553,6 +6850,177 @@ mod tests {
             "meta001",
             &open_loop_then_terminal,
             "open loop",
+        );
+
+        let open_step_then_terminal = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            loop_completed_line("evt-005", 5),
+            event_line(
+                "evt-006",
+                EventType::SessionCompleted,
+                "meta001",
+                6,
+                None,
+                serde_json::json!({}),
+            ),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "open-step.jsonl",
+            "meta001",
+            &open_step_then_terminal,
+            "open step",
+        );
+
+        let open_tool_then_terminal = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            tool_started_line("evt-005", 5),
+            step_completed_line("evt-006", 6),
+            loop_completed_line("evt-007", 7),
+            event_line(
+                "evt-008",
+                EventType::SessionCompleted,
+                "meta001",
+                8,
+                None,
+                serde_json::json!({}),
+            ),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "open-tool.jsonl",
+            "meta001",
+            &open_tool_then_terminal,
+            "open tool",
+        );
+
+        let repeated_step_completed = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            step_completed_line("evt-005", 5),
+            step_completed_line("evt-006", 6),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "repeated-step-completed.jsonl",
+            "meta001",
+            &repeated_step_completed,
+            "after terminal step",
+        );
+
+        let step_completed_without_start = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_completed_line("evt-004", 4),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "step-completed-without-start.jsonl",
+            "meta001",
+            &step_completed_without_start,
+            "must follow step.started",
+        );
+
+        let repeated_tool_started_after_failure = [
+            canonical.clone(),
+            tool_failed_line("evt-002", 2),
+            tool_failed_line("evt-003", 3),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "repeated-tool-failed.jsonl",
+            "meta001",
+            &repeated_tool_started_after_failure,
+            "after terminal tool",
+        );
+    }
+
+    #[test]
+    fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
+        let (registry, policy) =
+            fixture_runtime_policy("sandbox-negative", "sandbox-negative-write");
+        let loop_block = registry
+            .loop_block("sandbox-negative-write")
+            .expect("negative loop exists");
+        let phase = registry
+            .phase_block("negative-write")
+            .expect("negative phase exists");
+        assert!(sandbox_runtime_failure(&registry, &policy, loop_block)
+            .expect("sandbox failure resolves")
+            .is_some());
+        assert!(sandbox_out_of_phase_failure(&policy, loop_block, phase)
+            .expect("non out-of-phase loop returns none")
+            .is_none());
+
+        let tool = registry
+            .tool_block("negative-tool")
+            .expect("negative tool exists");
+        let mut extra_arg_tool = tool.clone();
+        extra_arg_tool.command = core_script::ToolCommand::Predefined {
+            command_id: "agent-negative".to_owned(),
+            argv: vec!["write".to_owned(), "network".to_owned()],
+        };
+        assert!(matches!(
+            sandbox_negative_fixture_for_tool(&extra_arg_tool),
+            Err(RuntimeError::Protocol(message)) if message.contains("one denied operation")
+        ));
+
+        let mut unsupported_operation_tool = tool.clone();
+        unsupported_operation_tool.command = core_script::ToolCommand::Predefined {
+            command_id: "agent-negative".to_owned(),
+            argv: vec!["process".to_owned()],
+        };
+        assert!(matches!(
+            sandbox_negative_fixture_for_tool(&unsupported_operation_tool),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported sandbox-negative")
+        ));
+        assert_eq!(sandbox_negative_fixture_for_operation("process"), None);
+
+        assert!(matches!(
+            linux_sandbox_expected_decision("unknown-fixture"),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing linux")
+        ));
+        validate_failed_sandbox_decisions("unknown-fixture", &[])
+            .expect("unknown fixture has no expected decisions");
+
+        let events_without_failure = vec![base_event()];
+        assert!(matches!(
+            validate_failed_sandbox_decisions("sandbox-negative-write", &events_without_failure),
+            Err(RuntimeError::Protocol(message)) if message.contains("session.failed reason")
+        ));
+
+        assert_eq!(
+            terminal_failure_reason(&[EventEnvelope::new(
+                "evt-001",
+                EventType::SessionFailed,
+                "meta001",
+                1,
+                "2026-01-01T00:00:00Z",
+                "loop-agent-cli",
+                serde_json::json!({"reason":"write-denied"}),
+            )]),
+            Some("write-denied")
+        );
+        assert_eq!(
+            tool_network_access_name(&core_script::NetworkPolicy::Declared {
+                default: core_script::NetworkDefault::Deny,
+                allow: vec![core_script::NetworkAllowEntry {
+                    kind: core_script::NetworkAllowKind::Cidr,
+                    cidr: "127.0.0.0/8".to_owned(),
+                    port: 443,
+                    transport: core_script::NetworkTransport::Tcp,
+                }]
+            }),
+            "declared"
         );
     }
 
@@ -7002,6 +7470,107 @@ mod tests {
         }
         .canonical_jsonl()
         .expect("event serializes")
+    }
+
+    fn loop_started_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::LoopStarted,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        )
+    }
+
+    fn loop_completed_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::LoopCompleted,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        )
+    }
+
+    fn phase_entered_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::PhaseEntered,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({
+                "instruction_ids": [],
+                "phase_id": "phase",
+                "phase_name": "Phase",
+                "tool_ids": [],
+            }),
+        )
+    }
+
+    fn step_started_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::StepStarted,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({
+                "phase_id": "phase",
+                "step_id": "step",
+                "step_name": "Step",
+            }),
+        )
+    }
+
+    fn step_completed_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::StepCompleted,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({
+                "phase_id": "phase",
+                "step_id": "step",
+                "step_name": "Step",
+            }),
+        )
+    }
+
+    fn tool_started_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::ToolStarted,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({
+                "allowed_parameters": [],
+                "network_access": "deny",
+                "read_scope": ["workspace"],
+                "tool_id": "tool",
+                "tool_kind": "predefined-command",
+                "tool_name": "Tool",
+                "write_scope": [],
+            }),
+        )
+    }
+
+    fn tool_failed_line(event_id: &str, sequence: u64) -> String {
+        event_line(
+            event_id,
+            EventType::ToolFailed,
+            "meta001",
+            sequence,
+            None,
+            serde_json::json!({
+                "error": "denied",
+                "tool_id": "tool",
+            }),
+        )
     }
 
     fn base_event() -> EventEnvelope {
