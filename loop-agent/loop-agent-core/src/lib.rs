@@ -2,7 +2,7 @@
 
 use proto::{EventEnvelope, EventType};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt, fs,
     io::{self, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -3378,8 +3378,11 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
     }
 
     let mut started_loops = BTreeSet::new();
+    let mut terminal_loops = BTreeMap::new();
     let mut started_steps = BTreeSet::new();
+    let mut terminal_steps = BTreeMap::new();
     let mut started_tools = BTreeSet::new();
+    let mut terminal_tools = BTreeMap::new();
 
     for (index, event) in events.iter().enumerate() {
         let line_number = index + 1;
@@ -3399,6 +3402,16 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         event.event_type.as_str()
                     )));
                 }
+                if let Some(terminal_line) = terminal_loops.get(loop_id) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "loop",
+                        loop_id,
+                        *terminal_line,
+                    ));
+                }
             }
         }
 
@@ -3415,12 +3428,34 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         event.event_type.as_str()
                     )));
                 }
+                terminal_loops.insert(loop_id, line_number);
             }
             EventType::StepStarted => {
-                started_steps.insert(lifecycle_payload_key(event, "step_id"));
+                let step = lifecycle_payload_key(event, "step_id");
+                if let Some(terminal_line) = terminal_steps.get(&step) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "step",
+                        &step.1,
+                        *terminal_line,
+                    ));
+                }
+                started_steps.insert(step);
             }
             EventType::StepCompleted => {
                 let step = lifecycle_payload_key(event, "step_id");
+                if let Some(terminal_line) = terminal_steps.get(&step) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "step",
+                        &step.1,
+                        *terminal_line,
+                    ));
+                }
                 if !started_steps.contains(&step) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
@@ -3428,12 +3463,34 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         step.1
                     )));
                 }
+                terminal_steps.insert(step, line_number);
             }
             EventType::ToolStarted => {
-                started_tools.insert(lifecycle_payload_key(event, "tool_id"));
+                let tool = lifecycle_payload_key(event, "tool_id");
+                if let Some(terminal_line) = terminal_tools.get(&tool) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "tool",
+                        &tool.1,
+                        *terminal_line,
+                    ));
+                }
+                started_tools.insert(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
                 let tool = lifecycle_payload_key(event, "tool_id");
+                if let Some(terminal_line) = terminal_tools.get(&tool) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "tool",
+                        &tool.1,
+                        *terminal_line,
+                    ));
+                }
                 if !started_tools.contains(&tool) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow tool.started for tool_id {:?}",
@@ -3442,9 +3499,27 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         tool.1
                     )));
                 }
+                if matches!(
+                    event.event_type,
+                    EventType::ToolCompleted | EventType::ToolTimedOut
+                ) {
+                    terminal_tools.insert(tool, line_number);
+                }
             }
             EventType::ToolFailed => {
                 // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
+                let tool = lifecycle_payload_key(event, "tool_id");
+                if let Some(terminal_line) = terminal_tools.get(&tool) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "tool",
+                        &tool.1,
+                        *terminal_line,
+                    ));
+                }
+                terminal_tools.insert(tool, line_number);
             }
             EventType::SessionStarted
             | EventType::SessionPaused
@@ -3462,6 +3537,21 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
     }
 
     Ok(())
+}
+
+fn terminal_lifecycle_error(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+    kind: &str,
+    id: &str,
+    terminal_line: usize,
+) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "{} line {line_number} {} appears after terminal {kind} {id:?} on line {terminal_line}",
+        path.display(),
+        event.event_type.as_str()
+    ))
 }
 
 fn require_lifecycle_loop_id(
@@ -4363,6 +4453,176 @@ mod tests {
     }
 
     #[test]
+    fn session_log_rejects_events_after_loop_terminal() {
+        let stream = [
+            event_line(
+                "evt-001",
+                EventType::SessionStarted,
+                "loop-terminal",
+                1,
+                None,
+                serde_json::json!({"reason":"fixture-start"}),
+            ),
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "loop-terminal",
+                2,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            event_line(
+                "evt-003",
+                EventType::LoopCompleted,
+                "loop-terminal",
+                3,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            event_line(
+                "evt-004",
+                EventType::PhaseEntered,
+                "loop-terminal",
+                4,
+                Some("loop-001"),
+                serde_json::json!({
+                    "instruction_ids": [],
+                    "phase_id": "phase-001",
+                    "phase_name": "AfterTerminal",
+                    "tool_ids": [],
+                }),
+            ),
+        ]
+        .concat();
+
+        let err =
+            validate_session_log_text(Path::new("loop-terminal.jsonl"), "loop-terminal", &stream)
+                .expect_err("loop-scoped events after loop terminal must be rejected");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal loop"))
+        );
+    }
+
+    #[test]
+    fn session_log_rejects_events_after_step_terminal() {
+        let stream = [
+            event_line(
+                "evt-001",
+                EventType::SessionStarted,
+                "step-terminal",
+                1,
+                None,
+                serde_json::json!({"reason":"fixture-start"}),
+            ),
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "step-terminal",
+                2,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            event_line(
+                "evt-003",
+                EventType::StepStarted,
+                "step-terminal",
+                3,
+                Some("loop-001"),
+                serde_json::json!({"step_id":"step-001","step_name":"Inspect"}),
+            ),
+            event_line(
+                "evt-004",
+                EventType::StepCompleted,
+                "step-terminal",
+                4,
+                Some("loop-001"),
+                serde_json::json!({"step_id":"step-001","step_name":"Inspect"}),
+            ),
+            event_line(
+                "evt-005",
+                EventType::StepStarted,
+                "step-terminal",
+                5,
+                Some("loop-001"),
+                serde_json::json!({"step_id":"step-001","step_name":"Inspect"}),
+            ),
+        ]
+        .concat();
+
+        let err =
+            validate_session_log_text(Path::new("step-terminal.jsonl"), "step-terminal", &stream)
+                .expect_err("step events after step terminal must be rejected");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
+        );
+    }
+
+    #[test]
+    fn session_log_rejects_events_after_tool_terminal() {
+        let stream = [
+            event_line(
+                "evt-001",
+                EventType::SessionStarted,
+                "tool-terminal",
+                1,
+                None,
+                serde_json::json!({"reason":"fixture-start"}),
+            ),
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "tool-terminal",
+                2,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            event_line(
+                "evt-003",
+                EventType::ToolStarted,
+                "tool-terminal",
+                3,
+                Some("loop-001"),
+                serde_json::json!({
+                    "allowed_parameters": [],
+                    "network_access": "deny",
+                    "read_scope": [],
+                    "tool_id": "tool-001",
+                    "tool_kind": "predefined-command",
+                    "tool_name": "Echo",
+                    "write_scope": [],
+                }),
+            ),
+            event_line(
+                "evt-004",
+                EventType::ToolCompleted,
+                "tool-terminal",
+                4,
+                Some("loop-001"),
+                serde_json::json!({"exit_code":0,"tool_id":"tool-001"}),
+            ),
+            event_line(
+                "evt-005",
+                EventType::ToolProgress,
+                "tool-terminal",
+                5,
+                Some("loop-001"),
+                serde_json::json!({"message":"late progress","tool_id":"tool-001"}),
+            ),
+        ]
+        .concat();
+
+        let err =
+            validate_session_log_text(Path::new("tool-terminal.jsonl"), "tool-terminal", &stream)
+                .expect_err("tool events after tool terminal must be rejected");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal tool"))
+        );
+    }
+
+    #[test]
     fn resume_rejects_events_after_terminal_without_rewriting_log() {
         let workspace = workspace_copy("smoke-loop");
         let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -5108,6 +5368,30 @@ mod tests {
             .expect("stream has first event")
             .to_owned()
             + "\n"
+    }
+
+    fn event_line(
+        event_id: &str,
+        event_type: EventType,
+        session_id: &str,
+        sequence: u64,
+        loop_id: Option<&str>,
+        payload: serde_json::Value,
+    ) -> String {
+        EventEnvelope {
+            loop_id: loop_id.map(str::to_owned),
+            ..EventEnvelope::new(
+                event_id,
+                event_type,
+                session_id,
+                sequence,
+                event_timestamp(sequence),
+                "loop-agent-cli",
+                payload,
+            )
+        }
+        .canonical_jsonl()
+        .expect("event serializes")
     }
 
     fn base_event() -> EventEnvelope {
