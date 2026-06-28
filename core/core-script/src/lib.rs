@@ -981,10 +981,10 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Regi
         path: dir.to_path_buf(),
         source,
     })?;
-    if dir_metadata.file_type().is_symlink() {
+    if registry_path_is_link_or_reparse(&dir_metadata) {
         return Err(RegistryError::UnsafePath {
             path: dir.to_path_buf(),
-            message: "registry paths must not be symlinks".to_owned(),
+            message: "registry paths must not be symlinks or reparse points".to_owned(),
         });
     }
     if !dir_metadata.is_dir() {
@@ -1007,10 +1007,10 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Regi
             path: path.clone(),
             source,
         })?;
-        if metadata.file_type().is_symlink() {
+        if registry_path_is_link_or_reparse(&metadata) {
             return Err(RegistryError::UnsafePath {
                 path,
-                message: "registry paths must not be symlinks".to_owned(),
+                message: "registry paths must not be symlinks or reparse points".to_owned(),
             });
         }
         if metadata.is_dir() {
@@ -1025,6 +1025,23 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Regi
         }
     }
     Ok(())
+}
+
+fn registry_path_is_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_symlink() || has_windows_reparse_point(metadata)
+}
+
+#[cfg(windows)]
+fn has_windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
 }
 
 fn parse_tool_block(source_name: &str, source: &str) -> Result<ToolBlock, RegistryError> {
@@ -2882,6 +2899,40 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn registry_loader_rejects_junction_registry_entries() {
+        let root = temp_registry_dir("junction-root");
+        let outside = temp_registry_dir("junction-outside");
+        std::fs::write(
+            outside.join("outside-tool.yaml"),
+            r#"
+tool:
+  id: outside-tool
+  name: Outside Tool
+  tool_kind: own-script
+  command: script:outside-tool
+  script_runtime: posix-sh
+  script_body: |
+    echo outside
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("outside registry file written");
+        create_windows_junction(&root.join("linked"), &outside);
+
+        let err = load_registry_root(&root).expect_err("registry junction must be rejected");
+
+        assert!(
+            matches!(err, RegistryError::UnsafePath { ref message, .. } if message.contains("reparse")),
+            "unexpected error: {err:?}"
+        );
+    }
+
     #[test]
     fn parser_reads_own_script_body_without_relicensing_or_runtime_escape() {
         let block = parse_registry_block(
@@ -4069,7 +4120,6 @@ mod tests {
             .expect("schema is valid JSON")
     }
 
-    #[cfg(unix)]
     fn temp_registry_dir(label: &str) -> std::path::PathBuf {
         let target = std::env::temp_dir().join(format!(
             "watershed-core-script-{label}-{}",
@@ -4080,5 +4130,21 @@ mod tests {
         }
         std::fs::create_dir_all(&target).expect("temp registry created");
         target
+    }
+
+    #[cfg(windows)]
+    fn create_windows_junction(link: &Path, target: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("mklink command runs");
+        assert!(
+            output.status.success(),
+            "junction creation failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
