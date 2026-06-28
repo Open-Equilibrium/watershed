@@ -1683,6 +1683,7 @@ fn reject_unknown_section_fields(
 ) -> Result<(), RegistryError> {
     let section_header = format!("{section}:");
     let mut in_section = false;
+    let mut seen_fields = BTreeSet::new();
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1711,6 +1712,12 @@ fn reject_unknown_section_fields(
                 format!("unsupported {section} field {field}"),
             ));
         }
+        if !seen_fields.insert(field.to_owned()) {
+            return Err(parse_error(
+                source_name,
+                format!("duplicate {section}.{field}"),
+            ));
+        }
     }
 
     Ok(())
@@ -1727,6 +1734,7 @@ fn reject_unknown_nested_fields(
     let parent_header = format!("{parent}:");
     let mut in_section = false;
     let mut in_parent = false;
+    let mut seen_fields = BTreeSet::new();
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1761,6 +1769,12 @@ fn reject_unknown_nested_fields(
             return Err(parse_error(
                 source_name,
                 format!("unsupported {section}.{parent} field {field}"),
+            ));
+        }
+        if !seen_fields.insert(field.to_owned()) {
+            return Err(parse_error(
+                source_name,
+                format!("duplicate {section}.{parent}.{field}"),
             ));
         }
     }
@@ -3285,6 +3299,64 @@ mod tests {
         assert!(err
             .to_string()
             .contains("duplicate tool.command.command_id"));
+    }
+
+    #[test]
+    fn parser_rejects_duplicate_section_list_fields() {
+        let err = parse_registry_block(
+            "duplicate-steps.yaml",
+            r#"phase:
+  id: duplicate-steps
+  name: DuplicateSteps
+  instruction_refs: []
+  tool_refs: []
+  steps:
+    - id: first-step
+      name: FirstStep
+      connection_refs: []
+  steps:
+    - id: second-step
+      name: SecondStep
+      connection_refs: []
+"#,
+        )
+        .expect_err("duplicate section list field rejected");
+
+        assert!(err.to_string().contains("duplicate phase.steps"));
+    }
+
+    #[test]
+    fn parser_rejects_duplicate_nested_list_fields() {
+        let err = parse_registry_block(
+            "duplicate-network-allow.yaml",
+            r#"tool:
+  id: duplicate-network
+  name: DuplicateNetwork
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network:
+    default: deny
+    allow:
+      - kind: cidr
+        transport: tcp
+        cidr: 127.0.0.0/8
+        port: 443
+    allow:
+      - kind: cidr
+        transport: tcp
+        cidr: 10.0.0.0/8
+        port: 443
+"#,
+        )
+        .expect_err("duplicate nested list field rejected");
+
+        assert!(err.to_string().contains("duplicate tool.network.allow"));
     }
 
     #[test]
