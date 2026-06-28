@@ -1883,6 +1883,7 @@ fn compile_own_script_operations(
     script_body: &str,
 ) -> Result<Vec<ScriptOperation>, RuntimeError> {
     let mut operations = Vec::new();
+    let mut write_count = 0usize;
     for line in script_body.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') || line == "---" {
@@ -1890,6 +1891,12 @@ fn compile_own_script_operations(
             continue;
         }
         if let Some((command, target)) = script_redirection(line)? {
+            write_count += 1;
+            if write_count > 1 {
+                return Err(RuntimeError::Protocol(
+                    "own-script multiple write operations are not supported in M1".to_owned(),
+                ));
+            }
             let target = validate_script_write_target(protected_path_match_mode, policy, &target)?;
             let contents = evaluate_script_command(&command)?;
             operations.push(ScriptOperation::Write { contents, target });
@@ -7432,6 +7439,45 @@ mod tests {
             fs::read_to_string(&outside_target).expect("outside target readable"),
             "outside\n"
         );
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn run_loop_rejects_multi_write_own_script_before_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        fs::write(
+            workspace.join("registry/tools/write-summary.yaml"),
+            r#"tool:
+  id: write-summary
+  name: WriteSummary
+  tool_kind: own-script
+  command: script:write-summary
+  script_runtime: posix-sh
+  script_body: |
+    printf 'partial\n' > out/partial.txt
+    printf '%s\n' "$SUMMARY" > out/summary.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("write-summary fixture mutated");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("multi-write own-script must fail before execution");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(ref message) if message.contains("multiple write operations")),
+            "{err:?}"
+        );
+        assert!(!workspace.join("out/partial.txt").exists());
+        assert!(!workspace.join("out/summary.txt").exists());
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
             .join("hello001.jsonl")
