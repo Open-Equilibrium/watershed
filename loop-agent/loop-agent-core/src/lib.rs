@@ -1391,6 +1391,7 @@ fn validate_script_write_target(
             policy.tool_id
         )));
     }
+    ensure_script_target_not_protected(policy, &scoped)?;
     Ok(relative)
 }
 
@@ -1399,10 +1400,7 @@ fn write_script_output(
     target: &str,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
-    let path = workspace.join(target);
-    if let Some(parent) = path.parent() {
-        ensure_real_directory(parent)?;
-    }
+    let path = ensure_real_workspace_write_path(workspace, target)?;
     ensure_writable_regular_leaf(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -1415,6 +1413,49 @@ fn write_script_output(
         })?;
     file.write_all(contents)
         .map_err(|source| RuntimeError::Io { path, source })
+}
+
+fn ensure_script_target_not_protected(
+    policy: &core_policy::CommandPolicy,
+    scoped_target: &str,
+) -> Result<(), RuntimeError> {
+    if !policy
+        .filesystem
+        .protected_paths
+        .iter()
+        .any(|pattern| protected_path_pattern_matches(pattern, scoped_target))
+    {
+        return Ok(());
+    }
+
+    if policy
+        .filesystem
+        .protected_path_grants
+        .iter()
+        .any(|pattern| protected_path_pattern_matches(pattern, scoped_target))
+    {
+        return Ok(());
+    }
+
+    Err(RuntimeError::Protocol(format!(
+        "tool {} cannot write protected path {scoped_target}",
+        policy.tool_id
+    )))
+}
+
+fn ensure_real_workspace_write_path(
+    workspace: &Path,
+    target: &str,
+) -> Result<PathBuf, RuntimeError> {
+    let mut parts = target.split('/').peekable();
+    let mut path = workspace.to_path_buf();
+    while let Some(part) = parts.next() {
+        path.push(part);
+        if parts.peek().is_some() {
+            ensure_real_directory(&path)?;
+        }
+    }
+    Ok(path)
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
@@ -1440,6 +1481,70 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
         parts.push(part);
     }
     Ok(parts.join("/"))
+}
+
+fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.replace('\\', "/");
+    let path = path.replace('\\', "/");
+    let pattern_segments = pattern
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let path_segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    protected_segments_match(&pattern_segments, &path_segments)
+}
+
+fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
+    match (pattern.split_first(), path.split_first()) {
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some((pattern_segment, rest)), _) if *pattern_segment == "**" => {
+            protected_segments_match(rest, path)
+                || (!path.is_empty() && protected_segments_match(pattern, &path[1..]))
+        }
+        (Some((pattern_segment, rest_pattern)), Some((path_segment, rest_path))) => {
+            protected_segment_match(pattern_segment, path_segment)
+                && protected_segments_match(rest_pattern, rest_path)
+        }
+        (Some(_), None) => false,
+    }
+}
+
+fn protected_segment_match(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let path = path.as_bytes();
+    let mut pattern_index = 0;
+    let mut path_index = 0;
+    let mut star_pattern_index = None;
+    let mut star_path_index = 0;
+
+    while path_index < path.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == path[path_index])
+        {
+            pattern_index += 1;
+            path_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_pattern_index = Some(pattern_index);
+            pattern_index += 1;
+            star_path_index = path_index;
+        } else if let Some(star_index) = star_pattern_index {
+            pattern_index = star_index + 1;
+            star_path_index += 1;
+            path_index = star_path_index;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
 }
 
 fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
@@ -3235,6 +3340,40 @@ mod tests {
     }
 
     #[test]
+    fn run_loop_rejects_protected_own_script_write_without_grant() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source
+                .replace(
+                    "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+                    "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > .env",
+                )
+                .replace(
+                    r#"write_scope: ["workspace/out"]"#,
+                    r#"write_scope: ["workspace"]"#,
+                ),
+        )
+        .expect("tool fixture rewritten");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("ungranted protected path write must reject");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("protected path"))
+        );
+        assert!(!workspace.join(".env").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
     fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
         let workspace = workspace_copy("hello-loop");
         let tool_path = workspace.join("registry/tools/write-summary.yaml");
@@ -3844,6 +3983,27 @@ mod tests {
             fs::read_to_string(&outside_target).expect("outside target readable"),
             "outside\n"
         );
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = workspace_copy("hello-loop");
+        let outside = empty_workspace("outside-summary-ancestor");
+        symlink(&outside, workspace.join("out")).expect("summary ancestor symlink");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("symlinked summary ancestor must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
+        assert!(!outside.join("summary.txt").exists());
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
             .join("hello001.jsonl")
