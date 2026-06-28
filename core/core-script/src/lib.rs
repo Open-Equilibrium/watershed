@@ -862,6 +862,16 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
                     message: "own-script tools must set script_body".to_owned(),
                 });
             }
+            if tool
+                .script_body
+                .as_deref()
+                .is_some_and(|body| body.trim().is_empty())
+            {
+                return Err(SemanticValidationError::ToolSchemaViolation {
+                    tool_id: tool.identity.id.clone(),
+                    message: "own-script tools must set a non-empty script_body".to_owned(),
+                });
+            }
         }
         (ToolKind::PredefinedCommand, ToolCommand::Predefined { .. }) => {
             if tool.script_runtime.is_some() || tool.script_body.is_some() {
@@ -1401,6 +1411,108 @@ fn strip_yaml_comment(line: &str) -> String {
     out.trim_end().to_owned()
 }
 
+fn literal_block_scalar_marker(value: &str) -> Option<&str> {
+    matches!(value, "|" | "|-" | "|+").then_some(value)
+}
+
+fn folded_block_scalar_marker(value: &str) -> Option<&str> {
+    matches!(value, ">" | ">-" | ">+").then_some(value)
+}
+
+fn parse_literal_block_scalar(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+    marker: &str,
+) -> Result<String, RegistryError> {
+    let section_header = format!("{section}:");
+    let field_prefix = format!("{field}:");
+    let mut in_section = false;
+    let mut in_block = false;
+    let mut content_indent = None::<usize>;
+    let mut body = String::new();
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        let indent = leading_spaces(line);
+        let trimmed = line.trim();
+
+        if !in_block && trimmed.is_empty() {
+            continue;
+        }
+
+        if indent == 0 && !trimmed.is_empty() {
+            if in_block {
+                break;
+            }
+            in_section = trimmed == section_header;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+
+        if !in_block && indent == 2 {
+            let Some(value) = trimmed.strip_prefix(&field_prefix) else {
+                continue;
+            };
+            if value.trim() == marker {
+                in_block = true;
+            }
+            continue;
+        }
+
+        if !in_block {
+            continue;
+        }
+        if !trimmed.is_empty() && indent <= 2 {
+            break;
+        }
+        if trimmed.is_empty() {
+            if content_indent.is_some() {
+                body.push('\n');
+            }
+            continue;
+        }
+
+        let content_indent = match content_indent {
+            Some(existing) => existing,
+            None => {
+                content_indent = Some(indent);
+                indent
+            }
+        };
+        if indent < content_indent {
+            return Err(parse_error(
+                source_name,
+                format!("{section}.{field} block scalar uses inconsistent indentation"),
+            ));
+        }
+        body.push_str(&line[content_indent..]);
+        body.push('\n');
+    }
+
+    if !in_block {
+        return Err(parse_error(
+            source_name,
+            format!("missing {section}.{field} block scalar"),
+        ));
+    }
+    if marker == "|-" {
+        while body.ends_with('\n') {
+            body.pop();
+        }
+    }
+    if body.trim().is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("{section}.{field} must be non-empty"),
+        ));
+    }
+    Ok(body)
+}
+
 fn top_section<'a>(source_name: &str, source: &'a str) -> Result<&'a str, RegistryError> {
     let mut section = None;
     for line in source.lines() {
@@ -1606,15 +1718,8 @@ fn required_scalar(
     section: &str,
     field: &str,
 ) -> Result<String, RegistryError> {
-    let value = raw_section_field_value(source_name, source, section, field)?
+    let value = section_scalar_value(source_name, source, section, field)?
         .ok_or_else(|| parse_error(source_name, format!("missing {section}.{field}")))?;
-    if value.is_empty() {
-        return Err(parse_error(
-            source_name,
-            format!("{section}.{field} must be a scalar"),
-        ));
-    }
-    let value = unquote_yaml_scalar(&value);
     if value.is_empty() {
         return Err(parse_error(
             source_name,
@@ -1630,15 +1735,43 @@ fn optional_scalar(
     section: &str,
     field: &str,
 ) -> Result<Option<String>, RegistryError> {
-    raw_section_field_value(source_name, source, section, field)?
+    section_scalar_value(source_name, source, section, field)?
         .map(|value| {
             if value.is_empty() {
+                Err(parse_error(
+                    source_name,
+                    format!("{section}.{field} must be non-empty"),
+                ))
+            } else {
+                Ok(value)
+            }
+        })
+        .transpose()
+}
+
+fn section_scalar_value(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    field: &str,
+) -> Result<Option<String>, RegistryError> {
+    raw_section_field_value(source_name, source, section, field)?
+        .map(|value| {
+            let value = value.trim();
+            if literal_block_scalar_marker(value).is_some() {
+                parse_literal_block_scalar(source_name, source, section, field, value)
+            } else if folded_block_scalar_marker(value).is_some() {
+                Err(parse_error(
+                    source_name,
+                    format!("{section}.{field} uses unsupported folded block scalar syntax"),
+                ))
+            } else if value.is_empty() {
                 Err(parse_error(
                     source_name,
                     format!("{section}.{field} must be a scalar"),
                 ))
             } else {
-                Ok(unquote_yaml_scalar(&value))
+                Ok(unquote_yaml_scalar(value))
             }
         })
         .transpose()
@@ -2639,6 +2772,79 @@ mod tests {
             tool.script_body.as_deref(),
             Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#)
         );
+    }
+
+    #[test]
+    fn parser_reads_literal_block_own_script_body() {
+        let block = parse_registry_block(
+            "literal-script-body.yaml",
+            r#"tool:
+  id: literal-script
+  name: LiteralScript
+  tool_kind: own-script
+  command: script:literal-script
+  script_runtime: posix-sh
+  script_body: |
+    printf '%s\n' "$SUMMARY" > out/summary.txt
+    echo done
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("literal block script_body parses");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.script_body.as_deref(),
+            Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\necho done\n")
+        );
+    }
+
+    #[test]
+    fn parser_rejects_empty_or_misrepresented_own_script_body() {
+        let err = parse_registry_block(
+            "empty-script-body.yaml",
+            r#"tool:
+  id: empty-script
+  name: EmptyScript
+  tool_kind: own-script
+  command: script:empty-script
+  script_runtime: posix-sh
+  script_body: ""
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("empty script body rejected");
+        assert!(err.to_string().contains("script_body"));
+
+        let err = parse_registry_block(
+            "folded-script-body.yaml",
+            r#"tool:
+  id: folded-script
+  name: FoldedScript
+  tool_kind: own-script
+  command: script:folded-script
+  script_runtime: posix-sh
+  script_body: >
+    echo folded
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("folded script body rejected");
+        assert!(err.to_string().contains("folded block scalar"));
     }
 
     #[test]
