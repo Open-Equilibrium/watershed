@@ -12,6 +12,26 @@ use std::{
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
+const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
+    TrustedPredefinedCommand {
+        command_id: "agent-echo",
+        progress: None,
+    },
+    TrustedPredefinedCommand {
+        command_id: "agent-negative",
+        progress: None,
+    },
+    TrustedPredefinedCommand {
+        command_id: "agent-read",
+        progress: Some("stub read completed"),
+    },
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TrustedPredefinedCommand {
+    command_id: &'static str,
+    progress: Option<&'static str>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeSurface {
@@ -1250,8 +1270,8 @@ fn execute_tool(
     match (&tool.tool_kind, &tool.command) {
         (
             core_script::ToolKind::PredefinedCommand,
-            core_script::ToolCommand::Predefined { command_id, .. },
-        ) => predefined_command_progress(command_id),
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) => execute_predefined_command(policy, command_id, argv),
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
             execute_own_script(workspace, tool, policy, timeout_ms, sequence)?;
             Ok(Some("stub write completed"))
@@ -1263,14 +1283,28 @@ fn execute_tool(
     }
 }
 
-fn predefined_command_progress(command_id: &str) -> Result<Option<&'static str>, RuntimeError> {
-    match command_id {
-        "agent-echo" => Ok(None),
-        "agent-read" => Ok(Some("stub read completed")),
-        _ => Err(RuntimeError::Protocol(format!(
-            "unsupported predefined command {command_id:?}"
-        ))),
+fn execute_predefined_command(
+    policy: &core_policy::CommandPolicy,
+    command_id: &str,
+    argv: &[String],
+) -> Result<Option<&'static str>, RuntimeError> {
+    let command = trusted_predefined_command(command_id).ok_or_else(|| {
+        RuntimeError::Protocol(format!("unsupported predefined command {command_id:?}"))
+    })?;
+    let executable = format!("registry:{command_id}");
+    if policy.executable != executable || policy.argv != argv {
+        return Err(RuntimeError::Protocol(format!(
+            "runtime policy executable does not match trusted command {command_id:?}"
+        )));
     }
+    Ok(command.progress)
+}
+
+fn trusted_predefined_command(command_id: &str) -> Option<TrustedPredefinedCommand> {
+    TRUSTED_PREDEFINED_COMMANDS
+        .iter()
+        .copied()
+        .find(|command| command.command_id == command_id)
 }
 
 fn execute_own_script(
@@ -1682,7 +1716,7 @@ fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
 }
 
 fn normalize_protected_path_match_input(value: &str) -> String {
-    value.replace('\\', "/").to_ascii_lowercase()
+    value.replace('\\', "/")
 }
 
 fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
@@ -3299,7 +3333,7 @@ mod tests {
             .expect_err("unknown predefined command must fail closed");
 
         assert!(
-            matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported predefined command"))
+            matches!(err, RuntimeError::Policy(message) if message.to_string().contains("unknown trusted command"))
         );
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
@@ -3551,7 +3585,7 @@ mod tests {
     }
 
     #[test]
-    fn run_loop_rejects_protected_own_script_case_variant_without_grant() {
+    fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
         let workspace = workspace_copy("hello-loop");
         fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
         let tool_path = workspace.join("registry/tools/write-summary.yaml");
@@ -3570,18 +3604,26 @@ mod tests {
         )
         .expect("tool fixture rewritten");
 
-        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-            .expect_err("case variant of a protected path must reject");
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("linux runtime protected-path matching is case-sensitive");
 
-        assert!(
-            matches!(err, RuntimeError::Protocol(message) if message.contains("protected path"))
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(workspace.join(".ENV")).expect("case variant output is written"),
+            "hello\n"
         );
-        assert!(!workspace.join(".ENV").exists());
-        assert!(!workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
-            .exists());
-        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn protected_path_matching_is_case_sensitive_for_linux_runtime() {
+        assert!(protected_path_pattern_matches(
+            "**/*.local",
+            "workspace/out/readme.local"
+        ));
+        assert!(!protected_path_pattern_matches(
+            "**/*.local",
+            "workspace/out/README.LOCAL"
+        ));
     }
 
     #[test]

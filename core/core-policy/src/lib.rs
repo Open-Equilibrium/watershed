@@ -11,6 +11,7 @@ use std::{
 pub const POLICY_VERSION_V0: &str = "0";
 const SCRIPT_RUNTIME_POSIX_SH: &str = "posix-sh";
 const OWN_SCRIPT_RUNNER_POSIX_SH: &str = "runner:posix-sh";
+const TRUSTED_PREDEFINED_COMMAND_IDS: &[&str] = &["agent-echo", "agent-negative", "agent-read"];
 pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/*.env",
     "**/*.key",
@@ -290,12 +291,17 @@ fn command_policy_from_tool(
         (
             core_script::ToolKind::PredefinedCommand,
             core_script::ToolCommand::Predefined { command_id, argv },
-        ) => (
-            command_id.clone(),
-            argv.clone(),
-            format!("registry:{command_id}"),
-            None,
-        ),
+        ) => {
+            let executable = trusted_predefined_command_executable(command_id).ok_or_else(|| {
+                PolicyCompileError::InvalidArtifact(PolicyArtifactValidationError {
+                    message: format!(
+                        "predefined-command tool {} references unknown trusted command {command_id:?}",
+                        tool.identity.id
+                    ),
+                })
+            })?;
+            (command_id.clone(), argv.clone(), executable, None)
+        }
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id)) => (
             command_id.clone(),
             Vec::new(),
@@ -362,6 +368,12 @@ fn command_policy_from_tool(
             core_script::ToolKind::OwnScript => ToolKind::OwnScript,
         },
     })
+}
+
+fn trusted_predefined_command_executable(command_id: &str) -> Option<String> {
+    TRUSTED_PREDEFINED_COMMAND_IDS
+        .contains(&command_id)
+        .then(|| format!("registry:{command_id}"))
 }
 
 fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> AllowedParameterPolicy {
@@ -1443,6 +1455,30 @@ mod tests {
             err,
             PolicyCompileError::NonEmptyNetworkAllowlist { .. }
         ));
+    }
+
+    #[test]
+    fn policy_compiler_rejects_unknown_predefined_commands() {
+        let mut registry = core_script::load_registry_root(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../loop-agent/fixtures/smoke-loop/registry"),
+        )
+        .expect("smoke-loop registry loads");
+        registry.tools.get_mut("echo").expect("echo tool").command =
+            core_script::ToolCommand::Predefined {
+                command_id: "agent-custom".to_owned(),
+                argv: Vec::new(),
+            };
+
+        let err = compile_policy_artifact(
+            "smoke-loop",
+            &registry,
+            "smoke-loop",
+            PolicyTarget::LinuxLandlockSeccomp,
+        )
+        .expect_err("unknown predefined command must fail closed");
+
+        assert!(err.to_string().contains("unknown trusted command"), "{err}");
     }
 
     #[test]
