@@ -218,6 +218,33 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
 }
 
 #[test]
+fn closed_stdout_pipe_does_not_fail_for_jsonl_tail() {
+    let workspace = workspace_copy("smoke-loop");
+    let run = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
+    assert!(run.status.success());
+
+    let mut child = loop_command()
+        .current_dir(&workspace)
+        .args(["tail", "smoke001", "--emit", "jsonl"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+
+    drop(child.stdout.take().expect("stdout is piped"));
+
+    let output = child.wait_with_output().expect("loop binary should exit");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+}
+
+#[test]
 fn resume_rejects_terminal_sessions_without_rewriting_log() {
     let fixture = workspace_copy("smoke-loop");
     let run = loop_command()

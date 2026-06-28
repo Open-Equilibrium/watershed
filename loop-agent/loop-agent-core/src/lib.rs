@@ -406,25 +406,24 @@ fn write_tail_chunk(
     jsonl: &str,
 ) -> Result<(), RuntimeError> {
     match emit {
-        EmitMode::Jsonl => writer
-            .write_all(jsonl.as_bytes())
-            .and_then(|_| writer.flush())
-            .map_err(|source| RuntimeError::Io {
-                path: PathBuf::from("<tail>"),
-                source,
-            }),
+        EmitMode::Jsonl => write_tail_bytes(writer, jsonl.as_bytes()),
         EmitMode::Human => {
             if jsonl.is_empty() {
-                writer
-                    .write_all(format!("session {session_id} tailed\n").as_bytes())
-                    .and_then(|_| writer.flush())
-                    .map_err(|source| RuntimeError::Io {
-                        path: PathBuf::from("<tail>"),
-                        source,
-                    })?;
+                write_tail_bytes(writer, format!("session {session_id} tailed\n").as_bytes())?;
             }
             Ok(())
         }
+    }
+}
+
+fn write_tail_bytes(writer: &mut impl Write, bytes: &[u8]) -> Result<(), RuntimeError> {
+    match writer.write_all(bytes).and_then(|_| writer.flush()) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(source) => Err(RuntimeError::Io {
+            path: PathBuf::from("<tail>"),
+            source,
+        }),
     }
 }
 
