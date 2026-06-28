@@ -2638,14 +2638,12 @@ fn unquote_yaml_scalar(
         while let Some(ch) = chars.next() {
             if ch == '\\' {
                 match chars.next() {
-                    Some('"') => out.push('"'),
-                    Some('\\') => out.push('\\'),
-                    Some(other) => {
-                        return Err(parse_error(
-                            source_name,
-                            format!("{field} contains unsupported escape \\{other}"),
-                        ));
-                    }
+                    Some(escape) => out.push(decode_yaml_double_quoted_escape(
+                        source_name,
+                        field,
+                        escape,
+                        &mut chars,
+                    )?),
                     None => {
                         return Err(parse_error(
                             source_name,
@@ -2663,6 +2661,74 @@ fn unquote_yaml_scalar(
     } else {
         Ok(value.to_owned())
     }
+}
+
+fn decode_yaml_double_quoted_escape(
+    source_name: &str,
+    field: &str,
+    escape: char,
+    chars: &mut std::str::Chars<'_>,
+) -> Result<char, RegistryError> {
+    match escape {
+        '0' => Ok('\0'),
+        'a' => Ok('\u{7}'),
+        'b' => Ok('\u{8}'),
+        't' => Ok('\t'),
+        'n' => Ok('\n'),
+        'v' => Ok('\u{b}'),
+        'f' => Ok('\u{c}'),
+        'r' => Ok('\r'),
+        'e' => Ok('\u{1b}'),
+        '"' => Ok('"'),
+        '/' => Ok('/'),
+        '\\' => Ok('\\'),
+        'N' => Ok('\u{85}'),
+        '_' => Ok('\u{a0}'),
+        'L' => Ok('\u{2028}'),
+        'P' => Ok('\u{2029}'),
+        'x' => decode_yaml_hex_escape(source_name, field, escape, chars, 2),
+        'u' => decode_yaml_hex_escape(source_name, field, escape, chars, 4),
+        'U' => decode_yaml_hex_escape(source_name, field, escape, chars, 8),
+        other => Err(parse_error(
+            source_name,
+            format!("{field} contains unsupported escape \\{other}"),
+        )),
+    }
+}
+
+fn decode_yaml_hex_escape(
+    source_name: &str,
+    field: &str,
+    escape: char,
+    chars: &mut std::str::Chars<'_>,
+    digits: usize,
+) -> Result<char, RegistryError> {
+    let mut value = 0_u32;
+    for _ in 0..digits {
+        match chars.next() {
+            Some(ch) if ch.is_ascii_hexdigit() => {
+                value = value * 16 + ch.to_digit(16).expect("ASCII hex digit");
+            }
+            Some(other) => {
+                return Err(parse_error(
+                    source_name,
+                    format!("{field} contains invalid \\{escape} escape digit {other:?}"),
+                ));
+            }
+            None => {
+                return Err(parse_error(
+                    source_name,
+                    format!("{field} contains incomplete \\{escape} escape"),
+                ));
+            }
+        }
+    }
+    char::from_u32(value).ok_or_else(|| {
+        parse_error(
+            source_name,
+            format!("{field} contains invalid \\{escape} Unicode scalar"),
+        )
+    })
 }
 
 fn leading_spaces(value: &str) -> usize {
@@ -2955,8 +3021,8 @@ tool:
     }
 
     #[test]
-    fn parser_rejects_unsupported_double_quoted_yaml_escapes() {
-        let err = parse_registry_block(
+    fn parser_decodes_yaml_double_quoted_escapes() {
+        let block = parse_registry_block(
             "quoted-script-body.yaml",
             r#"tool:
   id: quoted-script
@@ -2964,7 +3030,7 @@ tool:
   tool_kind: own-script
   command: script:quoted-script
   script_runtime: posix-sh
-  script_body: "echo a\necho b"
+  script_body: "printf '%s\n' \"$SUMMARY\" > out/summary.txt"
   allowed_parameters: []
   read_scope: ["workspace"]
   write_scope: ["workspace/out"]
@@ -2972,7 +3038,88 @@ tool:
   network: deny
 "#,
         )
-        .expect_err("unsupported quoted escape must be rejected");
+        .expect("YAML 1.2 double-quoted escapes parse");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.script_body.as_deref(),
+            Some("printf '%s\n' \"$SUMMARY\" > out/summary.txt")
+        );
+    }
+
+    #[test]
+    fn parser_decodes_yaml_double_quoted_escape_set() {
+        let block = parse_registry_block(
+            "quoted-argv.yaml",
+            r#"tool:
+  id: quoted-argv
+  name: QuotedArgv
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: ["\0", "\a", "\b", "\t", "\n", "\v", "\f", "\r", "\e", "\"", "\/", "\\", "\N", "\_", "\L", "\P", "\x41", "\u03A9", "\U0001F642"]
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("YAML 1.2 double-quoted escape set parses");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.command,
+            ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv: vec![
+                    "\0".to_owned(),
+                    "\u{7}".to_owned(),
+                    "\u{8}".to_owned(),
+                    "\t".to_owned(),
+                    "\n".to_owned(),
+                    "\u{b}".to_owned(),
+                    "\u{c}".to_owned(),
+                    "\r".to_owned(),
+                    "\u{1b}".to_owned(),
+                    "\"".to_owned(),
+                    "/".to_owned(),
+                    "\\".to_owned(),
+                    "\u{85}".to_owned(),
+                    "\u{a0}".to_owned(),
+                    "\u{2028}".to_owned(),
+                    "\u{2029}".to_owned(),
+                    "A".to_owned(),
+                    "\u{03a9}".to_owned(),
+                    "\u{1f642}".to_owned(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn parser_rejects_invalid_double_quoted_yaml_escapes() {
+        let err = parse_registry_block(
+            "bad-escape-script-body.yaml",
+            r#"tool:
+  id: bad-escape-script
+  name: BadEscapeScript
+  tool_kind: own-script
+  command: script:bad-escape-script
+  script_runtime: posix-sh
+  script_body: "echo \q"
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("invalid quoted escape must be rejected");
 
         assert!(err.to_string().contains("unsupported escape"));
     }
