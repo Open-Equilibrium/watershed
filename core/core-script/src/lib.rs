@@ -651,7 +651,9 @@ fn normalize_string(value: &str) -> String {
 }
 
 fn normalized_eq(left: &str, right: &str) -> bool {
-    normalize_string(left) == normalize_string(right)
+    let normalized_left = normalize_string(left);
+    let normalized_right = normalize_string(right);
+    normalized_left == normalized_right
 }
 
 #[derive(Debug)]
@@ -3083,6 +3085,38 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn registry_resolves_normalized_name_references() {
+        let registry = ResolvedRegistry::from_blocks([
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "inspect".to_owned(),
+                    name: "Café".to_owned(),
+                },
+                prompt: "Inspect".to_owned(),
+            }),
+            RegistryBlock::Phase(PhaseBlock {
+                identity: BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: vec!["Cafe\u{301}".to_owned()],
+                tool_refs: Vec::new(),
+                steps: Vec::new(),
+            }),
+        ])
+        .expect("canonically equivalent name reference resolves");
+
+        assert_eq!(
+            registry
+                .instruction_block("Cafe\u{301}")
+                .expect("decomposed reference resolves")
+                .identity
+                .id,
+            "inspect"
+        );
     }
 
     #[test]

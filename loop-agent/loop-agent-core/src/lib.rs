@@ -1404,13 +1404,19 @@ fn write_script_output(
     ensure_writable_regular_leaf(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
-        .truncate(true)
+        .truncate(false)
         .write(true)
         .open(&path)
         .map_err(|source| RuntimeError::Io {
             path: path.clone(),
             source,
         })?;
+    ensure_real_workspace_write_path(workspace, target)?;
+    ensure_opened_regular_leaf_matches_path(&path, &file)?;
+    file.set_len(0).map_err(|source| RuntimeError::Io {
+        path: path.clone(),
+        source,
+    })?;
     file.write_all(contents)
         .map_err(|source| RuntimeError::Io { path, source })
 }
@@ -1456,6 +1462,53 @@ fn ensure_real_workspace_write_path(
         }
     }
     Ok(path)
+}
+
+fn ensure_opened_regular_leaf_matches_path(
+    path: &Path,
+    file: &fs::File,
+) -> Result<(), RuntimeError> {
+    let path_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    if path_metadata.file_type().is_symlink() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        )));
+    }
+    if !path_metadata.is_file() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a file",
+            path.display()
+        )));
+    }
+
+    let file_metadata = file.metadata().map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    if !file_metadata.is_file() || !same_file_metadata(&path_metadata, &file_metadata) {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed before write",
+            path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(not(unix))]
+fn same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
