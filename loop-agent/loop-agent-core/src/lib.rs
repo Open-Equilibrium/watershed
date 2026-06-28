@@ -1623,7 +1623,7 @@ fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
             || (value.starts_with('\'') && value.ends_with('\'')))
     {
         Ok(value[1..value.len() - 1].to_owned())
-    } else if value.contains(['$', '`', '\\']) {
+    } else if value.chars().any(|ch| matches!(ch, '$' | '`' | '\\')) {
         Err(RuntimeError::Protocol(format!(
             "unsupported own-script argument {value:?}"
         )))
