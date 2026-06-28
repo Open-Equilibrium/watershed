@@ -1401,7 +1401,13 @@ fn write_script_output(
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
     let path = ensure_real_workspace_write_path(workspace, target)?;
-    ensure_writable_regular_leaf(&path)?;
+    let leaf_existed = ensure_writable_regular_leaf(&path)?;
+    if leaf_existed && !hard_link_count_is_verifiable() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} cannot be safely replaced on this platform",
+            path.display()
+        )));
+    }
     let mut file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -1527,6 +1533,16 @@ fn hard_link_count(metadata: &fs::Metadata) -> u64 {
 #[cfg(not(unix))]
 fn hard_link_count(_metadata: &fs::Metadata) -> u64 {
     1
+}
+
+#[cfg(unix)]
+fn hard_link_count_is_verifiable() -> bool {
+    true
+}
+
+#[cfg(not(unix))]
+fn hard_link_count_is_verifiable() -> bool {
+    false
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
@@ -1726,18 +1742,18 @@ fn workspace_scope_contains(root: &str, path: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
-fn ensure_writable_regular_leaf(path: &Path) -> Result<(), RuntimeError> {
+fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
             "{} must not be a symlink",
             path.display()
         ))),
-        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(metadata) if metadata.is_file() => Ok(true),
         Ok(_) => Err(RuntimeError::Protocol(format!(
             "{} must be a file",
             path.display()
         ))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
             source,
@@ -1784,25 +1800,32 @@ fn sandbox_runtime_failure(
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    let Some(fixture_name) = sandbox_negative_fixture_for_loop_name(&loop_block.identity.name)
-    else {
-        return Ok(None);
-    };
-    let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
-        return Ok(None);
-    };
-    let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
-    decision.validate().map_err(|err| {
-        RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
-    })?;
-    if decision.fixture_name != fixture_name {
-        return Err(RuntimeError::Protocol(format!(
-            "{fixture_name} expected decision fixture_name mismatch"
-        )));
+    for fixture_name in sandbox_negative_fixture_candidates(loop_block) {
+        let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
+            continue;
+        };
+        let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+        decision.validate().map_err(|err| {
+            RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
+        })?;
+        if decision.fixture_name != fixture_name {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} expected decision fixture_name mismatch"
+            )));
+        }
+        if !sandbox_loop_matches_decision(registry, policy, loop_block, &decision.attempt)? {
+            continue;
+        }
+        return Ok(Some(runtime_failure_for_decision(fixture_name, decision)));
     }
-    if !sandbox_loop_matches_decision(registry, policy, loop_block, &decision.attempt)? {
-        return Ok(None);
-    }
+
+    Ok(None)
+}
+
+fn runtime_failure_for_decision(
+    fixture_name: &'static str,
+    decision: core_policy::ExpectedDecision,
+) -> RuntimeFailure {
     let reason = decision.reason_code.as_str().to_owned();
     let tool_id = if matches!(
         decision.attempt,
@@ -1813,25 +1836,36 @@ fn sandbox_runtime_failure(
         Some(denied_attempt_tool_id(&decision.attempt).to_owned())
     };
 
-    Ok(Some(RuntimeFailure {
+    RuntimeFailure {
         reason,
         message: denial_message(decision.reason_code),
         sandbox_decision_fixture: fixture_name,
         tool_id,
-    }))
+    }
 }
 
-fn sandbox_negative_fixture_for_loop_name(loop_name: &str) -> Option<&'static str> {
-    match loop_name {
-        "SandboxNegativeEnvironment" => Some("sandbox-negative-environment"),
-        "SandboxNegativeInterpreter" => Some("sandbox-negative-interpreter"),
-        "SandboxNegativeNetwork" => Some("sandbox-negative-network"),
-        "SandboxNegativeProtectedPath" => Some("sandbox-negative-protected-path"),
-        "SandboxNegativeSymlink" => Some("sandbox-negative-symlink"),
-        "SandboxNegativeToolOutOfPhase" => Some("sandbox-negative-tool-out-of-phase"),
-        "SandboxNegativeWrite" => Some("sandbox-negative-write"),
-        _ => None,
-    }
+const SANDBOX_NEGATIVE_FIXTURES: &[&str] = &[
+    "sandbox-negative-environment",
+    "sandbox-negative-interpreter",
+    "sandbox-negative-network",
+    "sandbox-negative-protected-path",
+    "sandbox-negative-symlink",
+    "sandbox-negative-tool-out-of-phase",
+    "sandbox-negative-write",
+];
+
+fn sandbox_negative_fixture_candidates(loop_block: &core_script::LoopBlock) -> Vec<&'static str> {
+    let loop_id = loop_block.identity.id.as_str();
+    SANDBOX_NEGATIVE_FIXTURES
+        .iter()
+        .copied()
+        .filter(|fixture| {
+            loop_id == *fixture
+                || fixture
+                    .strip_prefix("sandbox-")
+                    .is_some_and(|suffix| loop_id.ends_with(suffix))
+        })
+        .collect()
 }
 
 fn sandbox_loop_matches_decision(
@@ -3490,6 +3524,27 @@ mod tests {
     }
 
     #[test]
+    fn sandbox_denial_follows_resolved_operation_not_loop_name() {
+        let workspace = workspace_copy("sandbox-negative");
+        let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
+        let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+        fs::write(
+            &loop_path,
+            source.replace("name: SandboxNegativeWrite", "name: RenamedNegativeWrite"),
+        )
+        .expect("loop fixture rewritten");
+
+        let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+            .expect("renamed negative operation runs");
+
+        assert!(output.failed);
+        assert!(output.stdout.contains("\"reason\":\"write_denied\""));
+        assert!(output
+            .stdout
+            .contains("\"loop_name\":\"RenamedNegativeWrite\""));
+    }
+
+    #[test]
     fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
         let workspace = workspace_copy("sandbox-negative");
         let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
@@ -4100,6 +4155,31 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&outside_target).expect("outside target readable"),
             "outside\n"
+        );
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn run_loop_rejects_existing_summary_leaf_when_link_count_unverified() {
+        let workspace = workspace_copy("hello-loop");
+        fs::create_dir_all(workspace.join("out")).expect("out dir");
+        let summary_path = workspace.join("out/summary.txt");
+        fs::write(&summary_path, "existing\n").expect("existing summary written");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("preexisting summary leaf must fail without link-count verification");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("cannot be safely replaced"))
+        );
+        assert_eq!(
+            fs::read_to_string(&summary_path).expect("summary remains readable"),
+            "existing\n"
         );
         assert!(!workspace
             .join(LOCAL_SESSION_DIR)
