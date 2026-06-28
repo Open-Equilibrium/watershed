@@ -4,8 +4,12 @@ use loop_agent_core::{
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Instant,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Barrier,
+    },
+    thread,
+    time::{Duration, Instant},
 };
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -80,7 +84,7 @@ fn hello_loop_log_append_p95_stays_under_m1_budget() {
 
 #[test]
 fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
-    for (fixture, loop_name) in [
+    let workspaces = [
         ("smoke-loop", "smoke-loop"),
         ("hello-loop", "hello-loop"),
         ("sandbox-negative", "sandbox-negative-write"),
@@ -91,13 +95,71 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
         ("sandbox-negative", "sandbox-negative-symlink"),
         ("sandbox-negative", "sandbox-negative-tool-out-of-phase"),
         ("smoke-loop", "smoke-loop"),
-    ] {
-        let workspace = workspace_copy(fixture);
-        let output = run_loop(&workspace, loop_name, EmitMode::Jsonl)
-            .unwrap_or_else(|err| panic!("{loop_name}: {err}"));
+    ]
+    .into_iter()
+    .map(|(fixture, loop_name)| (workspace_copy(fixture), loop_name))
+    .collect::<Vec<_>>();
+    let concurrency = workspaces.len();
+    let barrier = Arc::new(Barrier::new(concurrency + 1));
+    let (tx, rx) = mpsc::channel();
+    let handles = workspaces
+        .into_iter()
+        .map(|(workspace, loop_name)| {
+            let barrier = Arc::clone(&barrier);
+            let tx = tx.clone();
+            thread::spawn(move || {
+                barrier.wait();
+                let result = run_loop(&workspace, loop_name, EmitMode::Jsonl)
+                    .map(|output| {
+                        (
+                            output.event_count,
+                            output.failed,
+                            output.stdout.len(),
+                            dir_size(&workspace),
+                        )
+                    })
+                    .map_err(|err| err.to_string());
+                tx.send((loop_name, result)).expect("result sent");
+            })
+        })
+        .collect::<Vec<_>>();
+    drop(tx);
 
-        assert!(output.event_count > 0, "{loop_name}");
+    let started = Instant::now();
+    barrier.wait();
+    let timeout = Duration::from_secs(30);
+    let mut total_stdout_bytes = 0usize;
+    let mut total_workspace_bytes = 0u64;
+    for _ in 0..concurrency {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        let (loop_name, result) = rx
+            .recv_timeout(remaining)
+            .expect("10 concurrent fixture loops complete before timeout");
+        let (event_count, failed, stdout_bytes, workspace_bytes) =
+            result.unwrap_or_else(|err| panic!("{loop_name}: {err}"));
+        assert!(event_count > 0, "{loop_name}");
+        total_stdout_bytes += stdout_bytes;
+        total_workspace_bytes += workspace_bytes;
+        assert!(
+            failed == loop_name.contains("sandbox-negative"),
+            "{loop_name} failure state must match fixture kind"
+        );
     }
+    for handle in handles {
+        handle.join().expect("worker thread joins");
+    }
+    assert!(
+        started.elapsed() <= timeout,
+        "10 concurrent fixture loops must complete within {timeout:?}"
+    );
+    assert!(
+        total_stdout_bytes < 512 * 1024,
+        "concurrent fixture stdout must stay bounded: {total_stdout_bytes} bytes"
+    );
+    assert!(
+        total_workspace_bytes < 64 * 1024 * 1024,
+        "concurrent fixture workspaces must stay bounded: {total_workspace_bytes} bytes"
+    );
 }
 
 fn p95(mut values: Vec<u128>) -> u128 {
@@ -151,4 +213,18 @@ fn copy_dir(source: &Path, target: &Path) {
             fs::copy(&source_path, &target_path).expect("fixture file copied");
         }
     }
+}
+
+fn dir_size(path: &Path) -> u64 {
+    fs::read_dir(path)
+        .expect("directory readable")
+        .map(|entry| {
+            let path = entry.expect("directory entry readable").path();
+            if path.is_dir() {
+                dir_size(&path)
+            } else {
+                fs::metadata(&path).expect("file metadata readable").len()
+            }
+        })
+        .sum()
 }
