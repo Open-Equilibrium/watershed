@@ -401,6 +401,11 @@ pub fn resume_session(
             loop_block.identity.id
         )));
     }
+    if let Some(tool_id) = started_tool_without_progress(&events) {
+        return Err(RuntimeError::Protocol(format!(
+            "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
+        )));
+    }
 
     let resumed_runtime = execute_loop(
         workspace,
@@ -3553,6 +3558,61 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
     Ok(())
 }
 
+fn started_tool_without_progress(events: &[EventEnvelope]) -> Option<String> {
+    let mut active_phases = BTreeMap::new();
+    let mut active_steps = BTreeMap::new();
+    let mut started_without_progress = BTreeMap::new();
+
+    for event in events {
+        match event.event_type {
+            EventType::PhaseEntered => {
+                if let Some(loop_id) = &event.loop_id {
+                    active_phases
+                        .insert(loop_id.clone(), lifecycle_payload_string(event, "phase_id"));
+                    active_steps.remove(loop_id);
+                }
+            }
+            EventType::StepStarted => {
+                if let Some(loop_id) = &event.loop_id {
+                    active_steps.insert(loop_id.clone(), lifecycle_step_key(event, &active_phases));
+                }
+            }
+            EventType::StepCompleted => {
+                if let Some(loop_id) = &event.loop_id {
+                    active_steps.remove(loop_id);
+                }
+            }
+            EventType::ToolStarted => {
+                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
+                started_without_progress.insert(tool.clone(), tool.3);
+            }
+            EventType::ToolProgress
+            | EventType::ToolCompleted
+            | EventType::ToolFailed
+            | EventType::ToolTimedOut => {
+                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
+                started_without_progress.remove(&tool);
+            }
+            EventType::SessionStarted
+            | EventType::SessionPaused
+            | EventType::SessionResumed
+            | EventType::SessionCompleted
+            | EventType::SessionFailed
+            | EventType::LoopStarted
+            | EventType::LoopCompleted
+            | EventType::LoopFailed
+            | EventType::MessageDelta
+            | EventType::MessageCompleted
+            | EventType::ArtifactLogged
+            | EventType::AttentionRequested
+            | EventType::MetricSample
+            | EventType::Error => {}
+        }
+    }
+
+    started_without_progress.into_values().next()
+}
+
 fn terminal_lifecycle_error(
     path: &Path,
     line_number: usize,
@@ -5005,6 +5065,27 @@ mod tests {
         assert!(stream_is_completed(&events));
     }
 
+    #[test]
+    fn resume_rejects_tool_started_prefix_without_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let prefix = prefix_through_tool_started(
+            &expected_stream("hello-loop", "hello-loop.jsonl"),
+            "write-summary",
+        );
+        let path = session_dir.join("hello001.jsonl");
+        fs::write(&path, prefix).expect("started prefix written");
+
+        let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+            .expect_err("tool.started prefix is ambiguous and must not resume");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("in-flight tool"))
+        );
+        assert!(!workspace.join("out/summary.txt").exists());
+    }
+
     #[cfg(not(unix))]
     #[test]
     fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
@@ -5563,17 +5644,25 @@ mod tests {
     }
 
     fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {
-        let event_marker = "\"event_type\":\"tool.progress\"";
+        prefix_through_tool_event(stream, "tool.progress", tool_id)
+    }
+
+    fn prefix_through_tool_started(stream: &str, tool_id: &str) -> String {
+        prefix_through_tool_event(stream, "tool.started", tool_id)
+    }
+
+    fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> String {
+        let event_marker = format!("\"event_type\":\"{event_type}\"");
         let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
         let mut prefix = String::new();
         for line in stream.lines() {
             prefix.push_str(line);
             prefix.push('\n');
-            if line.contains(event_marker) && line.contains(&tool_marker) {
+            if line.contains(&event_marker) && line.contains(&tool_marker) {
                 return prefix;
             }
         }
-        panic!("missing tool.progress for {tool_id}");
+        panic!("missing {event_type} for {tool_id}");
     }
 
     fn first_event_line(fixture: &str, stream: &str) -> String {
