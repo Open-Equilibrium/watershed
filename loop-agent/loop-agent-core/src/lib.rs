@@ -639,14 +639,14 @@ fn reserve_session_log(
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
     let log_path = log_dir.join(format!("{session_id}.log"));
     let lock_path = session_lock_path(workspace, session_id)?;
-    reserve_session_file(&session_path, session_id)?;
-    if let Err(err) = reserve_new_file(&log_path) {
-        let _ = fs::remove_file(&session_path);
+    reserve_session_lock_file(&lock_path, session_id)?;
+    if let Err(err) = reserve_session_file(&session_path, session_id) {
+        let _ = fs::remove_file(&lock_path);
         return Err(err);
     }
-    if let Err(err) = reserve_session_lock_file(&lock_path, session_id) {
+    if let Err(err) = reserve_new_file(&log_path) {
         let _ = fs::remove_file(&session_path);
-        let _ = fs::remove_file(&log_path);
+        let _ = fs::remove_file(&lock_path);
         return Err(err);
     }
     Ok(SessionReservation {
@@ -672,6 +672,7 @@ fn reserve_unique_session_log(
             Err(RuntimeError::SessionLogExists(_)) => {
                 read_existing_session(workspace, &candidate, EmitMode::Jsonl)?;
             }
+            Err(err) if is_active_session_error(&err, &candidate) => continue,
             Err(err) => return Err(err),
         }
     }
@@ -679,6 +680,14 @@ fn reserve_unique_session_log(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
+}
+
+fn is_active_session_error(err: &RuntimeError, session_id: &str) -> bool {
+    matches!(
+        err,
+        RuntimeError::Protocol(message)
+            if message == &format!("session {session_id} is already active")
+    )
 }
 
 fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
@@ -5275,11 +5284,13 @@ mod tests {
         let err = reserve_session_log(&workspace, "reserve001")
             .expect_err("second reservation must fail atomically");
 
-        assert!(
-            matches!(err, RuntimeError::SessionLogExists(session_id) if session_id == "reserve001")
-        );
+        assert!(matches!(
+            err,
+            RuntimeError::Protocol(message) if message.contains("already active")
+        ));
         assert!(first.session_path.exists());
         assert!(first.log_path.exists());
+        assert!(first.lock_path.exists());
         first.rollback();
     }
 
@@ -6448,6 +6459,19 @@ mod tests {
             .join(LOCAL_LOG_DIR)
             .join("clean002.log")
             .exists());
+    }
+
+    #[test]
+    fn reserve_unique_session_log_skips_in_progress_reservations() {
+        let workspace = empty_workspace("reserve-in-progress-collision");
+        let held = reserve_session_log(&workspace, "smoke001").expect("first reservation succeeds");
+
+        let next = reserve_unique_session_log(&workspace, "smoke001")
+            .expect("in-progress reservation must be treated as occupied");
+
+        assert_eq!(next.session_id, "smoke001-2");
+        assert!(held.session_path.exists());
+        assert!(next.session_path.exists());
     }
 
     #[test]
