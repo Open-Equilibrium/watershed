@@ -363,6 +363,35 @@ mod tests {
     }
 
     #[test]
+    fn event_type_names_round_trip_through_serializer() {
+        for name in event_type_names() {
+            let event_type = EventType::try_from(*name).expect("event type name parses");
+
+            assert_eq!(event_type.as_str(), *name);
+            assert_eq!(
+                serde_json::to_string(&event_type).expect("event type serializes"),
+                format!("\"{name}\"")
+            );
+            assert_eq!(
+                serde_json::from_str::<EventType>(&format!("\"{name}\""))
+                    .expect("event type deserializes"),
+                event_type
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_event_type_reports_rejected_name() {
+        let err = EventType::try_from("future.event").expect_err("unknown event type must fail");
+
+        assert_eq!(err.to_string(), "unknown event type: future.event");
+        assert!(serde_json::from_str::<EventType>("\"future.event\"")
+            .expect_err("unknown event type must fail deserialization")
+            .to_string()
+            .contains("future.event"));
+    }
+
+    #[test]
     fn session_id_is_lowercase_path_safe_token() {
         assert!(is_valid_session_id("session_001-a"));
         assert!(!is_valid_session_id(""));
@@ -409,6 +438,19 @@ mod tests {
             canonical_json(&decomposed).expect("value canonicalizes"),
             "\"é\""
         );
+    }
+
+    #[test]
+    fn canonical_json_serializes_scalar_values() {
+        assert_eq!(
+            canonical_json(&Value::Null).expect("null canonicalizes"),
+            "null"
+        );
+        assert_eq!(
+            canonical_json(&Value::Bool(true)).expect("bool canonicalizes"),
+            "true"
+        );
+        assert_eq!(canonical_json(&json!(-7)).expect("i64 canonicalizes"), "-7");
     }
 
     #[test]
@@ -482,6 +524,7 @@ mod tests {
             .expect_err("non-object payload must fail");
 
         assert!(matches!(err, CanonicalJsonError::NonObjectPayload));
+        assert_eq!(err.to_string(), "event payload must be a JSON object");
     }
 
     #[test]
@@ -505,6 +548,27 @@ mod tests {
             err,
             CanonicalJsonError::UnsupportedProtocolVersion { .. }
         ));
+        assert_eq!(
+            err.to_string(),
+            "unsupported protocol_version \"1\"; expected \"0\""
+        );
+    }
+
+    #[test]
+    fn event_envelope_serializer_rejects_non_object_payload() {
+        let event = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "smoke001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            Value::Null,
+        );
+
+        let err = serde_json::to_string(&event).expect_err("non-object payload must fail");
+
+        assert!(err.to_string().contains("payload must be a JSON object"));
     }
 
     #[test]

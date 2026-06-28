@@ -24,6 +24,15 @@ fn expected_stream(fixture: &str, stream: &str) -> String {
         .expect("expected stream is readable")
 }
 
+fn first_event_line(fixture: &str, stream: &str) -> String {
+    expected_stream(fixture, stream)
+        .lines()
+        .next()
+        .expect("stream has first event")
+        .to_owned()
+        + "\n"
+}
+
 fn workspace_copy(fixture: &str) -> PathBuf {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
@@ -79,6 +88,46 @@ fn short_version_flag_prints_package_version() {
         format!("loop {}\n", env!("CARGO_PKG_VERSION"))
     );
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn no_arguments_and_unknown_commands_print_usage_errors() {
+    for args in [Vec::<&str>::new(), vec!["unknown"]] {
+        let output = loop_command()
+            .args(args)
+            .output()
+            .expect("loop binary should run");
+
+        assert_eq!(output.status.code(), Some(64));
+        assert!(String::from_utf8(output.stderr)
+            .expect("stderr should be UTF-8")
+            .contains("usage: loop run <loop>"));
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn invalid_emit_and_extra_arguments_print_usage_errors() {
+    let workspace = workspace_copy("smoke-loop");
+    for args in [
+        vec!["run", "smoke-loop", "--emit", "human"],
+        vec!["run", "smoke-loop", "--bogus"],
+        vec!["sessions", "--bogus"],
+    ] {
+        let output = loop_command()
+            .current_dir(&workspace)
+            .args(args)
+            .output()
+            .expect("loop binary should run");
+
+        assert_eq!(output.status.code(), Some(64));
+        let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+        assert!(
+            stderr.contains("unsupported emit mode") || stderr.contains("unknown argument"),
+            "{stderr}"
+        );
+        assert!(output.stdout.is_empty());
+    }
 }
 
 #[test]
@@ -275,6 +324,34 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
 }
 
 #[test]
+fn resume_partial_session_prints_human_status() {
+    let workspace = workspace_copy("smoke-loop");
+    let session_dir = workspace.join(".loop/sessions");
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    fs::write(
+        session_dir.join("smoke001.jsonl"),
+        first_event_line("smoke-loop", "smoke-loop.jsonl"),
+    )
+    .expect("partial session log written");
+
+    let output = loop_command()
+        .current_dir(&workspace)
+        .args(["resume", "smoke001"])
+        .output()
+        .expect("loop binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+        "session smoke001 resumed\n"
+    );
+    assert!(fs::read_to_string(session_dir.join("smoke001.jsonl"))
+        .expect("resumed log readable")
+        .contains("\"event_type\":\"session.completed\""));
+}
+
+#[test]
 fn unsafe_session_id_is_rejected_before_filesystem_access() {
     let workspace = workspace_copy("smoke-loop");
     let output = loop_command()
@@ -315,6 +392,58 @@ fn chat_hello_command_runs_hello_loop() {
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         expected_stream("hello-loop", "hello-loop.jsonl")
     );
+}
+
+#[test]
+fn chat_ignores_blank_input_until_eof() {
+    let workspace = workspace_copy("hello-loop");
+    let mut child = loop_command()
+        .current_dir(workspace)
+        .arg("chat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().expect("stdin is piped");
+        stdin.write_all(b"\n   \n").expect("stdin write");
+    }
+
+    let output = child.wait_with_output().expect("loop binary should exit");
+
+    assert!(output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn chat_rejects_unsupported_commands() {
+    let workspace = workspace_copy("hello-loop");
+    let mut child = loop_command()
+        .current_dir(workspace)
+        .arg("chat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().expect("stdin is piped");
+        stdin.write_all(b"/unknown\n").expect("stdin write");
+    }
+
+    let output = child.wait_with_output().expect("loop binary should exit");
+
+    assert_eq!(output.status.code(), Some(64));
+    assert!(String::from_utf8(output.stderr)
+        .expect("stderr should be UTF-8")
+        .contains("unsupported chat command"));
+    assert!(output.stdout.is_empty());
 }
 
 #[test]

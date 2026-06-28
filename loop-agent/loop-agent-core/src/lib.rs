@@ -3916,6 +3916,77 @@ mod tests {
     }
 
     #[test]
+    fn designed_future_surfaces_are_documented_but_not_m1() {
+        assert_eq!(
+            designed_future_surfaces(),
+            &[
+                RuntimeSurface::DesignedRpc,
+                RuntimeSurface::FutureEmbeddedCoreApi
+            ]
+        );
+        assert_eq!(
+            m0_runtime_notice(),
+            "M0 defines Loop Agent contracts and fixtures; runtime execution lands in M1"
+        );
+    }
+
+    #[test]
+    fn runtime_error_display_source_and_exit_codes_cover_variants() {
+        let io_error = RuntimeError::Io {
+            path: PathBuf::from("session.jsonl"),
+            source: io::Error::new(io::ErrorKind::Other, "disk full"),
+        };
+        assert_eq!(io_error.to_string(), "session.jsonl: disk full");
+        assert_eq!(io_error.exit_code(), 65);
+        assert!(std::error::Error::source(&io_error).is_some());
+
+        let json_error = RuntimeError::from(
+            serde_json::from_str::<serde_json::Value>("{").expect_err("invalid JSON"),
+        );
+        assert_eq!(json_error.exit_code(), 65);
+        assert!(std::error::Error::source(&json_error).is_some());
+
+        let registry_error = RuntimeError::from(
+            core_script::load_registry_root(Path::new("missing-registry-root"))
+                .expect_err("missing registry root"),
+        );
+        assert_eq!(registry_error.exit_code(), 65);
+        assert!(std::error::Error::source(&registry_error).is_some());
+
+        let policy_error = RuntimeError::from(core_policy::PolicyCompileError::MissingLoop(
+            "missing".to_owned(),
+        ));
+        assert_eq!(
+            policy_error.to_string(),
+            "policy compile references missing loop missing"
+        );
+        assert!(std::error::Error::source(&policy_error).is_some());
+
+        let protocol = RuntimeError::Protocol("bad stream".to_owned());
+        assert_eq!(protocol.to_string(), "bad stream");
+        assert_eq!(protocol.exit_code(), 65);
+        assert!(std::error::Error::source(&protocol).is_none());
+
+        let exists = RuntimeError::SessionLogExists("smoke001".to_owned());
+        assert_eq!(
+            exists.to_string(),
+            "session log already exists for smoke001"
+        );
+        assert_eq!(exists.exit_code(), 65);
+
+        let terminal = RuntimeError::TerminalSession("smoke001".to_owned());
+        assert_eq!(
+            terminal.to_string(),
+            "cannot resume terminal session smoke001"
+        );
+        assert_eq!(terminal.exit_code(), 65);
+
+        let usage = RuntimeError::Usage("usage".to_owned());
+        assert_eq!(usage.to_string(), "usage");
+        assert_eq!(usage.exit_code(), 64);
+    }
+
+    #[test]
     fn session_id_validation_uses_protocol_contract() {
         assert!(validate_session_id("hello001"));
         assert!(!validate_session_id("Hello001"));
@@ -3937,6 +4008,17 @@ mod tests {
         assert!(validate_session_id(&session_id));
         assert!(session_id.len() <= 128);
         assert_ne!(session_id, session_id_for_loop(&format!("{long}b")));
+    }
+
+    #[test]
+    fn session_id_suffix_matching_accepts_only_allocated_suffixes() {
+        assert!(session_id_matches_loop("smoke001", "smoke-loop"));
+        assert!(session_id_matches_loop("smoke001-2", "smoke-loop"));
+        assert!(session_id_matches_loop("smoke001-10000", "smoke-loop"));
+        assert!(!session_id_matches_loop("smoke001-1", "smoke-loop"));
+        assert!(!session_id_matches_loop("smoke001-10001", "smoke-loop"));
+        assert!(!session_id_matches_loop("smoke001-two", "smoke-loop"));
+        assert!(!session_id_matches_loop("smoke001", "hello-loop"));
     }
 
     #[test]
@@ -4151,6 +4233,48 @@ mod tests {
             .join(LOCAL_SESSION_DIR)
             .join("smoke001-2.jsonl")
             .is_file());
+    }
+
+    #[test]
+    fn human_run_replay_tail_and_session_listing_report_status() {
+        let workspace = workspace_copy("smoke-loop");
+
+        let run = run_loop(&workspace, "smoke-loop", EmitMode::Human).expect("loop runs");
+        assert!(!run.failed);
+        assert_eq!(run.stdout, "loop smoke-loop completed\n");
+
+        let replay =
+            replay_session(&workspace, "smoke001", EmitMode::Human).expect("session replays");
+        assert_eq!(replay.stdout, "session smoke001 replayed\n");
+
+        let tail = tail_session(&workspace, "smoke001", EmitMode::Human).expect("session tails");
+        assert_eq!(tail.stdout, "session smoke001 tailed\n");
+
+        assert_eq!(
+            list_sessions(&workspace).expect("sessions list"),
+            vec!["smoke001"]
+        );
+    }
+
+    #[test]
+    fn list_sessions_handles_missing_dirs_and_filters_unsafe_names() {
+        let workspace = empty_workspace("list-sessions");
+
+        assert_eq!(
+            list_sessions(&workspace).expect("missing .loop is empty"),
+            Vec::<String>::new()
+        );
+
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        fs::write(session_dir.join("good001.jsonl"), "").expect("valid session file");
+        fs::write(session_dir.join("Bad.jsonl"), "").expect("invalid session file");
+        fs::write(session_dir.join("good002.txt"), "").expect("non-jsonl file");
+
+        assert_eq!(
+            list_sessions(&workspace).expect("sessions list"),
+            vec!["good001"]
+        );
     }
 
     #[test]
@@ -5253,6 +5377,24 @@ mod tests {
     }
 
     #[test]
+    fn resume_human_mode_reports_resumed_status() {
+        let workspace = workspace_copy("smoke-loop");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("smoke001.jsonl");
+        fs::write(&path, first_event_line("smoke-loop", "smoke-loop.jsonl"))
+            .expect("partial log written");
+
+        let output =
+            resume_session(&workspace, "smoke001", EmitMode::Human).expect("session resumes");
+
+        assert_eq!(output.stdout, "session smoke001 resumed\n");
+        assert!(fs::read_to_string(&path)
+            .expect("resumed log readable")
+            .contains("\"event_type\":\"session.completed\""));
+    }
+
+    #[test]
     fn resume_rejects_tool_started_prefix_without_side_effects() {
         let workspace = workspace_copy("hello-loop");
         let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -5483,6 +5625,117 @@ mod tests {
     }
 
     #[test]
+    fn tail_session_rejects_non_append_only_log_changes() {
+        let workspace = empty_workspace("tail-mutated-log");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("tailmut001.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "tailmut001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("started event serializes");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "tailmut001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        fs::write(&path, &started).expect("initial session log written");
+
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = mpsc::channel();
+        let mut writer = NotifyingWriter {
+            bytes: Arc::clone(&bytes),
+            first_write: Some(tx),
+        };
+        let tail_workspace = workspace.clone();
+        let handle = thread::spawn(move || {
+            tail_session_to_writer(&tail_workspace, "tailmut001", EmitMode::Jsonl, &mut writer)
+        });
+
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("tail writes current prefix before mutation");
+        fs::write(&path, completed).expect("session log mutated");
+
+        let err = handle
+            .join()
+            .expect("tail thread joins")
+            .expect_err("tail must reject non-append mutation");
+        assert!(
+            matches!(err, RuntimeError::Protocol(ref message) if message.contains("append-only")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn tail_session_stops_when_writer_closes_after_appended_event() {
+        let workspace = empty_workspace("tail-appended-broken-pipe");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("tailappenddrop001.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "tailappenddrop001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("started event serializes");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "tailappenddrop001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        fs::write(&path, &started).expect("initial session log written");
+
+        let (tx, rx) = mpsc::channel();
+        let mut writer = ClosingAfterFirstWrite {
+            first_write: Some(tx),
+        };
+        let tail_workspace = workspace.clone();
+        let handle = thread::spawn(move || {
+            tail_session_to_writer(
+                &tail_workspace,
+                "tailappenddrop001",
+                EmitMode::Jsonl,
+                &mut writer,
+            )
+        });
+
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("tail writes current prefix before append");
+        append_session_log_line(&path, &completed).expect("terminal event appended");
+
+        let output = handle
+            .join()
+            .expect("tail thread joins")
+            .expect("broken pipe stops tail without error");
+        assert_eq!(output.event_count, 2);
+        assert_eq!(output.stdout, "");
+    }
+
+    #[test]
     fn tail_session_stops_when_writer_closes_before_terminal_event() {
         let workspace = empty_workspace("tail-broken-pipe");
         let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -5535,6 +5788,79 @@ mod tests {
 
         assert_eq!(output.event_count, 1);
         assert!(!output.failed);
+    }
+
+    #[test]
+    fn write_tail_bytes_reports_non_broken_pipe_writer_errors() {
+        let mut writer = ErrorWriter;
+
+        let err = write_tail_bytes(&mut writer, b"event")
+            .expect_err("non-broken-pipe writer error must surface");
+
+        assert!(matches!(
+            err,
+            RuntimeError::Io { path, source }
+                if path == PathBuf::from("<tail>") && source.kind() == io::ErrorKind::Other
+        ));
+    }
+
+    #[test]
+    fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
+        let log_conflict = empty_workspace("reserve-log-conflict");
+        fs::create_dir_all(log_conflict.join(LOCAL_SESSION_DIR)).expect("session dir");
+        fs::create_dir_all(log_conflict.join(LOCAL_LOG_DIR)).expect("log dir");
+        fs::write(log_conflict.join(LOCAL_LOG_DIR).join("clean001.log"), "")
+            .expect("conflicting log file");
+
+        reserve_session_log(&log_conflict, "clean001")
+            .expect_err("log conflict must fail reservation");
+
+        assert!(!log_conflict
+            .join(LOCAL_SESSION_DIR)
+            .join("clean001.jsonl")
+            .exists());
+
+        let lock_conflict = empty_workspace("reserve-lock-conflict");
+        fs::create_dir_all(lock_conflict.join(LOCAL_SESSION_DIR)).expect("session dir");
+        fs::write(
+            lock_conflict.join(LOCAL_SESSION_DIR).join("clean002.lock"),
+            "",
+        )
+        .expect("conflicting lock file");
+
+        reserve_session_log(&lock_conflict, "clean002")
+            .expect_err("lock conflict must fail reservation");
+
+        assert!(!lock_conflict
+            .join(LOCAL_SESSION_DIR)
+            .join("clean002.jsonl")
+            .exists());
+        assert!(!lock_conflict
+            .join(LOCAL_LOG_DIR)
+            .join("clean002.log")
+            .exists());
+    }
+
+    #[test]
+    fn filesystem_guards_reject_unexpected_leaf_shapes() {
+        let workspace = empty_workspace("filesystem-guards");
+        let file_path = workspace.join("file.txt");
+        let dir_path = workspace.join("dir");
+        fs::write(&file_path, "x").expect("file written");
+        fs::create_dir(&dir_path).expect("dir written");
+
+        assert!(matches!(
+            ensure_new_leaf_available(&file_path),
+            Err(RuntimeError::Protocol(message)) if message.contains("must not already exist")
+        ));
+        assert!(matches!(
+            ensure_real_file(&dir_path),
+            Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
+        ));
+        assert!(matches!(
+            ensure_real_directory(&file_path),
+            Err(RuntimeError::Protocol(message)) if message.contains("must be a directory")
+        ));
     }
 
     #[test]
@@ -5710,6 +6036,7 @@ mod tests {
 
         let workspace = workspace_copy("hello-loop");
         let outside = empty_workspace("outside-summary-ancestor");
+        fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
         symlink(&outside, workspace.join("out")).expect("summary ancestor symlink");
 
         let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
@@ -6053,6 +6380,37 @@ mod tests {
     impl Write for BrokenPipeWriter {
         fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
             Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct ClosingAfterFirstWrite {
+        first_write: Option<mpsc::Sender<()>>,
+    }
+
+    impl Write for ClosingAfterFirstWrite {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if let Some(sender) = self.first_write.take() {
+                let _ = sender.send(());
+                Ok(buf.len())
+            } else {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct ErrorWriter;
+
+    impl Write for ErrorWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::Other, "writer failed"))
         }
 
         fn flush(&mut self) -> io::Result<()> {

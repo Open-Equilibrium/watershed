@@ -2092,6 +2092,267 @@ mod tests {
     }
 
     #[test]
+    fn policy_compile_error_messages_and_sources_cover_variants() {
+        let missing_loop = PolicyCompileError::MissingLoop("missing-loop".to_owned());
+        assert_eq!(
+            missing_loop.to_string(),
+            "policy compile references missing loop missing-loop"
+        );
+        assert!(std::error::Error::source(&missing_loop).is_none());
+
+        let missing_phase = PolicyCompileError::MissingPhase("missing-phase".to_owned());
+        assert_eq!(
+            missing_phase.to_string(),
+            "policy compile references missing phase missing-phase"
+        );
+
+        let missing_tool = PolicyCompileError::MissingTool("missing-tool".to_owned());
+        assert_eq!(
+            missing_tool.to_string(),
+            "policy compile references missing tool missing-tool"
+        );
+
+        let network = PolicyCompileError::NonEmptyNetworkAllowlist {
+            tool_id: "network-tool".to_owned(),
+        };
+        assert_eq!(
+            network.to_string(),
+            "OS-enforced M1 policy for tool network-tool must use a deny-all network allowlist"
+        );
+
+        let mut artifact = valid_policy_artifact("invalid-artifact");
+        artifact.policy_version = "1".to_owned();
+        let validation = artifact.validate().expect_err("invalid artifact");
+        let invalid = PolicyCompileError::InvalidArtifact(validation);
+        assert_eq!(
+            invalid.to_string(),
+            "policy_version must be fixed string \"0\""
+        );
+        assert!(std::error::Error::source(&invalid).is_some());
+    }
+
+    #[test]
+    fn policy_artifact_rejects_duplicate_command_tool_ids() {
+        let mut artifact = valid_policy_artifact("duplicate-tool");
+        artifact
+            .commands
+            .push(valid_command_policy("duplicate-tool"));
+
+        let err = artifact
+            .validate()
+            .expect_err("duplicate command tool_id must fail validation");
+
+        assert_eq!(err.to_string(), "duplicate command tool_id duplicate-tool");
+    }
+
+    #[test]
+    fn policy_artifact_rejects_own_script_executable_mismatch() {
+        let mut artifact = own_script_policy_artifact("write-summary");
+        artifact.commands[0].executable = "registry:agent-echo".to_owned();
+
+        let err = artifact
+            .validate()
+            .expect_err("own-script executable mismatch must fail validation");
+
+        assert_eq!(
+            err.to_string(),
+            "own-script tool write-summary executable must be runner:posix-sh"
+        );
+    }
+
+    #[test]
+    fn allowed_parameter_policy_maps_script_value_types() {
+        let cases = [
+            (
+                core_script::ParameterValueType::None,
+                ParameterValueType::None,
+                Vec::new(),
+            ),
+            (
+                core_script::ParameterValueType::String,
+                ParameterValueType::String,
+                Vec::new(),
+            ),
+            (
+                core_script::ParameterValueType::Integer,
+                ParameterValueType::Integer,
+                Vec::new(),
+            ),
+            (
+                core_script::ParameterValueType::WorkspaceRelativePath,
+                ParameterValueType::WorkspaceRelativePath,
+                Vec::new(),
+            ),
+            (
+                core_script::ParameterValueType::Enum,
+                ParameterValueType::Enum,
+                vec!["fast".to_owned(), "slow".to_owned()],
+            ),
+        ];
+
+        for (script_type, policy_type, allowed_values) in cases {
+            let parameter = core_script::AllowedParameter {
+                name: "--mode".to_owned(),
+                value_type: script_type,
+                required: true,
+                allowed_values: allowed_values.clone(),
+                value_pattern: Some("[a-z]+".to_owned()),
+                max_length: Some(16),
+                min: Some(1),
+                max: Some(3),
+            };
+
+            let policy = allowed_parameter_policy(&parameter);
+
+            assert_eq!(policy.value_type, policy_type);
+            assert_eq!(policy.allowed_values, allowed_values);
+            assert_eq!(policy.name, "--mode");
+            assert!(policy.required);
+        }
+    }
+
+    #[test]
+    fn policy_artifact_rejects_parameter_constraint_mismatches() {
+        let mut cases = Vec::new();
+
+        let mut string_with_values = valid_parameter("--name", ParameterValueType::String);
+        string_with_values.allowed_values = vec!["alice".to_owned()];
+        cases.push((
+            string_with_values,
+            "tool parameter-tool non-enum parameter --name must omit allowed_values",
+        ));
+
+        let mut integer_with_values = valid_parameter("--count", ParameterValueType::Integer);
+        integer_with_values.allowed_values = vec!["1".to_owned()];
+        cases.push((
+            integer_with_values,
+            "tool parameter-tool non-enum parameter --count must omit allowed_values",
+        ));
+
+        let mut integer_with_pattern = valid_parameter("--count", ParameterValueType::Integer);
+        integer_with_pattern.value_pattern = Some("[0-9]+".to_owned());
+        cases.push((
+            integer_with_pattern,
+            "tool parameter-tool integer parameter --count must omit value_pattern and max_length",
+        ));
+
+        let mut integer_with_bad_range = valid_parameter("--count", ParameterValueType::Integer);
+        integer_with_bad_range.min = Some(10);
+        integer_with_bad_range.max = Some(1);
+        cases.push((
+            integer_with_bad_range,
+            "tool parameter-tool integer parameter --count min must be <= max",
+        ));
+
+        let mut none_with_values = valid_parameter("--dry-run", ParameterValueType::None);
+        none_with_values.allowed_values = vec!["true".to_owned()];
+        cases.push((
+            none_with_values,
+            "tool parameter-tool non-enum parameter --dry-run must omit allowed_values",
+        ));
+
+        let mut path_with_values =
+            valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
+        path_with_values.allowed_values = vec!["out/summary.txt".to_owned()];
+        cases.push((
+            path_with_values,
+            "tool parameter-tool non-enum parameter --path must omit allowed_values",
+        ));
+
+        for (parameter, expected) in cases {
+            let artifact = policy_artifact_with_parameter(parameter);
+
+            let err = artifact
+                .validate()
+                .expect_err("invalid parameter constraint must fail validation");
+
+            assert_eq!(err.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn policy_path_and_cidr_helpers_enforce_canonical_forms() {
+        assert_eq!(
+            normalize_policy_relative_path("workspace/out"),
+            Some("workspace/out".to_owned())
+        );
+        for path in [
+            "",
+            ".",
+            "/workspace",
+            "workspace/../out",
+            "workspace//out",
+            "workspace\\out",
+            "C:/workspace/out",
+        ] {
+            assert_eq!(normalize_policy_relative_path(path), None, "{path}");
+        }
+
+        for cidr in [
+            "192.0.2.0/24/extra",
+            "192.0.2.0/not-a-prefix",
+            "example.com/24",
+            "192.0.2.1/24",
+            "2001:db8::1/32",
+        ] {
+            assert!(!is_valid_canonical_cidr(cidr), "{cidr}");
+        }
+        assert!(is_valid_canonical_cidr("192.0.2.42/32"));
+        assert!(is_valid_canonical_cidr("2001:db8::/128"));
+    }
+
+    #[test]
+    fn canonical_policy_json_helpers_handle_scalar_and_sparse_shapes() {
+        assert_eq!(canonical_json(&Value::Null), "null");
+        assert_eq!(canonical_json(&Value::Bool(false)), "false");
+        assert_eq!(canonical_json(&serde_json::json!([2, "a"])), "[2,\"a\"]");
+
+        let mut not_object = Value::Null;
+        canonicalize_policy_artifact_arrays(&mut not_object);
+        assert_eq!(not_object, Value::Null);
+
+        let mut command_not_object = Value::Null;
+        canonicalize_command_policy_arrays(&mut command_not_object);
+        assert_eq!(command_not_object, Value::Null);
+
+        let mut command_without_network = serde_json::json!({"tool_id":"echo"});
+        canonicalize_command_policy_arrays(&mut command_without_network);
+        assert_eq!(
+            command_without_network,
+            serde_json::json!({"tool_id":"echo"})
+        );
+
+        let mut command_with_network_without_allow =
+            serde_json::json!({"network":{"default":"deny"}});
+        canonicalize_command_policy_arrays(&mut command_with_network_without_allow);
+        assert_eq!(
+            command_with_network_without_allow,
+            serde_json::json!({"network":{"default":"deny"}})
+        );
+    }
+
+    #[test]
+    fn policy_artifact_error_display_reports_serialization_failure() {
+        struct FailingSerialize;
+
+        impl serde::Serialize for FailingSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("intentional failure"))
+            }
+        }
+
+        let err = canonical_artifact_json(&FailingSerialize).expect_err("serialization must fail");
+
+        assert_eq!(
+            err.to_string(),
+            "failed to serialize policy artifact: intentional failure"
+        );
+    }
+
+    #[test]
     fn policy_artifact_canonical_json_sorts_schema_arrays() {
         let artifact = PolicyArtifact {
             commands: vec![
@@ -2290,6 +2551,38 @@ mod tests {
             .map(|path| (*path).to_owned())
             .collect();
         command
+    }
+
+    fn policy_artifact_with_parameter(parameter: AllowedParameterPolicy) -> PolicyArtifact {
+        let mut artifact = valid_policy_artifact("parameter-tool");
+        artifact.commands[0].allowed_parameters = vec![parameter];
+        artifact
+    }
+
+    fn valid_parameter(name: &str, value_type: ParameterValueType) -> AllowedParameterPolicy {
+        let mut parameter = AllowedParameterPolicy {
+            name: name.to_owned(),
+            required: false,
+            max: None,
+            max_length: None,
+            min: None,
+            value_pattern: None,
+            value_type,
+            allowed_values: Vec::new(),
+        };
+        match &parameter.value_type {
+            ParameterValueType::String => {
+                parameter.value_pattern = Some("[a-z]+".to_owned());
+                parameter.max_length = Some(64);
+            }
+            ParameterValueType::Enum => {
+                parameter.allowed_values = vec!["fast".to_owned()];
+            }
+            ParameterValueType::Integer
+            | ParameterValueType::None
+            | ParameterValueType::WorkspaceRelativePath => {}
+        }
+        parameter
     }
 
     fn own_script_policy_artifact(tool_id: &str) -> PolicyArtifact {
