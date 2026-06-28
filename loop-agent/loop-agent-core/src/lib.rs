@@ -1995,7 +1995,7 @@ fn sandbox_runtime_failure(
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        if let Some(failure) = sandbox_out_of_phase_failure(policy, phase)? {
+        if let Some(failure) = sandbox_out_of_phase_failure(policy, loop_block, phase)? {
             return Ok(Some(failure));
         }
         for tool_ref in &phase.tool_refs {
@@ -2030,9 +2030,13 @@ fn sandbox_tool_dispatch_failure(
 
 fn sandbox_out_of_phase_failure(
     policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
     phase: &core_script::PhaseBlock,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     let fixture_name = "sandbox-negative-tool-out-of-phase";
+    if loop_block.identity.id != fixture_name {
+        return Ok(None);
+    }
     let decision = linux_sandbox_expected_decision(fixture_name)?;
     let core_policy::DeniedAttempt::ToolOutOfPhase { phase_id, tool_id } = &decision.attempt else {
         return Err(RuntimeError::Protocol(format!(
@@ -3779,6 +3783,35 @@ mod tests {
             .stdout
             .contains("\"event_type\":\"session.completed\""));
         assert!(!output.stdout.contains("write_denied"));
+    }
+
+    #[test]
+    fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
+        let workspace = workspace_copy("smoke-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let loop_path = workspace.join("registry/loops/smoke-loop.yaml");
+        let loop_source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+        fs::write(
+            &loop_path,
+            loop_source.replace("phase_refs: [smoke]", "phase_refs: [negative-no-tools]"),
+        )
+        .expect("loop fixture rewritten");
+        let phase_path = workspace.join("registry/phases/smoke.yaml");
+        let phase_source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+        fs::write(
+            &phase_path,
+            phase_source.replace("id: smoke", "id: negative-no-tools"),
+        )
+        .expect("phase fixture rewritten");
+
+        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect("normal loop can reuse fixture phase id");
+
+        assert!(!output.failed);
+        assert!(output
+            .stdout
+            .contains("\"event_type\":\"session.completed\""));
+        assert!(!output.stdout.contains("tool_out_of_phase"));
     }
 
     #[test]

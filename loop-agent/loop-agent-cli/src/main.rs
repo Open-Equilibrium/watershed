@@ -2,7 +2,7 @@ use loop_agent_core::{EmitMode, RuntimeError};
 use std::{
     env,
     ffi::{OsStr, OsString},
-    io::{self, BufRead},
+    io::{self, BufRead, Write},
     path::PathBuf,
     process,
 };
@@ -24,7 +24,10 @@ fn main() {
         .first()
         .is_some_and(|arg| arg == "--version" || arg == "-V")
     {
-        println!("loop {}", env!("CARGO_PKG_VERSION"));
+        if let Err(err) = write_stdout(&format!("loop {}\n", env!("CARGO_PKG_VERSION"))) {
+            eprintln!("error: {err}");
+            process::exit(err.exit_code());
+        }
         return;
     }
 
@@ -48,7 +51,7 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
             let loop_ref = positional(args, 1, "loop name")?;
             let emit = emit_mode(args)?;
             let output = loop_agent_core::run_loop(workspace, loop_ref, emit)?;
-            print!("{}", output.stdout);
+            write_stdout(&output.stdout)?;
             if output.failed {
                 process::exit(65);
             }
@@ -58,7 +61,7 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
             let output = loop_agent_core::replay_session(workspace, session_id, emit)?;
-            print!("{}", output.stdout);
+            write_stdout(&output.stdout)?;
             Ok(())
         }
         "tail" => {
@@ -72,15 +75,17 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
             let output = loop_agent_core::resume_session(workspace, session_id, emit)?;
-            print!("{}", output.stdout);
+            write_stdout(&output.stdout)?;
             Ok(())
         }
         "sessions" => {
             reject_extra_args(args, 1)?;
+            let mut output = String::new();
             for session_id in loop_agent_core::list_sessions(workspace)? {
-                println!("{session_id}");
+                output.push_str(&session_id);
+                output.push('\n');
             }
-            Ok(())
+            write_stdout(&output)
         }
         "chat" => {
             reject_extra_args(args, 1)?;
@@ -100,7 +105,7 @@ fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
         match line.trim() {
             "/hello-loop" | "hello" => {
                 let output = loop_agent_core::run_loop(&workspace, "hello-loop", EmitMode::Jsonl)?;
-                print!("{}", output.stdout);
+                write_stdout(&output.stdout)?;
                 return Ok(());
             }
             "" => {}
@@ -112,6 +117,21 @@ fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
         }
     }
     Ok(())
+}
+
+fn write_stdout(contents: &str) -> Result<(), RuntimeError> {
+    let mut stdout = io::stdout().lock();
+    match stdout
+        .write_all(contents.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(source) => Err(RuntimeError::Io {
+            path: PathBuf::from("<stdout>"),
+            source,
+        }),
+    }
 }
 
 fn emit_mode(args: &[String]) -> Result<EmitMode, RuntimeError> {

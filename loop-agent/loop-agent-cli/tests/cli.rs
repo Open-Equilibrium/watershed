@@ -110,6 +110,26 @@ fn run_loop_emits_golden_jsonl_and_persists_session_log() {
 }
 
 #[test]
+fn closed_stdout_pipe_does_not_panic_for_jsonl_run() {
+    let workspace = workspace_copy("smoke-loop");
+    let mut child = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+
+    drop(child.stdout.take().expect("stdout is piped"));
+
+    let output = child.wait_with_output().expect("loop binary should exit");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+
+    assert!(output.status.success(), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
+#[test]
 fn run_loop_can_be_repeated_in_same_workspace() {
     let workspace = workspace_copy("smoke-loop");
     let first = loop_command()
