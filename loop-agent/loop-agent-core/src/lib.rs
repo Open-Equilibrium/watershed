@@ -900,9 +900,9 @@ fn ensure_real_directory(path: &Path) -> Result<(), RuntimeError> {
 }
 
 fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if metadata.file_type().is_symlink() {
+    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
         return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
+            "{} must not be a symlink or reparse point",
             path.display()
         )));
     }
@@ -913,6 +913,19 @@ fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), R
         )));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn has_windows_reparse_point(metadata: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
+    false
 }
 
 fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
@@ -5529,6 +5542,26 @@ mod tests {
         assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        let outside = empty_workspace("outside-summary-junction");
+        fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
+        create_windows_junction(&workspace.join("out"), &outside);
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("junction summary ancestor must fail");
+
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("reparse")));
+        assert!(!outside.join("summary.txt").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
     #[cfg(unix)]
     #[test]
     fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
@@ -5689,6 +5722,22 @@ mod tests {
         }
         fs::create_dir_all(&target).expect("temp workspace created");
         target
+    }
+
+    #[cfg(windows)]
+    fn create_windows_junction(link: &Path, target: &Path) {
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("mklink command runs");
+        assert!(
+            output.status.success(),
+            "junction creation failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     fn copy_dir(source: &Path, target: &Path) {
