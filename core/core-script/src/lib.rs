@@ -1222,8 +1222,17 @@ fn allowed_parameters(
                     "allowed_values is only valid for enum parameters".to_owned(),
                 ));
             }
+            let name = required_object_scalar(source_name, &object, "name")?;
+            if !is_valid_allowed_parameter_name(&name) {
+                return Err(parse_error(
+                    source_name,
+                    format!(
+                        "allowed_parameters.name {name:?} must match ^--[A-Za-z0-9][A-Za-z0-9_-]*$"
+                    ),
+                ));
+            }
             Ok(AllowedParameter {
-                name: required_object_scalar(source_name, &object, "name")?,
+                name,
                 value_type,
                 required: parse_bool(
                     source_name,
@@ -2739,6 +2748,18 @@ pub fn is_valid_command_id(value: &str) -> bool {
         && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
 }
 
+fn is_valid_allowed_parameter_name(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix("--") else {
+        return false;
+    };
+    let mut bytes = rest.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric()
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 pub fn is_valid_canonical_cidr(value: &str) -> bool {
     let Some((addr, prefix)) = value.split_once('/') else {
         return false;
@@ -3514,6 +3535,34 @@ mod tests {
         .expect_err("empty prompt rejected");
 
         assert!(err.to_string().contains("instruction.prompt"));
+    }
+
+    #[test]
+    fn parser_rejects_schema_invalid_allowed_parameter_names() {
+        let err = parse_registry_block(
+            "invalid-parameter-name.yaml",
+            r#"tool:
+  id: invalid-parameter-name
+  name: InvalidParameterName
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: file
+      value_type: string
+      required: true
+      value_pattern: "^[^/]+$"
+      max_length: 64
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("schema-invalid parameter name rejected");
+
+        assert!(err.to_string().contains("allowed_parameters.name"));
     }
 
     #[test]
