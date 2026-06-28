@@ -3,6 +3,7 @@ use loop_agent_core::{
 };
 use std::{
     fs,
+    ops::Deref,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -56,24 +57,19 @@ fn hello_loop_log_append_p95_stays_under_m1_budget() {
     let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
     let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
     let event_count = stream.lines().count() as u128;
-    let workspace = empty_workspace("hello-log-append");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    let log_dir = workspace.join(LOCAL_LOG_DIR);
-    fs::create_dir_all(&session_dir).expect("session directory created");
-    fs::create_dir_all(&log_dir).expect("log directory created");
+    let workspace = workspace_copy("hello-loop");
     let mut nanos_per_event = Vec::new();
 
-    for index in 0..100 {
-        let session_id = format!("perf{index:03}");
+    for _ in 0..100 {
+        clear_runtime_state(&workspace);
         let started = Instant::now();
-        fs::write(session_dir.join(format!("{session_id}.jsonl")), &stream)
-            .expect("session stream written");
-        fs::write(
-            log_dir.join(format!("{session_id}.log")),
-            format!("session_id={session_id}\nevents={event_count}\n"),
-        )
-        .expect("session log written");
+        let output =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop succeeds");
         nanos_per_event.push(started.elapsed().as_nanos() / event_count);
+        assert!(!output.failed);
+        assert_eq!(output.event_count as u128, event_count);
+        assert!(output.session_path.exists());
+        assert!(workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
 
     assert!(
@@ -162,6 +158,18 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
     );
 }
 
+#[test]
+fn temp_workspace_guard_removes_directory_on_drop() {
+    let path = {
+        let workspace = empty_workspace("cleanup");
+        let path = workspace.path().to_path_buf();
+        assert!(path.exists());
+        path
+    };
+
+    assert!(!path.exists(), "temporary workspace should be removed");
+}
+
 fn p95(mut values: Vec<u128>) -> u128 {
     values.sort_unstable();
     let index = ((values.len() - 1) * 95).div_ceil(100);
@@ -175,7 +183,41 @@ fn fixture_dir(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn workspace_copy(fixture: &str) -> PathBuf {
+struct TempWorkspace {
+    path: PathBuf,
+}
+
+impl TempWorkspace {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Deref for TempWorkspace {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for TempWorkspace {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempWorkspace {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn workspace_copy(fixture: &str) -> TempWorkspace {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
         "watershed-loop-agent-core-perf-{}-{id}",
@@ -185,10 +227,10 @@ fn workspace_copy(fixture: &str) -> PathBuf {
         fs::remove_dir_all(&target).expect("stale temp workspace removed");
     }
     copy_dir(&fixture_dir(fixture), &target);
-    target
+    TempWorkspace::new(target)
 }
 
-fn empty_workspace(label: &str) -> PathBuf {
+fn empty_workspace(label: &str) -> TempWorkspace {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
         "watershed-loop-agent-core-perf-{label}-{}-{id}",
@@ -198,7 +240,7 @@ fn empty_workspace(label: &str) -> PathBuf {
         fs::remove_dir_all(&target).expect("stale temp workspace removed");
     }
     fs::create_dir_all(&target).expect("empty workspace created");
-    target
+    TempWorkspace::new(target)
 }
 
 fn copy_dir(source: &Path, target: &Path) {
@@ -227,4 +269,9 @@ fn dir_size(path: &Path) -> u64 {
             }
         })
         .sum()
+}
+
+fn clear_runtime_state(workspace: &Path) {
+    let _ = fs::remove_dir_all(workspace.join(LOCAL_SESSION_DIR));
+    let _ = fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR));
 }
