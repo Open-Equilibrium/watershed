@@ -1430,10 +1430,7 @@ fn write_script_output(
     let path = ensure_real_workspace_write_path(workspace, target)?;
     let leaf_existed = ensure_writable_regular_leaf(&path)?;
     if leaf_existed && !hard_link_count_is_verifiable() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} cannot be safely replaced on this platform",
-            path.display()
-        )));
+        return replace_script_output_without_link_count(workspace, target, &path, contents);
     }
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -1452,6 +1449,81 @@ fn write_script_output(
     })?;
     file.write_all(contents)
         .map_err(|source| RuntimeError::Io { path, source })
+}
+
+fn replace_script_output_without_link_count(
+    workspace: &Path,
+    target: &str,
+    path: &Path,
+    contents: &[u8],
+) -> Result<(), RuntimeError> {
+    ensure_real_workspace_write_path(workspace, target)?;
+    let (temp_path, mut temp_file) = create_script_output_temp(path)?;
+    if let Err(err) = temp_file
+        .write_all(contents)
+        .map_err(|source| RuntimeError::Io {
+            path: temp_path.clone(),
+            source,
+        })
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    drop(temp_file);
+
+    ensure_real_workspace_write_path(workspace, target)?;
+    ensure_writable_regular_leaf(path)?;
+    if let Err(source) = fs::remove_file(path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    ensure_real_workspace_write_path(workspace, target)?;
+    if let Err(source) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    Ok(())
+}
+
+fn create_script_output_temp(path: &Path) -> Result<(PathBuf, fs::File), RuntimeError> {
+    for attempt in 0..100 {
+        let temp_path = script_output_temp_path(path, attempt)?;
+        match fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+        {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(source) => {
+                return Err(RuntimeError::Io {
+                    path: temp_path,
+                    source,
+                });
+            }
+        }
+    }
+    Err(RuntimeError::Protocol(format!(
+        "could not allocate temporary output path for {}",
+        path.display()
+    )))
+}
+
+fn script_output_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
+    let mut file_name = path
+        .file_name()
+        .ok_or_else(|| {
+            RuntimeError::Protocol("script output path must have a file name".to_owned())
+        })?
+        .to_os_string();
+    file_name.push(format!(".watershed-{}-{attempt}.tmp", std::process::id()));
+    Ok(path.with_file_name(file_name))
 }
 
 fn ensure_script_target_not_protected(
@@ -3370,6 +3442,32 @@ mod tests {
     }
 
     #[test]
+    fn run_loop_replaces_existing_own_script_output_on_repeat_run() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+
+        let first =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("first run succeeds");
+        assert!(!first.failed);
+        let summary_path = workspace.join("out/summary.txt");
+        assert_eq!(
+            fs::read_to_string(&summary_path).expect("summary is written"),
+            "hello\n"
+        );
+        fs::write(&summary_path, "stale\n").expect("stale summary written");
+
+        let second =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("second run succeeds");
+
+        assert!(!second.failed);
+        assert_eq!(second.session_id, "hello001-2");
+        assert_eq!(
+            fs::read_to_string(summary_path).expect("summary is replaced"),
+            "hello\n"
+        );
+    }
+
+    #[test]
     fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
         let workspace = workspace_copy("smoke-loop");
 
@@ -4221,27 +4319,28 @@ mod tests {
 
     #[cfg(not(unix))]
     #[test]
-    fn run_loop_rejects_existing_summary_leaf_when_link_count_unverified() {
+    fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified(
+    ) {
         let workspace = workspace_copy("hello-loop");
         fs::create_dir_all(workspace.join("out")).expect("out dir");
+        let outside = empty_workspace("outside-summary-hardlink-unverified");
+        let outside_target = outside.join("summary.txt");
+        fs::write(&outside_target, "outside\n").expect("outside target written");
         let summary_path = workspace.join("out/summary.txt");
-        fs::write(&summary_path, "existing\n").expect("existing summary written");
+        fs::hard_link(&outside_target, &summary_path).expect("summary hard link");
 
-        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-            .expect_err("preexisting summary leaf must fail without link-count verification");
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("unverifiable hardlink is safely replaced");
 
-        assert!(
-            matches!(err, RuntimeError::Protocol(message) if message.contains("cannot be safely replaced"))
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside target readable"),
+            "outside\n"
         );
         assert_eq!(
-            fs::read_to_string(&summary_path).expect("summary remains readable"),
-            "existing\n"
+            fs::read_to_string(&summary_path).expect("summary is replaced"),
+            "hello\n"
         );
-        assert!(!workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
-            .exists());
-        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
 
     #[test]
