@@ -3554,14 +3554,17 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
         )));
     }
 
-    let mut started_loops = BTreeSet::new();
-    let mut terminal_loops = BTreeMap::new();
-    let mut started_steps = BTreeSet::new();
-    let mut terminal_steps = BTreeMap::new();
-    let mut started_tools = BTreeSet::new();
-    let mut terminal_tools = BTreeMap::new();
-    let mut active_phases = BTreeMap::new();
-    let mut active_steps = BTreeMap::new();
+    let mut started_loops: BTreeSet<String> = BTreeSet::new();
+    let mut loop_parents: BTreeMap<String, Option<String>> = BTreeMap::new();
+    let mut terminal_loops: BTreeMap<String, usize> = BTreeMap::new();
+    let mut started_steps: BTreeSet<StepLifecycleKey> = BTreeSet::new();
+    let mut terminal_steps: BTreeMap<StepLifecycleKey, usize> = BTreeMap::new();
+    let mut started_tools: BTreeSet<ToolLifecycleKey> = BTreeSet::new();
+    let mut terminal_tools: BTreeMap<ToolLifecycleKey, usize> = BTreeMap::new();
+    let mut active_messages: BTreeMap<MessageLifecycleKey, String> = BTreeMap::new();
+    let mut terminal_messages: BTreeMap<MessageLifecycleKey, usize> = BTreeMap::new();
+    let mut active_phases: BTreeMap<String, String> = BTreeMap::new();
+    let mut active_steps: BTreeMap<String, StepLifecycleKey> = BTreeMap::new();
 
     for (index, event) in events.iter().enumerate() {
         let line_number = index + 1;
@@ -3593,10 +3596,20 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                 }
             }
         }
+        validate_lifecycle_parent(
+            path,
+            line_number,
+            event,
+            &started_loops,
+            &terminal_loops,
+            &loop_parents,
+        )?;
 
         match event.event_type {
             EventType::LoopStarted => {
-                started_loops.insert(require_lifecycle_loop_id(path, line_number, event)?);
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                loop_parents.insert(loop_id.clone(), event.parent_loop_id.clone());
+                started_loops.insert(loop_id);
             }
             EventType::LoopCompleted | EventType::LoopFailed => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
@@ -3610,14 +3623,28 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                 terminal_loops.insert(loop_id, line_number);
             }
             EventType::PhaseEntered => {
-                if let Some(loop_id) = &event.loop_id {
-                    active_phases
-                        .insert(loop_id.clone(), lifecycle_payload_string(event, "phase_id"));
-                    active_steps.remove(loop_id);
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                if let Some(active_step) = active_steps.get(&loop_id) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} phase.entered requires no active step for loop_id {:?}; active step_id {:?}",
+                        path.display(),
+                        loop_id,
+                        active_step.2
+                    )));
                 }
+                active_phases.insert(loop_id, lifecycle_payload_string(event, "phase_id"));
             }
             EventType::StepStarted => {
+                let active_phase = require_active_phase(path, line_number, event, &active_phases)?;
                 let step = lifecycle_step_key(event, &active_phases);
+                if step.1.as_deref() != Some(active_phase.as_str()) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} step.started phase_id {:?} must match active phase {:?}",
+                        path.display(),
+                        step.1,
+                        active_phase
+                    )));
+                }
                 if let Some(terminal_line) = terminal_steps.get(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
@@ -3628,9 +3655,16 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         *terminal_line,
                     ));
                 }
-                if let Some(loop_id) = &event.loop_id {
-                    active_steps.insert(loop_id.clone(), step.clone());
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                if let Some(active_step) = active_steps.get(&loop_id) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} step.started requires no active step for loop_id {:?}; active step_id {:?}",
+                        path.display(),
+                        loop_id,
+                        active_step.2
+                    )));
                 }
+                active_steps.insert(loop_id, step.clone());
                 started_steps.insert(step);
             }
             EventType::StepCompleted => {
@@ -3652,12 +3686,30 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         step.2
                     )));
                 }
-                if let Some(loop_id) = &event.loop_id {
-                    active_steps.remove(loop_id);
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                match active_steps.get(&loop_id) {
+                    Some(active_step) if active_step == &step => {}
+                    Some(active_step) => {
+                        return Err(RuntimeError::Protocol(format!(
+                            "{} line {line_number} step.completed requires active step_id {:?}, found {:?}",
+                            path.display(),
+                            step.2,
+                            active_step.2
+                        )));
+                    }
+                    None => {
+                        return Err(RuntimeError::Protocol(format!(
+                            "{} line {line_number} step.completed requires active step for step_id {:?}",
+                            path.display(),
+                            step.2
+                        )));
+                    }
                 }
+                active_steps.remove(&loop_id);
                 terminal_steps.insert(step, line_number);
             }
             EventType::ToolStarted => {
+                require_active_step(path, line_number, event, &active_steps)?;
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
                 if let Some(terminal_line) = terminal_tools.get(&tool) {
                     return Err(terminal_lifecycle_error(
@@ -3713,13 +3765,73 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                 }
                 terminal_tools.insert(tool, line_number);
             }
+            EventType::MessageDelta => {
+                require_active_step(path, line_number, event, &active_steps)?;
+                let message = lifecycle_message_key(path, line_number, event)?;
+                if let Some(terminal_line) = terminal_messages.get(&message) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "message",
+                        &message.1,
+                        *terminal_line,
+                    ));
+                }
+                let role = lifecycle_payload_string(event, "role");
+                match active_messages.get(&message) {
+                    Some(active_role) if active_role != &role => {
+                        return Err(RuntimeError::Protocol(format!(
+                            "{} line {line_number} message.delta role {:?} must match active role {:?} for message_id {:?}",
+                            path.display(),
+                            role,
+                            active_role,
+                            message.1
+                        )));
+                    }
+                    Some(_) => {}
+                    None => {
+                        active_messages.insert(message, role);
+                    }
+                }
+            }
+            EventType::MessageCompleted => {
+                require_active_step(path, line_number, event, &active_steps)?;
+                let message = lifecycle_message_key(path, line_number, event)?;
+                if let Some(terminal_line) = terminal_messages.get(&message) {
+                    return Err(terminal_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "message",
+                        &message.1,
+                        *terminal_line,
+                    ));
+                }
+                let role = lifecycle_payload_string(event, "role");
+                let Some(active_role) = active_messages.get(&message) else {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} message.completed must follow message.delta for message_id {:?}",
+                        path.display(),
+                        message.1
+                    )));
+                };
+                if active_role != &role {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} message.completed role {:?} must match active role {:?} for message_id {:?}",
+                        path.display(),
+                        role,
+                        active_role,
+                        message.1
+                    )));
+                }
+                terminal_messages.insert(message, line_number);
+            }
             EventType::SessionStarted
             | EventType::SessionPaused
             | EventType::SessionResumed
             | EventType::SessionCompleted
             | EventType::SessionFailed
-            | EventType::MessageDelta
-            | EventType::MessageCompleted
             | EventType::ArtifactLogged
             | EventType::AttentionRequested
             | EventType::MetricSample
@@ -3746,6 +3858,11 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
         for tool in &started_tools {
             if !terminal_tools.contains_key(tool) {
                 return Err(open_lifecycle_error(path, "tool", &tool.3));
+            }
+        }
+        for message in active_messages.keys() {
+            if !terminal_messages.contains_key(message) {
+                return Err(open_lifecycle_error(path, "message", &message.1));
             }
         }
     }
@@ -3844,8 +3961,93 @@ fn require_lifecycle_loop_id(
     })
 }
 
+fn validate_lifecycle_parent(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+    started_loops: &BTreeSet<String>,
+    terminal_loops: &BTreeMap<String, usize>,
+    loop_parents: &BTreeMap<String, Option<String>>,
+) -> Result<(), RuntimeError> {
+    if event.parent_loop_id.is_some() && event.loop_id.is_none() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} line {line_number} parent_loop_id requires loop_id",
+            path.display()
+        )));
+    }
+
+    let Some(loop_id) = &event.loop_id else {
+        return Ok(());
+    };
+
+    if let Some(parent_loop_id) = &event.parent_loop_id {
+        if parent_loop_id == loop_id {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} parent_loop_id must not match loop_id {loop_id:?}",
+                path.display()
+            )));
+        }
+        if !started_loops.contains(parent_loop_id) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} parent_loop_id {parent_loop_id:?} must reference an already started loop",
+                path.display()
+            )));
+        }
+        if let Some(terminal_line) = terminal_loops.get(parent_loop_id) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} parent_loop_id {parent_loop_id:?} references terminal loop on line {terminal_line}",
+                path.display()
+            )));
+        }
+    }
+
+    if let Some(expected_parent) = loop_parents.get(loop_id) {
+        if expected_parent != &event.parent_loop_id {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} parent_loop_id for loop_id {loop_id:?} must match loop.started",
+                path.display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 type StepLifecycleKey = (Option<String>, Option<String>, String);
 type ToolLifecycleKey = (Option<String>, Option<String>, Option<String>, String);
+type MessageLifecycleKey = (String, String);
+
+fn require_active_phase(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+    active_phases: &BTreeMap<String, String>,
+) -> Result<String, RuntimeError> {
+    let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+    active_phases.get(&loop_id).cloned().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number} {} requires active phase for loop_id {loop_id:?}",
+            path.display(),
+            event.event_type.as_str()
+        ))
+    })
+}
+
+fn require_active_step(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+    active_steps: &BTreeMap<String, StepLifecycleKey>,
+) -> Result<StepLifecycleKey, RuntimeError> {
+    let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+    active_steps.get(&loop_id).cloned().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number} {} requires active step for loop_id {loop_id:?}",
+            path.display(),
+            event.event_type.as_str()
+        ))
+    })
+}
 
 fn lifecycle_step_key(
     event: &EventEnvelope,
@@ -3892,6 +4094,17 @@ fn lifecycle_tool_key(
         step_id,
         lifecycle_payload_string(event, "tool_id"),
     )
+}
+
+fn lifecycle_message_key(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+) -> Result<MessageLifecycleKey, RuntimeError> {
+    Ok((
+        require_lifecycle_loop_id(path, line_number, event)?,
+        lifecycle_payload_string(event, "message_id"),
+    ))
 }
 
 fn lifecycle_payload_string(event: &EventEnvelope, field: &str) -> String {
@@ -5567,27 +5780,40 @@ mod tests {
             ),
             event_line(
                 "evt-003",
-                EventType::StepStarted,
+                EventType::PhaseEntered,
                 "step-terminal",
                 3,
                 Some("loop-001"),
-                serde_json::json!({"step_id":"step-001","step_name":"Inspect"}),
+                serde_json::json!({
+                    "instruction_ids": [],
+                    "phase_id": "phase-001",
+                    "phase_name": "Inspect",
+                    "tool_ids": [],
+                }),
             ),
             event_line(
                 "evt-004",
-                EventType::StepCompleted,
+                EventType::StepStarted,
                 "step-terminal",
                 4,
                 Some("loop-001"),
-                serde_json::json!({"step_id":"step-001","step_name":"Inspect"}),
+                serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
             ),
             event_line(
                 "evt-005",
-                EventType::StepStarted,
+                EventType::StepCompleted,
                 "step-terminal",
                 5,
                 Some("loop-001"),
-                serde_json::json!({"step_id":"step-001","step_name":"Inspect"}),
+                serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
+            ),
+            event_line(
+                "evt-006",
+                EventType::StepStarted,
+                "step-terminal",
+                6,
+                Some("loop-001"),
+                serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
             ),
         ]
         .concat();
@@ -5622,9 +5848,30 @@ mod tests {
             ),
             event_line(
                 "evt-003",
-                EventType::ToolStarted,
+                EventType::PhaseEntered,
                 "tool-terminal",
                 3,
+                Some("loop-001"),
+                serde_json::json!({
+                    "instruction_ids": [],
+                    "phase_id": "phase-001",
+                    "phase_name": "Inspect",
+                    "tool_ids": [],
+                }),
+            ),
+            event_line(
+                "evt-004",
+                EventType::StepStarted,
+                "tool-terminal",
+                4,
+                Some("loop-001"),
+                serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
+            ),
+            event_line(
+                "evt-005",
+                EventType::ToolStarted,
+                "tool-terminal",
+                5,
                 Some("loop-001"),
                 serde_json::json!({
                     "allowed_parameters": [],
@@ -5637,18 +5884,18 @@ mod tests {
                 }),
             ),
             event_line(
-                "evt-004",
+                "evt-006",
                 EventType::ToolCompleted,
                 "tool-terminal",
-                4,
+                6,
                 Some("loop-001"),
                 serde_json::json!({"exit_code":0,"tool_id":"tool-001"}),
             ),
             event_line(
-                "evt-005",
+                "evt-007",
                 EventType::ToolProgress,
                 "tool-terminal",
-                5,
+                7,
                 Some("loop-001"),
                 serde_json::json!({"message":"late progress","tool_id":"tool-001"}),
             ),
@@ -7018,6 +7265,63 @@ mod tests {
             "loop.started must include loop_id",
         );
 
+        let child_with_unknown_parent = event_line_with_parent(
+            "evt-002",
+            EventType::LoopStarted,
+            "meta001",
+            2,
+            Some("loop-002"),
+            Some("loop-missing"),
+            serde_json::json!({"loop_definition_id":"child-loop"}),
+        );
+        assert_invalid_session_log(
+            "unknown-parent-loop.jsonl",
+            "meta001",
+            &format!("{canonical}{child_with_unknown_parent}"),
+            "parent_loop_id",
+        );
+
+        let self_parented_loop = event_line_with_parent(
+            "evt-002",
+            EventType::LoopStarted,
+            "meta001",
+            2,
+            Some("loop-001"),
+            Some("loop-001"),
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        );
+        assert_invalid_session_log(
+            "self-parent-loop.jsonl",
+            "meta001",
+            &format!("{canonical}{self_parented_loop}"),
+            "parent_loop_id",
+        );
+
+        let parent_without_loop_id = event_line_with_parent(
+            "evt-003",
+            EventType::MessageDelta,
+            "meta001",
+            3,
+            None,
+            Some("loop-001"),
+            serde_json::json!({
+                "content_delta": "hello",
+                "message_id": "msg-001",
+                "role": "assistant",
+            }),
+        );
+        assert_invalid_session_log(
+            "parent-without-loop-id.jsonl",
+            "meta001",
+            &format!(
+                "{}{}{}",
+                canonical,
+                loop_started_line("evt-002", 2),
+                parent_without_loop_id
+            ),
+            "parent_loop_id",
+        );
+
         let first_not_session_started = EventEnvelope::new(
             "evt-001",
             EventType::SessionPaused,
@@ -7196,6 +7500,58 @@ mod tests {
             "meta001",
             &step_completed_without_start,
             "must follow step.started",
+        );
+
+        let step_before_phase = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            step_started_line("evt-003", 3),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "step-before-phase.jsonl",
+            "meta001",
+            &step_before_phase,
+            "active phase",
+        );
+
+        let tool_before_step = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            tool_started_line("evt-004", 4),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "tool-before-step.jsonl",
+            "meta001",
+            &tool_before_step,
+            "active step",
+        );
+
+        let message_completed_without_delta = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            event_line(
+                "evt-005",
+                EventType::MessageCompleted,
+                "meta001",
+                5,
+                Some("loop-001"),
+                serde_json::json!({
+                    "message_id": "msg-001",
+                    "role": "assistant",
+                }),
+            ),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "message-completed-without-delta.jsonl",
+            "meta001",
+            &message_completed_without_delta,
+            "message.delta",
         );
 
         let repeated_tool_started_after_failure = [
@@ -7765,6 +8121,32 @@ mod tests {
     ) -> String {
         EventEnvelope {
             loop_id: loop_id.map(str::to_owned),
+            ..EventEnvelope::new(
+                event_id,
+                event_type,
+                session_id,
+                sequence,
+                event_timestamp(sequence),
+                "loop-agent-cli",
+                payload,
+            )
+        }
+        .canonical_jsonl()
+        .expect("event serializes")
+    }
+
+    fn event_line_with_parent(
+        event_id: &str,
+        event_type: EventType,
+        session_id: &str,
+        sequence: u64,
+        loop_id: Option<&str>,
+        parent_loop_id: Option<&str>,
+        payload: serde_json::Value,
+    ) -> String {
+        EventEnvelope {
+            loop_id: loop_id.map(str::to_owned),
+            parent_loop_id: parent_loop_id.map(str::to_owned),
             ..EventEnvelope::new(
                 event_id,
                 event_type,
