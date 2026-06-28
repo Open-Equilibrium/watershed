@@ -7,7 +7,7 @@
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
 - [ ] `cargo nextest run --locked --workspace --all-targets`
-- [ ] `cargo llvm-cov nextest --locked --workspace --no-report`
+- [ ] `cargo llvm-cov nextest --locked --workspace --fail-under-lines 95`
 - [ ] `cargo audit`
 - [ ] `cargo deny check`
 - [ ] `pnpm run docs:render-check`

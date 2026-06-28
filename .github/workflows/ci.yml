@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  m0:
-    name: M0 gates (${{ matrix.os }})
+  m1:
+    name: M1 gates (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -52,8 +52,8 @@ jobs:
       - name: Run tests
         run: cargo nextest run --locked --workspace --all-targets
 
-      - name: Run coverage harness
-        run: cargo llvm-cov nextest --locked --workspace --no-report
+      - name: Check line coverage
+        run: cargo llvm-cov nextest --locked --workspace --fail-under-lines 95
 
       - name: Check RustSec advisories
         run: cargo audit

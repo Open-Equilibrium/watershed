@@ -10,7 +10,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M0 scaffold stage.** This repository contains the governance/spec packet plus the M0 Rust workspace scaffold, contract crates, deterministic fixture streams, policy artifact fixtures and CI gate wiring. Loop Agent runtime execution starts with M1; M0 is the implementation packet described in [PLAN.md](PLAN.md).
+**M1 Loop Agent MVP stage.** This repository contains the standalone Loop Agent CLI runtime, protocol/event contracts, deterministic fixture streams, policy artifacts, sandbox-negative tests and M1 validation gates described in [PLAN.md](PLAN.md).
 
 Each layer has independent value; the combined platform is stronger than any single layer. The defensible idea is the **combination** of structured loops, agent control, measurable outcomes, and reversible agent-edited workspace state — built as transparent, self-hostable, AGPL-licensed infrastructure rather than a proprietary/open-core product.
 
