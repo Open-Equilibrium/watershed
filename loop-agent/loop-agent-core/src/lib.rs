@@ -192,6 +192,7 @@ pub fn run_loop(
             session_path: reservation.session_path.clone(),
             stdout: match emit {
                 EmitMode::Jsonl => stream,
+                EmitMode::Human if failed => format!("loop {} failed\n", loop_block.identity.id),
                 EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
             },
         })

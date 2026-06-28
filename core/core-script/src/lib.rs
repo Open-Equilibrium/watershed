@@ -1675,8 +1675,23 @@ fn inline_list(
     section: &str,
     field: &str,
 ) -> Result<Vec<String>, RegistryError> {
-    let value = required_scalar(source_name, source, section, field)?;
-    parse_inline_yaml_list(source_name, field, &value)
+    let value = raw_section_field_value(source_name, source, section, field)?
+        .ok_or_else(|| parse_error(source_name, format!("missing {section}.{field}")))?;
+    if value.is_empty() {
+        block_string_list(
+            source_name,
+            source,
+            ScalarListShape {
+                section,
+                parent: None,
+                field,
+                field_indent: 2,
+                item_indent: 4,
+            },
+        )
+    } else {
+        parse_inline_yaml_list(source_name, field, &value)
+    }
 }
 
 fn optional_inline_list(
@@ -1685,9 +1700,21 @@ fn optional_inline_list(
     section: &str,
     field: &str,
 ) -> Result<Vec<String>, RegistryError> {
-    raw_section_field_value(source_name, source, section, field)?
-        .map(|value| parse_inline_yaml_list(source_name, field, &unquote_yaml_scalar(&value)))
-        .unwrap_or_else(|| Ok(Vec::new()))
+    match raw_section_field_value(source_name, source, section, field)? {
+        Some(value) if value.is_empty() => block_string_list(
+            source_name,
+            source,
+            ScalarListShape {
+                section,
+                parent: None,
+                field,
+                field_indent: 2,
+                item_indent: 4,
+            },
+        ),
+        Some(value) => parse_inline_yaml_list(source_name, field, &value),
+        None => Ok(Vec::new()),
+    }
 }
 
 fn nested_inline_list(
@@ -1697,8 +1724,23 @@ fn nested_inline_list(
     parent: &str,
     field: &str,
 ) -> Result<Vec<String>, RegistryError> {
-    let value = required_nested_scalar(source_name, source, section, parent, field)?;
-    parse_inline_yaml_list(source_name, field, &value)
+    let value = raw_nested_field_value(source_name, source, section, parent, field)?
+        .ok_or_else(|| parse_error(source_name, format!("missing {section}.{parent}.{field}")))?;
+    if value.is_empty() {
+        block_string_list(
+            source_name,
+            source,
+            ScalarListShape {
+                section,
+                parent: Some(parent),
+                field,
+                field_indent: 4,
+                item_indent: 6,
+            },
+        )
+    } else {
+        parse_inline_yaml_list(source_name, field, &value)
+    }
 }
 
 fn raw_section_field_value(
@@ -1835,11 +1877,20 @@ struct ListObjectShape<'a> {
     property_indent: usize,
 }
 
-fn list_objects(
+#[derive(Clone, Copy)]
+struct ScalarListShape<'a> {
+    section: &'a str,
+    parent: Option<&'a str>,
+    field: &'a str,
+    field_indent: usize,
+    item_indent: usize,
+}
+
+fn block_string_list(
     source_name: &str,
     source: &str,
-    shape: ListObjectShape<'_>,
-) -> Result<Vec<BTreeMap<String, String>>, RegistryError> {
+    shape: ScalarListShape<'_>,
+) -> Result<Vec<String>, RegistryError> {
     let section_header = format!("{}:", shape.section);
     let parent_header = shape.parent.map(|parent| format!("{parent}:"));
     let field_prefix = format!("{}:", shape.field);
@@ -1848,7 +1899,6 @@ fn list_objects(
     let mut in_list = false;
     let mut found = false;
     let mut items = Vec::new();
-    let mut current = None::<BTreeMap<String, String>>;
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1891,6 +1941,106 @@ fn list_objects(
                     return Ok(Vec::new());
                 }
                 if !value.is_empty() {
+                    return parse_inline_yaml_list(source_name, shape.field, value);
+                }
+                in_list = true;
+                continue;
+            }
+        }
+
+        if !in_list {
+            continue;
+        }
+        if indent <= shape.field_indent {
+            break;
+        }
+        if indent == shape.item_indent && trimmed.starts_with("- ") {
+            let item = trimmed.trim_start_matches("- ").trim();
+            push_inline_list_item(source_name, shape.field, &mut items, item)?;
+        } else {
+            return Err(parse_error(
+                source_name,
+                format!(
+                    "{}.{} uses unsupported list indentation",
+                    shape.section, shape.field
+                ),
+            ));
+        }
+    }
+
+    if found {
+        Ok(items)
+    } else {
+        Err(parse_error(
+            source_name,
+            format!("missing {}.{}", shape.section, shape.field),
+        ))
+    }
+}
+
+fn list_objects(
+    source_name: &str,
+    source: &str,
+    shape: ListObjectShape<'_>,
+) -> Result<Vec<BTreeMap<String, String>>, RegistryError> {
+    let section_header = format!("{}:", shape.section);
+    let parent_header = shape.parent.map(|parent| format!("{parent}:"));
+    let field_prefix = format!("{}:", shape.field);
+    let mut in_section = false;
+    let mut in_parent = shape.parent.is_none();
+    let mut in_list = false;
+    let mut found = false;
+    let mut items = Vec::new();
+    let mut current = None::<BTreeMap<String, String>>;
+    let mut pending_list_property = None::<PendingListProperty>;
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = leading_spaces(line);
+        let trimmed = line.trim();
+
+        if indent == 0 {
+            if in_list {
+                flush_pending_list_property(source_name, &mut current, &mut pending_list_property)?;
+                break;
+            }
+            in_section = trimmed == section_header;
+            in_parent = shape.parent.is_none();
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+
+        if let Some(parent_header) = &parent_header {
+            if indent == 2 {
+                if in_list {
+                    flush_pending_list_property(
+                        source_name,
+                        &mut current,
+                        &mut pending_list_property,
+                    )?;
+                    break;
+                }
+                in_parent = trimmed == parent_header;
+                continue;
+            }
+            if !in_parent {
+                continue;
+            }
+        }
+
+        if !in_list && indent == shape.field_indent {
+            if let Some(value) = trimmed.strip_prefix(&field_prefix) {
+                found = true;
+                let value = value.trim();
+                if value == "[]" {
+                    return Ok(Vec::new());
+                }
+                if !value.is_empty() {
                     return Err(parse_error(
                         source_name,
                         format!("{}.{} must be a list", shape.section, shape.field),
@@ -1905,19 +2055,27 @@ fn list_objects(
             continue;
         }
         if indent <= shape.field_indent {
+            flush_pending_list_property(source_name, &mut current, &mut pending_list_property)?;
             break;
         }
         if indent == shape.item_indent && trimmed.starts_with("- ") {
+            flush_pending_list_property(source_name, &mut current, &mut pending_list_property)?;
             if let Some(item) = current.take() {
                 items.push(item);
             }
             let mut item = BTreeMap::new();
             let rest = trimmed.trim_start_matches("- ").trim();
             if !rest.is_empty() {
-                parse_object_property(source_name, rest, &mut item)?;
+                if let Some(field) = parse_object_property(source_name, rest, &mut item)? {
+                    pending_list_property = Some(PendingListProperty {
+                        field,
+                        items: Vec::new(),
+                    });
+                }
             }
             current = Some(item);
         } else if indent == shape.property_indent {
+            flush_pending_list_property(source_name, &mut current, &mut pending_list_property)?;
             let Some(item) = &mut current else {
                 return Err(parse_error(
                     source_name,
@@ -1927,7 +2085,21 @@ fn list_objects(
                     ),
                 ));
             };
-            parse_object_property(source_name, trimmed, item)?;
+            if let Some(field) = parse_object_property(source_name, trimmed, item)? {
+                pending_list_property = Some(PendingListProperty {
+                    field,
+                    items: Vec::new(),
+                });
+            }
+        } else if indent == shape.property_indent + 2
+            && trimmed.starts_with("- ")
+            && pending_list_property.is_some()
+        {
+            let pending = pending_list_property
+                .as_mut()
+                .expect("checked pending list property");
+            let item = trimmed.trim_start_matches("- ").trim();
+            push_inline_list_item(source_name, &pending.field, &mut pending.items, item)?;
         } else {
             return Err(parse_error(
                 source_name,
@@ -1939,6 +2111,7 @@ fn list_objects(
         }
     }
 
+    flush_pending_list_property(source_name, &mut current, &mut pending_list_property)?;
     if let Some(item) = current.take() {
         items.push(item);
     }
@@ -1952,11 +2125,41 @@ fn list_objects(
     }
 }
 
+struct PendingListProperty {
+    field: String,
+    items: Vec<String>,
+}
+
+fn flush_pending_list_property(
+    source_name: &str,
+    current: &mut Option<BTreeMap<String, String>>,
+    pending: &mut Option<PendingListProperty>,
+) -> Result<(), RegistryError> {
+    let Some(pending) = pending.take() else {
+        return Ok(());
+    };
+    let Some(item) = current else {
+        return Err(parse_error(
+            source_name,
+            format!(
+                "list object property {} appears before list item",
+                pending.field
+            ),
+        ));
+    };
+    insert_object_property(
+        source_name,
+        item,
+        &pending.field,
+        canonical_inline_list_value(&pending.items),
+    )
+}
+
 fn parse_object_property(
     source_name: &str,
     line: &str,
     item: &mut BTreeMap<String, String>,
-) -> Result<(), RegistryError> {
+) -> Result<Option<String>, RegistryError> {
     let Some((field, value)) = line.split_once(':') else {
         return Err(parse_error(
             source_name,
@@ -1965,22 +2168,47 @@ fn parse_object_property(
     };
     let field = field.trim();
     let value = value.trim();
-    if field.is_empty() || value.is_empty() {
+    if field.is_empty() {
         return Err(parse_error(
             source_name,
             format!("list object property {line:?} must use key: value"),
         ));
     }
-    if item
-        .insert(field.to_owned(), unquote_yaml_scalar(value))
-        .is_some()
-    {
+    if value.is_empty() {
+        if matches!(field, "allowed_values" | "connection_refs") {
+            return Ok(Some(field.to_owned()));
+        }
+        return Err(parse_error(
+            source_name,
+            format!("list object property {line:?} must use key: value"),
+        ));
+    }
+    insert_object_property(source_name, item, field, unquote_yaml_scalar(value))?;
+    Ok(None)
+}
+
+fn insert_object_property(
+    source_name: &str,
+    item: &mut BTreeMap<String, String>,
+    field: &str,
+    value: String,
+) -> Result<(), RegistryError> {
+    if item.insert(field.to_owned(), value).is_some() {
         return Err(parse_error(
             source_name,
             format!("duplicate list object property {field}"),
         ));
     }
     Ok(())
+}
+
+fn canonical_inline_list_value(items: &[String]) -> String {
+    let body = items
+        .iter()
+        .map(|item| serde_json::to_string(item).expect("string serialization"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("[{body}]")
 }
 
 fn required_object_scalar(
@@ -2569,6 +2797,106 @@ mod tests {
         };
         assert_eq!(loop_block.identity.name, "Hash # Loop");
         assert_eq!(loop_block.phase_refs, vec!["phase-a"]);
+    }
+
+    #[test]
+    fn parser_accepts_block_style_yaml_scalar_lists() {
+        let block = parse_registry_block(
+            "block-list-tool.yaml",
+            r#"tool:
+  id: block-list-tool
+  name: BlockListTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv:
+      - --message
+      - "hello, world"
+  allowed_parameters:
+    - name: --mode
+      value_type: enum
+      required: true
+      allowed_values:
+        - fast
+        - "safe,quoted"
+  read_scope:
+    - workspace
+  write_scope:
+    - out
+  protected_path_grants:
+    - out/allowed.txt
+  network: deny
+"#,
+        )
+        .expect("block-style scalar lists parse");
+
+        let RegistryBlock::Tool(tool) = block else {
+            panic!("expected tool block");
+        };
+        assert_eq!(
+            tool.command,
+            ToolCommand::Predefined {
+                command_id: "agent-echo".to_owned(),
+                argv: vec!["--message".to_owned(), "hello, world".to_owned()],
+            }
+        );
+        assert_eq!(tool.read_scope, vec!["workspace"]);
+        assert_eq!(tool.write_scope, vec!["out"]);
+        assert_eq!(tool.protected_path_grants, vec!["out/allowed.txt"]);
+        assert_eq!(
+            tool.allowed_parameters[0].allowed_values,
+            vec!["fast".to_owned(), "safe,quoted".to_owned()]
+        );
+    }
+
+    #[test]
+    fn parser_accepts_block_style_loop_and_step_reference_lists() {
+        let block = parse_registry_block(
+            "block-list-loop.yaml",
+            r#"loop:
+  id: block-list-loop
+  name: BlockListLoop
+  phase_refs:
+    - inspect-phase
+  subloop_refs:
+    - child-loop
+  connection_refs:
+    - data-link
+"#,
+        )
+        .expect("loop block-style scalar lists parse");
+
+        let RegistryBlock::Loop(loop_block) = block else {
+            panic!("expected loop block");
+        };
+        assert_eq!(loop_block.phase_refs, vec!["inspect-phase"]);
+        assert_eq!(loop_block.subloop_refs, vec!["child-loop"]);
+        assert_eq!(loop_block.connection_refs, vec!["data-link"]);
+
+        let block = parse_registry_block(
+            "block-list-phase.yaml",
+            r#"phase:
+  id: inspect-phase
+  name: InspectPhase
+  instruction_refs:
+    - inspect-instruction
+  tool_refs:
+    - block-list-tool
+  steps:
+    - id: inspect-step
+      name: InspectStep
+      connection_refs:
+        - data-link
+"#,
+        )
+        .expect("phase block-style scalar lists parse");
+
+        let RegistryBlock::Phase(phase) = block else {
+            panic!("expected phase block");
+        };
+        assert_eq!(phase.instruction_refs, vec!["inspect-instruction"]);
+        assert_eq!(phase.tool_refs, vec!["block-list-tool"]);
+        assert_eq!(phase.steps[0].connection_refs, vec!["data-link"]);
     }
 
     #[test]

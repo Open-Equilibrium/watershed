@@ -288,6 +288,26 @@ fn sandbox_negative_streams_fail_without_side_effects() {
 }
 
 #[test]
+fn failed_human_run_does_not_report_completion() {
+    let workspace = workspace_copy("sandbox-negative");
+    let output = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "sandbox-negative-write"])
+        .output()
+        .expect("loop binary should run");
+
+    assert_eq!(output.status.code(), Some(65));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    assert_eq!(stdout, "loop sandbox-negative-write failed\n");
+    assert!(!stdout.contains("completed"));
+    assert!(
+        !workspace.join("out/forbidden.txt").exists(),
+        "failed human run must not create side effects after rejection"
+    );
+}
+
+#[test]
 fn non_unicode_argument_exits_with_usage_error() {
     let output = loop_command()
         .arg(non_unicode_argument())
