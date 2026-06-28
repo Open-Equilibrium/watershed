@@ -3943,6 +3943,7 @@ mod tests {
         let json_error = RuntimeError::from(
             serde_json::from_str::<serde_json::Value>("{").expect_err("invalid JSON"),
         );
+        assert!(json_error.to_string().contains("EOF"));
         assert_eq!(json_error.exit_code(), 65);
         assert!(std::error::Error::source(&json_error).is_some());
 
@@ -3950,6 +3951,7 @@ mod tests {
             core_script::load_registry_root(Path::new("missing-registry-root"))
                 .expect_err("missing registry root"),
         );
+        assert!(registry_error.to_string().contains("missing-registry-root"));
         assert_eq!(registry_error.exit_code(), 65);
         assert!(std::error::Error::source(&registry_error).is_some());
 
@@ -4201,6 +4203,296 @@ mod tests {
             fs::read_to_string(summary_path).expect("summary is replaced"),
             "hello\n"
         );
+    }
+
+    #[test]
+    fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
+        let (_registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+        let command_policy = policy
+            .commands
+            .iter()
+            .find(|command| command.tool_id == "write-summary")
+            .expect("write-summary policy exists");
+
+        assert_eq!(
+            script_redirection("printf 'hello > world\\n' > \"out/quoted.txt\"")
+                .expect("quoted redirection parses"),
+            Some((
+                "printf 'hello > world\\n'".to_owned(),
+                "out/quoted.txt".to_owned()
+            ))
+        );
+        assert_eq!(
+            script_redirection("echo no-redirection").expect("plain command parses"),
+            None
+        );
+        assert!(matches!(
+            script_redirection("printf 'x' >> out/summary.txt"),
+            Err(RuntimeError::Protocol(message)) if message.contains("append redirection")
+        ));
+        assert!(matches!(
+            script_redirection("> out/summary.txt"),
+            Err(RuntimeError::Protocol(message)) if message.contains("must include a command")
+        ));
+        assert!(matches!(
+            script_redirection("printf 'x' > out/a > out/b"),
+            Err(RuntimeError::Protocol(message)) if message.contains("multiple redirections")
+        ));
+        assert!(matches!(
+            script_redirection("printf 'unterminated > out/summary.txt"),
+            Err(RuntimeError::Protocol(message)) if message.contains("unterminated quote")
+        ));
+        assert!(matches!(
+            script_redirection("printf 'x' > out/summary one.txt"),
+            Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
+        ));
+
+        assert_eq!(
+            normalize_script_write_target(r"out\summary.txt").expect("normalizes separators"),
+            "out/summary.txt"
+        );
+        for target in [
+            "",
+            "/abs",
+            "C:/abs",
+            "out/$SUMMARY",
+            "out/*.txt",
+            "out/?.txt",
+        ] {
+            assert!(matches!(
+                normalize_script_write_target(target),
+                Err(RuntimeError::Protocol(message))
+                    if message.contains("literal workspace-relative path")
+            ));
+        }
+        for target in [
+            "out//summary.txt",
+            "out/./summary.txt",
+            "out/../summary.txt",
+        ] {
+            assert!(matches!(
+                normalize_script_write_target(target),
+                Err(RuntimeError::Protocol(message)) if message.contains("inside the workspace")
+            ));
+        }
+
+        assert_eq!(
+            evaluate_script_command("printf 'hi\\n'").expect("printf without args evaluates"),
+            b"hi\n"
+        );
+        assert_eq!(
+            evaluate_script_command("printf '%s\\n' $SUMMARY").expect("stub SUMMARY evaluates"),
+            b"hello\n"
+        );
+        assert_eq!(
+            evaluate_script_command("echo plain").expect("echo evaluates"),
+            b"plain\n"
+        );
+        assert!(matches!(
+            evaluate_script_command("printf \"bad\""),
+            Err(RuntimeError::Protocol(message)) if message.contains("single-quoted")
+        ));
+        assert!(matches!(
+            evaluate_script_command("printf 'bad"),
+            Err(RuntimeError::Protocol(message)) if message.contains("unterminated")
+        ));
+        assert!(matches!(
+            evaluate_script_command("printf 'bad\\t'"),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported")
+        ));
+        assert!(matches!(
+            evaluate_script_command("printf 'bad\\'"),
+            Err(RuntimeError::Protocol(message)) if message.contains("dangling escape")
+        ));
+        assert!(matches!(
+            evaluate_script_command("printf '%s' OTHER"),
+            Err(RuntimeError::Protocol(message)) if message.contains("printf argument")
+        ));
+        assert!(matches!(
+            evaluate_script_command("echo $SUMMARY"),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
+        ));
+        assert!(matches!(
+            evaluate_script_command("cat out/summary.txt"),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script command")
+        ));
+
+        let operations =
+            compile_own_script_operations(command_policy, "\n# comment\n---\necho noop\n")
+                .expect("noop-like lines and echo compile");
+        assert_eq!(operations.len(), 4);
+        assert!(matches!(operations[0], ScriptOperation::Noop));
+        assert!(matches!(operations[1], ScriptOperation::Noop));
+        assert!(matches!(operations[2], ScriptOperation::Noop));
+        assert!(matches!(operations[3], ScriptOperation::Noop));
+    }
+
+    #[test]
+    fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
+        let (_registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+        let command_policy = policy
+            .commands
+            .iter()
+            .find(|command| command.tool_id == "write-summary")
+            .expect("write-summary policy exists");
+        assert_eq!(
+            validate_script_write_target(command_policy, "out/summary.txt")
+                .expect("declared write target accepted"),
+            "out/summary.txt"
+        );
+        assert!(matches!(
+            validate_script_write_target(command_policy, "other/summary.txt"),
+            Err(RuntimeError::Protocol(message)) if message.contains("lacks write scope")
+        ));
+
+        let mut broad_policy = command_policy.clone();
+        broad_policy.filesystem.write_roots = vec!["workspace".to_owned()];
+        assert!(matches!(
+            validate_script_write_target(&broad_policy, ".ssh/id_rsa"),
+            Err(RuntimeError::Protocol(message)) if message.contains("protected path")
+        ));
+        broad_policy.filesystem.protected_path_grants = vec!["workspace/.ssh/**".to_owned()];
+        assert_eq!(
+            validate_script_write_target(&broad_policy, ".ssh/id_rsa")
+                .expect("explicit protected grant accepted"),
+            ".ssh/id_rsa"
+        );
+
+        assert!(workspace_scope_contains("workspace/out", "workspace/out"));
+        assert!(workspace_scope_contains(
+            "workspace/out",
+            "workspace/out/summary.txt"
+        ));
+        assert!(!workspace_scope_contains(
+            "workspace/out",
+            "workspace/output/summary.txt"
+        ));
+        assert!(protected_path_pattern_matches(
+            r"workspace\.ssh\**",
+            "workspace/.ssh/id_rsa"
+        ));
+        assert!(protected_path_pattern_matches(
+            "workspace/*/id_???",
+            "workspace/.ssh/id_rsa"
+        ));
+        assert!(protected_path_pattern_matches(
+            "workspace/**/secrets/*",
+            "workspace/a/b/secrets/token"
+        ));
+        assert!(!protected_path_pattern_matches(
+            "workspace/.ssh/**",
+            "workspace/.config/id_rsa"
+        ));
+    }
+
+    #[test]
+    fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
+        let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+        let write_tool = registry
+            .tool_block("write-summary")
+            .expect("write-summary tool exists");
+        let write_policy =
+            command_policy_for_phase(&policy, "summarize", write_tool).expect("policy scoped");
+
+        let mut unscoped = policy.clone();
+        unscoped.phase_scope.clear();
+        assert!(matches!(
+            command_policy_for_phase(&unscoped, "summarize", write_tool),
+            Err(RuntimeError::Protocol(message)) if message.contains("not available")
+        ));
+
+        let mut missing_command = policy.clone();
+        missing_command
+            .commands
+            .retain(|command| command.tool_id != "write-summary");
+        assert!(matches!(
+            command_policy_for_phase(&missing_command, "summarize", write_tool),
+            Err(RuntimeError::Protocol(message)) if message.contains("missing command")
+        ));
+
+        let mut wrong_tool_id = write_policy.clone();
+        wrong_tool_id.tool_id = "other-tool".to_owned();
+        assert!(matches!(
+            ensure_tool_matches_policy(write_tool, &wrong_tool_id),
+            Err(RuntimeError::Protocol(message)) if message.contains("does not match tool")
+        ));
+
+        let mut wrong_kind = write_policy.clone();
+        wrong_kind.tool_kind = core_policy::ToolKind::PredefinedCommand;
+        assert!(matches!(
+            ensure_tool_matches_policy(write_tool, &wrong_kind),
+            Err(RuntimeError::Protocol(message)) if message.contains("kind does not match")
+        ));
+
+        let mut network_allow = write_policy.clone();
+        network_allow
+            .network
+            .allow
+            .push(core_policy::NetworkAllowEntry {
+                cidr: "127.0.0.0/8".to_owned(),
+                kind: core_policy::NetworkAllowKind::Cidr,
+                port: 443,
+                transport: core_policy::NetworkTransport::Tcp,
+            });
+        assert!(matches!(
+            ensure_tool_matches_policy(write_tool, &network_allow),
+            Err(RuntimeError::Protocol(message)) if message.contains("deny-all network")
+        ));
+
+        let mut wrong_script_command = write_policy.clone();
+        wrong_script_command.executable = "runner:custom".to_owned();
+        assert!(matches!(
+            ensure_tool_matches_policy(write_tool, &wrong_script_command),
+            Err(RuntimeError::Protocol(message)) if message.contains("script command")
+        ));
+
+        let read_tool = registry
+            .tool_block("read-file")
+            .expect("read-file tool exists");
+        let read_policy =
+            command_policy_for_phase(&policy, "inspect", read_tool).expect("read policy scoped");
+        assert_eq!(
+            execute_predefined_command(read_policy, "agent-read", &[])
+                .expect("trusted read command executes"),
+            Some("stub read completed")
+        );
+        assert!(matches!(
+            execute_predefined_command(read_policy, "agent-custom", &[]),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported predefined")
+        ));
+        assert!(matches!(
+            execute_predefined_command(read_policy, "agent-read", &["extra".to_owned()]),
+            Err(RuntimeError::Protocol(message)) if message.contains("trusted command")
+        ));
+
+        let mut wrong_runtime = write_tool.clone();
+        wrong_runtime.script_runtime = None;
+        assert!(matches!(
+            plan_own_script(&wrong_runtime, write_policy),
+            Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
+        ));
+        assert!(matches!(
+            execute_own_script(Path::new("."), &wrong_runtime, write_policy, 100, 1),
+            Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
+        ));
+
+        let mut missing_body = write_tool.clone();
+        missing_body.script_body = None;
+        assert!(matches!(
+            plan_own_script(&missing_body, write_policy),
+            Err(RuntimeError::Protocol(message)) if message.contains("script_body")
+        ));
+
+        let mut mismatched_shape = write_tool.clone();
+        mismatched_shape.tool_kind = core_script::ToolKind::PredefinedCommand;
+        assert!(matches!(
+            planned_tool_progress(&mismatched_shape, write_policy),
+            Err(RuntimeError::Protocol(message)) if message.contains("command shape")
+        ));
+        assert!(matches!(
+            execute_tool(Path::new("."), &mismatched_shape, write_policy, 100, 1),
+            Err(RuntimeError::Protocol(message)) if message.contains("command shape")
+        ));
     }
 
     #[test]
@@ -5846,20 +6138,74 @@ mod tests {
         let workspace = empty_workspace("filesystem-guards");
         let file_path = workspace.join("file.txt");
         let dir_path = workspace.join("dir");
+        let created_dir = workspace.join("created");
+        let missing_file = workspace.join("missing.txt");
         fs::write(&file_path, "x").expect("file written");
         fs::create_dir(&dir_path).expect("dir written");
 
+        ensure_real_directory(&created_dir).expect("missing directory is created");
+        assert!(created_dir.is_dir());
+        assert!(matches!(
+            ensure_existing_real_directory(&missing_file),
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
+        assert!(
+            !ensure_optional_real_directory(&workspace.join("optional-missing"))
+                .expect("missing optional dir is false")
+        );
         assert!(matches!(
             ensure_new_leaf_available(&file_path),
             Err(RuntimeError::Protocol(message)) if message.contains("must not already exist")
         ));
+        ensure_new_leaf_available(&missing_file).expect("missing leaf is available");
         assert!(matches!(
             ensure_real_file(&dir_path),
             Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
         ));
         assert!(matches!(
+            ensure_real_file(&missing_file),
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
+        assert!(matches!(
             ensure_real_directory(&file_path),
             Err(RuntimeError::Protocol(message)) if message.contains("must be a directory")
+        ));
+        assert!(matches!(
+            ensure_optional_real_directory(&file_path),
+            Err(RuntimeError::Protocol(message)) if message.contains("must be a directory")
+        ));
+        assert!(matches!(
+            ensure_parent_real_directory(&workspace.join("missing-parent/file.txt")),
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
+        assert_eq!(
+            read_to_bytes(&file_path).expect("file bytes are readable"),
+            b"x"
+        );
+        assert!(matches!(
+            read_to_bytes(&missing_file),
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn filesystem_guards_reject_symlink_leaves_directly() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = empty_workspace("filesystem-symlink-guards");
+        let target = workspace.join("target.txt");
+        let link = workspace.join("link.txt");
+        fs::write(&target, "target").expect("target file written");
+        symlink(&target, &link).expect("leaf symlink created");
+
+        assert!(matches!(
+            ensure_new_leaf_available(&link),
+            Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
+        ));
+        assert!(matches!(
+            ensure_real_file(&link),
+            Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
         ));
     }
 
@@ -5911,6 +6257,20 @@ mod tests {
 
     #[test]
     fn protocol_validator_rejects_event_payload_contract_violations() {
+        let mut scalar_payload = base_event();
+        scalar_payload.payload = serde_json::json!("bad");
+        let err = validate_event_payload(Path::new("scalar-payload.jsonl"), 1, &scalar_payload)
+            .expect_err("scalar payload must fail");
+        assert!(err.to_string().contains("payload must be an object"));
+
+        let mut invalid_session_reason = base_event();
+        invalid_session_reason.payload = serde_json::json!({"reason": 42});
+        assert_invalid_event(
+            "invalid-session-started-reason.jsonl",
+            invalid_session_reason,
+            "payload.reason",
+        );
+
         let mut missing_reason = base_event();
         missing_reason.event_type = EventType::SessionFailed;
         missing_reason.payload = serde_json::json!({});
@@ -5948,6 +6308,86 @@ mod tests {
             "connection arrays",
         );
 
+        let mut invalid_connection_kind = base_event();
+        invalid_connection_kind.event_type = EventType::StepStarted;
+        invalid_connection_kind.payload = serde_json::json!({
+            "connection_ids": ["inspect-data"],
+            "connection_kinds": ["socket"],
+            "step_id": "inspect",
+            "step_name": "Inspect",
+        });
+        assert_invalid_event(
+            "invalid-step-connection-kind.jsonl",
+            invalid_connection_kind,
+            "connection_kinds values",
+        );
+
+        let mut invalid_role = base_event();
+        invalid_role.event_type = EventType::MessageDelta;
+        invalid_role.payload = serde_json::json!({
+            "content_delta": "hi",
+            "message_id": "msg-001",
+            "role": "critic",
+        });
+        assert_invalid_event("invalid-role.jsonl", invalid_role, "payload.role");
+
+        let mut invalid_tool_kind = base_event();
+        invalid_tool_kind.event_type = EventType::ToolStarted;
+        invalid_tool_kind.payload = serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "read_scope": ["workspace"],
+            "tool_id": "read-file",
+            "tool_kind": "shell",
+            "tool_name": "ReadFile",
+            "write_scope": [],
+        });
+        assert_invalid_event(
+            "invalid-tool-kind.jsonl",
+            invalid_tool_kind,
+            "payload.tool_kind",
+        );
+
+        let mut invalid_network = base_event();
+        invalid_network.event_type = EventType::ToolStarted;
+        invalid_network.payload = serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "allow",
+            "read_scope": ["workspace"],
+            "tool_id": "read-file",
+            "tool_kind": "predefined-command",
+            "tool_name": "ReadFile",
+            "write_scope": [],
+        });
+        assert_invalid_event(
+            "invalid-tool-network.jsonl",
+            invalid_network,
+            "payload.network_access",
+        );
+
+        let mut non_integer_exit_code = base_event();
+        non_integer_exit_code.event_type = EventType::ToolCompleted;
+        non_integer_exit_code.payload =
+            serde_json::json!({"exit_code": 1.5, "tool_id": "read-file"});
+        assert_invalid_event(
+            "non-integer-exit-code.jsonl",
+            non_integer_exit_code,
+            "payload.exit_code",
+        );
+
+        let mut invalid_error_data = base_event();
+        invalid_error_data.event_type = EventType::Error;
+        invalid_error_data.payload = serde_json::json!({
+            "code": "E_PROTOCOL",
+            "data": [],
+            "message": "bad",
+        });
+        assert_invalid_event(
+            "invalid-error-data.jsonl",
+            invalid_error_data,
+            "payload.data",
+        );
+
         let mut non_numeric_metric = base_event();
         non_numeric_metric.event_type = EventType::MetricSample;
         non_numeric_metric.payload = serde_json::json!({
@@ -5959,6 +6399,247 @@ mod tests {
             non_numeric_metric,
             "metric.sample payload.value",
         );
+    }
+
+    #[test]
+    fn protocol_validator_rejects_jsonl_and_lifecycle_edges() {
+        let base = base_event();
+        let canonical = base.canonical_jsonl().expect("base event serializes");
+
+        assert_invalid_stream("missing-lf.jsonl", canonical.trim_end(), "must end with LF");
+        assert_invalid_stream("crlf.jsonl", &canonical.replace('\n', "\r\n"), "LF-only");
+        assert_invalid_stream(
+            "noncanonical.jsonl",
+            &canonical.replacen('{', "{ ", 1),
+            "canonical JSONL",
+        );
+
+        let mut bad_session = base_event();
+        bad_session.session_id = "BadSession".to_owned();
+        assert_invalid_event("bad-session-id.jsonl", bad_session, "valid session_id");
+
+        let mut empty_event_id = base_event();
+        empty_event_id.event_id.clear();
+        assert_invalid_event("empty-event-id.jsonl", empty_event_id, "event_id");
+
+        let mut duplicate = base_event();
+        duplicate.sequence = 2;
+        assert_invalid_stream(
+            "duplicate-event-id.jsonl",
+            &format!(
+                "{}{}",
+                canonical,
+                duplicate.canonical_jsonl().expect("duplicate serializes")
+            ),
+            "unique event_id",
+        );
+
+        let mut second_session = base_event();
+        second_session.event_id = "evt-002".to_owned();
+        second_session.sequence = 2;
+        second_session.session_id = "other001".to_owned();
+        assert_invalid_stream(
+            "two-sessions.jsonl",
+            &format!(
+                "{}{}",
+                canonical,
+                second_session
+                    .canonical_jsonl()
+                    .expect("second session serializes")
+            ),
+            "one session_id",
+        );
+
+        let completed = event_line(
+            "evt-002",
+            EventType::SessionCompleted,
+            "meta001",
+            2,
+            None,
+            serde_json::json!({}),
+        );
+        let after_terminal = event_line(
+            "evt-003",
+            EventType::SessionResumed,
+            "meta001",
+            3,
+            None,
+            serde_json::json!({"reason":"late"}),
+        );
+        assert_invalid_stream(
+            "after-terminal.jsonl",
+            &format!("{canonical}{completed}{after_terminal}"),
+            "after terminal session event",
+        );
+
+        let loop_started_without_id = event_line(
+            "evt-002",
+            EventType::LoopStarted,
+            "meta001",
+            2,
+            None,
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        );
+        assert_invalid_stream(
+            "loop-started-without-loop-id.jsonl",
+            &format!("{canonical}{loop_started_without_id}"),
+            "loop.started must include loop_id",
+        );
+
+        let first_not_session_started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionPaused,
+            "meta001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"pause"}),
+        )
+        .canonical_jsonl()
+        .expect("event serializes");
+        assert!(
+            validate_protocol_jsonl_text(
+                Path::new("first-not-started.jsonl"),
+                &first_not_session_started,
+            )
+            .expect("protocol envelope accepts non-start first event")
+            .len()
+                == 1
+        );
+        assert_invalid_session_log(
+            "first-not-started.jsonl",
+            "meta001",
+            &first_not_session_started,
+            "must start with session.started",
+        );
+
+        let loop_completed_without_start = event_line(
+            "evt-002",
+            EventType::LoopCompleted,
+            "meta001",
+            2,
+            Some("loop-001"),
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        );
+        assert_invalid_session_log(
+            "loop-completed-without-start.jsonl",
+            "meta001",
+            &format!("{canonical}{loop_completed_without_start}"),
+            "must follow loop.started",
+        );
+
+        let open_loop_then_terminal = [
+            canonical,
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "meta001",
+                2,
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            event_line(
+                "evt-003",
+                EventType::SessionCompleted,
+                "meta001",
+                3,
+                None,
+                serde_json::json!({}),
+            ),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "open-loop.jsonl",
+            "meta001",
+            &open_loop_then_terminal,
+            "open loop",
+        );
+    }
+
+    #[test]
+    fn timestamp_parser_rejects_non_rfc3339_utc_shapes() {
+        assert!(is_rfc3339_utc_timestamp("2026-02-28T23:59:59Z"));
+        assert!(is_rfc3339_utc_timestamp("2028-02-29T00:00:00.123Z"));
+        for value in [
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-01 00:00:00Z",
+            "2026-13-01T00:00:00Z",
+            "2026-00-01T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2026-01-01T24:00:00Z",
+            "2026-01-01T00:60:00Z",
+            "2026-01-01T00:00:60Z",
+            "2026-01-01T00:00:00.Z",
+            "2026-01-01T00:00:00.badZ",
+            "20260101T00:00:00Z",
+        ] {
+            assert!(!is_rfc3339_utc_timestamp(value), "{value}");
+        }
+    }
+
+    #[test]
+    fn workspace_config_helpers_reject_unsafe_registry_roots() {
+        let workspace = empty_workspace("workspace-config-helpers");
+        fs::create_dir_all(workspace.join(".loop")).expect("loop config dir");
+        fs::create_dir(workspace.join("registry")).expect("registry dir");
+        fs::write(workspace.join("registry-file"), "not a dir").expect("registry file");
+
+        assert_eq!(
+            config_value(
+                "registry_root: \"registry\"\nother: ignored\n",
+                "registry_root"
+            ),
+            Some("registry".to_owned())
+        );
+        assert_eq!(config_value("registry_root:\n", "registry_root"), None);
+
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            "stub_model: deterministic\n",
+        )
+        .expect("config without registry root");
+        assert!(matches!(
+            load_workspace_config(&workspace),
+            Err(RuntimeError::Usage(message)) if message.contains("missing")
+        ));
+
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            "registry_root: registry\n",
+        )
+        .expect("valid config");
+        let config = load_workspace_config(&workspace).expect("config loads");
+        assert_eq!(
+            registry_root_path(&workspace, &config.registry_root).expect("registry path resolves"),
+            workspace.join("registry")
+        );
+        assert_eq!(
+            registry_root_path(&workspace, Path::new("./registry"))
+                .expect("curdir registry path resolves"),
+            workspace.join("registry")
+        );
+
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            "registry_root: ../registry\n",
+        )
+        .expect("unsafe config");
+        assert!(matches!(
+            load_workspace_config(&workspace),
+            Err(RuntimeError::Usage(message)) if message.contains("within the workspace")
+        ));
+        assert!(matches!(
+            registry_root_path(&workspace, Path::new("registry-file")),
+            Err(RuntimeError::Usage(message)) if message.contains("through directories")
+        ));
+        assert!(matches!(
+            registry_root_path(&workspace, Path::new("missing-registry")),
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
+        assert!(matches!(
+            read_to_string(&workspace.join("missing-config.yaml")),
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        ));
     }
 
     #[cfg(unix)]
@@ -6337,8 +7018,19 @@ mod tests {
 
     fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
         let text = event.canonical_jsonl().expect("event serializes");
-        let err = validate_protocol_jsonl_text(Path::new(name), &text)
+        assert_invalid_stream(name, &text, expected);
+    }
+
+    fn assert_invalid_stream(name: &str, text: &str, expected: &str) {
+        let err = validate_protocol_jsonl_text(Path::new(name), text)
             .expect_err("invalid event must fail");
+
+        assert!(err.to_string().contains(expected), "{err}");
+    }
+
+    fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected: &str) {
+        let err = validate_session_log_text(Path::new(name), session_id, text)
+            .expect_err("invalid session log must fail");
 
         assert!(err.to_string().contains(expected), "{err}");
     }
@@ -6347,6 +7039,20 @@ mod tests {
         let _ = fs::remove_dir_all(workspace.join(LOCAL_SESSION_DIR));
         let _ = fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR));
         let _ = fs::remove_file(workspace.join("out/summary.txt"));
+    }
+
+    fn fixture_runtime_policy(
+        fixture: &str,
+        loop_id: &str,
+    ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
+        let registry = core_script::load_registry_root(fixture_dir(fixture).join("registry"))
+            .expect("fixture registry loads");
+        let artifacts = core_policy::compile_policy_artifacts(loop_id, &registry, loop_id)
+            .expect("fixture policy compiles");
+        let policy = runtime_policy_artifact(&artifacts)
+            .expect("linux runtime policy exists")
+            .clone();
+        (registry, policy)
     }
 
     fn fixture_size(fixture: &str) -> u64 {
