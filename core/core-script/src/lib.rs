@@ -902,8 +902,11 @@ pub fn parse_registry_block(
     source_name: &str,
     source: &str,
 ) -> Result<RegistryBlock, RegistryError> {
+    let source = strip_yaml_comments(source);
+    let source = source.as_str();
     reject_unsupported_yaml(source_name, source)?;
     let section = top_section(source_name, source)?;
+    reject_unknown_yaml_fields(source_name, source, section)?;
     let block = match section {
         "tool" => RegistryBlock::Tool(parse_tool_block(source_name, source)?),
         "instruction" => RegistryBlock::Instruction(parse_instruction_block(source_name, source)?),
@@ -1138,6 +1141,22 @@ fn allowed_parameters(
     objects
         .into_iter()
         .map(|object| {
+            reject_unexpected_object_keys(
+                source_name,
+                "tool.allowed_parameters",
+                &object,
+                &[
+                    "name",
+                    "value_type",
+                    "required",
+                    "allowed_values",
+                    "value_pattern",
+                    "max_length",
+                    "min",
+                    "max",
+                ],
+            )?;
+            let has_allowed_values = object.contains_key("allowed_values");
             let value_type =
                 match required_object_scalar(source_name, &object, "value_type")?.as_str() {
                     "none" => ParameterValueType::None,
@@ -1152,6 +1171,16 @@ fn allowed_parameters(
                         ));
                     }
                 };
+            if matches!(value_type, ParameterValueType::String) {
+                required_object_scalar(source_name, &object, "value_pattern")?;
+                required_object_scalar(source_name, &object, "max_length")?;
+            }
+            if !matches!(value_type, ParameterValueType::Enum) && has_allowed_values {
+                return Err(parse_error(
+                    source_name,
+                    "allowed_values is only valid for enum parameters".to_owned(),
+                ));
+            }
             Ok(AllowedParameter {
                 name: required_object_scalar(source_name, &object, "name")?,
                 value_type,
@@ -1179,6 +1208,18 @@ fn allowed_parameters(
                     .map(|value| parse_i64(source_name, "allowed_parameters.max", value))
                     .transpose()?,
             })
+            .and_then(|parameter| {
+                if matches!(parameter.value_type, ParameterValueType::Enum)
+                    && parameter.allowed_values.is_empty()
+                {
+                    Err(parse_error(
+                        source_name,
+                        "enum parameters must declare at least one allowed value".to_owned(),
+                    ))
+                } else {
+                    Ok(parameter)
+                }
+            })
         })
         .collect()
 }
@@ -1187,8 +1228,18 @@ fn phase_steps(source_name: &str, source: &str) -> Result<Vec<StepBlock>, Regist
     section_list_objects(source_name, source, "phase", "steps")?
         .into_iter()
         .map(|object| {
+            reject_unexpected_object_keys(
+                source_name,
+                "phase.steps",
+                &object,
+                &["id", "name", "connection_refs"],
+            )?;
+            let id = required_object_scalar(source_name, &object, "id")?;
+            if !is_valid_block_id(&id) {
+                return Err(RegistryError::InvalidBlockId(id));
+            }
             Ok(StepBlock {
-                id: required_object_scalar(source_name, &object, "id")?,
+                id,
                 name: required_object_scalar(source_name, &object, "name")?,
                 connection_refs: object
                     .get("connection_refs")
@@ -1228,6 +1279,23 @@ fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, Regi
             let allow = nested_list_objects(source_name, source, "tool", "network", "allow")?
                 .into_iter()
                 .map(|object| {
+                    reject_unexpected_object_keys(
+                        source_name,
+                        "tool.network.allow",
+                        &object,
+                        &["kind", "transport", "cidr", "port"],
+                    )?;
+                    let port = parse_u16(
+                        source_name,
+                        "network.allow.port",
+                        &required_object_scalar(source_name, &object, "port")?,
+                    )?;
+                    if port == 0 {
+                        return Err(parse_error(
+                            source_name,
+                            "network.allow.port must be at least 1".to_owned(),
+                        ));
+                    }
                     Ok(NetworkAllowEntry {
                         kind: match required_object_scalar(source_name, &object, "kind")?.as_str() {
                             "cidr" => NetworkAllowKind::Cidr,
@@ -1251,11 +1319,7 @@ fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, Regi
                             }
                         },
                         cidr: required_object_scalar(source_name, &object, "cidr")?,
-                        port: parse_u16(
-                            source_name,
-                            "network.allow.port",
-                            &required_object_scalar(source_name, &object, "port")?,
-                        )?,
+                        port,
                     })
                 })
                 .collect::<Result<Vec<_>, RegistryError>>()?;
@@ -1289,6 +1353,54 @@ fn reject_unsupported_yaml(source_name: &str, source: &str) -> Result<(), Regist
     Ok(())
 }
 
+fn strip_yaml_comments(source: &str) -> String {
+    let mut out = String::new();
+    for line in source.lines() {
+        out.push_str(&strip_yaml_comment(line));
+        out.push('\n');
+    }
+    out
+}
+
+fn strip_yaml_comment(line: &str) -> String {
+    let mut out = String::new();
+    let mut quote = None::<char>;
+    let mut escaped = false;
+
+    for ch in line.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+            continue;
+        }
+        if quote == Some('"') && ch == '\\' {
+            out.push(ch);
+            escaped = true;
+            continue;
+        }
+        if quote == Some(ch) {
+            quote = None;
+            out.push(ch);
+            continue;
+        }
+        if quote.is_none() && (ch == '"' || ch == '\'') {
+            quote = Some(ch);
+            out.push(ch);
+            continue;
+        }
+        let starts_comment = match out.chars().last() {
+            Some(previous) => previous.is_whitespace(),
+            None => true,
+        };
+        if quote.is_none() && ch == '#' && starts_comment {
+            break;
+        }
+        out.push(ch);
+    }
+
+    out.trim_end().to_owned()
+}
+
 fn top_section<'a>(source_name: &str, source: &'a str) -> Result<&'a str, RegistryError> {
     let mut section = None;
     for line in source.lines() {
@@ -1315,6 +1427,179 @@ fn top_section<'a>(source_name: &str, source: &'a str) -> Result<&'a str, Regist
     section.ok_or_else(|| parse_error(source_name, "empty registry block".to_owned()))
 }
 
+fn reject_unknown_yaml_fields(
+    source_name: &str,
+    source: &str,
+    section: &str,
+) -> Result<(), RegistryError> {
+    match section {
+        "connection" => reject_unknown_section_fields(
+            source_name,
+            source,
+            section,
+            &["id", "name", "connection_kind", "from_ref", "to_ref"],
+        ),
+        "instruction" => {
+            reject_unknown_section_fields(source_name, source, section, &["id", "name", "prompt"])
+        }
+        "loop" => reject_unknown_section_fields(
+            source_name,
+            source,
+            section,
+            &[
+                "id",
+                "name",
+                "phase_refs",
+                "subloop_refs",
+                "connection_refs",
+            ],
+        ),
+        "phase" => reject_unknown_section_fields(
+            source_name,
+            source,
+            section,
+            &["id", "name", "instruction_refs", "tool_refs", "steps"],
+        ),
+        "tool" => {
+            reject_unknown_section_fields(
+                source_name,
+                source,
+                section,
+                &[
+                    "id",
+                    "name",
+                    "tool_kind",
+                    "command",
+                    "script_runtime",
+                    "script_body",
+                    "allowed_parameters",
+                    "read_scope",
+                    "write_scope",
+                    "protected_path_grants",
+                    "network",
+                ],
+            )?;
+            if raw_section_field_value(source_name, source, "tool", "command")?
+                .is_some_and(|value| value.is_empty())
+            {
+                reject_unknown_nested_fields(
+                    source_name,
+                    source,
+                    "tool",
+                    "command",
+                    &["command_id", "argv"],
+                )?;
+            }
+            if raw_section_field_value(source_name, source, "tool", "network")?
+                .is_some_and(|value| value.is_empty())
+            {
+                reject_unknown_nested_fields(
+                    source_name,
+                    source,
+                    "tool",
+                    "network",
+                    &["default", "allow"],
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn reject_unknown_section_fields(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    allowed: &[&str],
+) -> Result<(), RegistryError> {
+    let section_header = format!("{section}:");
+    let mut in_section = false;
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = leading_spaces(line);
+        let trimmed = line.trim();
+        if indent == 0 {
+            in_section = trimmed == section_header;
+            continue;
+        }
+        if !in_section || indent != 2 {
+            continue;
+        }
+        let Some((field, _)) = trimmed.split_once(':') else {
+            return Err(parse_error(
+                source_name,
+                format!("{section} field {trimmed:?} must use key: value"),
+            ));
+        };
+        let field = field.trim();
+        if !allowed.contains(&field) {
+            return Err(parse_error(
+                source_name,
+                format!("unsupported {section} field {field}"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn reject_unknown_nested_fields(
+    source_name: &str,
+    source: &str,
+    section: &str,
+    parent: &str,
+    allowed: &[&str],
+) -> Result<(), RegistryError> {
+    let section_header = format!("{section}:");
+    let parent_header = format!("{parent}:");
+    let mut in_section = false;
+    let mut in_parent = false;
+
+    for raw_line in source.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        let indent = leading_spaces(line);
+        let trimmed = line.trim();
+        if indent == 0 {
+            in_section = trimmed == section_header;
+            in_parent = false;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        if indent == 2 {
+            in_parent = trimmed == parent_header;
+            continue;
+        }
+        if !in_parent || indent != 4 {
+            continue;
+        }
+        let Some((field, _)) = trimmed.split_once(':') else {
+            return Err(parse_error(
+                source_name,
+                format!("{section}.{parent} field {trimmed:?} must use key: value"),
+            ));
+        };
+        let field = field.trim();
+        if !allowed.contains(&field) {
+            return Err(parse_error(
+                source_name,
+                format!("unsupported {section}.{parent} field {field}"),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn required_scalar(
     source_name: &str,
     source: &str,
@@ -1329,7 +1614,14 @@ fn required_scalar(
             format!("{section}.{field} must be a scalar"),
         ));
     }
-    Ok(unquote_yaml_scalar(&value))
+    let value = unquote_yaml_scalar(&value);
+    if value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("{section}.{field} must be non-empty"),
+        ));
+    }
+    Ok(value)
 }
 
 fn optional_scalar(
@@ -1367,7 +1659,14 @@ fn required_nested_scalar(
             format!("{section}.{parent}.{field} must be a scalar"),
         ));
     }
-    Ok(unquote_yaml_scalar(&value))
+    let value = unquote_yaml_scalar(&value);
+    if value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("{section}.{parent}.{field} must be non-empty"),
+        ));
+    }
+    Ok(value)
 }
 
 fn inline_list(
@@ -1689,10 +1988,34 @@ fn required_object_scalar(
     object: &BTreeMap<String, String>,
     field: &str,
 ) -> Result<String, RegistryError> {
-    object
+    let value = object
         .get(field)
         .cloned()
-        .ok_or_else(|| parse_error(source_name, format!("missing list object property {field}")))
+        .ok_or_else(|| parse_error(source_name, format!("missing list object property {field}")))?;
+    if value.is_empty() {
+        return Err(parse_error(
+            source_name,
+            format!("list object property {field} must be non-empty"),
+        ));
+    }
+    Ok(value)
+}
+
+fn reject_unexpected_object_keys(
+    source_name: &str,
+    context: &str,
+    object: &BTreeMap<String, String>,
+    allowed: &[&str],
+) -> Result<(), RegistryError> {
+    for key in object.keys() {
+        if !allowed.contains(&key.as_str()) {
+            return Err(parse_error(
+                source_name,
+                format!("unsupported {context} property {key}"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn parse_inline_yaml_list(
@@ -2231,6 +2554,122 @@ mod tests {
         assert!(err
             .to_string()
             .contains("duplicate tool.command.command_id"));
+    }
+
+    #[test]
+    fn parser_accepts_yaml_comments_and_discards_formatting_comments() {
+        let block = parse_registry_block(
+            "commented-loop.yaml",
+            "# leading comment\nloop: # block comment\n  id: commented-loop # field comment\n  name: \"Hash # Loop\"\n  phase_refs: [phase-a] # inline list comment\n",
+        )
+        .expect("comments are ignored outside quoted scalars");
+
+        let RegistryBlock::Loop(loop_block) = block else {
+            panic!("expected loop block");
+        };
+        assert_eq!(loop_block.identity.name, "Hash # Loop");
+        assert_eq!(loop_block.phase_refs, vec!["phase-a"]);
+    }
+
+    #[test]
+    fn parser_rejects_unknown_schema_fields() {
+        let err = parse_registry_block(
+            "unknown-field.yaml",
+            "instruction:\n  id: bad-instruction\n  name: BadInstruction\n  prompt: Inspect\n  prompt_extra: ignored\n",
+        )
+        .expect_err("unknown field rejected");
+
+        assert!(err.to_string().contains("unsupported instruction field"));
+    }
+
+    #[test]
+    fn parser_rejects_empty_required_schema_strings() {
+        let err = parse_registry_block(
+            "empty-prompt.yaml",
+            "instruction:\n  id: empty-prompt\n  name: EmptyPrompt\n  prompt: \"\"\n",
+        )
+        .expect_err("empty prompt rejected");
+
+        assert!(err.to_string().contains("instruction.prompt"));
+    }
+
+    #[test]
+    fn parser_enforces_allowed_parameter_schema_conditionals() {
+        let err = parse_registry_block(
+            "string-parameter-missing-bounds.yaml",
+            r#"tool:
+  id: bounded-tool
+  name: BoundedTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --message
+      value_type: string
+      required: true
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("string parameter bounds rejected");
+
+        assert!(err.to_string().contains("value_pattern"));
+
+        let err = parse_registry_block(
+            "non-enum-allowed-values.yaml",
+            r#"tool:
+  id: non-enum-tool
+  name: NonEnumTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --flag
+      value_type: none
+      required: false
+      allowed_values: [on]
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("non-enum allowed_values rejected");
+
+        assert!(err.to_string().contains("allowed_values"));
+    }
+
+    #[test]
+    fn parser_rejects_schema_invalid_network_ports() {
+        let err = parse_registry_block(
+            "zero-port.yaml",
+            r#"tool:
+  id: network-tool
+  name: NetworkTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network:
+    default: deny
+    allow:
+      - kind: cidr
+        transport: tcp
+        cidr: 192.0.2.0/24
+        port: 0
+"#,
+        )
+        .expect_err("zero port rejected");
+
+        assert!(err.to_string().contains("network.allow.port"));
     }
 
     #[test]
