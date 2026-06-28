@@ -286,6 +286,9 @@ pub fn tail_session_to_writer(
             continue;
         }
         let appended = &current[stream.len()..];
+        if !appended.ends_with('\n') {
+            continue;
+        }
         let current_events = validate_session_log_text(&path, session_id, &current)?;
         if !write_tail_chunk(writer, emit, session_id, appended)? {
             return Ok(RunOutput {
@@ -5291,6 +5294,81 @@ mod tests {
             .join()
             .expect("tail thread joins")
             .expect("tail succeeds");
+        assert_eq!(output.event_count, 2);
+        assert!(!output.failed);
+        assert_eq!(
+            String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+                .expect("tail stream is utf8"),
+            format!("{started}{completed}")
+        );
+    }
+
+    #[test]
+    fn tail_session_buffers_partial_appended_line_until_lf() {
+        let workspace = empty_workspace("tail-partial-line");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("tailpartial001.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "tailpartial001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("started event serializes");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "tailpartial001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        fs::write(&path, &started).expect("initial session log written");
+
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = mpsc::channel();
+        let mut writer = NotifyingWriter {
+            bytes: Arc::clone(&bytes),
+            first_write: Some(tx),
+        };
+        let tail_workspace = workspace.clone();
+        let handle = thread::spawn(move || {
+            tail_session_to_writer(
+                &tail_workspace,
+                "tailpartial001",
+                EmitMode::Jsonl,
+                &mut writer,
+            )
+        });
+
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("tail writes current prefix before append");
+        let split = completed.len() - 1;
+        append_session_log_line(&path, &completed[..split]).expect("partial event appended");
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !handle.is_finished(),
+            "tail must wait for a complete appended line"
+        );
+        assert_eq!(
+            String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+                .expect("tail prefix is utf8"),
+            started
+        );
+
+        append_session_log_line(&path, &completed[split..]).expect("event newline appended");
+        let output = handle
+            .join()
+            .expect("tail thread joins")
+            .expect("tail succeeds after complete line");
         assert_eq!(output.event_count, 2);
         assert!(!output.failed);
         assert_eq!(
