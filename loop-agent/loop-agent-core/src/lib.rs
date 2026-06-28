@@ -1897,30 +1897,10 @@ fn write_script_output(
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
     let path = ensure_real_workspace_write_path(workspace, target)?;
-    if !hard_link_count_is_verifiable() {
-        return replace_script_output_without_link_count(workspace, target, &path, contents);
-    }
-    ensure_writable_regular_leaf(&path)?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(|source| RuntimeError::Io {
-            path: path.clone(),
-            source,
-        })?;
-    ensure_real_workspace_write_path(workspace, target)?;
-    ensure_opened_regular_leaf_matches_path(&path, &file)?;
-    file.set_len(0).map_err(|source| RuntimeError::Io {
-        path: path.clone(),
-        source,
-    })?;
-    file.write_all(contents)
-        .map_err(|source| RuntimeError::Io { path, source })
+    replace_script_output_atomically(workspace, target, &path, contents)
 }
 
-fn replace_script_output_without_link_count(
+fn replace_script_output_atomically(
     workspace: &Path,
     target: &str,
     path: &Path,
@@ -2324,7 +2304,15 @@ fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
             "{} must not be a symlink",
             path.display()
         ))),
-        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(metadata) if metadata.is_file() => {
+            if hard_link_count_is_verifiable() && hard_link_count(&metadata) > 1 {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} must not be hard-linked",
+                    path.display()
+                )));
+            }
+            Ok(true)
+        }
         Ok(_) => Err(RuntimeError::Protocol(format!(
             "{} must be a file",
             path.display()
