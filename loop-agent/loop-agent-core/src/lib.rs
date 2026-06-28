@@ -714,6 +714,9 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
 
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_real_file(path)?;
+    if !hard_link_count_is_verifiable() {
+        return append_existing_file_without_link_count(path, contents);
+    }
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(path)
@@ -726,6 +729,54 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
         path: path.to_owned(),
         source,
     })
+}
+
+fn append_existing_file_without_link_count(
+    path: &Path,
+    contents: &[u8],
+) -> Result<(), RuntimeError> {
+    let mut appended = read_to_bytes(path)?;
+    appended.extend_from_slice(contents);
+    replace_existing_file_without_link_count(path, &appended)
+}
+
+fn replace_existing_file_without_link_count(
+    path: &Path,
+    contents: &[u8],
+) -> Result<(), RuntimeError> {
+    ensure_parent_real_directory(path)?;
+    ensure_real_file(path)?;
+    let (temp_path, mut temp_file) = create_replacement_temp(path)?;
+    if let Err(err) = temp_file
+        .write_all(contents)
+        .map_err(|source| RuntimeError::Io {
+            path: temp_path.clone(),
+            source,
+        })
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    drop(temp_file);
+
+    ensure_parent_real_directory(path)?;
+    ensure_real_file(path)?;
+    if let Err(source) = fs::remove_file(path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    ensure_parent_real_directory(path)?;
+    if let Err(source) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    Ok(())
 }
 
 fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
@@ -768,6 +819,13 @@ fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
         )));
     }
     Ok(())
+}
+
+fn ensure_parent_real_directory(path: &Path) -> Result<(), RuntimeError> {
+    let parent = path.parent().ok_or_else(|| {
+        RuntimeError::Protocol(format!("{} must have a parent directory", path.display()))
+    })?;
+    ensure_existing_real_directory(parent)
 }
 
 struct RuntimeExecution {
@@ -1490,7 +1548,7 @@ fn replace_script_output_without_link_count(
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
     ensure_real_workspace_write_path(workspace, target)?;
-    let (temp_path, mut temp_file) = create_script_output_temp(path)?;
+    let (temp_path, mut temp_file) = create_replacement_temp(path)?;
     if let Err(err) = temp_file
         .write_all(contents)
         .map_err(|source| RuntimeError::Io {
@@ -1523,9 +1581,9 @@ fn replace_script_output_without_link_count(
     Ok(())
 }
 
-fn create_script_output_temp(path: &Path) -> Result<(PathBuf, fs::File), RuntimeError> {
+fn create_replacement_temp(path: &Path) -> Result<(PathBuf, fs::File), RuntimeError> {
     for attempt in 0..100 {
-        let temp_path = script_output_temp_path(path, attempt)?;
+        let temp_path = replacement_temp_path(path, attempt)?;
         match fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -1542,17 +1600,15 @@ fn create_script_output_temp(path: &Path) -> Result<(PathBuf, fs::File), Runtime
         }
     }
     Err(RuntimeError::Protocol(format!(
-        "could not allocate temporary output path for {}",
+        "could not allocate temporary replacement path for {}",
         path.display()
     )))
 }
 
-fn script_output_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
+fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
     let mut file_name = path
         .file_name()
-        .ok_or_else(|| {
-            RuntimeError::Protocol("script output path must have a file name".to_owned())
-        })?
+        .ok_or_else(|| RuntimeError::Protocol("replacement path must have a file name".to_owned()))?
         .to_os_string();
     file_name.push(format!(".watershed-{}-{attempt}.tmp", std::process::id()));
     Ok(path.with_file_name(file_name))
@@ -2388,6 +2444,13 @@ struct WorkspaceConfig {
 
 fn read_to_string(path: &Path) -> Result<String, RuntimeError> {
     fs::read_to_string(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn read_to_bytes(path: &Path) -> Result<Vec<u8>, RuntimeError> {
+    fs::read(path).map_err(|source| RuntimeError::Io {
         path: path.to_path_buf(),
         source,
     })
@@ -4020,6 +4083,42 @@ mod tests {
             .len(),
             2
         );
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
+        let workspace = empty_workspace("resume-hardlink");
+        let outside = empty_workspace("outside-resume-hardlink");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let event = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "hardlink001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("event serializes");
+        let outside_target = outside.join("hardlink001.jsonl");
+        fs::write(&outside_target, &event).expect("outside log written");
+        let session_path = session_dir.join("hardlink001.jsonl");
+        fs::hard_link(&outside_target, &session_path).expect("session hard link");
+
+        let output =
+            resume_session(&workspace, "hardlink001", EmitMode::Jsonl).expect("session resumes");
+
+        assert_eq!(output.event_count, 2);
+        assert_eq!(
+            fs::read_to_string(&outside_target).expect("outside target readable"),
+            event
+        );
+        assert!(fs::read_to_string(&session_path)
+            .expect("workspace session log readable")
+            .contains("\"event_type\":\"session.resumed\""));
     }
 
     #[test]
