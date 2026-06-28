@@ -170,6 +170,7 @@ pub fn run_loop(
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
     let policy = runtime_policy_artifact(&artifacts)?;
+    preflight_loop_tools(&registry, policy, loop_block)?;
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
@@ -1221,6 +1222,50 @@ fn execute_loop(
             sandbox_decision_fixture: None,
         })
     }
+}
+
+fn preflight_loop_tools(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
+) -> Result<(), RuntimeError> {
+    if sandbox_runtime_failure(registry, policy, loop_block)?.is_some() {
+        return Ok(());
+    }
+
+    for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
+        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
+        })?;
+        preflight_phase_tools(registry, policy, phase)?;
+
+        if index == 0 {
+            for subloop_ref in &loop_block.subloop_refs {
+                let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
+                    RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
+                })?;
+                preflight_loop_tools(registry, policy, subloop)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn preflight_phase_tools(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    phase: &core_script::PhaseBlock,
+) -> Result<(), RuntimeError> {
+    for tool_ref in &phase.tool_refs {
+        let tool = registry.tool_block(tool_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
+        })?;
+        let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
+        ensure_tool_matches_policy(tool, command_policy)?;
+        planned_tool_progress(tool, command_policy)?;
+    }
+    Ok(())
 }
 
 fn emit_loop_block(
@@ -4207,6 +4252,53 @@ mod tests {
 
         let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
             .expect_err("unsupported own-script command must reject");
+
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
+        );
+        assert!(!workspace.join("out/summary.txt").exists());
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+
+    #[test]
+    fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        fs::write(
+            workspace.join("registry/tools/bad-write.yaml"),
+            r#"tool:
+  id: bad-write
+  name: BadWrite
+  tool_kind: own-script
+  command: script:bad-write
+  script_runtime: posix-sh
+  script_body: |
+    cat ../outside.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect("bad tool fixture written");
+        let phase_path = workspace.join("registry/phases/summarize.yaml");
+        let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+        fs::write(
+            &phase_path,
+            source.replace(
+                "tool_refs: [write-summary]",
+                "tool_refs: [write-summary, bad-write]",
+            ),
+        )
+        .expect("phase fixture rewritten");
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("later invalid tool must reject before earlier write");
 
         assert!(
             matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
