@@ -1281,7 +1281,7 @@ fn phase_steps(source_name: &str, source: &str) -> Result<Vec<StepBlock>, Regist
 fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, RegistryError> {
     match raw_section_field_value(source_name, source, "tool", "network")? {
         Some(value) if !value.is_empty() => {
-            let value = unquote_yaml_scalar(&value);
+            let value = unquote_yaml_scalar(source_name, "tool.network", &value)?;
             if value == "deny" {
                 Ok(NetworkPolicy::Deny(NetworkDeny))
             } else {
@@ -1813,7 +1813,7 @@ fn section_scalar_value(
                     format!("{section}.{field} must be a scalar"),
                 ))
             } else {
-                Ok(unquote_yaml_scalar(value))
+                unquote_yaml_scalar(source_name, &format!("{section}.{field}"), value)
             }
         })
         .transpose()
@@ -1834,7 +1834,7 @@ fn required_nested_scalar(
             format!("{section}.{parent}.{field} must be a scalar"),
         ));
     }
-    let value = unquote_yaml_scalar(&value);
+    let value = unquote_yaml_scalar(source_name, &format!("{section}.{parent}.{field}"), &value)?;
     if value.is_empty() {
         return Err(parse_error(
             source_name,
@@ -2358,7 +2358,12 @@ fn parse_object_property(
             format!("list object property {line:?} must use key: value"),
         ));
     }
-    insert_object_property(source_name, item, field, unquote_yaml_scalar(value))?;
+    insert_object_property(
+        source_name,
+        item,
+        field,
+        unquote_yaml_scalar(source_name, field, value)?,
+    )?;
     Ok(None)
 }
 
@@ -2514,7 +2519,7 @@ fn push_inline_list_item(
             ));
         }
     }
-    items.push(unquote_yaml_scalar(value));
+    items.push(unquote_yaml_scalar(source_name, field, value)?);
     Ok(())
 }
 
@@ -2547,7 +2552,11 @@ fn parse_i64(source_name: &str, field: &str, value: &str) -> Result<i64, Registr
     })
 }
 
-fn unquote_yaml_scalar(value: &str) -> String {
+fn unquote_yaml_scalar(
+    source_name: &str,
+    field: &str,
+    value: &str,
+) -> Result<String, RegistryError> {
     let value = value.trim();
     if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
         let mut out = String::new();
@@ -2558,20 +2567,27 @@ fn unquote_yaml_scalar(value: &str) -> String {
                     Some('"') => out.push('"'),
                     Some('\\') => out.push('\\'),
                     Some(other) => {
-                        out.push('\\');
-                        out.push(other);
+                        return Err(parse_error(
+                            source_name,
+                            format!("{field} contains unsupported escape \\{other}"),
+                        ));
                     }
-                    None => out.push('\\'),
+                    None => {
+                        return Err(parse_error(
+                            source_name,
+                            format!("{field} contains a dangling escape"),
+                        ));
+                    }
                 }
             } else {
                 out.push(ch);
             }
         }
-        out
+        Ok(out)
     } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
-        value[1..value.len() - 1].to_owned()
+        Ok(value[1..value.len() - 1].to_owned())
     } else {
-        value.to_owned()
+        Ok(value.to_owned())
     }
 }
 
@@ -2814,8 +2830,31 @@ mod tests {
         assert_eq!(tool.script_runtime, Some(ScriptRuntime::PosixSh));
         assert_eq!(
             tool.script_body.as_deref(),
-            Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#)
+            Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n")
         );
+    }
+
+    #[test]
+    fn parser_rejects_unsupported_double_quoted_yaml_escapes() {
+        let err = parse_registry_block(
+            "quoted-script-body.yaml",
+            r#"tool:
+  id: quoted-script
+  name: QuotedScript
+  tool_kind: own-script
+  command: script:quoted-script
+  script_runtime: posix-sh
+  script_body: "echo a\necho b"
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("unsupported quoted escape must be rejected");
+
+        assert!(err.to_string().contains("unsupported escape"));
     }
 
     #[test]

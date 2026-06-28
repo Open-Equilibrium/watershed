@@ -4,7 +4,8 @@ tool:
   tool_kind: own-script
   command: script:write-summary
   script_runtime: posix-sh
-  script_body: "printf '%s\n' \"$SUMMARY\" > out/summary.txt"
+  script_body: |
+    printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
   read_scope: ["workspace"]
   write_scope: ["workspace/out"]

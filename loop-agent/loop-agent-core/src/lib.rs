@@ -6,8 +6,9 @@ use std::{
     fmt, fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
@@ -1012,7 +1013,14 @@ fn emit_phase(
                 RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
             })?;
             let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
-            emit_tool(workspace, tool, command_policy, invocation, builder)?;
+            emit_tool(
+                workspace,
+                tool,
+                command_policy,
+                policy.runtime_limits.timeout_ms,
+                invocation,
+                builder,
+            )?;
         }
 
         builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
@@ -1201,6 +1209,7 @@ fn emit_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     policy: &core_policy::CommandPolicy,
+    timeout_ms: u64,
     invocation: &LoopInvocation,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
@@ -1219,32 +1228,8 @@ fn emit_tool(
         }),
     );
 
-    match (&tool.tool_kind, &tool.command) {
-        (
-            core_script::ToolKind::PredefinedCommand,
-            core_script::ToolCommand::Predefined { command_id, argv },
-        ) if command_id == "agent-read" && argv.is_empty() => {
-            emit_tool_progress("stub read completed", tool, invocation, builder)
-        }
-        (
-            core_script::ToolKind::PredefinedCommand,
-            core_script::ToolCommand::Predefined { command_id, argv },
-        ) if command_id == "agent-echo" && argv.is_empty() => {}
-        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id))
-            if command_id == "script:write-summary"
-                && tool.script_runtime == Some(core_script::ScriptRuntime::PosixSh)
-                && tool.script_body.as_deref()
-                    == Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#) =>
-        {
-            write_summary_artifact(workspace, policy)?;
-            emit_tool_progress("stub write completed", tool, invocation, builder);
-        }
-        _ => {
-            return Err(RuntimeError::Protocol(format!(
-                "unsupported tool command for {}",
-                tool.identity.id
-            )));
-        }
+    if let Some(message) = execute_tool(workspace, tool, policy, timeout_ms, builder.sequence)? {
+        emit_tool_progress(message, tool, invocation, builder);
     }
 
     builder.emit(
@@ -1256,6 +1241,219 @@ fn emit_tool(
         }),
     );
     Ok(())
+}
+
+fn execute_tool(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    policy: &core_policy::CommandPolicy,
+    timeout_ms: u64,
+    sequence: u64,
+) -> Result<Option<&'static str>, RuntimeError> {
+    match (&tool.tool_kind, &tool.command) {
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, .. },
+        ) => Ok(predefined_command_progress(command_id)),
+        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
+            execute_own_script(workspace, tool, policy, timeout_ms, sequence)?;
+            Ok(Some("stub write completed"))
+        }
+        _ => Err(RuntimeError::Protocol(format!(
+            "tool command shape does not match {}",
+            tool.identity.id
+        ))),
+    }
+}
+
+fn predefined_command_progress(command_id: &str) -> Option<&'static str> {
+    match command_id {
+        "agent-read" => Some("stub read completed"),
+        _ => None,
+    }
+}
+
+fn execute_own_script(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    policy: &core_policy::CommandPolicy,
+    timeout_ms: u64,
+    sequence: u64,
+) -> Result<(), RuntimeError> {
+    if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} must use script_runtime posix-sh",
+            tool.identity.id
+        )));
+    }
+    let script_body = tool.script_body.as_deref().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "tool {} must include script_body",
+            tool.identity.id
+        ))
+    })?;
+    prepare_own_script_write_targets(workspace, policy, script_body)?;
+
+    let script_dir = workspace.join(LOCAL_LOG_DIR).join("scripts");
+    ensure_real_directory(&script_dir)?;
+    let script_path = script_dir.join(format!("{}-{sequence}.sh", tool.identity.id));
+    ensure_writable_regular_leaf(&script_path)?;
+    fs::write(&script_path, script_body).map_err(|source| RuntimeError::Io {
+        path: script_path.clone(),
+        source,
+    })?;
+
+    let mut child = Command::new("sh")
+        .arg(&script_path)
+        .current_dir(workspace)
+        .env_clear()
+        .env("SUMMARY", "hello")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| RuntimeError::Io {
+            path: PathBuf::from("sh"),
+            source,
+        })?;
+    let deadline = Duration::from_millis(timeout_ms.max(1));
+    let started = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .map_err(|source| RuntimeError::Io {
+                path: script_path.clone(),
+                source,
+            })?
+            .is_some()
+        {
+            let output = child
+                .wait_with_output()
+                .map_err(|source| RuntimeError::Io {
+                    path: script_path.clone(),
+                    source,
+                })?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(RuntimeError::Protocol(format!(
+                "tool {} exited with status {}: {}",
+                tool.identity.id,
+                output.status,
+                stderr.trim()
+            )));
+        }
+        if started.elapsed() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(RuntimeError::Protocol(format!(
+                "tool {} timed out after {timeout_ms} ms",
+                tool.identity.id
+            )));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn prepare_own_script_write_targets(
+    workspace: &Path,
+    policy: &core_policy::CommandPolicy,
+    script_body: &str,
+) -> Result<(), RuntimeError> {
+    for line in script_body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(target) = script_redirection_target(line)? {
+            prepare_script_write_target(workspace, policy, &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn script_redirection_target(line: &str) -> Result<Option<String>, RuntimeError> {
+    if line.contains(">>") {
+        return Err(RuntimeError::Protocol(
+            "own-script append redirection is not supported in M1".to_owned(),
+        ));
+    }
+    let Some((_, target)) = line.split_once('>') else {
+        return Ok(None);
+    };
+    if target.contains('>') {
+        return Err(RuntimeError::Protocol(
+            "own-script multiple redirections are not supported in M1".to_owned(),
+        ));
+    }
+    let target = unquote_script_path(target.trim())?;
+    Ok(Some(target))
+}
+
+fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
+    if value.is_empty() || value.split_whitespace().count() != 1 {
+        return Err(RuntimeError::Protocol(
+            "own-script redirection target must be one literal path".to_owned(),
+        ));
+    }
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        Ok(value[1..value.len() - 1].to_owned())
+    } else {
+        Ok(value.to_owned())
+    }
+}
+
+fn prepare_script_write_target(
+    workspace: &Path,
+    policy: &core_policy::CommandPolicy,
+    target: &str,
+) -> Result<(), RuntimeError> {
+    let relative = normalize_script_write_target(target)?;
+    let scoped = format!("workspace/{relative}");
+    if !policy
+        .filesystem
+        .write_roots
+        .iter()
+        .any(|root| workspace_scope_contains(root, &scoped))
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} lacks write scope {scoped}",
+            policy.tool_id
+        )));
+    }
+    let path = workspace.join(relative);
+    if let Some(parent) = path.parent() {
+        ensure_real_directory(parent)?;
+    }
+    ensure_writable_regular_leaf(&path)
+}
+
+fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
+    let target = target.replace('\\', "/");
+    if target.is_empty()
+        || target.starts_with('/')
+        || target.contains(':')
+        || target.contains('$')
+        || target.contains('*')
+        || target.contains('?')
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "own-script write target {target:?} must be a literal workspace-relative path"
+        )));
+    }
+    let mut parts = Vec::new();
+    for part in target.split('/') {
+        if part.is_empty() || part == "." || part == ".." {
+            return Err(RuntimeError::Protocol(format!(
+                "own-script write target {target:?} must stay inside the workspace"
+            )));
+        }
+        parts.push(part);
+    }
+    Ok(parts.join("/"))
 }
 
 fn emit_tool_progress(
@@ -1272,42 +1470,6 @@ fn emit_tool_progress(
             "tool_id": tool.identity.id,
         }),
     );
-}
-
-fn write_summary_artifact(
-    workspace: &Path,
-    policy: &core_policy::CommandPolicy,
-) -> Result<(), RuntimeError> {
-    let summary_scope_path = "workspace/out/summary.txt";
-    if !policy
-        .filesystem
-        .write_roots
-        .iter()
-        .any(|root| workspace_scope_contains(root, summary_scope_path))
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "tool {} lacks write scope {summary_scope_path}",
-            policy.tool_id
-        )));
-    }
-    let out_dir = workspace.join("out");
-    ensure_real_directory(&out_dir)?;
-    let summary = out_dir.join("summary.txt");
-    ensure_writable_regular_leaf(&summary)?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&summary)
-        .map_err(|source| RuntimeError::Io {
-            path: summary.clone(),
-            source,
-        })?;
-    file.write_all(b"hello\n")
-        .map_err(|source| RuntimeError::Io {
-            path: summary,
-            source,
-        })
 }
 
 fn workspace_scope_contains(root: &str, path: &str) -> bool {
@@ -2820,6 +2982,53 @@ mod tests {
         assert_eq!(
             output.stdout,
             expected_stream("smoke-loop", "smoke-loop.jsonl")
+        );
+    }
+
+    #[test]
+    fn run_loop_executes_non_fixture_predefined_registry_command() {
+        let workspace = workspace_copy("smoke-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let tool_path = workspace.join("registry/tools/echo.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source.replace("command_id: agent-echo", "command_id: agent-custom"),
+        )
+        .expect("tool fixture rewritten");
+
+        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect("custom predefined registry command executes");
+
+        assert!(!output.failed);
+        assert_eq!(output.event_count, 11);
+        assert!(output.stdout.contains("\"tool_id\":\"echo\""));
+        assert!(!output.stdout.contains("unsupported tool command"));
+    }
+
+    #[test]
+    fn run_loop_executes_own_script_without_exact_fixture_body() {
+        let workspace = workspace_copy("hello-loop");
+        fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+        let tool_path = workspace.join("registry/tools/write-summary.yaml");
+        let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+        fs::write(
+            &tool_path,
+            source.replace(
+                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
+            ),
+        )
+        .expect("tool fixture rewritten");
+
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("own-script body executes through M1 runner");
+
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(workspace.join("out/custom-summary.txt"))
+                .expect("custom summary is written"),
+            "hello\n"
         );
     }
 

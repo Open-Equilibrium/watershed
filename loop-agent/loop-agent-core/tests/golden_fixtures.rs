@@ -368,7 +368,7 @@ fn hello_loop_source_tools_cover_m0_contract() {
     assert_eq!(write_summary.script_runtime, Some(ScriptRuntime::PosixSh));
     assert_eq!(
         write_summary.script_body.as_deref(),
-        Some(r#"printf '%s\n' "$SUMMARY" > out/summary.txt"#)
+        Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n")
     );
     assert!(write_summary.allowed_parameters.is_empty());
     assert_eq!(write_summary.write_scope, vec!["workspace/out"]);
@@ -695,6 +695,9 @@ fn yaml_nested_inline_list_field(
 
 fn yaml_field_value(path: &Path, section: &str, field: &str) -> Option<String> {
     let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    if let Some(value) = yaml_literal_field_value(&text, section, field) {
+        return Some(value);
+    }
     let section_header = format!("{section}:");
     let field_prefix = format!("{field}:");
     let mut in_section = false;
@@ -730,6 +733,46 @@ fn yaml_field_value(path: &Path, section: &str, field: &str) -> Option<String> {
     }
 
     parsed
+}
+
+fn yaml_literal_field_value(text: &str, section: &str, field: &str) -> Option<String> {
+    let section_header = format!("{section}:");
+    let literal_field = format!("{field}: |");
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut in_section = false;
+
+    for (index, raw_line) in lines.iter().enumerate() {
+        let without_comment = strip_yaml_comment(raw_line);
+        let line = without_comment.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_section = line.trim() == section_header;
+            continue;
+        }
+        if !in_section || !line.starts_with("  ") || line.starts_with("    ") {
+            continue;
+        }
+        if line.trim() != literal_field {
+            continue;
+        }
+
+        let mut value = String::new();
+        for content_line in lines.iter().skip(index + 1) {
+            if content_line.trim().is_empty() {
+                value.push('\n');
+            } else if let Some(content) = content_line.strip_prefix("    ") {
+                value.push_str(content);
+                value.push('\n');
+            } else {
+                break;
+            }
+        }
+        return Some(value);
+    }
+
+    None
 }
 
 fn yaml_nested_field_value(
