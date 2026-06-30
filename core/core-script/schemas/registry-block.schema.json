@@ -26,7 +26,16 @@
             "properties": { "value_type": { "const": "string" } },
             "required": ["value_type"]
           },
-          "then": { "required": ["value_pattern", "max_length"] }
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            },
+            "required": ["value_pattern", "max_length"]
+          }
         },
         {
           "if": {
@@ -37,10 +46,65 @@
             "properties": {
               "allowed_values": { "items": { "type": "string" }, "minItems": 1, "type": "array" }
             },
+            "not": {
+              "anyOf": [
+                { "required": ["value_pattern"] },
+                { "required": ["max_length"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            },
             "required": ["allowed_values"]
           },
           "else": {
             "not": { "required": ["allowed_values"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "integer" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["value_pattern"] },
+                { "required": ["max_length"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "none" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["value_pattern"] },
+                { "required": ["max_length"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "workspace-relative-path" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            }
           }
         }
       ],

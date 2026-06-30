@@ -1215,6 +1215,10 @@ fn allowed_parameters(
                 ],
             )?;
             let has_allowed_values = object.contains_key("allowed_values");
+            let has_value_pattern = object.contains_key("value_pattern");
+            let has_max_length = object.contains_key("max_length");
+            let has_min = object.contains_key("min");
+            let has_max = object.contains_key("max");
             let value_type =
                 match required_object_scalar(source_name, &object, "value_type")?.as_str() {
                     "none" => ParameterValueType::None,
@@ -1229,15 +1233,57 @@ fn allowed_parameters(
                         ));
                     }
                 };
-            if matches!(&value_type, ParameterValueType::String) {
-                required_object_scalar(source_name, &object, "value_pattern")?;
-                required_object_scalar(source_name, &object, "max_length")?;
-            }
             if !matches!(&value_type, ParameterValueType::Enum) && has_allowed_values {
                 return Err(parse_error(
                     source_name,
                     "allowed_values is only valid for enum parameters".to_owned(),
                 ));
+            }
+            match &value_type {
+                ParameterValueType::String => {
+                    required_object_scalar(source_name, &object, "value_pattern")?;
+                    required_object_scalar(source_name, &object, "max_length")?;
+                    if has_min || has_max {
+                        return Err(parse_error(
+                            source_name,
+                            "string parameters must omit min and max".to_owned(),
+                        ));
+                    }
+                }
+                ParameterValueType::Enum => {
+                    if has_value_pattern || has_max_length || has_min || has_max {
+                        return Err(parse_error(
+                            source_name,
+                            "enum parameters must omit value_pattern, max_length, min, and max"
+                                .to_owned(),
+                        ));
+                    }
+                }
+                ParameterValueType::Integer => {
+                    if has_value_pattern || has_max_length {
+                        return Err(parse_error(
+                            source_name,
+                            "integer parameters must omit value_pattern and max_length".to_owned(),
+                        ));
+                    }
+                }
+                ParameterValueType::None => {
+                    if has_value_pattern || has_max_length || has_min || has_max {
+                        return Err(parse_error(
+                            source_name,
+                            "none parameters must omit value_pattern, max_length, min, and max"
+                                .to_owned(),
+                        ));
+                    }
+                }
+                ParameterValueType::WorkspaceRelativePath => {
+                    if has_min || has_max {
+                        return Err(parse_error(
+                            source_name,
+                            "workspace-relative-path parameters must omit min and max".to_owned(),
+                        ));
+                    }
+                }
             }
             let name = required_object_scalar(source_name, &object, "name")?;
             if !is_valid_allowed_parameter_name(&name) {
@@ -2659,8 +2705,22 @@ fn unquote_yaml_scalar(
     } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
         decode_yaml_single_quoted_scalar(source_name, field, value)
     } else {
+        if plain_yaml_scalar_starts_with_anchor_or_alias(value) {
+            return Err(parse_error(
+                source_name,
+                format!("{field} uses unsupported YAML syntax"),
+            ));
+        }
         Ok(value.to_owned())
     }
+}
+
+fn plain_yaml_scalar_starts_with_anchor_or_alias(value: &str) -> bool {
+    let mut chars = value.trim_start().chars();
+    matches!(chars.next(), Some('&' | '*'))
+        && chars
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 fn decode_yaml_single_quoted_scalar(
@@ -3536,6 +3596,21 @@ mod tests {
             (
                 "anchor.yaml",
                 "instruction:\n  id: bad\n  name: Bad\n  prompt: Inspect\n  <<: *base\n",
+                "unsupported YAML syntax",
+            ),
+            (
+                "inline-anchor.yaml",
+                "instruction:\n  id: bad\n  name: &display Bad\n  prompt: Inspect\n",
+                "unsupported YAML syntax",
+            ),
+            (
+                "inline-alias.yaml",
+                "instruction:\n  id: bad\n  name: Bad\n  prompt: *base\n",
+                "unsupported YAML syntax",
+            ),
+            (
+                "inline-list-alias.yaml",
+                "phase:\n  id: bad\n  name: Bad\n  instruction_refs: [*inspect]\n  tool_refs: []\n  steps:\n    - id: inspect\n      name: Inspect\n",
                 "unsupported YAML syntax",
             ),
             ("bad-top.yaml", "instruction: Bad\n", "top-level line"),
@@ -4660,6 +4735,109 @@ tool:
         .expect_err("non-enum allowed_values rejected");
 
         assert!(err.to_string().contains("allowed_values"));
+
+        let err = parse_registry_block(
+            "string-parameter-with-range.yaml",
+            r#"tool:
+  id: string-range-tool
+  name: StringRangeTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --message
+      value_type: string
+      required: true
+      value_pattern: "^[^/]+$"
+      max_length: 64
+      min: 1
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("string parameter integer range rejected");
+
+        assert!(err.to_string().contains("min"));
+
+        let err = parse_registry_block(
+            "enum-parameter-with-string-constraints.yaml",
+            r#"tool:
+  id: enum-string-constraints-tool
+  name: EnumStringConstraintsTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --mode
+      value_type: enum
+      required: true
+      allowed_values: [fast]
+      value_pattern: "^[a-z]+$"
+      max_length: 16
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("enum parameter string constraints rejected");
+
+        assert!(err.to_string().contains("value_pattern"));
+
+        let err = parse_registry_block(
+            "none-parameter-with-string-constraints.yaml",
+            r#"tool:
+  id: none-string-constraints-tool
+  name: NoneStringConstraintsTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --dry-run
+      value_type: none
+      required: false
+      value_pattern: "^(true|false)$"
+      max_length: 5
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("none parameter string constraints rejected");
+
+        assert!(err.to_string().contains("value_pattern"));
+
+        let err = parse_registry_block(
+            "path-parameter-with-range.yaml",
+            r#"tool:
+  id: path-range-tool
+  name: PathRangeTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --file
+      value_type: workspace-relative-path
+      required: true
+      value_pattern: "^[A-Za-z0-9_./-]+$"
+      max_length: 128
+      min: 1
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("workspace path parameter integer range rejected");
+
+        assert!(err.to_string().contains("min"));
     }
 
     #[test]
@@ -4954,15 +5132,38 @@ tool:
                     items.contains(&serde_json::json!("value_pattern"))
                         && items.contains(&serde_json::json!("max_length"))
                 })
+                && schema_rule_forbids_required_field(&rule["then"], "min")
+                && schema_rule_forbids_required_field(&rule["then"], "max")
         }));
         assert!(parameter_rules.iter().any(|rule| {
             rule["if"]["properties"]["value_type"]["const"] == "enum"
                 && rule["then"]["required"]
                     .as_array()
                     .is_some_and(|items| items.contains(&serde_json::json!("allowed_values")))
+                && schema_rule_forbids_required_field(&rule["then"], "value_pattern")
+                && schema_rule_forbids_required_field(&rule["then"], "max_length")
+                && schema_rule_forbids_required_field(&rule["then"], "min")
+                && schema_rule_forbids_required_field(&rule["then"], "max")
                 && rule["else"]["not"]["required"]
                     .as_array()
                     .is_some_and(|items| items.contains(&serde_json::json!("allowed_values")))
+        }));
+        assert!(parameter_rules.iter().any(|rule| {
+            rule["if"]["properties"]["value_type"]["const"] == "integer"
+                && schema_rule_forbids_required_field(&rule["then"], "value_pattern")
+                && schema_rule_forbids_required_field(&rule["then"], "max_length")
+        }));
+        assert!(parameter_rules.iter().any(|rule| {
+            rule["if"]["properties"]["value_type"]["const"] == "none"
+                && schema_rule_forbids_required_field(&rule["then"], "value_pattern")
+                && schema_rule_forbids_required_field(&rule["then"], "max_length")
+                && schema_rule_forbids_required_field(&rule["then"], "min")
+                && schema_rule_forbids_required_field(&rule["then"], "max")
+        }));
+        assert!(parameter_rules.iter().any(|rule| {
+            rule["if"]["properties"]["value_type"]["const"] == "workspace-relative-path"
+                && schema_rule_forbids_required_field(&rule["then"], "min")
+                && schema_rule_forbids_required_field(&rule["then"], "max")
         }));
     }
 
@@ -5170,6 +5371,16 @@ tool:
     fn registry_schema() -> serde_json::Value {
         serde_json::from_str(include_str!("../schemas/registry-block.schema.json"))
             .expect("schema is valid JSON")
+    }
+
+    fn schema_rule_forbids_required_field(rule: &Value, field: &str) -> bool {
+        rule["not"]["anyOf"].as_array().is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry["required"]
+                    .as_array()
+                    .is_some_and(|items| items.contains(&serde_json::json!(field)))
+            })
+        })
     }
 
     fn temp_registry_dir(label: &str) -> std::path::PathBuf {

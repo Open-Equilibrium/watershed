@@ -514,11 +514,27 @@ impl AllowedParameterPolicy {
                         self.name
                     )));
                 }
+                if self.min.is_some() || self.max.is_some() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} string parameter {} must omit min and max",
+                        self.name
+                    )));
+                }
             }
             ParameterValueType::Enum => {
                 if self.allowed_values.is_empty() {
                     return Err(policy_artifact_error(format!(
                         "tool {tool_id} enum parameter {} must set allowed_values",
+                        self.name
+                    )));
+                }
+                if self.value_pattern.is_some()
+                    || self.max_length.is_some()
+                    || self.min.is_some()
+                    || self.max.is_some()
+                {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} enum parameter {} must omit value_pattern, max_length, min, and max",
                         self.name
                     )));
                 }
@@ -543,10 +559,34 @@ impl AllowedParameterPolicy {
                     )));
                 }
             }
-            ParameterValueType::None | ParameterValueType::WorkspaceRelativePath => {
+            ParameterValueType::None => {
                 if !self.allowed_values.is_empty() {
                     return Err(policy_artifact_error(format!(
                         "tool {tool_id} non-enum parameter {} must omit allowed_values",
+                        self.name
+                    )));
+                }
+                if self.value_pattern.is_some()
+                    || self.max_length.is_some()
+                    || self.min.is_some()
+                    || self.max.is_some()
+                {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} none parameter {} must omit value_pattern, max_length, min, and max",
+                        self.name
+                    )));
+                }
+            }
+            ParameterValueType::WorkspaceRelativePath => {
+                if !self.allowed_values.is_empty() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} non-enum parameter {} must omit allowed_values",
+                        self.name
+                    )));
+                }
+                if self.min.is_some() || self.max.is_some() {
+                    return Err(policy_artifact_error(format!(
+                        "tool {tool_id} workspace-relative-path parameter {} must omit min and max",
                         self.name
                     )));
                 }
@@ -2222,6 +2262,28 @@ mod tests {
             "tool parameter-tool non-enum parameter --name must omit allowed_values",
         ));
 
+        let mut string_with_range = valid_parameter("--name", ParameterValueType::String);
+        string_with_range.min = Some(1);
+        cases.push((
+            string_with_range,
+            "tool parameter-tool string parameter --name must omit min and max",
+        ));
+
+        let mut enum_with_string_constraints = valid_parameter("--mode", ParameterValueType::Enum);
+        enum_with_string_constraints.value_pattern = Some("[a-z]+".to_owned());
+        enum_with_string_constraints.max_length = Some(16);
+        cases.push((
+            enum_with_string_constraints,
+            "tool parameter-tool enum parameter --mode must omit value_pattern, max_length, min, and max",
+        ));
+
+        let mut enum_with_range = valid_parameter("--mode", ParameterValueType::Enum);
+        enum_with_range.min = Some(1);
+        cases.push((
+            enum_with_range,
+            "tool parameter-tool enum parameter --mode must omit value_pattern, max_length, min, and max",
+        ));
+
         let mut integer_with_values = valid_parameter("--count", ParameterValueType::Integer);
         integer_with_values.allowed_values = vec!["1".to_owned()];
         cases.push((
@@ -2251,12 +2313,31 @@ mod tests {
             "tool parameter-tool non-enum parameter --dry-run must omit allowed_values",
         ));
 
+        let mut none_with_string_constraints =
+            valid_parameter("--dry-run", ParameterValueType::None);
+        none_with_string_constraints.value_pattern = Some("^(true|false)$".to_owned());
+        none_with_string_constraints.max_length = Some(5);
+        cases.push((
+            none_with_string_constraints,
+            "tool parameter-tool none parameter --dry-run must omit value_pattern, max_length, min, and max",
+        ));
+
         let mut path_with_values =
             valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
         path_with_values.allowed_values = vec!["out/summary.txt".to_owned()];
         cases.push((
             path_with_values,
             "tool parameter-tool non-enum parameter --path must omit allowed_values",
+        ));
+
+        let mut path_with_range =
+            valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
+        path_with_range.value_pattern = Some("^[A-Za-z0-9_./-]+$".to_owned());
+        path_with_range.max_length = Some(128);
+        path_with_range.min = Some(1);
+        cases.push((
+            path_with_range,
+            "tool parameter-tool workspace-relative-path parameter --path must omit min and max",
         ));
 
         for (parameter, expected) in cases {
