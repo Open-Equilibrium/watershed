@@ -868,11 +868,11 @@ fn complete_reserved_session_log(
 
 fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {
     let loop_dir = workspace.join(".loop");
-    ensure_real_directory(&loop_dir)?;
+    ensure_created_real_directory(&loop_dir)?;
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    ensure_real_directory(&session_dir)?;
+    ensure_created_real_directory(&session_dir)?;
     let log_dir = workspace.join(LOCAL_LOG_DIR);
-    ensure_real_directory(&log_dir)?;
+    ensure_created_real_directory(&log_dir)?;
     Ok((session_dir, log_dir))
 }
 
@@ -904,7 +904,7 @@ fn ensure_optional_real_directory(path: &Path) -> Result<bool, RuntimeError> {
     }
 }
 
-fn ensure_real_directory(path: &Path) -> Result<(), RuntimeError> {
+fn ensure_created_real_directory(path: &Path) -> Result<(), RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => validate_real_directory(path, &metadata),
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -2121,7 +2121,7 @@ fn ensure_real_workspace_write_path(
     while let Some(part) = parts.next() {
         path.push(part);
         if parts.peek().is_some() {
-            ensure_real_directory(&path)?;
+            ensure_created_real_directory(&path)?;
         }
     }
     Ok(path)
@@ -3641,7 +3641,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         "{} line {line_number} phase.entered requires no active step for loop_id {:?}; active step_id {:?}",
                         path.display(),
                         loop_id,
-                        active_step.2
+                        active_step.step_id
                     )));
                 }
                 active_phases.insert(loop_id, lifecycle_payload_string(event, "phase_id"));
@@ -3649,11 +3649,11 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             EventType::StepStarted => {
                 let active_phase = require_active_phase(path, line_number, event, &active_phases)?;
                 let step = lifecycle_step_key(event, &active_phases);
-                if step.1.as_deref() != Some(active_phase.as_str()) {
+                if step.phase_id.as_deref() != Some(active_phase.as_str()) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.started phase_id {:?} must match active phase {:?}",
                         path.display(),
-                        step.1,
+                        step.phase_id,
                         active_phase
                     )));
                 }
@@ -3663,7 +3663,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         line_number,
                         event,
                         "step",
-                        &step.2,
+                        &step.step_id,
                         *terminal_line,
                     ));
                 }
@@ -3673,7 +3673,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         "{} line {line_number} step.started requires no active step for loop_id {:?}; active step_id {:?}",
                         path.display(),
                         loop_id,
-                        active_step.2
+                        active_step.step_id
                     )));
                 }
                 active_steps.insert(loop_id, step.clone());
@@ -3687,7 +3687,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         line_number,
                         event,
                         "step",
-                        &step.2,
+                        &step.step_id,
                         *terminal_line,
                     ));
                 }
@@ -3695,7 +3695,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
                         path.display(),
-                        step.2
+                        step.step_id
                     )));
                 }
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
@@ -3705,15 +3705,15 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         return Err(RuntimeError::Protocol(format!(
                             "{} line {line_number} step.completed requires active step_id {:?}, found {:?}",
                             path.display(),
-                            step.2,
-                            active_step.2
+                            step.step_id,
+                            active_step.step_id
                         )));
                     }
                     None => {
                         return Err(RuntimeError::Protocol(format!(
                             "{} line {line_number} step.completed requires active step for step_id {:?}",
                             path.display(),
-                            step.2
+                            step.step_id
                         )));
                     }
                 }
@@ -3729,7 +3729,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         line_number,
                         event,
                         "tool",
-                        &tool.3,
+                        &tool.tool_id,
                         *terminal_line,
                     ));
                 }
@@ -3743,7 +3743,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         line_number,
                         event,
                         "tool",
-                        &tool.3,
+                        &tool.tool_id,
                         *terminal_line,
                     ));
                 }
@@ -3752,7 +3752,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         "{} line {line_number} {} must follow tool.started for tool_id {:?}",
                         path.display(),
                         event.event_type.as_str(),
-                        tool.3
+                        tool.tool_id
                     )));
                 }
                 if matches!(
@@ -3772,7 +3772,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         line_number,
                         event,
                         "tool",
-                        &tool.3,
+                        &tool.tool_id,
                         *terminal_line,
                     ));
                 }
@@ -3871,12 +3871,12 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
         }
         for step in &started_steps {
             if !terminal_steps.contains_key(step) {
-                return Err(open_lifecycle_error(path, "step", &step.2));
+                return Err(open_lifecycle_error(path, "step", &step.step_id));
             }
         }
         for tool in &started_tools {
             if !terminal_tools.contains_key(tool) {
-                return Err(open_lifecycle_error(path, "tool", &tool.3));
+                return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
             }
         }
         for message in active_messages.keys() {
@@ -3922,7 +3922,7 @@ fn started_tool_without_progress(events: &[EventEnvelope]) -> Option<String> {
             }
             EventType::ToolStarted => {
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                started_without_progress.insert(tool.clone(), tool.3);
+                started_without_progress.insert(tool.clone(), tool.tool_id);
             }
             EventType::ToolProgress
             | EventType::ToolCompleted
@@ -4032,9 +4032,22 @@ fn validate_lifecycle_parent(
     Ok(())
 }
 
-type StepLifecycleKey = (Option<String>, Option<String>, String);
-type ToolLifecycleKey = (Option<String>, Option<String>, Option<String>, String);
 type MessageLifecycleKey = (String, String);
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct StepLifecycleKey {
+    loop_id: Option<String>,
+    phase_id: Option<String>,
+    step_id: String,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ToolLifecycleKey {
+    loop_id: Option<String>,
+    phase_id: Option<String>,
+    step_id: Option<String>,
+    tool_id: String,
+}
 
 fn require_active_phase(
     path: &Path,
@@ -4084,11 +4097,11 @@ fn lifecycle_step_key(
                 .and_then(|loop_id| active_phases.get(loop_id))
                 .cloned()
         });
-    (
+    StepLifecycleKey {
         loop_id,
         phase_id,
-        lifecycle_payload_string(event, "step_id"),
-    )
+        step_id: lifecycle_payload_string(event, "step_id"),
+    }
 }
 
 fn lifecycle_tool_key(
@@ -4100,19 +4113,19 @@ fn lifecycle_tool_key(
     let active_step = loop_id
         .as_ref()
         .and_then(|loop_id| active_steps.get(loop_id));
-    let phase_id = active_step.and_then(|step| step.1.clone()).or_else(|| {
+    let phase_id = active_step.and_then(|step| step.phase_id.clone()).or_else(|| {
         loop_id
             .as_ref()
             .and_then(|loop_id| active_phases.get(loop_id))
             .cloned()
     });
-    let step_id = active_step.map(|step| step.2.clone());
-    (
+    let step_id = active_step.map(|step| step.step_id.clone());
+    ToolLifecycleKey {
         loop_id,
         phase_id,
         step_id,
-        lifecycle_payload_string(event, "tool_id"),
-    )
+        tool_id: lifecycle_payload_string(event, "tool_id"),
+    }
 }
 
 fn lifecycle_message_key(
@@ -6886,7 +6899,7 @@ mod tests {
         fs::write(&file_path, "x").expect("file written");
         fs::create_dir(&dir_path).expect("dir written");
 
-        ensure_real_directory(&created_dir).expect("missing directory is created");
+        ensure_created_real_directory(&created_dir).expect("missing directory is created");
         assert!(created_dir.is_dir());
         assert!(matches!(
             ensure_existing_real_directory(&missing_file),
@@ -6910,7 +6923,7 @@ mod tests {
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
         ));
         assert!(matches!(
-            ensure_real_directory(&file_path),
+            ensure_created_real_directory(&file_path),
             Err(RuntimeError::Protocol(message)) if message.contains("must be a directory")
         ));
         assert!(matches!(
