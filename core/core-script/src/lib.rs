@@ -2689,7 +2689,13 @@ fn unquote_yaml_scalar(
     value: &str,
 ) -> Result<String, RegistryError> {
     let value = value.trim();
-    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+    if value.starts_with('"') {
+        if value.len() < 2 || !value.ends_with('"') {
+            return Err(parse_error(
+                source_name,
+                format!("{field} contains an unterminated \"-quoted scalar"),
+            ));
+        }
         let mut out = String::new();
         let mut chars = value[1..value.len() - 1].chars();
         while let Some(ch) = chars.next() {
@@ -2713,7 +2719,13 @@ fn unquote_yaml_scalar(
             }
         }
         Ok(out)
-    } else if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+    } else if value.starts_with('\'') {
+        if value.len() < 2 || !value.ends_with('\'') {
+            return Err(parse_error(
+                source_name,
+                format!("{field} contains an unterminated '-quoted scalar"),
+            ));
+        }
         decode_yaml_single_quoted_scalar(source_name, field, value)
     } else {
         if plain_yaml_scalar_starts_with_anchor_or_alias(value) {
@@ -3867,10 +3879,12 @@ mod tests {
         );
 
         for (value, expected) in [
+            ("\"unterminated", "unterminated"),
             ("\"\\q\"", "unsupported escape"),
             ("\"\\xZ0\"", "invalid \\x escape digit"),
             ("\"\\u12\"", "incomplete \\u escape"),
             ("\"\\U00110000\"", "invalid \\U Unicode scalar"),
+            ("'unterminated", "unterminated"),
             ("'bad'apostrophe'", "malformed single-quoted scalar"),
         ] {
             assert!(
@@ -3953,6 +3967,49 @@ tool:
             tool.script_body.as_deref(),
             Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n")
         );
+    }
+
+    #[test]
+    fn parser_rejects_unterminated_quoted_yaml_scalars() {
+        for (name, source) in [
+            (
+                "unterminated-double-quoted-scalar.yaml",
+                r#"tool:
+  id: bad-quoted-tool
+  name: "BadQuotedTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+            ),
+            (
+                "unterminated-single-quoted-scalar.yaml",
+                r#"tool:
+  id: bad-quoted-tool
+  name: 'BadQuotedTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+            ),
+        ] {
+            let err = parse_registry_block(name, source)
+                .expect_err("unterminated quoted scalar must be rejected");
+
+            assert!(err.to_string().contains("unterminated"), "{name}: {err}");
+        }
     }
 
     #[test]
