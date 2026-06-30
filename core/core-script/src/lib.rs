@@ -1767,6 +1767,7 @@ fn reject_unknown_section_fields(
     let section_header = format!("{section}:");
     let mut in_section = false;
     let mut seen_fields = BTreeSet::new();
+    let mut valued_field = None::<String>;
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1777,12 +1778,25 @@ fn reject_unknown_section_fields(
         let trimmed = line.trim();
         if indent == 0 {
             in_section = trimmed == section_header;
+            valued_field = None;
             continue;
         }
-        if !in_section || indent != 2 {
+        if !in_section {
             continue;
         }
-        let Some((field, _)) = trimmed.split_once(':') else {
+        if let Some(field) = &valued_field {
+            if indent > 2 {
+                return Err(parse_error(
+                    source_name,
+                    format!("{section}.{field} must not contain nested YAML content"),
+                ));
+            }
+            valued_field = None;
+        }
+        if indent != 2 {
+            continue;
+        }
+        let Some((field, value)) = trimmed.split_once(':') else {
             return Err(parse_error(
                 source_name,
                 format!("{section} field {trimmed:?} must use key: value"),
@@ -1801,6 +1815,9 @@ fn reject_unknown_section_fields(
                 format!("duplicate {section}.{field}"),
             ));
         }
+        if value_forbids_nested_yaml_content(value) {
+            valued_field = Some(field.to_owned());
+        }
     }
 
     Ok(())
@@ -1818,6 +1835,7 @@ fn reject_unknown_nested_fields(
     let mut in_section = false;
     let mut in_parent = false;
     let mut seen_fields = BTreeSet::new();
+    let mut valued_field = None::<String>;
 
     for raw_line in source.lines() {
         let line = raw_line.trim_end();
@@ -1829,6 +1847,7 @@ fn reject_unknown_nested_fields(
         if indent == 0 {
             in_section = trimmed == section_header;
             in_parent = false;
+            valued_field = None;
             continue;
         }
         if !in_section {
@@ -1836,12 +1855,25 @@ fn reject_unknown_nested_fields(
         }
         if indent == 2 {
             in_parent = trimmed == parent_header;
+            valued_field = None;
             continue;
         }
-        if !in_parent || indent != 4 {
+        if !in_parent {
             continue;
         }
-        let Some((field, _)) = trimmed.split_once(':') else {
+        if let Some(field) = &valued_field {
+            if indent > 4 {
+                return Err(parse_error(
+                    source_name,
+                    format!("{section}.{parent}.{field} must not contain nested YAML content"),
+                ));
+            }
+            valued_field = None;
+        }
+        if indent != 4 {
+            continue;
+        }
+        let Some((field, value)) = trimmed.split_once(':') else {
             return Err(parse_error(
                 source_name,
                 format!("{section}.{parent} field {trimmed:?} must use key: value"),
@@ -1860,9 +1892,19 @@ fn reject_unknown_nested_fields(
                 format!("duplicate {section}.{parent}.{field}"),
             ));
         }
+        if value_forbids_nested_yaml_content(value) {
+            valued_field = Some(field.to_owned());
+        }
     }
 
     Ok(())
+}
+
+fn value_forbids_nested_yaml_content(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && literal_block_scalar_marker(value).is_none()
+        && folded_block_scalar_marker(value).is_none()
 }
 
 fn required_scalar(
@@ -4009,6 +4051,71 @@ tool:
                 .expect_err("unterminated quoted scalar must be rejected");
 
             assert!(err.to_string().contains("unterminated"), "{name}: {err}");
+        }
+    }
+
+    #[test]
+    fn parser_rejects_nested_content_under_scalar_yaml_fields() {
+        for (name, source) in [
+            (
+                "scalar-network-with-nested-allow.yaml",
+                r#"tool:
+  id: scalar-network
+  name: ScalarNetwork
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+    allow: []
+"#,
+            ),
+            (
+                "scalar-command-with-nested-command-id.yaml",
+                r#"tool:
+  id: scalar-command
+  name: ScalarCommand
+  tool_kind: own-script
+  command: script:scalar-command
+    command_id: agent-echo
+  script_runtime: posix-sh
+  script_body: |
+    printf '%s\n' ok
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+            ),
+            (
+                "nested-scalar-network-default-with-child.yaml",
+                r#"tool:
+  id: nested-network
+  name: NestedNetwork
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network:
+    default: deny
+      ignored: true
+    allow: []
+"#,
+            ),
+        ] {
+            let err = parse_registry_block(name, source)
+                .expect_err("nested content under scalar fields must be rejected");
+
+            assert!(err.to_string().contains("nested"), "{name}: {err}");
         }
     }
 
