@@ -921,6 +921,17 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
         }
     }
 
+    for parameter in &tool.allowed_parameters {
+        if matches!(parameter.value_type, ParameterValueType::Integer)
+            && matches!((parameter.min, parameter.max), (Some(min), Some(max)) if min > max)
+        {
+            return Err(SemanticValidationError::ToolSchemaViolation {
+                tool_id: tool.identity.id.clone(),
+                message: format!("integer parameter {} min must be <= max", parameter.name),
+            });
+        }
+    }
+
     if let NetworkPolicy::Declared { allow, .. } = &tool.network {
         for entry in allow {
             if !is_valid_canonical_cidr(&entry.cidr) {
@@ -4838,6 +4849,31 @@ tool:
         .expect_err("workspace path parameter integer range rejected");
 
         assert!(err.to_string().contains("min"));
+
+        let err = parse_registry_block(
+            "integer-parameter-with-invalid-range.yaml",
+            r#"tool:
+  id: integer-range-tool
+  name: IntegerRangeTool
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --count
+      value_type: integer
+      required: true
+      min: 10
+      max: 1
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("integer parameter min greater than max rejected");
+
+        assert!(err.to_string().contains("min must be <= max"));
     }
 
     #[test]
