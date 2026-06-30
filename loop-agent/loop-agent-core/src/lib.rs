@@ -3757,6 +3757,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             }
             EventType::ToolFailed => {
                 // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
+                require_lifecycle_loop_id(path, line_number, event)?;
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
                 if let Some(terminal_line) = terminal_tools.get(&tool) {
                     return Err(terminal_lifecycle_error(
@@ -7558,6 +7559,28 @@ mod tests {
             "active step",
         );
 
+        let tool_failed_without_loop = [
+            canonical.clone(),
+            event_line(
+                "evt-002",
+                EventType::ToolFailed,
+                "meta001",
+                2,
+                None,
+                serde_json::json!({
+                    "error": "denied",
+                    "tool_id": "tool",
+                }),
+            ),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "tool-failed-without-loop.jsonl",
+            "meta001",
+            &tool_failed_without_loop,
+            "must include loop_id",
+        );
+
         let message_completed_without_delta = [
             canonical.clone(),
             loop_started_line("evt-002", 2),
@@ -7585,8 +7608,9 @@ mod tests {
 
         let repeated_tool_started_after_failure = [
             canonical.clone(),
-            tool_failed_line("evt-002", 2),
+            loop_started_line("evt-002", 2),
             tool_failed_line("evt-003", 3),
+            tool_failed_line("evt-004", 4),
         ]
         .concat();
         assert_invalid_session_log(
@@ -8283,7 +8307,7 @@ mod tests {
             EventType::ToolFailed,
             "meta001",
             sequence,
-            None,
+            Some("loop-001"),
             serde_json::json!({
                 "error": "denied",
                 "tool_id": "tool",
