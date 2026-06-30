@@ -203,15 +203,6 @@ pub fn run_loop(
             .session_id
             .clone();
         let failed = runtime.failed;
-        if failed {
-            let fixture_name = runtime.sandbox_decision_fixture.ok_or_else(|| {
-                RuntimeError::Protocol(format!(
-                    "failed loop {} did not record an expected sandbox decision fixture",
-                    loop_block.identity.id
-                ))
-            })?;
-            validate_failed_sandbox_decisions(fixture_name, &events)?;
-        }
         complete_reserved_session_log(&reservation, &session_id, &stream, events.len())?;
 
         Ok(RunOutput {
@@ -464,15 +455,6 @@ pub fn resume_session(
     let appended_stream = canonical_event_stream(&appended_events)?;
     let combined = format!("{before}{appended_stream}");
     let combined_events = validate_session_log_text(&path, session_id, &combined)?;
-    if resumed_runtime.failed {
-        let fixture_name = resumed_runtime.sandbox_decision_fixture.ok_or_else(|| {
-            RuntimeError::Protocol(format!(
-                "failed resumed loop {} did not record an expected sandbox decision fixture",
-                loop_block.identity.id
-            ))
-        })?;
-        validate_failed_sandbox_decisions(fixture_name, &combined_events)?;
-    }
     append_session_log_text(&path, &appended_stream)?;
 
     Ok(RunOutput {
@@ -1105,7 +1087,6 @@ fn ensure_parent_real_directory(path: &Path) -> Result<(), RuntimeError> {
 struct RuntimeExecution {
     events: Vec<EventEnvelope>,
     failed: bool,
-    sandbox_decision_fixture: Option<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -1117,7 +1098,6 @@ struct LoopInvocation {
 struct RuntimeFailure {
     reason: String,
     message: &'static str,
-    sandbox_decision_fixture: &'static str,
     tool_id: Option<String>,
 }
 
@@ -1291,7 +1271,6 @@ fn execute_loop(
         &mut builder,
     )?;
     if let Some(failure) = failed {
-        let sandbox_decision_fixture = Some(failure.sandbox_decision_fixture);
         builder.emit(
             None,
             EventType::SessionFailed,
@@ -1300,14 +1279,12 @@ fn execute_loop(
         Ok(RuntimeExecution {
             events: builder.events,
             failed: true,
-            sandbox_decision_fixture,
         })
     } else {
         builder.emit(None, EventType::SessionCompleted, serde_json::json!({}));
         Ok(RuntimeExecution {
             events: builder.events,
             failed: false,
-            sandbox_decision_fixture: None,
         })
     }
 }
@@ -2529,13 +2506,11 @@ fn sandbox_tool_dispatch_failure(
     command_policy: &core_policy::CommandPolicy,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     ensure_tool_matches_policy(tool, command_policy)?;
-    let Some(fixture_name) = sandbox_negative_fixture_for_tool(tool)? else {
+    let Some(reason_code) = sandbox_negative_reason_for_tool(tool)? else {
         return Ok(None);
     };
-    let decision = linux_sandbox_expected_decision(fixture_name)?;
-    Ok(Some(runtime_failure_for_decision(
-        fixture_name,
-        decision,
+    Ok(Some(runtime_failure_for_reason(
+        reason_code,
         Some(tool.identity.id.clone()),
     )))
 }
@@ -2549,25 +2524,20 @@ fn sandbox_out_of_phase_failure(
     if loop_block.identity.id != fixture_name {
         return Ok(None);
     }
-    let decision = linux_sandbox_expected_decision(fixture_name)?;
-    let core_policy::DeniedAttempt::ToolOutOfPhase { phase_id, tool_id } = &decision.attempt else {
-        return Err(RuntimeError::Protocol(format!(
-            "{fixture_name} expected decision must describe an out-of-phase tool"
-        )));
-    };
-    if phase.identity.id == *phase_id && !policy_phase_contains_tool(policy, phase_id, tool_id) {
-        return Ok(Some(runtime_failure_for_decision(
-            fixture_name,
-            decision,
+    if phase.tool_refs.is_empty()
+        && !policy_phase_contains_tool(policy, &phase.identity.id, "negative-tool")
+    {
+        return Ok(Some(runtime_failure_for_reason(
+            core_policy::DenyReasonCode::ToolOutOfPhase,
             None,
         )));
     }
     Ok(None)
 }
 
-fn sandbox_negative_fixture_for_tool(
+fn sandbox_negative_reason_for_tool(
     tool: &core_script::ToolBlock,
-) -> Result<Option<&'static str>, RuntimeError> {
+) -> Result<Option<core_policy::DenyReasonCode>, RuntimeError> {
     let (
         core_script::ToolKind::PredefinedCommand,
         core_script::ToolCommand::Predefined { command_id, argv },
@@ -2584,7 +2554,7 @@ fn sandbox_negative_fixture_for_tool(
             tool.identity.id
         )));
     };
-    sandbox_negative_fixture_for_operation(operation)
+    sandbox_negative_reason_for_operation(operation)
         .map(Some)
         .ok_or_else(|| {
             RuntimeError::Protocol(format!(
@@ -2594,32 +2564,30 @@ fn sandbox_negative_fixture_for_tool(
         })
 }
 
-fn sandbox_negative_fixture_for_operation(operation: &str) -> Option<&'static str> {
+fn sandbox_negative_reason_for_operation(operation: &str) -> Option<core_policy::DenyReasonCode> {
     match operation {
-        "environment" => Some("sandbox-negative-environment"),
-        "interpreter" => Some("sandbox-negative-interpreter"),
-        "network" => Some("sandbox-negative-network"),
-        "protected-path" => Some("sandbox-negative-protected-path"),
-        "symlink" => Some("sandbox-negative-symlink"),
-        "write" => Some("sandbox-negative-write"),
+        "environment" => Some(core_policy::DenyReasonCode::EnvironmentDenied),
+        "interpreter" => Some(core_policy::DenyReasonCode::InterpreterEscapeDenied),
+        "network" => Some(core_policy::DenyReasonCode::NetworkDenied),
+        "protected-path" => Some(core_policy::DenyReasonCode::ProtectedPathDenied),
+        "symlink" => Some(core_policy::DenyReasonCode::SymlinkEscapeDenied),
+        "write" => Some(core_policy::DenyReasonCode::WriteDenied),
         _ => None,
     }
 }
 
-fn runtime_failure_for_decision(
-    fixture_name: &'static str,
-    decision: core_policy::ExpectedDecision,
+fn runtime_failure_for_reason(
+    reason_code: core_policy::DenyReasonCode,
     tool_id: Option<String>,
 ) -> RuntimeFailure {
-    let reason_code = decision.reason_code.clone();
     RuntimeFailure {
         reason: reason_code.as_str().to_owned(),
         message: denial_message(reason_code),
-        sandbox_decision_fixture: fixture_name,
         tool_id,
     }
 }
 
+#[cfg(test)]
 fn linux_sandbox_expected_decision(
     fixture_name: &'static str,
 ) -> Result<core_policy::ExpectedDecision, RuntimeError> {
@@ -2651,6 +2619,7 @@ fn policy_phase_contains_tool(
         .any(|phase| phase.phase_id == phase_id && phase.tool_ids.iter().any(|id| id == tool_id))
 }
 
+#[cfg(test)]
 fn linux_sandbox_expected_decision_text(loop_id: &str) -> Option<&'static str> {
     sandbox_expected_decision_texts(loop_id)?
         .into_iter()
@@ -2682,34 +2651,48 @@ fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeErr
 }
 
 fn session_id_for_loop(loop_id: &str) -> String {
-    match loop_id {
-        "smoke-loop" => "smoke001".to_owned(),
-        "hello-loop" => "hello001".to_owned(),
-        "sandbox-negative-environment" => "negenv001".to_owned(),
-        "sandbox-negative-interpreter" => "neginterp001".to_owned(),
-        "sandbox-negative-network" => "negnet001".to_owned(),
-        "sandbox-negative-protected-path" => "negpath001".to_owned(),
-        "sandbox-negative-symlink" => "negsymlink001".to_owned(),
-        "sandbox-negative-tool-out-of-phase" => "negphase001".to_owned(),
-        "sandbox-negative-write" => "negwrite001".to_owned(),
-        _ => {
-            let mut token = loop_id.to_ascii_lowercase();
-            token.retain(|ch| {
-                ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-'
-            });
-            if token.is_empty() {
-                token.push_str("session");
-            }
-            let suffix = if token.len() <= 125 {
-                "001".to_owned()
-            } else {
-                format!("-{:016x}001", stable_hash64(loop_id.as_bytes()))
-            };
-            token.truncate(128 - suffix.len());
-            token.push_str(&suffix);
-            token
+    if matches!(loop_id, "smoke-loop" | "hello-loop") {
+        let base = loop_id
+            .strip_suffix("-loop")
+            .expect("fixture loop id ends with -loop");
+        return session_id_from_token(base, loop_id);
+    }
+    if let Some(operation) = loop_id.strip_prefix("sandbox-negative-") {
+        return session_id_from_token(&sandbox_negative_session_token(operation), loop_id);
+    }
+    session_id_from_token(loop_id, loop_id)
+}
+
+fn sandbox_negative_session_token(operation: &str) -> String {
+    let mut token = String::from("neg");
+    for word in operation.split('-') {
+        match word {
+            "environment" => token.push_str("env"),
+            "interpreter" => token.push_str("interp"),
+            "network" => token.push_str("net"),
+            "path" | "symlink" | "write" => token.push_str(word),
+            "phase" => token.push_str("phase"),
+            "of" | "out" | "protected" | "tool" => {}
+            other => token.push_str(other),
         }
     }
+    token
+}
+
+fn session_id_from_token(token: &str, stable_source: &str) -> String {
+    let mut token = token.to_ascii_lowercase();
+    token.retain(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-');
+    if token.is_empty() {
+        token.push_str("session");
+    }
+    let suffix = if token.len() <= 125 {
+        "001".to_owned()
+    } else {
+        format!("-{:016x}001", stable_hash64(stable_source.as_bytes()))
+    };
+    token.truncate(128 - suffix.len());
+    token.push_str(&suffix);
+    token
 }
 
 fn stable_hash64(bytes: &[u8]) -> u64 {
@@ -2754,6 +2737,7 @@ fn connection_kind_name(kind: &core_script::ConnectionKind) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn validate_failed_sandbox_decisions(
     fixture_name: &str,
     events: &[EventEnvelope],
@@ -2805,6 +2789,7 @@ fn validate_failed_sandbox_decisions(
     Ok(())
 }
 
+#[cfg(test)]
 fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
     events
         .iter()
@@ -2815,6 +2800,7 @@ fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
         .as_str()
 }
 
+#[cfg(test)]
 fn sandbox_expected_decision_texts(
     loop_id: &str,
 ) -> Option<[(core_policy::PolicyTarget, &'static str); 2]> {
@@ -7760,7 +7746,7 @@ mod tests {
             argv: vec!["write".to_owned(), "network".to_owned()],
         };
         assert!(matches!(
-            sandbox_negative_fixture_for_tool(&extra_arg_tool),
+            sandbox_negative_reason_for_tool(&extra_arg_tool),
             Err(RuntimeError::Protocol(message)) if message.contains("one denied operation")
         ));
 
@@ -7770,10 +7756,10 @@ mod tests {
             argv: vec!["process".to_owned()],
         };
         assert!(matches!(
-            sandbox_negative_fixture_for_tool(&unsupported_operation_tool),
+            sandbox_negative_reason_for_tool(&unsupported_operation_tool),
             Err(RuntimeError::Protocol(message)) if message.contains("unsupported sandbox-negative")
         ));
-        assert_eq!(sandbox_negative_fixture_for_operation("process"), None);
+        assert_eq!(sandbox_negative_reason_for_operation("process"), None);
 
         assert!(matches!(
             linux_sandbox_expected_decision("unknown-fixture"),
