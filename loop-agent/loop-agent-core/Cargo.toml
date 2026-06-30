@@ -1,6 +1,6 @@
 [package]
 name = "loop-agent-core"
-description = "Loop Agent core M0 walking skeleton."
+description = "Loop Agent core M1 deterministic runtime."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

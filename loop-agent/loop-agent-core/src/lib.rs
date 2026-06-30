@@ -152,7 +152,7 @@ pub fn validate_session_id(session_id: &str) -> bool {
 }
 
 pub fn m0_runtime_notice() -> &'static str {
-    "M0 defines Loop Agent contracts and fixtures; runtime execution lands in M1"
+    "M1 runs deterministic in-process Loop Agent execution; OS sandbox enforcement is post-M1"
 }
 
 pub fn run_loop(
@@ -4271,7 +4271,7 @@ mod tests {
         );
         assert_eq!(
             m0_runtime_notice(),
-            "M0 defines Loop Agent contracts and fixtures; runtime execution lands in M1"
+            "M1 runs deterministic in-process Loop Agent execution; OS sandbox enforcement is post-M1"
         );
     }
 

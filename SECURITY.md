@@ -12,7 +12,7 @@ Watershed's defensible trust model is the combination across its three layers: s
 
 ## Principle: scripts define, sandbox enforces
 
-Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into an automatically-applied OS policy per loop. Allowlisting alone is *not* a boundary.
+Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 enforces it deterministically in-process, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
 
 Because scripts are human-reviewable security/capability artifacts, they must parse to one unambiguous model: YAML 1.2, strict parsing, JSON Schema validation and canonical serialization (ADR-0031). YAML anchors and merge keys are not part of the composition model; the canonical byte form is defined in the Loop Agent V-Spec.
 
@@ -25,8 +25,8 @@ Loop Agent runs inside normal Git projects in the MVP, but it does not own proje
 
 ## Enforcement (per loop)
 
-1. Compile script policy → **Landlock + seccomp** (Linux) / **Seatbelt policy artifact** (macOS). Reuse proven sandbox primitives where possible. M0 produces policy artifacts plus escape tests; M1 implements real OS enforcement on Linux, with macOS enforcement parity planned (ADR-0032).
-2. **Network egress deny-by-default**. M1 Linux enforcement must fail closed: deny-all network is enforced for sandbox-negative tests, and policies with non-empty CIDR allow entries are rejected for OS-enforced runs (ADR-0051). CIDR allow entries remain part of the policy artifact/schema so reviewed capabilities are explicit, but they are not silently treated as enforced by Landlock/seccomp until a post-M1 egress backend exists.
+1. Compile script policy → deterministic M1 in-process enforcement/emulation plus OS policy artifacts. Linux Landlock + seccomp and macOS Seatbelt are post-M1 OS-enforcement backends. Reuse proven sandbox primitives where possible. M0 produces policy artifacts plus escape tests (ADR-0032, ADR-0052).
+2. **Network egress deny-by-default**. M1 Linux-target policy rejects non-empty CIDR allow entries and emulates deny-all network decisions for sandbox-negative tests (ADR-0051, ADR-0052). CIDR allow entries remain part of the policy artifact/schema so reviewed capabilities are explicit, but they are not silently treated as enforced by Landlock/seccomp until a post-M1 egress backend exists.
 3. Filesystem **read/write confined** to declared roots; protect the default protected paths below unless explicitly granted.
 4. **Blast-radius control** via least-capability tools, isolated workspaces when configured, deterministic logs and short-lived bounded runs.
 5. Bounded/headless/timeout execution + `.loop/logs` — for stability, **not** a security boundary by itself.
@@ -58,7 +58,7 @@ This is Liquid's **workspace** action history (over Liquid's own data), not a pr
 
 ## M0/M1 sandbox scope
 
-The M0 security packet describes policy artifacts and sandbox-negative tests for forbidden writes, network egress, out-of-phase tools, protected paths, symlink traversal and interpreter misuse; it does not implement the OS sandbox yet. M1 must enforce the compiled policy on Linux and keep the macOS Seatbelt backend as a parity target.
+The M0 security packet describes policy artifacts and sandbox-negative tests for forbidden writes, network egress, out-of-phase tools, protected paths, symlink traversal and interpreter misuse; it does not implement the OS sandbox yet. M1 enforces the compiled policy through deterministic in-process runtime execution/emulation. Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0052).
 
 ### M0 policy artifact contract
 
@@ -98,7 +98,7 @@ Network allow entries are CIDR objects, not strings:
 - `cidr` is canonical CIDR notation; IP literals are represented as `/32` or `/128` CIDR entries;
 - schemes, hostnames, DNS lookups, CNAME handling, suffix matching and wildcard matching are not part of the M0 network policy artifact.
 
-V0 network policy grammar is IP/CIDR based. A sandboxed tool may not rely on the policy compiler to resolve hostnames. For M1 Linux OS enforcement, non-empty allowlists are rejected (ADR-0051); direct DNS, DoH and DoT traffic is therefore denied in enforced runs. If a future CIDR/port grant is enforceable, it is reviewed as general network egress, not hostname-scoped access.
+V0 network policy grammar is IP/CIDR based. A sandboxed tool may not rely on the policy compiler to resolve hostnames. For M1 Linux-target policy, non-empty allowlists are rejected (ADR-0051); direct DNS, DoH and DoT traffic is therefore denied in deterministic in-process runs. If a future CIDR/port grant is enforceable, it is reviewed as general network egress, not hostname-scoped access.
 
 Negative expected-decision artifacts use the same canonical JSON serialization and contain `{ fixture_name, target, attempt, expected, reason_code, side_effects_allowed }`. `expected` is `deny`; `side_effects_allowed` is `false`; `reason_code` is one of `write_denied`, `network_denied`, `environment_denied`, `tool_out_of_phase`, `protected_path_denied`, `symlink_escape_denied` or `interpreter_escape_denied`.
 

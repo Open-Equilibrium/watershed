@@ -1,6 +1,6 @@
 [package]
 name = "loop-agent-cli"
-description = "Loop Agent CLI M0 walking skeleton."
+description = "Loop Agent CLI for the M1 deterministic runtime."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

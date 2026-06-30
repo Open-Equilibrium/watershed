@@ -39,7 +39,7 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0029** | 2026-06-19 | Accepted | Designed control transport is local JSON-RPC over stdio; M1 implemented runtime stream is bare JSONL — `PROTOCOL.md`.
 - **ADR-0030** | 2026-06-19 | Accepted | `PLAN.md` M0 pass/fail checklist is the M0 bar — `PLAN.md`.
 - **ADR-0031** | 2026-06-19 | Accepted | Building-block scripts use strict YAML 1.2, schema validation, explicit registry references and canonical resolved JSON — `SECURITY.md`, Loop Agent V-Spec.
-- **ADR-0032** | 2026-06-19 | Accepted | M0 has policy artifacts and escape tests; M1 adds Linux OS enforcement; macOS parity is planned — `SECURITY.md`.
+- **ADR-0032** | 2026-06-19 | Accepted | M0 has policy artifacts and escape tests; Linux OS enforcement was targeted for M1, then deferred by ADR-0052; macOS parity remains planned — `SECURITY.md`.
 - **ADR-0033** | 2026-06-19 | Accepted | Crate layout is `core/core-script`, `core/core-policy`, `proto/proto`, `loop-agent/loop-agent-core`, `loop-agent/loop-agent-cli` — `PLAN.md`.
 - **ADR-0034** | 2026-06-19 | Accepted | Fixture suite is `smoke-loop`, `hello-loop` and sandbox-negative fixtures using a stub model — `TESTING.md`.
 - **ADR-0035** | 2026-06-19 | Accepted | M1 ships human CLI and JSONL event stream; RPC and embedded core are designed-for seams — Loop Agent V-Spec.
@@ -58,4 +58,5 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0048** | 2026-06-22 | Accepted | Only unpublished commit metadata may be amended; topic branches must not track `origin/main` — `AGENTS.md`.
 - **ADR-0049** | 2026-06-24 | Accepted | M1 Loop Agent performance budgets are fixed: FSM p95 <= 1 ms/event, no-op local tool-dispatch p95 <= 50 ms, memory <= 10 MiB/active top-level loop before payloads, log append p95 <= 5 ms/event, and 10 fixture top-level loops complete without deadlock or unbounded memory growth — `PERFORMANCE.md`, `TESTING.md`.
 - **ADR-0050** | 2026-06-24 | Accepted | M1 context handling is deterministic rule/window selection only; embeddings, RAG and adaptive compaction are post-M1 — Loop Agent V-Spec.
-- **ADR-0051** | 2026-06-24 | Accepted | M1 Linux network enforcement is fail-closed deny-all; OS-enforced runs reject non-empty allowlists; CIDR allowlists remain policy artifacts until a post-M1 egress backend exists — `SECURITY.md`.
+- **ADR-0051** | 2026-06-24 | Accepted | M1 Linux-target network policy is fail-closed deny-all; deterministic in-process runs reject non-empty allowlists; CIDR allowlists remain policy artifacts until a post-M1 egress backend exists — `SECURITY.md`.
+- **ADR-0052** | 2026-06-30 | Accepted | Loop Agent M1 ships deterministic in-process policy enforcement/emulation; Linux Landlock/seccomp OS enforcement is deferred post-M1 — `SECURITY.md`, `PLAN.md`.
