@@ -81,6 +81,14 @@ impl PolicyArtifact {
 
         for command in &self.commands {
             command.validate()?;
+            if matches!(self.target, PolicyTarget::LinuxLandlockSeccomp)
+                && !command.network.allow.is_empty()
+            {
+                return Err(policy_artifact_error(format!(
+                    "tool {} network allow must be empty for linux-landlock-seccomp policy artifacts",
+                    command.tool_id
+                )));
+            }
         }
         self.validate_phase_scope()?;
 
@@ -1613,6 +1621,20 @@ mod tests {
     }
 
     #[test]
+    fn policy_artifact_rejects_non_empty_linux_network_allow_entries() {
+        let artifact = policy_artifact_with_network_allow("192.0.2.0/24", 443);
+
+        let err = artifact
+            .validate()
+            .expect_err("linux artifacts must reject network allowlists");
+
+        assert_eq!(
+            err.to_string(),
+            "tool network-tool network allow must be empty for linux-landlock-seccomp policy artifacts"
+        );
+    }
+
+    #[test]
     fn policy_artifact_rejects_zero_network_allow_port() {
         let artifact = policy_artifact_with_network_allow("192.0.2.0/24", 0);
 
@@ -2686,6 +2708,7 @@ mod tests {
             .iter()
             .map(|path| (*path).to_owned())
             .collect();
+        command.network.allow.clear();
         command
     }
 
