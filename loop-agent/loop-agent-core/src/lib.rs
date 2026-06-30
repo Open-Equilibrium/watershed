@@ -2964,10 +2964,8 @@ fn read_to_bytes(path: &Path) -> Result<Vec<u8>, RuntimeError> {
     })
 }
 
-/// Validates public v0 event JSONL envelope and canonical-byte invariants.
-///
-/// This does not validate session lifecycle ordering. Runtime session-log
-/// readers apply stricter lifecycle checks after parsing the public stream.
+/// Validates public v0 event JSONL canonical bytes, envelope fields, payload
+/// contracts and session lifecycle ordering.
 pub fn validate_protocol_jsonl_text(
     path: &Path,
     text: &str,
@@ -3121,6 +3119,7 @@ pub fn validate_protocol_jsonl_text(
             path.display()
         )));
     }
+    validate_session_lifecycle(path, &events)?;
     Ok(events)
 }
 
@@ -3549,7 +3548,6 @@ fn validate_session_log_text(
             path.display()
         )));
     }
-    validate_session_lifecycle(path, &events)?;
     Ok(events)
 }
 
@@ -7476,14 +7474,10 @@ mod tests {
         )
         .canonical_jsonl()
         .expect("event serializes");
-        assert!(
-            validate_protocol_jsonl_text(
-                Path::new("first-not-started.jsonl"),
-                &first_not_session_started,
-            )
-            .expect("protocol envelope accepts non-start first event")
-            .len()
-                == 1
+        assert_invalid_stream(
+            "first-not-started.jsonl",
+            &first_not_session_started,
+            "must start with session.started",
         );
         assert_invalid_session_log(
             "first-not-started.jsonl",
