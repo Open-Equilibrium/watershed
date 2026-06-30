@@ -3757,7 +3757,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             }
             EventType::ToolFailed => {
                 // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
-                require_lifecycle_loop_id(path, line_number, event)?;
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
                 if let Some(terminal_line) = terminal_tools.get(&tool) {
                     return Err(terminal_lifecycle_error(
@@ -3768,6 +3768,12 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         &tool.3,
                         *terminal_line,
                     ));
+                }
+                if !started_tools.contains(&tool) && active_phases.contains_key(&loop_id) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} tool.failed must follow tool.started after phase.entered for loop_id {loop_id:?}",
+                        path.display()
+                    )));
                 }
                 terminal_tools.insert(tool, line_number);
             }
@@ -7579,6 +7585,31 @@ mod tests {
             "meta001",
             &tool_failed_without_loop,
             "must include loop_id",
+        );
+
+        let unstarted_tool_failed_inside_step = [
+            canonical.clone(),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            tool_failed_line("evt-005", 5),
+            step_completed_line("evt-006", 6),
+            loop_completed_line("evt-007", 7),
+            event_line(
+                "evt-008",
+                EventType::SessionCompleted,
+                "meta001",
+                8,
+                None,
+                serde_json::json!({}),
+            ),
+        ]
+        .concat();
+        assert_invalid_session_log(
+            "unstarted-tool-failed-inside-step.jsonl",
+            "meta001",
+            &unstarted_tool_failed_inside_step,
+            "must follow tool.started",
         );
 
         let message_completed_without_delta = [
