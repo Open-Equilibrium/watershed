@@ -76,6 +76,9 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
             let emit = emit_mode(args)?;
             let output = loop_agent_core::resume_session(workspace, session_id, emit)?;
             write_stdout(&output.stdout)?;
+            if output.failed {
+                process::exit(65);
+            }
             Ok(())
         }
         "sessions" => {

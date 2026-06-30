@@ -261,8 +261,15 @@ pub fn tail_session_to_writer(
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
-    let mut stream = read_to_string(&path)?;
+    let initial = read_to_string(&path)?;
+    let mut stream = complete_jsonl_prefix(&initial).to_owned();
     let mut events = validate_session_log_text(&path, session_id, &stream)?;
+    if initial.len() > stream.len() && (stream_is_failed(&events) || stream_is_completed(&events)) {
+        return Err(RuntimeError::Protocol(format!(
+            "{} contains a partial line after a terminal event",
+            path.display()
+        )));
+    }
     if !write_tail_chunk(writer, emit, session_id, &stream)? {
         return Ok(RunOutput {
             event_count: events.len(),
@@ -320,6 +327,11 @@ pub fn tail_session_to_writer(
         session_path: path,
         stdout: String::new(),
     })
+}
+
+fn complete_jsonl_prefix(text: &str) -> &str {
+    text.rfind('\n')
+        .map_or(text, |newline_index| &text[..=newline_index])
 }
 
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
@@ -6543,6 +6555,76 @@ mod tests {
             .join()
             .expect("tail thread joins")
             .expect("tail succeeds after complete line");
+        assert_eq!(output.event_count, 2);
+        assert!(!output.failed);
+        assert_eq!(
+            String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+                .expect("tail stream is utf8"),
+            format!("{started}{completed}")
+        );
+    }
+
+    #[test]
+    fn tail_session_buffers_initial_partial_line_until_lf() {
+        let workspace = empty_workspace("tail-initial-partial-line");
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join("tailinitialpartial001.jsonl");
+        let started = EventEnvelope::new(
+            "evt-001",
+            EventType::SessionStarted,
+            "tailinitialpartial001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        )
+        .canonical_jsonl()
+        .expect("started event serializes");
+        let completed = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionCompleted,
+            "tailinitialpartial001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+        .canonical_jsonl()
+        .expect("completed event serializes");
+        let split = completed.len() - 1;
+        fs::write(&path, format!("{started}{}", &completed[..split]))
+            .expect("initial session log with partial event written");
+
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = mpsc::channel();
+        let mut writer = NotifyingWriter {
+            bytes: Arc::clone(&bytes),
+            first_write: Some(tx),
+        };
+        let tail_workspace = workspace.clone();
+        let handle = thread::spawn(move || {
+            tail_session_to_writer(
+                &tail_workspace,
+                "tailinitialpartial001",
+                EmitMode::Jsonl,
+                &mut writer,
+            )
+        });
+
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("tail writes current prefix before initial partial completes");
+        assert_eq!(
+            String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+                .expect("tail prefix is utf8"),
+            started
+        );
+        append_session_log_line(&path, &completed[split..]).expect("event newline appended");
+
+        let output = handle
+            .join()
+            .expect("tail thread joins")
+            .expect("tail succeeds after initial partial line completes");
         assert_eq!(output.event_count, 2);
         assert!(!output.failed);
         assert_eq!(

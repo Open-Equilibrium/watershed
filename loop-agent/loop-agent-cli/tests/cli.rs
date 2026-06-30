@@ -352,6 +352,31 @@ fn resume_partial_session_prints_human_status() {
 }
 
 #[test]
+fn failed_jsonl_resume_exits_with_failed_status() {
+    let workspace = workspace_copy("sandbox-negative");
+    let session_dir = workspace.join(".loop/sessions");
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    fs::write(
+        session_dir.join("negwrite001.jsonl"),
+        first_event_line("sandbox-negative", "sandbox-negative-write.jsonl"),
+    )
+    .expect("partial failed-session log written");
+
+    let output = loop_command()
+        .current_dir(&workspace)
+        .args(["resume", "negwrite001", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
+
+    assert_eq!(output.status.code(), Some(65));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    assert!(stdout.contains("\"event_type\":\"session.resumed\""));
+    assert!(stdout.contains("\"event_type\":\"session.failed\""));
+    assert!(!workspace.join("out/forbidden.txt").exists());
+}
+
+#[test]
 fn unsafe_session_id_is_rejected_before_filesystem_access() {
     let workspace = workspace_copy("smoke-loop");
     let output = loop_command()
