@@ -799,7 +799,7 @@ impl FilesystemPolicy {
             )));
         }
 
-        let scopes = self.validate_roots(tool_id)?;
+        let write_scopes = self.validate_roots(tool_id)?;
 
         for grant in &self.protected_path_grants {
             let Some(normalized_grant) = normalize_policy_relative_path(grant) else {
@@ -807,13 +807,18 @@ impl FilesystemPolicy {
                     "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path"
                 )));
             };
+            if protected_path_grant_has_wildcard(&normalized_grant) {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} protected_path_grant {grant:?} must be an exact safe relative path"
+                )));
+            }
 
-            if !scopes
+            if !write_scopes
                 .iter()
                 .any(|scope| path_is_inside_scope(&normalized_grant, scope))
             {
                 return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must stay inside read_roots/write_roots"
+                    "tool {tool_id} protected_path_grant {grant:?} must stay inside write_roots"
                 )));
             }
         }
@@ -822,17 +827,25 @@ impl FilesystemPolicy {
     }
 
     fn validate_roots(&self, tool_id: &str) -> Result<Vec<String>, PolicyArtifactValidationError> {
-        let mut scopes = Vec::new();
-        for root in self.read_roots.iter().chain(self.write_roots.iter()) {
+        for root in &self.read_roots {
+            if normalize_policy_relative_path(root).is_none() {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} filesystem root {root:?} must be a safe relative path"
+                )));
+            };
+        }
+
+        let mut write_scopes = Vec::new();
+        for root in &self.write_roots {
             let Some(normalized_root) = normalize_policy_relative_path(root) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} filesystem root {root:?} must be a safe relative path"
                 )));
             };
-            scopes.push(normalized_root);
+            write_scopes.push(normalized_root);
         }
 
-        Ok(scopes)
+        Ok(write_scopes)
     }
 }
 
@@ -870,6 +883,10 @@ fn normalize_policy_relative_path(value: &str) -> Option<String> {
     }
 
     Some(canonical)
+}
+
+fn protected_path_grant_has_wildcard(value: &str) -> bool {
+    value.contains('*') || value.contains('?')
 }
 
 fn has_windows_drive_prefix(value: &str) -> bool {
@@ -1735,8 +1752,45 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside read_roots/write_roots"
+            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside write_roots"
         );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_protected_path_grants_outside_write_scope() {
+        let mut artifact = valid_policy_artifact("filesystem-tool");
+        artifact.commands[0].filesystem.read_roots = vec!["workspace/secrets".to_owned()];
+        artifact.commands[0].filesystem.write_roots = vec!["workspace/out".to_owned()];
+        artifact.commands[0].filesystem.protected_path_grants =
+            vec!["workspace/secrets/.env".to_owned()];
+
+        let err = artifact
+            .validate()
+            .expect_err("protected path grants must stay inside write scope");
+
+        assert_eq!(
+            err.to_string(),
+            "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside write_roots"
+        );
+    }
+
+    #[test]
+    fn policy_artifact_rejects_wildcard_protected_path_grants() {
+        for grant in ["workspace/**", "workspace/*.env", "workspace/.env?"] {
+            let mut artifact = valid_policy_artifact("filesystem-tool");
+            artifact.commands[0].filesystem.protected_path_grants = vec![grant.to_owned()];
+
+            let err = artifact
+                .validate()
+                .expect_err("protected path grants must be exact paths");
+
+            assert_eq!(
+                err.to_string(),
+                format!(
+                    "tool filesystem-tool protected_path_grant {grant:?} must be an exact safe relative path"
+                )
+            );
+        }
     }
 
     #[test]
@@ -2627,6 +2681,7 @@ mod tests {
 
     fn valid_command_policy(tool_id: &str) -> CommandPolicy {
         let mut command = command_policy(tool_id, vec!["a"], vec!["workspace"]);
+        command.filesystem.write_roots = vec!["workspace".to_owned()];
         command.filesystem.protected_paths = DEFAULT_PROTECTED_PATHS
             .iter()
             .map(|path| (*path).to_owned())
