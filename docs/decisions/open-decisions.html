@@ -15,11 +15,32 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1">
+    <h2>M1 - Loop Agent Runtime Hardening</h2>
+    <div class="grid">
+      <article id="d-052" class="decision">
+        <h3>D-052 - Loop Nesting Depth Cap</h3>
+        <p><strong>Status:</strong> Open, M1 hardening blocker.</p>
+        <p><strong>Question:</strong> What maximum recursive Loop nesting depth should registry validation, policy compilation and runtime emission enforce?</p>
+        <ul><li><strong>A:</strong> 16 levels. Pro: simple and strongly bounded. Con: may reject legitimate generated compositions.</li><li><strong>B:</strong> 64 levels. Pro: prevents stack exhaustion while staying unlikely to block real M1 loops. Con: permits more worst-case work.</li><li><strong>C:</strong> Workspace-configurable cap. Pro: flexible. Con: adds config surface before the need is proven.</li></ul>
+        <p><strong>Recommendation:</strong> B for M1 as a fixed constant, revisited only if real loops hit it.</p>
+      </article>
+      <article id="d-053" class="decision">
+        <h3>D-053 - Registry And Session Log Read Caps</h3>
+        <p><strong>Status:</strong> Open, M1 hardening blocker.</p>
+        <p><strong>Question:</strong> What byte limits should registry loads, session-log reads and tail suffix validation enforce?</p>
+        <ul><li><strong>A:</strong> Small fixed caps: 1 MiB per registry file, 16 MiB total registry, 16 MiB per session log. Pro: predictable DoS bound. Con: large transcripts fail early.</li><li><strong>B:</strong> Larger fixed caps: 10 MiB per registry file, 100 MiB total registry, 100 MiB per session log. Pro: fewer false positives. Con: weaker memory/latency protection.</li><li><strong>C:</strong> Configurable caps. Pro: adaptable. Con: creates another runtime contract before M1 has usage data.</li></ul>
+        <p><strong>Recommendation:</strong> A for M1, plus tail validation that trusts the already-validated prefix and validates only complete appended JSONL lines.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>
