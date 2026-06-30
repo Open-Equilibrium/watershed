@@ -702,6 +702,7 @@ pub enum RegistryError {
         loop_id: String,
     },
     Semantic(SemanticValidationError),
+    CanonicalJson(proto::CanonicalJsonError),
     Serialize(serde_json::Error),
 }
 
@@ -732,6 +733,9 @@ impl fmt::Display for RegistryError {
             ),
             Self::LoopCycle { loop_id } => write!(f, "loop cycle includes {loop_id}"),
             Self::Semantic(err) => write!(f, "{err}"),
+            Self::CanonicalJson(err) => {
+                write!(f, "failed to serialize canonical registry JSON: {err}")
+            }
             Self::Serialize(err) => write!(f, "failed to serialize resolved registry: {err}"),
         }
     }
@@ -741,6 +745,7 @@ impl std::error::Error for RegistryError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
+            Self::CanonicalJson(err) => Some(err),
             Self::Semantic(err) => Some(err),
             Self::Serialize(err) => Some(err),
             Self::UnsafePath { .. }
@@ -982,7 +987,7 @@ pub fn canonical_resolved_registry_json(
     let mut value = serde_json::to_value(registry).map_err(RegistryError::Serialize)?;
     materialize_registry_defaults(&mut value);
     sort_allowed_parameters(&mut value);
-    let mut out = canonical_json(&value);
+    let mut out = canonical_json(&value).map_err(RegistryError::CanonicalJson)?;
     out.push('\n');
     Ok(out)
 }
@@ -2884,39 +2889,8 @@ fn leading_spaces(value: &str) -> usize {
     value.bytes().take_while(|byte| *byte == b' ').count()
 }
 
-fn canonical_json(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_owned(),
-        Value::Bool(value) => value.to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::String(value) => {
-            serde_json::to_string(&normalize_string(value)).expect("string serialization")
-        }
-        Value::Array(values) => {
-            let body = values
-                .iter()
-                .map(canonical_json)
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("[{body}]")
-        }
-        Value::Object(map) => {
-            let mut entries = map.iter().collect::<Vec<_>>();
-            entries.sort_by(|(left, _), (right, _)| left.cmp(right));
-            let body = entries
-                .into_iter()
-                .map(|(key, value)| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(&normalize_string(key)).expect("key serialization"),
-                        canonical_json(value)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("{{{body}}}")
-        }
-    }
+fn canonical_json(value: &Value) -> Result<String, proto::CanonicalJsonError> {
+    proto::canonical_json(value)
 }
 
 fn materialize_registry_defaults(value: &mut Value) {
@@ -5259,9 +5233,21 @@ tool:
         });
 
         assert_eq!(
-            canonical_json(&value),
+            canonical_json(&value).expect("canonical JSON"),
             "{\"items\":[\"Å\"],\"name\":\"Café\"}"
         );
+    }
+
+    #[test]
+    fn canonical_json_rejects_normalized_duplicate_keys() {
+        let value = serde_json::json!({
+            "é": 1,
+            "e\u{301}": 2,
+        });
+
+        let err = canonical_json(&value).expect_err("normalized duplicate object keys must fail");
+
+        assert_eq!(err.to_string(), "normalized object key collision: é");
     }
 
     #[test]

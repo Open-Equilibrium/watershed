@@ -1273,23 +1273,37 @@ impl DenyReasonCode {
 
 #[derive(Debug)]
 pub enum PolicyArtifactError {
+    CanonicalJson(proto::CanonicalJsonError),
     Serialize(serde_json::Error),
 }
 
 impl fmt::Display for PolicyArtifactError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CanonicalJson(err) => {
+                write!(
+                    f,
+                    "failed to serialize canonical policy artifact JSON: {err}"
+                )
+            }
             Self::Serialize(err) => write!(f, "failed to serialize policy artifact: {err}"),
         }
     }
 }
 
-impl std::error::Error for PolicyArtifactError {}
+impl std::error::Error for PolicyArtifactError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::CanonicalJson(err) => Some(err),
+            Self::Serialize(err) => Some(err),
+        }
+    }
+}
 
 pub fn canonical_artifact_json<T: Serialize>(artifact: &T) -> Result<String, PolicyArtifactError> {
     let mut value = serde_json::to_value(artifact).map_err(PolicyArtifactError::Serialize)?;
     canonicalize_policy_artifact_arrays(&mut value);
-    let mut out = canonical_json(&value);
+    let mut out = canonical_json(&value).map_err(PolicyArtifactError::CanonicalJson)?;
     out.push('\n');
     Ok(out)
 }
@@ -1386,39 +1400,8 @@ fn network_allow_key(value: &Value) -> (String, String, u64) {
     )
 }
 
-fn canonical_json(value: &Value) -> String {
-    match value {
-        Value::Null => "null".to_owned(),
-        Value::Bool(value) => value.to_string(),
-        Value::Number(value) => value.to_string(),
-        Value::String(value) => {
-            serde_json::to_string(value).expect("string serialization cannot fail")
-        }
-        Value::Array(values) => {
-            let body = values
-                .iter()
-                .map(canonical_json)
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("[{body}]")
-        }
-        Value::Object(map) => {
-            let mut entries = map.iter().collect::<Vec<_>>();
-            entries.sort_by_key(|(key, _)| key.to_owned());
-            let body = entries
-                .into_iter()
-                .map(|(key, value)| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(key).expect("object key serialization cannot fail"),
-                        canonical_json(value)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(",");
-            format!("{{{body}}}")
-        }
-    }
+fn canonical_json(value: &Value) -> Result<String, proto::CanonicalJsonError> {
+    proto::canonical_json(value)
 }
 
 #[cfg(test)]
@@ -2460,9 +2443,12 @@ mod tests {
 
     #[test]
     fn canonical_policy_json_helpers_handle_scalar_and_sparse_shapes() {
-        assert_eq!(canonical_json(&Value::Null), "null");
-        assert_eq!(canonical_json(&Value::Bool(false)), "false");
-        assert_eq!(canonical_json(&serde_json::json!([2, "a"])), "[2,\"a\"]");
+        assert_eq!(canonical_json(&Value::Null).expect("null"), "null");
+        assert_eq!(canonical_json(&Value::Bool(false)).expect("bool"), "false");
+        assert_eq!(
+            canonical_json(&serde_json::json!([2, "a"])).expect("array"),
+            "[2,\"a\"]"
+        );
 
         let mut not_object = Value::Null;
         canonicalize_policy_artifact_arrays(&mut not_object);
@@ -2485,6 +2471,22 @@ mod tests {
         assert_eq!(
             command_with_network_without_allow,
             serde_json::json!({"network":{"default":"deny"}})
+        );
+    }
+
+    #[test]
+    fn policy_artifact_canonical_json_rejects_normalized_duplicate_keys() {
+        let value = serde_json::json!({
+            "é": 1,
+            "e\u{301}": 2,
+        });
+
+        let err = canonical_artifact_json(&value)
+            .expect_err("normalized duplicate object keys must fail");
+
+        assert_eq!(
+            err.to_string(),
+            "failed to serialize canonical policy artifact JSON: normalized object key collision: é"
         );
     }
 
