@@ -40,10 +40,12 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
     let mut nanos = Vec::new();
 
     for _ in 0..100 {
+        clear_runtime_state(&workspace);
         let started = Instant::now();
-        let sessions = loop_agent_core::list_sessions(&workspace).expect("sessions lists");
-        assert!(sessions.is_empty());
+        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop runs");
         nanos.push(started.elapsed().as_nanos());
+        assert!(!output.failed);
+        assert!(output.event_count > 0);
     }
 
     assert!(
@@ -80,6 +82,7 @@ fn hello_loop_log_append_p95_stays_under_m1_budget() {
 
 #[test]
 fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
+    let resident_bytes_before = current_resident_set_size();
     let workspaces = [
         ("smoke-loop", "smoke-loop"),
         ("hello-loop", "hello-loop"),
@@ -156,6 +159,14 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
         total_workspace_bytes < 64 * 1024 * 1024,
         "concurrent fixture workspaces must stay bounded: {total_workspace_bytes} bytes"
     );
+    if let (Some(before), Some(after)) = (resident_bytes_before, current_resident_set_size()) {
+        let growth = after.saturating_sub(before);
+        let budget = 10 * 1024 * 1024 * concurrency as u64;
+        assert!(
+            growth <= budget,
+            "concurrent fixture RSS growth must stay <= {budget} bytes: {growth} bytes"
+        );
+    }
 }
 
 #[test]
@@ -269,6 +280,72 @@ fn dir_size(path: &Path) -> u64 {
             }
         })
         .sum()
+}
+
+#[cfg(target_os = "linux")]
+fn current_resident_set_size() -> Option<u64> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        let value = line.strip_prefix("VmRSS:")?.trim();
+        let kilobytes = value.strip_suffix(" kB")?.trim().parse::<u64>().ok()?;
+        Some(kilobytes * 1024)
+    })
+}
+
+#[cfg(windows)]
+fn current_resident_set_size() -> Option<u64> {
+    use std::ffi::c_void;
+    use std::mem;
+
+    #[repr(C)]
+    struct ProcessMemoryCounters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+
+    #[link(name = "psapi")]
+    extern "system" {
+        fn GetCurrentProcess() -> *mut c_void;
+        fn GetProcessMemoryInfo(
+            process: *mut c_void,
+            counters: *mut ProcessMemoryCounters,
+            size: u32,
+        ) -> i32;
+    }
+
+    let mut counters = ProcessMemoryCounters {
+        cb: mem::size_of::<ProcessMemoryCounters>() as u32,
+        page_fault_count: 0,
+        peak_working_set_size: 0,
+        working_set_size: 0,
+        quota_peak_paged_pool_usage: 0,
+        quota_paged_pool_usage: 0,
+        quota_peak_non_paged_pool_usage: 0,
+        quota_non_paged_pool_usage: 0,
+        pagefile_usage: 0,
+        peak_pagefile_usage: 0,
+    };
+    let ok = unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters,
+            mem::size_of::<ProcessMemoryCounters>() as u32,
+        )
+    };
+    (ok != 0).then_some(counters.working_set_size as u64)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn current_resident_set_size() -> Option<u64> {
+    None
 }
 
 fn clear_runtime_state(workspace: &Path) {
