@@ -2,6 +2,7 @@
 
 use proto::{EventEnvelope, EventType};
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     fmt, fs,
     io::{self, Seek, SeekFrom, Write},
@@ -603,6 +604,7 @@ struct SessionReservation {
     lock_path: PathBuf,
     session_path: PathBuf,
     session_id: String,
+    cleanup_on_drop: Cell<bool>,
 }
 
 impl SessionReservation {
@@ -610,13 +612,24 @@ impl SessionReservation {
         let _ = fs::remove_file(&self.session_path);
         let _ = fs::remove_file(&self.log_path);
         let _ = fs::remove_file(&self.lock_path);
+        self.cleanup_on_drop.set(false);
     }
 
     fn release_lock(&self) -> Result<(), RuntimeError> {
         fs::remove_file(&self.lock_path).map_err(|source| RuntimeError::Io {
             path: self.lock_path.clone(),
             source,
-        })
+        })?;
+        self.cleanup_on_drop.set(false);
+        Ok(())
+    }
+}
+
+impl Drop for SessionReservation {
+    fn drop(&mut self) {
+        if self.cleanup_on_drop.get() {
+            self.rollback();
+        }
     }
 }
 
@@ -653,6 +666,7 @@ fn reserve_session_log(
         lock_path,
         session_path,
         session_id: session_id.to_owned(),
+        cleanup_on_drop: Cell::new(true),
     })
 }
 
@@ -785,7 +799,8 @@ fn write_session_log(
     event_count: usize,
 ) -> Result<(), RuntimeError> {
     let reservation = reserve_session_log(workspace, session_id)?;
-    let result = write_reserved_session_log(&reservation, session_id, stream, event_count);
+    let result = write_reserved_session_log(&reservation, session_id, stream, event_count)
+        .and_then(|()| reservation.release_lock());
     if result.is_err() {
         reservation.rollback();
     }
@@ -1105,7 +1120,6 @@ struct RuntimeFailure {
 struct RuntimeToolPolicy<'a> {
     command: &'a core_policy::CommandPolicy,
     protected_path_match_mode: ProtectedPathMatchMode,
-    timeout_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1490,7 +1504,6 @@ fn emit_phase(
             let tool_policy = RuntimeToolPolicy {
                 command: command_policy,
                 protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
-                timeout_ms: policy.runtime_limits.timeout_ms,
             };
             emit_tool(
                 workspace,
@@ -1722,8 +1735,6 @@ fn emit_tool(
             tool,
             policy.protected_path_match_mode,
             policy.command,
-            policy.timeout_ms,
-            builder.sequence,
         )?
     } else {
         planned_progress
@@ -1749,8 +1760,6 @@ fn execute_tool(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
-    timeout_ms: u64,
-    sequence: u64,
 ) -> Result<Option<&'static str>, RuntimeError> {
     match (&tool.tool_kind, &tool.command) {
         (
@@ -1763,8 +1772,6 @@ fn execute_tool(
                 tool,
                 protected_path_match_mode,
                 policy,
-                timeout_ms,
-                sequence,
             )?;
             Ok(Some("stub write completed"))
         }
@@ -1825,8 +1832,6 @@ fn execute_own_script(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
-    _timeout_ms: u64,
-    _sequence: u64,
 ) -> Result<(), RuntimeError> {
     if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
         return Err(RuntimeError::Protocol(format!(
@@ -2959,6 +2964,10 @@ fn read_to_bytes(path: &Path) -> Result<Vec<u8>, RuntimeError> {
     })
 }
 
+/// Validates public v0 event JSONL envelope and canonical-byte invariants.
+///
+/// This does not validate session lifecycle ordering. Runtime session-log
+/// readers apply stricter lifecycle checks after parsing the public stream.
 pub fn validate_protocol_jsonl_text(
     path: &Path,
     text: &str,
@@ -4848,8 +4857,6 @@ mod tests {
                 &wrong_runtime,
                 match_mode,
                 write_policy,
-                100,
-                1
             ),
             Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
         ));
@@ -4873,8 +4880,6 @@ mod tests {
                 &mismatched_shape,
                 match_mode,
                 write_policy,
-                100,
-                1
             ),
             Err(RuntimeError::Protocol(message)) if message.contains("command shape")
         ));
@@ -5540,6 +5545,27 @@ mod tests {
         assert!(first.log_path.exists());
         assert!(first.lock_path.exists());
         first.rollback();
+    }
+
+    #[test]
+    fn dropped_session_reservation_rolls_back_reserved_files() {
+        let workspace = empty_workspace("reservation-drop");
+        let (session_path, log_path, lock_path) = {
+            let reservation =
+                reserve_session_log(&workspace, "drop001").expect("reservation succeeds");
+            assert!(reservation.session_path.exists());
+            assert!(reservation.log_path.exists());
+            assert!(reservation.lock_path.exists());
+            (
+                reservation.session_path.clone(),
+                reservation.log_path.clone(),
+                reservation.lock_path.clone(),
+            )
+        };
+
+        assert!(!session_path.exists());
+        assert!(!log_path.exists());
+        assert!(!lock_path.exists());
     }
 
     #[test]
