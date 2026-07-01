@@ -1489,7 +1489,7 @@ fn phase_steps(source_name: &str, source: &str) -> Result<Vec<StepBlock>, Regist
 fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, RegistryError> {
     match raw_section_field_value(source_name, source, "tool", "network")? {
         Some(value) if !value.is_empty() => {
-            let value = unquote_yaml_scalar(source_name, "tool.network", &value)?;
+            let value = unquote_yaml_string_scalar(source_name, "tool.network", &value)?;
             if value == "deny" {
                 Ok(NetworkPolicy::Deny(NetworkDeny))
             } else {
@@ -2077,7 +2077,7 @@ fn section_scalar_value(
                     format!("{section}.{field} must be a scalar"),
                 ))
             } else {
-                unquote_yaml_scalar(source_name, &format!("{section}.{field}"), value)
+                unquote_yaml_string_scalar(source_name, &format!("{section}.{field}"), value)
             }
         })
         .transpose()
@@ -2098,7 +2098,8 @@ fn required_nested_scalar(
             format!("{section}.{parent}.{field} must be a scalar"),
         ));
     }
-    let value = unquote_yaml_scalar(source_name, &format!("{section}.{parent}.{field}"), &value)?;
+    let value =
+        unquote_yaml_string_scalar(source_name, &format!("{section}.{parent}.{field}"), &value)?;
     if value.is_empty() {
         return Err(parse_error(
             source_name,
@@ -2622,13 +2623,20 @@ fn parse_object_property(
             format!("list object property {line:?} must use key: value"),
         ));
     }
-    insert_object_property(
-        source_name,
-        item,
-        field,
-        unquote_yaml_scalar(source_name, field, value)?,
-    )?;
+    let value = if list_object_property_is_string_scalar(field) {
+        unquote_yaml_string_scalar(source_name, field, value)?
+    } else {
+        unquote_yaml_scalar(source_name, field, value)?
+    };
+    insert_object_property(source_name, item, field, value)?;
     Ok(None)
+}
+
+fn list_object_property_is_string_scalar(field: &str) -> bool {
+    matches!(
+        field,
+        "cidr" | "id" | "kind" | "name" | "transport" | "value_pattern" | "value_type"
+    )
 }
 
 fn insert_object_property(
@@ -2889,6 +2897,21 @@ fn unquote_yaml_scalar(
         }
         Ok(value.to_owned())
     }
+}
+
+fn unquote_yaml_string_scalar(
+    source_name: &str,
+    field: &str,
+    value: &str,
+) -> Result<String, RegistryError> {
+    let value = value.trim();
+    if !is_quoted_yaml_scalar(value) && plain_yaml_scalar_is_non_string(value) {
+        return Err(parse_error(
+            source_name,
+            format!("{field} must be a string; quote YAML non-string scalars"),
+        ));
+    }
+    unquote_yaml_scalar(source_name, field, value)
 }
 
 fn plain_yaml_scalar_starts_with_anchor_or_alias(value: &str) -> bool {
@@ -5068,6 +5091,46 @@ tool:
         .expect_err("empty prompt rejected");
 
         assert!(err.to_string().contains("instruction.prompt"));
+    }
+
+    #[test]
+    fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
+        for (name, source, expected) in [
+            (
+                "boolean-prompt.yaml",
+                "instruction:\n  id: boolean-prompt\n  name: BooleanPrompt\n  prompt: true\n",
+                "instruction.prompt must be a string",
+            ),
+            (
+                "null-step-name.yaml",
+                r#"phase:
+  id: null-step-name
+  name: NullStepName
+  instruction_refs: []
+  tool_refs: []
+  steps:
+    - id: inspect-step
+      name: null
+"#,
+                "name must be a string",
+            ),
+        ] {
+            let err = parse_registry_block(name, source)
+                .expect_err("plain YAML non-string scalar must be rejected");
+
+            assert!(err.to_string().contains(expected), "{name}: {err}");
+        }
+
+        let block = parse_registry_block(
+            "quoted-boolean-prompt.yaml",
+            "instruction:\n  id: quoted-boolean-prompt\n  name: QuotedBooleanPrompt\n  prompt: \"true\"\n",
+        )
+        .expect("quoted YAML scalar remains a string");
+
+        let RegistryBlock::Instruction(instruction) = block else {
+            panic!("expected instruction block");
+        };
+        assert_eq!(instruction.prompt, "true");
     }
 
     #[test]
