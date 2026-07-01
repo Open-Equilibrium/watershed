@@ -410,21 +410,8 @@ pub fn resume_session(
         session_id,
         ToolSideEffectMode::DryRun,
     )?;
-    if events.len() > planned_runtime.events.len() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} is not a valid prefix of loop {}",
-            path.display(),
-            loop_block.identity.id
-        )));
-    }
-    let expected_prefix = canonical_event_stream(&planned_runtime.events[..events.len()])?;
-    if before != expected_prefix {
-        return Err(RuntimeError::Protocol(format!(
-            "{} is not a valid prefix of loop {}",
-            path.display(),
-            loop_block.identity.id
-        )));
-    }
+    let resume_prefix =
+        validate_resume_replay_prefix(&path, &events, &planned_runtime.events, loop_block)?;
     if let Some(tool_id) = started_tool_without_progress(&events) {
         return Err(RuntimeError::Protocol(format!(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
@@ -439,7 +426,7 @@ pub fn resume_session(
         loop_block,
         session_id,
         ToolSideEffectMode::Resume {
-            prefix_event_count: events.len() as u64,
+            prefix_event_count: resume_prefix.planned_event_count as u64,
         },
     )?;
     if resumed_runtime.events != planned_runtime.events {
@@ -464,11 +451,12 @@ pub fn resume_session(
         serde_json::json!({"reason":"resume"}),
     );
     let mut appended_events = vec![resume_event];
+    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
     appended_events.extend(
-        resumed_runtime.events[events.len()..]
+        resumed_runtime.events[resume_prefix.planned_event_count..]
             .iter()
             .cloned()
-            .map(shift_resumed_suffix_event),
+            .map(|event| shift_resumed_event(event, resumed_suffix_offset)),
     );
     let appended_stream = canonical_event_stream(&appended_events)?;
     let combined = format!("{before}{appended_stream}");
@@ -485,6 +473,50 @@ pub fn resume_session(
             EmitMode::Human => format!("session {session_id} resumed\n"),
         },
     })
+}
+
+struct ResumeReplayPrefix {
+    planned_event_count: usize,
+    resume_marker_count: usize,
+}
+
+fn validate_resume_replay_prefix(
+    path: &Path,
+    events: &[EventEnvelope],
+    planned_events: &[EventEnvelope],
+    loop_block: &core_script::LoopBlock,
+) -> Result<ResumeReplayPrefix, RuntimeError> {
+    let mut planned_event_count = 0usize;
+    let mut resume_marker_count = 0usize;
+
+    for event in events {
+        if event.event_type == EventType::SessionResumed {
+            resume_marker_count += 1;
+            continue;
+        }
+
+        let Some(planned_event) = planned_events.get(planned_event_count) else {
+            return Err(invalid_resume_prefix_error(path, loop_block));
+        };
+        let expected_event = shift_resumed_event(planned_event.clone(), resume_marker_count as u64);
+        if event != &expected_event {
+            return Err(invalid_resume_prefix_error(path, loop_block));
+        }
+        planned_event_count += 1;
+    }
+
+    Ok(ResumeReplayPrefix {
+        planned_event_count,
+        resume_marker_count,
+    })
+}
+
+fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "{} is not a valid prefix of loop {}",
+        path.display(),
+        loop_block.identity.id
+    ))
 }
 
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
@@ -517,8 +549,8 @@ fn ensure_session_log_growth_within_limit(
     Ok(())
 }
 
-fn shift_resumed_suffix_event(mut event: EventEnvelope) -> EventEnvelope {
-    event.sequence += 1;
+fn shift_resumed_event(mut event: EventEnvelope, sequence_offset: u64) -> EventEnvelope {
+    event.sequence += sequence_offset;
     event.event_id = format!("evt-{:03}", event.sequence);
     event.timestamp = event_timestamp(event.sequence);
     event

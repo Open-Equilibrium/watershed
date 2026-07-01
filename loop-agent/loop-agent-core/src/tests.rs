@@ -2006,6 +2006,56 @@ fn resume_continues_initial_placeholder_session_to_terminal_state() {
 }
 
 #[test]
+fn resume_continues_after_prior_resume_marker() {
+    let workspace = workspace_copy("smoke-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let started = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "smoke001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+    .canonical_jsonl()
+    .expect("started event serializes");
+    let resumed = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionResumed,
+        "smoke001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"resume"}),
+    )
+    .canonical_jsonl()
+    .expect("resume event serializes");
+    let path = session_dir.join("smoke001.jsonl");
+    fs::write(&path, format!("{started}{resumed}")).expect("partial resumed log written");
+
+    let output = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
+        .expect("session resumes after prior resume marker");
+
+    assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
+    assert!(output
+        .stdout
+        .contains("\"event_type\":\"session.completed\""));
+    let resumed = fs::read_to_string(&path).expect("resumed log readable");
+    let events =
+        validate_session_log_text(&path, "smoke001", &resumed).expect("resumed log remains valid");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::SessionResumed)
+            .count(),
+        2
+    );
+    assert!(stream_is_completed(&events));
+}
+
+#[test]
 fn resume_rejects_unidentified_prefix_without_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
