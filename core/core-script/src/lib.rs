@@ -614,10 +614,9 @@ impl ResolvedRegistry {
     }
 
     fn validate_loop_cycles(&self) -> Result<(), RegistryError> {
-        let mut visiting = BTreeSet::new();
-        let mut visited = BTreeSet::new();
         for loop_id in self.loops.keys() {
-            self.visit_loop(loop_id, 1, &mut visiting, &mut visited)?;
+            let mut visiting = BTreeSet::new();
+            self.visit_loop(loop_id, 1, &mut visiting)?;
         }
         Ok(())
     }
@@ -627,7 +626,6 @@ impl ResolvedRegistry {
         loop_id: &str,
         depth: usize,
         visiting: &mut BTreeSet<String>,
-        visited: &mut BTreeSet<String>,
     ) -> Result<(), RegistryError> {
         if depth > MAX_LOOP_NESTING_DEPTH {
             return Err(RegistryError::LoopDepthExceeded {
@@ -635,9 +633,6 @@ impl ResolvedRegistry {
                 depth,
                 max: MAX_LOOP_NESTING_DEPTH,
             });
-        }
-        if visited.contains(loop_id) {
-            return Ok(());
         }
         if !visiting.insert(loop_id.to_owned()) {
             return Err(RegistryError::LoopCycle {
@@ -648,11 +643,10 @@ impl ResolvedRegistry {
         let loop_block = self.require_loop(loop_id, "loop", loop_id)?;
         for subloop_ref in &loop_block.subloop_refs {
             let subloop = self.require_loop(subloop_ref, "loop", loop_id)?;
-            self.visit_loop(&subloop.identity.id, depth + 1, visiting, visited)?;
+            self.visit_loop(&subloop.identity.id, depth + 1, visiting)?;
         }
 
         visiting.remove(loop_id);
-        visited.insert(loop_id.to_owned());
         Ok(())
     }
 }
@@ -4591,6 +4585,32 @@ tool:
             } if loop_id == format!("loop-{MAX_LOOP_NESTING_DEPTH:03}")
                 && depth == MAX_LOOP_NESTING_DEPTH + 1
                 && max == MAX_LOOP_NESTING_DEPTH
+        ));
+    }
+
+    #[test]
+    fn registry_reference_validation_counts_shared_subloop_tails_per_path() {
+        let mut blocks = loop_chain_blocks(MAX_LOOP_NESTING_DEPTH);
+        blocks.push(RegistryBlock::Loop(LoopBlock {
+            identity: BlockIdentity {
+                id: "zz-parent".to_owned(),
+                name: "Parent".to_owned(),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: vec!["loop-000".to_owned()],
+            connection_refs: Vec::new(),
+        }));
+
+        let err = ResolvedRegistry::from_blocks(blocks)
+            .expect_err("shared subloop tail still counts against parent depth");
+
+        assert!(matches!(
+            err,
+            RegistryError::LoopDepthExceeded {
+                depth,
+                max,
+                ..
+            } if depth == MAX_LOOP_NESTING_DEPTH + 1 && max == MAX_LOOP_NESTING_DEPTH
         ));
     }
 
