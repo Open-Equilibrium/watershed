@@ -91,7 +91,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **M0-blocking decisions:** none remain. D-002, D-006, D-012…D-018 and D-047…D-050 are decided in ADR-0029…ADR-0037 and ADR-0041…ADR-0045.
 
-D-008, D-019 and D-046 are closed for M1 in ADR-0050/ADR-0051/ADR-0052/ADR-0055: M1 context handling is deterministic rule/window selection only, M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, and the post-M1 RPC command shape starts as a minimal local JSON-RPC control set. D-020 (embedded core API scope) remains a post-M1 seam and does not block M1.
+D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is deterministic rule/window selection only, and the post-M1 RPC command shape starts as a minimal local JSON-RPC control set. ADR-0051/ADR-0052 close the M1 network/sandbox behavior: M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, while D-046 remains open for post-M1 positive CIDR egress enforcement. D-020 (embedded core API scope) remains a post-M1 seam and does not block M1.
 
 **DoD / pass-fail definition:**
 
