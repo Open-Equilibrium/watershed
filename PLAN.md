@@ -91,7 +91,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **M0-blocking decisions:** none remain. D-002, D-006, D-012…D-018 and D-047…D-050 are decided in ADR-0029…ADR-0037 and ADR-0041…ADR-0045.
 
-D-008 and D-046 are closed for M1 in ADR-0050/ADR-0051/ADR-0052: M1 context handling is deterministic rule/window selection only, and M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs. D-019 (RPC command/request shape) and D-020 (embedded core API scope) remain post-M1 seams and do not block M1.
+D-008, D-019 and D-046 are closed for M1 in ADR-0050/ADR-0051/ADR-0052/ADR-0055: M1 context handling is deterministic rule/window selection only, M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, and the post-M1 RPC command shape starts as a minimal local JSON-RPC control set. D-020 (embedded core API scope) remains a post-M1 seam and does not block M1.
 
 **DoD / pass-fail definition:**
 
@@ -175,6 +175,7 @@ M3 delivers Liquid as a **self-contained native workspace/app-building product**
 
 ## Progress Log (timestamped)
 
+- `2026-07-01` — M1 hardening decisions closed: recursive Loop nesting is capped at 64 levels (ADR-0053), registry/session-log reads use fixed M1 byte caps with tail suffix validation (ADR-0054), and the post-M1 Loop Agent RPC shape starts with a minimal local JSON-RPC control method set (ADR-0055).
 - `2026-06-24` — M1 preflight decisions closed: Loop Agent M1 performance budgets (ADR-0049), deterministic M1 context scope (ADR-0050), fail-closed Linux-target network policy with non-empty allowlists rejected (ADR-0051). Decision docs cleaned up: live open decisions stay in `open-decisions.html`, accepted decisions stay compact in `ADR-LOG.md`.
 - `2026-06-23` — M0 scaffold started: Rust workspace/toolchain policy, `proto`, `core-script`, `core-policy`, `loop-agent-core`, `loop-agent-cli`, deterministic D-015 fixture streams, M0 policy expected-output fixtures and GitHub CI gate wiring added. Loop Agent runtime execution remains M1 scope.
 - `2026-06-05` — Repo governance & spec set created; name "Watershed" selected (crates.io free).

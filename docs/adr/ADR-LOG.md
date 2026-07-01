@@ -60,3 +60,6 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0050** | 2026-06-24 | Accepted | M1 context handling is deterministic rule/window selection only; embeddings, RAG and adaptive compaction are post-M1 — Loop Agent V-Spec.
 - **ADR-0051** | 2026-06-24 | Accepted | M1 Linux-target network policy is fail-closed deny-all; deterministic in-process runs reject non-empty allowlists; CIDR allowlists remain policy artifacts until a post-M1 egress backend exists — `SECURITY.md`.
 - **ADR-0052** | 2026-06-30 | Accepted | Loop Agent M1 ships deterministic in-process policy enforcement/emulation; Linux Landlock/seccomp OS enforcement is deferred post-M1 — `SECURITY.md`, `PLAN.md`.
+- **ADR-0053** | 2026-07-01 | Accepted | Recursive loop composition is capped at 64 levels across registry validation, policy compilation and runtime emission — Loop Agent V-Spec.
+- **ADR-0054** | 2026-07-01 | Accepted | M1 registry/session-log reads use fixed caps: 1 MiB per registry file, 16 MiB registry total and 16 MiB per session log; tail validates appended JSONL suffixes against prior state — Loop Agent V-Spec.
+- **ADR-0055** | 2026-07-01 | Accepted | Post-M1 Loop Agent control starts with minimal local JSON-RPC `loop.start`/`loop.status`/`loop.cancel`/`loop.tail`/`loop.export`; no `cmd.*` runtime events — `PROTOCOL.md`, Loop Agent V-Spec.

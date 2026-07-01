@@ -28,7 +28,7 @@ Protocol v0 is designed for the Loop Agent CLI MVP and later Meta-Harness integr
 
 Runtime events use the v0 Loop Agent short-form name set decided in ADR-0036. `message.delta` and `tool.progress` stay first-class for near-real-time consumers. Do not maintain a second event naming convention.
 
-Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029), but method names, parameters and error mapping remain D-019. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
+Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029); ADR-0055 selects the initial method set as `loop.start`, `loop.status`, `loop.cancel`, `loop.tail` and `loop.export`. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
 
 ## Required v0 event-envelope fields
 
@@ -98,6 +98,6 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 
 ## M0 implementation packet required before coding
 
-The M0/M1 transport, runtime event-envelope fields and runtime event names are decided (ADR-0029, ADR-0036). The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Do not add `cmd.*` event names to close the still-open D-019 command/request shape.
+The M0/M1 transport, runtime event-envelope fields and runtime event names are decided (ADR-0029, ADR-0036). The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Do not add `cmd.*` event names; D-019 is closed by ADR-0055 as JSON-RPC control methods separate from runtime events.
 
 D-044/ADR-0039 constrains later cloud/remote execution: durability is replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Before that ships, define the flush/fsync cadence, resume-from-log on a new container, crash replay to the last good `sequence` and the session-ownership lease. M0 local session storage remains ADR-0037.
