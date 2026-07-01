@@ -1228,6 +1228,71 @@ fn sandbox_denial_follows_resolved_operation_not_loop_name() {
 }
 
 #[test]
+fn nested_sandbox_denial_emits_child_tool_failure_only() {
+    let workspace = workspace_copy("sandbox-negative");
+    fs::write(
+        workspace.join("registry/loops/sandbox-negative-write.yaml"),
+        "loop:\n  id: sandbox-negative-write\n  name: SandboxNegativeWrite\n  phase_refs: [benign-parent]\n  subloop_refs: [nested-negative-write]\n  connection_refs: []\n",
+    )
+    .expect("parent loop fixture rewritten");
+    fs::write(
+        workspace.join("registry/phases/benign-parent.yaml"),
+        "phase:\n  id: benign-parent\n  name: BenignParent\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  steps:\n    - id: observe\n      name: Observe\n",
+    )
+    .expect("benign parent phase written");
+    fs::write(
+        workspace.join("registry/loops/nested-negative-write.yaml"),
+        "loop:\n  id: nested-negative-write\n  name: NestedNegativeWrite\n  phase_refs: [negative-write]\n  subloop_refs: []\n  connection_refs: []\n",
+    )
+    .expect("nested loop fixture written");
+
+    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+        .expect("nested negative operation produces a valid stream");
+
+    assert!(output.failed);
+    let events = validate_session_log_text(
+        Path::new("nested-negative.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("nested negative stream validates");
+    let parent_loop_id = loop_id_for_definition(&events, "sandbox-negative-write");
+    let child_loop_id = loop_id_for_definition(&events, "nested-negative-write");
+    let tool_failed = events
+        .iter()
+        .filter(|event| event.event_type == EventType::ToolFailed)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_failed.len(), 1);
+    assert_eq!(
+        tool_failed[0].loop_id.as_deref(),
+        Some(child_loop_id.as_str())
+    );
+    assert_ne!(
+        tool_failed[0].loop_id.as_deref(),
+        Some(parent_loop_id.as_str())
+    );
+    assert_eq!(
+        tool_failed[0]
+            .payload
+            .get("tool_id")
+            .and_then(serde_json::Value::as_str),
+        Some("negative-tool")
+    );
+    for loop_id in [&parent_loop_id, &child_loop_id] {
+        assert!(events.iter().any(|event| {
+            event.event_type == EventType::LoopFailed
+                && event.loop_id.as_deref() == Some(loop_id.as_str())
+                && event
+                    .payload
+                    .get("error")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("write_denied")
+        }));
+    }
+    assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
+}
+
+#[test]
 fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
     let workspace = workspace_copy("sandbox-negative");
     let loop_path = workspace.join("registry/loops/sandbox-negative-tool-out-of-phase.yaml");
@@ -4525,6 +4590,22 @@ fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected
         .expect_err("invalid session log must fail");
 
     assert!(err.to_string().contains(expected), "{err}");
+}
+
+fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
+    events
+        .iter()
+        .find(|event| {
+            event.event_type == EventType::LoopStarted
+                && event
+                    .payload
+                    .get("loop_definition_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(definition_id)
+        })
+        .and_then(|event| event.loop_id.as_deref())
+        .expect("loop definition starts")
+        .to_owned()
 }
 
 fn emit_noop_dispatch_for_budget(

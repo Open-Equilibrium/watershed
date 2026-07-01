@@ -1520,7 +1520,7 @@ fn emit_loop_block_at_depth(
                     builder,
                     depth + 1,
                 )? {
-                    emit_runtime_failure(loop_block, &invocation, &failure, builder);
+                    emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder);
                     return Ok(Some(failure));
                 }
             }
@@ -2638,6 +2638,20 @@ fn emit_runtime_failure(
             "loop_definition_id": loop_block.identity.id,
         }),
     );
+}
+
+fn emit_propagated_runtime_failure(
+    loop_block: &core_script::LoopBlock,
+    invocation: &LoopInvocation,
+    failure: &RuntimeFailure,
+    builder: &mut RuntimeEventBuilder,
+) {
+    let loop_failure = RuntimeFailure {
+        reason: failure.reason.clone(),
+        message: failure.message,
+        tool_id: None,
+    };
+    emit_runtime_failure(loop_block, invocation, &loop_failure, builder);
 }
 
 fn sandbox_runtime_failure(
