@@ -1308,6 +1308,23 @@ fn preflight_loop_tools(
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
 ) -> Result<(), RuntimeError> {
+    preflight_loop_tools_at_depth(registry, policy, loop_block, 1)
+}
+
+fn preflight_loop_tools_at_depth(
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    loop_block: &core_script::LoopBlock,
+    depth: usize,
+) -> Result<(), RuntimeError> {
+    if depth > core_script::MAX_LOOP_NESTING_DEPTH {
+        return Err(RuntimeError::Protocol(format!(
+            "loop nesting depth {depth} for {} exceeds max {}",
+            loop_block.identity.id,
+            core_script::MAX_LOOP_NESTING_DEPTH
+        )));
+    }
+
     if sandbox_runtime_failure(registry, policy, loop_block)?.is_some() {
         return Ok(());
     }
@@ -1323,7 +1340,7 @@ fn preflight_loop_tools(
                 let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
                     RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
                 })?;
-                preflight_loop_tools(registry, policy, subloop)?;
+                preflight_loop_tools_at_depth(registry, policy, subloop, depth + 1)?;
             }
         }
     }
@@ -1360,6 +1377,37 @@ fn emit_loop_block(
     side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    let context = LoopEmitContext {
+        workspace,
+        registry,
+        policy,
+        side_effect_mode,
+    };
+    emit_loop_block_at_depth(&context, loop_block, parent_loop_id, builder, 1)
+}
+
+struct LoopEmitContext<'a> {
+    workspace: &'a Path,
+    registry: &'a core_script::ResolvedRegistry,
+    policy: &'a core_policy::PolicyArtifact,
+    side_effect_mode: ToolSideEffectMode,
+}
+
+fn emit_loop_block_at_depth(
+    context: &LoopEmitContext<'_>,
+    loop_block: &core_script::LoopBlock,
+    parent_loop_id: Option<String>,
+    builder: &mut RuntimeEventBuilder,
+    depth: usize,
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    if depth > core_script::MAX_LOOP_NESTING_DEPTH {
+        return Err(RuntimeError::Protocol(format!(
+            "loop nesting depth {depth} for {} exceeds max {}",
+            loop_block.identity.id,
+            core_script::MAX_LOOP_NESTING_DEPTH
+        )));
+    }
+
     let invocation = builder.next_loop_invocation(parent_loop_id);
     builder.emit(
         Some(&invocation),
@@ -1370,38 +1418,36 @@ fn emit_loop_block(
         }),
     );
 
-    if let Some(failure) = sandbox_runtime_failure(registry, policy, loop_block)? {
+    if let Some(failure) = sandbox_runtime_failure(context.registry, context.policy, loop_block)? {
         emit_runtime_failure(loop_block, &invocation, &failure, builder);
         return Ok(Some(failure));
     }
 
     for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
-        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
+        let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
         emit_phase(
-            workspace,
-            registry,
-            policy,
+            context.workspace,
+            context.registry,
+            context.policy,
             phase,
             &invocation,
-            side_effect_mode,
+            context.side_effect_mode,
             builder,
         )?;
 
         if index == 0 {
             for subloop_ref in &loop_block.subloop_refs {
-                let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
+                let subloop = context.registry.loop_block(subloop_ref).ok_or_else(|| {
                     RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
                 })?;
-                if let Some(failure) = emit_loop_block(
-                    workspace,
-                    registry,
-                    policy,
+                if let Some(failure) = emit_loop_block_at_depth(
+                    context,
                     subloop,
                     Some(invocation.loop_id.clone()),
-                    side_effect_mode,
                     builder,
+                    depth + 1,
                 )? {
                     emit_runtime_failure(loop_block, &invocation, &failure, builder);
                     return Ok(Some(failure));

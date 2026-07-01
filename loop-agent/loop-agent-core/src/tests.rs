@@ -676,6 +676,29 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
     ));
 
+    let deep_registry = loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH + 1);
+    let deep_policy = empty_policy_artifact("loop-000");
+    let deep_loop = deep_registry
+        .loop_block("loop-000")
+        .expect("deep loop exists");
+    assert!(matches!(
+        preflight_loop_tools(&deep_registry, &deep_policy, deep_loop),
+        Err(RuntimeError::Protocol(message))
+            if message == "loop nesting depth 65 for loop-064 exceeds max 64"
+    ));
+    assert!(matches!(
+        execute_loop(
+            Path::new("."),
+            &deep_registry,
+            &deep_policy,
+            deep_loop,
+            "deep001",
+            ToolSideEffectMode::DryRun,
+        ),
+        Err(RuntimeError::Protocol(message))
+            if message == "loop nesting depth 65 for loop-064 exceeds max 64"
+    ));
+
     let inspect_phase = registry
         .phase_block("inspect")
         .expect("inspect phase exists")
@@ -4192,6 +4215,64 @@ fn fixture_runtime_policy(
         .expect("linux runtime policy exists")
         .clone();
     (registry, policy)
+}
+
+fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
+    let loops = (0..depth)
+        .map(|index| {
+            let id = format!("loop-{index:03}");
+            (
+                id.clone(),
+                core_script::LoopBlock {
+                    identity: core_script::BlockIdentity {
+                        id,
+                        name: format!("Loop {index:03}"),
+                    },
+                    phase_refs: vec!["phase".to_owned()],
+                    subloop_refs: (index + 1 < depth)
+                        .then(|| format!("loop-{:03}", index + 1))
+                        .into_iter()
+                        .collect(),
+                    connection_refs: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    core_script::ResolvedRegistry {
+        connections: std::collections::BTreeMap::new(),
+        instructions: std::collections::BTreeMap::new(),
+        loops,
+        phases: [(
+            "phase".to_owned(),
+            core_script::PhaseBlock {
+                identity: core_script::BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                steps: Vec::new(),
+                tool_refs: Vec::new(),
+            },
+        )]
+        .into_iter()
+        .collect(),
+        tools: std::collections::BTreeMap::new(),
+    }
+}
+
+fn empty_policy_artifact(loop_id: &str) -> core_policy::PolicyArtifact {
+    core_policy::PolicyArtifact {
+        commands: Vec::new(),
+        fixture_name: loop_id.to_owned(),
+        phase_scope: Vec::new(),
+        policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
+        runtime_limits: core_policy::RuntimeLimits {
+            headless: true,
+            timeout_ms: 30_000,
+        },
+        source_loop_definition_id: loop_id.to_owned(),
+        target: core_policy::PolicyTarget::LinuxLandlockSeccomp,
+    }
 }
 
 fn fixture_size(fixture: &str) -> u64 {

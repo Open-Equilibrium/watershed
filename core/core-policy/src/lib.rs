@@ -143,7 +143,14 @@ pub enum PolicyCompileError {
     MissingLoop(String),
     MissingPhase(String),
     MissingTool(String),
-    NonEmptyNetworkAllowlist { tool_id: String },
+    LoopDepthExceeded {
+        loop_id: String,
+        depth: usize,
+        max: usize,
+    },
+    NonEmptyNetworkAllowlist {
+        tool_id: String,
+    },
     InvalidArtifact(PolicyArtifactValidationError),
 }
 
@@ -159,6 +166,14 @@ impl fmt::Display for PolicyCompileError {
             Self::MissingTool(reference) => {
                 write!(f, "policy compile references missing tool {reference}")
             }
+            Self::LoopDepthExceeded {
+                loop_id,
+                depth,
+                max,
+            } => write!(
+                f,
+                "policy compile loop nesting depth {depth} for {loop_id} exceeds max {max}"
+            ),
             Self::NonEmptyNetworkAllowlist { tool_id } => write!(
                 f,
                 "OS-enforced M1 policy for tool {tool_id} must use a deny-all network allowlist"
@@ -175,6 +190,7 @@ impl std::error::Error for PolicyCompileError {
             Self::MissingLoop(_)
             | Self::MissingPhase(_)
             | Self::MissingTool(_)
+            | Self::LoopDepthExceeded { .. }
             | Self::NonEmptyNetworkAllowlist { .. } => None,
         }
     }
@@ -216,6 +232,7 @@ pub fn compile_policy_artifact(
     collect_loop_policy_scope(
         registry,
         loop_block,
+        1,
         &mut phase_tools,
         &mut tool_ids,
         &mut visited_loops,
@@ -260,10 +277,18 @@ pub fn compile_policy_artifact(
 fn collect_loop_policy_scope(
     registry: &core_script::ResolvedRegistry,
     loop_block: &core_script::LoopBlock,
+    depth: usize,
     phase_tools: &mut BTreeMap<String, BTreeSet<String>>,
     tool_ids: &mut BTreeSet<String>,
     visited_loops: &mut BTreeSet<String>,
 ) -> Result<(), PolicyCompileError> {
+    if depth > core_script::MAX_LOOP_NESTING_DEPTH {
+        return Err(PolicyCompileError::LoopDepthExceeded {
+            loop_id: loop_block.identity.id.clone(),
+            depth,
+            max: core_script::MAX_LOOP_NESTING_DEPTH,
+        });
+    }
     if !visited_loops.insert(loop_block.identity.id.clone()) {
         return Ok(());
     }
@@ -286,7 +311,14 @@ fn collect_loop_policy_scope(
         let subloop = registry
             .loop_block(subloop_ref)
             .ok_or_else(|| PolicyCompileError::MissingLoop(subloop_ref.clone()))?;
-        collect_loop_policy_scope(registry, subloop, phase_tools, tool_ids, visited_loops)?;
+        collect_loop_policy_scope(
+            registry,
+            subloop,
+            depth + 1,
+            phase_tools,
+            tool_ids,
+            visited_loops,
+        )?;
     }
 
     Ok(())
@@ -2211,6 +2243,17 @@ mod tests {
             "policy compile references missing tool missing-tool"
         );
 
+        let depth = PolicyCompileError::LoopDepthExceeded {
+            loop_id: "loop-064".to_owned(),
+            depth: core_script::MAX_LOOP_NESTING_DEPTH + 1,
+            max: core_script::MAX_LOOP_NESTING_DEPTH,
+        };
+        assert_eq!(
+            depth.to_string(),
+            "policy compile loop nesting depth 65 for loop-064 exceeds max 64"
+        );
+        assert!(std::error::Error::source(&depth).is_none());
+
         let network = PolicyCompileError::NonEmptyNetworkAllowlist {
             tool_id: "network-tool".to_owned(),
         };
@@ -2228,6 +2271,36 @@ mod tests {
             "policy_version must be fixed string \"0\""
         );
         assert!(std::error::Error::source(&invalid).is_some());
+    }
+
+    #[test]
+    fn policy_compile_rejects_deep_loop_chains() {
+        compile_policy_artifact(
+            "max-depth",
+            &loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH),
+            "loop-000",
+            PolicyTarget::LinuxLandlockSeccomp,
+        )
+        .expect("max loop nesting depth is accepted");
+
+        let err = compile_policy_artifact(
+            "too-deep",
+            &loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH + 1),
+            "loop-000",
+            PolicyTarget::LinuxLandlockSeccomp,
+        )
+        .expect_err("loop nesting above the max is rejected");
+
+        assert!(matches!(
+            err,
+            PolicyCompileError::LoopDepthExceeded {
+                loop_id,
+                depth,
+                max,
+            } if loop_id == format!("loop-{:03}", core_script::MAX_LOOP_NESTING_DEPTH)
+                && depth == core_script::MAX_LOOP_NESTING_DEPTH + 1
+                && max == core_script::MAX_LOOP_NESTING_DEPTH
+        ));
     }
 
     #[test]
@@ -2700,6 +2773,36 @@ mod tests {
             },
             source_loop_definition_id: format!("{tool_id}-loop"),
             target: PolicyTarget::LinuxLandlockSeccomp,
+        }
+    }
+
+    fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
+        let loops = (0..depth)
+            .map(|index| {
+                let id = format!("loop-{index:03}");
+                (
+                    id.clone(),
+                    core_script::LoopBlock {
+                        identity: core_script::BlockIdentity {
+                            id,
+                            name: format!("Loop {index:03}"),
+                        },
+                        phase_refs: Vec::new(),
+                        subloop_refs: (index + 1 < depth)
+                            .then(|| format!("loop-{:03}", index + 1))
+                            .into_iter()
+                            .collect(),
+                        connection_refs: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        core_script::ResolvedRegistry {
+            connections: BTreeMap::new(),
+            instructions: BTreeMap::new(),
+            loops,
+            phases: BTreeMap::new(),
+            tools: BTreeMap::new(),
         }
     }
 

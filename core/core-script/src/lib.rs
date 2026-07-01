@@ -11,6 +11,7 @@ use unicode_normalization::UnicodeNormalization;
 
 pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
 pub const YAML_VERSION: &str = "1.2";
+pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockIdentity {
@@ -590,7 +591,7 @@ impl ResolvedRegistry {
         let mut visiting = BTreeSet::new();
         let mut visited = BTreeSet::new();
         for loop_id in self.loops.keys() {
-            self.visit_loop(loop_id, &mut visiting, &mut visited)?;
+            self.visit_loop(loop_id, 1, &mut visiting, &mut visited)?;
         }
         Ok(())
     }
@@ -598,9 +599,17 @@ impl ResolvedRegistry {
     fn visit_loop(
         &self,
         loop_id: &str,
+        depth: usize,
         visiting: &mut BTreeSet<String>,
         visited: &mut BTreeSet<String>,
     ) -> Result<(), RegistryError> {
+        if depth > MAX_LOOP_NESTING_DEPTH {
+            return Err(RegistryError::LoopDepthExceeded {
+                loop_id: loop_id.to_owned(),
+                depth,
+                max: MAX_LOOP_NESTING_DEPTH,
+            });
+        }
         if visited.contains(loop_id) {
             return Ok(());
         }
@@ -613,7 +622,7 @@ impl ResolvedRegistry {
         let loop_block = self.require_loop(loop_id, "loop", loop_id)?;
         for subloop_ref in &loop_block.subloop_refs {
             let subloop = self.require_loop(subloop_ref, "loop", loop_id)?;
-            self.visit_loop(&subloop.identity.id, visiting, visited)?;
+            self.visit_loop(&subloop.identity.id, depth + 1, visiting, visited)?;
         }
 
         visiting.remove(loop_id);
@@ -701,6 +710,11 @@ pub enum RegistryError {
     LoopCycle {
         loop_id: String,
     },
+    LoopDepthExceeded {
+        loop_id: String,
+        depth: usize,
+        max: usize,
+    },
     Semantic(SemanticValidationError),
     CanonicalJson(proto::CanonicalJsonError),
     Serialize(serde_json::Error),
@@ -732,6 +746,14 @@ impl fmt::Display for RegistryError {
                 "{from_kind} {from_id} references missing {reference_kind} {reference}"
             ),
             Self::LoopCycle { loop_id } => write!(f, "loop cycle includes {loop_id}"),
+            Self::LoopDepthExceeded {
+                loop_id,
+                depth,
+                max,
+            } => write!(
+                f,
+                "loop nesting depth {depth} for {loop_id} exceeds max {max}"
+            ),
             Self::Semantic(err) => write!(f, "{err}"),
             Self::CanonicalJson(err) => {
                 write!(f, "failed to serialize canonical registry JSON: {err}")
@@ -755,7 +777,8 @@ impl std::error::Error for RegistryError {
             | Self::DuplicateId { .. }
             | Self::AmbiguousReference { .. }
             | Self::MissingReference { .. }
-            | Self::LoopCycle { .. } => None,
+            | Self::LoopCycle { .. }
+            | Self::LoopDepthExceeded { .. } => None,
         }
     }
 }
@@ -4404,6 +4427,26 @@ tool:
     }
 
     #[test]
+    fn registry_reference_validation_rejects_deep_loop_chains() {
+        ResolvedRegistry::from_blocks(loop_chain_blocks(MAX_LOOP_NESTING_DEPTH))
+            .expect("max loop nesting depth is accepted");
+
+        let err = ResolvedRegistry::from_blocks(loop_chain_blocks(MAX_LOOP_NESTING_DEPTH + 1))
+            .expect_err("loop nesting above the max is rejected");
+
+        assert!(matches!(
+            err,
+            RegistryError::LoopDepthExceeded {
+                loop_id,
+                depth,
+                max,
+            } if loop_id == format!("loop-{MAX_LOOP_NESTING_DEPTH:03}")
+                && depth == MAX_LOOP_NESTING_DEPTH + 1
+                && max == MAX_LOOP_NESTING_DEPTH
+        ));
+    }
+
+    #[test]
     fn registry_rejects_ambiguous_same_kind_id_name_references() {
         let err = ResolvedRegistry::from_blocks([
             RegistryBlock::Instruction(InstructionBlock {
@@ -5551,6 +5594,27 @@ tool:
             script_runtime: Some(ScriptRuntime::PosixSh),
             tool_kind: ToolKind::OwnScript,
             write_scope: Vec::new(),
+        }
+    }
+
+    fn loop_chain_blocks(depth: usize) -> Vec<RegistryBlock> {
+        (0..depth)
+            .map(|index| RegistryBlock::Loop(loop_chain_block(index, depth)))
+            .collect()
+    }
+
+    fn loop_chain_block(index: usize, depth: usize) -> LoopBlock {
+        LoopBlock {
+            identity: BlockIdentity {
+                id: format!("loop-{index:03}"),
+                name: format!("Loop {index:03}"),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: (index + 1 < depth)
+                .then(|| format!("loop-{:03}", index + 1))
+                .into_iter()
+                .collect(),
+            connection_refs: Vec::new(),
         }
     }
 
