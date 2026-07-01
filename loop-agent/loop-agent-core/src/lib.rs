@@ -14,6 +14,8 @@ use std::{
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
 pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
+const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 20;
+const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
 const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
     TrustedPredefinedCommand {
         command_id: "agent-echo",
@@ -277,7 +279,7 @@ pub fn tail_session_to_writer(
 
     while !stream_is_failed(&events) && !stream_is_completed(&events) {
         thread::sleep(Duration::from_millis(25));
-        let current_len = session_log_len(&path)?;
+        let current_len = tail_session_log_len(&path)?;
         if current_len < observed_len {
             return Err(RuntimeError::Protocol(format!(
                 "{} changed outside append-only tail semantics",
@@ -287,7 +289,7 @@ pub fn tail_session_to_writer(
         if current_len == observed_len {
             continue;
         }
-        let suffix = read_file_suffix_to_string(&path, observed_len, current_len)?;
+        let suffix = read_tail_file_suffix_to_string(&path, observed_len, current_len)?;
         observed_len = current_len;
         pending.push_str(&suffix);
         if !pending.ends_with('\n') {
@@ -3054,6 +3056,10 @@ fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
     })
 }
 
+fn tail_session_log_len(path: &Path) -> Result<usize, RuntimeError> {
+    retry_tail_transient_read_error(|| session_log_len(path))
+}
+
 fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
     let bytes = read_file_range(path, 0, max_bytes)?;
     String::from_utf8(bytes).map_err(|source| {
@@ -3081,6 +3087,42 @@ fn read_file_suffix_to_string(
     String::from_utf8(bytes).map_err(|source| {
         RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
     })
+}
+
+fn read_tail_file_suffix_to_string(
+    path: &Path,
+    offset: usize,
+    expected_len: usize,
+) -> Result<String, RuntimeError> {
+    retry_tail_transient_read_error(|| read_file_suffix_to_string(path, offset, expected_len))
+}
+
+fn retry_tail_transient_read_error<T>(
+    mut operation: impl FnMut() -> Result<T, RuntimeError>,
+) -> Result<T, RuntimeError> {
+    for attempt in 0..=TAIL_TRANSIENT_READ_RETRY_ATTEMPTS {
+        match operation() {
+            Err(err)
+                if runtime_error_is_transient_tail_read(&err)
+                    && attempt < TAIL_TRANSIENT_READ_RETRY_ATTEMPTS =>
+            {
+                thread::sleep(Duration::from_millis(TAIL_TRANSIENT_READ_RETRY_MS));
+            }
+            result => return result,
+        }
+    }
+    unreachable!("tail transient retry loop always returns")
+}
+
+fn runtime_error_is_transient_tail_read(err: &RuntimeError) -> bool {
+    matches!(
+        err,
+        RuntimeError::Io { source, .. }
+            if matches!(
+                source.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+            )
+    )
 }
 
 fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {

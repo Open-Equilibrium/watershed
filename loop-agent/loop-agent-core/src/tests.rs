@@ -2317,6 +2317,78 @@ fn tail_session_buffers_partial_appended_line_until_lf() {
 }
 
 #[test]
+fn tail_session_tolerates_transient_append_replacement_gap() {
+    let workspace = empty_workspace("tail-transient-replacement");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailreplace001.jsonl");
+    let started = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "tailreplace001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+    .canonical_jsonl()
+    .expect("started event serializes");
+    let completed = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionCompleted,
+        "tailreplace001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    )
+    .canonical_jsonl()
+    .expect("completed event serializes");
+    fs::write(&path, &started).expect("initial session log written");
+
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let mut writer = NotifyingWriter {
+        bytes: Arc::clone(&bytes),
+        first_write: Some(tx),
+    };
+    let tail_workspace = workspace.clone();
+    let handle = thread::spawn(move || {
+        tail_session_to_writer(
+            &tail_workspace,
+            "tailreplace001",
+            EmitMode::Jsonl,
+            &mut writer,
+        )
+    });
+
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("tail writes current prefix before append");
+    let temp_path = session_dir.join("tailreplace001.tmp");
+    let replacement_path = path.clone();
+    let replacement = format!("{started}{completed}");
+    fs::write(&temp_path, replacement).expect("replacement temp written");
+    fs::remove_file(&path).expect("session log temporarily removed");
+    let replacer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(50));
+        fs::rename(&temp_path, &replacement_path).expect("session log restored with append");
+    });
+
+    let output = handle
+        .join()
+        .expect("tail thread joins")
+        .expect("tail succeeds after transient replacement gap");
+    replacer.join().expect("replacement thread joins");
+    assert_eq!(output.event_count, 2);
+    assert!(!output.failed);
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail stream is utf8"),
+        format!("{started}{completed}")
+    );
+}
+
+#[test]
 fn tail_session_buffers_initial_partial_line_until_lf() {
     let workspace = empty_workspace("tail-initial-partial-line");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
