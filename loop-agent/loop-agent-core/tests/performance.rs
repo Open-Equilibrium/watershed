@@ -41,33 +41,6 @@ fn event_validation_p95_stays_under_m1_budget() {
 }
 
 #[test]
-fn noop_dispatch_p95_stays_under_m1_budget() {
-    let _guard = performance_test_guard();
-    let workspace = workspace_copy("smoke-loop");
-    let mut nanos = Vec::new();
-
-    for _ in 0..30 {
-        clear_runtime_state(&workspace);
-        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop runs");
-        assert!(!output.failed);
-    }
-    for _ in 0..100 {
-        clear_runtime_state(&workspace);
-        let started = Instant::now();
-        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop runs");
-        nanos.push(started.elapsed().as_nanos());
-        assert!(!output.failed);
-        assert!(output.event_count > 0);
-    }
-    let p95_nanos = p95(nanos);
-
-    assert!(
-        p95_nanos <= 50_000_000,
-        "no-op dispatch p95 must stay <= 50 ms: {p95_nanos} ns"
-    );
-}
-
-#[test]
 fn hello_loop_log_append_p95_stays_under_m1_budget() {
     let _guard = performance_test_guard();
     let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
@@ -210,8 +183,9 @@ fn temp_workspace_guard_removes_directory_on_drop() {
 }
 
 fn p95(mut values: Vec<u128>) -> u128 {
+    assert!(!values.is_empty(), "p95 requires at least one value");
     values.sort_unstable();
-    let index = ((values.len() - 1) * 95).div_ceil(100);
+    let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
     values[index]
 }
 

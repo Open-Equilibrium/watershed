@@ -14,7 +14,7 @@ use std::{
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
 pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
-const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 20;
+const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
 const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
 const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
     TrustedPredefinedCommand {
@@ -258,7 +258,11 @@ pub fn tail_session_to_writer(
     ensure_existing_session_log_path(workspace, &path)?;
     let initial = read_session_log_to_string(&path)?;
     let mut stream = complete_jsonl_prefix(&initial).to_owned();
-    let mut events = validate_session_log_text(&path, session_id, &stream)?;
+    let mut events = if stream.is_empty() {
+        Vec::new()
+    } else {
+        validate_session_log_text(&path, session_id, &stream)?
+    };
     let mut pending = initial[stream.len()..].to_owned();
     let mut observed_len = initial.len();
     if initial.len() > stream.len() && (stream_is_failed(&events) || stream_is_completed(&events)) {
@@ -267,7 +271,9 @@ pub fn tail_session_to_writer(
             path.display()
         )));
     }
-    if !write_tail_chunk(writer, emit, session_id, &stream)? {
+    if (!stream.is_empty() || emit == EmitMode::Jsonl)
+        && !write_tail_chunk(writer, emit, session_id, &stream)?
+    {
         return Ok(RunOutput {
             event_count: events.len(),
             failed: stream_is_failed(&events),
@@ -334,7 +340,7 @@ pub fn tail_session_to_writer(
 
 fn complete_jsonl_prefix(text: &str) -> &str {
     text.rfind('\n')
-        .map_or(text, |newline_index| &text[..=newline_index])
+        .map_or("", |newline_index| &text[..=newline_index])
 }
 
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {

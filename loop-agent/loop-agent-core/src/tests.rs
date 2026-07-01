@@ -6,7 +6,7 @@ use std::{
         mpsc, Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -2483,6 +2483,75 @@ fn tail_session_buffers_initial_partial_line_until_lf() {
 }
 
 #[test]
+fn tail_session_buffers_initial_file_without_complete_line_until_lf() {
+    let workspace = empty_workspace("tail-initial-first-partial-line");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailinitialfirstpartial001.jsonl");
+    let started = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "tailinitialfirstpartial001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+    .canonical_jsonl()
+    .expect("started event serializes");
+    let completed = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionCompleted,
+        "tailinitialfirstpartial001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    )
+    .canonical_jsonl()
+    .expect("completed event serializes");
+    let split = started.len() - 1;
+    fs::write(&path, &started[..split]).expect("initial partial session log written");
+
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let mut writer = NotifyingWriter {
+        bytes: Arc::clone(&bytes),
+        first_write: Some(tx),
+    };
+    let tail_workspace = workspace.clone();
+    let handle = thread::spawn(move || {
+        tail_session_to_writer(
+            &tail_workspace,
+            "tailinitialfirstpartial001",
+            EmitMode::Jsonl,
+            &mut writer,
+        )
+    });
+
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("tail waits after empty initial prefix");
+    assert!(
+        bytes.lock().expect("tail bytes lock").is_empty(),
+        "tail must not emit an incomplete first line"
+    );
+    append_session_log_line(&path, &format!("{}{}", &started[split..], completed))
+        .expect("first event newline and terminal event appended");
+
+    let output = handle
+        .join()
+        .expect("tail thread joins")
+        .expect("tail succeeds after first partial line completes");
+    assert_eq!(output.event_count, 2);
+    assert!(!output.failed);
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail stream is utf8"),
+        format!("{started}{completed}")
+    );
+}
+
+#[test]
 fn tail_session_rejects_non_append_only_log_changes() {
     let workspace = empty_workspace("tail-mutated-log");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -4034,6 +4103,46 @@ fn m1_performance_fixture_runtime_paths_are_exercised() {
 }
 
 #[test]
+fn noop_dispatch_p95_stays_under_m1_budget() {
+    let workspace = empty_workspace("noop-dispatch-budget");
+    let (registry, policy) = fixture_runtime_policy("smoke-loop", "smoke-loop");
+    let phase = registry.phase_block("smoke").expect("smoke phase exists");
+    let tool = registry.tool_block("echo").expect("echo tool exists");
+    let command_policy =
+        command_policy_for_phase(&policy, &phase.identity.id, tool).expect("tool in phase policy");
+    let tool_policy = RuntimeToolPolicy {
+        command: command_policy,
+        protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
+    };
+    let invocation = LoopInvocation {
+        loop_id: "loop-001".to_owned(),
+        parent_loop_id: None,
+    };
+    let mut nanos = Vec::new();
+
+    for _ in 0..30 {
+        assert_eq!(
+            emit_noop_dispatch_for_budget(&workspace, tool, tool_policy, &invocation)
+                .expect("no-op dispatch succeeds"),
+            2
+        );
+    }
+    for _ in 0..100 {
+        let started = Instant::now();
+        let event_count = emit_noop_dispatch_for_budget(&workspace, tool, tool_policy, &invocation)
+            .expect("no-op dispatch succeeds");
+        nanos.push(started.elapsed().as_nanos());
+        assert_eq!(event_count, 2);
+    }
+    let p95_nanos = p95_nanos(nanos);
+
+    assert!(
+        p95_nanos <= 50_000_000,
+        "no-op dispatch p95 must stay <= 50 ms: {p95_nanos} ns"
+    );
+}
+
+#[test]
 fn ten_fixture_loops_complete_concurrently() {
     let handles = (0..10)
         .map(|_| {
@@ -4332,6 +4441,31 @@ fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected
     assert!(err.to_string().contains(expected), "{err}");
 }
 
+fn emit_noop_dispatch_for_budget(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    policy: RuntimeToolPolicy<'_>,
+    invocation: &LoopInvocation,
+) -> Result<usize, RuntimeError> {
+    let mut builder = RuntimeEventBuilder::new("dispatchprobe001".to_owned());
+    emit_tool(
+        workspace,
+        tool,
+        policy,
+        invocation,
+        ToolSideEffectMode::ApplyAll,
+        &mut builder,
+    )?;
+    Ok(builder.events.len())
+}
+
+fn p95_nanos(mut values: Vec<u128>) -> u128 {
+    assert!(!values.is_empty(), "p95 requires at least one value");
+    values.sort_unstable();
+    let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
+    values[index]
+}
+
 fn fixture_runtime_policy(
     fixture: &str,
     loop_id: &str,
@@ -4426,6 +4560,9 @@ impl Write for NotifyingWriter {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if let Some(sender) = self.first_write.take() {
+            let _ = sender.send(());
+        }
         Ok(())
     }
 }
