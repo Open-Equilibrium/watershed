@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
+use std::io::{self, Read};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
@@ -1052,11 +1053,19 @@ pub fn canonical_resolved_registry_json(
 }
 
 fn read_registry_file_to_string(path: &Path, max_bytes: u64) -> Result<String, RegistryError> {
-    let source = fs::read_to_string(path).map_err(|source| RegistryError::Io {
+    let file = fs::File::open(path).map_err(|source| RegistryError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let source_len = u64::try_from(source.len()).unwrap_or(u64::MAX);
+    let mut bytes = Vec::new();
+    let mut reader = file.take(max_bytes.saturating_add(1));
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|source| RegistryError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let source_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if source_len > max_bytes {
         return Err(RegistryError::ReadLimitExceeded {
             path: path.to_path_buf(),
@@ -1064,7 +1073,10 @@ fn read_registry_file_to_string(path: &Path, max_bytes: u64) -> Result<String, R
             max: max_bytes,
         });
     }
-    Ok(source)
+    String::from_utf8(bytes).map_err(|source| RegistryError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::new(io::ErrorKind::InvalidData, source),
+    })
 }
 
 struct RegistryFile {
@@ -3307,6 +3319,27 @@ mod tests {
                 bytes,
                 max: 16,
             } if path.ends_with("instruction.yaml") && bytes > 16
+        ));
+    }
+
+    #[test]
+    fn registry_file_reader_enforces_limit_before_utf8_decoding() {
+        let root = temp_registry_dir("registry-bounded-file-read");
+        let path = root.join("instruction.yaml");
+        let mut source = vec![b'a'; 17];
+        source.push(0xff);
+        std::fs::write(&path, source).expect("registry file written");
+
+        let err = read_registry_file_to_string(&path, 16)
+            .expect_err("oversized registry file is rejected before decoding trailing bytes");
+
+        assert!(matches!(
+            err,
+            RegistryError::ReadLimitExceeded {
+                path: error_path,
+                bytes: 17,
+                max: 16,
+            } if error_path == path
         ));
     }
 
