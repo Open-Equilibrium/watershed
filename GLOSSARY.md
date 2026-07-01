@@ -57,7 +57,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Transcript** — The ordered record of a session's messages and runtime events; persisted to the local session store and reconstructable by replay.
 - **Runtime event** — One normalized event Loop Agent emits over its public contract (see `PROTOCOL.md`); the same events feed JSONL mode, future RPC mode and the session store.
 - **JSONL event stream** — Loop Agent's headless mode that streams newline-delimited JSON runtime events to stdout for automation/CI/consumers.
-- **RPC mode** — Loop Agent's designed-for bidirectional stdin/stdout control mode. D-019 decides the command/request shape; runtime events remain the public event contract.
+- **RPC mode** — Loop Agent's designed-for bidirectional stdin/stdout control mode. ADR-0055 selects the initial command/request shape; runtime events remain the public event contract.
 - **Session store** — Loop Agent's local append-only transcript persistence (e.g. `.loop/sessions/<session_id>.jsonl`). Runtime state only; **not** a project VCS/history engine.
 - **Loop registry** — The name/id index used by `loop run <name>` and interactive slash commands such as `/hello-loop` inside `loop chat` to resolve a loop definition without requiring a path.
 - **Fixture workspace** — A checked-in test workspace for a golden loop; D-047 decides how it points Loop Agent at the fixture registry and deterministic stub-model profile.
