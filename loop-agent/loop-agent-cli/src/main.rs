@@ -109,6 +109,9 @@ fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
             "/hello-loop" | "hello" => {
                 let output = loop_agent_core::run_loop(&workspace, "hello-loop", EmitMode::Jsonl)?;
                 write_stdout(&output.stdout)?;
+                if output.failed {
+                    process::exit(65);
+                }
                 return Ok(());
             }
             "" => {}

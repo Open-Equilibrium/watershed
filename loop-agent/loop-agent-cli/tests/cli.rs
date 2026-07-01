@@ -420,6 +420,39 @@ fn chat_hello_command_runs_hello_loop() {
 }
 
 #[test]
+fn chat_failed_loop_exits_with_failed_status() {
+    let workspace = workspace_copy("sandbox-negative");
+    fs::write(
+        workspace.join("registry/loops/hello-loop.yaml"),
+        "loop:\n  id: hello-loop\n  name: HelloLoop\n  phase_refs: [negative-write]\n  subloop_refs: []\n  connection_refs: []\n",
+    )
+    .expect("chat loop fixture written");
+    let mut child = loop_command()
+        .current_dir(&workspace)
+        .arg("chat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+
+    {
+        use std::io::Write;
+        let stdin = child.stdin.as_mut().expect("stdin is piped");
+        stdin.write_all(b"/hello-loop\n").expect("stdin write");
+    }
+
+    let output = child.wait_with_output().expect("loop binary should exit");
+
+    assert_eq!(output.status.code(), Some(65));
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    assert!(stdout.contains("\"loop_definition_id\":\"hello-loop\""));
+    assert!(stdout.contains("\"event_type\":\"session.failed\""));
+    assert!(!workspace.join("out/forbidden.txt").exists());
+}
+
+#[test]
 fn chat_ignores_blank_input_until_eof() {
     let workspace = workspace_copy("hello-loop");
     let mut child = loop_command()
