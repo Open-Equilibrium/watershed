@@ -243,7 +243,7 @@ pub fn compile_policy_artifact(
         let tool = registry
             .tool_block(&tool_id)
             .ok_or_else(|| PolicyCompileError::MissingTool(tool_id.clone()))?;
-        commands.push(command_policy_from_tool(tool)?);
+        commands.push(command_policy_from_tool(tool, &target)?);
     }
 
     let artifact = PolicyArtifact {
@@ -326,6 +326,7 @@ fn collect_loop_policy_scope(
 
 fn command_policy_from_tool(
     tool: &core_script::ToolBlock,
+    target: &PolicyTarget,
 ) -> Result<CommandPolicy, PolicyCompileError> {
     let (command_id, argv, executable, script_runtime) = match (&tool.tool_kind, &tool.command) {
         (
@@ -366,13 +367,13 @@ fn command_policy_from_tool(
             default: NetworkDefault::Deny,
         },
         core_script::NetworkPolicy::Declared { allow, .. } => {
-            if !allow.is_empty() {
+            if matches!(target, PolicyTarget::LinuxLandlockSeccomp) && !allow.is_empty() {
                 return Err(PolicyCompileError::NonEmptyNetworkAllowlist {
                     tool_id: tool.identity.id.clone(),
                 });
             }
             NetworkPolicy {
-                allow: Vec::new(),
+                allow: allow.iter().map(network_allow_entry_from_tool).collect(),
                 default: NetworkDefault::Deny,
             }
         }
@@ -408,6 +409,20 @@ fn command_policy_from_tool(
             core_script::ToolKind::OwnScript => ToolKind::OwnScript,
         },
     })
+}
+
+fn network_allow_entry_from_tool(entry: &core_script::NetworkAllowEntry) -> NetworkAllowEntry {
+    NetworkAllowEntry {
+        cidr: entry.cidr.clone(),
+        kind: match &entry.kind {
+            core_script::NetworkAllowKind::Cidr => NetworkAllowKind::Cidr,
+        },
+        port: entry.port,
+        transport: match &entry.transport {
+            core_script::NetworkTransport::Tcp => NetworkTransport::Tcp,
+            core_script::NetworkTransport::Udp => NetworkTransport::Udp,
+        },
+    }
 }
 
 fn trusted_predefined_command_executable(command_id: &str) -> Option<String> {
@@ -1535,6 +1550,45 @@ mod tests {
             err,
             PolicyCompileError::NonEmptyNetworkAllowlist { .. }
         ));
+    }
+
+    #[test]
+    fn policy_compiler_preserves_macos_network_allowlists() {
+        let mut registry = core_script::load_registry_root(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../loop-agent/fixtures/smoke-loop/registry"),
+        )
+        .expect("smoke-loop registry loads");
+        registry.tools.get_mut("echo").expect("echo tool").network =
+            core_script::NetworkPolicy::Declared {
+                default: core_script::NetworkDefault::Deny,
+                allow: vec![core_script::NetworkAllowEntry {
+                    kind: core_script::NetworkAllowKind::Cidr,
+                    transport: core_script::NetworkTransport::Tcp,
+                    cidr: "192.0.2.0/24".to_owned(),
+                    port: 443,
+                }],
+            };
+
+        let artifact = compile_policy_artifact(
+            "smoke-loop",
+            &registry,
+            "smoke-loop",
+            PolicyTarget::MacosSeatbelt,
+        )
+        .expect("macOS policy artifacts may carry reviewed CIDR allowlists");
+
+        assert_eq!(artifact.target, PolicyTarget::MacosSeatbelt);
+        assert_eq!(artifact.commands[0].network.default, NetworkDefault::Deny);
+        assert_eq!(
+            artifact.commands[0].network.allow,
+            vec![NetworkAllowEntry {
+                cidr: "192.0.2.0/24".to_owned(),
+                kind: NetworkAllowKind::Cidr,
+                port: 443,
+                transport: NetworkTransport::Tcp,
+            }]
+        );
     }
 
     #[test]

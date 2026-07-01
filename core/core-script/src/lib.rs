@@ -659,6 +659,15 @@ fn insert_named_block<T>(
     block: T,
 ) -> Result<(), RegistryError> {
     let names_for_kind = names.entry(kind).or_default();
+    if !is_valid_block_id(&identity.id) {
+        return Err(RegistryError::InvalidBlockId(identity.id));
+    }
+    if identity.name.is_empty() {
+        return Err(RegistryError::InvalidBlockName {
+            kind,
+            id: identity.id,
+        });
+    }
     if blocks.contains_key(&identity.id) {
         return Err(RegistryError::DuplicateId {
             kind,
@@ -713,6 +722,10 @@ pub enum RegistryError {
         max: u64,
     },
     InvalidBlockId(String),
+    InvalidBlockName {
+        kind: &'static str,
+        id: String,
+    },
     InvalidCommandId(String),
     Parse {
         source_name: String,
@@ -756,6 +769,9 @@ impl fmt::Display for RegistryError {
                 path.display()
             ),
             Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
+            Self::InvalidBlockName { kind, id } => {
+                write!(f, "{kind} {id} name must be non-empty")
+            }
             Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
             Self::Parse {
                 source_name,
@@ -803,6 +819,7 @@ impl std::error::Error for RegistryError {
             Self::UnsafePath { .. }
             | Self::ReadLimitExceeded { .. }
             | Self::InvalidBlockId(_)
+            | Self::InvalidBlockName { .. }
             | Self::InvalidCommandId(_)
             | Self::Parse { .. }
             | Self::DuplicateId { .. }
@@ -4670,6 +4687,40 @@ tool:
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn registry_rejects_programmatic_invalid_identity_ids() {
+        let err = ResolvedRegistry::from_blocks([RegistryBlock::Instruction(InstructionBlock {
+            identity: BlockIdentity {
+                id: "../bad".to_owned(),
+                name: "Bad".to_owned(),
+            },
+            prompt: "Inspect".to_owned(),
+        })])
+        .expect_err("programmatic block ids must follow registry id rules");
+
+        assert!(matches!(
+            err,
+            RegistryError::InvalidBlockId(id) if id == "../bad"
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_programmatic_empty_identity_names() {
+        let err = ResolvedRegistry::from_blocks([RegistryBlock::Instruction(InstructionBlock {
+            identity: BlockIdentity {
+                id: "empty-name".to_owned(),
+                name: String::new(),
+            },
+            prompt: "Inspect".to_owned(),
+        })])
+        .expect_err("programmatic block names must be non-empty");
+
+        assert_eq!(
+            err.to_string(),
+            "instruction empty-name name must be non-empty"
+        );
     }
 
     #[test]
