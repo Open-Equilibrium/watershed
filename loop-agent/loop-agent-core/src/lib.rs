@@ -183,6 +183,31 @@ pub fn run_loop(
         reservation.rollback();
         return Err(err);
     }
+    let planned_runtime = match execute_loop(
+        workspace,
+        &registry,
+        policy,
+        loop_block,
+        &expected_session_id,
+        ToolSideEffectMode::DryRun,
+    ) {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            reservation.rollback();
+            return Err(err);
+        }
+    };
+    let (planned_stream, planned_events) = match preflight_session_completion_stream(
+        &reservation,
+        &expected_session_id,
+        &planned_runtime.events,
+    ) {
+        Ok(planned) => planned,
+        Err(err) => {
+            reservation.rollback();
+            return Err(err);
+        }
+    };
     let runtime = match execute_loop(
         workspace,
         &registry,
@@ -199,24 +224,32 @@ pub fn run_loop(
     };
 
     let result = (|| {
-        let stream = canonical_event_stream(&runtime.events)?;
-        let events =
-            validate_session_log_text(Path::new("runtime.jsonl"), &expected_session_id, &stream)?;
-        let session_id = events
+        if runtime.events != planned_runtime.events {
+            return Err(RuntimeError::Protocol(format!(
+                "{} runtime did not match deterministic replay",
+                reservation.session_path.display()
+            )));
+        }
+        let session_id = planned_events
             .first()
             .expect("validated streams contain at least one event")
             .session_id
             .clone();
         let failed = runtime.failed;
-        complete_reserved_session_log(&reservation, &session_id, &stream, events.len())?;
+        complete_reserved_session_log(
+            &reservation,
+            &session_id,
+            &planned_stream,
+            planned_events.len(),
+        )?;
 
         Ok(RunOutput {
-            event_count: events.len(),
+            event_count: planned_events.len(),
             failed,
             session_id,
             session_path: reservation.session_path.clone(),
             stdout: match emit {
-                EmitMode::Jsonl => stream,
+                EmitMode::Jsonl => planned_stream,
                 EmitMode::Human if failed => format!("loop {} failed\n", loop_block.identity.id),
                 EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
             },
@@ -911,19 +944,34 @@ fn write_initial_session_log(
     write_existing_file(&reservation.session_path, stream.as_bytes())
 }
 
+fn preflight_session_completion_stream(
+    reservation: &SessionReservation,
+    expected_session_id: &str,
+    events: &[EventEnvelope],
+) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
+    let stream = canonical_event_stream(events)?;
+    let validated_events =
+        validate_session_log_text(Path::new("runtime.jsonl"), expected_session_id, &stream)?;
+    preflight_complete_reserved_session_log(reservation, &stream)?;
+    Ok((stream, validated_events))
+}
+
+fn preflight_complete_reserved_session_log(
+    reservation: &SessionReservation,
+    stream: &str,
+) -> Result<(), RuntimeError> {
+    let append_bytes = session_completion_append_bytes(stream)?;
+    ensure_session_log_growth_within_limit(&reservation.session_path, append_bytes.len())
+}
+
 fn complete_reserved_session_log(
     reservation: &SessionReservation,
     session_id: &str,
     stream: &str,
     event_count: usize,
 ) -> Result<(), RuntimeError> {
-    let first_line_end = stream.find('\n').ok_or_else(|| {
-        RuntimeError::Protocol("validated runtime stream must contain an initial event".to_owned())
-    })?;
-    let append_result = append_existing_file(
-        &reservation.session_path,
-        &stream.as_bytes()[first_line_end + 1..],
-    );
+    let append_bytes = session_completion_append_bytes(stream)?;
+    let append_result = append_session_log_bytes(&reservation.session_path, append_bytes);
     let metadata_result = if append_result.is_ok() {
         write_existing_file(
             &reservation.log_path,
@@ -936,6 +984,13 @@ fn complete_reserved_session_log(
     append_result?;
     metadata_result?;
     release_result
+}
+
+fn session_completion_append_bytes(stream: &str) -> Result<&[u8], RuntimeError> {
+    let first_line_end = stream.find('\n').ok_or_else(|| {
+        RuntimeError::Protocol("validated runtime stream must contain an initial event".to_owned())
+    })?;
+    Ok(&stream.as_bytes()[first_line_end + 1..])
 }
 
 fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {

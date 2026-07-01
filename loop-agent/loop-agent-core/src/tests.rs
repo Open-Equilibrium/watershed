@@ -1526,6 +1526,40 @@ fn completed_session_log_append_keeps_audit_when_log_update_fails() {
     reservation.rollback();
 }
 
+#[test]
+fn completed_session_log_append_rejects_streams_above_size_limit() {
+    let workspace = empty_workspace("session-completion-size-limit");
+    let reservation = reserve_session_log(&workspace, "limit001").expect("reservation succeeds");
+    write_initial_session_log(&reservation, "limit001").expect("initial session log writes");
+    let initial = fs::read_to_string(&reservation.session_path).expect("initial log readable");
+    let completed = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionCompleted,
+        "limit001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({"padding":"x".repeat(MAX_SESSION_LOG_BYTES as usize)}),
+    )
+    .canonical_jsonl()
+    .expect("completed event serializes");
+    let stream = format!("{initial}{completed}");
+
+    let err = complete_reserved_session_log(&reservation, "limit001", &stream, 2)
+        .expect_err("oversized completion must fail before append");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message)
+            if message.contains("session log size") && message.contains("exceeds max")
+    ));
+    assert_eq!(
+        fs::read_to_string(&reservation.session_path).expect("initial log remains readable"),
+        initial
+    );
+    reservation.rollback();
+}
+
 #[cfg(unix)]
 #[test]
 fn write_existing_file_rejects_hardlinked_leaf_without_truncating_target() {
