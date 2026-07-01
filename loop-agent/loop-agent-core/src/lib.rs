@@ -2358,9 +2358,38 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
                 "own-script write target {target:?} must not use a Windows path alias"
             )));
         }
+        if is_windows_reserved_device_component(part) {
+            return Err(RuntimeError::Protocol(format!(
+                "own-script write target {target:?} must not use a Windows path alias"
+            )));
+        }
         parts.push(part);
     }
     Ok(parts.join("/"))
+}
+
+fn is_windows_reserved_device_component(part: &str) -> bool {
+    let basename = part.split_once('.').map_or(part, |(basename, _)| basename);
+    matches!(
+        basename.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+    ) || matches!(
+        basename.as_bytes(),
+        [first, second, third, digit]
+            if first.eq_ignore_ascii_case(&b'C')
+                && second.eq_ignore_ascii_case(&b'O')
+                && third.eq_ignore_ascii_case(&b'M')
+                && *digit >= b'1'
+                && *digit <= b'9'
+    ) || matches!(
+        basename.as_bytes(),
+        [first, second, third, digit]
+            if first.eq_ignore_ascii_case(&b'L')
+                && second.eq_ignore_ascii_case(&b'P')
+                && third.eq_ignore_ascii_case(&b'T')
+                && *digit >= b'1'
+                && *digit <= b'9'
+    )
 }
 
 fn protected_path_pattern_matches(

@@ -380,7 +380,15 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
             Err(RuntimeError::Protocol(message)) if message.contains("inside the workspace")
         ));
     }
-    for target in [".ssh./id_rsa", "out./summary.txt", "out/summary.txt."] {
+    for target in [
+        ".ssh./id_rsa",
+        "NUL",
+        "out./summary.txt",
+        "out/COM1",
+        "out/lPt9.log",
+        "out/nul.txt",
+        "out/summary.txt.",
+    ] {
         assert!(matches!(
             normalize_script_write_target(target),
             Err(RuntimeError::Protocol(message)) if message.contains("Windows path alias")
