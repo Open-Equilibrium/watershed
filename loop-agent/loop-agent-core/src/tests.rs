@@ -648,6 +648,7 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
 
 #[test]
 fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
+    let workspace = empty_workspace("mutated-preflight");
     let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
     let loop_block = registry
         .loop_block("hello-loop")
@@ -657,7 +658,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     let mut missing_phase = registry.clone();
     missing_phase.phases.remove("inspect");
     assert!(matches!(
-        preflight_loop_tools(&missing_phase, &policy, &loop_block),
+        preflight_loop_tools(&workspace, &missing_phase, &policy, &loop_block),
         Err(RuntimeError::Protocol(message)) if message.contains("missing phase")
     ));
     assert!(matches!(
@@ -675,7 +676,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     let mut missing_subloop = registry.clone();
     missing_subloop.loops.remove("hello-subloop");
     assert!(matches!(
-        preflight_loop_tools(&missing_subloop, &policy, &loop_block),
+        preflight_loop_tools(&workspace, &missing_subloop, &policy, &loop_block),
         Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
     ));
     assert!(matches!(
@@ -696,7 +697,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         .loop_block("loop-000")
         .expect("deep loop exists");
     assert!(matches!(
-        preflight_loop_tools(&deep_registry, &deep_policy, deep_loop),
+        preflight_loop_tools(&workspace, &deep_registry, &deep_policy, deep_loop),
         Err(RuntimeError::Protocol(message))
             if message == "loop nesting depth 65 for loop-064 exceeds max 64"
     ));
@@ -720,7 +721,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     let mut missing_tool = registry.clone();
     missing_tool.tools.remove("read-file");
     assert!(matches!(
-        preflight_phase_tools(&missing_tool, &policy, &inspect_phase),
+        preflight_phase_tools(&workspace, &missing_tool, &policy, &inspect_phase),
         Err(RuntimeError::Protocol(message)) if message.contains("missing tool")
     ));
 
@@ -973,6 +974,62 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
+    assert!(!workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("hello001.jsonl")
+        .exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+}
+
+#[test]
+fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
+    let workspace = workspace_copy("hello-loop");
+    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+    fs::write(
+        &tool_path,
+        source.replace(
+            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+            "printf 'partial\\n' > out/partial.txt",
+        ),
+    )
+    .expect("first tool fixture rewritten");
+    fs::write(
+        workspace.join("registry/tools/bad-write.yaml"),
+        r#"tool:
+  id: bad-write
+  name: BadWrite
+  tool_kind: own-script
+  command: script:bad-write
+  script_runtime: posix-sh
+  script_body: |
+    printf 'later\n' > out/summary.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+    )
+    .expect("bad tool fixture written");
+    let phase_path = workspace.join("registry/phases/summarize.yaml");
+    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+    fs::write(
+        &phase_path,
+        source.replace(
+            "tool_refs: [write-summary]",
+            "tool_refs: [write-summary, bad-write]",
+        ),
+    )
+    .expect("phase fixture rewritten");
+    fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
+
+    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect_err("later invalid own-script path must reject before earlier write");
+
+    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
+    assert!(!workspace.join("out/partial.txt").exists());
     assert!(!workspace
         .join(LOCAL_SESSION_DIR)
         .join("hello001.jsonl")

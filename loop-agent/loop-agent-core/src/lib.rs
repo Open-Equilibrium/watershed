@@ -174,7 +174,7 @@ pub fn run_loop(
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
     let policy = runtime_policy_artifact(&artifacts)?;
-    preflight_loop_tools(&registry, policy, loop_block)?;
+    preflight_loop_tools(workspace, &registry, policy, loop_block)?;
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
@@ -1375,14 +1375,16 @@ fn execute_loop(
 }
 
 fn preflight_loop_tools(
+    workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
 ) -> Result<(), RuntimeError> {
-    preflight_loop_tools_at_depth(registry, policy, loop_block, 1)
+    preflight_loop_tools_at_depth(workspace, registry, policy, loop_block, 1)
 }
 
 fn preflight_loop_tools_at_depth(
+    workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
@@ -1404,14 +1406,14 @@ fn preflight_loop_tools_at_depth(
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        preflight_phase_tools(registry, policy, phase)?;
+        preflight_phase_tools(workspace, registry, policy, phase)?;
 
         if index == 0 {
             for subloop_ref in &loop_block.subloop_refs {
                 let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
                     RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
                 })?;
-                preflight_loop_tools_at_depth(registry, policy, subloop, depth + 1)?;
+                preflight_loop_tools_at_depth(workspace, registry, policy, subloop, depth + 1)?;
             }
         }
     }
@@ -1420,6 +1422,7 @@ fn preflight_loop_tools_at_depth(
 }
 
 fn preflight_phase_tools(
+    workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     phase: &core_script::PhaseBlock,
@@ -1430,7 +1433,8 @@ fn preflight_phase_tools(
         })?;
         let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
         ensure_tool_matches_policy(tool, command_policy)?;
-        planned_tool_progress(
+        preflight_tool_progress(
+            workspace,
             tool,
             runtime_protected_path_match_mode(&policy.target),
             command_policy,
@@ -1915,6 +1919,29 @@ fn planned_tool_progress(
     }
 }
 
+fn preflight_tool_progress(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+) -> Result<Option<&'static str>, RuntimeError> {
+    match (&tool.tool_kind, &tool.command) {
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) => execute_predefined_command(policy, command_id, argv),
+        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
+            let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
+            preflight_own_script_outputs(workspace, &operations)?;
+            Ok(Some("stub write completed"))
+        }
+        _ => Err(RuntimeError::Protocol(format!(
+            "tool command shape does not match {}",
+            tool.identity.id
+        ))),
+    }
+}
+
 fn execute_predefined_command(
     policy: &core_policy::CommandPolicy,
     command_id: &str,
@@ -2136,6 +2163,19 @@ fn write_script_output(
     replace_script_output_atomically(workspace, target, &path, contents)
 }
 
+fn preflight_own_script_outputs(
+    workspace: &Path,
+    operations: &[ScriptOperation],
+) -> Result<(), RuntimeError> {
+    for operation in operations {
+        if let ScriptOperation::Write { target, .. } = operation {
+            let path = preflight_real_workspace_write_path(workspace, target)?;
+            ensure_writable_regular_leaf(&path)?;
+        }
+    }
+    Ok(())
+}
+
 fn replace_script_output_atomically(
     workspace: &Path,
     target: &str,
@@ -2253,6 +2293,21 @@ fn ensure_real_workspace_write_path(
         path.push(part);
         if parts.peek().is_some() {
             ensure_created_real_directory(&path)?;
+        }
+    }
+    Ok(path)
+}
+
+fn preflight_real_workspace_write_path(
+    workspace: &Path,
+    target: &str,
+) -> Result<PathBuf, RuntimeError> {
+    let mut parts = target.split('/').peekable();
+    let mut path = workspace.to_path_buf();
+    while let Some(part) = parts.next() {
+        path.push(part);
+        if parts.peek().is_some() {
+            ensure_optional_real_directory(&path)?;
         }
     }
     Ok(path)
