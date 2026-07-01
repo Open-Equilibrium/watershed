@@ -2626,7 +2626,7 @@ fn parse_object_property(
     let value = if list_object_property_is_string_scalar(field) {
         unquote_yaml_string_scalar(source_name, field, value)?
     } else {
-        unquote_yaml_scalar(source_name, field, value)?
+        unquote_yaml_typed_scalar(source_name, field, value)?
     };
     insert_object_property(source_name, item, field, value)?;
     Ok(None)
@@ -2909,6 +2909,21 @@ fn unquote_yaml_string_scalar(
         return Err(parse_error(
             source_name,
             format!("{field} must be a string; quote YAML non-string scalars"),
+        ));
+    }
+    unquote_yaml_scalar(source_name, field, value)
+}
+
+fn unquote_yaml_typed_scalar(
+    source_name: &str,
+    field: &str,
+    value: &str,
+) -> Result<String, RegistryError> {
+    let value = value.trim();
+    if is_quoted_yaml_scalar(value) {
+        return Err(parse_error(
+            source_name,
+            format!("{field} must not quote schema-typed scalars"),
         ));
     }
     unquote_yaml_scalar(source_name, field, value)
@@ -5131,6 +5146,82 @@ tool:
             panic!("expected instruction block");
         };
         assert_eq!(instruction.prompt, "true");
+    }
+
+    #[test]
+    fn parser_rejects_quoted_yaml_scalars_for_typed_fields() {
+        for (name, source, expected) in [
+            (
+                "quoted-required.yaml",
+                r#"tool:
+  id: quoted-required
+  name: QuotedRequired
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --value
+      value_type: none
+      required: "true"
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+                "required",
+            ),
+            (
+                "quoted-max-length.yaml",
+                r#"tool:
+  id: quoted-max-length
+  name: QuotedMaxLength
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters:
+    - name: --value
+      value_type: string
+      required: true
+      value_pattern: "^[^/]+$"
+      max_length: "64"
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+                "max_length",
+            ),
+            (
+                "quoted-port.yaml",
+                r#"tool:
+  id: quoted-port
+  name: QuotedPort
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network:
+    default: deny
+    allow:
+      - kind: cidr
+        transport: tcp
+        cidr: 192.0.2.0/24
+        port: "443"
+"#,
+                "port",
+            ),
+        ] {
+            let err = parse_registry_block(name, source)
+                .expect_err("quoted typed scalar must be rejected");
+
+            assert!(err.to_string().contains(expected), "{name}: {err}");
+        }
     }
 
     #[test]
