@@ -20,7 +20,10 @@ node_modules/
 # Python bytecode (e.g. .codex/hooks/ scripts)
 __pycache__/
 *.pyc
+pytest-cache-files-*/
 .codex-logs/
+.tmp/
+.tmp-git-objects/
 
 # OS cruft
 .DS_Store
