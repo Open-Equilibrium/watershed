@@ -2357,6 +2357,65 @@ fn resume_rejects_tool_started_prefix_without_side_effects() {
     assert!(!workspace.join("out/summary.txt").exists());
 }
 
+#[test]
+fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
+    let workspace = workspace_copy("hello-loop");
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+    fs::write(
+        &tool_path,
+        source.replace(
+            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+            "printf 'partial\\n' > out/partial.txt",
+        ),
+    )
+    .expect("first tool fixture rewritten");
+    fs::write(
+        workspace.join("registry/tools/bad-write.yaml"),
+        r#"tool:
+  id: bad-write
+  name: BadWrite
+  tool_kind: own-script
+  command: script:bad-write
+  script_runtime: posix-sh
+  script_body: |
+    printf 'later\n' > out/summary.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+    )
+    .expect("bad tool fixture written");
+    let phase_path = workspace.join("registry/phases/summarize.yaml");
+    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+    fs::write(
+        &phase_path,
+        source.replace(
+            "tool_refs: [write-summary]",
+            "tool_refs: [write-summary, bad-write]",
+        ),
+    )
+    .expect("phase fixture rewritten");
+    fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("hello001.jsonl");
+    let prefix = first_event_line("hello-loop", "hello-loop.jsonl");
+    fs::write(&path, &prefix).expect("partial log written");
+
+    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect_err("later invalid own-script path must reject before earlier write");
+
+    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
+    assert!(!workspace.join("out/partial.txt").exists());
+    assert_eq!(
+        fs::read_to_string(&path).expect("unchanged log readable"),
+        prefix
+    );
+}
+
 #[cfg(not(unix))]
 #[test]
 fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {

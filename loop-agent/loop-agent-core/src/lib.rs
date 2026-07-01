@@ -451,7 +451,30 @@ pub fn resume_session(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
         )));
     }
-    prepare_session_log_append(&path)?;
+    let preflight_runtime = execute_loop(
+        workspace,
+        &registry,
+        policy,
+        loop_block,
+        session_id,
+        ToolSideEffectMode::PreflightResume {
+            prefix_event_count: resume_prefix.planned_event_count as u64,
+        },
+    )?;
+    if preflight_runtime.events != planned_runtime.events {
+        return Err(RuntimeError::Protocol(format!(
+            "{} resume preflight did not match deterministic replay",
+            path.display()
+        )));
+    }
+    let (appended_stream, combined_events) = preflight_resume_append_stream(
+        &path,
+        session_id,
+        &before,
+        &events,
+        &planned_runtime.events,
+        &resume_prefix,
+    )?;
 
     let resumed_runtime = execute_loop(
         workspace,
@@ -470,31 +493,6 @@ pub fn resume_session(
         )));
     }
 
-    let sequence = events
-        .last()
-        .expect("validated streams contain at least one event")
-        .sequence
-        + 1;
-    let resume_event = EventEnvelope::new(
-        next_event_id(sequence, &events),
-        EventType::SessionResumed,
-        session_id.to_owned(),
-        sequence,
-        resume_timestamp(sequence),
-        "loop-agent-cli",
-        serde_json::json!({"reason":"resume"}),
-    );
-    let mut appended_events = vec![resume_event];
-    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
-    appended_events.extend(
-        resumed_runtime.events[resume_prefix.planned_event_count..]
-            .iter()
-            .cloned()
-            .map(|event| shift_resumed_event(event, resumed_suffix_offset)),
-    );
-    let appended_stream = canonical_event_stream(&appended_events)?;
-    let combined = format!("{before}{appended_stream}");
-    let combined_events = validate_session_log_text(&path, session_id, &combined)?;
     append_session_log_text(&path, &appended_stream)?;
 
     Ok(RunOutput {
@@ -553,12 +551,50 @@ fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock)
     ))
 }
 
+fn preflight_resume_append_stream(
+    path: &Path,
+    session_id: &str,
+    before: &str,
+    events: &[EventEnvelope],
+    planned_events: &[EventEnvelope],
+    resume_prefix: &ResumeReplayPrefix,
+) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
+    let sequence = events
+        .last()
+        .expect("validated streams contain at least one event")
+        .sequence
+        + 1;
+    let resume_event = EventEnvelope::new(
+        next_event_id(sequence, events),
+        EventType::SessionResumed,
+        session_id.to_owned(),
+        sequence,
+        resume_timestamp(sequence),
+        "loop-agent-cli",
+        serde_json::json!({"reason":"resume"}),
+    );
+    let mut appended_events = vec![resume_event];
+    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
+    appended_events.extend(
+        planned_events[resume_prefix.planned_event_count..]
+            .iter()
+            .cloned()
+            .map(|event| shift_resumed_event(event, resumed_suffix_offset)),
+    );
+    let appended_stream = canonical_event_stream(&appended_events)?;
+    let combined = format!("{before}{appended_stream}");
+    let combined_events = validate_session_log_text(path, session_id, &combined)?;
+    prepare_session_log_append(path, &appended_stream)?;
+    Ok((appended_stream, combined_events))
+}
+
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
     append_session_log_bytes(path, text.as_bytes())
 }
 
-fn prepare_session_log_append(path: &Path) -> Result<(), RuntimeError> {
-    append_session_log_bytes(path, b"")
+fn prepare_session_log_append(path: &Path, text: &str) -> Result<(), RuntimeError> {
+    ensure_session_log_growth_within_limit(path, text.len())?;
+    append_existing_file(path, b"")
 }
 
 fn append_session_log_bytes(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
@@ -1244,6 +1280,7 @@ enum ProtectedPathMatchMode {
 enum ToolSideEffectMode {
     ApplyAll,
     DryRun,
+    PreflightResume { prefix_event_count: u64 },
     Resume { prefix_event_count: u64 },
 }
 
@@ -1252,7 +1289,15 @@ impl ToolSideEffectMode {
         match self {
             Self::ApplyAll => true,
             Self::DryRun => false,
+            Self::PreflightResume { .. } => false,
             Self::Resume { prefix_event_count } => completed_sequence > prefix_event_count,
+        }
+    }
+
+    fn should_preflight_tool(self, completed_sequence: u64) -> bool {
+        match self {
+            Self::PreflightResume { prefix_event_count } => completed_sequence > prefix_event_count,
+            Self::ApplyAll | Self::DryRun | Self::Resume { .. } => false,
         }
     }
 }
@@ -1893,6 +1938,13 @@ fn emit_tool(
     };
     let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
         execute_tool(
+            workspace,
+            tool,
+            policy.protected_path_match_mode,
+            policy.command,
+        )?
+    } else if side_effect_mode.should_preflight_tool(replay_guard_sequence) {
+        preflight_tool_progress(
             workspace,
             tool,
             policy.protected_path_match_mode,
