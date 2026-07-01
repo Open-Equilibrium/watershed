@@ -5,7 +5,7 @@ use std::{
     cell::Cell,
     collections::{BTreeMap, BTreeSet},
     fmt, fs,
-    io::{self, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     thread,
     time::Duration,
@@ -13,6 +13,7 @@ use std::{
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
+pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
 const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
     TrustedPredefinedCommand {
         command_id: "agent-echo",
@@ -253,9 +254,11 @@ pub fn tail_session_to_writer(
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
-    let initial = read_to_string(&path)?;
+    let initial = read_session_log_to_string(&path)?;
     let mut stream = complete_jsonl_prefix(&initial).to_owned();
     let mut events = validate_session_log_text(&path, session_id, &stream)?;
+    let mut pending = initial[stream.len()..].to_owned();
+    let mut observed_len = initial.len();
     if initial.len() > stream.len() && (stream_is_failed(&events) || stream_is_completed(&events)) {
         return Err(RuntimeError::Protocol(format!(
             "{} contains a partial line after a terminal event",
@@ -274,22 +277,28 @@ pub fn tail_session_to_writer(
 
     while !stream_is_failed(&events) && !stream_is_completed(&events) {
         thread::sleep(Duration::from_millis(25));
-        let current = read_to_string(&path)?;
-        if current.len() < stream.len() || !current.starts_with(&stream) {
+        let current_len = session_log_len(&path)?;
+        if current_len < observed_len {
             return Err(RuntimeError::Protocol(format!(
                 "{} changed outside append-only tail semantics",
                 path.display()
             )));
         }
-        if current.len() == stream.len() {
+        if current_len == observed_len {
             continue;
         }
-        let appended = &current[stream.len()..];
-        if !appended.ends_with('\n') {
+        let suffix = read_file_suffix_to_string(&path, observed_len, current_len)?;
+        observed_len = current_len;
+        pending.push_str(&suffix);
+        if !pending.ends_with('\n') {
             continue;
         }
-        let current_events = validate_session_log_text(&path, session_id, &current)?;
-        if !write_tail_chunk(writer, emit, session_id, appended)? {
+        let appended = std::mem::take(&mut pending);
+        let appended_events =
+            validate_appended_session_log_text(&path, session_id, &events, &appended)?;
+        let mut current_events = events.clone();
+        current_events.extend(appended_events);
+        if !write_tail_chunk(writer, emit, session_id, &appended)? {
             return Ok(RunOutput {
                 event_count: current_events.len(),
                 failed: stream_is_failed(&current_events),
@@ -298,7 +307,7 @@ pub fn tail_session_to_writer(
                 stdout: String::new(),
             });
         }
-        stream = current;
+        stream.push_str(&appended);
         events = current_events;
     }
 
@@ -369,7 +378,7 @@ pub fn resume_session(
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
     let _lock = acquire_session_lock(workspace, session_id)?;
-    let before = read_to_string(&path)?;
+    let before = read_session_log_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &before)?;
     if stream_is_failed(&events) || stream_is_completed(&events) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
@@ -471,11 +480,33 @@ pub fn resume_session(
 }
 
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
-    append_existing_file(path, text.as_bytes())
+    append_session_log_bytes(path, text.as_bytes())
 }
 
 fn prepare_session_log_append(path: &Path) -> Result<(), RuntimeError> {
-    append_existing_file(path, b"")
+    append_session_log_bytes(path, b"")
+}
+
+fn append_session_log_bytes(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    ensure_session_log_growth_within_limit(path, contents.len())?;
+    append_existing_file(path, contents)
+}
+
+fn ensure_session_log_growth_within_limit(
+    path: &Path,
+    appended_bytes: usize,
+) -> Result<(), RuntimeError> {
+    let existing_bytes = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
+    let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
+    let total = existing_bytes.saturating_add(appended_bytes);
+    if total > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} session log size {total} bytes exceeds max {}",
+            path.display(),
+            MAX_SESSION_LOG_BYTES
+        )));
+    }
+    Ok(())
 }
 
 fn shift_resumed_suffix_event(mut event: EventEnvelope) -> EventEnvelope {
@@ -542,7 +573,7 @@ fn read_existing_session(
 ) -> Result<RunOutput, RuntimeError> {
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
-    let stream = read_to_string(&path)?;
+    let stream = read_session_log_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &stream)?;
     Ok(RunOutput {
         event_count: events.len(),
@@ -1069,7 +1100,7 @@ fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
 
 #[cfg(test)]
 fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
-    append_existing_file(path, line.as_bytes())
+    append_session_log_bytes(path, line.as_bytes())
 }
 
 fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
@@ -2998,6 +3029,112 @@ fn read_to_string(path: &Path) -> Result<String, RuntimeError> {
     })
 }
 
+fn read_session_log_to_string(path: &Path) -> Result<String, RuntimeError> {
+    read_to_string_with_limit(path, MAX_SESSION_LOG_BYTES)
+}
+
+fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
+    let metadata = fs::metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let len = metadata.len();
+    if len > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} read size {len} bytes exceeds max {}",
+            path.display(),
+            MAX_SESSION_LOG_BYTES
+        )));
+    }
+    usize::try_from(len).map_err(|_| {
+        RuntimeError::Protocol(format!(
+            "{} read size {len} bytes exceeds addressable memory",
+            path.display()
+        ))
+    })
+}
+
+fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
+    let bytes = read_file_range(path, 0, max_bytes)?;
+    String::from_utf8(bytes).map_err(|source| {
+        RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
+    })
+}
+
+fn read_file_suffix_to_string(
+    path: &Path,
+    offset: usize,
+    expected_len: usize,
+) -> Result<String, RuntimeError> {
+    if expected_len < offset {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed outside append-only tail semantics",
+            path.display()
+        )));
+    }
+    let suffix_len = expected_len - offset;
+    let bytes = read_file_range(
+        path,
+        u64::try_from(offset).unwrap_or(u64::MAX),
+        u64::try_from(suffix_len).unwrap_or(u64::MAX),
+    )?;
+    String::from_utf8(bytes).map_err(|source| {
+        RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
+    })
+}
+
+fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
+    let metadata = fs::metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let total_len = metadata.len();
+    if total_len > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} read size {total_len} bytes exceeds max {}",
+            path.display(),
+            MAX_SESSION_LOG_BYTES
+        )));
+    }
+    if offset > total_len {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed outside append-only tail semantics",
+            path.display()
+        )));
+    }
+    let available = total_len - offset;
+    if available > max_bytes {
+        return Err(RuntimeError::Protocol(format!(
+            "{} read size {available} bytes exceeds max {max_bytes}",
+            path.display()
+        )));
+    }
+    let mut file = fs::File::open(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let mut bytes = Vec::new();
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let bytes_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if bytes_len > max_bytes {
+        return Err(RuntimeError::Protocol(format!(
+            "{} read size {bytes_len} bytes exceeds max {max_bytes}",
+            path.display()
+        )));
+    }
+    Ok(bytes)
+}
+
 fn read_to_bytes(path: &Path) -> Result<Vec<u8>, RuntimeError> {
     fs::read(path).map_err(|source| RuntimeError::Io {
         path: path.to_path_buf(),
@@ -3571,6 +3708,185 @@ fn payload_contract_error(
         path.display(),
         event_type.as_str()
     ))
+}
+
+fn validate_appended_session_log_text(
+    path: &Path,
+    expected_session_id: &str,
+    prior_events: &[EventEnvelope],
+    text: &str,
+) -> Result<Vec<EventEnvelope>, RuntimeError> {
+    if prior_events.is_empty() {
+        return validate_session_log_text(path, expected_session_id, text);
+    }
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !text.ends_with('\n') {
+        return Err(RuntimeError::Protocol(format!(
+            "{} appended suffix must end with LF",
+            path.display()
+        )));
+    }
+
+    let prior_session_id = &prior_events
+        .first()
+        .expect("prior events are non-empty")
+        .session_id;
+    if prior_session_id != expected_session_id {
+        return Err(RuntimeError::Protocol(format!(
+            "{} contains session_id {prior_session_id:?}, expected {expected_session_id:?}",
+            path.display()
+        )));
+    }
+
+    let mut previous_sequence = prior_events
+        .last()
+        .expect("prior events are non-empty")
+        .sequence;
+    let mut event_ids = prior_events
+        .iter()
+        .map(|event| event.event_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut loop_started_ids = prior_events
+        .iter()
+        .filter(|event| event.event_type == EventType::LoopStarted)
+        .filter_map(|event| event.loop_id.clone())
+        .collect::<BTreeSet<_>>();
+    let mut terminal_line = prior_events.iter().position(|event| {
+        matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        )
+    });
+    terminal_line = terminal_line.map(|index| index + 1);
+
+    let mut appended_events = Vec::new();
+    for (index, line) in text.split_terminator('\n').enumerate() {
+        let line_number = prior_events.len() + index + 1;
+        if line.ends_with('\r') {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use LF-only line endings",
+                path.display()
+            )));
+        }
+        let event: EventEnvelope = serde_json::from_str(line)?;
+        let canonical = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
+        })?;
+        if canonical != format!("{line}\n") {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use canonical JSONL bytes",
+                path.display()
+            )));
+        }
+        if event.session_id != *prior_session_id {
+            return Err(RuntimeError::Protocol(format!(
+                "{} must use one session_id",
+                path.display()
+            )));
+        }
+        if !validate_session_id(&event.session_id) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a valid session_id",
+                path.display()
+            )));
+        }
+        if event.event_id.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty event_id",
+                path.display()
+            )));
+        }
+        if event.source.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty source",
+                path.display()
+            )));
+        }
+        if !is_rfc3339_utc_timestamp(&event.timestamp) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use an RFC3339 UTC timestamp",
+                path.display()
+            )));
+        }
+        if event
+            .correlation_id
+            .as_ref()
+            .is_some_and(|correlation_id| correlation_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty correlation_id",
+                path.display()
+            )));
+        }
+        if event
+            .loop_id
+            .as_ref()
+            .is_some_and(|loop_id| loop_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty loop_id",
+                path.display()
+            )));
+        }
+        if event
+            .parent_loop_id
+            .as_ref()
+            .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty parent_loop_id",
+                path.display()
+            )));
+        }
+        if event.sequence <= previous_sequence {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} sequence must increase",
+                path.display()
+            )));
+        }
+        previous_sequence = event.sequence;
+        if !event_ids.insert(event.event_id.clone()) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a unique event_id",
+                path.display()
+            )));
+        }
+        if let Some(terminal_line) = terminal_line {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} appears after terminal session event on line {terminal_line}",
+                path.display()
+            )));
+        }
+        validate_event_payload(path, line_number, &event)?;
+        if event.event_type == EventType::LoopStarted {
+            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "{} line {line_number} loop.started must include loop_id",
+                    path.display()
+                ))
+            })?;
+            if !loop_started_ids.insert(loop_id.to_owned()) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a unique loop_id for loop.started",
+                    path.display()
+                )));
+            }
+        }
+        if matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        ) {
+            terminal_line = Some(line_number);
+        }
+        appended_events.push(event);
+    }
+
+    let mut events = prior_events.to_vec();
+    events.extend(appended_events.iter().cloned());
+    validate_session_lifecycle(path, &events)?;
+    Ok(appended_events)
 }
 
 fn validate_session_log_text(

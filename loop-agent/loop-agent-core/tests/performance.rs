@@ -7,38 +7,50 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc, Arc, Barrier,
+        mpsc, Arc, Barrier, Mutex, MutexGuard,
     },
     thread,
     time::{Duration, Instant},
 };
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+static PERFORMANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
 fn event_validation_p95_stays_under_m1_budget() {
+    let _guard = performance_test_guard();
     let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
     let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
     let event_count = stream.lines().count() as u128;
     let mut nanos_per_event = Vec::new();
 
+    for _ in 0..10 {
+        validate_protocol_jsonl_text(&stream_path, &stream).expect("stream validates");
+    }
     for _ in 0..100 {
         let started = Instant::now();
         validate_protocol_jsonl_text(&stream_path, &stream).expect("stream validates");
         nanos_per_event.push(started.elapsed().as_nanos() / event_count);
     }
+    let p95_nanos = p95(nanos_per_event);
 
     assert!(
-        p95(nanos_per_event) <= 1_000_000,
-        "FSM/event validation p95 must stay <= 1 ms per event"
+        p95_nanos <= 1_000_000,
+        "FSM/event validation p95 must stay <= 1 ms per event: {p95_nanos} ns"
     );
 }
 
 #[test]
 fn noop_dispatch_p95_stays_under_m1_budget() {
+    let _guard = performance_test_guard();
     let workspace = workspace_copy("smoke-loop");
     let mut nanos = Vec::new();
 
+    for _ in 0..30 {
+        clear_runtime_state(&workspace);
+        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop runs");
+        assert!(!output.failed);
+    }
     for _ in 0..100 {
         clear_runtime_state(&workspace);
         let started = Instant::now();
@@ -47,21 +59,29 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
         assert!(!output.failed);
         assert!(output.event_count > 0);
     }
+    let p95_nanos = p95(nanos);
 
     assert!(
-        p95(nanos) <= 50_000_000,
-        "no-op dispatch p95 must stay <= 50 ms"
+        p95_nanos <= 50_000_000,
+        "no-op dispatch p95 must stay <= 50 ms: {p95_nanos} ns"
     );
 }
 
 #[test]
 fn hello_loop_log_append_p95_stays_under_m1_budget() {
+    let _guard = performance_test_guard();
     let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
     let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
     let event_count = stream.lines().count() as u128;
     let workspace = workspace_copy("hello-loop");
     let mut nanos_per_event = Vec::new();
 
+    for _ in 0..10 {
+        clear_runtime_state(&workspace);
+        let output =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop succeeds");
+        assert!(!output.failed);
+    }
     for _ in 0..100 {
         clear_runtime_state(&workspace);
         let started = Instant::now();
@@ -73,15 +93,17 @@ fn hello_loop_log_append_p95_stays_under_m1_budget() {
         assert!(output.session_path.exists());
         assert!(workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
+    let p95_nanos = p95(nanos_per_event);
 
     assert!(
-        p95(nanos_per_event) <= 5_000_000,
-        "hello-loop stream/log append p95 must stay <= 5 ms per event"
+        p95_nanos <= 5_000_000,
+        "hello-loop stream/log append p95 must stay <= 5 ms per event: {p95_nanos} ns"
     );
 }
 
 #[test]
 fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
+    let _guard = performance_test_guard();
     let resident_bytes_before = current_resident_set_size();
     let workspaces = [
         ("smoke-loop", "smoke-loop"),
@@ -167,6 +189,12 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
             "concurrent fixture RSS growth must stay <= {budget} bytes: {growth} bytes"
         );
     }
+}
+
+fn performance_test_guard() -> MutexGuard<'static, ()> {
+    PERFORMANCE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[test]

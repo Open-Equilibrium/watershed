@@ -12,6 +12,8 @@ use unicode_normalization::UnicodeNormalization;
 pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
 pub const YAML_VERSION: &str = "1.2";
 pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
+pub const MAX_REGISTRY_FILE_BYTES: u64 = 1024 * 1024;
+pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockIdentity {
@@ -264,19 +266,42 @@ pub struct ResolvedRegistry {
 
 impl ResolvedRegistry {
     pub fn load(root: &Path) -> Result<Self, RegistryError> {
+        Self::load_with_limits(root, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES)
+    }
+
+    fn load_with_limits(
+        root: &Path,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+    ) -> Result<Self, RegistryError> {
         let mut paths = Vec::new();
         collect_registry_files(root, &mut paths)?;
-        paths.sort();
+        paths.sort_by(|left, right| left.path.cmp(&right.path));
         let mut blocks = Vec::new();
+        let mut total_bytes = 0u64;
 
-        for path in paths {
-            let source = fs::read_to_string(&path).map_err(|source| RegistryError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let source_name = path
+        for file in paths {
+            if file.bytes > max_file_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: file.path,
+                    bytes: file.bytes,
+                    max: max_file_bytes,
+                });
+            }
+            let source = read_registry_file_to_string(&file.path, max_file_bytes)?;
+            let bytes = u64::try_from(source.len()).unwrap_or(u64::MAX);
+            total_bytes = total_bytes.saturating_add(bytes);
+            if total_bytes > max_total_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: root.to_path_buf(),
+                    bytes: total_bytes,
+                    max: max_total_bytes,
+                });
+            }
+            let source_name = file
+                .path
                 .strip_prefix(root)
-                .unwrap_or(path.as_path())
+                .unwrap_or(file.path.as_path())
                 .to_string_lossy()
                 .replace('\\', "/");
             let block = parse_registry_block(&source_name, &source)?;
@@ -687,6 +712,11 @@ pub enum RegistryError {
         path: PathBuf,
         message: String,
     },
+    ReadLimitExceeded {
+        path: PathBuf,
+        bytes: u64,
+        max: u64,
+    },
     InvalidBlockId(String),
     InvalidCommandId(String),
     Parse {
@@ -725,6 +755,11 @@ impl fmt::Display for RegistryError {
         match self {
             Self::Io { path, source } => write!(f, "{}: {source}", path.display()),
             Self::UnsafePath { path, message } => write!(f, "{}: {message}", path.display()),
+            Self::ReadLimitExceeded { path, bytes, max } => write!(
+                f,
+                "{}: registry read size {bytes} bytes exceeds max {max}",
+                path.display()
+            ),
             Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
             Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
             Self::Parse {
@@ -771,6 +806,7 @@ impl std::error::Error for RegistryError {
             Self::Semantic(err) => Some(err),
             Self::Serialize(err) => Some(err),
             Self::UnsafePath { .. }
+            | Self::ReadLimitExceeded { .. }
             | Self::InvalidBlockId(_)
             | Self::InvalidCommandId(_)
             | Self::Parse { .. }
@@ -1015,7 +1051,28 @@ pub fn canonical_resolved_registry_json(
     Ok(out)
 }
 
-fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), RegistryError> {
+fn read_registry_file_to_string(path: &Path, max_bytes: u64) -> Result<String, RegistryError> {
+    let source = fs::read_to_string(path).map_err(|source| RegistryError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let source_len = u64::try_from(source.len()).unwrap_or(u64::MAX);
+    if source_len > max_bytes {
+        return Err(RegistryError::ReadLimitExceeded {
+            path: path.to_path_buf(),
+            bytes: source_len,
+            max: max_bytes,
+        });
+    }
+    Ok(source)
+}
+
+struct RegistryFile {
+    path: PathBuf,
+    bytes: u64,
+}
+
+fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(), RegistryError> {
     let dir_metadata = fs::symlink_metadata(dir).map_err(|source| RegistryError::Io {
         path: dir.to_path_buf(),
         source,
@@ -1060,7 +1117,10 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Regi
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
         {
-            out.push(path);
+            out.push(RegistryFile {
+                path,
+                bytes: metadata.len(),
+            });
         }
     }
     Ok(())
@@ -3229,6 +3289,53 @@ mod tests {
     }
 
     #[test]
+    fn registry_loader_rejects_files_above_read_limit() {
+        let root = temp_registry_dir("registry-file-read-limit");
+        std::fs::write(
+            root.join("instruction.yaml"),
+            "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
+        )
+        .expect("registry file written");
+
+        let err = ResolvedRegistry::load_with_limits(&root, 16, 1024)
+            .expect_err("oversized registry file is rejected before parsing");
+
+        assert!(matches!(
+            err,
+            RegistryError::ReadLimitExceeded {
+                path,
+                bytes,
+                max: 16,
+            } if path.ends_with("instruction.yaml") && bytes > 16
+        ));
+    }
+
+    #[test]
+    fn registry_loader_rejects_total_bytes_above_read_limit() {
+        let root = temp_registry_dir("registry-total-read-limit");
+        let first = "instruction:\n  id: inspect-a\n  name: InspectA\n  prompt: Inspect\n";
+        let second = "instruction:\n  id: inspect-b\n  name: InspectB\n  prompt: Inspect\n";
+        std::fs::write(root.join("a.yaml"), first).expect("first registry file written");
+        std::fs::write(root.join("b.yaml"), second).expect("second registry file written");
+
+        let err = ResolvedRegistry::load_with_limits(
+            &root,
+            1024,
+            u64::try_from(first.len()).expect("test length fits u64"),
+        )
+        .expect_err("registry total size is rejected before parsing all files");
+
+        assert!(matches!(
+            err,
+            RegistryError::ReadLimitExceeded {
+                path,
+                bytes,
+                max,
+            } if path == root && bytes > max
+        ));
+    }
+
+    #[test]
     fn registry_and_parse_errors_report_sources_and_conversions() {
         let io_error = RegistryError::Io {
             path: PathBuf::from("registry"),
@@ -3288,6 +3395,14 @@ mod tests {
                     loop_id: "root".to_owned(),
                 },
                 "loop cycle includes root",
+            ),
+            (
+                RegistryError::ReadLimitExceeded {
+                    path: PathBuf::from("registry/tool.yaml"),
+                    bytes: 17,
+                    max: 16,
+                },
+                "registry/tool.yaml: registry read size 17 bytes exceeds max 16",
             ),
         ];
         for (err, expected) in cases {
