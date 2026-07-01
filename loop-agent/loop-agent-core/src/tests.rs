@@ -1403,6 +1403,11 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
 fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
     let workspace = workspace_copy("smoke-loop");
     fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+    fs::write(
+        workspace.join("registry/tools/unrelated-negative.yaml"),
+        "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+    )
+    .expect("unrelated sentinel tool written");
     let loop_path = workspace.join("registry/loops/smoke-loop.yaml");
     let loop_source = fs::read_to_string(&loop_path).expect("loop fixture readable");
     fs::write(
@@ -3179,6 +3184,23 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         ensure_writable_regular_leaf(&dir_leaf),
         Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
     ));
+}
+
+#[test]
+fn existing_leaf_replacement_restores_original_when_final_rename_fails() {
+    let workspace = empty_workspace("existing-leaf-replacement-restore");
+    let path = workspace.join("file.txt");
+    let missing_temp_path = replacement_temp_path(&path, 0).expect("temp path");
+    fs::write(&path, "old").expect("file written");
+
+    assert!(matches!(
+        replace_existing_leaf_from_temp(&path, &missing_temp_path),
+        Err(RuntimeError::Io { path: failed_path, .. }) if failed_path == path
+    ));
+    assert_eq!(
+        fs::read_to_string(&path).expect("original file restored"),
+        "old"
+    );
 }
 
 #[cfg(unix)]
