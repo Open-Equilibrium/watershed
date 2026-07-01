@@ -2563,7 +2563,7 @@ fn sandbox_runtime_failure(
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        if let Some(failure) = sandbox_out_of_phase_failure(policy, loop_block, phase)? {
+        if let Some(failure) = sandbox_out_of_phase_failure(registry, policy, phase) {
             return Ok(Some(failure));
         }
         for tool_ref in &phase.tool_refs {
@@ -2595,23 +2595,42 @@ fn sandbox_tool_dispatch_failure(
 }
 
 fn sandbox_out_of_phase_failure(
+    registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
     phase: &core_script::PhaseBlock,
-) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    let fixture_name = "sandbox-negative-tool-out-of-phase";
-    if loop_block.identity.id != fixture_name {
-        return Ok(None);
-    }
-    if phase.tool_refs.is_empty()
-        && !policy_phase_contains_tool(policy, &phase.identity.id, "negative-tool")
+) -> Option<RuntimeFailure> {
+    if !phase.tool_refs.is_empty()
+        || !phase.identity.id.starts_with("negative-")
+        || !phase.identity.id.contains("no-tools")
     {
-        return Ok(Some(runtime_failure_for_reason(
-            core_policy::DenyReasonCode::ToolOutOfPhase,
-            None,
-        )));
+        return None;
     }
-    Ok(None)
+    let has_unavailable_sentinel = registry.tools.values().any(|tool| {
+        is_sandbox_negative_sentinel_tool(tool)
+            && !policy_phase_contains_tool(policy, &phase.identity.id, &tool.identity.id)
+    });
+    if !has_unavailable_sentinel {
+        return None;
+    }
+    Some(runtime_failure_for_reason(
+        core_policy::DenyReasonCode::ToolOutOfPhase,
+        None,
+    ))
+}
+
+fn is_sandbox_negative_sentinel_tool(tool: &core_script::ToolBlock) -> bool {
+    let (
+        core_script::ToolKind::PredefinedCommand,
+        core_script::ToolCommand::Predefined { command_id, argv },
+    ) = (&tool.tool_kind, &tool.command)
+    else {
+        return false;
+    };
+    command_id == "agent-negative"
+        && matches!(
+            argv.as_slice(),
+            [operation] if sandbox_negative_reason_for_operation(operation).is_some()
+        )
 }
 
 fn sandbox_negative_reason_for_tool(

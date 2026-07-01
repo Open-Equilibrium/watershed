@@ -1214,6 +1214,30 @@ fn sandbox_denial_follows_resolved_operation_not_loop_name() {
 }
 
 #[test]
+fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
+    let workspace = workspace_copy("sandbox-negative");
+    let loop_path = workspace.join("registry/loops/sandbox-negative-tool-out-of-phase.yaml");
+    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+    fs::write(
+        &loop_path,
+        source.replace(
+            "id: sandbox-negative-tool-out-of-phase",
+            "id: custom-tool-out-of-phase",
+        ),
+    )
+    .expect("loop fixture rewritten");
+
+    let output = run_loop(&workspace, "custom-tool-out-of-phase", EmitMode::Jsonl)
+        .expect("renamed out-of-phase operation runs");
+
+    assert!(output.failed);
+    assert!(output.stdout.contains("\"reason\":\"tool_out_of_phase\""));
+    assert!(output
+        .stdout
+        .contains("\"loop_definition_id\":\"custom-tool-out-of-phase\""));
+}
+
+#[test]
 fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
     let workspace = workspace_copy("sandbox-negative");
     let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
@@ -3637,9 +3661,7 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     assert!(sandbox_runtime_failure(&registry, &policy, loop_block)
         .expect("sandbox failure resolves")
         .is_some());
-    assert!(sandbox_out_of_phase_failure(&policy, loop_block, phase)
-        .expect("non out-of-phase loop returns none")
-        .is_none());
+    assert!(sandbox_out_of_phase_failure(&registry, &policy, phase).is_none());
 
     let tool = registry
         .tool_block("negative-tool")
