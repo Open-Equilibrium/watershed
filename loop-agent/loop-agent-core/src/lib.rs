@@ -2072,8 +2072,27 @@ fn validate_script_write_target(
             policy.tool_id
         )));
     }
+    let temp_parent_scoped = script_replacement_temp_parent_scope(&relative);
+    if !policy
+        .filesystem
+        .write_roots
+        .iter()
+        .any(|root| workspace_scope_contains(root, &temp_parent_scoped))
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} lacks write scope for replacement temp under {temp_parent_scoped}",
+            policy.tool_id
+        )));
+    }
     ensure_script_target_not_protected(protected_path_match_mode, policy, &scoped)?;
     Ok(relative)
+}
+
+fn script_replacement_temp_parent_scope(relative: &str) -> String {
+    relative.rsplit_once('/').map_or_else(
+        || "workspace".to_owned(),
+        |(parent, _)| format!("workspace/{parent}"),
+    )
 }
 
 fn write_script_output(

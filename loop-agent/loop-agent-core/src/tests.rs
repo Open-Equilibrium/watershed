@@ -456,6 +456,12 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
             .expect("declared write target accepted"),
         "out/summary.txt"
     );
+    let mut file_scoped_policy = command_policy.clone();
+    file_scoped_policy.filesystem.write_roots = vec!["workspace/out/summary.txt".to_owned()];
+    assert!(matches!(
+        validate_script_write_target(match_mode, &file_scoped_policy, "out/summary.txt"),
+        Err(RuntimeError::Protocol(message)) if message.contains("replacement temp")
+    ));
     assert!(matches!(
         validate_script_write_target(match_mode, command_policy, "other/summary.txt"),
         Err(RuntimeError::Protocol(message)) if message.contains("lacks write scope")
