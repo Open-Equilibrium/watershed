@@ -4038,6 +4038,13 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         ),
         Some("registry".to_owned())
     );
+    assert_eq!(
+        config_value(
+            "registry_root: registry # fixture registry\n",
+            "registry_root"
+        ),
+        Some("registry".to_owned())
+    );
     assert_eq!(config_value("registry_root:\n", "registry_root"), None);
 
     fs::write(
@@ -4065,6 +4072,13 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
             .expect("curdir registry path resolves"),
         workspace.join("registry")
     );
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "registry_root: registry # fixture registry\n",
+    )
+    .expect("commented config");
+    let config = load_workspace_config(&workspace).expect("commented config loads");
+    assert_eq!(config.registry_root, PathBuf::from("registry"));
 
     fs::write(
         workspace.join(".loop/config.yaml"),
@@ -4084,9 +4098,38 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
     assert!(matches!(
-        read_to_string(&workspace.join("missing-config.yaml")),
+        read_workspace_config_to_string(&workspace.join("missing-config.yaml")),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
+
+    let oversized_len =
+        usize::try_from(core_script::MAX_REGISTRY_FILE_BYTES).expect("limit fits usize") + 1;
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        format!("registry_root: registry\n{}", "x".repeat(oversized_len)),
+    )
+    .expect("oversized config written");
+    assert!(matches!(
+        load_workspace_config(&workspace),
+        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_config_rejects_symlinked_config_file() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace("workspace-config-symlink");
+    let outside = empty_workspace("outside-workspace-config");
+    fs::create_dir_all(workspace.join(".loop")).expect("loop config dir");
+    let outside_config = outside.join("config.yaml");
+    fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
+    symlink(&outside_config, workspace.join(".loop/config.yaml")).expect("config symlink");
+
+    let err = load_workspace_config(&workspace).expect_err("config symlink must fail");
+
+    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
 }
 
 #[cfg(unix)]

@@ -14,6 +14,7 @@ use std::{
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
 pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_WORKSPACE_CONFIG_BYTES: u64 = core_script::MAX_REGISTRY_FILE_BYTES;
 const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
 const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
 const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
@@ -3125,7 +3126,7 @@ fn sandbox_expected_decision_texts(
 
 fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
     let path = workspace.join(".loop/config.yaml");
-    let text = read_to_string(&path)?;
+    let text = read_workspace_config_to_string(&path)?;
     let registry_root = config_value(&text, "registry_root")
         .ok_or_else(|| RuntimeError::Usage("missing .loop/config.yaml registry_root".to_owned()))?;
     let registry_root = PathBuf::from(registry_root);
@@ -3182,27 +3183,50 @@ fn registry_root_path(workspace: &Path, registry_root: &Path) -> Result<PathBuf,
 
 fn config_value(text: &str, key: &str) -> Option<String> {
     let prefix = format!("{key}:");
-    for line in text.lines() {
+    for raw_line in text.lines() {
+        let line = strip_config_comment(raw_line);
         let line = line.trim();
         if let Some(value) = line.strip_prefix(&prefix) {
-            let value = value.trim().trim_matches('"');
+            let value = unquote_config_scalar(value.trim());
             if !value.is_empty() {
-                return Some(value.to_owned());
+                return Some(value);
             }
         }
     }
     None
 }
 
+fn strip_config_comment(line: &str) -> &str {
+    let mut in_double_quotes = false;
+    let mut in_single_quotes = false;
+    for (index, ch) in line.char_indices() {
+        match ch {
+            '"' if !in_single_quotes => in_double_quotes = !in_double_quotes,
+            '\'' if !in_double_quotes => in_single_quotes = !in_single_quotes,
+            '#' if !in_double_quotes && !in_single_quotes => return &line[..index],
+            _ => {}
+        }
+    }
+    line
+}
+
+fn unquote_config_scalar(value: &str) -> String {
+    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
+        return value[1..value.len() - 1].replace("\\\"", "\"");
+    }
+    if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
+        return value[1..value.len() - 1].replace("''", "'");
+    }
+    value.to_owned()
+}
+
 struct WorkspaceConfig {
     registry_root: PathBuf,
 }
 
-fn read_to_string(path: &Path) -> Result<String, RuntimeError> {
-    fs::read_to_string(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
+fn read_workspace_config_to_string(path: &Path) -> Result<String, RuntimeError> {
+    ensure_real_file(path)?;
+    read_to_string_with_limit(path, MAX_WORKSPACE_CONFIG_BYTES)
 }
 
 fn read_session_log_to_string(path: &Path) -> Result<String, RuntimeError> {
