@@ -3123,11 +3123,54 @@ fn read_file_suffix_to_string(
         )));
     }
     let suffix_len = expected_len - offset;
-    let bytes = read_file_range(
-        path,
-        u64::try_from(offset).unwrap_or(u64::MAX),
-        u64::try_from(suffix_len).unwrap_or(u64::MAX),
-    )?;
+    let metadata = fs::metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let total_len = metadata.len();
+    if total_len > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} read size {total_len} bytes exceeds max {}",
+            path.display(),
+            MAX_SESSION_LOG_BYTES
+        )));
+    }
+    let expected_len = u64::try_from(expected_len).map_err(|_| {
+        RuntimeError::Protocol(format!(
+            "{} read size {expected_len} bytes exceeds addressable memory",
+            path.display()
+        ))
+    })?;
+    if total_len < expected_len {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed outside append-only tail semantics",
+            path.display()
+        )));
+    }
+    let offset = u64::try_from(offset).unwrap_or(u64::MAX);
+    let suffix_len = u64::try_from(suffix_len).unwrap_or(u64::MAX);
+    let mut file = fs::File::open(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let mut bytes = Vec::new();
+    file.take(suffix_len)
+        .read_to_end(&mut bytes)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != suffix_len {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed outside append-only tail semantics",
+            path.display()
+        )));
+    }
     String::from_utf8(bytes).map_err(|source| {
         RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
     })

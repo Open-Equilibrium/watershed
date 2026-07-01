@@ -2613,6 +2613,28 @@ fn tail_session_rejects_non_append_only_log_changes() {
 }
 
 #[test]
+fn tail_suffix_reader_uses_observed_range_when_log_grows() {
+    let workspace = empty_workspace("tail-observed-range");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailrace001.jsonl");
+    let initial = "first\n";
+    let observed_append = "second\n";
+    let later_append = "third\n";
+    fs::write(&path, format!("{initial}{observed_append}{later_append}"))
+        .expect("grown session log written");
+
+    let suffix = read_tail_file_suffix_to_string(
+        &path,
+        initial.len(),
+        initial.len() + observed_append.len(),
+    )
+    .expect("growth after observed length must not reject the observed range");
+
+    assert_eq!(suffix, observed_append);
+}
+
+#[test]
 fn tail_session_rejects_invalid_appended_suffix() {
     let workspace = empty_workspace("tail-invalid-suffix");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);

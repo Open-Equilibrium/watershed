@@ -854,7 +854,7 @@ impl FilesystemPolicy {
             )));
         }
 
-        let write_scopes = self.validate_roots(tool_id)?;
+        let declared_scopes = self.validate_roots(tool_id)?;
 
         for grant in &self.protected_path_grants {
             let Some(normalized_grant) = normalize_policy_relative_path(grant) else {
@@ -868,12 +868,12 @@ impl FilesystemPolicy {
                 )));
             }
 
-            if !write_scopes
+            if !declared_scopes
                 .iter()
                 .any(|scope| path_is_inside_scope(&normalized_grant, scope))
             {
                 return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must stay inside write_roots"
+                    "tool {tool_id} protected_path_grant {grant:?} must stay inside read_roots or write_roots"
                 )));
             }
         }
@@ -882,25 +882,26 @@ impl FilesystemPolicy {
     }
 
     fn validate_roots(&self, tool_id: &str) -> Result<Vec<String>, PolicyArtifactValidationError> {
+        let mut declared_scopes = Vec::new();
         for root in &self.read_roots {
-            if normalize_policy_relative_path(root).is_none() {
+            let Some(normalized_root) = normalize_policy_relative_path(root) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} filesystem root {root:?} must be a safe relative path"
                 )));
             };
+            declared_scopes.push(normalized_root);
         }
 
-        let mut write_scopes = Vec::new();
         for root in &self.write_roots {
             let Some(normalized_root) = normalize_policy_relative_path(root) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} filesystem root {root:?} must be a safe relative path"
                 )));
             };
-            write_scopes.push(normalized_root);
+            declared_scopes.push(normalized_root);
         }
 
-        Ok(write_scopes)
+        Ok(declared_scopes)
     }
 }
 
@@ -1843,26 +1844,39 @@ mod tests {
 
         assert_eq!(
             err.to_string(),
-            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside write_roots"
+            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside read_roots or write_roots"
         );
     }
 
     #[test]
     fn policy_artifact_rejects_protected_path_grants_outside_write_scope() {
         let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.read_roots = vec!["workspace/secrets".to_owned()];
+        artifact.commands[0].filesystem.read_roots = vec!["workspace/in".to_owned()];
         artifact.commands[0].filesystem.write_roots = vec!["workspace/out".to_owned()];
         artifact.commands[0].filesystem.protected_path_grants =
             vec!["workspace/secrets/.env".to_owned()];
 
         let err = artifact
             .validate()
-            .expect_err("protected path grants must stay inside write scope");
+            .expect_err("protected path grants must stay inside declared scopes");
 
         assert_eq!(
             err.to_string(),
-            "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside write_roots"
+            "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside read_roots or write_roots"
         );
+    }
+
+    #[test]
+    fn policy_artifact_accepts_read_only_protected_path_grants() {
+        let mut artifact = valid_policy_artifact("filesystem-tool");
+        artifact.commands[0].filesystem.read_roots = vec!["workspace/secrets".to_owned()];
+        artifact.commands[0].filesystem.write_roots.clear();
+        artifact.commands[0].filesystem.protected_path_grants =
+            vec!["workspace/secrets/.env".to_owned()];
+
+        artifact
+            .validate()
+            .expect("read-only protected path grants inside read scope are valid");
     }
 
     #[test]
