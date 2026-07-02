@@ -2340,6 +2340,699 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
 }
 
 #[test]
+fn appended_session_log_validator_rejects_malformed_suffixes() {
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &started)
+        .expect("prior event validates");
+    let completed = event_line(
+        "evt-002",
+        EventType::SessionCompleted,
+        "meta001",
+        2,
+        None,
+        serde_json::json!({}),
+    );
+
+    validate_appended_session_log_text(Path::new("append.jsonl"), "meta001", &[], &started)
+        .expect("empty prior validates a complete stream");
+    assert!(validate_appended_session_log_text(
+        Path::new("append.jsonl"),
+        "meta001",
+        &prior_events,
+        ""
+    )
+    .expect("empty append succeeds")
+    .is_empty());
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            completed.trim_end()
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("must end with LF")
+    ));
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "other001",
+            &prior_events,
+            &completed
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("expected")
+    ));
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &completed.replace('\n', "\r\n")
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("LF-only")
+    ));
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &completed.replacen('{', "{ ", 1)
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("canonical JSONL")
+    ));
+
+    let other_session = event_line(
+        "evt-002",
+        EventType::SessionCompleted,
+        "other001",
+        2,
+        None,
+        serde_json::json!({}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &other_session
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("one session_id")
+    ));
+
+    let mut invalid_prior = base_event();
+    invalid_prior.session_id = "BadSession".to_owned();
+    let mut invalid_session = invalid_prior.clone();
+    invalid_session.event_id = "evt-002".to_owned();
+    invalid_session.sequence = 2;
+    let invalid_session = invalid_session
+        .canonical_jsonl()
+        .expect("invalid session event serializes");
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "BadSession",
+            &[invalid_prior],
+            &invalid_session
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("valid session_id")
+    ));
+
+    let mut empty_event_id = base_event();
+    empty_event_id.event_id.clear();
+    empty_event_id.sequence = 2;
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &empty_event_id
+                .canonical_jsonl()
+                .expect("empty event id serializes")
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("event_id")
+    ));
+
+    let mut empty_source = base_event();
+    empty_source.event_id = "evt-002".to_owned();
+    empty_source.sequence = 2;
+    empty_source.source.clear();
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &empty_source
+                .canonical_jsonl()
+                .expect("empty source serializes")
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("source")
+    ));
+
+    let mut invalid_timestamp = base_event();
+    invalid_timestamp.event_id = "evt-002".to_owned();
+    invalid_timestamp.sequence = 2;
+    invalid_timestamp.timestamp = "not-a-time".to_owned();
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &invalid_timestamp
+                .canonical_jsonl()
+                .expect("invalid timestamp serializes")
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("timestamp")
+    ));
+
+    let mut empty_correlation_id = base_event();
+    empty_correlation_id.event_id = "evt-002".to_owned();
+    empty_correlation_id.sequence = 2;
+    empty_correlation_id.correlation_id = Some(String::new());
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &empty_correlation_id
+                .canonical_jsonl()
+                .expect("empty correlation id serializes")
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("correlation_id")
+    ));
+
+    let same_sequence = event_line(
+        "evt-002",
+        EventType::SessionCompleted,
+        "meta001",
+        1,
+        None,
+        serde_json::json!({}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &same_sequence
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("sequence must increase")
+    ));
+    let duplicate_event_id = event_line(
+        "evt-001",
+        EventType::SessionCompleted,
+        "meta001",
+        2,
+        None,
+        serde_json::json!({}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &duplicate_event_id
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("unique event_id")
+    ));
+
+    let terminal_events = validate_session_log_text(
+        Path::new("append-terminal.jsonl"),
+        "meta001",
+        &format!("{started}{completed}"),
+    )
+    .expect("terminal prior validates");
+    let late_resumed = event_line(
+        "evt-003",
+        EventType::SessionResumed,
+        "meta001",
+        3,
+        None,
+        serde_json::json!({"reason":"late"}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append-terminal.jsonl"),
+            "meta001",
+            &terminal_events,
+            &late_resumed
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("after terminal session event")
+    ));
+}
+
+#[test]
+fn appended_session_log_validator_rejects_loop_identity_edges() {
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let prior_events =
+        validate_session_log_text(Path::new("append-loop.jsonl"), "meta001", &started)
+            .expect("prior event validates");
+    let loop_without_id = event_line(
+        "evt-002",
+        EventType::LoopStarted,
+        "meta001",
+        2,
+        None,
+        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append-loop.jsonl"),
+            "meta001",
+            &prior_events,
+            &loop_without_id
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("loop.started must include loop_id")
+    ));
+
+    let loop_started = loop_started_line("evt-002", 2);
+    let prior_events = validate_session_log_text(
+        Path::new("append-loop.jsonl"),
+        "meta001",
+        &format!("{started}{loop_started}"),
+    )
+    .expect("loop prior validates");
+    let duplicate_loop = event_line(
+        "evt-003",
+        EventType::LoopStarted,
+        "meta001",
+        3,
+        Some("loop-001"),
+        serde_json::json!({"loop_definition_id":"other-loop"}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append-loop.jsonl"),
+            "meta001",
+            &prior_events,
+            &duplicate_loop
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("unique loop_id")
+    ));
+}
+
+#[test]
+fn session_lifecycle_rejects_parent_and_active_state_edges() {
+    let started = base_event().canonical_jsonl().expect("started serializes");
+
+    let second_start = event_line(
+        "evt-002",
+        EventType::SessionStarted,
+        "meta001",
+        2,
+        None,
+        serde_json::json!({"reason":"fixture-start"}),
+    );
+    assert_invalid_session_log(
+        "second-start.jsonl",
+        "meta001",
+        &format!("{started}{second_start}"),
+        "only valid as the first event",
+    );
+
+    assert_invalid_session_log(
+        "phase-before-loop.jsonl",
+        "meta001",
+        &format!("{started}{}", phase_entered_line("evt-002", 2)),
+        "must follow loop.started",
+    );
+
+    let parent_without_loop = event_line_with_parent(
+        "evt-002",
+        EventType::Error,
+        "meta001",
+        2,
+        None,
+        Some("parent-loop"),
+        serde_json::json!({
+            "code": "E_PARENT",
+            "data": {},
+            "message": "parent without loop",
+        }),
+    );
+    assert_invalid_session_log(
+        "parent-without-loop.jsonl",
+        "meta001",
+        &format!("{started}{parent_without_loop}"),
+        "parent_loop_id requires loop_id",
+    );
+
+    let self_parent = event_line_with_parent(
+        "evt-002",
+        EventType::LoopStarted,
+        "meta001",
+        2,
+        Some("loop-001"),
+        Some("loop-001"),
+        serde_json::json!({"loop_definition_id":"child-loop"}),
+    );
+    assert_invalid_session_log(
+        "self-parent.jsonl",
+        "meta001",
+        &format!("{started}{self_parent}"),
+        "must not match loop_id",
+    );
+
+    let missing_parent = event_line_with_parent(
+        "evt-002",
+        EventType::LoopStarted,
+        "meta001",
+        2,
+        Some("child-loop"),
+        Some("missing-parent"),
+        serde_json::json!({"loop_definition_id":"child-loop"}),
+    );
+    assert_invalid_session_log(
+        "missing-parent.jsonl",
+        "meta001",
+        &format!("{started}{missing_parent}"),
+        "already started loop",
+    );
+
+    let child_after_terminal_parent = event_line_with_parent(
+        "evt-004",
+        EventType::LoopStarted,
+        "meta001",
+        4,
+        Some("child-loop"),
+        Some("loop-001"),
+        serde_json::json!({"loop_definition_id":"child-loop"}),
+    );
+    assert_invalid_session_log(
+        "terminal-parent.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            loop_completed_line("evt-003", 3),
+            child_after_terminal_parent
+        ),
+        "references terminal loop",
+    );
+
+    let child_started = event_line_with_parent(
+        "evt-003",
+        EventType::LoopStarted,
+        "meta001",
+        3,
+        Some("child-loop"),
+        Some("loop-001"),
+        serde_json::json!({"loop_definition_id":"child-loop"}),
+    );
+    let child_phase_without_parent = event_line(
+        "evt-004",
+        EventType::PhaseEntered,
+        "meta001",
+        4,
+        Some("child-loop"),
+        serde_json::json!({
+            "instruction_ids": [],
+            "phase_id": "phase",
+            "phase_name": "Phase",
+            "tool_ids": [],
+        }),
+    );
+    assert_invalid_session_log(
+        "parent-mismatch.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            child_started,
+            child_phase_without_parent
+        ),
+        "must match loop.started",
+    );
+
+    assert_invalid_session_log(
+        "phase-during-step.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            phase_entered_line("evt-005", 5)
+        ),
+        "requires no active step",
+    );
+
+    assert_invalid_session_log(
+        "step-without-phase.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}",
+            loop_started_line("evt-002", 2),
+            step_started_line("evt-003", 3)
+        ),
+        "requires active phase",
+    );
+
+    let mismatched_step_phase = event_line(
+        "evt-004",
+        EventType::StepStarted,
+        "meta001",
+        4,
+        Some("loop-001"),
+        serde_json::json!({"phase_id":"other-phase","step_id":"step","step_name":"Step"}),
+    );
+    assert_invalid_session_log(
+        "step-phase-mismatch.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            mismatched_step_phase
+        ),
+        "must match active phase",
+    );
+
+    let second_active_step = event_line(
+        "evt-005",
+        EventType::StepStarted,
+        "meta001",
+        5,
+        Some("loop-001"),
+        serde_json::json!({"phase_id":"phase","step_id":"other-step","step_name":"OtherStep"}),
+    );
+    assert_invalid_session_log(
+        "step-during-step.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            second_active_step
+        ),
+        "requires no active step",
+    );
+
+    assert_invalid_session_log(
+        "step-completed-without-start.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_completed_line("evt-004", 4)
+        ),
+        "must follow step.started",
+    );
+
+    let wrong_step_completed = event_line(
+        "evt-005",
+        EventType::StepCompleted,
+        "meta001",
+        5,
+        Some("loop-001"),
+        serde_json::json!({"phase_id":"phase","step_id":"other-step","step_name":"OtherStep"}),
+    );
+    assert_invalid_session_log(
+        "wrong-step-completed.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            wrong_step_completed
+        ),
+        "must follow step.started",
+    );
+}
+
+#[test]
+fn session_lifecycle_rejects_tool_and_message_edges() {
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let active_step_prefix = format!(
+        "{started}{}{}{}",
+        loop_started_line("evt-002", 2),
+        phase_entered_line("evt-003", 3),
+        step_started_line("evt-004", 4)
+    );
+
+    assert_invalid_session_log(
+        "tool-without-step.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            tool_started_line("evt-004", 4)
+        ),
+        "requires active step",
+    );
+
+    let tool_completed_without_start = event_line(
+        "evt-005",
+        EventType::ToolCompleted,
+        "meta001",
+        5,
+        Some("loop-001"),
+        serde_json::json!({"exit_code":0,"tool_id":"tool"}),
+    );
+    assert_invalid_session_log(
+        "tool-completed-without-start.jsonl",
+        "meta001",
+        &format!("{active_step_prefix}{tool_completed_without_start}"),
+        "must follow tool.started",
+    );
+
+    let tool_failed_without_start = event_line(
+        "evt-004",
+        EventType::ToolFailed,
+        "meta001",
+        4,
+        Some("loop-001"),
+        serde_json::json!({"error":"denied","tool_id":"tool"}),
+    );
+    assert_invalid_session_log(
+        "tool-failed-without-start-after-phase.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            tool_failed_without_start
+        ),
+        "must follow tool.started after phase.entered",
+    );
+
+    let message_delta = event_line(
+        "evt-005",
+        EventType::MessageDelta,
+        "meta001",
+        5,
+        Some("loop-001"),
+        serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
+    );
+    assert_invalid_session_log(
+        "message-without-step.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            message_delta
+        ),
+        "requires active step",
+    );
+
+    let message_completed = event_line(
+        "evt-006",
+        EventType::MessageCompleted,
+        "meta001",
+        6,
+        Some("loop-001"),
+        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+    );
+    assert_invalid_session_log(
+        "message-completed-without-delta.jsonl",
+        "meta001",
+        &format!("{active_step_prefix}{message_completed}"),
+        "must follow message.delta",
+    );
+
+    let user_delta_same_id = event_line(
+        "evt-006",
+        EventType::MessageDelta,
+        "meta001",
+        6,
+        Some("loop-001"),
+        serde_json::json!({"content_delta":"hi","message_id":"msg-001","role":"user"}),
+    );
+    assert_invalid_session_log(
+        "message-role-mismatch.jsonl",
+        "meta001",
+        &format!("{active_step_prefix}{message_delta}{user_delta_same_id}"),
+        "must match active role",
+    );
+
+    let user_completed_same_id = event_line(
+        "evt-006",
+        EventType::MessageCompleted,
+        "meta001",
+        6,
+        Some("loop-001"),
+        serde_json::json!({"message_id":"msg-001","role":"user"}),
+    );
+    assert_invalid_session_log(
+        "message-completed-role-mismatch.jsonl",
+        "meta001",
+        &format!("{active_step_prefix}{message_delta}{user_completed_same_id}"),
+        "must match active role",
+    );
+
+    let late_completed = event_line(
+        "evt-007",
+        EventType::MessageCompleted,
+        "meta001",
+        7,
+        Some("loop-001"),
+        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+    );
+    assert_invalid_session_log(
+        "message-after-terminal.jsonl",
+        "meta001",
+        &format!("{active_step_prefix}{message_delta}{message_completed}{late_completed}"),
+        "after terminal message",
+    );
+
+    let loop_completed = loop_completed_line("evt-006", 6);
+    let session_completed = event_line(
+        "evt-007",
+        EventType::SessionCompleted,
+        "meta001",
+        7,
+        None,
+        serde_json::json!({}),
+    );
+    assert_invalid_session_log(
+        "terminal-with-open-step.jsonl",
+        "meta001",
+        &format!("{active_step_prefix}{loop_completed}{session_completed}"),
+        "open step",
+    );
+    assert_invalid_session_log(
+        "terminal-with-open-tool.jsonl",
+        "meta001",
+        &format!(
+            "{active_step_prefix}{}{}{}{}",
+            tool_started_line("evt-005", 5),
+            step_completed_line("evt-006", 6),
+            loop_completed_line("evt-007", 7),
+            event_line(
+                "evt-008",
+                EventType::SessionCompleted,
+                "meta001",
+                8,
+                None,
+                serde_json::json!({})
+            )
+        ),
+        "open tool",
+    );
+    assert_invalid_session_log(
+        "terminal-with-open-message.jsonl",
+        "meta001",
+        &format!(
+            "{active_step_prefix}{message_delta}{}{}{}",
+            step_completed_line("evt-006", 6),
+            loop_completed_line("evt-007", 7),
+            event_line(
+                "evt-008",
+                EventType::SessionCompleted,
+                "meta001",
+                8,
+                None,
+                serde_json::json!({})
+            )
+        ),
+        "open message",
+    );
+}
+
+#[test]
 fn resume_rejects_events_after_terminal_without_rewriting_log() {
     let workspace = workspace_copy("smoke-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -3163,6 +3856,83 @@ fn tail_suffix_reader_uses_observed_range_when_log_grows() {
     .expect("growth after observed length must not reject the observed range");
 
     assert_eq!(suffix, observed_append);
+}
+
+#[test]
+fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
+    let workspace = empty_workspace("tail-reader-edges");
+    let path = workspace.join("tailreader001.jsonl");
+    fs::write(&path, "abc").expect("session log written");
+
+    assert_eq!(session_log_len(&path).expect("log length is readable"), 3);
+    assert!(matches!(
+        read_file_suffix_to_string(&path, 3, 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("append-only")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&path, 0, 4),
+        Err(RuntimeError::Protocol(message)) if message.contains("append-only")
+    ));
+    assert!(matches!(
+        read_file_range(&path, 4, 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("append-only")
+    ));
+    assert!(matches!(
+        read_file_range(&path, 0, 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max 2")
+    ));
+
+    fs::write(&path, [0xff]).expect("invalid utf8 log written");
+    assert!(matches!(
+        read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES),
+        Err(RuntimeError::Protocol(message)) if message.contains("not valid UTF-8")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&path, 0, 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("not valid UTF-8")
+    ));
+
+    let oversized = workspace.join("oversized.jsonl");
+    let file = fs::File::create(&oversized).expect("oversized file created");
+    file.set_len(MAX_SESSION_LOG_BYTES + 1)
+        .expect("oversized sparse file length set");
+    assert!(matches!(
+        session_log_len(&oversized),
+        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&oversized, 0, 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
+    ));
+    assert!(matches!(
+        read_file_range(&oversized, 0, MAX_SESSION_LOG_BYTES),
+        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
+    ));
+
+    let attempts = AtomicUsize::new(0);
+    let retry_result = retry_tail_transient_read_error(|| {
+        let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+        if attempt < 2 {
+            Err(RuntimeError::Io {
+                path: workspace.join("pending.jsonl"),
+                source: io::Error::new(io::ErrorKind::NotFound, "pending"),
+            })
+        } else {
+            Ok("ready")
+        }
+    })
+    .expect("transient read errors are retried");
+    assert_eq!(retry_result, "ready");
+    assert_eq!(attempts.load(Ordering::SeqCst), 3);
+
+    let attempts = AtomicUsize::new(0);
+    let err = retry_tail_transient_read_error::<()>(|| {
+        attempts.fetch_add(1, Ordering::SeqCst);
+        Err(RuntimeError::Protocol("permanent".to_owned()))
+    })
+    .expect_err("non-transient read errors are returned immediately");
+    assert!(matches!(err, RuntimeError::Protocol(message) if message == "permanent"));
+    assert_eq!(attempts.load(Ordering::SeqCst), 1);
 }
 
 #[test]
