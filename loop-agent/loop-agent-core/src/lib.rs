@@ -419,6 +419,7 @@ pub fn resume_session(
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
+    ensure_non_hardlinked_real_file(&path)?;
     let _lock = acquire_session_lock(workspace, session_id)?;
     let before = read_session_log_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &before)?;
@@ -1248,6 +1249,19 @@ fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
         path: path.to_owned(),
         source,
     })?;
+    validate_real_file(path, &metadata)
+}
+
+fn ensure_non_hardlinked_real_file(path: &Path) -> Result<(), RuntimeError> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    validate_real_file(path, &metadata)?;
+    ensure_not_hardlinked_file(path, &metadata)
+}
+
+fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
     if metadata.file_type().is_symlink() {
         return Err(RuntimeError::Protocol(format!(
             "{} must not be a symlink",
@@ -1257,6 +1271,16 @@ fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
     if !metadata.is_file() {
         return Err(RuntimeError::Protocol(format!(
             "{} must be a file",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_not_hardlinked_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
+    if hard_link_count_is_verifiable() && hard_link_count(metadata) > 1 {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be hard-linked",
             path.display()
         )));
     }
@@ -2525,12 +2549,7 @@ fn ensure_opened_regular_leaf_matches_path(
             path.display()
         )));
     }
-    if hard_link_count(&file_metadata) > 1 {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be hard-linked",
-            path.display()
-        )));
-    }
+    ensure_not_hardlinked_file(path, &file_metadata)?;
 
     Ok(())
 }
@@ -2822,12 +2841,7 @@ fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
             path.display()
         ))),
         Ok(metadata) if metadata.is_file() => {
-            if hard_link_count_is_verifiable() && hard_link_count(&metadata) > 1 {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} must not be hard-linked",
-                    path.display()
-                )));
-            }
+            ensure_not_hardlinked_file(path, &metadata)?;
             Ok(true)
         }
         Ok(_) => Err(RuntimeError::Protocol(format!(
