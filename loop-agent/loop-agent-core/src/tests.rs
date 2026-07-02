@@ -130,6 +130,52 @@ fn session_id_suffix_matching_accepts_only_allocated_suffixes() {
 }
 
 #[test]
+fn session_id_and_resume_helpers_cover_fallback_edges() {
+    assert_eq!(
+        session_id_for_loop("sandbox-negative-custom-word"),
+        "negcustomword001"
+    );
+    assert_eq!(session_id_for_loop("!!!"), "session001");
+
+    assert!(!session_id_matches_loop("hello001later", "hello-loop"));
+
+    let long = "a".repeat(128);
+    let suffixed = suffixed_session_id(&long, 10_000);
+    assert_eq!(suffixed.len(), 128);
+    assert!(suffixed.ends_with("-10000"));
+
+    let registry = loop_chain_registry(1);
+    assert_eq!(
+        resumable_loop_id(&[], &registry, &session_id_for_loop("loop-000"))
+            .expect("session id fallback resolves the loop"),
+        "loop-000"
+    );
+    assert!(matches!(
+        resumable_loop_id(&[], &registry, "unknown001"),
+        Err(RuntimeError::Protocol(message))
+            if message.contains("does not identify a resumable loop")
+    ));
+
+    let missing_definition = EventEnvelope {
+        loop_id: Some("loop-001".to_owned()),
+        ..EventEnvelope::new(
+            "evt-001",
+            EventType::LoopStarted,
+            "resume001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            serde_json::json!({}),
+        )
+    };
+    assert!(matches!(
+        resumable_loop_id(&[missing_definition], &registry, "resume001"),
+        Err(RuntimeError::Protocol(message))
+            if message.contains("loop.started missing loop_definition_id")
+    ));
+}
+
+#[test]
 fn registry_root_must_stay_inside_workspace() {
     let workspace = workspace_copy("smoke-loop");
     fs::write(
@@ -1742,6 +1788,46 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
     assert!(!session_path.exists());
     assert!(!log_path.exists());
     assert!(!lock_path.exists());
+}
+
+#[test]
+fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
+    let workspace = empty_workspace("reservation-helper-edges");
+    let missing_lock = SessionReservation {
+        log_path: workspace.join(".loop/logs/missing.log"),
+        lock_path: workspace.join(".loop/sessions/missing.lock"),
+        session_path: workspace.join(".loop/sessions/missing.jsonl"),
+        session_id: "missing001".to_owned(),
+        cleanup_on_drop: std::cell::Cell::new(true),
+    };
+
+    let err = missing_lock
+        .release_lock()
+        .expect_err("missing lock release reports an IO error");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Io { path, .. } if path.ends_with("missing.lock")
+    ));
+    missing_lock.rollback();
+
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    let directory_leaf = session_dir.join("dirleaf001.jsonl");
+    fs::create_dir(&directory_leaf).expect("directory session leaf created");
+
+    let err = reserve_session_file(&directory_leaf, "dirleaf001")
+        .expect_err("directory session leaf must be rejected");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("must be a file")
+    ));
+
+    assert!(matches!(
+        session_lock_path(&workspace, "../bad"),
+        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
+    ));
 }
 
 #[test]
