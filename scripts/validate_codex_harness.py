@@ -235,6 +235,13 @@ def validate_agents(root: Path) -> list[str]:
             ):
                 if token not in instructions:
                     errors.append(f"{rel}: pr_validator must include {token}")
+            if not all(
+                token in instructions
+                for token in ("Windows", "CI-only", "Check line coverage", "gh")
+            ):
+                errors.append(
+                    f"{rel}: pr_validator must direct Windows coverage to CI with gh"
+                )
     return errors
 
 
@@ -263,6 +270,11 @@ def validate_skills(root: Path) -> list[str]:
             errors.append(f"{rel}: description is required")
         if not references_canonical_rules(text):
             errors.append(f"{rel}: must reference AGENTS.md or canonical repo rules")
+        if metadata.get("name") == "git" and not all(
+            token in text
+            for token in ("Windows", "CI", "Check line coverage", "gh pr checks")
+        ):
+            errors.append(f"{rel}: git skill must direct Windows coverage to CI with gh")
     return errors
 
 

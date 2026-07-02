@@ -16,6 +16,7 @@ class M1ValidationContractTest(unittest.TestCase):
             "cargo llvm-cov nextest --locked --workspace --fail-under-lines 95",
             workflow,
         )
+        self.assertIn("--show-missing-lines", workflow)
         self.assertNotIn("cargo llvm-cov nextest --locked --workspace --no-report", workflow)
 
     def test_pr_template_lists_m1_coverage_gate(self) -> None:

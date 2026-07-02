@@ -26,6 +26,10 @@ Run exactly these gates (scoped or full as asked):
 - cargo deny check
 - lychee (docs links) + HTML render check  (see TESTING.md / ADR-0021)
 
+On Windows hosts where local llvm-cov is blocked by the Rust GNU profiler
+runtime, do not add wrapper or WSL workaround code. Treat coverage as a CI-only
+gate and verify the already-pushed branch's `Check line coverage` jobs with gh.
+
 Never modify any file; never 'fix' anything. cargo writing under target/ is
 expected — do not touch source. Return ONLY a concise summary: the exact commands
 run, pass/fail per gate, and for each failure the minimal excerpt with file:line.

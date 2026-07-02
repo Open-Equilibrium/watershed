@@ -158,6 +158,44 @@ class CodexHarnessValidatorTest(unittest.TestCase):
             errors,
         )
 
+    def test_rejects_git_skill_without_windows_ci_coverage_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            skill_path = root / ".agents" / "skills" / "git" / "SKILL.md"
+            skill_path.write_text(
+                skill_path.read_text(encoding="utf-8").replace(
+                    "gh pr checks", "gh checks"
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validator.validate_repo(root)
+
+        self.assertIn(
+            ".agents/skills/git/SKILL.md: git skill must direct Windows coverage to CI with gh",
+            errors,
+        )
+
+    def test_rejects_pr_validator_without_windows_ci_coverage_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            agent_path = root / ".codex" / "agents" / "pr-validator.toml"
+            agent_path.write_text(
+                agent_path.read_text(encoding="utf-8").replace(
+                    "CI-only", "local-only"
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validator.validate_repo(root)
+
+        self.assertIn(
+            ".codex/agents/pr-validator.toml: pr_validator must direct Windows coverage to CI with gh",
+            errors,
+        )
+
     def test_pre_tool_guard_accepts_command_and_cmd_envelopes(self) -> None:
         for key in ("command", "cmd"):
             with self.subTest(key=key):
