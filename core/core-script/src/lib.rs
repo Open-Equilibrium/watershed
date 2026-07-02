@@ -3578,6 +3578,13 @@ mod tests {
                 "invalid block id: Bad",
             ),
             (
+                RegistryError::InvalidBlockName {
+                    kind: "instruction",
+                    id: "empty-name".to_owned(),
+                },
+                "instruction empty-name name must be non-empty",
+            ),
+            (
                 RegistryError::InvalidCommandId("bad command".to_owned()),
                 "invalid command id: bad command",
             ),
@@ -3618,6 +3625,14 @@ mod tests {
                 "loop cycle includes root",
             ),
             (
+                RegistryError::LoopDepthExceeded {
+                    loop_id: "root".to_owned(),
+                    depth: 65,
+                    max: 64,
+                },
+                "loop nesting depth 65 for root exceeds max 64",
+            ),
+            (
                 RegistryError::ReadLimitExceeded {
                     path: PathBuf::from("registry/tool.yaml"),
                     bytes: 17,
@@ -3650,6 +3665,18 @@ mod tests {
         let semantic_registry = RegistryError::from(schema.clone());
         assert!(std::error::Error::source(&semantic_registry).is_some());
         assert_eq!(semantic_registry.to_string(), schema.to_string());
+
+        let canonical_registry = RegistryError::CanonicalJson(
+            canonical_json(&serde_json::json!({
+                "é": 1,
+                "e\u{301}": 2,
+            }))
+            .expect_err("normalized duplicate key produces canonical error"),
+        );
+        assert!(canonical_registry
+            .to_string()
+            .contains("failed to serialize canonical registry JSON"));
+        assert!(std::error::Error::source(&canonical_registry).is_some());
 
         let serialize_error = RegistryError::Serialize(
             serde_json::from_str::<Value>("{").expect_err("invalid json produces serde error"),
@@ -4271,6 +4298,113 @@ mod tests {
         assert!(message(parse_bool("bool.yaml", "required", "maybe")).contains("true or false"));
         assert!(message(parse_u16("port.yaml", "port", "70000")).contains("16-bit integer"));
         assert!(message(parse_i64("int.yaml", "min", "abc")).contains("64-bit integer"));
+
+        assert!(message(parse_registry_block(
+            "unknown-block.yaml",
+            "endpoint:\n  id: endpoint\n  name: Endpoint\n",
+        ))
+        .contains("unsupported registry block kind"));
+        assert!(message(required_scalar(
+            "empty-scalar.yaml",
+            "instruction:\n  prompt: \"\"\n",
+            "instruction",
+            "prompt",
+        ))
+        .contains("instruction.prompt must be non-empty"));
+        assert!(message(optional_scalar(
+            "empty-optional-scalar.yaml",
+            "tool:\n  script_runtime: \"\"\n",
+            "tool",
+            "script_runtime",
+        ))
+        .contains("tool.script_runtime must be non-empty"));
+        assert!(message(section_scalar_value(
+            "folded-scalar.yaml",
+            "instruction:\n  prompt: >\n    Folded\n",
+            "instruction",
+            "prompt",
+        ))
+        .contains("unsupported folded block scalar"));
+        assert!(message(section_scalar_value(
+            "missing-scalar-value.yaml",
+            "instruction:\n  prompt:\n",
+            "instruction",
+            "prompt",
+        ))
+        .contains("instruction.prompt must be a scalar"));
+        assert!(message(required_nested_scalar(
+            "missing-nested-scalar-value.yaml",
+            "tool:\n  command:\n    command_id:\n",
+            "tool",
+            "command",
+            "command_id",
+        ))
+        .contains("tool.command.command_id must be a scalar"));
+        assert!(message(required_nested_scalar(
+            "empty-nested-scalar.yaml",
+            "tool:\n  command:\n    command_id: \"\"\n",
+            "tool",
+            "command",
+            "command_id",
+        ))
+        .contains("tool.command.command_id must be non-empty"));
+
+        let nested_object_shape = ListObjectShape {
+            section: "tool",
+            parent: Some("network"),
+            field: "allow",
+            field_indent: 4,
+            item_indent: 6,
+            property_indent: 8,
+        };
+        assert!(list_objects(
+            "empty-nested-objects.yaml",
+            "tool:\n  network:\n    allow: []\n",
+            nested_object_shape
+        )
+        .expect("empty nested object list parses")
+        .is_empty());
+        let nested_objects = list_objects(
+            "nested-objects-stop-at-sibling.yaml",
+            "tool:\n  network:\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 127.0.0.0/8\n        port: 443\n  command:\n    argv: []\n",
+            nested_object_shape,
+        )
+        .expect("nested object list stops at sibling parent");
+        assert_eq!(nested_objects.len(), 1);
+
+        let mut current = None;
+        let mut pending = Some(PendingListProperty {
+            field: "connection_refs".to_owned(),
+            items: vec!["link".to_owned()],
+        });
+        assert!(message(flush_pending_list_property(
+            "orphan-pending-list.yaml",
+            &mut current,
+            &mut pending,
+        ))
+        .contains("appears before list item"));
+
+        let object = BTreeMap::new();
+        assert!(message(required_object_scalar(
+            "missing-object-property.yaml",
+            &object,
+            "id"
+        ))
+        .contains("missing list object property id"));
+        let object = BTreeMap::from([("id".to_owned(), String::new())]);
+        assert!(message(required_object_scalar(
+            "empty-object-property.yaml",
+            &object,
+            "id"
+        ))
+        .contains("list object property id must be non-empty"));
+        assert!(message(reject_unexpected_object_keys(
+            "unexpected-object-property.yaml",
+            "phase.steps",
+            &BTreeMap::from([("unexpected".to_owned(), "value".to_owned())]),
+            &["id", "name"],
+        ))
+        .contains("unsupported phase.steps property unexpected"));
     }
 
     #[cfg(unix)]
@@ -4834,6 +4968,61 @@ tool:
                 kind: "instruction",
                 reference,
             } if reference == "alpha"
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_ids_and_ids_that_shadow_names() {
+        let duplicate_id = ResolvedRegistry::from_blocks([
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "same".to_owned(),
+                    name: "First".to_owned(),
+                },
+                prompt: "first".to_owned(),
+            }),
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "same".to_owned(),
+                    name: "Second".to_owned(),
+                },
+                prompt: "second".to_owned(),
+            }),
+        ])
+        .expect_err("duplicate block ids must fail");
+
+        assert!(matches!(
+            duplicate_id,
+            RegistryError::DuplicateId {
+                kind: "instruction",
+                id,
+            } if id == "same"
+        ));
+
+        let id_shadowing_name = ResolvedRegistry::from_blocks([
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "first".to_owned(),
+                    name: "alias".to_owned(),
+                },
+                prompt: "first".to_owned(),
+            }),
+            RegistryBlock::Instruction(InstructionBlock {
+                identity: BlockIdentity {
+                    id: "alias".to_owned(),
+                    name: "Second".to_owned(),
+                },
+                prompt: "second".to_owned(),
+            }),
+        ])
+        .expect_err("ids must not shadow existing names");
+
+        assert!(matches!(
+            id_shadowing_name,
+            RegistryError::AmbiguousReference {
+                kind: "instruction",
+                reference,
+            } if reference == "alias"
         ));
     }
 

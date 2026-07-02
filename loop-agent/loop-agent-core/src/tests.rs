@@ -5829,6 +5829,164 @@ fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected
     assert!(err.to_string().contains(expected), "{err}");
 }
 
+fn linux_sandbox_expected_decision(
+    fixture_name: &'static str,
+) -> Result<core_policy::ExpectedDecision, RuntimeError> {
+    let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
+        return Err(RuntimeError::Protocol(format!(
+            "missing linux expected decision for {fixture_name}"
+        )));
+    };
+    let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+    decision.validate().map_err(|err| {
+        RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
+    })?;
+    if decision.fixture_name != fixture_name {
+        return Err(RuntimeError::Protocol(format!(
+            "{fixture_name} expected decision fixture_name mismatch"
+        )));
+    }
+    Ok(decision)
+}
+
+fn linux_sandbox_expected_decision_text(loop_id: &str) -> Option<&'static str> {
+    sandbox_expected_decision_texts(loop_id)?
+        .into_iter()
+        .find_map(|(target, text)| {
+            (target == core_policy::PolicyTarget::LinuxLandlockSeccomp).then_some(text)
+        })
+}
+
+fn validate_failed_sandbox_decisions(
+    fixture_name: &str,
+    events: &[EventEnvelope],
+) -> Result<(), RuntimeError> {
+    let Some(decision_texts) = sandbox_expected_decision_texts(fixture_name) else {
+        return Ok(());
+    };
+    let reason = terminal_failure_reason(events).ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "sandbox-negative fixture {fixture_name} must end with session.failed reason"
+        ))
+    })?;
+
+    for (target, text) in decision_texts {
+        let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+        decision.validate().map_err(|err| {
+            RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision: {err}"
+            ))
+        })?;
+        if decision.fixture_name != fixture_name {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision fixture_name mismatch"
+            )));
+        }
+        if decision.target != target {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision target mismatch"
+            )));
+        }
+        if decision.expected != core_policy::ExpectedDecisionKind::Deny {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision must deny"
+            )));
+        }
+        if decision.side_effects_allowed {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision must disallow side effects"
+            )));
+        }
+        if decision.reason_code.as_str() != reason {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision reason {} does not match stream reason {reason}",
+                decision.reason_code.as_str()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
+    events
+        .iter()
+        .rev()
+        .find(|event| event.event_type == EventType::SessionFailed)?
+        .payload
+        .get("reason")?
+        .as_str()
+}
+
+fn sandbox_expected_decision_texts(
+    loop_id: &str,
+) -> Option<[(core_policy::PolicyTarget, &'static str); 2]> {
+    let (linux, macos) = match loop_id {
+        "sandbox-negative-environment" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-environment/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-environment/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-interpreter" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-interpreter/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-interpreter/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-network" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-network/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-network/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-protected-path" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-protected-path/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-protected-path/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-symlink" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-symlink/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-symlink/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-tool-out-of-phase" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-tool-out-of-phase/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-tool-out-of-phase/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-write" => (
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-write/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../core/core-policy/fixtures/sandbox-negative-write/macos-seatbelt.expected.json"
+            ),
+        ),
+        _ => return None,
+    };
+
+    Some([
+        (core_policy::PolicyTarget::LinuxLandlockSeccomp, linux),
+        (core_policy::PolicyTarget::MacosSeatbelt, macos),
+    ])
+}
+
 fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
     events
         .iter()
