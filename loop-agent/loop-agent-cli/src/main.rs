@@ -62,13 +62,20 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
             let emit = emit_mode(args)?;
             let output = loop_agent_core::replay_session(workspace, session_id, emit)?;
             write_stdout(&output.stdout)?;
+            if output.failed {
+                process::exit(65);
+            }
             Ok(())
         }
         "tail" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
             let mut stdout = io::stdout().lock();
-            loop_agent_core::tail_session_to_writer(workspace, session_id, emit, &mut stdout)?;
+            let output =
+                loop_agent_core::tail_session_to_writer(workspace, session_id, emit, &mut stdout)?;
+            if output.failed {
+                process::exit(65);
+            }
             Ok(())
         }
         "resume" => {

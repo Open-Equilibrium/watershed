@@ -122,6 +122,38 @@ fn golden_stream_validation_rejects_duplicate_event_ids() {
 }
 
 #[test]
+fn golden_stream_validation_rejects_invalid_runtime_payload_contract() {
+    let started = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "fixture001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    );
+    let failed = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionFailed,
+        "fixture001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    );
+    let text = format!(
+        "{}{}",
+        started.canonical_jsonl().expect("started event serializes"),
+        failed.canonical_jsonl().expect("failed event serializes")
+    );
+
+    let err = validate_protocol_jsonl_text(Path::new("missing-failure-reason.jsonl"), &text)
+        .expect_err("runtime payload contract violations must fail");
+
+    assert!(err.contains("session.failed payload.reason"));
+}
+
+#[test]
 fn golden_stream_validation_rejects_invalid_envelope_metadata() {
     let mut empty_event_id = base_event();
     empty_event_id.event_id.clear();
@@ -1500,226 +1532,8 @@ fn canonical_stream(events: &[EventEnvelope]) -> String {
         .collect()
 }
 
-fn is_rfc3339_utc_timestamp(value: &str) -> bool {
-    let Some(value) = value.strip_suffix('Z') else {
-        return false;
-    };
-    let Some((date, time)) = value.split_once('T') else {
-        return false;
-    };
-
-    let mut date_parts = date.split('-');
-    let Some(year) = date_parts.next().and_then(|part| parse_digits(part, 4)) else {
-        return false;
-    };
-    let Some(month) = date_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    let Some(day) = date_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    if date_parts.next().is_some() || !(1..=12).contains(&month) {
-        return false;
-    }
-    if day == 0 || day > days_in_month(year, month) {
-        return false;
-    }
-
-    let mut time_parts = time.split(':');
-    let Some(hour) = time_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    let Some(minute) = time_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    let Some(second_part) = time_parts.next() else {
-        return false;
-    };
-    if time_parts.next().is_some() {
-        return false;
-    }
-
-    let (second, fraction) = second_part
-        .split_once('.')
-        .map_or((second_part, None), |(second, fraction)| {
-            (second, Some(fraction))
-        });
-    let Some(second) = parse_digits(second, 2) else {
-        return false;
-    };
-    if fraction
-        .is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return false;
-    }
-
-    hour <= 23 && minute <= 59 && second <= 59
-}
-
-fn parse_digits(value: &str, len: usize) -> Option<u16> {
-    if value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit()) {
-        value.parse().ok()
-    } else {
-        None
-    }
-}
-
-fn days_in_month(year: u16, month: u16) -> u16 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
-}
-
-fn is_leap_year(year: u16) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
-}
-
 fn validate_protocol_jsonl_text(path: &Path, text: &str) -> Result<(), String> {
-    if !text.ends_with('\n') {
-        return Err(format!("{} must end with LF", path.display()));
-    }
-
-    let mut previous_sequence = 0;
-    let mut session_id = None;
-    let mut event_ids = HashSet::new();
-    let mut loop_started_ids = HashSet::new();
-    let mut event_count = 0;
-
-    for (line_index, line) in text.split_terminator('\n').enumerate() {
-        let line_number = line_index + 1;
-        if line.ends_with('\r') {
-            return Err(format!(
-                "{} line {line_number} must use LF-only line endings",
-                path.display()
-            ));
-        }
-        let event: EventEnvelope =
-            serde_json::from_str(line).map_err(|err| format!("{}: {err}", path.display()))?;
-        let canonical = event
-            .canonical_jsonl()
-            .map_err(|err| format!("{} line {line_number}: {err}", path.display()))?;
-        let source_line = format!("{line}\n");
-
-        if canonical != source_line {
-            return Err(format!(
-                "{} line {line_number} must use canonical JSONL bytes",
-                path.display()
-            ));
-        }
-        if event.protocol_version != proto::PROTOCOL_VERSION_V0 {
-            return Err(format!(
-                "{} line {line_number} must use protocol version {}",
-                path.display(),
-                proto::PROTOCOL_VERSION_V0
-            ));
-        }
-        if !proto::is_valid_session_id(&event.session_id) {
-            return Err(format!(
-                "{} line {line_number} must use a valid session_id",
-                path.display()
-            ));
-        }
-        if event.event_id.is_empty() {
-            return Err(format!(
-                "{} line {line_number} must use a non-empty event_id",
-                path.display()
-            ));
-        }
-        if event.source.is_empty() {
-            return Err(format!(
-                "{} line {line_number} must use a non-empty source",
-                path.display()
-            ));
-        }
-        if !is_rfc3339_utc_timestamp(&event.timestamp) {
-            return Err(format!(
-                "{} line {line_number} must use an RFC3339 UTC timestamp",
-                path.display()
-            ));
-        }
-        if event
-            .correlation_id
-            .as_ref()
-            .is_some_and(|correlation_id| correlation_id.is_empty())
-        {
-            return Err(format!(
-                "{} line {line_number} must use a non-empty correlation_id",
-                path.display()
-            ));
-        }
-        if event
-            .loop_id
-            .as_ref()
-            .is_some_and(|loop_id| loop_id.is_empty())
-        {
-            return Err(format!(
-                "{} line {line_number} must use a non-empty loop_id",
-                path.display()
-            ));
-        }
-        if event
-            .parent_loop_id
-            .as_ref()
-            .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
-        {
-            return Err(format!(
-                "{} line {line_number} must use a non-empty parent_loop_id",
-                path.display()
-            ));
-        }
-        if event.event_type == EventType::LoopStarted {
-            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
-                format!(
-                    "{} line {line_number} loop.started must include loop_id",
-                    path.display()
-                )
-            })?;
-            if !loop_started_ids.insert(loop_id.to_owned()) {
-                return Err(format!(
-                    "{} line {line_number} must use a unique loop_id for loop.started",
-                    path.display()
-                ));
-            }
-        }
-        if line_number == 1 && event.sequence != 1 {
-            return Err(format!("{} first sequence must be 1", path.display()));
-        }
-        if event.sequence <= previous_sequence {
-            return Err(format!(
-                "{} line {line_number} sequence must increase",
-                path.display()
-            ));
-        }
-        previous_sequence = event.sequence;
-
-        if !event_ids.insert(event.event_id.clone()) {
-            return Err(format!(
-                "{} line {line_number} must use a unique event_id",
-                path.display()
-            ));
-        }
-
-        if let Some(existing) = &session_id {
-            if existing != &event.session_id {
-                return Err(format!("{} must use one session_id", path.display()));
-            }
-        } else {
-            session_id = Some(event.session_id);
-        }
-
-        event_count += 1;
-    }
-
-    if event_count == 0 {
-        return Err(format!(
-            "{} must contain at least one event",
-            path.display()
-        ));
-    }
-
-    Ok(())
+    loop_agent_core::validate_protocol_jsonl_text(path, text)
+        .map(|_| ())
+        .map_err(|err| err.to_string())
 }

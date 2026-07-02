@@ -425,6 +425,7 @@ pub fn resume_session(
     if stream_is_failed(&events) || stream_is_completed(&events) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
+    ensure_resume_has_durable_loop_progress(&path, session_id, &events)?;
 
     let config = load_workspace_config(workspace)?;
     let registry_path = registry_root_path(workspace, &config.registry_root)?;
@@ -549,6 +550,24 @@ fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock)
         path.display(),
         loop_block.identity.id
     ))
+}
+
+fn ensure_resume_has_durable_loop_progress(
+    path: &Path,
+    session_id: &str,
+    events: &[EventEnvelope],
+) -> Result<(), RuntimeError> {
+    if events
+        .iter()
+        .any(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
+    {
+        return Ok(());
+    }
+
+    Err(RuntimeError::Protocol(format!(
+        "{} cannot resume session {session_id} before durable loop progress",
+        path.display()
+    )))
 }
 
 fn preflight_resume_append_stream(
@@ -823,9 +842,7 @@ fn reserve_unique_session_log(
         };
         match reserve_session_log(workspace, &candidate) {
             Ok(reservation) => return Ok(reservation),
-            Err(RuntimeError::SessionLogExists(_)) => {
-                read_existing_session(workspace, &candidate, EmitMode::Jsonl)?;
-            }
+            Err(RuntimeError::SessionLogExists(_)) => continue,
             Err(err) if is_active_session_error(&err, &candidate) => continue,
             Err(err) => return Err(err),
         }
@@ -863,7 +880,13 @@ fn reserve_session_file(path: &Path, session_id: &str) -> Result<(), RuntimeErro
             "{} must not be a symlink",
             path.display()
         ))),
-        Ok(_) => Err(RuntimeError::SessionLogExists(session_id.to_owned())),
+        Ok(metadata) if metadata.is_file() => {
+            Err(RuntimeError::SessionLogExists(session_id.to_owned()))
+        }
+        Ok(_) => Err(RuntimeError::Protocol(format!(
+            "{} must be a file",
+            path.display()
+        ))),
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             reserve_new_file(path).map_err(|err| match err {
                 RuntimeError::Io { source, .. }
@@ -1262,6 +1285,8 @@ struct RuntimeFailure {
     reason: String,
     message: &'static str,
     tool_id: Option<String>,
+    phase_id: Option<String>,
+    emit_tool_failed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -1484,10 +1509,6 @@ fn preflight_loop_tools_at_depth(
         )));
     }
 
-    if sandbox_runtime_failure(registry, policy, loop_block)?.is_some() {
-        return Ok(());
-    }
-
     for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
@@ -1579,16 +1600,11 @@ fn emit_loop_block_at_depth(
         }),
     );
 
-    if let Some(failure) = sandbox_runtime_failure(context.registry, context.policy, loop_block)? {
-        emit_runtime_failure(loop_block, &invocation, &failure, builder);
-        return Ok(Some(failure));
-    }
-
     for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        emit_phase(
+        if let Some(failure) = emit_phase(
             context.workspace,
             context.registry,
             context.policy,
@@ -1596,7 +1612,10 @@ fn emit_loop_block_at_depth(
             &invocation,
             context.side_effect_mode,
             builder,
-        )?;
+        )? {
+            emit_runtime_failure(loop_block, &invocation, &failure, builder);
+            return Ok(Some(failure));
+        }
 
         if index == 0 {
             for subloop_ref in &loop_block.subloop_refs {
@@ -1636,7 +1655,7 @@ fn emit_phase(
     invocation: &LoopInvocation,
     side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder,
-) -> Result<(), RuntimeError> {
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
     let instruction_ids = phase
         .instruction_refs
         .iter()
@@ -1674,7 +1693,7 @@ fn emit_phase(
         }),
     );
 
-    for step in &phase.steps {
+    for (step_index, step) in phase.steps.iter().enumerate() {
         let step_payload = step_payload(registry, phase, step)?;
         builder.emit(
             Some(invocation),
@@ -1703,29 +1722,41 @@ fn emit_phase(
             );
         }
 
-        for tool_ref in &phase.tool_refs {
-            let tool = registry.tool_block(tool_ref).ok_or_else(|| {
-                RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
-            })?;
-            let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
-            let tool_policy = RuntimeToolPolicy {
-                command: command_policy,
-                protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
-            };
-            emit_tool(
-                workspace,
-                tool,
-                tool_policy,
-                invocation,
-                side_effect_mode,
-                builder,
-            )?;
+        if step_index == 0 {
+            if let Some(failure) = sandbox_out_of_phase_failure(registry, policy, phase) {
+                builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
+                return Ok(Some(failure));
+            }
+
+            for tool_ref in &phase.tool_refs {
+                let tool = registry.tool_block(tool_ref).ok_or_else(|| {
+                    RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
+                })?;
+                let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
+                let tool_policy = RuntimeToolPolicy {
+                    command: command_policy,
+                    protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
+                };
+                if let Some(mut failure) = emit_tool(
+                    workspace,
+                    tool,
+                    tool_policy,
+                    invocation,
+                    side_effect_mode,
+                    builder,
+                )? {
+                    emit_runtime_tool_failure(invocation, &failure, builder);
+                    failure.emit_tool_failed = false;
+                    builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
+                    return Ok(Some(failure));
+                }
+            }
         }
 
         builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
     }
 
-    Ok(())
+    Ok(None)
 }
 
 fn step_payload(
@@ -1911,7 +1942,7 @@ fn emit_tool(
     invocation: &LoopInvocation,
     side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder,
-) -> Result<(), RuntimeError> {
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
     ensure_tool_matches_policy(tool, policy.command)?;
     let planned_progress =
         planned_tool_progress(tool, policy.protected_path_match_mode, policy.command)?;
@@ -1928,6 +1959,10 @@ fn emit_tool(
             "write_scope": policy.command.filesystem.write_roots,
         }),
     );
+
+    if let Some(failure) = sandbox_tool_dispatch_failure(tool, policy.command)? {
+        return Ok(Some(failure));
+    }
 
     let side_effect_sequence = builder.sequence + 1;
     let completed_sequence = side_effect_sequence + u64::from(planned_progress.is_some());
@@ -1966,7 +2001,7 @@ fn emit_tool(
             "tool_id": tool.identity.id,
         }),
     );
-    Ok(())
+    Ok(None)
 }
 
 fn execute_tool(
@@ -2191,19 +2226,25 @@ fn redirection_positions(line: &str) -> Result<Vec<usize>, RuntimeError> {
 }
 
 fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
-    if value.is_empty() || value.split_whitespace().count() != 1 {
+    if value.is_empty() {
         return Err(RuntimeError::Protocol(
             "own-script redirection target must be one literal path".to_owned(),
         ));
     }
-    if value.len() >= 2
-        && ((value.starts_with('"') && value.ends_with('"'))
-            || (value.starts_with('\'') && value.ends_with('\'')))
-    {
-        Ok(value[1..value.len() - 1].to_owned())
-    } else {
-        Ok(value.to_owned())
+    if let Some(quote) = value.chars().next().filter(|ch| matches!(ch, '"' | '\'')) {
+        if value.len() < 2 || !value.ends_with(quote) {
+            return Err(RuntimeError::Protocol(
+                "own-script redirection target must be one literal path".to_owned(),
+            ));
+        }
+        return Ok(value[1..value.len() - 1].to_owned());
     }
+    if value.contains('"') || value.contains('\'') || value.split_whitespace().count() != 1 {
+        return Err(RuntimeError::Protocol(
+            "own-script redirection target must be one literal path".to_owned(),
+        ));
+    }
+    Ok(value.to_owned())
 }
 
 fn validate_script_write_target(
@@ -2807,6 +2848,40 @@ fn emit_runtime_failure(
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder,
 ) {
+    if failure.emit_tool_failed {
+        emit_runtime_tool_failure(invocation, failure, builder);
+    }
+    let mut error_payload = serde_json::json!({
+        "code": failure.reason,
+        "message": failure.message,
+    });
+    if let Some(phase_id) = &failure.phase_id {
+        let mut error_data = serde_json::Map::new();
+        error_data.insert("phase_id".to_owned(), serde_json::json!(phase_id));
+        if let Some(tool_id) = &failure.tool_id {
+            error_data.insert("tool_id".to_owned(), serde_json::json!(tool_id));
+        }
+        let object = error_payload
+            .as_object_mut()
+            .expect("error payload is constructed as an object");
+        object.insert("data".to_owned(), serde_json::Value::Object(error_data));
+    }
+    builder.emit(Some(invocation), EventType::Error, error_payload);
+    builder.emit(
+        Some(invocation),
+        EventType::LoopFailed,
+        serde_json::json!({
+            "error": failure.reason,
+            "loop_definition_id": loop_block.identity.id,
+        }),
+    );
+}
+
+fn emit_runtime_tool_failure(
+    invocation: &LoopInvocation,
+    failure: &RuntimeFailure,
+    builder: &mut RuntimeEventBuilder,
+) {
     if let Some(tool_id) = &failure.tool_id {
         builder.emit(
             Some(invocation),
@@ -2817,22 +2892,6 @@ fn emit_runtime_failure(
             }),
         );
     }
-    builder.emit(
-        Some(invocation),
-        EventType::Error,
-        serde_json::json!({
-            "code": failure.reason,
-            "message": failure.message,
-        }),
-    );
-    builder.emit(
-        Some(invocation),
-        EventType::LoopFailed,
-        serde_json::json!({
-            "error": failure.reason,
-            "loop_definition_id": loop_block.identity.id,
-        }),
-    );
 }
 
 fn emit_propagated_runtime_failure(
@@ -2845,34 +2904,10 @@ fn emit_propagated_runtime_failure(
         reason: failure.reason.clone(),
         message: failure.message,
         tool_id: None,
+        phase_id: None,
+        emit_tool_failed: false,
     };
     emit_runtime_failure(loop_block, invocation, &loop_failure, builder);
-}
-
-fn sandbox_runtime_failure(
-    registry: &core_script::ResolvedRegistry,
-    policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
-) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    for phase_ref in &loop_block.phase_refs {
-        let phase = registry.phase_block(phase_ref).ok_or_else(|| {
-            RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
-        })?;
-        if let Some(failure) = sandbox_out_of_phase_failure(registry, policy, phase) {
-            return Ok(Some(failure));
-        }
-        for tool_ref in &phase.tool_refs {
-            let tool = registry.tool_block(tool_ref).ok_or_else(|| {
-                RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
-            })?;
-            let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
-            if let Some(failure) = sandbox_tool_dispatch_failure(tool, command_policy)? {
-                return Ok(Some(failure));
-            }
-        }
-    }
-
-    Ok(None)
 }
 
 fn sandbox_tool_dispatch_failure(
@@ -2901,16 +2936,23 @@ fn sandbox_out_of_phase_failure(
     {
         return None;
     }
-    let has_unavailable_sentinel = registry.tools.values().any(|tool| {
-        is_sandbox_negative_sentinel_tool(tool)
-            && !policy_phase_contains_tool(policy, &phase.identity.id, &tool.identity.id)
-    });
-    if !has_unavailable_sentinel {
-        return None;
-    }
-    Some(runtime_failure_for_reason(
-        core_policy::DenyReasonCode::ToolOutOfPhase,
-        None,
+    let unavailable_sentinel = registry
+        .tools
+        .values()
+        .filter(|tool| {
+            is_sandbox_negative_sentinel_tool(tool)
+                && !policy_phase_contains_tool(policy, &phase.identity.id, &tool.identity.id)
+        })
+        .min_by_key(|tool| {
+            if sandbox_negative_operation_for_tool(tool) == Some("write") {
+                0
+            } else {
+                1
+            }
+        })?;
+    Some(runtime_out_of_phase_failure(
+        phase.identity.id.clone(),
+        unavailable_sentinel.identity.id.clone(),
     ))
 }
 
@@ -2932,18 +2974,24 @@ fn phase_attempts_sandbox_negative_action(
 }
 
 fn is_sandbox_negative_sentinel_tool(tool: &core_script::ToolBlock) -> bool {
+    sandbox_negative_operation_for_tool(tool).is_some()
+}
+
+fn sandbox_negative_operation_for_tool(tool: &core_script::ToolBlock) -> Option<&str> {
     let (
         core_script::ToolKind::PredefinedCommand,
         core_script::ToolCommand::Predefined { command_id, argv },
     ) = (&tool.tool_kind, &tool.command)
     else {
-        return false;
+        return None;
     };
-    command_id == "agent-negative"
-        && matches!(
-            argv.as_slice(),
-            [operation] if sandbox_negative_reason_for_operation(operation).is_some()
-        )
+    if command_id != "agent-negative" {
+        return None;
+    }
+    let [operation] = argv.as_slice() else {
+        return None;
+    };
+    sandbox_negative_reason_for_operation(operation).map(|_| operation.as_str())
 }
 
 fn sandbox_negative_reason_for_tool(
@@ -2991,10 +3039,25 @@ fn runtime_failure_for_reason(
     reason_code: core_policy::DenyReasonCode,
     tool_id: Option<String>,
 ) -> RuntimeFailure {
+    let emit_tool_failed = tool_id.is_some();
     RuntimeFailure {
         reason: reason_code.as_str().to_owned(),
         message: denial_message(reason_code),
         tool_id,
+        phase_id: None,
+        emit_tool_failed,
+    }
+}
+
+fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFailure {
+    RuntimeFailure {
+        reason: core_policy::DenyReasonCode::ToolOutOfPhase
+            .as_str()
+            .to_owned(),
+        message: denial_message(core_policy::DenyReasonCode::ToolOutOfPhase),
+        tool_id: Some(tool_id),
+        phase_id: Some(phase_id),
+        emit_tool_failed: false,
     }
 }
 
@@ -3377,6 +3440,7 @@ fn unquote_config_scalar(value: &str) -> String {
     value.to_owned()
 }
 
+#[derive(Debug)]
 struct WorkspaceConfig {
     registry_root: PathBuf,
 }

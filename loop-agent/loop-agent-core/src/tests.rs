@@ -328,6 +328,14 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
         ))
     );
     assert_eq!(
+        script_redirection("printf 'hello\\n' > \"out/quoted summary.txt\"")
+            .expect("quoted redirection target with spaces parses"),
+        Some((
+            "printf 'hello\\n'".to_owned(),
+            "out/quoted summary.txt".to_owned()
+        ))
+    );
+    assert_eq!(
         script_redirection("echo no-redirection").expect("plain command parses"),
         None
     );
@@ -349,6 +357,10 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
     ));
     assert!(matches!(
         script_redirection("printf 'x' > out/summary one.txt"),
+        Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
+    ));
+    assert!(matches!(
+        script_redirection("printf 'x' > \"out/summary.txt\"suffix"),
         Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
     ));
 
@@ -865,21 +877,32 @@ fn run_loop_emits_resolved_ids_for_name_references() {
 }
 
 #[test]
-fn run_loop_preflights_existing_session_before_tool_side_effects() {
+fn run_loop_allocates_next_session_id_when_base_session_exists() {
     let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    fs::write(session_dir.join("hello001.jsonl"), "reserved\n").expect("session reserved");
+    let base_path = session_dir.join("hello001.jsonl");
+    fs::write(&base_path, "reserved\n").expect("session reserved");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect_err("existing session must fail before execution");
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect("existing base session allocates next ordinal");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Json(_) | RuntimeError::Protocol(_)
-    ));
-    assert!(!workspace.join("out/summary.txt").exists());
+    assert!(!output.failed);
+    assert_eq!(output.session_id, "hello001-2");
+    assert_eq!(
+        fs::read_to_string(&base_path).expect("base session remains readable"),
+        "reserved\n"
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(session_dir.join("hello001-2.jsonl").is_file());
+    assert!(workspace
+        .join(LOCAL_LOG_DIR)
+        .join("hello001-2.log")
+        .is_file());
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary written"),
+        "hello\n"
+    );
 }
 
 #[test]
@@ -935,6 +958,31 @@ fn run_loop_rejects_unsupported_own_script_before_side_effects() {
 }
 
 #[test]
+fn run_loop_writes_quoted_own_script_target_with_spaces() {
+    let workspace = workspace_copy("hello-loop");
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+    fs::write(
+        &tool_path,
+        source.replace(
+            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+            "printf '%s\\n' \"$SUMMARY\" > \"out/quoted summary.txt\"",
+        ),
+    )
+    .expect("tool fixture rewritten");
+
+    let output =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("quoted own-script target runs");
+
+    assert!(!output.failed);
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/quoted summary.txt"))
+            .expect("quoted target is written"),
+        "hello\n"
+    );
+}
+
+#[test]
 fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
     let workspace = workspace_copy("hello-loop");
     fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
@@ -979,6 +1027,45 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
         .join("hello001.jsonl")
         .exists());
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+}
+
+#[test]
+fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
+    let workspace = workspace_copy("hello-loop");
+    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+    let loop_path = workspace.join("registry/loops/hello-loop.yaml");
+    let loop_source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+    fs::write(
+        &loop_path,
+        loop_source.replace(
+            "phase_refs: [inspect, summarize]",
+            "phase_refs: [inspect, summarize, negative-no-tools]",
+        ),
+    )
+    .expect("loop fixture rewritten");
+    fs::write(
+        workspace.join("registry/instructions/deny-attempt.yaml"),
+        "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: Attempt the sandbox-negative action selected by the fixture.\n",
+    )
+    .expect("negative instruction written");
+    fs::write(
+        workspace.join("registry/tools/negative-tool.yaml"),
+        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+    )
+    .expect("negative sentinel tool written");
+    fs::write(
+        workspace.join("registry/phases/negative-no-tools.yaml"),
+        "phase:\n  id: negative-no-tools\n  name: NegativeNoTools\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  steps:\n    - id: attempt\n      name: Attempt\n",
+    )
+    .expect("negative phase written");
+    fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
+
+    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect_err("invalid output path must preflight before runtime setup");
+
+    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
+    assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).exists());
 }
 
 #[test]
@@ -1243,6 +1330,49 @@ fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
 }
 
 #[test]
+fn phase_scoped_tools_run_once_for_multi_step_phase() {
+    let workspace = workspace_copy("hello-loop");
+    let phase_path = workspace.join("registry/phases/summarize.yaml");
+    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+    fs::write(
+        &phase_path,
+        source.replace(
+            "steps:\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n",
+            "steps:\n    - id: prepare\n      name: Prepare\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n",
+        ),
+    )
+    .expect("phase fixture rewritten");
+
+    let output =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("multi-step phase executes");
+
+    assert!(!output.failed);
+    let events = validate_session_log_text(
+        Path::new("multi-step-phase.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("multi-step phase stream validates");
+    let write_summary_starts = events
+        .iter()
+        .filter(|event| {
+            event.event_type == EventType::ToolStarted
+                && event
+                    .payload
+                    .get("tool_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("write-summary")
+        })
+        .count();
+
+    assert_eq!(write_summary_starts, 1);
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
+        "hello\n"
+    );
+}
+
+#[test]
 fn sandbox_denial_follows_resolved_operation_not_loop_id() {
     let workspace = workspace_copy("sandbox-negative");
     let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
@@ -1282,6 +1412,54 @@ fn sandbox_denial_follows_resolved_operation_not_loop_name() {
     assert!(output
         .stdout
         .contains("\"loop_name\":\"RenamedNegativeWrite\""));
+}
+
+#[test]
+fn sandbox_negative_write_reaches_tool_dispatch_before_denial() {
+    let workspace = workspace_copy("sandbox-negative");
+
+    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+        .expect("sandbox denial produces a valid stream");
+
+    assert!(output.failed);
+    assert!(!workspace.join("out/forbidden.txt").exists());
+    let events = validate_session_log_text(
+        Path::new("sandbox-negative-write.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("sandbox negative stream validates");
+    let event_index = |event_type| {
+        events
+            .iter()
+            .position(|event| event.event_type == event_type)
+            .unwrap_or_else(|| panic!("{event_type:?} is emitted"))
+    };
+    let phase_entered = event_index(EventType::PhaseEntered);
+    let step_started = event_index(EventType::StepStarted);
+    let tool_started = event_index(EventType::ToolStarted);
+    let tool_failed = event_index(EventType::ToolFailed);
+
+    assert!(phase_entered < step_started);
+    assert!(step_started < tool_started);
+    assert!(tool_started < tool_failed);
+    assert_eq!(
+        events[tool_started]
+            .payload
+            .get("tool_id")
+            .and_then(serde_json::Value::as_str),
+        Some("negative-tool")
+    );
+    assert_eq!(
+        events[tool_failed]
+            .payload
+            .get("tool_id")
+            .and_then(serde_json::Value::as_str),
+        Some("negative-tool")
+    );
+    assert!(!events
+        .iter()
+        .any(|event| event.event_type == EventType::ToolCompleted));
 }
 
 #[test]
@@ -1374,6 +1552,58 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
 }
 
 #[test]
+fn sandbox_out_of_phase_denial_reports_attempt_context() {
+    let workspace = workspace_copy("sandbox-negative");
+
+    let output = run_loop(
+        &workspace,
+        "sandbox-negative-tool-out-of-phase",
+        EmitMode::Jsonl,
+    )
+    .expect("out-of-phase sandbox denial produces a valid stream");
+
+    assert!(output.failed);
+    let events = validate_session_log_text(
+        Path::new("sandbox-negative-tool-out-of-phase.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("out-of-phase stream validates");
+    let error = events
+        .iter()
+        .find(|event| event.event_type == EventType::Error)
+        .expect("error event is emitted");
+
+    assert_eq!(
+        error
+            .payload
+            .get("code")
+            .and_then(serde_json::Value::as_str),
+        Some("tool_out_of_phase")
+    );
+    assert_eq!(
+        error
+            .payload
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|data| data.get("phase_id"))
+            .and_then(serde_json::Value::as_str),
+        Some("negative-no-tools")
+    );
+    assert_eq!(
+        error
+            .payload
+            .get("data")
+            .and_then(serde_json::Value::as_object)
+            .and_then(|data| data.get("tool_id"))
+            .and_then(serde_json::Value::as_str),
+        Some("negative-tool")
+    );
+    assert!(error.payload.get("phase_id").is_none());
+    assert!(error.payload.get("tool_id").is_none());
+}
+
+#[test]
 fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
     let workspace = workspace_copy("sandbox-negative");
     let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
@@ -1453,6 +1683,27 @@ fn corrupted_session_log_is_rejected_without_rewrite() {
             before
         );
     }
+}
+
+#[test]
+fn run_loop_allocates_next_session_id_when_base_log_is_corrupt() {
+    let workspace = workspace_copy("smoke-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let corrupt_path = session_dir.join("smoke001.jsonl");
+    fs::write(&corrupt_path, "{\"not\":\"an event\"}\n").expect("corrupt base log written");
+    let before = fs::read_to_string(&corrupt_path).expect("corrupt base log readable");
+
+    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+        .expect("run allocates a new ordinal after corrupt existing log");
+
+    assert!(!output.failed);
+    assert_eq!(output.session_id, "smoke001-2");
+    assert_eq!(
+        fs::read_to_string(&corrupt_path).expect("corrupt base log remains readable"),
+        before
+    );
+    assert!(session_dir.join("smoke001-2.jsonl").is_file());
 }
 
 #[test]
@@ -2141,14 +2392,14 @@ fn resume_rejects_events_after_terminal_without_rewriting_log() {
 }
 
 #[test]
-fn resume_continues_initial_placeholder_session_to_terminal_state() {
-    let workspace = workspace_copy("smoke-loop");
+fn resume_rejects_placeholder_prefix_without_rerunning_tool() {
+    let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let event = EventEnvelope::new(
         "evt-001",
         EventType::SessionStarted,
-        "smoke001",
+        "hello001",
         1,
         "2026-01-01T00:00:00Z",
         "loop-agent-cli",
@@ -2156,26 +2407,31 @@ fn resume_continues_initial_placeholder_session_to_terminal_state() {
     )
     .canonical_jsonl()
     .expect("event serializes");
-    let path = session_dir.join("smoke001.jsonl");
-    fs::write(&path, event).expect("partial log written");
+    let path = session_dir.join("hello001.jsonl");
+    fs::write(&path, &event).expect("partial log written");
+    fs::create_dir_all(workspace.join("out")).expect("output dir created");
+    fs::write(workspace.join("out/summary.txt"), "already-written\n")
+        .expect("committed side effect written");
 
-    let output = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
-        .expect("session resumes to completion");
+    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect_err("placeholder prefix must fail closed");
 
-    assert!(output.event_count > 2);
-    assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
-    assert!(output
-        .stdout
-        .contains("\"event_type\":\"session.completed\""));
-    let resumed = fs::read_to_string(&path).expect("resumed log readable");
-    let events =
-        validate_session_log_text(&path, "smoke001", &resumed).expect("resumed log remains valid");
-    assert!(stream_is_completed(&events));
-    assert_eq!(events.len(), output.event_count);
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("before durable loop progress")
+    ));
+    assert_eq!(
+        fs::read_to_string(&path).expect("placeholder log remains readable"),
+        event
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary remains readable"),
+        "already-written\n"
+    );
 }
 
 #[test]
-fn resume_continues_after_prior_resume_marker() {
+fn resume_rejects_only_prior_resume_marker_without_rerunning_tool() {
     let workspace = workspace_copy("smoke-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
@@ -2204,24 +2460,17 @@ fn resume_continues_after_prior_resume_marker() {
     let path = session_dir.join("smoke001.jsonl");
     fs::write(&path, format!("{started}{resumed}")).expect("partial resumed log written");
 
-    let output = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
-        .expect("session resumes after prior resume marker");
+    let err = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
+        .expect_err("resume marker without loop progress must fail closed");
 
-    assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
-    assert!(output
-        .stdout
-        .contains("\"event_type\":\"session.completed\""));
-    let resumed = fs::read_to_string(&path).expect("resumed log readable");
-    let events =
-        validate_session_log_text(&path, "smoke001", &resumed).expect("resumed log remains valid");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("before durable loop progress")
+    ));
     assert_eq!(
-        events
-            .iter()
-            .filter(|event| event.event_type == EventType::SessionResumed)
-            .count(),
-        2
+        fs::read_to_string(&path).expect("partial resumed log remains readable"),
+        format!("{started}{resumed}")
     );
-    assert!(stream_is_completed(&events));
 }
 
 #[test]
@@ -2246,7 +2495,10 @@ fn resume_rejects_unidentified_prefix_without_side_effects() {
     let err = resume_session(&workspace, "partial001", EmitMode::Jsonl)
         .expect_err("unidentified prefix must not resume");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("resumable loop")));
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("before durable loop progress")
+    ));
     assert_eq!(
         fs::read_to_string(&path).expect("unchanged log readable"),
         event
@@ -2327,8 +2579,13 @@ fn resume_human_mode_reports_resumed_status() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("smoke001.jsonl");
-    fs::write(&path, first_event_line("smoke-loop", "smoke-loop.jsonl"))
-        .expect("partial log written");
+    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(&path, prefix).expect("partial log written");
 
     let output = resume_session(&workspace, "smoke001", EmitMode::Human).expect("session resumes");
 
@@ -2402,7 +2659,12 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("hello001.jsonl");
-    let prefix = first_event_line("hello-loop", "hello-loop.jsonl");
+    let prefix = expected_stream("hello-loop", "hello-loop.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     fs::write(&path, &prefix).expect("partial log written");
 
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
@@ -2423,19 +2685,14 @@ fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
     let outside = empty_workspace("outside-resume-hardlink");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let event = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "smoke001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("event serializes");
+    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     let outside_target = outside.join("smoke001.jsonl");
-    fs::write(&outside_target, &event).expect("outside log written");
+    fs::write(&outside_target, &prefix).expect("outside log written");
     let session_path = session_dir.join("smoke001.jsonl");
     fs::hard_link(&outside_target, &session_path).expect("session hard link");
 
@@ -2444,7 +2701,7 @@ fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
     assert!(output.event_count > 2);
     assert_eq!(
         fs::read_to_string(&outside_target).expect("outside target readable"),
-        event
+        prefix
     );
     assert!(fs::read_to_string(&session_path)
         .expect("workspace session log readable")
@@ -2456,19 +2713,15 @@ fn resume_rejects_noncanonical_prefix_without_rewriting_log() {
     let workspace = workspace_copy("smoke-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let event = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionStarted,
-        "smoke001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("event serializes");
+    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("\"event_id\":\"evt-002\"", "\"event_id\":\"evt-999\"")
+        + "\n";
     let path = session_dir.join("smoke001.jsonl");
-    fs::write(&path, event).expect("partial log written");
+    fs::write(&path, &prefix).expect("partial log written");
 
     let err = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
         .expect_err("noncanonical prefix must not resume");
@@ -2482,7 +2735,7 @@ fn resume_rejects_noncanonical_prefix_without_rewriting_log() {
         )
         .expect("resumed log remains valid")
         .len(),
-        1
+        2
     );
 }
 
@@ -4044,20 +4297,19 @@ fn protocol_validator_rejects_jsonl_and_lifecycle_edges() {
 #[test]
 fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     let (registry, policy) = fixture_runtime_policy("sandbox-negative", "sandbox-negative-write");
-    let loop_block = registry
-        .loop_block("sandbox-negative-write")
-        .expect("negative loop exists");
     let phase = registry
         .phase_block("negative-write")
         .expect("negative phase exists");
-    assert!(sandbox_runtime_failure(&registry, &policy, loop_block)
+    let tool = registry
+        .tool_block("negative-tool")
+        .expect("negative tool exists");
+    let command_policy = command_policy_for_phase(&policy, &phase.identity.id, tool)
+        .expect("negative tool policy exists");
+    assert!(sandbox_tool_dispatch_failure(tool, command_policy)
         .expect("sandbox failure resolves")
         .is_some());
     assert!(sandbox_out_of_phase_failure(&registry, &policy, phase).is_none());
 
-    let tool = registry
-        .tool_block("negative-tool")
-        .expect("negative tool exists");
     let mut extra_arg_tool = tool.clone();
     extra_arg_tool.command = core_script::ToolCommand::Predefined {
         command_id: "agent-negative".to_owned(),

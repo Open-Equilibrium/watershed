@@ -24,15 +24,6 @@ fn expected_stream(fixture: &str, stream: &str) -> String {
         .expect("expected stream is readable")
 }
 
-fn first_event_line(fixture: &str, stream: &str) -> String {
-    expected_stream(fixture, stream)
-        .lines()
-        .next()
-        .expect("stream has first event")
-        .to_owned()
-        + "\n"
-}
-
 fn workspace_copy(fixture: &str) -> PathBuf {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
@@ -328,11 +319,13 @@ fn resume_partial_session_prints_human_status() {
     let workspace = workspace_copy("smoke-loop");
     let session_dir = workspace.join(".loop/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
-    fs::write(
-        session_dir.join("smoke001.jsonl"),
-        first_event_line("smoke-loop", "smoke-loop.jsonl"),
-    )
-    .expect("partial session log written");
+    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(session_dir.join("smoke001.jsonl"), prefix).expect("partial session log written");
 
     let output = loop_command()
         .current_dir(&workspace)
@@ -356,11 +349,14 @@ fn failed_jsonl_resume_exits_with_failed_status() {
     let workspace = workspace_copy("sandbox-negative");
     let session_dir = workspace.join(".loop/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
-    fs::write(
-        session_dir.join("negwrite001.jsonl"),
-        first_event_line("sandbox-negative", "sandbox-negative-write.jsonl"),
-    )
-    .expect("partial failed-session log written");
+    let prefix = expected_stream("sandbox-negative", "sandbox-negative-write.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(session_dir.join("negwrite001.jsonl"), prefix)
+        .expect("partial failed-session log written");
 
     let output = loop_command()
         .current_dir(&workspace)
@@ -545,6 +541,32 @@ fn sandbox_negative_streams_fail_without_side_effects() {
             !workspace.join("out/forbidden.txt").exists(),
             "{loop_name} must not create side effects after rejection"
         );
+    }
+}
+
+#[test]
+fn replay_and_tail_failed_sessions_exit_with_failed_status() {
+    let workspace = workspace_copy("sandbox-negative");
+    let run_output = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "sandbox-negative-write", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
+    assert_eq!(run_output.status.code(), Some(65));
+    assert!(run_output.stderr.is_empty());
+
+    for command in ["replay", "tail"] {
+        let output = loop_command()
+            .current_dir(&workspace)
+            .args([command, "negwrite001", "--emit", "jsonl"])
+            .output()
+            .expect("loop binary should run");
+
+        assert_eq!(output.status.code(), Some(65), "{command}");
+        assert!(output.stderr.is_empty(), "{command}");
+        assert!(String::from_utf8(output.stdout)
+            .expect("stdout should be UTF-8")
+            .contains("\"event_type\":\"session.failed\""));
     }
 }
 

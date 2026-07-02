@@ -289,7 +289,7 @@ impl ResolvedRegistry {
                     max: max_file_bytes,
                 });
             }
-            let source = read_registry_file_to_string(&file.path, max_file_bytes)?;
+            let source = read_registry_file_to_string(&file, max_file_bytes)?;
             let bytes = u64::try_from(source.len()).unwrap_or(u64::MAX);
             total_bytes = total_bytes.saturating_add(bytes);
             if total_bytes > max_total_bytes {
@@ -1063,29 +1063,38 @@ pub fn canonical_resolved_registry_json(
     Ok(out)
 }
 
-fn read_registry_file_to_string(path: &Path, max_bytes: u64) -> Result<String, RegistryError> {
-    let file = fs::File::open(path).map_err(|source| RegistryError::Io {
-        path: path.to_path_buf(),
+fn read_registry_file_to_string(
+    file: &RegistryFile,
+    max_bytes: u64,
+) -> Result<String, RegistryError> {
+    let opened = fs::File::open(&file.path).map_err(|source| RegistryError::Io {
+        path: file.path.clone(),
         source,
     })?;
+    let opened_metadata = opened.metadata().map_err(|source| RegistryError::Io {
+        path: file.path.clone(),
+        source,
+    })?;
+    ensure_opened_registry_file_matches(file, &opened_metadata)?;
+
     let mut bytes = Vec::new();
-    let mut reader = file.take(max_bytes.saturating_add(1));
+    let mut reader = opened.take(max_bytes.saturating_add(1));
     reader
         .read_to_end(&mut bytes)
         .map_err(|source| RegistryError::Io {
-            path: path.to_path_buf(),
+            path: file.path.clone(),
             source,
         })?;
     let source_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if source_len > max_bytes {
         return Err(RegistryError::ReadLimitExceeded {
-            path: path.to_path_buf(),
+            path: file.path.clone(),
             bytes: source_len,
             max: max_bytes,
         });
     }
     String::from_utf8(bytes).map_err(|source| RegistryError::Io {
-        path: path.to_path_buf(),
+        path: file.path.clone(),
         source: io::Error::new(io::ErrorKind::InvalidData, source),
     })
 }
@@ -1093,6 +1102,103 @@ fn read_registry_file_to_string(path: &Path, max_bytes: u64) -> Result<String, R
 struct RegistryFile {
     path: PathBuf,
     bytes: u64,
+    identity: RegistryFileIdentity,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RegistryFileIdentity {
+    dev: u64,
+    ino: u64,
+    len: u64,
+    mtime: i64,
+    mtime_nsec: i64,
+    ctime: i64,
+    ctime_nsec: i64,
+}
+
+#[cfg(windows)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RegistryFileIdentity {
+    canonical_path: PathBuf,
+    creation_time: u64,
+    file_attributes: u32,
+    file_size: u64,
+    last_write_time: u64,
+}
+
+#[cfg(not(any(unix, windows)))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RegistryFileIdentity {
+    len: u64,
+}
+
+fn ensure_opened_registry_file_matches(
+    file: &RegistryFile,
+    opened_metadata: &fs::Metadata,
+) -> Result<(), RegistryError> {
+    if registry_path_is_link_or_reparse(opened_metadata) || !opened_metadata.is_file() {
+        return Err(RegistryError::UnsafePath {
+            path: file.path.clone(),
+            message: "registry paths must not be symlinks or reparse points".to_owned(),
+        });
+    }
+    let opened_identity = registry_file_identity(&file.path, opened_metadata)?;
+    if opened_identity != file.identity {
+        return Err(RegistryError::UnsafePath {
+            path: file.path.clone(),
+            message: "registry file changed before open".to_owned(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn registry_file_identity(
+    _path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<RegistryFileIdentity, RegistryError> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(RegistryFileIdentity {
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+        len: metadata.len(),
+        mtime: metadata.mtime(),
+        mtime_nsec: metadata.mtime_nsec(),
+        ctime: metadata.ctime(),
+        ctime_nsec: metadata.ctime_nsec(),
+    })
+}
+
+#[cfg(windows)]
+fn registry_file_identity(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<RegistryFileIdentity, RegistryError> {
+    use std::os::windows::fs::MetadataExt;
+
+    let canonical_path = path.canonicalize().map_err(|source| RegistryError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(RegistryFileIdentity {
+        canonical_path,
+        creation_time: metadata.creation_time(),
+        file_attributes: metadata.file_attributes(),
+        file_size: metadata.file_size(),
+        last_write_time: metadata.last_write_time(),
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn registry_file_identity(
+    _path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<RegistryFileIdentity, RegistryError> {
+    Ok(RegistryFileIdentity {
+        len: metadata.len(),
+    })
 }
 
 fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(), RegistryError> {
@@ -1140,9 +1246,11 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(),
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
         {
+            let identity = registry_file_identity(&path, &metadata)?;
             out.push(RegistryFile {
                 path,
                 bytes: metadata.len(),
+                identity,
             });
         }
     }
@@ -3378,8 +3486,11 @@ mod tests {
         let mut source = vec![b'a'; 17];
         source.push(0xff);
         std::fs::write(&path, source).expect("registry file written");
+        let mut files = Vec::new();
+        collect_registry_files(&root, &mut files).expect("registry file collected");
+        assert_eq!(files.len(), 1);
 
-        let err = read_registry_file_to_string(&path, 16)
+        let err = read_registry_file_to_string(&files[0], 16)
             .expect_err("oversized registry file is rejected before decoding trailing bytes");
 
         assert!(matches!(
@@ -3390,6 +3501,34 @@ mod tests {
                 max: 16,
             } if error_path == path
         ));
+    }
+
+    #[test]
+    fn registry_file_reader_rejects_file_replaced_after_collection() {
+        let root = temp_registry_dir("registry-file-replaced-after-collection");
+        let path = root.join("instruction.yaml");
+        std::fs::write(
+            &path,
+            "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
+        )
+        .expect("registry file written");
+        let mut files = Vec::new();
+        collect_registry_files(&root, &mut files).expect("registry file collected");
+        assert_eq!(files.len(), 1);
+
+        std::fs::write(
+            &path,
+            "instruction:\n  id: replaced\n  name: Replaced\n  prompt: Replaced\n",
+        )
+        .expect("registry file replaced");
+
+        let err = read_registry_file_to_string(&files[0], MAX_REGISTRY_FILE_BYTES)
+            .expect_err("replaced registry file must be rejected");
+
+        assert!(
+            matches!(err, RegistryError::UnsafePath { ref message, .. } if message.contains("changed before open")),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
