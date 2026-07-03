@@ -1,3 +1,5 @@
+//! Loop Agent command-line entry point.
+
 use loop_agent_core::{EmitMode, RuntimeError, TailOptions};
 use std::{
     env,

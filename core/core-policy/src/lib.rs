@@ -1,5 +1,7 @@
 //! Policy artifact contracts for M0.
 
+#![deny(missing_docs)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -7,10 +9,12 @@ use std::{
     fmt,
 };
 
+/// Policy artifact version string emitted by the v0 compiler.
 pub const POLICY_VERSION_V0: &str = "0";
 const SCRIPT_RUNTIME_POSIX_SH: &str = "posix-sh";
 const OWN_SCRIPT_RUNNER_POSIX_SH: &str = "runner:posix-sh";
 const TRUSTED_PREDEFINED_COMMAND_IDS: &[&str] = &["agent-echo", "agent-negative", "agent-read"];
+/// Default protected path patterns that policy artifacts must carry.
 pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/*.env",
     "**/*.key",
@@ -59,18 +63,27 @@ pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/secrets/**",
 ];
 
+/// Compiled policy artifact for one target sandbox backend.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PolicyArtifact {
+    /// Command policies keyed by tool id in canonical output.
     pub commands: Vec<CommandPolicy>,
+    /// Fixture or workspace profile name that produced the artifact.
     pub fixture_name: String,
+    /// Phase-to-tool availability scope.
     pub phase_scope: Vec<PhaseScope>,
+    /// Policy version. v0 artifacts use [`POLICY_VERSION_V0`].
     pub policy_version: String,
+    /// Runtime limits shared by commands in this artifact.
     pub runtime_limits: RuntimeLimits,
+    /// Source loop definition id.
     pub source_loop_definition_id: String,
+    /// Sandbox target for this artifact.
     pub target: PolicyTarget,
 }
 
 impl PolicyArtifact {
+    /// Validates artifact invariants after compile or deserialization.
     pub fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
         if self.policy_version != POLICY_VERSION_V0 {
             return Err(policy_artifact_error(
@@ -130,26 +143,40 @@ impl PolicyArtifact {
     }
 }
 
+/// Target sandbox backend represented by a policy artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PolicyTarget {
+    /// Linux Landlock/seccomp policy target.
     LinuxLandlockSeccomp,
+    /// macOS Seatbelt policy target.
     MacosSeatbelt,
 }
 
+/// Error returned while compiling policy artifacts from a script registry.
 #[derive(Debug)]
 pub enum PolicyCompileError {
+    /// Requested loop reference was missing.
     MissingLoop(String),
+    /// A loop referenced a missing phase.
     MissingPhase(String),
+    /// A phase referenced a missing tool.
     MissingTool(String),
+    /// Recursive loop policy collection exceeded the nesting cap.
     LoopDepthExceeded {
+        /// Loop id where the cap was exceeded.
         loop_id: String,
+        /// Observed nesting depth.
         depth: usize,
+        /// Maximum allowed nesting depth.
         max: usize,
     },
+    /// M1 OS policy target was asked to encode network allow entries.
     NonEmptyNetworkAllowlist {
+        /// Tool id with non-empty network allow entries.
         tool_id: String,
     },
+    /// Compiled artifact failed validation.
     InvalidArtifact(PolicyArtifactValidationError),
 }
 
@@ -195,6 +222,7 @@ impl std::error::Error for PolicyCompileError {
     }
 }
 
+/// Compiles policy artifacts for every M1 sandbox target.
 pub fn compile_policy_artifacts(
     fixture_name: &str,
     registry: &core_script::ResolvedRegistry,
@@ -216,6 +244,7 @@ pub fn compile_policy_artifacts(
     ])
 }
 
+/// Compiles a policy artifact for one sandbox target.
 pub fn compile_policy_artifact(
     fixture_name: &str,
     registry: &core_script::ResolvedRegistry,
@@ -451,18 +480,29 @@ fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> Allowe
     }
 }
 
+/// Command-level policy derived from a tool block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CommandPolicy {
+    /// Allowed command parameters.
     pub allowed_parameters: Vec<AllowedParameterPolicy>,
+    /// Literal argv for predefined commands.
     pub argv: Vec<String>,
+    /// Trusted predefined command id or `script:<tool-id>`.
     pub command_id: String,
+    /// Environment allow policy.
     pub environment: EnvironmentPolicy,
+    /// Executable identity used by the target backend.
     pub executable: String,
+    /// Filesystem access policy.
     pub filesystem: FilesystemPolicy,
+    /// Network access policy.
     pub network: NetworkPolicy,
+    /// Script runtime for own-script tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_runtime: Option<String>,
+    /// Source tool id.
     pub tool_id: String,
+    /// Source tool kind.
     pub tool_kind: ToolKind,
 }
 
@@ -528,19 +568,28 @@ impl CommandPolicy {
     }
 }
 
+/// Parameter-level policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AllowedParameterPolicy {
+    /// Exact parameter name.
     pub name: String,
+    /// Whether the parameter is required.
     pub required: bool,
+    /// Optional maximum integer value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<i64>,
+    /// Optional maximum string length.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u16>,
+    /// Optional minimum integer value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<i64>,
+    /// Optional string validation pattern.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_pattern: Option<String>,
+    /// Accepted parameter value type.
     pub value_type: ParameterValueType,
+    /// Allowed enum values.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_values: Vec<String>,
 }
@@ -651,26 +700,38 @@ impl AllowedParameterPolicy {
     }
 }
 
+/// Parameter value type in a compiled policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ParameterValueType {
+    /// Flag-style parameter with no value.
     None,
+    /// String value.
     String,
+    /// Integer value.
     Integer,
+    /// Workspace-relative path value.
     WorkspaceRelativePath,
+    /// Explicit enum value.
     Enum,
 }
 
+/// Tool execution kind in a compiled policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ToolKind {
+    /// Trusted predefined command.
     PredefinedCommand,
+    /// Inline own-script command.
     OwnScript,
 }
 
+/// Environment variable policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EnvironmentPolicy {
+    /// Explicitly allowed environment variable names.
     pub allow: Vec<String>,
+    /// Default environment behavior.
     pub default: EnvironmentDefault,
 }
 
@@ -688,12 +749,15 @@ impl EnvironmentPolicy {
     }
 }
 
+/// Default environment behavior.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EnvironmentDefault {
+    /// Start from an empty environment.
     Clear,
 }
 
+/// Error returned when a policy artifact fails validation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PolicyArtifactValidationError {
     message: String,
@@ -837,11 +901,16 @@ fn policy_artifact_error(message: String) -> PolicyArtifactValidationError {
     PolicyArtifactValidationError { message }
 }
 
+/// Filesystem access policy for a command.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FilesystemPolicy {
+    /// Exact protected paths this command may access.
     pub protected_path_grants: Vec<String>,
+    /// Default protected path patterns.
     pub protected_paths: Vec<String>,
+    /// Workspace-relative read roots.
     pub read_roots: Vec<String>,
+    /// Workspace-relative write roots.
     pub write_roots: Vec<String>,
 }
 
@@ -924,9 +993,12 @@ fn path_is_inside_scope(path: &str, scope: &str) -> bool {
     core_script::relative_path_is_inside_scope(path, scope)
 }
 
+/// Network access policy for a command.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NetworkPolicy {
+    /// Explicit allow entries.
     pub allow: Vec<NetworkAllowEntry>,
+    /// Default network behavior.
     pub default: NetworkDefault,
 }
 
@@ -961,30 +1033,42 @@ impl NetworkPolicy {
     }
 }
 
+/// Default network behavior.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkDefault {
+    /// Deny access unless allowed by a matching entry.
     Deny,
 }
 
+/// One network allow entry.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NetworkAllowEntry {
+    /// Canonical CIDR destination.
     pub cidr: String,
+    /// Allow entry kind.
     pub kind: NetworkAllowKind,
+    /// Destination port.
     pub port: u16,
+    /// Transport protocol.
     pub transport: NetworkTransport,
 }
 
+/// Network allow entry kind.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkAllowKind {
+    /// CIDR destination range.
     Cidr,
 }
 
+/// Network transport protocol.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkTransport {
+    /// TCP transport.
     Tcp,
+    /// UDP transport.
     Udp,
 }
 
@@ -992,29 +1076,43 @@ fn is_valid_canonical_cidr(value: &str) -> bool {
     core_script::is_valid_canonical_cidr(value)
 }
 
+/// Tools available within a phase.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PhaseScope {
+    /// Phase id.
     pub phase_id: String,
+    /// Tool ids available in the phase.
     pub tool_ids: Vec<String>,
 }
 
+/// Runtime limits encoded in a policy artifact.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeLimits {
+    /// Whether execution is headless.
     pub headless: bool,
+    /// Timeout in milliseconds.
     pub timeout_ms: u64,
 }
 
+/// Expected sandbox-negative decision fixture.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ExpectedDecision {
+    /// Attempt being denied.
     pub attempt: DeniedAttempt,
+    /// Expected decision kind.
     pub expected: ExpectedDecisionKind,
+    /// Fixture name.
     pub fixture_name: String,
+    /// Expected denial reason.
     pub reason_code: DenyReasonCode,
+    /// Whether side effects are expected.
     pub side_effects_allowed: bool,
+    /// Target backend for the decision.
     pub target: PolicyTarget,
 }
 
 impl ExpectedDecision {
+    /// Validates the expected-decision fixture contract.
     pub fn validate(&self) -> Result<(), ExpectedDecisionValidationError> {
         self.attempt.validate()?;
         let expected = self.attempt.expected_reason_code();
@@ -1035,53 +1133,87 @@ impl ExpectedDecision {
     }
 }
 
+/// Modeled attempt that must be denied by sandbox-negative fixtures.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DeniedAttempt {
+    /// Write attempt outside policy.
     Write {
+        /// Write operation name.
         operation: String,
+        /// Tool id.
         tool_id: String,
+        /// Single path for non-rename operations.
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<String>,
+        /// Source path for rename operations.
         #[serde(skip_serializing_if = "Option::is_none")]
         from_path: Option<String>,
+        /// Destination path for rename operations.
         #[serde(skip_serializing_if = "Option::is_none")]
         to_path: Option<String>,
     },
+    /// Network egress attempt.
     Network {
+        /// Destination host or address.
         destination: String,
+        /// Destination port.
         port: u16,
+        /// Tool id.
         tool_id: String,
+        /// Transport protocol.
         transport: NetworkTransport,
     },
+    /// Environment variable access attempt.
     Environment {
+        /// Environment variable name.
         name: String,
+        /// Tool id.
         tool_id: String,
     },
+    /// Tool invocation outside its phase.
     ToolOutOfPhase {
+        /// Phase id where the tool was invoked.
         phase_id: String,
+        /// Tool id.
         tool_id: String,
     },
+    /// Protected path access attempt.
     ProtectedPath {
+        /// Operation name.
         operation: String,
+        /// Tool id.
         tool_id: String,
+        /// Single path for non-rename operations.
         #[serde(skip_serializing_if = "Option::is_none")]
         path: Option<String>,
+        /// Source path for rename operations.
         #[serde(skip_serializing_if = "Option::is_none")]
         from_path: Option<String>,
+        /// Destination path for rename operations.
         #[serde(skip_serializing_if = "Option::is_none")]
         to_path: Option<String>,
     },
+    /// Symlink escape attempt.
     SymlinkEscape {
+        /// Operation name.
         operation: String,
+        /// Requested path.
         path: String,
+        /// Symlink path encountered.
         symlink_path: String,
+        /// Symlink target.
         symlink_target: String,
+        /// Tool id.
         tool_id: String,
     },
+    /// Interpreter escape attempt.
     InterpreterEscape {
+        /// Attempted argv.
         argv: Vec<String>,
+        /// Attempted executable.
         executable: String,
+        /// Tool id.
         tool_id: String,
     },
 }
@@ -1150,6 +1282,7 @@ impl DeniedAttempt {
     }
 }
 
+/// Error returned when an expected-decision fixture is invalid.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExpectedDecisionValidationError {
     message: String,
@@ -1201,25 +1334,36 @@ fn expected_decision_error(message: String) -> ExpectedDecisionValidationError {
     ExpectedDecisionValidationError { message }
 }
 
+/// Expected decision result kind.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExpectedDecisionKind {
+    /// Attempt must be denied.
     Deny,
 }
 
+/// Normalized denial reason code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DenyReasonCode {
+    /// Write was denied.
     WriteDenied,
+    /// Network access was denied.
     NetworkDenied,
+    /// Environment access was denied.
     EnvironmentDenied,
+    /// Tool was invoked out of phase.
     ToolOutOfPhase,
+    /// Protected path access was denied.
     ProtectedPathDenied,
+    /// Symlink escape was denied.
     SymlinkEscapeDenied,
+    /// Interpreter escape was denied.
     InterpreterEscapeDenied,
 }
 
 impl DenyReasonCode {
+    /// Returns the stable serialized reason-code string.
     pub fn as_str(&self) -> &'static str {
         self.name()
     }
@@ -1237,9 +1381,12 @@ impl DenyReasonCode {
     }
 }
 
+/// Error returned while canonicalizing a policy artifact.
 #[derive(Debug)]
 pub enum PolicyArtifactError {
+    /// Canonical JSON serialization failed.
     CanonicalJson(proto::CanonicalJsonError),
+    /// Serde serialization failed before canonicalization.
     Serialize(serde_json::Error),
 }
 
@@ -1266,6 +1413,7 @@ impl std::error::Error for PolicyArtifactError {
     }
 }
 
+/// Serializes a policy artifact with canonical ordering and a trailing newline.
 pub fn canonical_artifact_json<T: Serialize>(artifact: &T) -> Result<String, PolicyArtifactError> {
     let mut value = serde_json::to_value(artifact).map_err(PolicyArtifactError::Serialize)?;
     canonicalize_policy_artifact_arrays(&mut value);

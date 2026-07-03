@@ -1,36 +1,52 @@
 //! Protocol v0 runtime event contracts.
 
+#![deny(missing_docs)]
+
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use std::{collections::HashSet, fmt};
 use unicode_normalization::UnicodeNormalization;
 
+/// Protocol version string emitted by all v0 event envelopes.
 pub const PROTOCOL_VERSION_V0: &str = "0";
 
+/// Canonical runtime event envelope shared by Loop Agent, Meta-Harness and Liquid.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EventEnvelope {
+    /// Optional cross-event correlation token.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// Stable event identifier within the session stream.
     pub event_id: String,
+    /// Normalized event family and transition name.
     pub event_type: EventType,
+    /// Loop invocation id for loop-scoped events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub loop_id: Option<String>,
+    /// Parent loop invocation id when this event belongs to a subloop.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_loop_id: Option<String>,
+    /// Event-family payload. Payloads must be JSON objects.
     #[serde(
         deserialize_with = "deserialize_payload_object",
         serialize_with = "serialize_payload_object"
     )]
     pub payload: Value,
+    /// Protocol version. v0 envelopes must use [`PROTOCOL_VERSION_V0`].
     #[serde(deserialize_with = "deserialize_protocol_version_v0")]
     pub protocol_version: String,
+    /// One-based event order within the session stream.
     pub sequence: u64,
+    /// Lowercase path-safe session id.
     pub session_id: String,
+    /// Producing runtime or adapter name.
     pub source: String,
+    /// RFC 3339 timestamp string for the event.
     pub timestamp: String,
 }
 
 impl EventEnvelope {
+    /// Builds a v0 event envelope with no loop, parent-loop or correlation id.
     pub fn new(
         event_id: impl Into<String>,
         event_type: EventType,
@@ -55,6 +71,7 @@ impl EventEnvelope {
         }
     }
 
+    /// Serializes the envelope as canonical JSON plus a trailing newline.
     pub fn canonical_jsonl(&self) -> Result<String, CanonicalJsonError> {
         if !self.payload.is_object() {
             return Err(CanonicalJsonError::NonObjectPayload);
@@ -72,33 +89,57 @@ impl EventEnvelope {
     }
 }
 
+/// v0 normalized runtime event types.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum EventType {
+    /// A session started.
     SessionStarted,
+    /// A session paused before reaching a terminal state.
     SessionPaused,
+    /// A previously persisted session resumed.
     SessionResumed,
+    /// A session completed successfully.
     SessionCompleted,
+    /// A session reached a failed terminal state.
     SessionFailed,
+    /// A loop invocation started.
     LoopStarted,
+    /// A loop invocation completed successfully.
     LoopCompleted,
+    /// A loop invocation failed.
     LoopFailed,
+    /// Runtime entered a phase.
     PhaseEntered,
+    /// Runtime started a phase step.
     StepStarted,
+    /// Runtime completed a phase step.
     StepCompleted,
+    /// Assistant message content chunk.
     MessageDelta,
+    /// Assistant message completed.
     MessageCompleted,
+    /// Tool invocation started.
     ToolStarted,
+    /// Tool invocation emitted structured progress.
     ToolProgress,
+    /// Tool invocation completed successfully.
     ToolCompleted,
+    /// Tool invocation failed.
     ToolFailed,
+    /// Tool invocation exceeded its runtime limit.
     ToolTimedOut,
+    /// Artifact metadata was recorded.
     ArtifactLogged,
+    /// Human or external attention was requested.
     AttentionRequested,
+    /// Runtime metric sample was emitted.
     MetricSample,
+    /// Runtime error event.
     Error,
 }
 
 impl EventType {
+    /// Returns the stable protocol string for this event type.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::SessionStarted => "session.started",
@@ -178,6 +219,7 @@ impl<'de> Deserialize<'de> for EventType {
     }
 }
 
+/// Error returned when a string is not a known v0 event type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnknownEventType(String);
 
@@ -189,12 +231,23 @@ impl fmt::Display for UnknownEventType {
 
 impl std::error::Error for UnknownEventType {}
 
+/// Error returned by canonical JSON and JSONL serialization.
 #[derive(Debug)]
 pub enum CanonicalJsonError {
+    /// JSON serialization failed before canonicalization.
     Serialize(serde_json::Error),
+    /// Event payload was not a JSON object.
     NonObjectPayload,
-    UnsupportedProtocolVersion { protocol_version: String },
-    DuplicateNormalizedObjectKey { key: String },
+    /// Envelope used a protocol version other than v0.
+    UnsupportedProtocolVersion {
+        /// Version string found in the envelope.
+        protocol_version: String,
+    },
+    /// Object keys collided after Unicode NFC normalization.
+    DuplicateNormalizedObjectKey {
+        /// Normalized duplicate key.
+        key: String,
+    },
 }
 
 impl fmt::Display for CanonicalJsonError {
@@ -215,6 +268,7 @@ impl fmt::Display for CanonicalJsonError {
 
 impl std::error::Error for CanonicalJsonError {}
 
+/// Returns every v0 event type name in canonical order.
 pub fn event_type_names() -> &'static [&'static str] {
     &[
         "session.started",
@@ -242,6 +296,7 @@ pub fn event_type_names() -> &'static [&'static str] {
     ]
 }
 
+/// Returns whether a value is a lowercase path-safe session id.
 pub fn is_valid_session_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -250,6 +305,7 @@ pub fn is_valid_session_id(value: &str) -> bool {
         })
 }
 
+/// Serializes a JSON value with deterministic key ordering and NFC normalization.
 pub fn canonical_json(value: &Value) -> Result<String, CanonicalJsonError> {
     match value {
         Value::Null => Ok("null".to_owned()),

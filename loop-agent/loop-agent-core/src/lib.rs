@@ -1,5 +1,7 @@
 //! Loop Agent M1 deterministic runtime.
 
+#![deny(missing_docs)]
+
 use proto::{EventEnvelope, EventType};
 use std::{
     cell::Cell,
@@ -11,11 +13,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Workspace-relative directory containing persisted session JSONL logs.
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
+/// Workspace-relative directory containing structured sidecar run logs.
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
+/// Maximum bytes accepted for one persisted session log.
 pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
+/// Maximum canonical JSONL bytes emitted by one loop run.
 pub const MAX_LOOP_EVENT_STREAM_BYTES: usize = 10 * 1024 * 1024;
+/// Maximum events emitted by one loop run.
 pub const MAX_LOOP_EVENTS: u64 = 64 * 1024;
+/// Maximum loop invocations executed by one loop run.
 pub const MAX_LOOP_INVOCATIONS: u64 = 8 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = core_script::MAX_REGISTRY_FILE_BYTES;
 const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
@@ -41,16 +49,24 @@ struct TrustedPredefinedCommand {
     progress: Option<&'static str>,
 }
 
+/// Runtime surfaces tracked by the Loop Agent MVP.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeSurface {
+    /// Human CLI commands.
     HumanCli,
+    /// Headless JSONL event stream.
     JsonlEventStream,
+    /// Local append-only session log.
     LocalSessionLog,
+    /// Session tail, replay and resume commands.
     TailReplayResume,
+    /// Designed future RPC surface.
     DesignedRpc,
+    /// Designed future embedded core API.
     FutureEmbeddedCoreApi,
 }
 
+/// Returns the runtime surfaces implemented in M1.
 pub fn m1_runtime_surfaces() -> &'static [RuntimeSurface] {
     &[
         RuntimeSurface::HumanCli,
@@ -60,6 +76,7 @@ pub fn m1_runtime_surfaces() -> &'static [RuntimeSurface] {
     ]
 }
 
+/// Returns runtime surfaces intentionally deferred beyond M1.
 pub fn designed_future_surfaces() -> &'static [RuntimeSurface] {
     &[
         RuntimeSurface::DesignedRpc,
@@ -67,28 +84,41 @@ pub fn designed_future_surfaces() -> &'static [RuntimeSurface] {
     ]
 }
 
+/// Output format for CLI/runtime calls.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EmitMode {
+    /// Human-readable one-line status output.
     Human,
+    /// Canonical JSONL event stream output.
     Jsonl,
 }
 
+/// Result of a run, replay, tail or resume operation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunOutput {
+    /// Number of events represented by this output.
     pub event_count: usize,
+    /// Whether the represented session ended or is known to be failed.
     pub failed: bool,
+    /// Session id.
     pub session_id: String,
+    /// Path to the persisted session log.
     pub session_path: PathBuf,
+    /// Captured stdout for non-streaming callers.
     pub stdout: String,
 }
 
+/// Tail behavior options.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TailOptions {
+    /// Whether to wait for appended events until a terminal event or timeout.
     pub follow: bool,
+    /// Optional maximum follow duration.
     pub timeout: Option<Duration>,
 }
 
 impl TailOptions {
+    /// Follows until the session reaches a terminal event.
     pub fn follow() -> Self {
         Self {
             follow: true,
@@ -96,6 +126,7 @@ impl TailOptions {
         }
     }
 
+    /// Reads the current complete prefix and exits immediately.
     pub fn no_follow() -> Self {
         Self {
             follow: false,
@@ -104,19 +135,34 @@ impl TailOptions {
     }
 }
 
+/// Error returned by Loop Agent runtime operations.
 #[derive(Debug)]
 pub enum RuntimeError {
-    Io { path: PathBuf, source: io::Error },
+    /// Filesystem I/O failed.
+    Io {
+        /// Path being accessed.
+        path: PathBuf,
+        /// Underlying I/O error.
+        source: io::Error,
+    },
+    /// JSON parsing or serialization failed.
     Json(serde_json::Error),
+    /// Policy compilation failed.
     Policy(core_policy::PolicyCompileError),
+    /// Registry loading or validation failed.
     Registry(core_script::RegistryError),
+    /// Runtime protocol invariant was violated.
     Protocol(String),
+    /// A requested new session log already exists.
     SessionLogExists(String),
+    /// Resume was requested for a terminal session.
     TerminalSession(String),
+    /// CLI/user input was invalid.
     Usage(String),
 }
 
 impl RuntimeError {
+    /// Returns the process exit code associated with this runtime error.
     pub fn exit_code(&self) -> i32 {
         match self {
             Self::Protocol(_) | Self::SessionLogExists(_) | Self::TerminalSession(_) => 65,
@@ -177,14 +223,17 @@ impl From<serde_json::Error> for RuntimeError {
     }
 }
 
+/// Returns whether `session_id` is a valid path-safe v0 session id.
 pub fn validate_session_id(session_id: &str) -> bool {
     proto::is_valid_session_id(session_id)
 }
 
+/// Returns the current runtime enforcement notice used by docs/tests.
 pub fn m0_runtime_notice() -> &'static str {
     "M1 runs deterministic in-process Loop Agent execution; OS sandbox enforcement is post-M1"
 }
 
+/// Runs a loop from a workspace registry and persists a new session log.
 pub fn run_loop(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
@@ -291,6 +340,7 @@ pub fn run_loop(
     result
 }
 
+/// Replays a persisted terminal or partial session log without modifying it.
 pub fn replay_session(
     workspace: impl AsRef<Path>,
     session_id: &str,
@@ -299,6 +349,7 @@ pub fn replay_session(
     read_existing_session(workspace.as_ref(), session_id, emit)
 }
 
+/// Tails a session log and captures output in the returned [`RunOutput`].
 pub fn tail_session(
     workspace: impl AsRef<Path>,
     session_id: &str,
@@ -311,6 +362,7 @@ pub fn tail_session(
     Ok(output)
 }
 
+/// Tails a session log to a caller-provided writer with default follow behavior.
 pub fn tail_session_to_writer(
     workspace: impl AsRef<Path>,
     session_id: &str,
@@ -320,6 +372,7 @@ pub fn tail_session_to_writer(
     tail_session_to_writer_with_options(workspace, session_id, emit, TailOptions::follow(), writer)
 }
 
+/// Tails a session log to a caller-provided writer with explicit options.
 pub fn tail_session_to_writer_with_options(
     workspace: impl AsRef<Path>,
     session_id: &str,
@@ -432,6 +485,7 @@ fn complete_jsonl_prefix(text: &str) -> &str {
         .map_or("", |newline_index| &text[..=newline_index])
 }
 
+/// Lists valid persisted session ids in canonical order.
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
     let workspace = workspace.as_ref();
     let loop_dir = workspace.join(".loop");
@@ -466,6 +520,7 @@ pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, Runtime
     Ok(sessions)
 }
 
+/// Resumes a non-terminal persisted session after validating registry drift.
 pub fn resume_session(
     workspace: impl AsRef<Path>,
     session_id: &str,

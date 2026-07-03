@@ -1,5 +1,7 @@
 //! Building-block script model contracts for M0.
 
+#![deny(missing_docs)]
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,105 +12,161 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
+/// Script schema version string accepted by the v0 parser.
 pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
+/// YAML version targeted by checked-in registry files.
 pub const YAML_VERSION: &str = "1.2";
+/// Maximum allowed recursive loop nesting depth.
 pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
+/// Maximum size for one registry YAML file.
 pub const MAX_REGISTRY_FILE_BYTES: u64 = 1024 * 1024;
+/// Maximum cumulative size for a registry root.
 pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
 
+/// Shared id/name pair for every registry block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockIdentity {
+    /// Stable block id used by references and canonical maps.
     pub id: String,
+    /// Human-readable block name, also valid as a reference when unambiguous.
     pub name: String,
 }
 
+/// One parsed registry block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RegistryBlock {
+    /// Tool block.
     Tool(ToolBlock),
+    /// Instruction block.
     Instruction(InstructionBlock),
+    /// Phase block.
     Phase(PhaseBlock),
+    /// Connection block.
     Connection(ConnectionBlock),
+    /// Loop block.
     Loop(LoopBlock),
 }
 
+/// Tool definition block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolBlock {
+    /// Tool identity.
     #[serde(flatten)]
     pub identity: BlockIdentity,
+    /// Tool execution kind.
     pub tool_kind: ToolKind,
+    /// Command declaration for this tool.
     pub command: ToolCommand,
+    /// Script runtime for `own-script` tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_runtime: Option<ScriptRuntime>,
+    /// Inline script source for `own-script` tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_body: Option<String>,
+    /// Parameters accepted by the tool.
     pub allowed_parameters: Vec<AllowedParameter>,
+    /// Workspace-relative read scopes.
     pub read_scope: Vec<String>,
+    /// Workspace-relative write scopes.
     pub write_scope: Vec<String>,
+    /// Protected paths this tool may access.
     pub protected_path_grants: Vec<String>,
+    /// Network policy declared for this tool.
     pub network: NetworkPolicy,
 }
 
+/// Tool execution family.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ToolKind {
+    /// Trusted predefined command resolved from the command registry.
     PredefinedCommand,
+    /// Inline script owned by the tool definition.
     OwnScript,
 }
 
+/// Tool command shape.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolCommand {
+    /// Predefined command id plus literal argv.
     Predefined {
+        /// Registry command id.
         command_id: String,
+        /// Literal argv values supplied by the block.
         argv: Vec<String>,
     },
+    /// `script:<tool-id>` command for an own-script tool.
     OwnScript(String),
 }
 
+/// Script runtime supported by v0 own-script tools.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ScriptRuntime {
+    /// POSIX shell subset interpreted by M1 fixtures.
     PosixSh,
 }
 
+/// Tool parameter contract.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AllowedParameter {
+    /// Exact parameter name, including the leading `--`.
     pub name: String,
+    /// Accepted value type.
     pub value_type: ParameterValueType,
+    /// Whether the parameter is required.
     pub required: bool,
+    /// Allowed enum values when [`ParameterValueType::Enum`] is used.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_values: Vec<String>,
+    /// Optional string value pattern.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_pattern: Option<String>,
+    /// Optional maximum string length.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u16>,
+    /// Optional minimum integer value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<i64>,
+    /// Optional maximum integer value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<i64>,
 }
 
+/// Parameter value type.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ParameterValueType {
+    /// Flag-style parameter with no value.
     None,
+    /// UTF-8 string value.
     String,
+    /// Integer value.
     Integer,
+    /// Workspace-relative path value.
     WorkspaceRelativePath,
+    /// Value selected from an explicit set.
     Enum,
 }
 
+/// Network policy declared by a tool.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum NetworkPolicy {
+    /// Deny all network access.
     Deny(NetworkDeny),
+    /// Explicit default plus allowlist entries.
     Declared {
+        /// Default network behavior.
         default: NetworkDefault,
+        /// Allowed network destinations.
         allow: Vec<NetworkAllowEntry>,
     },
 }
 
+/// Marker serialized as the literal `deny` network policy.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NetworkDeny;
 
@@ -135,91 +193,135 @@ impl<'de> Deserialize<'de> for NetworkDeny {
     }
 }
 
+/// Default network policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkDefault {
+    /// Deny access unless a matching allow entry exists.
     Deny,
 }
 
+/// One declared network allow entry.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NetworkAllowEntry {
+    /// Allow entry kind.
     pub kind: NetworkAllowKind,
+    /// Transport protocol.
     pub transport: NetworkTransport,
+    /// Canonical CIDR range.
     pub cidr: String,
+    /// Destination port.
     pub port: u16,
 }
 
+/// Network allow entry kind.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkAllowKind {
+    /// CIDR destination range.
     Cidr,
 }
 
+/// Network transport protocol.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NetworkTransport {
+    /// TCP transport.
     Tcp,
+    /// UDP transport.
     Udp,
 }
 
+/// Prompt instruction block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct InstructionBlock {
+    /// Instruction identity.
     #[serde(flatten)]
     pub identity: BlockIdentity,
+    /// Prompt text.
     pub prompt: String,
 }
 
+/// Ordered phase definition.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PhaseBlock {
+    /// Phase identity.
     #[serde(flatten)]
     pub identity: BlockIdentity,
+    /// Instruction references loaded for the phase.
     pub instruction_refs: Vec<String>,
+    /// Tool references available in the phase.
     pub tool_refs: Vec<String>,
+    /// Ordered phase steps.
     pub steps: Vec<StepBlock>,
 }
 
+/// Phase-local step definition.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StepBlock {
+    /// Phase-local step id.
     pub id: String,
+    /// Human-readable step name.
     pub name: String,
+    /// Ordered connection references active on this step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connection_refs: Vec<String>,
 }
 
+/// Connection between registry blocks or scoped steps.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ConnectionBlock {
+    /// Connection identity.
     #[serde(flatten)]
     pub identity: BlockIdentity,
+    /// Connection semantics.
     pub connection_kind: ConnectionKind,
+    /// Source endpoint reference.
     pub from_ref: String,
+    /// Destination endpoint reference.
     pub to_ref: String,
 }
 
+/// Connection semantics.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConnectionKind {
+    /// Data dependency.
     Data,
+    /// Trigger dependency.
     Trigger,
+    /// Refresh dependency.
     Refresh,
 }
 
+/// Loop definition block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LoopBlock {
+    /// Loop identity.
     #[serde(flatten)]
     pub identity: BlockIdentity,
+    /// Ordered phase references executed by the loop.
     pub phase_refs: Vec<String>,
+    /// Ordered subloop references executed after phases.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subloop_refs: Vec<String>,
+    /// Connections declared at loop scope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connection_refs: Vec<String>,
 }
 
+/// Static parser contract summary for docs/tests.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParserContract {
+    /// Supported schema version.
     pub schema_version: &'static str,
+    /// Supported YAML version.
     pub yaml_version: &'static str,
+    /// Whether each registry file contains exactly one top-level block.
     pub one_block_per_file: bool,
+    /// Semantic validation summary.
     pub semantic_validation: &'static str,
+    /// Canonical serialization summary.
     pub canonical_serialization: &'static str,
 }
 
@@ -235,7 +337,9 @@ impl Default for ParserContract {
     }
 }
 
+/// Parser interface for registry block sources.
 pub trait ScriptParser {
+    /// Parses one registry block from a named source.
     fn parse_registry_block(
         &self,
         source_name: &str,
@@ -243,6 +347,7 @@ pub trait ScriptParser {
     ) -> Result<RegistryBlock, ParseError>;
 }
 
+/// v0 parser implementation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V0ScriptParser;
 
@@ -256,16 +361,23 @@ impl ScriptParser for V0ScriptParser {
     }
 }
 
+/// Fully resolved registry keyed by block id.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ResolvedRegistry {
+    /// Connection blocks keyed by id.
     pub connections: BTreeMap<String, ConnectionBlock>,
+    /// Instruction blocks keyed by id.
     pub instructions: BTreeMap<String, InstructionBlock>,
+    /// Loop blocks keyed by id.
     pub loops: BTreeMap<String, LoopBlock>,
+    /// Phase blocks keyed by id.
     pub phases: BTreeMap<String, PhaseBlock>,
+    /// Tool blocks keyed by id.
     pub tools: BTreeMap<String, ToolBlock>,
 }
 
 impl ResolvedRegistry {
+    /// Loads and validates a registry root with M1 read caps.
     pub fn load(root: &Path) -> Result<Self, RegistryError> {
         Self::load_with_limits(root, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES)
     }
@@ -312,6 +424,7 @@ impl ResolvedRegistry {
         Self::from_blocks(blocks)
     }
 
+    /// Resolves a registry from already parsed blocks.
     pub fn from_blocks(
         blocks: impl IntoIterator<Item = RegistryBlock>,
     ) -> Result<Self, RegistryError> {
@@ -332,6 +445,7 @@ impl ResolvedRegistry {
         Ok(registry)
     }
 
+    /// Serializes the resolved registry as canonical JSON without a trailing newline.
     pub fn canonical_json(&self) -> Result<String, RegistryError> {
         let mut out = canonical_resolved_registry_json(self)?;
         if out.ends_with('\n') {
@@ -340,6 +454,7 @@ impl ResolvedRegistry {
         Ok(out)
     }
 
+    /// Resolves a loop by id or unambiguous name.
     pub fn loop_block(&self, reference: &str) -> Option<&LoopBlock> {
         self.loops.get(reference).or_else(|| {
             self.loops
@@ -348,6 +463,7 @@ impl ResolvedRegistry {
         })
     }
 
+    /// Resolves a phase by id or unambiguous name.
     pub fn phase_block(&self, reference: &str) -> Option<&PhaseBlock> {
         self.phases.get(reference).or_else(|| {
             self.phases
@@ -356,6 +472,7 @@ impl ResolvedRegistry {
         })
     }
 
+    /// Resolves a tool by id or unambiguous name.
     pub fn tool_block(&self, reference: &str) -> Option<&ToolBlock> {
         self.tools.get(reference).or_else(|| {
             self.tools
@@ -364,6 +481,7 @@ impl ResolvedRegistry {
         })
     }
 
+    /// Resolves an instruction by id or unambiguous name.
     pub fn instruction_block(&self, reference: &str) -> Option<&InstructionBlock> {
         self.instructions.get(reference).or_else(|| {
             self.instructions
@@ -372,6 +490,7 @@ impl ResolvedRegistry {
         })
     }
 
+    /// Resolves a connection by id or unambiguous name.
     pub fn connection_block(&self, reference: &str) -> Option<&ConnectionBlock> {
         self.connections.get(reference).or_else(|| {
             self.connections
@@ -738,55 +857,94 @@ fn normalized_eq(left: &str, right: &str) -> bool {
     normalized_left == normalized_right
 }
 
+/// Error returned while loading, resolving or serializing a registry.
 #[derive(Debug)]
 pub enum RegistryError {
+    /// Filesystem read failed.
     Io {
+        /// Path being accessed.
         path: PathBuf,
+        /// Underlying I/O error.
         source: std::io::Error,
     },
+    /// Registry path failed lexical safety checks.
     UnsafePath {
+        /// Rejected path.
         path: PathBuf,
+        /// Rejection reason.
         message: String,
     },
+    /// Registry read exceeded an M1 byte cap.
     ReadLimitExceeded {
+        /// Path whose read budget was exceeded.
         path: PathBuf,
+        /// Observed byte count.
         bytes: u64,
+        /// Maximum allowed byte count.
         max: u64,
     },
+    /// Block id was not a valid v0 id token.
     InvalidBlockId(String),
+    /// Block name was empty or otherwise invalid.
     InvalidBlockName {
+        /// Block kind.
         kind: &'static str,
+        /// Block id.
         id: String,
     },
+    /// Command id was not a valid v0 command token.
     InvalidCommandId(String),
+    /// Source text could not be parsed.
     Parse {
+        /// Source name used in diagnostics.
         source_name: String,
+        /// Parse diagnostic.
         message: String,
     },
+    /// A block id or normalized name was duplicated.
     DuplicateId {
+        /// Block kind.
         kind: &'static str,
+        /// Duplicated id or name.
         id: String,
     },
+    /// A reference matched both an id and a normalized name.
     AmbiguousReference {
+        /// Referenced block kind.
         kind: &'static str,
+        /// User-supplied reference.
         reference: String,
     },
+    /// A reference could not be resolved.
     MissingReference {
+        /// Referencing block kind.
         from_kind: &'static str,
+        /// Referencing block id.
         from_id: String,
+        /// Referenced block kind.
         reference_kind: &'static str,
+        /// User-supplied reference.
         reference: String,
     },
+    /// Recursive loop references contain a cycle.
     LoopCycle {
+        /// Loop id involved in the cycle.
         loop_id: String,
     },
+    /// Recursive loop references exceed the nesting cap.
     LoopDepthExceeded {
+        /// Loop id where the cap was exceeded.
         loop_id: String,
+        /// Observed nesting depth.
         depth: usize,
+        /// Maximum allowed nesting depth.
         max: usize,
     },
+    /// Semantic validation failed.
     Semantic(SemanticValidationError),
+    /// Canonical JSON serialization failed.
     CanonicalJson(proto::CanonicalJsonError),
+    /// Serde serialization failed before canonicalization.
     Serialize(serde_json::Error),
 }
 
@@ -869,12 +1027,18 @@ impl From<SemanticValidationError> for RegistryError {
     }
 }
 
+/// Error returned by a script parser.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseError {
+    /// Parser implementation is not available on this surface.
     ContractOnly,
+    /// Block id was invalid.
     InvalidBlockId(String),
+    /// Command id was invalid.
     InvalidCommandId(String),
+    /// Parser rejected the source.
     Parse(String),
+    /// Semantic validation failed.
     Semantic(SemanticValidationError),
 }
 
@@ -922,22 +1086,35 @@ impl From<RegistryError> for ParseError {
     }
 }
 
+/// Semantic validation failure for a registry block.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SemanticValidationError {
+    /// The command shape does not match the declared tool kind.
     ToolCommandKindMismatch {
+        /// Tool id.
         tool_id: String,
+        /// Declared tool kind.
         tool_kind: ToolKind,
     },
+    /// Tool-specific schema validation failed.
     ToolSchemaViolation {
+        /// Tool id.
         tool_id: String,
+        /// Rejection reason.
         message: String,
     },
+    /// Own-script command was not `script:<tool-id>`.
     OwnScriptCommandIdMismatch {
+        /// Declared command string.
         command: String,
+        /// Tool id.
         tool_id: String,
     },
+    /// Network CIDR entry was not canonical.
     InvalidCanonicalCidr {
+        /// Rejected CIDR string.
         cidr: String,
+        /// Tool id.
         tool_id: String,
     },
 }
@@ -967,6 +1144,7 @@ impl fmt::Display for SemanticValidationError {
 
 impl std::error::Error for SemanticValidationError {}
 
+/// Validates block-level semantic rules that are independent of registry references.
 pub fn validate_registry_block_semantics(
     block: &RegistryBlock,
 ) -> Result<(), SemanticValidationError> {
@@ -979,6 +1157,7 @@ pub fn validate_registry_block_semantics(
     }
 }
 
+/// Validates the semantic contract for one tool block.
 pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
     match (&tool.tool_kind, &tool.command) {
         (ToolKind::OwnScript, ToolCommand::OwnScript(command)) => {
@@ -1054,10 +1233,12 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
     Ok(())
 }
 
+/// Loads and validates a registry root from disk.
 pub fn load_registry_root(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
     ResolvedRegistry::load(root.as_ref())
 }
 
+/// Parses one registry block from a named YAML source.
 pub fn parse_registry_block(
     source_name: &str,
     source: &str,
@@ -1084,6 +1265,7 @@ pub fn parse_registry_block(
     Ok(block)
 }
 
+/// Serializes a resolved registry as canonical JSON plus a trailing newline.
 pub fn canonical_resolved_registry_json(
     registry: &ResolvedRegistry,
 ) -> Result<String, RegistryError> {
@@ -3229,10 +3411,12 @@ fn parse_error(source_name: &str, message: String) -> RegistryError {
     }
 }
 
+/// Returns whether `value` is a valid v0 block id.
 pub fn is_valid_block_id(value: &str) -> bool {
     matches_lower_token(value, 1, 128)
 }
 
+/// Returns whether `value` is a valid predefined command id.
 pub fn is_valid_command_id(value: &str) -> bool {
     matches_lower_token(value, 1, 64)
         && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
@@ -3250,6 +3434,7 @@ fn is_valid_allowed_parameter_name(value: &str) -> bool {
         && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
+/// Returns whether `value` is a canonical IPv4 or IPv6 CIDR.
 pub fn is_valid_canonical_cidr(value: &str) -> bool {
     let Some((addr, prefix)) = value.split_once('/') else {
         return false;
@@ -3279,6 +3464,7 @@ pub fn is_valid_canonical_cidr(value: &str) -> bool {
     }
 }
 
+/// Normalizes a safe slash-separated relative path or rejects unsafe aliases.
 pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
     if value.is_empty()
         || value.starts_with('/')
@@ -3303,6 +3489,7 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
     (canonical == value).then_some(canonical)
 }
 
+/// Returns whether `path` is equal to or contained under `scope`.
 pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
     path == scope
         || path
@@ -3310,6 +3497,7 @@ pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
+/// Returns whether any path component would alias a Windows device or trimmed name.
 pub fn relative_path_has_windows_alias(value: &str) -> bool {
     value.split('/').any(|component| {
         !matches!(component, "" | "." | "..") && path_component_has_windows_alias(component)
