@@ -49,6 +49,16 @@ class M1ValidationContractTest(unittest.TestCase):
         self.assertNotIn("JSON Schema validation", security)
         self.assertIn("strict parser validation", security)
 
+    def test_plan_tracks_active_m1_implementation(self) -> None:
+        plan = (ROOT / "PLAN.md").read_text(encoding="utf-8")
+
+        self.assertIn("Updated: 2026-07-03", plan)
+        self.assertIn("**Status:** M1 implementation is in progress.", plan)
+        self.assertIn(
+            "`2026-07-03` — M1 Loop Agent implementation is active", plan
+        )
+        self.assertNotIn("## Ordered follow-up steps to start M1 with Codex", plan)
+
 
 if __name__ == "__main__":
     unittest.main()

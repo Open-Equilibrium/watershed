@@ -3,7 +3,7 @@
 Implementation plan as milestones with deliverables and a Definition of Done (DoD). Performance targets are **not** repeated here — see `PERFORMANCE.md`. Dates are targets the maintainer fills in; the Progress Log is timestamped on completion.
 
 Created: 2026-06-05
-Updated: 2026-06-24
+Updated: 2026-07-03
 
 ## MVP boundary
 
@@ -103,6 +103,8 @@ D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is d
 
 **Wedge:** Loop Agent execution wedge — prove deterministic, reusable, evented agent loops as a deterministic, auditable, reusable agent-loop runtime (not a generic coding agent).
 
+**Status:** M1 implementation is in progress. The standalone CLI runtime, JSONL event stream, local session log, replay/tail/resume commands, fixture registry loading and validation gates are in active hardening against the DoD.
+
 **Deliverables:**
 
 - Standalone CLI Loop Agent (human CLI run path).
@@ -164,17 +166,16 @@ M3 delivers Liquid as a **self-contained native workspace/app-building product**
 
 **DoD:** a user can, **without any agents installed**, create a useful dashboard, add/edit/connect components, run a script component over local data, and use PowerBar for workspace actions; Liquid AI can propose or modify a dashboard/component through the same mutation pipeline; an external agent can read permitted workspace info and propose/apply a permitted mutation through the CLI/API; every mutation is recorded in the action history; a faulty external-agent mutation can be reverted; the workspace can be restored to a previous checkpoint/snapshot. Optional: render Meta-Harness + AgentPulse views in a dashboard and start a loop from the PowerBar.
 
-## Ordered follow-up steps to start M1 with Codex
+## Ordered follow-up steps to finish M1 with Codex
 
-1. Finish maintainer doc polish, then move/push the project to the official `Open-Equilibrium/watershed` repo.
-2. Verify official `main` has green CI and GitHub branch protection/ruleset before starting PR-only work.
-3. Start the first M1 topic branch from official `main`: executable `loop run smoke-loop --emit jsonl` over the checked-in fixture with the stub model.
-4. Add runtime gates as implementation lands: ≥95% coverage, D-015 golden diffs, M1 performance budgets, Linux sandbox-negative enforcement and macOS policy-artifact parity.
-5. Expand in order: `hello-loop`, session log replay/tail/resume, then full sandbox policy enforcement.
-6. Start Meta-Harness M2 planning only after Loop Agent M1 is green and standalone.
+1. Keep the M1 topic branch scoped to Loop Agent runtime hardening until the DoD is green.
+2. Keep runtime gates green as implementation changes: ≥95% production-code coverage, D-015 golden diffs, M1 performance budgets, sandbox-negative policy emulation and macOS policy-artifact parity.
+3. Finish M1 only after the full closeout chain in `AGENTS.md` is green and Loop Agent remains standalone.
+4. Start Meta-Harness M2 planning only after Loop Agent M1 is green and standalone.
 
 ## Progress Log (timestamped)
 
+- `2026-07-03` — M1 Loop Agent implementation is active: standalone CLI run/replay/tail/resume, local session logs, registry loading, deterministic fixture streams and sandbox-negative validation are in place; current work is governance hardening against the M1 DoD.
 - `2026-07-01` — M1 hardening decisions closed: recursive Loop nesting is capped at 64 levels (ADR-0053), registry/session-log reads use fixed M1 byte caps with tail suffix validation (ADR-0054), and the post-M1 Loop Agent RPC shape starts with a minimal local JSON-RPC control method set (ADR-0055).
 - `2026-06-24` — M1 preflight decisions closed: Loop Agent M1 performance budgets (ADR-0049), deterministic M1 context scope (ADR-0050), fail-closed Linux-target network policy with non-empty allowlists rejected (ADR-0051). Decision docs cleaned up: live open decisions stay in `open-decisions.html`, accepted decisions stay compact in `ADR-LOG.md`.
 - `2026-06-23` — M0 scaffold started: Rust workspace/toolchain policy, `proto`, `core-script`, `core-policy`, `loop-agent-core`, `loop-agent-cli`, deterministic D-015 fixture streams, M0 policy expected-output fixtures and GitHub CI gate wiring added. Loop Agent runtime execution remains M1 scope.
