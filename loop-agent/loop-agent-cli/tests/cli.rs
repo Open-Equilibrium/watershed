@@ -197,6 +197,65 @@ fn invalid_emit_and_extra_arguments_print_usage_errors() {
 }
 
 #[test]
+fn invalid_tail_arguments_print_usage_errors() {
+    let workspace = workspace_copy("smoke-loop");
+    for (args, expected) in [
+        (
+            vec!["tail", "smoke001", "--emit", "human"],
+            "unsupported emit mode",
+        ),
+        (
+            vec!["tail", "smoke001", "--timeout-ms"],
+            "missing value for --timeout-ms",
+        ),
+        (
+            vec!["tail", "smoke001", "--timeout-ms", "slow"],
+            "invalid --timeout-ms value",
+        ),
+        (vec!["tail", "smoke001", "--bogus"], "unknown argument"),
+    ] {
+        let output = loop_command()
+            .current_dir(&workspace)
+            .args(args)
+            .output()
+            .expect("loop binary should run");
+
+        assert_eq!(output.status.code(), Some(64), "{expected}");
+        assert!(
+            String::from_utf8(output.stderr)
+                .expect("stderr should be UTF-8")
+                .contains(expected),
+            "{expected}"
+        );
+        assert!(output.stdout.is_empty());
+    }
+}
+
+#[test]
+fn tail_timeout_argument_is_accepted() {
+    let workspace = workspace_copy("smoke-loop");
+    let run = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
+    assert!(run.status.success());
+
+    let output = loop_command()
+        .current_dir(&workspace)
+        .args(["tail", "smoke001", "--timeout-ms", "1"])
+        .output()
+        .expect("loop binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+        "session smoke001 tailed\n"
+    );
+}
+
+#[test]
 fn run_loop_emits_golden_jsonl_and_persists_session_log() {
     let workspace = workspace_copy("smoke-loop");
     let output = loop_command()

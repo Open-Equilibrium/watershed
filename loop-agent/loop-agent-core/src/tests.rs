@@ -821,6 +821,36 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
 }
 
 #[test]
+fn runtime_policy_target_helpers_report_missing_artifacts() {
+    assert_eq!(
+        protected_path_match_mode_for_policy_target(
+            &core_policy::PolicyTarget::LinuxLandlockSeccomp
+        ),
+        ProtectedPathMatchMode::CaseSensitive
+    );
+    assert_eq!(
+        protected_path_match_mode_for_policy_target(&core_policy::PolicyTarget::MacosSeatbelt),
+        ProtectedPathMatchMode::CaseInsensitive
+    );
+
+    for (target, expected_name) in [
+        (core_policy::PolicyTarget::LinuxLandlockSeccomp, "linux"),
+        (core_policy::PolicyTarget::MacosSeatbelt, "macos"),
+    ] {
+        let err = runtime_policy_artifact_for_target(&[], &target)
+            .expect_err("missing runtime policy artifact must fail");
+
+        assert!(matches!(
+            err,
+            RuntimeError::Protocol(message)
+                if message.contains("missing")
+                    && message.contains(expected_name)
+                    && message.contains("runtime policy artifact")
+        ));
+    }
+}
+
+#[test]
 fn runtime_rejects_duplicate_subloop_work_over_m1_budget() {
     let registry = duplicated_subloop_registry(14);
     let policy = empty_policy_artifact("loop-000");
@@ -925,11 +955,40 @@ fn list_sessions_handles_missing_dirs_and_filters_unsafe_names() {
         Vec::<String>::new()
     );
 
+    fs::create_dir(workspace.join(".loop")).expect("loop dir");
+    assert_eq!(
+        list_sessions(&workspace).expect("missing sessions dir is empty"),
+        Vec::<String>::new()
+    );
+
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     fs::write(session_dir.join("good001.jsonl"), "").expect("valid session file");
     fs::write(session_dir.join("Bad.jsonl"), "").expect("invalid session file");
     fs::write(session_dir.join("good002.txt"), "").expect("non-jsonl file");
+
+    assert_eq!(
+        list_sessions(&workspace).expect("sessions list"),
+        vec!["good001"]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn list_sessions_skips_non_utf8_file_stems() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let workspace = empty_workspace("list-sessions-non-utf8");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    fs::write(session_dir.join("good001.jsonl"), "").expect("valid session file");
+    fs::write(
+        session_dir.join(PathBuf::from(OsString::from_vec(vec![
+            0xff, b'.', b'j', b's', b'o', b'n', b'l',
+        ]))),
+        "",
+    )
+    .expect("non-UTF-8 session file");
 
     assert_eq!(
         list_sessions(&workspace).expect("sessions list"),
@@ -3425,6 +3484,42 @@ fn resume_rejects_registry_drift_before_side_effects() {
     );
 }
 
+#[test]
+fn resume_definition_metadata_allows_legacy_partial_hashes() {
+    let workspace = workspace_copy("hello-loop");
+    let registry = core_script::load_registry_root(workspace.join("registry"))
+        .expect("fixture registry loads");
+    let loop_block = registry.loop_block("hello-loop").expect("loop exists");
+    let metadata_path =
+        session_log_metadata_path(&workspace, "legacy001").expect("metadata path resolves");
+    fs::create_dir_all(metadata_path.parent().expect("metadata parent")).expect("metadata dir");
+
+    fs::write(&metadata_path, "session_id=legacy001\nevents=2\n")
+        .expect("legacy metadata without hashes");
+    verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+        .expect("metadata without registry hash stays readable");
+
+    fs::write(
+        &metadata_path,
+        "session_id=legacy001\nevents=2\nregistry_hash=fnv64:legacy\n",
+    )
+    .expect("legacy metadata with partial hash");
+    verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+        .expect("metadata without loop hash stays readable");
+}
+
+#[test]
+fn session_metadata_helpers_reject_malformed_inputs() {
+    assert!(matches!(
+        parse_session_log_metadata("not key value\n"),
+        Err(RuntimeError::Protocol(message)) if message.contains("key=value")
+    ));
+    assert!(matches!(
+        session_log_metadata_path(Path::new("."), "../bad"),
+        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn resume_rejects_hardlinked_session_log_before_side_effects() {
@@ -4288,6 +4383,112 @@ fn tail_session_stops_when_writer_closes_before_terminal_event() {
 
     assert_eq!(output.event_count, 1);
     assert!(!output.failed);
+}
+
+#[test]
+fn tail_options_no_follow_reads_current_prefix_without_waiting() {
+    let workspace = empty_workspace("tail-options-no-follow");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let started = session_event_line("tailnowait001", "evt-001", EventType::SessionStarted, 1);
+    fs::write(session_dir.join("tailnowait001.jsonl"), &started)
+        .expect("partial session log written");
+    let mut writer = Vec::new();
+
+    let output = tail_session_to_writer_with_options(
+        &workspace,
+        "tailnowait001",
+        EmitMode::Jsonl,
+        TailOptions::no_follow(),
+        &mut writer,
+    )
+    .expect("no-follow tail succeeds");
+
+    assert_eq!(output.event_count, 1);
+    assert_eq!(
+        String::from_utf8(writer).expect("tail output is utf8"),
+        started
+    );
+}
+
+#[test]
+fn tail_session_rejects_terminal_log_with_partial_suffix() {
+    let workspace = empty_workspace("tail-terminal-partial");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let stream = format!(
+        "{}{}{{\"partial\":true",
+        session_event_line(
+            "tailpartialterminal001",
+            "evt-001",
+            EventType::SessionStarted,
+            1
+        ),
+        session_event_line(
+            "tailpartialterminal001",
+            "evt-002",
+            EventType::SessionCompleted,
+            2
+        )
+    );
+    fs::write(session_dir.join("tailpartialterminal001.jsonl"), stream)
+        .expect("terminal session with partial suffix written");
+    let mut writer = Vec::new();
+
+    let err = tail_session_to_writer_with_options(
+        &workspace,
+        "tailpartialterminal001",
+        EmitMode::Jsonl,
+        TailOptions::no_follow(),
+        &mut writer,
+    )
+    .expect_err("terminal partial suffix must be rejected");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("partial line after a terminal event")
+    ));
+    assert!(writer.is_empty());
+}
+
+#[test]
+fn human_tail_stops_when_final_status_writer_closes() {
+    let workspace = empty_workspace("tail-human-broken-pipe");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let stream = format!(
+        "{}{}",
+        session_event_line("tailhuman001", "evt-001", EventType::SessionStarted, 1),
+        session_event_line("tailhuman001", "evt-002", EventType::SessionCompleted, 2)
+    );
+    fs::write(session_dir.join("tailhuman001.jsonl"), stream).expect("terminal session written");
+    let mut writer = BrokenPipeWriter;
+
+    let output = tail_session_to_writer_with_options(
+        &workspace,
+        "tailhuman001",
+        EmitMode::Human,
+        TailOptions::no_follow(),
+        &mut writer,
+    )
+    .expect("broken pipe on human status stops tail without error");
+
+    assert_eq!(output.event_count, 2);
+    assert_eq!(output.stdout, "");
+}
+
+#[test]
+fn tail_poll_interval_respects_timeout_remaining_duration() {
+    let options = TailOptions {
+        follow: true,
+        timeout: Some(Duration::from_millis(5)),
+    };
+
+    assert!(tail_poll_interval(&options, Instant::now()) <= Duration::from_millis(5));
+    assert_eq!(
+        tail_poll_interval(&options, Instant::now() - Duration::from_millis(10)),
+        Duration::ZERO
+    );
 }
 
 #[test]
@@ -6382,6 +6583,30 @@ fn empty_policy_artifact(loop_id: &str) -> core_policy::PolicyArtifact {
 
 fn fixture_size(fixture: &str) -> u64 {
     dir_size(&fixture_dir(fixture))
+}
+
+fn session_event_line(
+    session_id: &str,
+    event_id: &str,
+    event_type: EventType,
+    sequence: u64,
+) -> String {
+    let payload = if event_type == EventType::SessionStarted {
+        serde_json::json!({"reason":"fixture-start"})
+    } else {
+        serde_json::json!({})
+    };
+    EventEnvelope::new(
+        event_id,
+        event_type,
+        session_id,
+        sequence,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        payload,
+    )
+    .canonical_jsonl()
+    .expect("session event serializes")
 }
 
 struct NotifyingWriter {
