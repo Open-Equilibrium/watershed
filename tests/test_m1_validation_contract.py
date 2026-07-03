@@ -20,7 +20,7 @@ class M1ValidationContractTest(unittest.TestCase):
         ]:
             self.assertIn(token, workflow)
         self.assertIn("--ignore-filename-regex", workflow)
-        self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)", workflow)
+        self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)", workflow)
         self.assertIn("--show-missing-lines", workflow)
         self.assertNotIn("cargo llvm-cov nextest --locked --workspace --no-report", workflow)
 
@@ -34,7 +34,7 @@ class M1ValidationContractTest(unittest.TestCase):
             template,
         )
         self.assertIn("--ignore-filename-regex", template)
-        self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)", template)
+        self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)", template)
         self.assertNotIn("cargo llvm-cov nextest --locked --workspace --no-report", template)
 
     def test_security_docs_do_not_overstate_m1_enforcement(self) -> None:

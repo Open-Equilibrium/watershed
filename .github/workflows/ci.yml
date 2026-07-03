@@ -58,7 +58,7 @@ jobs:
           --locked
           --workspace
           --fail-under-lines 95
-          --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)'
+          --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)'
           --show-missing-lines
 
       - name: Check RustSec advisories
