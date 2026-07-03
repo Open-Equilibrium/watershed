@@ -5559,6 +5559,31 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
+#[test]
+fn run_loop_rolls_back_session_log_when_apply_side_effects_fail() {
+    let workspace = workspace_copy("hello-loop");
+    let summary_path = workspace.join("out/summary.txt");
+    for attempt in 0..100 {
+        let temp_path =
+            replacement_temp_path(&summary_path, attempt).expect("replacement temp path is valid");
+        fs::write(temp_path, b"collision").expect("replacement temp collision written");
+    }
+
+    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect_err("apply-time side effect failure must fail the run");
+
+    assert!(
+        matches!(err, RuntimeError::Protocol(ref message) if message.contains("temporary replacement path")),
+        "{err:?}"
+    );
+    assert!(!summary_path.exists());
+    assert!(!workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("hello001.jsonl")
+        .exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {

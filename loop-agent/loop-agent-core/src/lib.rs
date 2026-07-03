@@ -299,13 +299,6 @@ pub fn run_loop(
             .session_id
             .clone();
         let failed = planned_runtime.failed;
-        commit_reserved_session_log(
-            &reservation,
-            &session_id,
-            &planned_stream,
-            planned_events.len(),
-            Some(&definition_hashes),
-        )?;
         let runtime = execute_loop(
             workspace,
             &registry,
@@ -320,6 +313,13 @@ pub fn run_loop(
                 reservation.session_path.display()
             )));
         }
+        commit_reserved_session_log(
+            &reservation,
+            &session_id,
+            &planned_stream,
+            planned_events.len(),
+            Some(&definition_hashes),
+        )?;
         reservation.release_lock()?;
 
         Ok(RunOutput {
