@@ -12,7 +12,7 @@ Watershed's defensible trust model is the combination across its three layers: s
 
 ## Principle: scripts define, sandbox enforces
 
-Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 enforces it deterministically in-process, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
+Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 runs deterministic in-process execution/emulation for the modeled checks, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
 
 Because scripts are human-reviewable security/capability artifacts, they must parse to one unambiguous model: YAML 1.2, strict parsing, JSON Schema validation and canonical serialization (ADR-0031). YAML anchors and merge keys are not part of the composition model; the canonical byte form is defined in the Loop Agent V-Spec.
 
@@ -58,7 +58,7 @@ This is Liquid's **workspace** action history (over Liquid's own data), not a pr
 
 ## M0/M1 sandbox scope
 
-The M0 security packet describes policy artifacts and sandbox-negative tests for forbidden writes, network egress, out-of-phase tools, protected paths, symlink traversal and interpreter misuse; it does not implement the OS sandbox yet. M1 enforces the compiled policy through deterministic in-process runtime execution/emulation. Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0052).
+The M0 security packet describes policy artifacts and sandbox-negative tests for forbidden writes, network egress, out-of-phase tools, protected paths, symlink traversal and interpreter misuse; it does not implement the OS sandbox yet. M1 applies the compiled policy through deterministic in-process execution/emulation of modeled decisions; predefined commands are fixture stubs, and own-script writes use the bounded fixture executor. Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0052).
 
 ### M0 policy artifact contract
 

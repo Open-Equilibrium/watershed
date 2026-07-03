@@ -37,6 +37,12 @@ class M1ValidationContractTest(unittest.TestCase):
         self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)", template)
         self.assertNotIn("cargo llvm-cov nextest --locked --workspace --no-report", template)
 
+    def test_security_docs_do_not_overstate_m1_enforcement(self) -> None:
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("M1 enforces it deterministically in-process", security)
+        self.assertIn("deterministic in-process execution/emulation", security)
+
 
 if __name__ == "__main__":
     unittest.main()
