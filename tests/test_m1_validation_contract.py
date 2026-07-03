@@ -12,10 +12,15 @@ class M1ValidationContractTest(unittest.TestCase):
         )
 
         self.assertIn("M1 gates", workflow)
-        self.assertIn(
-            "cargo llvm-cov nextest --locked --workspace --fail-under-lines 95",
-            workflow,
-        )
+        for token in [
+            "cargo llvm-cov nextest",
+            "--locked",
+            "--workspace",
+            "--fail-under-lines 95",
+        ]:
+            self.assertIn(token, workflow)
+        self.assertIn("--ignore-filename-regex", workflow)
+        self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)", workflow)
         self.assertIn("--show-missing-lines", workflow)
         self.assertNotIn("cargo llvm-cov nextest --locked --workspace --no-report", workflow)
 
@@ -28,6 +33,8 @@ class M1ValidationContractTest(unittest.TestCase):
             "cargo llvm-cov nextest --locked --workspace --fail-under-lines 95",
             template,
         )
+        self.assertIn("--ignore-filename-regex", template)
+        self.assertIn(r"(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)", template)
         self.assertNotIn("cargo llvm-cov nextest --locked --workspace --no-report", template)
 
 

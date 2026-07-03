@@ -53,7 +53,13 @@ jobs:
         run: cargo nextest run --locked --workspace --all-targets
 
       - name: Check line coverage
-        run: cargo llvm-cov nextest --locked --workspace --fail-under-lines 95 --show-missing-lines
+        run: >-
+          cargo llvm-cov nextest
+          --locked
+          --workspace
+          --fail-under-lines 95
+          --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\\.rs)([\\/]|$)'
+          --show-missing-lines
 
       - name: Check RustSec advisories
         run: cargo audit
