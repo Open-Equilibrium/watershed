@@ -860,7 +860,7 @@ fn is_active_session_error(err: &RuntimeError, session_id: &str) -> bool {
     matches!(
         err,
         RuntimeError::Protocol(message)
-            if message == &format!("session {session_id} is already active")
+            if message.starts_with(&format!("session {session_id} is already active"))
     )
 }
 
@@ -939,13 +939,20 @@ fn reserve_session_lock_file(path: &Path, session_id: &str) -> Result<(), Runtim
     {
         Ok(_) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Err(RuntimeError::Protocol(
-            format!("session {session_id} is already active"),
+            active_session_lock_message(path, session_id),
         )),
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
             source,
         }),
     }
+}
+
+fn active_session_lock_message(path: &Path, session_id: &str) -> String {
+    format!(
+        "session {session_id} is already active; lock file {} exists. If the previous process crashed, verify no Loop Agent process owns this session, then remove that lock file and retry.",
+        path.display()
+    )
 }
 
 fn acquire_session_lock(

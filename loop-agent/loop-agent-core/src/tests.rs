@@ -3300,7 +3300,13 @@ fn resume_rejects_active_session_lock_without_side_effects() {
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("active session must not resume concurrently");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("already active")));
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message)
+            if message.contains("already active")
+                && message.contains("hello001.lock")
+                && message.contains("verify no Loop Agent process")
+    ));
     assert!(!workspace.join("out/summary.txt").exists());
     reservation.rollback();
 }
