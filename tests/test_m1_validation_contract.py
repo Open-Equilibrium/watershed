@@ -43,6 +43,12 @@ class M1ValidationContractTest(unittest.TestCase):
         self.assertNotIn("M1 enforces it deterministically in-process", security)
         self.assertIn("deterministic in-process execution/emulation", security)
 
+    def test_security_docs_do_not_advertise_json_schema_engine(self) -> None:
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+
+        self.assertNotIn("JSON Schema validation", security)
+        self.assertIn("strict parser validation", security)
+
 
 if __name__ == "__main__":
     unittest.main()

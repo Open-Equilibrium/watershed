@@ -229,7 +229,7 @@ impl Default for ParserContract {
             schema_version: SCRIPT_SCHEMA_VERSION_V0,
             yaml_version: YAML_VERSION,
             one_block_per_file: true,
-            semantic_validation: "JSON Schema plus post-schema identity and canonical CIDR checks",
+            semantic_validation: "strict parser plus identity and canonical CIDR checks",
             canonical_serialization: "deterministic UTF-8 JSON of the resolved model",
         }
     }
@@ -3324,7 +3324,7 @@ mod tests {
         assert_eq!(contract.schema_version, "0");
         assert_eq!(contract.yaml_version, "1.2");
         assert!(contract.one_block_per_file);
-        assert!(contract.semantic_validation.contains("post-schema"));
+        assert!(contract.semantic_validation.contains("strict parser"));
         assert!(contract.canonical_serialization.contains("resolved model"));
     }
 

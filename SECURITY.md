@@ -14,7 +14,7 @@ Watershed's defensible trust model is the combination across its three layers: s
 
 Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 runs deterministic in-process execution/emulation for the modeled checks, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
 
-Because scripts are human-reviewable security/capability artifacts, they must parse to one unambiguous model: YAML 1.2, strict parsing, JSON Schema validation and canonical serialization (ADR-0031). YAML anchors and merge keys are not part of the composition model; the canonical byte form is defined in the Loop Agent V-Spec.
+Because scripts are human-reviewable security/capability artifacts, they must parse to one unambiguous model: YAML 1.2, strict parser validation and canonical serialization (ADR-0031). The checked-in JSON Schema files document the intended shape; M1 does not run a separate schema engine. YAML anchors and merge keys are not part of the composition model; the canonical byte form is defined in the Loop Agent V-Spec.
 
 - **Command allowlisting limits names, not effects.** Interpreters and deploy commands (`python`, `cf push`, build scripts, git hooks) are Turing-complete escapes; argument filters are bypassable via path traversal, symlinks and shell metacharacters.
 - **Agent intent is untrusted (prompt injection / confused-deputy).** Reading untrusted content + holding private data + an exfiltration path is unconditionally exploitable regardless of prompt hardening ("lethal trifecta"). The fix is architectural separation, not a longer allowlist.
