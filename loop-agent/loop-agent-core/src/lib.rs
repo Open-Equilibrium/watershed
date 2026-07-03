@@ -4405,10 +4405,36 @@ fn validate_appended_session_log_text(
         )
     });
     terminal_line = terminal_line.map(|index| index + 1);
+    let mut stream_bytes = 0usize;
+    for event in prior_events {
+        let canonical = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("{} prior event stream: {err}", path.display()))
+        })?;
+        stream_bytes = stream_bytes
+            .checked_add(canonical.len())
+            .unwrap_or(usize::MAX);
+    }
 
     let mut appended_events = Vec::new();
     for (index, line) in text.split_terminator('\n').enumerate() {
         let line_number = prior_events.len() + index + 1;
+        // WHY: incremental tail validation must preserve the same cumulative
+        // public stream budgets as full replay validation.
+        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
+                path.display()
+            )));
+        }
+        stream_bytes = stream_bytes
+            .checked_add(line.len().saturating_add(1))
+            .unwrap_or(usize::MAX);
+        if stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} event stream budget exceeded at line {line_number}: {stream_bytes} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
+                path.display()
+            )));
+        }
         if line.ends_with('\r') {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} must use LF-only line endings",
