@@ -1,10 +1,11 @@
-use loop_agent_core::{EmitMode, RuntimeError};
+use loop_agent_core::{EmitMode, RuntimeError, TailOptions};
 use std::{
     env,
     ffi::{OsStr, OsString},
     io::{self, BufRead, Write},
     path::PathBuf,
     process,
+    time::Duration,
 };
 
 fn main() {
@@ -69,10 +70,15 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
         }
         "tail" => {
             let session_id = positional(args, 1, "session_id")?;
-            let emit = emit_mode(args)?;
+            let (emit, tail_options) = tail_args(args)?;
             let mut stdout = io::stdout().lock();
-            let output =
-                loop_agent_core::tail_session_to_writer(workspace, session_id, emit, &mut stdout)?;
+            let output = loop_agent_core::tail_session_to_writer_with_options(
+                workspace,
+                session_id,
+                emit,
+                tail_options,
+                &mut stdout,
+            )?;
             if output.failed {
                 process::exit(65);
             }
@@ -159,6 +165,44 @@ fn emit_mode(args: &[String]) -> Result<EmitMode, RuntimeError> {
     }
 }
 
+fn tail_args(args: &[String]) -> Result<(EmitMode, TailOptions), RuntimeError> {
+    let mut emit = EmitMode::Human;
+    let mut options = TailOptions::follow();
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--emit" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| RuntimeError::Usage("missing value for --emit".to_owned()))?;
+                if value != "jsonl" {
+                    return Err(RuntimeError::Usage(format!(
+                        "unsupported emit mode {value:?}"
+                    )));
+                }
+                emit = EmitMode::Jsonl;
+                index += 2;
+            }
+            "--no-follow" => {
+                options.follow = false;
+                index += 1;
+            }
+            "--timeout-ms" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    RuntimeError::Usage("missing value for --timeout-ms".to_owned())
+                })?;
+                let millis = value.parse::<u64>().map_err(|_| {
+                    RuntimeError::Usage(format!("invalid --timeout-ms value {value:?}"))
+                })?;
+                options.timeout = Some(Duration::from_millis(millis));
+                index += 2;
+            }
+            other => return Err(RuntimeError::Usage(format!("unknown argument {other:?}"))),
+        }
+    }
+    Ok((emit, options))
+}
+
 fn positional<'a>(args: &'a [String], index: usize, label: &str) -> Result<&'a str, RuntimeError> {
     args.get(index)
         .map(String::as_str)
@@ -186,5 +230,5 @@ fn os_string_to_string(value: OsString) -> Result<String, &'static str> {
 }
 
 fn usage() -> String {
-    "usage: loop run <loop> [--emit jsonl] | replay <session_id> [--emit jsonl] | tail <session_id> [--emit jsonl] | resume <session_id> [--emit jsonl] | sessions | chat".to_owned()
+    "usage: loop run <loop> [--emit jsonl] | replay <session_id> [--emit jsonl] | tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | resume <session_id> [--emit jsonl] | sessions | chat".to_owned()
 }

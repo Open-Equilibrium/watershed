@@ -8,7 +8,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
@@ -77,6 +77,28 @@ pub struct RunOutput {
     pub session_id: String,
     pub session_path: PathBuf,
     pub stdout: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TailOptions {
+    pub follow: bool,
+    pub timeout: Option<Duration>,
+}
+
+impl TailOptions {
+    pub fn follow() -> Self {
+        Self {
+            follow: true,
+            timeout: None,
+        }
+    }
+
+    pub fn no_follow() -> Self {
+        Self {
+            follow: false,
+            timeout: None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -281,6 +303,16 @@ pub fn tail_session_to_writer(
     emit: EmitMode,
     writer: &mut impl Write,
 ) -> Result<RunOutput, RuntimeError> {
+    tail_session_to_writer_with_options(workspace, session_id, emit, TailOptions::follow(), writer)
+}
+
+pub fn tail_session_to_writer_with_options(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+    options: TailOptions,
+    writer: &mut impl Write,
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
@@ -311,8 +343,16 @@ pub fn tail_session_to_writer(
         });
     }
 
+    let started = Instant::now();
     while !stream_is_failed(&events) && !stream_is_completed(&events) {
-        thread::sleep(Duration::from_millis(25));
+        if !options.follow
+            || options
+                .timeout
+                .is_some_and(|timeout| started.elapsed() >= timeout)
+        {
+            break;
+        }
+        thread::sleep(tail_poll_interval(&options, started));
         let current_len = tail_session_log_len(&path)?;
         if current_len < observed_len {
             return Err(RuntimeError::Protocol(format!(
@@ -363,6 +403,13 @@ pub fn tail_session_to_writer(
         session_id: session_id.to_owned(),
         session_path: path,
         stdout: String::new(),
+    })
+}
+
+fn tail_poll_interval(options: &TailOptions, started: Instant) -> Duration {
+    let default = Duration::from_millis(25);
+    options.timeout.map_or(default, |timeout| {
+        timeout.saturating_sub(started.elapsed()).min(default)
     })
 }
 

@@ -333,6 +333,33 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
 }
 
 #[test]
+fn tail_no_follow_exits_after_current_non_terminal_prefix() {
+    let fixture = workspace_copy("smoke-loop");
+    let session_dir = fixture.join(".loop/sessions");
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+        .lines()
+        .next()
+        .expect("golden has session.started")
+        .to_owned()
+        + "\n";
+    fs::write(session_dir.join("smoke001.jsonl"), &prefix).expect("partial session written");
+
+    let output = loop_command()
+        .current_dir(&fixture)
+        .args(["tail", "smoke001", "--emit", "jsonl", "--no-follow"])
+        .output()
+        .expect("loop binary should run");
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+        prefix
+    );
+}
+
+#[test]
 fn closed_stdout_pipe_does_not_fail_for_jsonl_tail() {
     let workspace = workspace_copy("smoke-loop");
     let run = loop_command()
