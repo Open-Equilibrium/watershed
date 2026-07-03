@@ -194,6 +194,7 @@ pub fn run_loop(
     let loop_block = registry
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
+    let definition_hashes = session_definition_hashes(&registry, loop_block)?;
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
     let policy = runtime_policy_artifact(&artifacts)?;
@@ -202,6 +203,15 @@ pub fn run_loop(
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
     if let Err(err) = write_initial_session_log(&reservation, &expected_session_id) {
+        reservation.rollback();
+        return Err(err);
+    }
+    if let Err(err) = write_reserved_session_metadata(
+        &reservation,
+        &expected_session_id,
+        1,
+        Some(&definition_hashes),
+    ) {
         reservation.rollback();
         return Err(err);
     }
@@ -242,6 +252,7 @@ pub fn run_loop(
             &session_id,
             &planned_stream,
             planned_events.len(),
+            Some(&definition_hashes),
         )?;
         let runtime = execute_loop(
             workspace,
@@ -476,6 +487,7 @@ pub fn resume_session(
     let loop_block = registry.loop_block(&loop_id).ok_or_else(|| {
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;
+    verify_resume_definition_metadata(workspace, session_id, &registry, loop_block)?;
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, &loop_id)?;
     let policy = runtime_policy_artifact(&artifacts)?;
@@ -852,6 +864,114 @@ impl Drop for SessionLockGuard {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SessionDefinitionHashes {
+    registry_hash: String,
+    loop_definition_hash: String,
+}
+
+#[derive(Default, Debug, Eq, PartialEq)]
+struct SessionLogMetadata {
+    registry_hash: Option<String>,
+    loop_definition_hash: Option<String>,
+}
+
+fn session_definition_hashes(
+    registry: &core_script::ResolvedRegistry,
+    loop_block: &core_script::LoopBlock,
+) -> Result<SessionDefinitionHashes, RuntimeError> {
+    let registry_json = registry.canonical_json()?;
+    let loop_json = proto::canonical_json(&serde_json::to_value(loop_block)?).map_err(|err| {
+        RuntimeError::Protocol(format!("failed to serialize loop definition hash: {err}"))
+    })?;
+    Ok(SessionDefinitionHashes {
+        registry_hash: stable_hash_text(registry_json.as_bytes()),
+        loop_definition_hash: stable_hash_text(loop_json.as_bytes()),
+    })
+}
+
+fn stable_hash_text(bytes: &[u8]) -> String {
+    format!("fnv64:{:016x}", stable_hash64(bytes))
+}
+
+fn verify_resume_definition_metadata(
+    workspace: &Path,
+    session_id: &str,
+    registry: &core_script::ResolvedRegistry,
+    loop_block: &core_script::LoopBlock,
+) -> Result<(), RuntimeError> {
+    let Some(metadata) = read_session_log_metadata(workspace, session_id)? else {
+        return Ok(());
+    };
+    let Some(recorded_registry_hash) = metadata.registry_hash else {
+        return Ok(());
+    };
+    let Some(recorded_loop_definition_hash) = metadata.loop_definition_hash else {
+        return Ok(());
+    };
+
+    let expected = session_definition_hashes(registry, loop_block)?;
+    if recorded_registry_hash != expected.registry_hash
+        || recorded_loop_definition_hash != expected.loop_definition_hash
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: recorded definition metadata does not match current registry"
+        )));
+    }
+    Ok(())
+}
+
+fn read_session_log_metadata(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<Option<SessionLogMetadata>, RuntimeError> {
+    let path = session_log_metadata_path(workspace, session_id)?;
+    let log_dir = path.parent().ok_or_else(|| {
+        RuntimeError::Protocol(format!("{} must have a parent directory", path.display()))
+    })?;
+    if !ensure_optional_real_directory(log_dir)? {
+        return Ok(None);
+    }
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) => validate_real_file(&path, &metadata)?,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(RuntimeError::Io { path, source });
+        }
+    }
+    parse_session_log_metadata(&read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES)?).map(Some)
+}
+
+fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
+    let mut metadata = SessionLogMetadata::default();
+    for (line_number, line) in text.lines().enumerate() {
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(RuntimeError::Protocol(format!(
+                "session metadata line {} is not key=value",
+                line_number + 1
+            )));
+        };
+        match key {
+            "registry_hash" => metadata.registry_hash = Some(value.to_owned()),
+            "loop_definition_hash" => metadata.loop_definition_hash = Some(value.to_owned()),
+            "session_id" | "events" => {}
+            _ => {}
+        }
+    }
+    Ok(metadata)
+}
+
+fn session_log_metadata_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
+    if !validate_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    Ok(workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{session_id}.log")))
+}
+
 fn reserve_session_log(
     workspace: &Path,
     session_id: &str,
@@ -1036,10 +1156,36 @@ fn write_reserved_session_log(
     event_count: usize,
 ) -> Result<(), RuntimeError> {
     write_existing_file(&reservation.session_path, stream.as_bytes())?;
+    write_reserved_session_metadata(reservation, session_id, event_count, None)
+}
+
+fn write_reserved_session_metadata(
+    reservation: &SessionReservation,
+    session_id: &str,
+    event_count: usize,
+    definition_hashes: Option<&SessionDefinitionHashes>,
+) -> Result<(), RuntimeError> {
     write_existing_file(
         &reservation.log_path,
-        format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
+        session_log_metadata_text(session_id, event_count, definition_hashes).as_bytes(),
     )
+}
+
+fn session_log_metadata_text(
+    session_id: &str,
+    event_count: usize,
+    definition_hashes: Option<&SessionDefinitionHashes>,
+) -> String {
+    let mut metadata = format!("session_id={session_id}\nevents={event_count}\n");
+    if let Some(hashes) = definition_hashes {
+        metadata.push_str("registry_hash=");
+        metadata.push_str(&hashes.registry_hash);
+        metadata.push('\n');
+        metadata.push_str("loop_definition_hash=");
+        metadata.push_str(&hashes.loop_definition_hash);
+        metadata.push('\n');
+    }
+    metadata
 }
 
 fn write_initial_session_log(
@@ -1087,7 +1233,8 @@ fn complete_reserved_session_log(
     stream: &str,
     event_count: usize,
 ) -> Result<(), RuntimeError> {
-    let commit_result = commit_reserved_session_log(reservation, session_id, stream, event_count);
+    let commit_result =
+        commit_reserved_session_log(reservation, session_id, stream, event_count, None);
     let release_result = reservation.release_lock();
     commit_result?;
     release_result
@@ -1098,6 +1245,7 @@ fn commit_reserved_session_log(
     session_id: &str,
     stream: &str,
     event_count: usize,
+    definition_hashes: Option<&SessionDefinitionHashes>,
 ) -> Result<(), RuntimeError> {
     let append_bytes = session_completion_append_bytes(stream)?;
     let append_result = append_session_log_bytes(&reservation.session_path, append_bytes);
@@ -1105,10 +1253,7 @@ fn commit_reserved_session_log(
         reservation.mark_committed();
     }
     let metadata_result = if append_result.is_ok() {
-        write_existing_file(
-            &reservation.log_path,
-            format!("session_id={session_id}\nevents={event_count}\n").as_bytes(),
-        )
+        write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
     } else {
         Ok(())
     };

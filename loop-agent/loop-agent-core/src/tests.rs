@@ -3340,6 +3340,47 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
     assert!(stream_is_completed(&events));
 }
 
+#[test]
+fn resume_rejects_registry_drift_before_side_effects() {
+    let workspace = workspace_copy("hello-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let prefix = prefix_through_tool_progress(
+        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        "write-summary",
+    );
+    let path = session_dir.join("hello001.jsonl");
+    let event_count = prefix.lines().count();
+    fs::write(&path, &prefix).expect("progress prefix written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    fs::create_dir_all(workspace.join("out")).expect("output dir created");
+    fs::write(workspace.join("out/summary.txt"), "already-written\n")
+        .expect("sentinel summary written");
+
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+    fs::write(
+        &tool_path,
+        source.replace(
+            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+            "printf 'drift\\n' > out/summary.txt",
+        ),
+    )
+    .expect("tool fixture rewritten");
+
+    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect_err("registry drift must reject resume");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("registry drift")
+    ));
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary remains readable"),
+        "already-written\n"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn resume_rejects_hardlinked_session_log_before_side_effects() {
@@ -5734,6 +5775,33 @@ fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> S
         }
     }
     panic!("missing {event_type} for {tool_id}");
+}
+
+fn write_definition_hash_metadata(
+    workspace: &Path,
+    session_id: &str,
+    loop_ref: &str,
+    event_count: usize,
+) {
+    let registry =
+        core_script::load_registry_root(workspace.join("registry")).expect("registry loads");
+    let loop_block = registry.loop_block(loop_ref).expect("loop exists");
+    let registry_json = registry.canonical_json().expect("registry serializes");
+    let loop_json = proto::canonical_json(
+        &serde_json::to_value(loop_block).expect("loop definition converts to JSON"),
+    )
+    .expect("loop definition serializes");
+    let log_dir = workspace.join(LOCAL_LOG_DIR);
+    fs::create_dir_all(&log_dir).expect("log dir created");
+    fs::write(
+        log_dir.join(format!("{session_id}.log")),
+        format!(
+            "session_id={session_id}\nevents={event_count}\nregistry_hash=fnv64:{:016x}\nloop_definition_hash=fnv64:{:016x}\n",
+            stable_hash64(registry_json.as_bytes()),
+            stable_hash64(loop_json.as_bytes())
+        ),
+    )
+    .expect("definition hash metadata written");
 }
 
 fn first_event_line(fixture: &str, stream: &str) -> String {
