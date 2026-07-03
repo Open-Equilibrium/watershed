@@ -14,6 +14,9 @@ use std::{
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
 pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_LOOP_EVENT_STREAM_BYTES: usize = 10 * 1024 * 1024;
+pub const MAX_LOOP_EVENTS: u64 = 64 * 1024;
+pub const MAX_LOOP_INVOCATIONS: u64 = 8 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = core_script::MAX_REGISTRY_FILE_BYTES;
 const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
 const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
@@ -1631,6 +1634,7 @@ struct RuntimeEventBuilder {
     message_counter: u64,
     sequence: u64,
     session_id: String,
+    stream_bytes: usize,
 }
 
 impl RuntimeEventBuilder {
@@ -1641,15 +1645,25 @@ impl RuntimeEventBuilder {
             message_counter: 0,
             sequence: 0,
             session_id,
+            stream_bytes: 0,
         }
     }
 
-    fn next_loop_invocation(&mut self, parent_loop_id: Option<String>) -> LoopInvocation {
-        self.loop_counter += 1;
-        LoopInvocation {
+    fn next_loop_invocation(
+        &mut self,
+        parent_loop_id: Option<String>,
+    ) -> Result<LoopInvocation, RuntimeError> {
+        let next_loop_counter = self.loop_counter + 1;
+        if next_loop_counter > MAX_LOOP_INVOCATIONS {
+            return Err(RuntimeError::Protocol(format!(
+                "loop invocation budget exceeded: next invocation {next_loop_counter} exceeds max {MAX_LOOP_INVOCATIONS}"
+            )));
+        }
+        self.loop_counter = next_loop_counter;
+        Ok(LoopInvocation {
             loop_id: format!("loop-{:03}", self.loop_counter),
             parent_loop_id,
-        }
+        })
     }
 
     fn next_message_id(&mut self) -> String {
@@ -1662,14 +1676,19 @@ impl RuntimeEventBuilder {
         invocation: Option<&LoopInvocation>,
         event_type: EventType,
         payload: serde_json::Value,
-    ) {
-        self.sequence += 1;
+    ) -> Result<(), RuntimeError> {
+        let sequence = self.sequence + 1;
+        if sequence > MAX_LOOP_EVENTS {
+            return Err(RuntimeError::Protocol(format!(
+                "runtime event budget exceeded: next event {sequence} exceeds max {MAX_LOOP_EVENTS}"
+            )));
+        }
         let mut event = EventEnvelope::new(
-            format!("evt-{:03}", self.sequence),
+            format!("evt-{:03}", sequence),
             event_type,
             self.session_id.clone(),
-            self.sequence,
-            event_timestamp(self.sequence),
+            sequence,
+            event_timestamp(sequence),
             "loop-agent-cli",
             payload,
         );
@@ -1677,7 +1696,22 @@ impl RuntimeEventBuilder {
             event.loop_id = Some(invocation.loop_id.clone());
             event.parent_loop_id = invocation.parent_loop_id.clone();
         }
+        let event_bytes = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
+        })?;
+        let next_stream_bytes = self
+            .stream_bytes
+            .checked_add(event_bytes.len())
+            .unwrap_or(usize::MAX);
+        if next_stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "event stream budget exceeded: next event would use {next_stream_bytes} bytes, max {MAX_LOOP_EVENT_STREAM_BYTES}"
+            )));
+        }
+        self.sequence = sequence;
+        self.stream_bytes = next_stream_bytes;
         self.events.push(event);
+        Ok(())
     }
 }
 
@@ -1694,7 +1728,7 @@ fn execute_loop(
         None,
         EventType::SessionStarted,
         serde_json::json!({"reason":"fixture-start"}),
-    );
+    )?;
 
     let failed = emit_loop_block(
         workspace,
@@ -1710,13 +1744,13 @@ fn execute_loop(
             None,
             EventType::SessionFailed,
             serde_json::json!({"reason":failure.reason}),
-        );
+        )?;
         Ok(RuntimeExecution {
             events: builder.events,
             failed: true,
         })
     } else {
-        builder.emit(None, EventType::SessionCompleted, serde_json::json!({}));
+        builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
         Ok(RuntimeExecution {
             events: builder.events,
             failed: false,
@@ -1829,7 +1863,7 @@ fn emit_loop_block_at_depth(
         )));
     }
 
-    let invocation = builder.next_loop_invocation(parent_loop_id);
+    let invocation = builder.next_loop_invocation(parent_loop_id)?;
     builder.emit(
         Some(&invocation),
         EventType::LoopStarted,
@@ -1837,7 +1871,7 @@ fn emit_loop_block_at_depth(
             "loop_definition_id": loop_block.identity.id,
             "loop_name": loop_block.identity.name,
         }),
-    );
+    )?;
 
     for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
@@ -1852,7 +1886,7 @@ fn emit_loop_block_at_depth(
             context.side_effect_mode,
             builder,
         )? {
-            emit_runtime_failure(loop_block, &invocation, &failure, builder);
+            emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
             return Ok(Some(failure));
         }
 
@@ -1868,7 +1902,7 @@ fn emit_loop_block_at_depth(
                     builder,
                     depth + 1,
                 )? {
-                    emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder);
+                    emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder)?;
                     return Ok(Some(failure));
                 }
             }
@@ -1882,7 +1916,7 @@ fn emit_loop_block_at_depth(
             "loop_definition_id": loop_block.identity.id,
             "loop_name": loop_block.identity.name,
         }),
-    );
+    )?;
     Ok(None)
 }
 
@@ -1930,7 +1964,7 @@ fn emit_phase(
             "phase_name": phase.identity.name,
             "tool_ids": tool_ids,
         }),
-    );
+    )?;
 
     for (step_index, step) in phase.steps.iter().enumerate() {
         let step_payload = step_payload(registry, phase, step)?;
@@ -1938,7 +1972,7 @@ fn emit_phase(
             Some(invocation),
             EventType::StepStarted,
             step_payload.clone(),
-        );
+        )?;
 
         if let Some(content) = stub_message_content(registry, phase)? {
             let message_id = builder.next_message_id();
@@ -1950,7 +1984,7 @@ fn emit_phase(
                     "message_id": message_id,
                     "role": "assistant",
                 }),
-            );
+            )?;
             builder.emit(
                 Some(invocation),
                 EventType::MessageCompleted,
@@ -1958,12 +1992,12 @@ fn emit_phase(
                     "message_id": message_id,
                     "role": "assistant",
                 }),
-            );
+            )?;
         }
 
         if step_index == 0 {
             if let Some(failure) = sandbox_out_of_phase_failure(registry, policy, phase) {
-                builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
+                builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
                 return Ok(Some(failure));
             }
 
@@ -1984,15 +2018,15 @@ fn emit_phase(
                     side_effect_mode,
                     builder,
                 )? {
-                    emit_runtime_tool_failure(invocation, &failure, builder);
+                    emit_runtime_tool_failure(invocation, &failure, builder)?;
                     failure.emit_tool_failed = false;
-                    builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
+                    builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
                     return Ok(Some(failure));
                 }
             }
         }
 
-        builder.emit(Some(invocation), EventType::StepCompleted, step_payload);
+        builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
     }
 
     Ok(None)
@@ -2197,7 +2231,7 @@ fn emit_tool(
             "tool_name": tool.identity.name,
             "write_scope": policy.command.filesystem.write_roots,
         }),
-    );
+    )?;
 
     if let Some(failure) = sandbox_tool_dispatch_failure(tool, policy.command)? {
         return Ok(Some(failure));
@@ -2229,7 +2263,7 @@ fn emit_tool(
     };
 
     if let Some(message) = progress {
-        emit_tool_progress(message, tool, invocation, builder);
+        emit_tool_progress(message, tool, invocation, builder)?;
     }
 
     builder.emit(
@@ -2239,7 +2273,7 @@ fn emit_tool(
             "exit_code": 0,
             "tool_id": tool.identity.id,
         }),
-    );
+    )?;
     Ok(None)
 }
 
@@ -3031,7 +3065,7 @@ fn emit_tool_progress(
     tool: &core_script::ToolBlock,
     invocation: &LoopInvocation,
     builder: &mut RuntimeEventBuilder,
-) {
+) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),
         EventType::ToolProgress,
@@ -3039,7 +3073,7 @@ fn emit_tool_progress(
             "message": message,
             "tool_id": tool.identity.id,
         }),
-    );
+    )
 }
 
 fn workspace_scope_contains(root: &str, path: &str) -> bool {
@@ -3076,9 +3110,9 @@ fn emit_runtime_failure(
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder,
-) {
+) -> Result<(), RuntimeError> {
     if failure.emit_tool_failed {
-        emit_runtime_tool_failure(invocation, failure, builder);
+        emit_runtime_tool_failure(invocation, failure, builder)?;
     }
     let mut error_payload = serde_json::json!({
         "code": failure.reason,
@@ -3095,7 +3129,7 @@ fn emit_runtime_failure(
             .expect("error payload is constructed as an object");
         object.insert("data".to_owned(), serde_json::Value::Object(error_data));
     }
-    builder.emit(Some(invocation), EventType::Error, error_payload);
+    builder.emit(Some(invocation), EventType::Error, error_payload)?;
     builder.emit(
         Some(invocation),
         EventType::LoopFailed,
@@ -3103,14 +3137,14 @@ fn emit_runtime_failure(
             "error": failure.reason,
             "loop_definition_id": loop_block.identity.id,
         }),
-    );
+    )
 }
 
 fn emit_runtime_tool_failure(
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder,
-) {
+) -> Result<(), RuntimeError> {
     if let Some(tool_id) = &failure.tool_id {
         builder.emit(
             Some(invocation),
@@ -3119,8 +3153,9 @@ fn emit_runtime_tool_failure(
                 "error": failure.reason,
                 "tool_id": tool_id,
             }),
-        );
+        )?;
     }
+    Ok(())
 }
 
 fn emit_propagated_runtime_failure(
@@ -3128,7 +3163,7 @@ fn emit_propagated_runtime_failure(
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder,
-) {
+) -> Result<(), RuntimeError> {
     let loop_failure = RuntimeFailure {
         reason: failure.reason.clone(),
         message: failure.message,
@@ -3136,7 +3171,7 @@ fn emit_propagated_runtime_failure(
         phase_id: None,
         emit_tool_failed: false,
     };
-    emit_runtime_failure(loop_block, invocation, &loop_failure, builder);
+    emit_runtime_failure(loop_block, invocation, &loop_failure, builder)
 }
 
 fn sandbox_tool_dispatch_failure(
@@ -3731,8 +3766,24 @@ pub fn validate_protocol_jsonl_text(
     let mut loop_started_ids = BTreeSet::new();
     let mut terminal_line = None::<usize>;
     let mut events = Vec::new();
+    let mut stream_bytes = 0usize;
     for (index, line) in text.split_terminator('\n').enumerate() {
         let line_number = index + 1;
+        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
+                path.display()
+            )));
+        }
+        stream_bytes = stream_bytes
+            .checked_add(line.len().saturating_add(1))
+            .unwrap_or(usize::MAX);
+        if stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} event stream budget exceeded at line {line_number}: {stream_bytes} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
+                path.display()
+            )));
+        }
         if line.ends_with('\r') {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} must use LF-only line endings",

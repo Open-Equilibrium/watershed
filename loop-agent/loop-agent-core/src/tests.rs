@@ -821,6 +821,50 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
 }
 
 #[test]
+fn runtime_rejects_duplicate_subloop_work_over_m1_budget() {
+    let registry = duplicated_subloop_registry(14);
+    let policy = empty_policy_artifact("loop-000");
+    let root = registry
+        .loop_block("loop-000")
+        .expect("duplicated root loop exists");
+    let started = Instant::now();
+
+    let err = match execute_loop(
+        Path::new("."),
+        &registry,
+        &policy,
+        root,
+        "budget001",
+        ToolSideEffectMode::DryRun,
+    ) {
+        Ok(runtime) => panic!(
+            "duplicated subloop work must be budgeted; emitted {} events",
+            runtime.events.len()
+        ),
+        Err(err) => err,
+    };
+
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "budget rejection should be incremental"
+    );
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("loop invocation budget")
+    ));
+}
+
+#[test]
+fn protocol_validation_rejects_oversized_stream_before_json_parse() {
+    let oversized = format!("{}\n", "x".repeat(10 * 1024 * 1024 + 1));
+
+    let err = validate_protocol_jsonl_text(Path::new("oversized.jsonl"), &oversized)
+        .expect_err("oversized streams must be rejected by budget");
+
+    assert!(err.to_string().contains("event stream budget"), "{err}");
+}
+
+#[test]
 fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
     let workspace = workspace_copy("smoke-loop");
 
@@ -6224,6 +6268,51 @@ fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
                         .then(|| format!("loop-{:03}", index + 1))
                         .into_iter()
                         .collect(),
+                    connection_refs: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    core_script::ResolvedRegistry {
+        connections: std::collections::BTreeMap::new(),
+        instructions: std::collections::BTreeMap::new(),
+        loops,
+        phases: [(
+            "phase".to_owned(),
+            core_script::PhaseBlock {
+                identity: core_script::BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                steps: Vec::new(),
+                tool_refs: Vec::new(),
+            },
+        )]
+        .into_iter()
+        .collect(),
+        tools: std::collections::BTreeMap::new(),
+    }
+}
+
+fn duplicated_subloop_registry(depth: usize) -> core_script::ResolvedRegistry {
+    let loops = (0..depth)
+        .map(|index| {
+            let id = format!("loop-{index:03}");
+            let next = format!("loop-{:03}", index + 1);
+            (
+                id.clone(),
+                core_script::LoopBlock {
+                    identity: core_script::BlockIdentity {
+                        id,
+                        name: format!("Loop {index:03}"),
+                    },
+                    phase_refs: vec!["phase".to_owned()],
+                    subloop_refs: if index + 1 < depth {
+                        vec![next.clone(), next]
+                    } else {
+                        Vec::new()
+                    },
                     connection_refs: Vec::new(),
                 },
             )
