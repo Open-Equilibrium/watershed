@@ -6154,8 +6154,39 @@ fn workspace_copy(fixture: &str) -> PathBuf {
     if target.exists() {
         fs::remove_dir_all(&target).expect("stale temp workspace removed");
     }
-    copy_dir(&fixture_dir(fixture), &target);
+    copy_fixture_workspace(&fixture_dir(fixture), &target);
     target
+}
+
+#[test]
+fn workspace_copy_skips_fixture_runtime_state() {
+    let fixture = fixture_dir("hello-loop");
+    let stale_session = fixture.join(".loop/sessions/stale.jsonl");
+    let stale_output = fixture.join("out/summary.txt");
+    let _guard = FixtureRuntimeStateGuard::new([stale_session.clone(), stale_output.clone()]);
+    fs::create_dir_all(stale_session.parent().expect("session path has parent"))
+        .expect("stale session parent created");
+    fs::write(&stale_session, "{}\n").expect("stale session created");
+    fs::write(&stale_output, "stale\n").expect("stale output created");
+
+    let workspace = workspace_copy("hello-loop");
+
+    assert!(
+        workspace.join(".loop/config.yaml").exists(),
+        "workspace config must still be copied"
+    );
+    assert!(
+        workspace.join("out").is_dir(),
+        "output directory shape must still be copied"
+    );
+    assert!(
+        !workspace.join(".loop/sessions/stale.jsonl").exists(),
+        "fixture runtime session state must not be copied"
+    );
+    assert!(
+        !workspace.join("out/summary.txt").exists(),
+        "fixture output state must not be copied"
+    );
 }
 
 fn empty_workspace(label: &str) -> PathBuf {
@@ -6187,18 +6218,66 @@ fn create_windows_junction(link: &Path, target: &Path) {
     );
 }
 
+struct FixtureRuntimeStateGuard {
+    paths: Vec<PathBuf>,
+}
+
+impl FixtureRuntimeStateGuard {
+    fn new(paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self {
+            paths: paths.into_iter().collect(),
+        }
+    }
+}
+
+impl Drop for FixtureRuntimeStateGuard {
+    fn drop(&mut self) {
+        for path in &self.paths {
+            let _ = fs::remove_file(path);
+        }
+        for path in &self.paths {
+            if let Some(parent) = path.parent() {
+                let _ = fs::remove_dir(parent);
+            }
+        }
+    }
+}
+
+fn copy_fixture_workspace(source: &Path, target: &Path) {
+    copy_dir(source, target);
+    copy_workspace_config(source, target);
+}
+
 fn copy_dir(source: &Path, target: &Path) {
     fs::create_dir_all(target).expect("target directory created");
     for entry in fs::read_dir(source).expect("source directory readable") {
         let entry = entry.expect("source entry readable");
         let source_path = entry.path();
         let target_path = target.join(entry.file_name());
+        if source_path.is_dir() && entry.file_name() == ".loop" {
+            continue;
+        }
+        if source_path.is_dir() && entry.file_name() == "out" {
+            fs::create_dir_all(&target_path).expect("output directory shape copied");
+            continue;
+        }
         if source_path.is_dir() {
             copy_dir(&source_path, &target_path);
         } else {
             fs::copy(&source_path, &target_path).expect("fixture file copied");
         }
     }
+}
+
+fn copy_workspace_config(source: &Path, target: &Path) {
+    let source_config = source.join(".loop/config.yaml");
+    if !source_config.exists() {
+        return;
+    }
+    let target_config = target.join(".loop/config.yaml");
+    fs::create_dir_all(target_config.parent().expect("config path has parent"))
+        .expect("workspace config directory created");
+    fs::copy(source_config, target_config).expect("workspace config copied");
 }
 
 fn expected_stream(fixture: &str, stream: &str) -> String {
