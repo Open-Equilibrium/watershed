@@ -1847,20 +1847,18 @@ fn preflight_loop_tools_at_depth(
         )));
     }
 
-    for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
+    for phase_ref in &loop_block.phase_refs {
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
         preflight_phase_tools(workspace, registry, policy, phase)?;
+    }
 
-        if index == 0 {
-            for subloop_ref in &loop_block.subloop_refs {
-                let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
-                    RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
-                })?;
-                preflight_loop_tools_at_depth(workspace, registry, policy, subloop, depth + 1)?;
-            }
-        }
+    for subloop_ref in &loop_block.subloop_refs {
+        let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
+        })?;
+        preflight_loop_tools_at_depth(workspace, registry, policy, subloop, depth + 1)?;
     }
 
     Ok(())
@@ -1938,7 +1936,7 @@ fn emit_loop_block_at_depth(
         }),
     )?;
 
-    for (index, phase_ref) in loop_block.phase_refs.iter().enumerate() {
+    for phase_ref in &loop_block.phase_refs {
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
@@ -1954,23 +1952,21 @@ fn emit_loop_block_at_depth(
             emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
             return Ok(Some(failure));
         }
+    }
 
-        if index == 0 {
-            for subloop_ref in &loop_block.subloop_refs {
-                let subloop = context.registry.loop_block(subloop_ref).ok_or_else(|| {
-                    RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
-                })?;
-                if let Some(failure) = emit_loop_block_at_depth(
-                    context,
-                    subloop,
-                    Some(invocation.loop_id.clone()),
-                    builder,
-                    depth + 1,
-                )? {
-                    emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder)?;
-                    return Ok(Some(failure));
-                }
-            }
+    for subloop_ref in &loop_block.subloop_refs {
+        let subloop = context.registry.loop_block(subloop_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
+        })?;
+        if let Some(failure) = emit_loop_block_at_depth(
+            context,
+            subloop,
+            Some(invocation.loop_id.clone()),
+            builder,
+            depth + 1,
+        )? {
+            emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder)?;
+            return Ok(Some(failure));
         }
     }
 

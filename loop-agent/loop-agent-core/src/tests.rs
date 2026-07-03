@@ -256,6 +256,51 @@ fn run_loop_executes_registry_without_expected_streams() {
 }
 
 #[test]
+fn runtime_executes_subloops_after_all_parent_phases() {
+    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let loop_block = registry
+        .loop_block("hello-loop")
+        .expect("hello loop exists");
+
+    let runtime = execute_loop(
+        Path::new("."),
+        &registry,
+        &policy,
+        loop_block,
+        "ordering001",
+        ToolSideEffectMode::DryRun,
+    )
+    .expect("hello loop executes");
+    let root_loop_id = loop_id_for_definition(&runtime.events, "hello-loop");
+    let summarize_completed = runtime
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::StepCompleted
+                && event.loop_id.as_deref() == Some(root_loop_id.as_str())
+                && event
+                    .payload
+                    .get("phase_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("summarize")
+        })
+        .expect("parent summarize phase completes");
+    let first_subloop_started = runtime
+        .events
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::LoopStarted
+                && event.parent_loop_id.as_deref() == Some(root_loop_id.as_str())
+        })
+        .expect("child loop starts");
+
+    assert!(
+        summarize_completed < first_subloop_started,
+        "subloops must start after all parent phases complete"
+    );
+}
+
+#[test]
 fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     let workspace = workspace_copy("smoke-loop");
     fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
