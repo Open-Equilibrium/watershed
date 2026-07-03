@@ -531,17 +531,15 @@ impl ResolvedRegistry {
         block: RegistryBlock,
         names: &mut BTreeMap<&'static str, BTreeSet<String>>,
     ) -> Result<(), RegistryError> {
+        validate_registry_block_semantics(&block)?;
         match block {
-            RegistryBlock::Tool(block) => {
-                validate_registry_block_semantics(&RegistryBlock::Tool(block.clone()))?;
-                insert_named_block(
-                    "tool",
-                    block.identity.clone(),
-                    &mut self.tools,
-                    names,
-                    block,
-                )
-            }
+            RegistryBlock::Tool(block) => insert_named_block(
+                "tool",
+                block.identity.clone(),
+                &mut self.tools,
+                names,
+                block,
+            ),
             RegistryBlock::Instruction(block) => insert_named_block(
                 "instruction",
                 block.identity.clone(),
@@ -1175,6 +1173,13 @@ pub enum SemanticValidationError {
         /// Tool id.
         tool_id: String,
     },
+    /// Loop-specific schema validation failed.
+    LoopSchemaViolation {
+        /// Loop id.
+        loop_id: String,
+        /// Rejection reason.
+        message: String,
+    },
 }
 
 impl fmt::Display for SemanticValidationError {
@@ -1196,6 +1201,9 @@ impl fmt::Display for SemanticValidationError {
             Self::InvalidCanonicalCidr { cidr, tool_id } => {
                 write!(f, "invalid canonical CIDR for tool {tool_id}: {cidr}")
             }
+            Self::LoopSchemaViolation { loop_id, message } => {
+                write!(f, "loop schema violation for {loop_id}: {message}")
+            }
         }
     }
 }
@@ -1208,11 +1216,21 @@ pub fn validate_registry_block_semantics(
 ) -> Result<(), SemanticValidationError> {
     match block {
         RegistryBlock::Tool(tool) => validate_tool_semantics(tool),
-        RegistryBlock::Instruction(_)
-        | RegistryBlock::Phase(_)
-        | RegistryBlock::Connection(_)
-        | RegistryBlock::Loop(_) => Ok(()),
+        RegistryBlock::Loop(loop_block) => validate_loop_semantics(loop_block),
+        RegistryBlock::Instruction(_) | RegistryBlock::Phase(_) | RegistryBlock::Connection(_) => {
+            Ok(())
+        }
     }
+}
+
+fn validate_loop_semantics(loop_block: &LoopBlock) -> Result<(), SemanticValidationError> {
+    if loop_block.phase_refs.is_empty() {
+        return Err(SemanticValidationError::LoopSchemaViolation {
+            loop_id: loop_block.identity.id.clone(),
+            message: "loop.phase_refs must contain at least one item".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// Validates the semantic contract for one tool block.
@@ -4311,15 +4329,18 @@ mod tests {
             }
         ));
 
-        let missing_loop = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
-            identity: BlockIdentity {
-                id: "root".to_owned(),
-                name: "Root".to_owned(),
-            },
-            phase_refs: Vec::new(),
-            subloop_refs: vec!["missing-loop".to_owned()],
-            connection_refs: Vec::new(),
-        })])
+        let missing_loop = ResolvedRegistry::from_blocks([
+            simple_phase_block("phase"),
+            RegistryBlock::Loop(LoopBlock {
+                identity: BlockIdentity {
+                    id: "root".to_owned(),
+                    name: "Root".to_owned(),
+                },
+                phase_refs: vec!["phase".to_owned()],
+                subloop_refs: vec!["missing-loop".to_owned()],
+                connection_refs: Vec::new(),
+            }),
+        ])
         .expect_err("missing loop rejected");
         assert!(matches!(
             missing_loop,
@@ -4329,15 +4350,18 @@ mod tests {
             }
         ));
 
-        let missing_connection = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
-            identity: BlockIdentity {
-                id: "root".to_owned(),
-                name: "Root".to_owned(),
-            },
-            phase_refs: Vec::new(),
-            subloop_refs: Vec::new(),
-            connection_refs: vec!["missing-connection".to_owned()],
-        })])
+        let missing_connection = ResolvedRegistry::from_blocks([
+            simple_phase_block("phase"),
+            RegistryBlock::Loop(LoopBlock {
+                identity: BlockIdentity {
+                    id: "root".to_owned(),
+                    name: "Root".to_owned(),
+                },
+                phase_refs: vec!["phase".to_owned()],
+                subloop_refs: Vec::new(),
+                connection_refs: vec!["missing-connection".to_owned()],
+            }),
+        ])
         .expect_err("missing connection rejected");
         assert!(matches!(
             missing_connection,
@@ -4346,6 +4370,18 @@ mod tests {
                 ..
             }
         ));
+
+        let empty_loop = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
+            identity: BlockIdentity {
+                id: "root".to_owned(),
+                name: "Root".to_owned(),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: Vec::new(),
+            connection_refs: Vec::new(),
+        })])
+        .expect_err("empty loop phase_refs rejected");
+        assert!(empty_loop.to_string().contains("loop.phase_refs"));
 
         let missing_endpoint =
             ResolvedRegistry::from_blocks([RegistryBlock::Connection(ConnectionBlock {
@@ -5370,12 +5406,13 @@ tool:
     #[test]
     fn registry_reference_validation_rejects_loop_cycles() {
         let err = ResolvedRegistry::from_blocks([
+            simple_phase_block("phase"),
             RegistryBlock::Loop(LoopBlock {
                 identity: BlockIdentity {
                     id: "a".to_owned(),
                     name: "A".to_owned(),
                 },
-                phase_refs: Vec::new(),
+                phase_refs: vec!["phase".to_owned()],
                 subloop_refs: vec!["b".to_owned()],
                 connection_refs: Vec::new(),
             }),
@@ -5384,7 +5421,7 @@ tool:
                     id: "b".to_owned(),
                     name: "B".to_owned(),
                 },
-                phase_refs: Vec::new(),
+                phase_refs: vec!["phase".to_owned()],
                 subloop_refs: vec!["a".to_owned()],
                 connection_refs: Vec::new(),
             }),
@@ -5422,7 +5459,7 @@ tool:
                 id: "zz-parent".to_owned(),
                 name: "Parent".to_owned(),
             },
-            phase_refs: Vec::new(),
+            phase_refs: vec!["chain-phase".to_owned()],
             subloop_refs: vec!["loop-000".to_owned()],
             connection_refs: Vec::new(),
         }));
@@ -6834,10 +6871,26 @@ tool:
         }
     }
 
+    fn simple_phase_block(id: &str) -> RegistryBlock {
+        RegistryBlock::Phase(PhaseBlock {
+            identity: BlockIdentity {
+                id: id.to_owned(),
+                name: format!("Phase {id}"),
+            },
+            instruction_refs: Vec::new(),
+            tool_refs: Vec::new(),
+            steps: vec![StepBlock {
+                id: "step".to_owned(),
+                name: "Step".to_owned(),
+                connection_refs: Vec::new(),
+            }],
+        })
+    }
+
     fn loop_chain_blocks(depth: usize) -> Vec<RegistryBlock> {
-        (0..depth)
-            .map(|index| RegistryBlock::Loop(loop_chain_block(index, depth)))
-            .collect()
+        let mut blocks = vec![simple_phase_block("chain-phase")];
+        blocks.extend((0..depth).map(|index| RegistryBlock::Loop(loop_chain_block(index, depth))));
+        blocks
     }
 
     fn loop_chain_block(index: usize, depth: usize) -> LoopBlock {
@@ -6846,7 +6899,7 @@ tool:
                 id: format!("loop-{index:03}"),
                 name: format!("Loop {index:03}"),
             },
-            phase_refs: Vec::new(),
+            phase_refs: vec!["chain-phase".to_owned()],
             subloop_refs: (index + 1 < depth)
                 .then(|| format!("loop-{:03}", index + 1))
                 .into_iter()
@@ -6856,23 +6909,23 @@ tool:
     }
 
     fn duplicated_subloop_tail_blocks(depth: usize) -> Vec<RegistryBlock> {
-        (0..depth)
-            .map(|index| {
-                let child = (index + 1 < depth).then(|| format!("dup-loop-{:03}", index + 1));
-                RegistryBlock::Loop(LoopBlock {
-                    identity: BlockIdentity {
-                        id: format!("dup-loop-{index:03}"),
-                        name: format!("DupLoop {index:03}"),
-                    },
-                    phase_refs: Vec::new(),
-                    subloop_refs: child
-                        .into_iter()
-                        .flat_map(|child| [child.clone(), child])
-                        .collect(),
-                    connection_refs: Vec::new(),
-                })
+        let mut blocks = vec![simple_phase_block("dup-phase")];
+        blocks.extend((0..depth).map(|index| {
+            let child = (index + 1 < depth).then(|| format!("dup-loop-{:03}", index + 1));
+            RegistryBlock::Loop(LoopBlock {
+                identity: BlockIdentity {
+                    id: format!("dup-loop-{index:03}"),
+                    name: format!("DupLoop {index:03}"),
+                },
+                phase_refs: vec!["dup-phase".to_owned()],
+                subloop_refs: child
+                    .into_iter()
+                    .flat_map(|child| [child.clone(), child])
+                    .collect(),
+                connection_refs: Vec::new(),
             })
-            .collect()
+        }));
+        blocks
     }
 
     fn registry_schema() -> serde_json::Value {
