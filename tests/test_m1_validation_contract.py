@@ -59,6 +59,21 @@ class M1ValidationContractTest(unittest.TestCase):
         )
         self.assertNotIn("## Ordered follow-up steps to start M1 with Codex", plan)
 
+    def test_readme_documents_loop_agent_quickstart_and_layout(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+        for token in [
+            "## Build and run Loop Agent",
+            "cargo run -p loop-agent-cli -- run smoke-loop --emit jsonl",
+            ".loop/config.yaml",
+            "registry_root: registry",
+            "registry/{tools,instructions,phases,loops,connections}/",
+            ".loop/sessions/<session_id>.jsonl",
+            ".loop/logs/<session_id>.log",
+            "out/",
+        ]:
+            self.assertIn(token, readme)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,45 @@ liquid/       the UI surface that composes everything
 docs/         governance, specs, decisions
 ```
 
+## Build and run Loop Agent
+
+From the repo root:
+
+```powershell
+cargo build --workspace
+cargo test --workspace
+```
+
+Run the checked-in smoke fixture from its workspace directory:
+
+```powershell
+cd loop-agent/fixtures/smoke-loop
+cargo run -p loop-agent-cli -- run smoke-loop --emit jsonl
+cargo run -p loop-agent-cli -- replay smoke001 --emit jsonl
+cargo run -p loop-agent-cli -- tail smoke001 --emit jsonl --no-follow
+cargo run -p loop-agent-cli -- sessions
+```
+
+A Loop Agent workspace has this M1 layout:
+
+```text
+.loop/config.yaml                         workspace config
+registry/{tools,instructions,phases,loops,connections}/
+.loop/sessions/<session_id>.jsonl         runtime event log
+.loop/logs/<session_id>.log               structured run log
+out/                                      fixture/runtime output
+```
+
+The minimal `.loop/config.yaml` shape used by the fixtures is:
+
+```yaml
+fixture_profile: stub-model
+registry_root: registry
+stub_model: deterministic
+```
+
+Registry block fields are defined in [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html); the checked-in examples live under [`loop-agent/fixtures/`](loop-agent/fixtures/).
+
 ## Loop Agent is a standalone product
 
 Loop Agent is a **standalone CLI agent product first**, with Pi-style runtime integration surfaces: a human CLI, a headless JSONL event stream, designed-for remote-control/embeddable seams, and its own local session/transcript store. Meta-Harness and Liquid integrate with Loop Agent through its public runtime surfaces; **they are not required to run Loop Agent.** See [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html) for the surfaces and [`PROTOCOL.md`](PROTOCOL.md) for the event contract.
