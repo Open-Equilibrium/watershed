@@ -882,6 +882,8 @@ struct SessionReservation {
 
 impl SessionReservation {
     fn rollback(&self) {
+        // WHY: committed JSONL streams are durable audit records, so late sidecar/lock
+        // cleanup failures must not erase them.
         if !self.committed.get() {
             let _ = fs::remove_file(&self.session_path);
             let _ = fs::remove_file(&self.log_path);
@@ -958,6 +960,8 @@ fn verify_resume_definition_metadata(
     registry: &core_script::ResolvedRegistry,
     loop_block: &core_script::LoopBlock,
 ) -> Result<(), RuntimeError> {
+    // WHY: resume hashes bind a partial session to the registry definitions that produced
+    // it; older logs without metadata stay readable.
     let Some(metadata) = read_session_log_metadata(workspace, session_id)? else {
         return Ok(());
     };
@@ -1174,6 +1178,8 @@ fn reserve_session_lock_file(path: &Path, session_id: &str) -> Result<(), Runtim
 }
 
 fn active_session_lock_message(path: &Path, session_id: &str) -> String {
+    // WHY: M1 cannot safely prove stale lock ownership, so report the exact manual clear
+    // path instead of stealing the lock.
     format!(
         "session {session_id} is already active; lock file {} exists. If the previous process crashed, verify no Loop Agent process owns this session, then remove that lock file and retry.",
         path.display()
@@ -1709,6 +1715,8 @@ impl RuntimeEventBuilder {
         parent_loop_id: Option<String>,
     ) -> Result<LoopInvocation, RuntimeError> {
         let next_loop_counter = self.loop_counter + 1;
+        // WHY: loop invocation budgets preserve duplicate subloop execution semantics while
+        // bounding the total runtime work one session can request.
         if next_loop_counter > MAX_LOOP_INVOCATIONS {
             return Err(RuntimeError::Protocol(format!(
                 "loop invocation budget exceeded: next invocation {next_loop_counter} exceeds max {MAX_LOOP_INVOCATIONS}"
@@ -1733,6 +1741,8 @@ impl RuntimeEventBuilder {
         payload: serde_json::Value,
     ) -> Result<(), RuntimeError> {
         let sequence = self.sequence + 1;
+        // WHY: enforce event budgets before storing the event so oversized in-cap loops
+        // cannot accumulate unbounded memory.
         if sequence > MAX_LOOP_EVENTS {
             return Err(RuntimeError::Protocol(format!(
                 "runtime event budget exceeded: next event {sequence} exceeds max {MAX_LOOP_EVENTS}"
@@ -2893,6 +2903,8 @@ fn hard_link_count_is_verifiable() -> bool {
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
+    // WHY: script write targets use one shared slash-only path policy across parser,
+    // policy and runtime checks.
     if target.is_empty()
         || target.starts_with('/')
         || target.contains(':')
@@ -3783,6 +3795,8 @@ pub fn validate_protocol_jsonl_text(
     let mut stream_bytes = 0usize;
     for (index, line) in text.split_terminator('\n').enumerate() {
         let line_number = index + 1;
+        // WHY: count JSONL bytes and events before parsing payloads so oversized streams
+        // fail cheaply and deterministically.
         if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",

@@ -74,6 +74,48 @@ class M1ValidationContractTest(unittest.TestCase):
         ]:
             self.assertIn(token, readme)
 
+    def test_hardening_checks_explain_why_they_exist(self) -> None:
+        sources = {
+            "core_script": (ROOT / "core" / "core-script" / "src" / "lib.rs").read_text(
+                encoding="utf-8"
+            ),
+            "loop_agent_core": (
+                ROOT / "loop-agent" / "loop-agent-core" / "src" / "lib.rs"
+            ).read_text(encoding="utf-8"),
+        }
+
+        for source_key, token in [
+            (
+                "core_script",
+                "WHY: keep the visited cache for the whole registry validation pass",
+            ),
+            (
+                "loop_agent_core",
+                "WHY: committed JSONL streams are durable audit records",
+            ),
+            (
+                "loop_agent_core",
+                "WHY: resume hashes bind a partial session to the registry",
+            ),
+            (
+                "loop_agent_core",
+                "WHY: enforce event budgets before storing the event",
+            ),
+            (
+                "loop_agent_core",
+                "WHY: count JSONL bytes and events before parsing payloads",
+            ),
+            (
+                "loop_agent_core",
+                "WHY: script write targets use one shared slash-only path policy",
+            ),
+            (
+                "loop_agent_core",
+                "WHY: M1 cannot safely prove stale lock ownership",
+            ),
+        ]:
+            self.assertIn(token, sources[source_key])
+
 
 if __name__ == "__main__":
     unittest.main()

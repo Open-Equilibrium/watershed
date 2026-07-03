@@ -733,6 +733,8 @@ impl ResolvedRegistry {
     }
 
     fn validate_loop_cycles(&self) -> Result<(), RegistryError> {
+        // WHY: keep the visited cache for the whole registry validation pass so duplicated
+        // subloop tails are validated once without changing duplicate execution semantics.
         let mut visited = BTreeMap::<String, LoopTailDepth>::new();
         for loop_id in self.loops.keys() {
             let mut visiting = BTreeSet::new();
