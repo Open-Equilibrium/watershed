@@ -580,7 +580,7 @@ pub fn resume_session(
             path.display()
         )));
     }
-    let (appended_stream, combined_events) = preflight_resume_append_stream(
+    let append_plan = preflight_resume_append_plan(
         &path,
         session_id,
         &before,
@@ -588,6 +588,10 @@ pub fn resume_session(
         &planned_runtime.events,
         &resume_prefix,
     )?;
+
+    // WHY: resume side effects need a durable attempt marker before they run, while success
+    // events are only appended after the resumed side-effect replay matches the dry run.
+    append_session_log_text(&path, &append_plan.marker_stream)?;
 
     let resumed_runtime = execute_loop(
         workspace,
@@ -606,10 +610,11 @@ pub fn resume_session(
         )));
     }
 
-    append_session_log_text(&path, &appended_stream)?;
+    append_session_log_text(&path, &append_plan.suffix_stream)?;
+    let appended_stream = format!("{}{}", append_plan.marker_stream, append_plan.suffix_stream);
 
     Ok(RunOutput {
-        event_count: combined_events.len(),
+        event_count: append_plan.combined_events.len(),
         failed: resumed_runtime.failed,
         session_id: session_id.to_owned(),
         session_path: path,
@@ -623,6 +628,12 @@ pub fn resume_session(
 struct ResumeReplayPrefix {
     planned_event_count: usize,
     resume_marker_count: usize,
+}
+
+struct ResumeAppendPlan {
+    marker_stream: String,
+    suffix_stream: String,
+    combined_events: Vec<EventEnvelope>,
 }
 
 fn validate_resume_replay_prefix(
@@ -682,14 +693,14 @@ fn ensure_resume_has_durable_loop_progress(
     )))
 }
 
-fn preflight_resume_append_stream(
+fn preflight_resume_append_plan(
     path: &Path,
     session_id: &str,
     before: &str,
     events: &[EventEnvelope],
     planned_events: &[EventEnvelope],
     resume_prefix: &ResumeReplayPrefix,
-) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
+) -> Result<ResumeAppendPlan, RuntimeError> {
     let sequence = events
         .last()
         .expect("validated streams contain at least one event")
@@ -704,19 +715,25 @@ fn preflight_resume_append_stream(
         "loop-agent-cli",
         serde_json::json!({"reason":"resume"}),
     );
-    let mut appended_events = vec![resume_event];
     let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
-    appended_events.extend(
-        planned_events[resume_prefix.planned_event_count..]
-            .iter()
-            .cloned()
-            .map(|event| shift_resumed_event(event, resumed_suffix_offset)),
-    );
-    let appended_stream = canonical_event_stream(&appended_events)?;
+    let suffix_events = planned_events[resume_prefix.planned_event_count..]
+        .iter()
+        .cloned()
+        .map(|event| shift_resumed_event(event, resumed_suffix_offset))
+        .collect::<Vec<_>>();
+    let marker_stream = canonical_event_stream(std::slice::from_ref(&resume_event))?;
+    let suffix_stream = canonical_event_stream(&suffix_events)?;
+    let appended_stream = format!("{marker_stream}{suffix_stream}");
+    let marker_combined = format!("{before}{marker_stream}");
+    validate_session_log_text(path, session_id, &marker_combined)?;
     let combined = format!("{before}{appended_stream}");
     let combined_events = validate_session_log_text(path, session_id, &combined)?;
     prepare_session_log_append(path, &appended_stream)?;
-    Ok((appended_stream, combined_events))
+    Ok(ResumeAppendPlan {
+        marker_stream,
+        suffix_stream,
+        combined_events,
+    })
 }
 
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {

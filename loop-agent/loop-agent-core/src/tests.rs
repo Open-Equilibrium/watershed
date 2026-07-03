@@ -3675,6 +3675,46 @@ fn resume_rejects_tool_started_prefix_without_side_effects() {
 }
 
 #[test]
+fn resume_commits_resume_marker_before_apply_side_effects_fail() {
+    let workspace = workspace_copy("hello-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let prefix = prefix_before_tool_started(
+        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        "write-summary",
+    );
+    let path = session_dir.join("hello001.jsonl");
+    fs::write(&path, &prefix).expect("prefix written");
+
+    let summary_path = workspace.join("out/summary.txt");
+    for attempt in 0..100 {
+        let temp_path =
+            replacement_temp_path(&summary_path, attempt).expect("replacement temp path is valid");
+        fs::write(temp_path, b"collision").expect("replacement temp collision written");
+    }
+
+    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect_err("apply-time side effect failure must fail the resume");
+
+    assert!(
+        matches!(err, RuntimeError::Protocol(ref message) if message.contains("temporary replacement path")),
+        "{err:?}"
+    );
+    assert!(!summary_path.exists());
+    let resumed = fs::read_to_string(&path).expect("resume marker log readable");
+    assert!(resumed.starts_with(&prefix));
+    assert!(resumed.contains("\"event_type\":\"session.resumed\""));
+    assert!(!resumed.lines().any(|line| {
+        line.contains("\"event_type\":\"tool.completed\"")
+            && line.contains("\"tool_id\":\"write-summary\"")
+    }));
+    assert!(!resumed.contains("\"event_type\":\"session.completed\""));
+    let events =
+        validate_session_log_text(&path, "hello001", &resumed).expect("marker log remains valid");
+    assert!(!stream_is_completed(&events));
+}
+
+#[test]
 fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
@@ -6120,6 +6160,20 @@ fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {
 
 fn prefix_through_tool_started(stream: &str, tool_id: &str) -> String {
     prefix_through_tool_event(stream, "tool.started", tool_id)
+}
+
+fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
+    let event_marker = "\"event_type\":\"tool.started\"";
+    let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
+    let mut prefix = String::new();
+    for line in stream.lines() {
+        if line.contains(event_marker) && line.contains(&tool_marker) {
+            return prefix;
+        }
+        prefix.push_str(line);
+        prefix.push('\n');
+    }
+    panic!("missing tool.started for {tool_id}");
 }
 
 fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> String {
