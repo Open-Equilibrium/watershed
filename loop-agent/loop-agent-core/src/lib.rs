@@ -307,6 +307,7 @@ pub fn run_loop(
             &expected_session_id,
             ToolSideEffectMode::ApplyAll,
         )?;
+        reservation.mark_side_effects_applied();
         if runtime.events != planned_runtime.events {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime did not match deterministic replay",
@@ -895,13 +896,14 @@ struct SessionReservation {
     session_id: String,
     cleanup_on_drop: Cell<bool>,
     committed: Cell<bool>,
+    side_effects_applied: Cell<bool>,
 }
 
 impl SessionReservation {
     fn rollback(&self) {
-        // WHY: committed JSONL streams are durable audit records, so late sidecar/lock
-        // cleanup failures must not erase them.
-        if !self.committed.get() {
+        // WHY: once side effects have applied, even an incomplete started stream is the only
+        // durable audit record tying the workspace mutation to a session attempt.
+        if !self.committed.get() && !self.side_effects_applied.get() {
             let _ = fs::remove_file(&self.session_path);
             let _ = fs::remove_file(&self.log_path);
         }
@@ -920,6 +922,10 @@ impl SessionReservation {
 
     fn mark_committed(&self) {
         self.committed.set(true);
+    }
+
+    fn mark_side_effects_applied(&self) {
+        self.side_effects_applied.set(true);
     }
 }
 
@@ -1076,6 +1082,7 @@ fn reserve_session_log(
         session_id: session_id.to_owned(),
         cleanup_on_drop: Cell::new(true),
         committed: Cell::new(false),
+        side_effects_applied: Cell::new(false),
     })
 }
 
