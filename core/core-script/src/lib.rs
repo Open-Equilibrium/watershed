@@ -22,6 +22,10 @@ pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
 pub const MAX_REGISTRY_FILE_BYTES: u64 = 1024 * 1024;
 /// Maximum cumulative size for a registry root.
 pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
+/// Maximum number of registry YAML files under one root.
+pub const MAX_REGISTRY_FILES: usize = 4096;
+/// Maximum directory nesting depth walked below one registry root.
+pub const MAX_REGISTRY_TRAVERSAL_DEPTH: usize = 64;
 
 /// Shared id/name pair for every registry block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -387,8 +391,31 @@ impl ResolvedRegistry {
         max_file_bytes: u64,
         max_total_bytes: u64,
     ) -> Result<Self, RegistryError> {
+        Self::load_with_all_limits(
+            root,
+            max_file_bytes,
+            max_total_bytes,
+            MAX_REGISTRY_FILES,
+            MAX_REGISTRY_TRAVERSAL_DEPTH,
+        )
+    }
+
+    fn load_with_all_limits(
+        root: &Path,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+        max_files: usize,
+        max_depth: usize,
+    ) -> Result<Self, RegistryError> {
         let mut paths = Vec::new();
-        collect_registry_files(root, &mut paths)?;
+        let limits = RegistryTraversalLimits {
+            max_file_bytes,
+            max_total_bytes,
+            max_files,
+            max_depth,
+        };
+        let mut state = RegistryTraversalState::default();
+        collect_registry_files_with_limits(root, root, &mut paths, limits, 0, &mut state)?;
         paths.sort_by(|left, right| left.path.cmp(&right.path));
         let mut blocks = Vec::new();
         let mut total_bytes = 0u64;
@@ -892,6 +919,17 @@ pub enum RegistryError {
         /// Maximum allowed byte count.
         max: u64,
     },
+    /// Registry traversal exceeded a non-byte work bound.
+    TraversalLimitExceeded {
+        /// Path where traversal exceeded the bound.
+        path: PathBuf,
+        /// Name of the traversal limit.
+        limit: &'static str,
+        /// Observed count or depth.
+        observed: usize,
+        /// Maximum allowed count or depth.
+        max: usize,
+    },
     /// Block id was not a valid v0 id token.
     InvalidBlockId(String),
     /// Block name was empty or otherwise invalid.
@@ -967,6 +1005,16 @@ impl fmt::Display for RegistryError {
                 "{}: registry read size {bytes} bytes exceeds max {max}",
                 path.display()
             ),
+            Self::TraversalLimitExceeded {
+                path,
+                limit,
+                observed,
+                max,
+            } => write!(
+                f,
+                "{}: registry traversal {limit} {observed} exceeds max {max}",
+                path.display()
+            ),
             Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
             Self::InvalidBlockName { kind, id } => {
                 write!(f, "{kind} {id} name must be non-empty")
@@ -1017,6 +1065,7 @@ impl std::error::Error for RegistryError {
             Self::Serialize(err) => Some(err),
             Self::UnsafePath { .. }
             | Self::ReadLimitExceeded { .. }
+            | Self::TraversalLimitExceeded { .. }
             | Self::InvalidBlockId(_)
             | Self::InvalidBlockName { .. }
             | Self::InvalidCommandId(_)
@@ -1424,7 +1473,39 @@ fn registry_file_identity(
     })
 }
 
+#[derive(Clone, Copy)]
+struct RegistryTraversalLimits {
+    max_file_bytes: u64,
+    max_total_bytes: u64,
+    max_files: usize,
+    max_depth: usize,
+}
+
+#[derive(Default)]
+struct RegistryTraversalState {
+    total_bytes: u64,
+}
+
+#[cfg(test)]
 fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(), RegistryError> {
+    let limits = RegistryTraversalLimits {
+        max_file_bytes: MAX_REGISTRY_FILE_BYTES,
+        max_total_bytes: MAX_REGISTRY_TOTAL_BYTES,
+        max_files: MAX_REGISTRY_FILES,
+        max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
+    };
+    let mut state = RegistryTraversalState::default();
+    collect_registry_files_with_limits(dir, dir, out, limits, 0, &mut state)
+}
+
+fn collect_registry_files_with_limits(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<RegistryFile>,
+    limits: RegistryTraversalLimits,
+    depth: usize,
+    state: &mut RegistryTraversalState,
+) -> Result<(), RegistryError> {
     let dir_metadata = fs::symlink_metadata(dir).map_err(|source| RegistryError::Io {
         path: dir.to_path_buf(),
         source,
@@ -1462,17 +1543,53 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(),
             });
         }
         if metadata.is_dir() {
-            collect_registry_files(&path, out)?;
+            let next_depth = depth.saturating_add(1);
+            // WHY: bound traversal before descending so directory fan-out cannot bypass read caps.
+            if next_depth > limits.max_depth {
+                return Err(RegistryError::TraversalLimitExceeded {
+                    path,
+                    limit: "depth",
+                    observed: next_depth,
+                    max: limits.max_depth,
+                });
+            }
+            collect_registry_files_with_limits(root, &path, out, limits, next_depth, state)?;
         } else if metadata.is_file()
             && path
                 .extension()
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
         {
+            let bytes = metadata.len();
+            if bytes > limits.max_file_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path,
+                    bytes,
+                    max: limits.max_file_bytes,
+                });
+            }
+            state.total_bytes = state.total_bytes.saturating_add(bytes);
+            if state.total_bytes > limits.max_total_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: root.to_path_buf(),
+                    bytes: state.total_bytes,
+                    max: limits.max_total_bytes,
+                });
+            }
+            let observed = out.len().saturating_add(1);
+            // WHY: many tiny registry files can exhaust memory before byte reads if unbounded.
+            if observed > limits.max_files {
+                return Err(RegistryError::TraversalLimitExceeded {
+                    path,
+                    limit: "file count",
+                    observed,
+                    max: limits.max_files,
+                });
+            }
             let identity = registry_file_identity(&path, &metadata)?;
             out.push(RegistryFile {
                 path,
-                bytes: metadata.len(),
+                bytes,
                 identity,
             });
         }
@@ -3854,6 +3971,58 @@ mod tests {
                 bytes,
                 max,
             } if path == root && bytes > max
+        ));
+    }
+
+    #[test]
+    fn registry_loader_rejects_file_counts_above_traversal_limit() {
+        let root = temp_registry_dir("registry-file-count-limit");
+        std::fs::write(
+            root.join("a.yaml"),
+            "instruction:\n  id: inspect-a\n  name: InspectA\n  prompt: Inspect\n",
+        )
+        .expect("first registry file written");
+        std::fs::write(
+            root.join("b.yaml"),
+            "instruction:\n  id: inspect-b\n  name: InspectB\n  prompt: Inspect\n",
+        )
+        .expect("second registry file written");
+
+        let err = ResolvedRegistry::load_with_all_limits(&root, 1024, 1024, 1, 64)
+            .expect_err("registry file count is rejected during traversal");
+
+        assert!(matches!(
+            err,
+            RegistryError::TraversalLimitExceeded {
+                limit: "file count",
+                observed: 2,
+                max: 1,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn registry_loader_rejects_directories_above_traversal_depth_limit() {
+        let root = temp_registry_dir("registry-depth-limit");
+        std::fs::create_dir_all(root.join("nested")).expect("nested dir created");
+        std::fs::write(
+            root.join("nested").join("instruction.yaml"),
+            "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
+        )
+        .expect("registry file written");
+
+        let err = ResolvedRegistry::load_with_all_limits(&root, 1024, 1024, 1024, 0)
+            .expect_err("registry traversal depth is rejected before recursion");
+
+        assert!(matches!(
+            err,
+            RegistryError::TraversalLimitExceeded {
+                limit: "depth",
+                observed: 1,
+                max: 0,
+                ..
+            }
         ));
     }
 
