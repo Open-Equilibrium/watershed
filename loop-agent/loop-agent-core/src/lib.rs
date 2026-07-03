@@ -2531,7 +2531,7 @@ fn validate_script_write_target(
         .filesystem
         .write_roots
         .iter()
-        .any(|root| workspace_scope_contains(root, &scoped))
+        .any(|root| core_script::relative_path_is_inside_scope(&scoped, root))
     {
         return Err(RuntimeError::Protocol(format!(
             "tool {} lacks write scope {scoped}",
@@ -2543,7 +2543,7 @@ fn validate_script_write_target(
         .filesystem
         .write_roots
         .iter()
-        .any(|root| workspace_scope_contains(root, &temp_parent_scoped))
+        .any(|root| core_script::relative_path_is_inside_scope(&temp_parent_scoped, root))
     {
         return Err(RuntimeError::Protocol(format!(
             "tool {} lacks write scope for replacement temp under {temp_parent_scoped}",
@@ -2838,10 +2838,10 @@ fn hard_link_count_is_verifiable() -> bool {
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
-    let target = target.replace('\\', "/");
     if target.is_empty()
         || target.starts_with('/')
         || target.contains(':')
+        || target.contains('\\')
         || target.contains('$')
         || target.contains('*')
         || target.contains('?')
@@ -2850,50 +2850,16 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
             "own-script write target {target:?} must be a literal workspace-relative path"
         )));
     }
-    let mut parts = Vec::new();
-    for part in target.split('/') {
-        if part.is_empty() || part == "." || part == ".." {
-            return Err(RuntimeError::Protocol(format!(
-                "own-script write target {target:?} must stay inside the workspace"
-            )));
-        }
-        if part.ends_with('.') || part.ends_with(' ') {
-            return Err(RuntimeError::Protocol(format!(
-                "own-script write target {target:?} must not use a Windows path alias"
-            )));
-        }
-        if is_windows_reserved_device_component(part) {
-            return Err(RuntimeError::Protocol(format!(
-                "own-script write target {target:?} must not use a Windows path alias"
-            )));
-        }
-        parts.push(part);
+    if core_script::relative_path_has_windows_alias(target) {
+        return Err(RuntimeError::Protocol(format!(
+            "own-script write target {target:?} must not use a Windows path alias"
+        )));
     }
-    Ok(parts.join("/"))
-}
-
-fn is_windows_reserved_device_component(part: &str) -> bool {
-    let basename = part.split_once('.').map_or(part, |(basename, _)| basename);
-    matches!(
-        basename.to_ascii_uppercase().as_str(),
-        "CON" | "PRN" | "AUX" | "NUL"
-    ) || matches!(
-        basename.as_bytes(),
-        [first, second, third, digit]
-            if first.eq_ignore_ascii_case(&b'C')
-                && second.eq_ignore_ascii_case(&b'O')
-                && third.eq_ignore_ascii_case(&b'M')
-                && *digit >= b'1'
-                && *digit <= b'9'
-    ) || matches!(
-        basename.as_bytes(),
-        [first, second, third, digit]
-            if first.eq_ignore_ascii_case(&b'L')
-                && second.eq_ignore_ascii_case(&b'P')
-                && third.eq_ignore_ascii_case(&b'T')
-                && *digit >= b'1'
-                && *digit <= b'9'
-    )
+    core_script::normalize_safe_relative_path(target).ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "own-script write target {target:?} must stay inside the workspace"
+        ))
+    })
 }
 
 fn protected_path_pattern_matches(
@@ -3074,13 +3040,6 @@ fn emit_tool_progress(
             "tool_id": tool.identity.id,
         }),
     )
-}
-
-fn workspace_scope_contains(root: &str, path: &str) -> bool {
-    path == root
-        || path
-            .strip_prefix(root)
-            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {

@@ -5,7 +5,6 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 pub const POLICY_VERSION_V0: &str = "0";
@@ -914,47 +913,15 @@ fn matches_default_protected_paths(paths: &[String]) -> bool {
 }
 
 fn normalize_policy_relative_path(value: &str) -> Option<String> {
-    let normalized = value.replace('\\', "/");
-    if normalized.is_empty() || normalized.starts_with('/') || has_windows_drive_prefix(&normalized)
-    {
-        return None;
-    }
-
-    let mut components = Vec::new();
-    for component in normalized.split('/') {
-        match component {
-            "" | "." => {}
-            ".." => return None,
-            component => components.push(component),
-        }
-    }
-
-    if components.is_empty() {
-        return None;
-    }
-
-    let canonical = components.join("/");
-    if canonical != value {
-        return None;
-    }
-
-    Some(canonical)
+    core_script::normalize_safe_relative_path(value)
 }
 
 fn protected_path_grant_has_wildcard(value: &str) -> bool {
     value.contains('*') || value.contains('?')
 }
 
-fn has_windows_drive_prefix(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
-}
-
 fn path_is_inside_scope(path: &str, scope: &str) -> bool {
-    path == scope
-        || path
-            .strip_prefix(scope)
-            .is_some_and(|suffix| suffix.starts_with('/'))
+    core_script::relative_path_is_inside_scope(path, scope)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1022,56 +989,7 @@ pub enum NetworkTransport {
 }
 
 fn is_valid_canonical_cidr(value: &str) -> bool {
-    let Some((addr, prefix)) = value.split_once('/') else {
-        return false;
-    };
-    if prefix.len() > 1 && prefix.starts_with('0') {
-        return false;
-    }
-    if value.matches('/').count() != 1 {
-        return false;
-    }
-
-    let Ok(prefix) = prefix.parse::<u8>() else {
-        return false;
-    };
-    match addr.parse::<IpAddr>() {
-        Ok(IpAddr::V4(addr)) => {
-            prefix <= 32
-                && host_bits_are_zero_v4(addr, prefix)
-                && value == format!("{addr}/{prefix}")
-        }
-        Ok(IpAddr::V6(addr)) => {
-            prefix <= 128
-                && host_bits_are_zero_v6(addr, prefix)
-                && value == format!("{addr}/{prefix}")
-        }
-        Err(_) => false,
-    }
-}
-
-fn host_bits_are_zero_v4(addr: Ipv4Addr, prefix: u8) -> bool {
-    let value = u32::from(addr);
-    match 32 - prefix {
-        0 => true,
-        32 => value == 0,
-        host_bits => {
-            let host_mask = (1u32 << host_bits) - 1;
-            value & host_mask == 0
-        }
-    }
-}
-
-fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
-    let value = u128::from(addr);
-    match 128 - prefix {
-        0 => true,
-        128 => value == 0,
-        host_bits => {
-            let host_mask = (1u128 << host_bits) - 1;
-            value & host_mask == 0
-        }
-    }
+    core_script::is_valid_canonical_cidr(value)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -2564,6 +2482,9 @@ mod tests {
             "workspace/../out",
             "workspace//out",
             "workspace\\out",
+            "workspace/NUL",
+            "workspace/out.",
+            "workspace/out ",
             "C:/workspace/out",
         ] {
             assert_eq!(normalize_policy_relative_path(path), None, "{path}");

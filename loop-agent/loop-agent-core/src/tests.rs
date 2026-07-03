@@ -410,14 +410,11 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
         Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
     ));
 
-    assert_eq!(
-        normalize_script_write_target(r"out\summary.txt").expect("normalizes separators"),
-        "out/summary.txt"
-    );
     for target in [
         "",
         "/abs",
         "C:/abs",
+        r"out\summary.txt",
         "out/$SUMMARY",
         "out/*.txt",
         "out/?.txt",
@@ -546,14 +543,17 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
         ".ssh/id_rsa"
     );
 
-    assert!(workspace_scope_contains("workspace/out", "workspace/out"));
-    assert!(workspace_scope_contains(
+    assert!(core_script::relative_path_is_inside_scope(
         "workspace/out",
-        "workspace/out/summary.txt"
+        "workspace/out"
     ));
-    assert!(!workspace_scope_contains(
-        "workspace/out",
-        "workspace/output/summary.txt"
+    assert!(core_script::relative_path_is_inside_scope(
+        "workspace/out/summary.txt",
+        "workspace/out"
+    ));
+    assert!(!core_script::relative_path_is_inside_scope(
+        "workspace/output/summary.txt",
+        "workspace/out"
     ));
     assert!(protected_path_pattern_matches(
         match_mode,

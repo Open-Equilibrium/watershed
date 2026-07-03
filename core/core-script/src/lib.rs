@@ -3279,6 +3279,77 @@ pub fn is_valid_canonical_cidr(value: &str) -> bool {
     }
 }
 
+pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
+    if value.is_empty()
+        || value.starts_with('/')
+        || has_windows_drive_prefix(value)
+        || value.contains('\\')
+    {
+        return None;
+    }
+
+    let mut components = Vec::new();
+    for component in value.split('/') {
+        if component.is_empty() || component == "." || component == ".." {
+            return None;
+        }
+        if path_component_has_windows_alias(component) {
+            return None;
+        }
+        components.push(component);
+    }
+
+    let canonical = components.join("/");
+    (canonical == value).then_some(canonical)
+}
+
+pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
+    path == scope
+        || path
+            .strip_prefix(scope)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+pub fn relative_path_has_windows_alias(value: &str) -> bool {
+    value.split('/').any(|component| {
+        !matches!(component, "" | "." | "..") && path_component_has_windows_alias(component)
+    })
+}
+
+fn has_windows_drive_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+fn path_component_has_windows_alias(component: &str) -> bool {
+    if component.ends_with('.') || component.ends_with(' ') {
+        return true;
+    }
+    let basename = component
+        .split_once('.')
+        .map_or(component, |(basename, _)| basename);
+    matches!(
+        basename.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+    ) || matches!(
+        basename.as_bytes(),
+        [first, second, third, digit]
+            if first.eq_ignore_ascii_case(&b'C')
+                && second.eq_ignore_ascii_case(&b'O')
+                && third.eq_ignore_ascii_case(&b'M')
+                && *digit >= b'1'
+                && *digit <= b'9'
+    ) || matches!(
+        basename.as_bytes(),
+        [first, second, third, digit]
+            if first.eq_ignore_ascii_case(&b'L')
+                && second.eq_ignore_ascii_case(&b'P')
+                && third.eq_ignore_ascii_case(&b'T')
+                && *digit >= b'1'
+                && *digit <= b'9'
+    )
+}
+
 fn matches_lower_token(value: &str, min_len: usize, max_len: usize) -> bool {
     value.len() >= min_len
         && value.len() <= max_len
