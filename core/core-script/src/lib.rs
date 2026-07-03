@@ -3323,6 +3323,11 @@ fn unquote_yaml_scalar(
                         ));
                     }
                 }
+            } else if ch == '"' {
+                return Err(parse_error(
+                    source_name,
+                    format!("{field} contains a malformed double-quoted scalar"),
+                ));
             } else {
                 out.push(ch);
             }
@@ -5158,6 +5163,29 @@ tool:
         .expect_err("invalid quoted escape must be rejected");
 
         assert!(err.to_string().contains("unsupported escape"));
+    }
+
+    #[test]
+    fn parser_rejects_malformed_double_quoted_yaml_scalars() {
+        let err = parse_registry_block(
+            "malformed-double-quoted-scalar.yaml",
+            r#"tool:
+  id: malformed-double-quoted-tool
+  name: "Bad"Tool"
+  tool_kind: predefined-command
+  command:
+    command_id: agent-echo
+    argv: []
+  allowed_parameters: []
+  read_scope: []
+  write_scope: []
+  protected_path_grants: []
+  network: deny
+"#,
+        )
+        .expect_err("double-quoted scalar with bare quote rejected");
+
+        assert!(err.to_string().contains("double-quoted"));
     }
 
     #[test]
