@@ -973,7 +973,7 @@ fn list_sessions_handles_missing_dirs_and_filters_unsafe_names() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn list_sessions_skips_non_utf8_file_stems() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
