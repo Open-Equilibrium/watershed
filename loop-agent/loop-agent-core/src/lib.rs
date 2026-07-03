@@ -208,40 +208,34 @@ pub fn run_loop(
             return Err(err);
         }
     };
-    let runtime = match execute_loop(
-        workspace,
-        &registry,
-        policy,
-        loop_block,
-        &expected_session_id,
-        ToolSideEffectMode::ApplyAll,
-    ) {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            reservation.rollback();
-            return Err(err);
-        }
-    };
-
     let result = (|| {
+        let session_id = planned_events
+            .first()
+            .expect("validated streams contain at least one event")
+            .session_id
+            .clone();
+        let failed = planned_runtime.failed;
+        commit_reserved_session_log(
+            &reservation,
+            &session_id,
+            &planned_stream,
+            planned_events.len(),
+        )?;
+        let runtime = execute_loop(
+            workspace,
+            &registry,
+            policy,
+            loop_block,
+            &expected_session_id,
+            ToolSideEffectMode::ApplyAll,
+        )?;
         if runtime.events != planned_runtime.events {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime did not match deterministic replay",
                 reservation.session_path.display()
             )));
         }
-        let session_id = planned_events
-            .first()
-            .expect("validated streams contain at least one event")
-            .session_id
-            .clone();
-        let failed = runtime.failed;
-        complete_reserved_session_log(
-            &reservation,
-            &session_id,
-            &planned_stream,
-            planned_events.len(),
-        )?;
+        reservation.release_lock()?;
 
         Ok(RunOutput {
             event_count: planned_events.len(),
@@ -766,12 +760,15 @@ struct SessionReservation {
     session_path: PathBuf,
     session_id: String,
     cleanup_on_drop: Cell<bool>,
+    committed: Cell<bool>,
 }
 
 impl SessionReservation {
     fn rollback(&self) {
-        let _ = fs::remove_file(&self.session_path);
-        let _ = fs::remove_file(&self.log_path);
+        if !self.committed.get() {
+            let _ = fs::remove_file(&self.session_path);
+            let _ = fs::remove_file(&self.log_path);
+        }
         let _ = fs::remove_file(&self.lock_path);
         self.cleanup_on_drop.set(false);
     }
@@ -783,6 +780,10 @@ impl SessionReservation {
         })?;
         self.cleanup_on_drop.set(false);
         Ok(())
+    }
+
+    fn mark_committed(&self) {
+        self.committed.set(true);
     }
 }
 
@@ -828,6 +829,7 @@ fn reserve_session_log(
         session_path,
         session_id: session_id.to_owned(),
         cleanup_on_drop: Cell::new(true),
+        committed: Cell::new(false),
     })
 }
 
@@ -1024,7 +1026,20 @@ fn preflight_complete_reserved_session_log(
     ensure_session_log_growth_within_limit(&reservation.session_path, append_bytes.len())
 }
 
+#[cfg(test)]
 fn complete_reserved_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    let commit_result = commit_reserved_session_log(reservation, session_id, stream, event_count);
+    let release_result = reservation.release_lock();
+    commit_result?;
+    release_result
+}
+
+fn commit_reserved_session_log(
     reservation: &SessionReservation,
     session_id: &str,
     stream: &str,
@@ -1032,6 +1047,9 @@ fn complete_reserved_session_log(
 ) -> Result<(), RuntimeError> {
     let append_bytes = session_completion_append_bytes(stream)?;
     let append_result = append_session_log_bytes(&reservation.session_path, append_bytes);
+    if append_result.is_ok() {
+        reservation.mark_committed();
+    }
     let metadata_result = if append_result.is_ok() {
         write_existing_file(
             &reservation.log_path,
@@ -1040,10 +1058,8 @@ fn complete_reserved_session_log(
     } else {
         Ok(())
     };
-    let release_result = reservation.release_lock();
     append_result?;
-    metadata_result?;
-    release_result
+    metadata_result
 }
 
 fn session_completion_append_bytes(stream: &str) -> Result<&[u8], RuntimeError> {

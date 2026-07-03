@@ -1799,6 +1799,7 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         session_path: workspace.join(".loop/sessions/missing.jsonl"),
         session_id: "missing001".to_owned(),
         cleanup_on_drop: std::cell::Cell::new(true),
+        committed: std::cell::Cell::new(false),
     };
 
     let err = missing_lock
@@ -1861,6 +1862,11 @@ fn completed_session_log_append_keeps_audit_when_log_update_fails() {
     );
     fs::remove_dir_all(&reservation.log_path).expect("log directory cleanup");
     reservation.rollback();
+    assert_eq!(
+        fs::read_to_string(&reservation.session_path)
+            .expect("committed audit stream survives rollback"),
+        stream
+    );
 }
 
 #[test]
