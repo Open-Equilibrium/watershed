@@ -551,8 +551,15 @@ impl ResolvedRegistry {
             for reference in &phase.instruction_refs {
                 self.require_instruction(reference, "phase", &phase.identity.id)?;
             }
+            let mut tool_ids = BTreeSet::new();
             for reference in &phase.tool_refs {
-                self.require_tool(reference, "phase", &phase.identity.id)?;
+                let tool = self.require_tool(reference, "phase", &phase.identity.id)?;
+                if !tool_ids.insert(tool.identity.id.as_str()) {
+                    return Err(RegistryError::DuplicateId {
+                        kind: "phase tool reference",
+                        id: format!("{}.{}", phase.identity.id, tool.identity.id),
+                    });
+                }
             }
             let mut step_ids = BTreeSet::new();
             for step in &phase.steps {
@@ -5458,6 +5465,31 @@ tool:
                 kind: "step",
                 id,
             } if id == "phase.attempt"
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_duplicate_phase_tool_refs() {
+        let err = ResolvedRegistry::from_blocks([
+            RegistryBlock::Tool(own_script_tool("echo", "script:echo")),
+            RegistryBlock::Phase(PhaseBlock {
+                identity: BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                tool_refs: vec!["echo".to_owned(), "echo".to_owned()],
+                steps: Vec::new(),
+            }),
+        ])
+        .expect_err("duplicate phase tool references must fail");
+
+        assert!(matches!(
+            err,
+            RegistryError::DuplicateId {
+                kind: "phase tool reference",
+                id,
+            } if id == "phase.echo"
         ));
     }
 
