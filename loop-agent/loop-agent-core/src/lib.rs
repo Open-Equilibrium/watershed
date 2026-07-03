@@ -274,6 +274,7 @@ pub fn run_loop(
         loop_block,
         &expected_session_id,
         ToolSideEffectMode::DryRun,
+        SideEffectRecorder::none(),
     ) {
         Ok(runtime) => runtime,
         Err(err) => {
@@ -306,6 +307,7 @@ pub fn run_loop(
             loop_block,
             &expected_session_id,
             ToolSideEffectMode::ApplyAll,
+            SideEffectRecorder::for_reservation(&reservation),
         )?;
         reservation.mark_side_effects_applied();
         if runtime.events != planned_runtime.events {
@@ -557,6 +559,7 @@ pub fn resume_session(
         loop_block,
         session_id,
         ToolSideEffectMode::DryRun,
+        SideEffectRecorder::none(),
     )?;
     let resume_prefix =
         validate_resume_replay_prefix(&path, &events, &planned_runtime.events, loop_block)?;
@@ -574,6 +577,7 @@ pub fn resume_session(
         ToolSideEffectMode::PreflightResume {
             prefix_event_count: resume_prefix.planned_event_count as u64,
         },
+        SideEffectRecorder::none(),
     )?;
     if preflight_runtime.events != planned_runtime.events {
         return Err(RuntimeError::Protocol(format!(
@@ -603,6 +607,7 @@ pub fn resume_session(
         ToolSideEffectMode::Resume {
             prefix_event_count: resume_prefix.planned_event_count as u64,
         },
+        SideEffectRecorder::none(),
     )?;
     if resumed_runtime.events != planned_runtime.events {
         return Err(RuntimeError::Protocol(format!(
@@ -1522,7 +1527,7 @@ fn replace_existing_file_without_link_count(
 
     ensure_parent_real_directory(path)?;
     ensure_real_file(path)?;
-    replace_existing_leaf_from_temp(path, &temp_path)
+    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none())
 }
 
 fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
@@ -1651,6 +1656,29 @@ impl ToolSideEffectMode {
         match self {
             Self::PreflightResume { prefix_event_count } => completed_sequence > prefix_event_count,
             Self::ApplyAll | Self::DryRun | Self::Resume { .. } => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SideEffectRecorder<'a> {
+    reservation: Option<&'a SessionReservation>,
+}
+
+impl<'a> SideEffectRecorder<'a> {
+    fn none() -> Self {
+        Self { reservation: None }
+    }
+
+    fn for_reservation(reservation: &'a SessionReservation) -> Self {
+        Self {
+            reservation: Some(reservation),
+        }
+    }
+
+    fn mark_applied(self) {
+        if let Some(reservation) = self.reservation {
+            reservation.mark_side_effects_applied();
         }
     }
 }
@@ -1812,6 +1840,7 @@ fn execute_loop(
     root_loop: &core_script::LoopBlock,
     session_id: &str,
     side_effect_mode: ToolSideEffectMode,
+    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<RuntimeExecution, RuntimeError> {
     let mut builder = RuntimeEventBuilder::new(session_id.to_owned());
     builder.emit(
@@ -1820,15 +1849,14 @@ fn execute_loop(
         serde_json::json!({"reason":"fixture-start"}),
     )?;
 
-    let failed = emit_loop_block(
+    let context = LoopEmitContext {
         workspace,
         registry,
         policy,
-        root_loop,
-        None,
         side_effect_mode,
-        &mut builder,
-    )?;
+        side_effect_recorder,
+    };
+    let failed = emit_loop_block(&context, root_loop, None, &mut builder)?;
     if let Some(failure) = failed {
         builder.emit(
             None,
@@ -1912,21 +1940,12 @@ fn preflight_phase_tools(
 }
 
 fn emit_loop_block(
-    workspace: &Path,
-    registry: &core_script::ResolvedRegistry,
-    policy: &core_policy::PolicyArtifact,
+    context: &LoopEmitContext<'_>,
     loop_block: &core_script::LoopBlock,
     parent_loop_id: Option<String>,
-    side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    let context = LoopEmitContext {
-        workspace,
-        registry,
-        policy,
-        side_effect_mode,
-    };
-    emit_loop_block_at_depth(&context, loop_block, parent_loop_id, builder, 1)
+    emit_loop_block_at_depth(context, loop_block, parent_loop_id, builder, 1)
 }
 
 struct LoopEmitContext<'a> {
@@ -1934,6 +1953,7 @@ struct LoopEmitContext<'a> {
     registry: &'a core_script::ResolvedRegistry,
     policy: &'a core_policy::PolicyArtifact,
     side_effect_mode: ToolSideEffectMode,
+    side_effect_recorder: SideEffectRecorder<'a>,
 }
 
 fn emit_loop_block_at_depth(
@@ -1965,15 +1985,7 @@ fn emit_loop_block_at_depth(
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        if let Some(failure) = emit_phase(
-            context.workspace,
-            context.registry,
-            context.policy,
-            phase,
-            &invocation,
-            context.side_effect_mode,
-            builder,
-        )? {
+        if let Some(failure) = emit_phase(context, phase, &invocation, builder)? {
             emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
             return Ok(Some(failure));
         }
@@ -2007,19 +2019,17 @@ fn emit_loop_block_at_depth(
 }
 
 fn emit_phase(
-    workspace: &Path,
-    registry: &core_script::ResolvedRegistry,
-    policy: &core_policy::PolicyArtifact,
+    context: &LoopEmitContext<'_>,
     phase: &core_script::PhaseBlock,
     invocation: &LoopInvocation,
-    side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     let instruction_ids = phase
         .instruction_refs
         .iter()
         .map(|instruction_ref| {
-            registry
+            context
+                .registry
                 .instruction_block(instruction_ref)
                 .map(|instruction| instruction.identity.id.clone())
                 .ok_or_else(|| {
@@ -2033,7 +2043,8 @@ fn emit_phase(
         .tool_refs
         .iter()
         .map(|tool_ref| {
-            registry
+            context
+                .registry
                 .tool_block(tool_ref)
                 .map(|tool| tool.identity.id.clone())
                 .ok_or_else(|| {
@@ -2053,14 +2064,14 @@ fn emit_phase(
     )?;
 
     for (step_index, step) in phase.steps.iter().enumerate() {
-        let step_payload = step_payload(registry, phase, step)?;
+        let step_payload = step_payload(context.registry, phase, step)?;
         builder.emit(
             Some(invocation),
             EventType::StepStarted,
             step_payload.clone(),
         )?;
 
-        if let Some(content) = stub_message_content(registry, phase)? {
+        if let Some(content) = stub_message_content(context.registry, phase)? {
             let message_id = builder.next_message_id();
             builder.emit(
                 Some(invocation),
@@ -2082,26 +2093,32 @@ fn emit_phase(
         }
 
         if step_index == 0 {
-            if let Some(failure) = sandbox_out_of_phase_failure(registry, policy, phase) {
+            if let Some(failure) =
+                sandbox_out_of_phase_failure(context.registry, context.policy, phase)
+            {
                 builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
                 return Ok(Some(failure));
             }
 
             for tool_ref in &phase.tool_refs {
-                let tool = registry.tool_block(tool_ref).ok_or_else(|| {
+                let tool = context.registry.tool_block(tool_ref).ok_or_else(|| {
                     RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
                 })?;
-                let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
+                let command_policy =
+                    command_policy_for_phase(context.policy, &phase.identity.id, tool)?;
                 let tool_policy = RuntimeToolPolicy {
                     command: command_policy,
-                    protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
+                    protected_path_match_mode: runtime_protected_path_match_mode(
+                        &context.policy.target,
+                    ),
                 };
                 if let Some(mut failure) = emit_tool(
-                    workspace,
+                    context.workspace,
                     tool,
                     tool_policy,
                     invocation,
-                    side_effect_mode,
+                    context.side_effect_mode,
+                    context.side_effect_recorder,
                     builder,
                 )? {
                     emit_runtime_tool_failure(invocation, &failure, builder)?;
@@ -2300,6 +2317,7 @@ fn emit_tool(
     policy: RuntimeToolPolicy<'_>,
     invocation: &LoopInvocation,
     side_effect_mode: ToolSideEffectMode,
+    side_effect_recorder: SideEffectRecorder<'_>,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     ensure_tool_matches_policy(tool, policy.command)?;
@@ -2336,6 +2354,7 @@ fn emit_tool(
             tool,
             policy.protected_path_match_mode,
             policy.command,
+            side_effect_recorder,
         )?
     } else if side_effect_mode.should_preflight_tool(replay_guard_sequence) {
         preflight_tool_progress(
@@ -2368,6 +2387,7 @@ fn execute_tool(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
+    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<Option<&'static str>, RuntimeError> {
     match (&tool.tool_kind, &tool.command) {
         (
@@ -2375,7 +2395,13 @@ fn execute_tool(
             core_script::ToolCommand::Predefined { command_id, argv },
         ) => execute_predefined_command(policy, command_id, argv),
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            execute_own_script(workspace, tool, protected_path_match_mode, policy)?;
+            execute_own_script(
+                workspace,
+                tool,
+                protected_path_match_mode,
+                policy,
+                side_effect_recorder,
+            )?;
             Ok(Some("stub write completed"))
         }
         _ => Err(RuntimeError::Protocol(format!(
@@ -2458,6 +2484,7 @@ fn execute_own_script(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
+    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
     if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
         return Err(RuntimeError::Protocol(format!(
@@ -2470,7 +2497,7 @@ fn execute_own_script(
         match operation {
             ScriptOperation::Noop => {}
             ScriptOperation::Write { contents, target } => {
-                write_script_output(workspace, &target, &contents)?;
+                write_script_output(workspace, &target, &contents, side_effect_recorder)?;
             }
         }
     }
@@ -2651,9 +2678,10 @@ fn write_script_output(
     workspace: &Path,
     target: &str,
     contents: &[u8],
+    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
     let path = ensure_real_workspace_write_path(workspace, target)?;
-    replace_script_output_atomically(workspace, target, &path, contents)
+    replace_script_output_atomically(workspace, target, &path, contents, side_effect_recorder)
 }
 
 fn preflight_own_script_outputs(
@@ -2674,6 +2702,7 @@ fn replace_script_output_atomically(
     target: &str,
     path: &Path,
     contents: &[u8],
+    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
     ensure_real_workspace_write_path(workspace, target)?;
     let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
@@ -2693,7 +2722,7 @@ fn replace_script_output_atomically(
     ensure_real_workspace_write_path(workspace, target)?;
     if initial_leaf_existed {
         if ensure_writable_regular_leaf(path)? {
-            return replace_existing_leaf_from_temp(path, &temp_path);
+            return replace_existing_leaf_from_temp(path, &temp_path, side_effect_recorder);
         }
     } else {
         ensure_new_leaf_available(path)?;
@@ -2706,10 +2735,15 @@ fn replace_script_output_atomically(
             source,
         });
     }
+    side_effect_recorder.mark_applied();
     Ok(())
 }
 
-fn replace_existing_leaf_from_temp(path: &Path, temp_path: &Path) -> Result<(), RuntimeError> {
+fn replace_existing_leaf_from_temp(
+    path: &Path,
+    temp_path: &Path,
+    side_effect_recorder: SideEffectRecorder<'_>,
+) -> Result<(), RuntimeError> {
     let backup_path = create_replacement_backup_path(path)?;
     if let Err(source) = fs::rename(path, &backup_path) {
         let _ = fs::remove_file(temp_path);
@@ -2718,6 +2752,9 @@ fn replace_existing_leaf_from_temp(path: &Path, temp_path: &Path) -> Result<(), 
             source,
         });
     }
+    // WHY: once the original target is moved aside, a later failure must not
+    // erase the session attempt that explains the workspace change.
+    side_effect_recorder.mark_applied();
     if let Err(source) = fs::rename(temp_path, path) {
         if fs::rename(&backup_path, path).is_ok() {
             let _ = fs::remove_file(temp_path);

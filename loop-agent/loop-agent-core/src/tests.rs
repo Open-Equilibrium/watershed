@@ -269,6 +269,7 @@ fn runtime_executes_subloops_after_all_parent_phases() {
         loop_block,
         "ordering001",
         ToolSideEffectMode::DryRun,
+        SideEffectRecorder::none(),
     )
     .expect("hello loop executes");
     let root_loop_id = loop_id_for_definition(&runtime.events, "hello-loop");
@@ -721,6 +722,7 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
             &wrong_runtime,
             match_mode,
             write_policy,
+            SideEffectRecorder::none(),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
     ));
@@ -744,6 +746,7 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
             &mismatched_shape,
             match_mode,
             write_policy,
+            SideEffectRecorder::none(),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("command shape")
     ));
@@ -772,6 +775,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             &loop_block,
             "mutated001",
             ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing phase")
     ));
@@ -790,6 +794,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             &loop_block,
             "mutated001",
             ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
     ));
@@ -812,6 +817,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             deep_loop,
             "deep001",
             ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
         ),
         Err(RuntimeError::Protocol(message))
             if message == "loop nesting depth 65 for loop-064 exceeds max 64"
@@ -834,15 +840,19 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     };
     let mut missing_instruction = registry.clone();
     missing_instruction.instructions.remove("inspect-input");
+    let missing_instruction_context = LoopEmitContext {
+        workspace: Path::new("."),
+        registry: &missing_instruction,
+        policy: &policy,
+        side_effect_mode: ToolSideEffectMode::DryRun,
+        side_effect_recorder: SideEffectRecorder::none(),
+    };
     let mut builder = RuntimeEventBuilder::new("mutated001".to_owned());
     assert!(matches!(
         emit_phase(
-            Path::new("."),
-            &missing_instruction,
-            &policy,
+            &missing_instruction_context,
             &inspect_phase,
             &invocation,
-            ToolSideEffectMode::DryRun,
             &mut builder,
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing instruction")
@@ -850,15 +860,19 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
 
     let mut missing_connection = registry.clone();
     missing_connection.connections.remove("inspect-data");
+    let missing_connection_context = LoopEmitContext {
+        workspace: Path::new("."),
+        registry: &missing_connection,
+        policy: &policy,
+        side_effect_mode: ToolSideEffectMode::DryRun,
+        side_effect_recorder: SideEffectRecorder::none(),
+    };
     let mut builder = RuntimeEventBuilder::new("mutated001".to_owned());
     assert!(matches!(
         emit_phase(
-            Path::new("."),
-            &missing_connection,
-            &policy,
+            &missing_connection_context,
             &inspect_phase,
             &invocation,
-            ToolSideEffectMode::DryRun,
             &mut builder,
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing connection")
@@ -911,6 +925,7 @@ fn runtime_rejects_duplicate_subloop_work_over_m1_budget() {
         root,
         "budget001",
         ToolSideEffectMode::DryRun,
+        SideEffectRecorder::none(),
     ) {
         Ok(runtime) => panic!(
             "duplicated subloop work must be budgeted; emitted {} events",
@@ -1360,6 +1375,73 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
         .join("hello001.jsonl")
         .exists());
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+}
+
+#[test]
+fn run_loop_keeps_started_audit_after_partial_apply_failure() {
+    let workspace = workspace_copy("hello-loop");
+    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+    fs::write(
+        &tool_path,
+        source.replace(
+            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+            "printf 'partial\\n' > out/blocker",
+        ),
+    )
+    .expect("first tool fixture rewritten");
+    fs::write(
+        workspace.join("registry/tools/bad-write.yaml"),
+        r#"tool:
+  id: bad-write
+  name: BadWrite
+  tool_kind: own-script
+  command: script:bad-write
+  script_runtime: posix-sh
+  script_body: |
+    printf 'later\n' > out/blocker/later.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+    )
+    .expect("bad tool fixture written");
+    let phase_path = workspace.join("registry/phases/summarize.yaml");
+    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+    fs::write(
+        &phase_path,
+        source.replace(
+            "tool_refs: [write-summary]",
+            "tool_refs: [write-summary, bad-write]",
+        ),
+    )
+    .expect("phase fixture rewritten");
+
+    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect_err("later apply-time write must fail after the first write");
+
+    assert!(
+        matches!(err, RuntimeError::Protocol(ref message) if message.contains("must be a directory")),
+        "{err:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/blocker")).expect("first write persisted"),
+        "partial\n"
+    );
+    assert!(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists(),
+        "partial side effects must keep the started session audit"
+    );
+    assert!(
+        workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists(),
+        "partial side effects must keep the run log"
+    );
 }
 
 #[test]
@@ -4875,7 +4957,7 @@ fn existing_leaf_replacement_restores_original_when_final_rename_fails() {
     fs::write(&path, "old").expect("file written");
 
     assert!(matches!(
-        replace_existing_leaf_from_temp(&path, &missing_temp_path),
+        replace_existing_leaf_from_temp(&path, &missing_temp_path, SideEffectRecorder::none()),
         Err(RuntimeError::Io { path: failed_path, .. }) if failed_path == path
     ));
     assert_eq!(
@@ -6726,6 +6808,7 @@ fn emit_noop_dispatch_for_budget(
         policy,
         invocation,
         ToolSideEffectMode::ApplyAll,
+        SideEffectRecorder::none(),
         &mut builder,
     )?;
     Ok(builder.events.len())
