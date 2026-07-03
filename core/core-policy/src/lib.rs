@@ -1683,6 +1683,31 @@ mod tests {
     }
 
     #[test]
+    fn policy_compiler_rejects_tool_kind_command_shape_mismatches() {
+        let mut registry = core_script::load_registry_root(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../loop-agent/fixtures/smoke-loop/registry"),
+        )
+        .expect("smoke-loop registry loads");
+        registry.tools.get_mut("echo").expect("echo tool").tool_kind =
+            core_script::ToolKind::OwnScript;
+
+        let err = compile_policy_artifact(
+            "smoke-loop",
+            &registry,
+            "smoke-loop",
+            PolicyTarget::LinuxLandlockSeccomp,
+        )
+        .expect_err("tool kind and command shape mismatch must fail closed");
+
+        assert!(
+            err.to_string()
+                .contains("tool echo command shape does not match tool_kind"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn policy_artifact_rejects_forbidden_environment_allow_entries() {
         let forbidden_names = [
             "AWS_REGION",
