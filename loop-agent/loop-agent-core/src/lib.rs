@@ -1400,9 +1400,12 @@ fn ensure_optional_real_directory(path: &Path) -> Result<bool, RuntimeError> {
     }
 }
 
-fn ensure_created_real_directory(path: &Path) -> Result<(), RuntimeError> {
+fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) => validate_real_directory(path, &metadata),
+        Ok(metadata) => {
+            validate_real_directory(path, &metadata)?;
+            Ok(false)
+        }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
             fs::create_dir(path).map_err(|source| RuntimeError::Io {
                 path: path.to_owned(),
@@ -1412,7 +1415,8 @@ fn ensure_created_real_directory(path: &Path) -> Result<(), RuntimeError> {
                 path: path.to_owned(),
                 source,
             })?;
-            validate_real_directory(path, &metadata)
+            validate_real_directory(path, &metadata)?;
+            Ok(true)
         }
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
@@ -2680,7 +2684,7 @@ fn write_script_output(
     contents: &[u8],
     side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
-    let path = ensure_real_workspace_write_path(workspace, target)?;
+    let path = ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     replace_script_output_atomically(workspace, target, &path, contents, side_effect_recorder)
 }
 
@@ -2704,7 +2708,7 @@ fn replace_script_output_atomically(
     contents: &[u8],
     side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
-    ensure_real_workspace_write_path(workspace, target)?;
+    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
     let (temp_path, mut temp_file) = create_replacement_temp(path)?;
     if let Err(err) = temp_file
@@ -2719,7 +2723,7 @@ fn replace_script_output_atomically(
     }
     drop(temp_file);
 
-    ensure_real_workspace_write_path(workspace, target)?;
+    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     if initial_leaf_existed {
         if ensure_writable_regular_leaf(path)? {
             return replace_existing_leaf_from_temp(path, &temp_path, side_effect_recorder);
@@ -2727,7 +2731,7 @@ fn replace_script_output_atomically(
     } else {
         ensure_new_leaf_available(path)?;
     }
-    ensure_real_workspace_write_path(workspace, target)?;
+    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     if let Err(source) = fs::rename(&temp_path, path) {
         let _ = fs::remove_file(&temp_path);
         return Err(RuntimeError::Io {
@@ -2863,13 +2867,16 @@ fn ensure_script_target_not_protected(
 fn ensure_real_workspace_write_path(
     workspace: &Path,
     target: &str,
+    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<PathBuf, RuntimeError> {
     let mut parts = target.split('/').peekable();
     let mut path = workspace.to_path_buf();
     while let Some(part) = parts.next() {
         path.push(part);
-        if parts.peek().is_some() {
-            ensure_created_real_directory(&path)?;
+        if parts.peek().is_some() && ensure_created_real_directory(&path)? {
+            // WHY: a newly created parent directory is already a durable
+            // workspace mutation even if the later leaf write fails.
+            side_effect_recorder.mark_applied();
         }
     }
     Ok(path)

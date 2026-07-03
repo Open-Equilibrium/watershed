@@ -2065,6 +2065,38 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
 }
 
 #[test]
+fn created_parent_directory_keeps_reserved_audit_on_rollback() {
+    let workspace = empty_workspace("created-parent-audit");
+    let reservation = reserve_session_log(&workspace, "audit001").expect("reservation succeeds");
+    write_initial_session_log(&reservation, "audit001").expect("started audit writes");
+    write_reserved_session_metadata(&reservation, "audit001", 1, None)
+        .expect("started metadata writes");
+
+    let target = "out/nested/summary.txt";
+    let path = ensure_real_workspace_write_path(
+        &workspace,
+        target,
+        SideEffectRecorder::for_reservation(&reservation),
+    )
+    .expect("parent dirs created");
+
+    assert_eq!(path, workspace.join("out/nested/summary.txt"));
+    assert!(workspace.join("out/nested").is_dir());
+
+    reservation.rollback();
+
+    assert!(
+        reservation.session_path.exists(),
+        "created parent directories must keep the started session audit"
+    );
+    assert!(
+        reservation.log_path.exists(),
+        "created parent directories must keep session metadata"
+    );
+    assert!(!reservation.lock_path.exists());
+}
+
+#[test]
 fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let workspace = empty_workspace("reservation-helper-edges");
     let missing_lock = SessionReservation {
