@@ -1,6 +1,8 @@
 use loop_agent_core::{
     run_loop, validate_protocol_jsonl_text, EmitMode, LOCAL_LOG_DIR, LOCAL_SESSION_DIR,
+    MAX_LOOP_EVENT_STREAM_BYTES,
 };
+use proto::{EventEnvelope, EventType};
 use std::{
     fs,
     ops::Deref,
@@ -38,6 +40,35 @@ fn event_validation_p95_stays_under_m1_budget() {
         p95_nanos <= 1_000_000,
         "FSM/event validation p95 must stay <= 1 ms per event: {p95_nanos} ns"
     );
+}
+
+#[test]
+fn near_cap_event_validation_enforces_m1_memory_budget() {
+    let _guard = performance_test_guard();
+    let stream = near_cap_valid_event_stream();
+    assert!(
+        stream.len() <= MAX_LOOP_EVENT_STREAM_BYTES,
+        "near-cap stream must stay inside the runtime budget"
+    );
+    assert!(
+        stream.len() >= MAX_LOOP_EVENT_STREAM_BYTES - 8 * 1024,
+        "near-cap stream should exercise the budget boundary: {} bytes",
+        stream.len()
+    );
+
+    let started = Instant::now();
+    let events = validate_protocol_jsonl_text(Path::new("near-cap.jsonl"), &stream)
+        .expect("near-cap stream validates");
+    assert_eq!(events.len(), 9);
+    assert!(
+        started.elapsed() <= Duration::from_secs(5),
+        "near-cap validation should remain bounded"
+    );
+
+    let oversized = format!("{stream}{}\n", "x".repeat(16 * 1024));
+    let err = validate_protocol_jsonl_text(Path::new("oversized-near-cap.jsonl"), &oversized)
+        .expect_err("oversized stream must fail the event-stream budget");
+    assert!(err.to_string().contains("event stream budget"), "{err}");
 }
 
 #[test]
@@ -154,7 +185,11 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
         total_workspace_bytes < 64 * 1024 * 1024,
         "concurrent fixture workspaces must stay bounded: {total_workspace_bytes} bytes"
     );
-    if let (Some(before), Some(after)) = (resident_bytes_before, current_resident_set_size()) {
+    if rss_budget_must_be_enforced() {
+        let before = resident_bytes_before
+            .expect("RSS measurement must be available on this enforced target before the run");
+        let after = current_resident_set_size()
+            .expect("RSS measurement must be available on this enforced target after the run");
         let growth = after.saturating_sub(before);
         let budget = 10 * 1024 * 1024 * concurrency as u64;
         assert!(
@@ -187,6 +222,107 @@ fn p95(mut values: Vec<u128>) -> u128 {
     values.sort_unstable();
     let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
     values[index]
+}
+
+fn near_cap_valid_event_stream() -> String {
+    let base = event_stream_with_message_content("");
+    let target_len = MAX_LOOP_EVENT_STREAM_BYTES - 4 * 1024;
+    let padding_len = target_len.saturating_sub(base.len());
+    event_stream_with_message_content(&"x".repeat(padding_len))
+}
+
+fn event_stream_with_message_content(content: &str) -> String {
+    [
+        perf_event_line(
+            1,
+            EventType::SessionStarted,
+            None,
+            serde_json::json!({"reason":"fixture-start"}),
+        ),
+        perf_event_line(
+            2,
+            EventType::LoopStarted,
+            Some("loop-001"),
+            serde_json::json!({"loop_definition_id":"near-cap-loop","loop_name":"NearCap"}),
+        ),
+        perf_event_line(
+            3,
+            EventType::PhaseEntered,
+            Some("loop-001"),
+            serde_json::json!({
+                "instruction_ids": [],
+                "phase_id": "phase",
+                "phase_name": "Phase",
+                "tool_ids": [],
+            }),
+        ),
+        perf_event_line(
+            4,
+            EventType::StepStarted,
+            Some("loop-001"),
+            serde_json::json!({
+                "phase_id": "phase",
+                "step_id": "step",
+                "step_name": "Step",
+            }),
+        ),
+        perf_event_line(
+            5,
+            EventType::MessageDelta,
+            Some("loop-001"),
+            serde_json::json!({
+                "content_delta": content,
+                "message_id": "msg-001",
+                "role": "assistant",
+            }),
+        ),
+        perf_event_line(
+            6,
+            EventType::MessageCompleted,
+            Some("loop-001"),
+            serde_json::json!({
+                "message_id": "msg-001",
+                "role": "assistant",
+            }),
+        ),
+        perf_event_line(
+            7,
+            EventType::StepCompleted,
+            Some("loop-001"),
+            serde_json::json!({
+                "phase_id": "phase",
+                "step_id": "step",
+                "step_name": "Step",
+            }),
+        ),
+        perf_event_line(
+            8,
+            EventType::LoopCompleted,
+            Some("loop-001"),
+            serde_json::json!({"loop_definition_id":"near-cap-loop","loop_name":"NearCap"}),
+        ),
+        perf_event_line(9, EventType::SessionCompleted, None, serde_json::json!({})),
+    ]
+    .join("")
+}
+
+fn perf_event_line(
+    sequence: u64,
+    event_type: EventType,
+    loop_id: Option<&str>,
+    payload: serde_json::Value,
+) -> String {
+    let mut event = EventEnvelope::new(
+        format!("evt-{sequence:03}"),
+        event_type,
+        "nearcap001",
+        sequence,
+        format!("2026-01-01T00:00:{:02}Z", sequence - 1),
+        "loop-agent-cli",
+        payload,
+    );
+    event.loop_id = loop_id.map(str::to_owned);
+    event.canonical_jsonl().expect("event serializes")
 }
 
 fn fixture_dir(name: &str) -> PathBuf {
@@ -307,6 +443,10 @@ fn dir_size(path: &Path) -> u64 {
         .sum()
 }
 
+fn rss_budget_must_be_enforced() -> bool {
+    cfg!(any(target_os = "linux", target_os = "macos", windows))
+}
+
 #[cfg(target_os = "linux")]
 fn current_resident_set_size() -> Option<u64> {
     let status = fs::read_to_string("/proc/self/status").ok()?;
@@ -368,7 +508,72 @@ fn current_resident_set_size() -> Option<u64> {
     (ok != 0).then_some(counters.working_set_size as u64)
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+fn current_resident_set_size() -> Option<u64> {
+    use std::mem;
+
+    type MachMsgTypeNumber = u32;
+    type MachPort = u32;
+
+    #[repr(C)]
+    struct TimeValue {
+        seconds: i32,
+        microseconds: i32,
+    }
+
+    #[repr(C)]
+    struct MachTaskBasicInfo {
+        virtual_size: u64,
+        resident_size: u64,
+        resident_size_max: u64,
+        user_time: TimeValue,
+        system_time: TimeValue,
+        policy: i32,
+        suspend_count: i32,
+    }
+
+    const KERN_SUCCESS: i32 = 0;
+    const MACH_TASK_BASIC_INFO: i32 = 20;
+
+    extern "C" {
+        fn mach_task_self() -> MachPort;
+        fn task_info(
+            target_task: MachPort,
+            flavor: i32,
+            task_info_out: *mut i32,
+            task_info_out_count: *mut MachMsgTypeNumber,
+        ) -> i32;
+    }
+
+    let mut info = MachTaskBasicInfo {
+        virtual_size: 0,
+        resident_size: 0,
+        resident_size_max: 0,
+        user_time: TimeValue {
+            seconds: 0,
+            microseconds: 0,
+        },
+        system_time: TimeValue {
+            seconds: 0,
+            microseconds: 0,
+        },
+        policy: 0,
+        suspend_count: 0,
+    };
+    let mut count =
+        (mem::size_of::<MachTaskBasicInfo>() / mem::size_of::<i32>()) as MachMsgTypeNumber;
+    let ok = unsafe {
+        task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            (&mut info as *mut MachTaskBasicInfo).cast::<i32>(),
+            &mut count,
+        )
+    };
+    (ok == KERN_SUCCESS).then_some(info.resident_size)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn current_resident_set_size() -> Option<u64> {
     None
 }
