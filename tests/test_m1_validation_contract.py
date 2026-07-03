@@ -116,6 +116,30 @@ class M1ValidationContractTest(unittest.TestCase):
         ]:
             self.assertIn(token, sources[source_key])
 
+    def test_ci_trigger_scope_and_branch_protection_decision_are_recorded(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        decisions = (ROOT / "docs" / "decisions" / "open-decisions.html").read_text(
+            encoding="utf-8"
+        )
+        plan = (ROOT / "PLAN.md").read_text(encoding="utf-8")
+
+        self.assertIn("pull_request:\n    branches: [main]", workflow)
+        self.assertIn("push:\n    branches: [main]", workflow)
+        for token in [
+            'id="d-056"',
+            "D-056 - CI Trigger And Branch Protection Scope",
+            "CI currently runs only for pull requests targeting main and pushes to main",
+            "changing triggers",
+        ]:
+            self.assertIn(token, decisions)
+        self.assertIn(
+            "CI currently runs only for PRs targeting `main` and pushes to `main`; "
+            "branch protection/ruleset activation remains D-056.",
+            plan,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
