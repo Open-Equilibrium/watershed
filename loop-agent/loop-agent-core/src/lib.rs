@@ -901,8 +901,9 @@ struct SessionReservation {
 
 impl SessionReservation {
     fn rollback(&self) {
-        // WHY: once side effects have applied, even an incomplete started stream is the only
-        // durable audit record tying the workspace mutation to a session attempt.
+        // WHY: committed JSONL streams are durable audit records, and once side effects
+        // have applied, even an incomplete started stream ties workspace mutation to a
+        // session attempt.
         if !self.committed.get() && !self.side_effects_applied.get() {
             let _ = fs::remove_file(&self.session_path);
             let _ = fs::remove_file(&self.log_path);
