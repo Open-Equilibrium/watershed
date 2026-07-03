@@ -614,9 +614,10 @@ impl ResolvedRegistry {
     }
 
     fn validate_loop_cycles(&self) -> Result<(), RegistryError> {
+        let mut visited = BTreeMap::<String, LoopTailDepth>::new();
         for loop_id in self.loops.keys() {
             let mut visiting = BTreeSet::new();
-            self.visit_loop(loop_id, 1, &mut visiting)?;
+            self.visit_loop(loop_id, 1, &mut visiting, &mut visited)?;
         }
         Ok(())
     }
@@ -626,6 +627,7 @@ impl ResolvedRegistry {
         loop_id: &str,
         depth: usize,
         visiting: &mut BTreeSet<String>,
+        visited: &mut BTreeMap<String, LoopTailDepth>,
     ) -> Result<(), RegistryError> {
         if depth > MAX_LOOP_NESTING_DEPTH {
             return Err(RegistryError::LoopDepthExceeded {
@@ -634,6 +636,17 @@ impl ResolvedRegistry {
                 max: MAX_LOOP_NESTING_DEPTH,
             });
         }
+        if let Some(tail) = visited.get(loop_id) {
+            let resolved_depth = depth + tail.depth - 1;
+            if resolved_depth > MAX_LOOP_NESTING_DEPTH {
+                return Err(RegistryError::LoopDepthExceeded {
+                    loop_id: tail.deepest_loop_id.clone(),
+                    depth: resolved_depth,
+                    max: MAX_LOOP_NESTING_DEPTH,
+                });
+            }
+            return Ok(());
+        }
         if !visiting.insert(loop_id.to_owned()) {
             return Err(RegistryError::LoopCycle {
                 loop_id: loop_id.to_owned(),
@@ -641,14 +654,33 @@ impl ResolvedRegistry {
         }
 
         let loop_block = self.require_loop(loop_id, "loop", loop_id)?;
+        let mut tail = LoopTailDepth {
+            deepest_loop_id: loop_id.to_owned(),
+            depth: 1,
+        };
         for subloop_ref in &loop_block.subloop_refs {
             let subloop = self.require_loop(subloop_ref, "loop", loop_id)?;
-            self.visit_loop(&subloop.identity.id, depth + 1, visiting)?;
+            self.visit_loop(&subloop.identity.id, depth + 1, visiting, visited)?;
+            let child_tail = visited
+                .get(&subloop.identity.id)
+                .expect("visited child loop has tail depth");
+            if child_tail.depth + 1 > tail.depth {
+                tail = LoopTailDepth {
+                    deepest_loop_id: child_tail.deepest_loop_id.clone(),
+                    depth: child_tail.depth + 1,
+                };
+            }
         }
 
         visiting.remove(loop_id);
+        visited.insert(loop_id.to_owned(), tail);
         Ok(())
     }
+}
+
+struct LoopTailDepth {
+    deepest_loop_id: String,
+    depth: usize,
 }
 
 fn insert_named_block<T>(
@@ -3283,6 +3315,7 @@ fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn parser_contract_records_decided_m0_shape() {
@@ -4943,6 +4976,19 @@ tool:
     }
 
     #[test]
+    fn registry_reference_validation_memoizes_duplicate_subloop_tails() {
+        let started = Instant::now();
+
+        ResolvedRegistry::from_blocks(duplicated_subloop_tail_blocks(25))
+            .expect("duplicated acyclic subloop tail validates");
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "duplicated subloop tail validation must be linear in resolved loops"
+        );
+    }
+
+    #[test]
     fn registry_rejects_ambiguous_same_kind_id_name_references() {
         let err = ResolvedRegistry::from_blocks([
             RegistryBlock::Instruction(InstructionBlock {
@@ -6317,6 +6363,26 @@ tool:
                 .collect(),
             connection_refs: Vec::new(),
         }
+    }
+
+    fn duplicated_subloop_tail_blocks(depth: usize) -> Vec<RegistryBlock> {
+        (0..depth)
+            .map(|index| {
+                let child = (index + 1 < depth).then(|| format!("dup-loop-{:03}", index + 1));
+                RegistryBlock::Loop(LoopBlock {
+                    identity: BlockIdentity {
+                        id: format!("dup-loop-{index:03}"),
+                        name: format!("DupLoop {index:03}"),
+                    },
+                    phase_refs: Vec::new(),
+                    subloop_refs: child
+                        .into_iter()
+                        .flat_map(|child| [child.clone(), child])
+                        .collect(),
+                    connection_refs: Vec::new(),
+                })
+            })
+            .collect()
     }
 
     fn registry_schema() -> serde_json::Value {
