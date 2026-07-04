@@ -58,6 +58,43 @@ class CodexHarnessValidatorTest(unittest.TestCase):
 
         self.assertIn(".codex/config.toml: unknown root key 'unknown_key'", errors)
 
+    def test_accepts_boolean_network_access_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            config_path = root / ".codex" / "config.toml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    "network_access = true",
+                    "network_access = false",
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validator.validate_repo(root)
+
+        self.assertEqual([], errors)
+
+    def test_rejects_non_boolean_network_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            config_path = root / ".codex" / "config.toml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    "network_access = true",
+                    'network_access = "true"',
+                ),
+                encoding="utf-8",
+            )
+
+            errors = validator.validate_repo(root)
+
+        self.assertIn(
+            ".codex/config.toml: sandbox_workspace_write.network_access must be a boolean",
+            errors,
+        )
+
     def test_rejects_unknown_hook_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

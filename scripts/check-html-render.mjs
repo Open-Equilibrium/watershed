@@ -37,6 +37,11 @@ function runPlaywrightCli(args, action) {
 }
 
 function ensurePlaywrightChromium() {
+  const executablePath = chromium.executablePath();
+  if (existsSync(executablePath)) {
+    return;
+  }
+
   if (process.platform === "linux" && process.env.CI === "true") {
     runPlaywrightCli(
       ["exec", "playwright", "install-deps", "chromium"],
@@ -46,7 +51,6 @@ function ensurePlaywrightChromium() {
 
   runPlaywrightCli(["exec", "playwright", "install", "chromium"], "Playwright browser install");
 
-  const executablePath = chromium.executablePath();
   if (!existsSync(executablePath)) {
     throw new Error(`Playwright browser install did not create ${executablePath}`);
   }

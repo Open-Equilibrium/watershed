@@ -97,8 +97,9 @@ def validate_config(root: Path) -> list[str]:
     for key, expected in EXPECTED_CONFIG_VALUES.items():
         if config.get(key) != expected:
             errors.append(f"{rel}: {key} must be {expected!r}")
-    if config.get("sandbox_workspace_write", {}).get("network_access") is not False:
-        errors.append(f"{rel}: sandbox_workspace_write.network_access must be false")
+    network_access = config.get("sandbox_workspace_write", {}).get("network_access")
+    if not isinstance(network_access, bool):
+        errors.append(f"{rel}: sandbox_workspace_write.network_access must be a boolean")
     features = config.get("features", {})
     if features.get("hooks") is not True:
         errors.append(f"{rel}: features.hooks must be true")

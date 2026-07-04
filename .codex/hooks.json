@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \".codex/hooks/pre_tool_use_guard.py\"",
+            "command": "sh -c 'if command -v python3 >/dev/null 2>&1; then exec python3 \"$1\"; else exec python \"$1\"; fi' sh \".codex/hooks/pre_tool_use_guard.py\"",
             "statusMessage": "Checking command against protected-path policy",
             "timeout": 20
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \".codex/hooks/stop_closeout_check.py\"",
+            "command": "sh -c 'if command -v python3 >/dev/null 2>&1; then exec python3 \"$1\"; else exec python \"$1\"; fi' sh \".codex/hooks/stop_closeout_check.py\"",
             "timeout": 30
           }
         ]

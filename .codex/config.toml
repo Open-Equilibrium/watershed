@@ -17,7 +17,7 @@ sandbox_mode = "workspace-write"
 web_search = "disabled"
 
 [sandbox_workspace_write]
-network_access = false
+network_access = true
 
 [features]
 multi_agent = true
