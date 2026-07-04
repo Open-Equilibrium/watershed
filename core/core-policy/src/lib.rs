@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 /// Policy artifact version string emitted by the v0 compiler.
@@ -1488,8 +1489,56 @@ fn network_attempt_is_denied(
 
 fn network_allow_matches_destination(entry: &NetworkAllowEntry, destination: &str) -> bool {
     match entry.kind {
-        NetworkAllowKind::Cidr => entry.cidr == destination,
+        NetworkAllowKind::Cidr => cidr_contains_destination(&entry.cidr, destination),
     }
+}
+
+fn cidr_contains_destination(cidr: &str, destination: &str) -> bool {
+    let Some((network, prefix)) = parse_cidr(cidr) else {
+        return false;
+    };
+    let Ok(destination) = destination.parse::<IpAddr>() else {
+        return false;
+    };
+
+    match (network, destination) {
+        (IpAddr::V4(network), IpAddr::V4(destination)) => {
+            ipv4_cidr_contains(network, prefix, destination)
+        }
+        (IpAddr::V6(network), IpAddr::V6(destination)) => {
+            ipv6_cidr_contains(network, prefix, destination)
+        }
+        _ => false,
+    }
+}
+
+fn parse_cidr(value: &str) -> Option<(IpAddr, u8)> {
+    let (addr, prefix) = value.split_once('/')?;
+    let addr = addr.parse::<IpAddr>().ok()?;
+    let prefix = prefix.parse::<u8>().ok()?;
+    match addr {
+        IpAddr::V4(_) if prefix <= 32 => Some((addr, prefix)),
+        IpAddr::V6(_) if prefix <= 128 => Some((addr, prefix)),
+        _ => None,
+    }
+}
+
+fn ipv4_cidr_contains(network: Ipv4Addr, prefix: u8, destination: Ipv4Addr) -> bool {
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - u32::from(prefix))
+    };
+    u32::from(destination) & mask == u32::from(network) & mask
+}
+
+fn ipv6_cidr_contains(network: Ipv6Addr, prefix: u8, destination: Ipv6Addr) -> bool {
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u128::MAX << (128 - u32::from(prefix))
+    };
+    u128::from(destination) & mask == u128::from(network) & mask
 }
 
 fn environment_attempt_is_denied(command: &CommandPolicy, name: &str) -> bool {

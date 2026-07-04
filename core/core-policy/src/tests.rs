@@ -665,13 +665,24 @@ fn policy_denial_evaluation_rejects_attempts_allowed_by_policy() {
     }];
     let err = network_artifact
         .evaluate_denied_attempt(&DeniedAttempt::Network {
-            destination: "192.0.2.0/24".to_owned(),
+            destination: "192.0.2.42".to_owned(),
             port: 5353,
             tool_id: "allowed-tool".to_owned(),
             transport: NetworkTransport::Udp,
         })
         .expect_err("allowed network attempt must not validate as a denial");
     assert!(err.to_string().contains("policy allows network"), "{err}");
+    assert_eq!(
+        network_artifact
+            .evaluate_denied_attempt(&DeniedAttempt::Network {
+                destination: "192.0.3.42".to_owned(),
+                port: 5353,
+                tool_id: "allowed-tool".to_owned(),
+                transport: NetworkTransport::Udp,
+            })
+            .expect("outside CIDR destination is denied"),
+        DenyReasonCode::NetworkDenied
+    );
 
     let artifact = policy_artifact_with_environment_allow("SAFE_ENV");
     let err = artifact
@@ -866,6 +877,40 @@ fn path_denial_helpers_cover_normalization_and_pattern_edges() {
         "**/secrets",
         "workspace/app/secrets"
     ));
+}
+
+#[test]
+fn network_allow_helpers_cover_cidr_matching_edges() {
+    let ipv4 = NetworkAllowEntry {
+        cidr: "192.0.2.0/24".to_owned(),
+        kind: NetworkAllowKind::Cidr,
+        port: 443,
+        transport: NetworkTransport::Tcp,
+    };
+    assert!(network_allow_matches_destination(&ipv4, "192.0.2.42"));
+    assert!(!network_allow_matches_destination(&ipv4, "192.0.3.42"));
+    assert!(!network_allow_matches_destination(&ipv4, "example.test"));
+
+    let ipv6 = NetworkAllowEntry {
+        cidr: "2001:db8::/32".to_owned(),
+        kind: NetworkAllowKind::Cidr,
+        port: 443,
+        transport: NetworkTransport::Tcp,
+    };
+    assert!(network_allow_matches_destination(&ipv6, "2001:db8::1"));
+    assert!(!network_allow_matches_destination(&ipv6, "2001:db9::1"));
+    assert!(!network_allow_matches_destination(&ipv6, "192.0.2.42"));
+
+    assert!(cidr_contains_destination("0.0.0.0/0", "203.0.113.42"));
+    assert!(cidr_contains_destination("::/0", "2001:db8::1"));
+    assert!(!cidr_contains_destination("not-a-cidr", "192.0.2.42"));
+    assert!(!cidr_contains_destination("not-an-ip/24", "192.0.2.42"));
+    assert!(!cidr_contains_destination(
+        "192.0.2.0/not-a-prefix",
+        "192.0.2.42"
+    ));
+    assert!(!cidr_contains_destination("192.0.2.0/33", "192.0.2.42"));
+    assert!(!cidr_contains_destination("2001:db8::/129", "2001:db8::1"));
 }
 
 #[test]
