@@ -170,7 +170,7 @@ M3 delivers Liquid as a **self-contained native workspace/app-building product**
 
 1. Keep the M1 topic branch scoped to Loop Agent runtime hardening until the DoD is green.
 2. Keep runtime gates green as implementation changes: ≥95% production-code coverage, D-015 golden diffs, M1 performance budgets, sandbox-negative policy emulation and macOS policy-artifact parity.
-3. CI currently runs only for PRs targeting `main` and pushes to `main`; branch protection/ruleset activation remains D-056.
+3. CI runs for PRs targeting `main`, pushes to `main` and pushes to `feat/**`; branch protection/ruleset activation remains D-056.
 4. Finish M1 only after the full closeout chain in `AGENTS.md` is green and Loop Agent remains standalone.
 5. Start Meta-Harness M2 planning only after Loop Agent M1 is green and standalone.
 

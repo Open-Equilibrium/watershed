@@ -140,16 +140,16 @@ class M1ValidationContractTest(unittest.TestCase):
         plan = (ROOT / "PLAN.md").read_text(encoding="utf-8")
 
         self.assertIn("pull_request:\n    branches: [main]", workflow)
-        self.assertIn("push:\n    branches: [main]", workflow)
+        self.assertIn('push:\n    branches: [main, "feat/**"]', workflow)
         for token in [
             'id="d-056"',
             "D-056 - CI Trigger And Branch Protection Scope",
-            "CI currently runs only for pull requests targeting main and pushes to main",
-            "changing triggers",
+            "CI runs for pull requests targeting main, pushes to main and pushes to feat/**",
+            "Which GitHub branch protection or ruleset should require the M1 gates",
         ]:
             self.assertIn(token, decisions)
         self.assertIn(
-            "CI currently runs only for PRs targeting `main` and pushes to `main`; "
+            "CI runs for PRs targeting `main`, pushes to `main` and pushes to `feat/**`; "
             "branch protection/ruleset activation remains D-056.",
             plan,
         )
