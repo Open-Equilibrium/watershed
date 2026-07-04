@@ -4897,6 +4897,7 @@ fn payload_contract_error(
     ))
 }
 
+#[cfg(any(test, doctest))]
 fn validate_appended_session_log_text(
     path: &Path,
     expected_session_id: &str,
