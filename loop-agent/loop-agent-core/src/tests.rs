@@ -7695,7 +7695,7 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("hard-linked summary leaf must fail");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
+    assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "hard-linked");
     assert_eq!(
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
