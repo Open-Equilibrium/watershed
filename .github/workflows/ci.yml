@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
 
 permissions:
   contents: read
@@ -51,6 +51,9 @@ jobs:
 
       - name: Run tests
         run: cargo nextest run --locked --workspace --all-targets
+
+      - name: Run optimized performance tests
+        run: cargo test --locked -p loop-agent-core --test performance --release
 
       - name: Check line coverage
         run: >-

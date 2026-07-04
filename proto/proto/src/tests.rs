@@ -91,6 +91,31 @@ fn canonical_json_normalizes_strings_to_nfc() {
 }
 
 #[test]
+fn event_envelope_build_normalizes_string_values_to_nfc() {
+    let mut event = EventEnvelope::new(
+        "evt-e\u{301}",
+        EventType::LoopStarted,
+        "smoke001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        json!({
+            "loop_name": "Cafe\u{301}",
+            "nested": ["e\u{301}"]
+        }),
+    );
+    event.loop_id = Some("loop-e\u{301}".to_owned());
+    event.correlation_id = Some("corr-e\u{301}".to_owned());
+    event.normalize_strings_to_nfc();
+
+    assert_eq!(event.event_id, "evt-é");
+    assert_eq!(event.loop_id.as_deref(), Some("loop-é"));
+    assert_eq!(event.correlation_id.as_deref(), Some("corr-é"));
+    assert_eq!(event.payload["loop_name"], json!("Café"));
+    assert_eq!(event.payload["nested"][0], json!("é"));
+}
+
+#[test]
 fn canonical_json_serializes_scalar_values() {
     assert_eq!(
         canonical_json(&Value::Null).expect("null canonicalizes"),

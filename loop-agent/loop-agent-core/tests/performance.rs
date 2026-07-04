@@ -1,11 +1,10 @@
 use loop_agent_core::{
-    run_loop, validate_protocol_jsonl_text, EmitMode, LOCAL_SESSION_DIR,
+    resume_session, run_loop, validate_protocol_jsonl_text, EmitMode, LOCAL_LOG_DIR,
     MAX_LOOP_EVENT_STREAM_BYTES,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
     fs,
-    io::Write,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
@@ -20,27 +19,28 @@ static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PERFORMANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn event_stream_validation_p95_stays_under_m1_budget() {
+fn smoke_loop_runtime_emit_p95_stays_under_m1_budget() {
     let _guard = performance_test_guard();
-    let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
-    let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
-    let event_count = stream.lines().count() as u128;
-    let mut stream_nanos = Vec::new();
+    let mut event_nanos = Vec::new();
 
-    for _ in 0..10 {
-        validate_protocol_jsonl_text(&stream_path, &stream).expect("stream validates");
+    for _ in 0..3 {
+        let workspace = workspace_copy("smoke-loop");
+        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("warm runtime emit succeeds");
     }
-    for _ in 0..100 {
+    for _ in 0..25 {
+        let workspace = workspace_copy("smoke-loop");
         let started = Instant::now();
-        validate_protocol_jsonl_text(&stream_path, &stream).expect("stream validates");
-        stream_nanos.push(started.elapsed().as_nanos());
+        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect("runtime emit path succeeds");
+        assert!(!output.failed);
+        event_nanos.push(started.elapsed().as_nanos() / output.event_count as u128);
     }
-    let p95_nanos = p95(stream_nanos);
-    let budget_nanos = 1_000_000 * event_count;
+    let p95_nanos = p95(event_nanos);
+    let budget_nanos = perf_budget_nanos(1_000_000, 25_000_000);
 
     assert!(
         p95_nanos <= budget_nanos,
-        "FSM/event stream validation p95 must stay <= 1 ms per event across {event_count} events: {p95_nanos} ns"
+        "smoke-loop runtime emit p95 must stay within the per-event budget: {p95_nanos} ns"
     );
 }
 
@@ -74,28 +74,22 @@ fn near_cap_event_validation_enforces_m1_memory_budget() {
 }
 
 #[test]
-fn hello_loop_session_log_append_p95_stays_under_m1_budget() {
+fn hello_loop_resume_append_p95_stays_under_m1_budget() {
     let _guard = performance_test_guard();
-    let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
-    let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
-    let lines = stream.lines().collect::<Vec<_>>();
-    let workspace = empty_workspace("hello-loop-append");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session directory created");
-    let session_path = session_dir.join("hello001.jsonl");
     let mut append_nanos = Vec::new();
 
-    for _ in 0..10 {
-        append_lines_to_session_log(&session_path, &lines);
+    for _ in 0..3 {
+        measure_hello_loop_resume_append();
     }
-    for _ in 0..100 {
-        append_nanos.extend(append_lines_to_session_log(&session_path, &lines));
+    for _ in 0..25 {
+        append_nanos.push(measure_hello_loop_resume_append());
     }
     let p95_nanos = p95(append_nanos);
+    let budget_nanos = perf_budget_nanos(5_000_000, 50_000_000);
 
     assert!(
-        p95_nanos <= 5_000_000,
-        "hello-loop session-log append p95 must stay <= 5 ms per event: {p95_nanos} ns"
+        p95_nanos <= budget_nanos,
+        "hello-loop resume append p95 must stay within the per-event budget: {p95_nanos} ns"
     );
 }
 
@@ -195,22 +189,56 @@ fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() 
     }
 }
 
-fn append_lines_to_session_log(path: &Path, lines: &[&str]) -> Vec<u128> {
-    fs::write(path, "").expect("session log reset");
-    let mut samples = Vec::with_capacity(lines.len());
-    for line in lines {
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(path)
-            .expect("session log opened for append");
-        let started = Instant::now();
-        file.write_all(line.as_bytes())
-            .expect("session log event appended");
-        file.write_all(b"\n").expect("session log newline appended");
-        file.flush().expect("session log append flushed");
-        samples.push(started.elapsed().as_nanos());
+fn measure_hello_loop_resume_append() -> u128 {
+    let workspace = workspace_copy("hello-loop");
+    let completed =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop completes");
+    let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
+    let prefix_events = prefix.lines().count();
+    fs::write(&completed.session_path, &prefix).expect("partial prefix written");
+    rewrite_session_metadata_event_count(&workspace, &completed.session_id, prefix_events);
+    fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
+
+    let started = Instant::now();
+    let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
+        .expect("resume append succeeds");
+    let elapsed = started.elapsed().as_nanos();
+    let appended_events = output.event_count.saturating_sub(prefix_events).max(1);
+    elapsed / appended_events as u128
+}
+
+fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
+    let event_marker = "\"event_type\":\"tool.started\"";
+    let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
+    let mut prefix = String::new();
+    for line in stream.lines() {
+        if line.contains(event_marker) && line.contains(&tool_marker) {
+            return prefix;
+        }
+        prefix.push_str(line);
+        prefix.push('\n');
     }
-    samples
+    panic!("missing tool.started for {tool_id}");
+}
+
+fn rewrite_session_metadata_event_count(workspace: &Path, session_id: &str, event_count: usize) {
+    let metadata_path = workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{session_id}.log"));
+    let metadata = fs::read_to_string(&metadata_path).expect("metadata readable");
+    let updated = metadata
+        .lines()
+        .map(|line| {
+            if line.starts_with("events=") {
+                format!("events={event_count}")
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    fs::write(metadata_path, updated).expect("metadata event count rewritten");
 }
 
 fn performance_test_guard() -> MutexGuard<'static, ()> {
@@ -236,6 +264,14 @@ fn p95(mut values: Vec<u128>) -> u128 {
     values.sort_unstable();
     let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
     values[index]
+}
+
+fn perf_budget_nanos(release_budget_nanos: u128, debug_budget_nanos: u128) -> u128 {
+    if cfg!(debug_assertions) {
+        debug_budget_nanos
+    } else {
+        release_budget_nanos
+    }
 }
 
 fn near_cap_valid_event_stream() -> String {

@@ -58,17 +58,30 @@ impl EventEnvelope {
     ) -> Self {
         Self {
             correlation_id: None,
-            event_id: event_id.into(),
+            event_id: nfc_string(event_id.into()),
             event_type,
             loop_id: None,
             parent_loop_id: None,
-            payload,
+            payload: nfc_json_string_values(payload),
             protocol_version: PROTOCOL_VERSION_V0.to_owned(),
             sequence,
-            session_id: session_id.into(),
-            source: source.into(),
-            timestamp: timestamp.into(),
+            session_id: nfc_string(session_id.into()),
+            source: nfc_string(source.into()),
+            timestamp: nfc_string(timestamp.into()),
         }
+    }
+
+    /// Normalizes envelope string fields and payload string values to Unicode NFC.
+    pub fn normalize_strings_to_nfc(&mut self) {
+        normalize_optional_string_to_nfc(&mut self.correlation_id);
+        self.event_id = nfc_string(std::mem::take(&mut self.event_id));
+        normalize_optional_string_to_nfc(&mut self.loop_id);
+        normalize_optional_string_to_nfc(&mut self.parent_loop_id);
+        self.payload = nfc_json_string_values(std::mem::take(&mut self.payload));
+        self.protocol_version = nfc_string(std::mem::take(&mut self.protocol_version));
+        self.session_id = nfc_string(std::mem::take(&mut self.session_id));
+        self.source = nfc_string(std::mem::take(&mut self.source));
+        self.timestamp = nfc_string(std::mem::take(&mut self.timestamp));
     }
 
     /// Serializes the envelope as canonical JSON plus a trailing newline.
@@ -86,6 +99,32 @@ impl EventEnvelope {
         let mut out = canonical_json(&value)?;
         out.push('\n');
         Ok(out)
+    }
+}
+
+fn normalize_optional_string_to_nfc(value: &mut Option<String>) {
+    if let Some(current) = value {
+        *current = nfc_string(std::mem::take(current));
+    }
+}
+
+fn nfc_string(value: String) -> String {
+    value.nfc().collect()
+}
+
+fn nfc_json_string_values(value: Value) -> Value {
+    match value {
+        Value::String(value) => Value::String(nfc_string(value)),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(nfc_json_string_values).collect())
+        }
+        Value::Object(values) => Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, nfc_json_string_values(value)))
+                .collect(),
+        ),
+        Value::Null | Value::Bool(_) | Value::Number(_) => value,
     }
 }
 

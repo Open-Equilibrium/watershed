@@ -3894,6 +3894,41 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
 }
 
 #[test]
+fn resume_accepts_nfc_disk_prefix_for_decomposed_registry_names() {
+    let workspace = workspace_copy("hello-loop");
+    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+    let loop_path = workspace.join("registry/loops/hello-loop.yaml");
+    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+    fs::write(
+        &loop_path,
+        source.replace("name: HelloLoop", "name: Cafe\u{301}Loop"),
+    )
+    .expect("loop fixture rewritten");
+
+    let completed =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("initial run completes");
+    let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
+    let event_count = prefix.lines().count();
+    fs::write(&completed.session_path, &prefix).expect("partial canonical prefix written");
+    write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop", event_count);
+    fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
+
+    let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
+        .expect("canonical disk prefix resumes against decomposed registry name");
+
+    assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary written on resume"),
+        "hello\n"
+    );
+    let resumed = fs::read_to_string(&completed.session_path).expect("resumed log readable");
+    let events =
+        validate_session_log_text(&completed.session_path, &completed.session_id, &resumed)
+            .expect("resumed log validates");
+    assert!(stream_is_completed(&events));
+}
+
+#[test]
 fn resume_rejects_registry_drift_before_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);

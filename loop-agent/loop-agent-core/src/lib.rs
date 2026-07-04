@@ -494,6 +494,16 @@ pub fn tail_session_to_writer_with_options(
     } else {
         validate_session_log_text(&path, session_id, &stream)?
     };
+    let mut append_state = if events.is_empty() {
+        None
+    } else {
+        Some(SessionAppendValidationState::from_prior_events(
+            &path,
+            session_id,
+            &events,
+            stream.len(),
+        )?)
+    };
     let mut pending = initial[stream.len()..].to_owned();
     let mut observed_len = initial.len();
     if initial.len() > stream.len() && (stream_is_failed(&events) || stream_is_completed(&events)) {
@@ -541,21 +551,29 @@ pub fn tail_session_to_writer_with_options(
             continue;
         }
         let appended = std::mem::take(&mut pending);
-        let appended_events =
-            validate_appended_session_log_text(&path, session_id, &events, &appended)?;
-        let mut current_events = events.clone();
-        current_events.extend(appended_events);
+        let appended_events = if let Some(state) = &mut append_state {
+            state.validate_appended(&path, &appended)?
+        } else {
+            let appended_events = validate_session_log_text(&path, session_id, &appended)?;
+            append_state = Some(SessionAppendValidationState::from_prior_events(
+                &path,
+                session_id,
+                &appended_events,
+                appended.len(),
+            )?);
+            appended_events
+        };
+        events.extend(appended_events);
         if !write_tail_chunk(writer, emit, session_id, &appended)? {
             return Ok(RunOutput {
-                event_count: current_events.len(),
-                failed: stream_is_failed(&current_events),
+                event_count: events.len(),
+                failed: stream_is_failed(&events),
                 session_id: session_id.to_owned(),
                 session_path: path,
                 stdout: String::new(),
             });
         }
         stream.push_str(&appended);
-        events = current_events;
     }
 
     if emit == EmitMode::Human && !write_tail_chunk(writer, emit, session_id, "")? {
@@ -2047,6 +2065,7 @@ impl RuntimeEventBuilder {
             event.loop_id = Some(invocation.loop_id.clone());
             event.parent_loop_id = invocation.parent_loop_id.clone();
         }
+        event.normalize_strings_to_nfc();
         let event_bytes = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
         })?;
@@ -3041,6 +3060,25 @@ fn replace_script_output_atomically(
     Ok(())
 }
 
+#[cfg(unix)]
+fn replace_existing_leaf_from_temp(
+    path: &Path,
+    temp_path: &Path,
+    side_effect_recorder: SideEffectRecorder<'_>,
+    _denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<(), RuntimeError> {
+    if let Err(source) = fs::rename(temp_path, path) {
+        let _ = fs::remove_file(temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    side_effect_recorder.mark_applied();
+    Ok(())
+}
+
+#[cfg(not(unix))]
 fn replace_existing_leaf_from_temp(
     path: &Path,
     temp_path: &Path,
@@ -4859,6 +4897,7 @@ fn payload_contract_error(
     ))
 }
 
+#[cfg(test)]
 fn validate_appended_session_log_text(
     path: &Path,
     expected_session_id: &str,
@@ -4868,47 +4907,6 @@ fn validate_appended_session_log_text(
     if prior_events.is_empty() {
         return validate_session_log_text(path, expected_session_id, text);
     }
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-    if !text.ends_with('\n') {
-        return Err(RuntimeError::Protocol(format!(
-            "{} appended suffix must end with LF",
-            path.display()
-        )));
-    }
-
-    let prior_session_id = &prior_events
-        .first()
-        .expect("prior events are non-empty")
-        .session_id;
-    if prior_session_id != expected_session_id {
-        return Err(RuntimeError::Protocol(format!(
-            "{} contains session_id {prior_session_id:?}, expected {expected_session_id:?}",
-            path.display()
-        )));
-    }
-
-    let mut previous_sequence = prior_events
-        .last()
-        .expect("prior events are non-empty")
-        .sequence;
-    let mut event_ids = prior_events
-        .iter()
-        .map(|event| event.event_id.clone())
-        .collect::<BTreeSet<_>>();
-    let mut loop_started_ids = prior_events
-        .iter()
-        .filter(|event| event.event_type == EventType::LoopStarted)
-        .filter_map(|event| event.loop_id.clone())
-        .collect::<BTreeSet<_>>();
-    let mut terminal_line = prior_events.iter().position(|event| {
-        matches!(
-            event.event_type,
-            EventType::SessionCompleted | EventType::SessionFailed
-        )
-    });
-    terminal_line = terminal_line.map(|index| index + 1);
     let mut stream_bytes = 0usize;
     for event in prior_events {
         let canonical = event.canonical_jsonl().map_err(|err| {
@@ -4918,150 +4916,260 @@ fn validate_appended_session_log_text(
             .checked_add(canonical.len())
             .unwrap_or(usize::MAX);
     }
+    let mut state = SessionAppendValidationState::from_prior_events(
+        path,
+        expected_session_id,
+        prior_events,
+        stream_bytes,
+    )?;
+    state.validate_appended(path, text)
+}
 
-    let mut appended_events = Vec::new();
-    for (index, line) in text.split_terminator('\n').enumerate() {
-        let line_number = prior_events.len() + index + 1;
-        // WHY: incremental tail validation must preserve the same cumulative
-        // public stream budgets as full replay validation.
-        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
-            return Err(RuntimeError::Protocol(format!(
-                "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
-                path.display()
-            )));
-        }
-        stream_bytes = stream_bytes
-            .checked_add(line.len().saturating_add(1))
-            .unwrap_or(usize::MAX);
-        if stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "{} event stream budget exceeded at line {line_number}: {stream_bytes} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
-                path.display()
-            )));
-        }
-        if line.ends_with('\r') {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use LF-only line endings",
-                path.display()
-            )));
-        }
-        let event: EventEnvelope = serde_json::from_str(line)?;
-        let canonical = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
-        })?;
-        if canonical != format!("{line}\n") {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use canonical JSONL bytes",
-                path.display()
-            )));
-        }
-        if event.session_id != *prior_session_id {
-            return Err(RuntimeError::Protocol(format!(
-                "{} must use one session_id",
-                path.display()
-            )));
-        }
-        if !validate_session_id(&event.session_id) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a valid session_id",
-                path.display()
-            )));
-        }
-        if event.event_id.is_empty() {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a non-empty event_id",
-                path.display()
-            )));
-        }
-        if event.source.is_empty() {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a non-empty source",
-                path.display()
-            )));
-        }
-        if !is_rfc3339_utc_timestamp(&event.timestamp) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use an RFC3339 UTC timestamp",
-                path.display()
-            )));
-        }
-        if event
-            .correlation_id
-            .as_ref()
-            .is_some_and(|correlation_id| correlation_id.is_empty())
+struct SessionAppendValidationState {
+    expected_session_id: String,
+    previous_sequence: u64,
+    event_ids: BTreeSet<String>,
+    loop_started_ids: BTreeSet<String>,
+    terminal_line: Option<usize>,
+    stream_bytes: usize,
+    line_count: usize,
+    lifecycle: SessionLifecycleState,
+}
+
+impl SessionAppendValidationState {
+    fn from_prior_events(
+        path: &Path,
+        expected_session_id: &str,
+        prior_events: &[EventEnvelope],
+        stream_bytes: usize,
+    ) -> Result<Self, RuntimeError> {
+        let prior_session_id = &prior_events
+            .first()
+            .expect("prior events are non-empty")
+            .session_id;
+        if prior_events
+            .first()
+            .expect("prior events are non-empty")
+            .event_type
+            != EventType::SessionStarted
         {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a non-empty correlation_id",
+                "{} line 1 must start with session.started",
                 path.display()
             )));
         }
-        if event
-            .loop_id
-            .as_ref()
-            .is_some_and(|loop_id| loop_id.is_empty())
-        {
+        if prior_session_id != expected_session_id {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a non-empty loop_id",
+                "{} contains session_id {prior_session_id:?}, expected {expected_session_id:?}",
                 path.display()
             )));
         }
-        if event
-            .parent_loop_id
-            .as_ref()
-            .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
-        {
+
+        let mut lifecycle = SessionLifecycleState::default();
+        for (index, event) in prior_events.iter().enumerate() {
+            lifecycle.validate_event(path, index + 1, event)?;
+        }
+        lifecycle.validate_terminal_session(path, prior_events.last())?;
+
+        let terminal_line = prior_events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event.event_type,
+                    EventType::SessionCompleted | EventType::SessionFailed
+                )
+            })
+            .map(|index| index + 1);
+
+        Ok(Self {
+            expected_session_id: expected_session_id.to_owned(),
+            previous_sequence: prior_events
+                .last()
+                .expect("prior events are non-empty")
+                .sequence,
+            event_ids: prior_events
+                .iter()
+                .map(|event| event.event_id.clone())
+                .collect(),
+            loop_started_ids: prior_events
+                .iter()
+                .filter(|event| event.event_type == EventType::LoopStarted)
+                .filter_map(|event| event.loop_id.clone())
+                .collect(),
+            terminal_line,
+            stream_bytes,
+            line_count: prior_events.len(),
+            lifecycle,
+        })
+    }
+
+    fn validate_appended(
+        &mut self,
+        path: &Path,
+        text: &str,
+    ) -> Result<Vec<EventEnvelope>, RuntimeError> {
+        if text.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !text.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a non-empty parent_loop_id",
+                "{} appended suffix must end with LF",
                 path.display()
             )));
         }
-        if event.sequence <= previous_sequence {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} sequence must increase",
-                path.display()
-            )));
-        }
-        previous_sequence = event.sequence;
-        if !event_ids.insert(event.event_id.clone()) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a unique event_id",
-                path.display()
-            )));
-        }
-        if let Some(terminal_line) = terminal_line {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} appears after terminal session event on line {terminal_line}",
-                path.display()
-            )));
-        }
-        validate_event_payload(path, line_number, &event)?;
-        if event.event_type == EventType::LoopStarted {
-            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
-                RuntimeError::Protocol(format!(
-                    "{} line {line_number} loop.started must include loop_id",
-                    path.display()
-                ))
-            })?;
-            if !loop_started_ids.insert(loop_id.to_owned()) {
+
+        let mut appended_events = Vec::new();
+        for line in text.split_terminator('\n') {
+            let line_number = self.line_count + 1;
+            // WHY: incremental tail validation must preserve the same cumulative
+            // public stream budgets as full replay validation.
+            if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a unique loop_id for loop.started",
+                    "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
                     path.display()
                 )));
             }
+            self.stream_bytes = self
+                .stream_bytes
+                .checked_add(line.len().saturating_add(1))
+                .unwrap_or(usize::MAX);
+            if self.stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} event stream budget exceeded at line {line_number}: {} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
+                    path.display(),
+                    self.stream_bytes
+                )));
+            }
+            if line.ends_with('\r') {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use LF-only line endings",
+                    path.display()
+                )));
+            }
+            let event: EventEnvelope = serde_json::from_str(line)?;
+            let canonical = event.canonical_jsonl().map_err(|err| {
+                RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
+            })?;
+            if canonical != format!("{line}\n") {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use canonical JSONL bytes",
+                    path.display()
+                )));
+            }
+            if event.session_id != self.expected_session_id {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} must use one session_id",
+                    path.display()
+                )));
+            }
+            if !validate_session_id(&event.session_id) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a valid session_id",
+                    path.display()
+                )));
+            }
+            if event.event_id.is_empty() {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a non-empty event_id",
+                    path.display()
+                )));
+            }
+            if event.source.is_empty() {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a non-empty source",
+                    path.display()
+                )));
+            }
+            if !is_rfc3339_utc_timestamp(&event.timestamp) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use an RFC3339 UTC timestamp",
+                    path.display()
+                )));
+            }
+            if event
+                .correlation_id
+                .as_ref()
+                .is_some_and(|correlation_id| correlation_id.is_empty())
+            {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a non-empty correlation_id",
+                    path.display()
+                )));
+            }
+            if event
+                .loop_id
+                .as_ref()
+                .is_some_and(|loop_id| loop_id.is_empty())
+            {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a non-empty loop_id",
+                    path.display()
+                )));
+            }
+            if event
+                .parent_loop_id
+                .as_ref()
+                .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
+            {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a non-empty parent_loop_id",
+                    path.display()
+                )));
+            }
+            if event.sequence <= self.previous_sequence {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} sequence must increase",
+                    path.display()
+                )));
+            }
+            self.previous_sequence = event.sequence;
+            if !self.event_ids.insert(event.event_id.clone()) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a unique event_id",
+                    path.display()
+                )));
+            }
+            if let Some(terminal_line) = self.terminal_line {
+                return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} appears after terminal session event on line {terminal_line}",
+                path.display()
+            )));
+            }
+            validate_event_payload(path, line_number, &event)?;
+            if event.event_type == EventType::LoopStarted {
+                let loop_id = event.loop_id.as_deref().ok_or_else(|| {
+                    RuntimeError::Protocol(format!(
+                        "{} line {line_number} loop.started must include loop_id",
+                        path.display()
+                    ))
+                })?;
+                if !self.loop_started_ids.insert(loop_id.to_owned()) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} must use a unique loop_id for loop.started",
+                        path.display()
+                    )));
+                }
+            }
+            self.lifecycle.validate_event(path, line_number, &event)?;
+            if matches!(
+                event.event_type,
+                EventType::SessionCompleted | EventType::SessionFailed
+            ) {
+                self.terminal_line = Some(line_number);
+            }
+            self.line_count = line_number;
+            let is_terminal = matches!(
+                event.event_type,
+                EventType::SessionCompleted | EventType::SessionFailed
+            );
+            appended_events.push(event);
+            if is_terminal {
+                self.lifecycle
+                    .validate_terminal_session(path, appended_events.last())?;
+            }
         }
-        if matches!(
-            event.event_type,
-            EventType::SessionCompleted | EventType::SessionFailed
-        ) {
-            terminal_line = Some(line_number);
-        }
-        appended_events.push(event);
+        Ok(appended_events)
     }
-
-    let mut events = prior_events.to_vec();
-    events.extend(appended_events.iter().cloned());
-    validate_session_lifecycle(path, &events)?;
-    Ok(appended_events)
 }
 
 fn validate_session_log_text(
@@ -5100,17 +5208,36 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
         )));
     }
 
-    let mut loops = LifecycleTracker::<String>::default();
-    let mut loop_parents: BTreeMap<String, Option<String>> = BTreeMap::new();
-    let mut steps = LifecycleTracker::<StepLifecycleKey>::default();
-    let mut tools = LifecycleTracker::<ToolLifecycleKey>::default();
-    let mut messages = LifecycleTracker::<MessageLifecycleKey>::default();
-    let mut active_message_roles: BTreeMap<MessageLifecycleKey, String> = BTreeMap::new();
-    let mut active_phases: BTreeMap<String, String> = BTreeMap::new();
-    let mut active_steps: BTreeMap<String, StepLifecycleKey> = BTreeMap::new();
+    let mut state = SessionLifecycleState::default();
 
     for (index, event) in events.iter().enumerate() {
         let line_number = index + 1;
+        state.validate_event(path, line_number, event)?;
+    }
+
+    state.validate_terminal_session(path, events.last())?;
+    Ok(())
+}
+
+#[derive(Default)]
+struct SessionLifecycleState {
+    loops: LifecycleTracker<String>,
+    loop_parents: BTreeMap<String, Option<String>>,
+    steps: LifecycleTracker<StepLifecycleKey>,
+    tools: LifecycleTracker<ToolLifecycleKey>,
+    messages: LifecycleTracker<MessageLifecycleKey>,
+    active_message_roles: BTreeMap<MessageLifecycleKey, String>,
+    active_phases: BTreeMap<String, String>,
+    active_steps: BTreeMap<String, StepLifecycleKey>,
+}
+
+impl SessionLifecycleState {
+    fn validate_event(
+        &mut self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
         if line_number > 1 && event.event_type == EventType::SessionStarted {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} session.started is only valid as the first event",
@@ -5120,14 +5247,14 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
 
         if event.event_type != EventType::LoopStarted {
             if let Some(loop_id) = &event.loop_id {
-                if !loops.is_started(loop_id) {
+                if !self.loops.is_started(loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
                 }
-                if let Some(terminal_line) = loops.terminal_line(loop_id) {
+                if let Some(terminal_line) = self.loops.terminal_line(loop_id) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5139,28 +5266,29 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                 }
             }
         }
-        validate_lifecycle_parent(path, line_number, event, &loops, &loop_parents)?;
+        validate_lifecycle_parent(path, line_number, event, &self.loops, &self.loop_parents)?;
 
         match event.event_type {
             EventType::LoopStarted => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                loop_parents.insert(loop_id.clone(), event.parent_loop_id.clone());
-                loops.start(loop_id);
+                self.loop_parents
+                    .insert(loop_id.clone(), event.parent_loop_id.clone());
+                self.loops.start(loop_id);
             }
             EventType::LoopCompleted | EventType::LoopFailed => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if !loops.is_started(&loop_id) {
+                if !self.loops.is_started(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
                 }
-                loops.finish(loop_id, line_number);
+                self.loops.finish(loop_id, line_number);
             }
             EventType::PhaseEntered => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if let Some(active_step) = active_steps.get(&loop_id) {
+                if let Some(active_step) = self.active_steps.get(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} phase.entered requires no active step for loop_id {:?}; active step_id {:?}",
                         path.display(),
@@ -5168,11 +5296,13 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         active_step.step_id
                     )));
                 }
-                active_phases.insert(loop_id, lifecycle_payload_string(event, "phase_id"));
+                self.active_phases
+                    .insert(loop_id, lifecycle_payload_string(event, "phase_id"));
             }
             EventType::StepStarted => {
-                let active_phase = require_active_phase(path, line_number, event, &active_phases)?;
-                let step = lifecycle_step_key(event, &active_phases);
+                let active_phase =
+                    require_active_phase(path, line_number, event, &self.active_phases)?;
+                let step = lifecycle_step_key(event, &self.active_phases);
                 if step.phase_id.as_deref() != Some(active_phase.as_str()) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.started phase_id {:?} must match active phase {:?}",
@@ -5181,7 +5311,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         active_phase
                     )));
                 }
-                if let Some(terminal_line) = steps.terminal_line(&step) {
+                if let Some(terminal_line) = self.steps.terminal_line(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5192,7 +5322,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     ));
                 }
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if let Some(active_step) = active_steps.get(&loop_id) {
+                if let Some(active_step) = self.active_steps.get(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.started requires no active step for loop_id {:?}; active step_id {:?}",
                         path.display(),
@@ -5200,12 +5330,12 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         active_step.step_id
                     )));
                 }
-                active_steps.insert(loop_id, step.clone());
-                steps.start(step);
+                self.active_steps.insert(loop_id, step.clone());
+                self.steps.start(step);
             }
             EventType::StepCompleted => {
-                let step = lifecycle_step_key(event, &active_phases);
-                if let Some(terminal_line) = steps.terminal_line(&step) {
+                let step = lifecycle_step_key(event, &self.active_phases);
+                if let Some(terminal_line) = self.steps.terminal_line(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5215,7 +5345,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         terminal_line,
                     ));
                 }
-                if !steps.is_started(&step) {
+                if !self.steps.is_started(&step) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
                         path.display(),
@@ -5223,7 +5353,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     )));
                 }
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                match active_steps.get(&loop_id) {
+                match self.active_steps.get(&loop_id) {
                     Some(active_step) if active_step == &step => {}
                     Some(active_step) => {
                         return Err(RuntimeError::Protocol(format!(
@@ -5241,13 +5371,13 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         )));
                     }
                 }
-                active_steps.remove(&loop_id);
-                steps.finish(step, line_number);
+                self.active_steps.remove(&loop_id);
+                self.steps.finish(step, line_number);
             }
             EventType::ToolStarted => {
-                require_active_step(path, line_number, event, &active_steps)?;
-                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                if let Some(terminal_line) = tools.terminal_line(&tool) {
+                require_active_step(path, line_number, event, &self.active_steps)?;
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                if let Some(terminal_line) = self.tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5257,11 +5387,11 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         terminal_line,
                     ));
                 }
-                tools.start(tool);
+                self.tools.start(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
-                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                if let Some(terminal_line) = tools.terminal_line(&tool) {
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                if let Some(terminal_line) = self.tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5271,7 +5401,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         terminal_line,
                     ));
                 }
-                if !tools.is_started(&tool) {
+                if !self.tools.is_started(&tool) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow tool.started for tool_id {:?}",
                         path.display(),
@@ -5283,14 +5413,13 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     event.event_type,
                     EventType::ToolCompleted | EventType::ToolTimedOut
                 ) {
-                    tools.finish(tool, line_number);
+                    self.tools.finish(tool, line_number);
                 }
             }
             EventType::ToolFailed => {
-                // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                if let Some(terminal_line) = tools.terminal_line(&tool) {
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                if let Some(terminal_line) = self.tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5300,18 +5429,18 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         terminal_line,
                     ));
                 }
-                if !tools.is_started(&tool) && active_phases.contains_key(&loop_id) {
+                if !self.tools.is_started(&tool) && self.active_phases.contains_key(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} tool.failed must follow tool.started after phase.entered for loop_id {loop_id:?}",
                         path.display()
                     )));
                 }
-                tools.finish(tool, line_number);
+                self.tools.finish(tool, line_number);
             }
             EventType::MessageDelta => {
-                require_active_step(path, line_number, event, &active_steps)?;
+                require_active_step(path, line_number, event, &self.active_steps)?;
                 let message = lifecycle_message_key(path, line_number, event)?;
-                if let Some(terminal_line) = messages.terminal_line(&message) {
+                if let Some(terminal_line) = self.messages.terminal_line(&message) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5322,7 +5451,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     ));
                 }
                 let role = lifecycle_payload_string(event, "role");
-                match active_message_roles.get(&message) {
+                match self.active_message_roles.get(&message) {
                     Some(active_role) if active_role != &role => {
                         return Err(RuntimeError::Protocol(format!(
                             "{} line {line_number} message.delta role {:?} must match active role {:?} for message_id {:?}",
@@ -5334,15 +5463,15 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     }
                     Some(_) => {}
                     None => {
-                        messages.start(message.clone());
-                        active_message_roles.insert(message, role);
+                        self.messages.start(message.clone());
+                        self.active_message_roles.insert(message, role);
                     }
                 }
             }
             EventType::MessageCompleted => {
-                require_active_step(path, line_number, event, &active_steps)?;
+                require_active_step(path, line_number, event, &self.active_steps)?;
                 let message = lifecycle_message_key(path, line_number, event)?;
-                if let Some(terminal_line) = messages.terminal_line(&message) {
+                if let Some(terminal_line) = self.messages.terminal_line(&message) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -5353,7 +5482,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     ));
                 }
                 let role = lifecycle_payload_string(event, "role");
-                let Some(active_role) = active_message_roles.get(&message) else {
+                let Some(active_role) = self.active_message_roles.get(&message) else {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} message.completed must follow message.delta for message_id {:?}",
                         path.display(),
@@ -5369,7 +5498,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         message.1
                     )));
                 }
-                messages.finish(message, line_number);
+                self.messages.finish(message, line_number);
             }
             EventType::SessionStarted
             | EventType::SessionPaused
@@ -5381,37 +5510,44 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             | EventType::MetricSample
             | EventType::Error => {}
         }
+        Ok(())
     }
 
-    if events.last().is_some_and(|event| {
-        matches!(
-            event.event_type,
-            EventType::SessionCompleted | EventType::SessionFailed
-        )
-    }) {
-        for loop_id in loops.started_keys() {
-            if !loops.is_terminal(loop_id) {
+    fn validate_terminal_session(
+        &self,
+        path: &Path,
+        last_event: Option<&EventEnvelope>,
+    ) -> Result<(), RuntimeError> {
+        if !last_event.is_some_and(|event| {
+            matches!(
+                event.event_type,
+                EventType::SessionCompleted | EventType::SessionFailed
+            )
+        }) {
+            return Ok(());
+        }
+        for loop_id in self.loops.started_keys() {
+            if !self.loops.is_terminal(loop_id) {
                 return Err(open_lifecycle_error(path, "loop", loop_id));
             }
         }
-        for step in steps.started_keys() {
-            if !steps.is_terminal(step) {
+        for step in self.steps.started_keys() {
+            if !self.steps.is_terminal(step) {
                 return Err(open_lifecycle_error(path, "step", &step.step_id));
             }
         }
-        for tool in tools.started_keys() {
-            if !tools.is_terminal(tool) {
+        for tool in self.tools.started_keys() {
+            if !self.tools.is_terminal(tool) {
                 return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
             }
         }
-        for message in messages.started_keys() {
-            if !messages.is_terminal(message) {
+        for message in self.messages.started_keys() {
+            if !self.messages.is_terminal(message) {
                 return Err(open_lifecycle_error(path, "message", &message.1));
             }
         }
+        Ok(())
     }
-
-    Ok(())
 }
 
 fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
