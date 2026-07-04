@@ -1706,11 +1706,9 @@ fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
+#[cfg(unix)]
 fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_real_file(path)?;
-    if !hard_link_count_is_verifiable() {
-        return replace_existing_file_without_link_count(path, contents);
-    }
     let mut file = fs::OpenOptions::new()
         .write(true)
         .open(path)
@@ -1734,6 +1732,11 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
     })
 }
 
+#[cfg(not(unix))]
+fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    replace_existing_file_without_link_count(path, contents)
+}
+
 fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_parent_real_directory(path)?;
     ensure_non_hardlinked_real_file(path)?;
@@ -1755,11 +1758,9 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
     replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
 }
 
+#[cfg(unix)]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_real_file(path)?;
-    if !hard_link_count_is_verifiable() {
-        return append_existing_file_without_link_count(path, contents);
-    }
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(path)
@@ -1772,6 +1773,11 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
         path: path.to_owned(),
         source,
     })
+}
+
+#[cfg(not(unix))]
+fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    append_existing_file_without_link_count(path, contents)
 }
 
 fn append_existing_file_without_link_count(
@@ -1858,13 +1864,19 @@ fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), Runtim
     Ok(())
 }
 
+#[cfg(unix)]
 fn ensure_not_hardlinked_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if hard_link_count_is_verifiable() && hard_link_count(metadata) > 1 {
+    if hard_link_count(metadata) > 1 {
         return Err(RuntimeError::Protocol(format!(
             "{} must not be hard-linked",
             path.display()
         )));
     }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_not_hardlinked_file(_path: &Path, _metadata: &fs::Metadata) -> Result<(), RuntimeError> {
     Ok(())
 }
 
@@ -3289,6 +3301,7 @@ fn ensure_created_script_real_directory(path: &Path) -> Result<bool, RuntimeErro
     ensure_created_directory_with(path, DirectoryErrorMode::ScriptWrite)
 }
 
+#[cfg(unix)]
 fn ensure_opened_regular_leaf_matches_path(
     path: &Path,
     file: &fs::File,
@@ -3332,31 +3345,11 @@ fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
     left.dev() == right.dev() && left.ino() == right.ino()
 }
 
-#[cfg(not(unix))]
-fn same_file_metadata(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    false
-}
-
 #[cfg(unix)]
 fn hard_link_count(metadata: &fs::Metadata) -> u64 {
     use std::os::unix::fs::MetadataExt;
 
     metadata.nlink()
-}
-
-#[cfg(not(unix))]
-fn hard_link_count(_metadata: &fs::Metadata) -> u64 {
-    1
-}
-
-#[cfg(unix)]
-fn hard_link_count_is_verifiable() -> bool {
-    true
-}
-
-#[cfg(not(unix))]
-fn hard_link_count_is_verifiable() -> bool {
-    false
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
@@ -3512,16 +3505,25 @@ fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
     }
 }
 
+#[cfg(unix)]
 fn ensure_script_leaf_not_hardlinked(
     path: &Path,
     metadata: &fs::Metadata,
 ) -> Result<(), RuntimeError> {
-    if hard_link_count_is_verifiable() && hard_link_count(metadata) > 1 {
+    if hard_link_count(metadata) > 1 {
         return Err(runtime_denied(
             core_policy::DenyReasonCode::WriteDenied,
             format!("{} must not be hard-linked", path.display()),
         ));
     }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_script_leaf_not_hardlinked(
+    _path: &Path,
+    _metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
     Ok(())
 }
 
