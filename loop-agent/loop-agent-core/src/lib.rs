@@ -33,6 +33,7 @@ const MAX_WORKSPACE_CONFIG_BYTES: u64 = core_script::MAX_REGISTRY_FILE_BYTES;
 const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
 const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
 const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
+const RUNTIME_ERROR_REASON: &str = "runtime_error";
 const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
     TrustedPredefinedCommand {
         command_id: "agent-echo",
@@ -190,8 +191,22 @@ pub enum RuntimeError {
     Policy(core_policy::PolicyCompileError),
     /// Registry loading or validation failed.
     Registry(core_script::RegistryError),
+    /// Runtime enforcement denied a side effect.
+    Denied {
+        /// Structured denial reason.
+        reason: core_policy::DenyReasonCode,
+        /// Human-readable denial message.
+        message: String,
+    },
     /// Runtime protocol invariant was violated.
     Protocol(String),
+    /// A session lock already exists for the requested session.
+    ActiveSession {
+        /// Requested session id.
+        session_id: String,
+        /// Existing lock path.
+        lock_path: PathBuf,
+    },
     /// A requested new session log already exists.
     SessionLogExists(String),
     /// Resume was requested for a terminal session.
@@ -204,7 +219,11 @@ impl RuntimeError {
     /// Returns the process exit code associated with this runtime error.
     pub fn exit_code(&self) -> i32 {
         match self {
-            Self::Protocol(_) | Self::SessionLogExists(_) | Self::TerminalSession(_) => 65,
+            Self::Denied { .. }
+            | Self::Protocol(_)
+            | Self::ActiveSession { .. }
+            | Self::SessionLogExists(_)
+            | Self::TerminalSession(_) => 65,
             Self::Usage(_) => 64,
             Self::Io { .. } | Self::Json(_) | Self::Policy(_) | Self::Registry(_) => 65,
         }
@@ -218,7 +237,12 @@ impl fmt::Display for RuntimeError {
             Self::Json(err) => write!(f, "{err}"),
             Self::Policy(err) => write!(f, "{err}"),
             Self::Registry(err) => write!(f, "{err}"),
+            Self::Denied { message, .. } => f.write_str(message),
             Self::Protocol(message) | Self::Usage(message) => f.write_str(message),
+            Self::ActiveSession {
+                session_id,
+                lock_path,
+            } => f.write_str(&active_session_lock_message(lock_path, session_id)),
             Self::SessionLogExists(session_id) => {
                 write!(f, "session log already exists for {session_id}")
             }
@@ -236,7 +260,9 @@ impl std::error::Error for RuntimeError {
             Self::Json(err) => Some(err),
             Self::Policy(err) => Some(err),
             Self::Registry(err) => Some(err),
-            Self::Protocol(_)
+            Self::Denied { .. }
+            | Self::Protocol(_)
+            | Self::ActiveSession { .. }
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
@@ -367,13 +393,15 @@ pub fn run_loop(
             ),
         )?;
         reservation.mark_side_effects_applied();
-        if !runtime.failed && runtime.events != planned_runtime.events {
+        let runtime_failed = runtime.failed;
+        let terminal_error = runtime.terminal_error;
+        if !runtime_failed && runtime.events != planned_runtime.events {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime did not match deterministic replay",
                 reservation.session_path.display()
             )));
         }
-        let (final_stream, final_events) = if runtime.failed {
+        let (final_stream, final_events) = if runtime_failed {
             preflight_session_completion_stream_from_prefix(
                 &reservation,
                 &expected_session_id,
@@ -392,15 +420,18 @@ pub fn run_loop(
             durable_prefix_event_count,
         )?;
         reservation.release_lock()?;
+        if let Some(err) = terminal_error {
+            return Err(err);
+        }
 
         Ok(RunOutput {
             event_count: final_events.len(),
-            failed: runtime.failed,
+            failed: runtime_failed,
             session_id,
             session_path: reservation.session_path.clone(),
             stdout: match emit {
                 EmitMode::Jsonl => final_stream,
-                EmitMode::Human if runtime.failed => {
+                EmitMode::Human if runtime_failed => {
                     format!("loop {} failed\n", loop_block.identity.id)
                 }
                 EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
@@ -694,19 +725,38 @@ pub fn resume_session(
             SideEffectRecorder::none(),
         ),
     )?;
-    if resumed_runtime.events != planned_runtime.events {
+    let terminal_error = resumed_runtime.terminal_error;
+    let resumed_failed = resumed_runtime.failed;
+    if terminal_error.is_none() && resumed_runtime.events != planned_runtime.events {
         return Err(RuntimeError::Protocol(format!(
             "{} resumed runtime did not match deterministic replay",
             path.display()
         )));
     }
 
-    append_session_log_text(&path, &append_plan.suffix_stream)?;
-    let appended_stream = format!("{}{}", append_plan.marker_stream, append_plan.suffix_stream);
+    let (suffix_stream, combined_events) = if terminal_error.is_some() {
+        preflight_resume_runtime_suffix(
+            &path,
+            session_id,
+            &before,
+            &append_plan.marker_stream,
+            &resumed_runtime.events,
+            &resume_prefix,
+            resume_event_clock(&config, &events)?,
+        )?
+    } else {
+        (append_plan.suffix_stream, append_plan.combined_events)
+    };
+
+    append_session_log_text(&path, &suffix_stream)?;
+    let appended_stream = format!("{}{}", append_plan.marker_stream, suffix_stream);
+    if let Some(err) = terminal_error {
+        return Err(err);
+    }
 
     Ok(RunOutput {
-        event_count: append_plan.combined_events.len(),
-        failed: resumed_runtime.failed,
+        event_count: combined_events.len(),
+        failed: resumed_failed,
         session_id: session_id.to_owned(),
         session_path: path,
         stdout: match emit {
@@ -828,6 +878,28 @@ fn preflight_resume_append_plan(
         suffix_stream,
         combined_events,
     })
+}
+
+fn preflight_resume_runtime_suffix(
+    path: &Path,
+    session_id: &str,
+    before: &str,
+    marker_stream: &str,
+    runtime_events: &[EventEnvelope],
+    resume_prefix: &ResumeReplayPrefix,
+    clock: EventClock,
+) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
+    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
+    let suffix_events = runtime_events[resume_prefix.planned_event_count..]
+        .iter()
+        .cloned()
+        .map(|event| shift_resumed_event(event, resumed_suffix_offset, clock))
+        .collect::<Vec<_>>();
+    let suffix_stream = canonical_event_stream(&suffix_events)?;
+    let combined = format!("{before}{marker_stream}{suffix_stream}");
+    let combined_events = validate_session_log_text(path, session_id, &combined)?;
+    prepare_session_log_append(path, &suffix_stream)?;
+    Ok((suffix_stream, combined_events))
 }
 
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
@@ -1203,7 +1275,7 @@ fn reserve_unique_session_log(
         match reserve_session_log(workspace, &candidate) {
             Ok(reservation) => return Ok(reservation),
             Err(RuntimeError::SessionLogExists(_)) => continue,
-            Err(err) if is_active_session_error(&err, &candidate) => continue,
+            Err(err) if is_active_session_error(&err, &candidate) => return Err(err),
             Err(err) => return Err(err),
         }
     }
@@ -1216,8 +1288,10 @@ fn reserve_unique_session_log(
 fn is_active_session_error(err: &RuntimeError, session_id: &str) -> bool {
     matches!(
         err,
-        RuntimeError::Protocol(message)
-            if message.starts_with(&format!("session {session_id} is already active"))
+        RuntimeError::ActiveSession {
+            session_id: active_session_id,
+            ..
+        } if active_session_id == session_id
     )
 }
 
@@ -1295,9 +1369,12 @@ fn reserve_session_lock_file(path: &Path, session_id: &str) -> Result<(), Runtim
         .open(path)
     {
         Ok(_) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => Err(RuntimeError::Protocol(
-            active_session_lock_message(path, session_id),
-        )),
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+            Err(RuntimeError::ActiveSession {
+                session_id: session_id.to_owned(),
+                lock_path: path.to_owned(),
+            })
+        }
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
             source,
@@ -1612,7 +1689,7 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
 fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_parent_real_directory(path)?;
     ensure_non_hardlinked_real_file(path)?;
-    let (temp_path, mut temp_file) = create_replacement_temp(path)?;
+    let (temp_path, mut temp_file) = create_replacement_temp(path, None)?;
     if let Err(err) = temp_file
         .write_all(contents)
         .map_err(|source| RuntimeError::Io {
@@ -1627,7 +1704,7 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
 
     ensure_parent_real_directory(path)?;
     ensure_non_hardlinked_real_file(path)?;
-    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none())
+    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
 }
 
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
@@ -1664,7 +1741,7 @@ fn replace_existing_file_without_link_count(
 ) -> Result<(), RuntimeError> {
     ensure_parent_real_directory(path)?;
     ensure_real_file(path)?;
-    let (temp_path, mut temp_file) = create_replacement_temp(path)?;
+    let (temp_path, mut temp_file) = create_replacement_temp(path, None)?;
     if let Err(err) = temp_file
         .write_all(contents)
         .map_err(|source| RuntimeError::Io {
@@ -1679,7 +1756,7 @@ fn replace_existing_file_without_link_count(
 
     ensure_parent_real_directory(path)?;
     ensure_real_file(path)?;
-    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none())
+    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
 }
 
 fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
@@ -1753,6 +1830,7 @@ fn ensure_parent_real_directory(path: &Path) -> Result<(), RuntimeError> {
 struct RuntimeExecution {
     events: Vec<EventEnvelope>,
     failed: bool,
+    terminal_error: Option<RuntimeError>,
 }
 
 #[derive(Clone, Debug)]
@@ -2010,7 +2088,22 @@ fn execute_loop(
         side_effect_mode: options.side_effect_mode,
         side_effect_recorder: options.side_effect_recorder,
     };
-    let failed = emit_loop_block(&context, root_loop, None, &mut builder)?;
+    let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
+        Ok(failed) => failed,
+        Err(err) if should_terminalize_runtime_error(options.side_effect_mode) => {
+            builder.emit(
+                None,
+                EventType::SessionFailed,
+                serde_json::json!({"reason":RUNTIME_ERROR_REASON}),
+            )?;
+            return Ok(RuntimeExecution {
+                events: builder.events,
+                failed: true,
+                terminal_error: Some(err),
+            });
+        }
+        Err(err) => return Err(err),
+    };
     if let Some(failure) = failed {
         builder.emit(
             None,
@@ -2020,14 +2113,23 @@ fn execute_loop(
         Ok(RuntimeExecution {
             events: builder.events,
             failed: true,
+            terminal_error: None,
         })
     } else {
         builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
         Ok(RuntimeExecution {
             events: builder.events,
             failed: false,
+            terminal_error: None,
         })
     }
+}
+
+fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> bool {
+    matches!(
+        side_effect_mode,
+        ToolSideEffectMode::ApplyAll | ToolSideEffectMode::Resume { .. }
+    )
 }
 
 fn preflight_loop_tools(
@@ -2139,9 +2241,17 @@ fn emit_loop_block_at_depth(
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        if let Some(failure) = emit_phase(context, phase, &invocation, builder)? {
-            emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
-            return Ok(Some(failure));
+        match emit_phase(context, phase, &invocation, builder) {
+            Ok(Some(failure)) => {
+                emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
+                return Ok(Some(failure));
+            }
+            Ok(None) => {}
+            Err(err) if should_terminalize_runtime_error(context.side_effect_mode) => {
+                emit_runtime_error_failure(loop_block, &invocation, &err, builder)?;
+                return Err(err);
+            }
+            Err(err) => return Err(err),
         }
     }
 
@@ -2149,15 +2259,23 @@ fn emit_loop_block_at_depth(
         let subloop = context.registry.loop_block(subloop_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
         })?;
-        if let Some(failure) = emit_loop_block_at_depth(
+        match emit_loop_block_at_depth(
             context,
             subloop,
             Some(invocation.loop_id.clone()),
             builder,
             depth + 1,
-        )? {
-            emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder)?;
-            return Ok(Some(failure));
+        ) {
+            Ok(Some(failure)) => {
+                emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder)?;
+                return Ok(Some(failure));
+            }
+            Ok(None) => {}
+            Err(err) if should_terminalize_runtime_error(context.side_effect_mode) => {
+                emit_propagated_runtime_error_failure(loop_block, &invocation, builder)?;
+                return Err(err);
+            }
+            Err(err) => return Err(err),
         }
     }
 
@@ -2266,7 +2384,7 @@ fn emit_phase(
                         &context.policy.target,
                     ),
                 };
-                if let Some(mut failure) = emit_tool(
+                match emit_tool(
                     context.workspace,
                     tool,
                     tool_policy,
@@ -2274,11 +2392,22 @@ fn emit_phase(
                     context.side_effect_mode,
                     context.side_effect_recorder,
                     builder,
-                )? {
-                    emit_runtime_tool_failure(invocation, &failure, builder)?;
-                    failure.emit_tool_failed = false;
-                    builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
-                    return Ok(Some(failure));
+                ) {
+                    Ok(Some(mut failure)) => {
+                        emit_runtime_tool_failure(invocation, &failure, builder)?;
+                        failure.emit_tool_failed = false;
+                        builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
+                        return Ok(Some(failure));
+                    }
+                    Ok(None) => {}
+                    Err(err) if should_terminalize_runtime_error(context.side_effect_mode) => {
+                        let mut failure = runtime_failure_for_unhandled_error(&err);
+                        failure.tool_id = Some(tool.identity.id.clone());
+                        emit_runtime_tool_failure(invocation, &failure, builder)?;
+                        builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
+                        return Err(err);
+                    }
+                    Err(err) => return Err(err),
                 }
             }
         }
@@ -2810,10 +2939,10 @@ fn validate_script_write_target(
         .iter()
         .any(|root| core_script::relative_path_is_inside_scope(&scoped, root))
     {
-        return Err(RuntimeError::Protocol(format!(
-            "tool {} lacks write scope {scoped}",
-            policy.tool_id
-        )));
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("tool {} lacks write scope {scoped}", policy.tool_id),
+        ));
     }
     let temp_parent_scoped = script_replacement_temp_parent_scope(&relative);
     if !policy
@@ -2822,10 +2951,13 @@ fn validate_script_write_target(
         .iter()
         .any(|root| core_script::relative_path_is_inside_scope(&temp_parent_scoped, root))
     {
-        return Err(RuntimeError::Protocol(format!(
-            "tool {} lacks write scope for replacement temp under {temp_parent_scoped}",
-            policy.tool_id
-        )));
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!(
+                "tool {} lacks write scope for replacement temp under {temp_parent_scoped}",
+                policy.tool_id
+            ),
+        ));
     }
     ensure_script_target_not_protected(protected_path_match_mode, policy, &scoped)?;
     Ok(relative)
@@ -2870,7 +3002,8 @@ fn replace_script_output_atomically(
 ) -> Result<(), RuntimeError> {
     ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
-    let (temp_path, mut temp_file) = create_replacement_temp(path)?;
+    let (temp_path, mut temp_file) =
+        create_replacement_temp(path, Some(core_policy::DenyReasonCode::WriteDenied))?;
     if let Err(err) = temp_file
         .write_all(contents)
         .map_err(|source| RuntimeError::Io {
@@ -2886,7 +3019,12 @@ fn replace_script_output_atomically(
     ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     if initial_leaf_existed {
         if ensure_writable_regular_leaf(path)? {
-            return replace_existing_leaf_from_temp(path, &temp_path, side_effect_recorder);
+            return replace_existing_leaf_from_temp(
+                path,
+                &temp_path,
+                side_effect_recorder,
+                Some(core_policy::DenyReasonCode::WriteDenied),
+            );
         }
     } else {
         ensure_new_leaf_available(path)?;
@@ -2907,8 +3045,9 @@ fn replace_existing_leaf_from_temp(
     path: &Path,
     temp_path: &Path,
     side_effect_recorder: SideEffectRecorder<'_>,
+    denied_reason: Option<core_policy::DenyReasonCode>,
 ) -> Result<(), RuntimeError> {
-    let backup_path = create_replacement_backup_path(path)?;
+    let backup_path = create_replacement_backup_path(path, denied_reason)?;
     if let Err(source) = fs::rename(path, &backup_path) {
         let _ = fs::remove_file(temp_path);
         return Err(RuntimeError::Io {
@@ -2934,7 +3073,10 @@ fn replace_existing_leaf_from_temp(
     })
 }
 
-fn create_replacement_temp(path: &Path) -> Result<(PathBuf, fs::File), RuntimeError> {
+fn create_replacement_temp(
+    path: &Path,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<(PathBuf, fs::File), RuntimeError> {
     for attempt in 0..100 {
         let temp_path = replacement_temp_path(path, attempt)?;
         match fs::OpenOptions::new()
@@ -2952,13 +3094,19 @@ fn create_replacement_temp(path: &Path) -> Result<(PathBuf, fs::File), RuntimeEr
             }
         }
     }
-    Err(RuntimeError::Protocol(format!(
-        "could not allocate temporary replacement path for {}",
-        path.display()
-    )))
+    Err(runtime_protocol_or_denied(
+        denied_reason,
+        format!(
+            "could not allocate temporary replacement path for {}",
+            path.display()
+        ),
+    ))
 }
 
-fn create_replacement_backup_path(path: &Path) -> Result<PathBuf, RuntimeError> {
+fn create_replacement_backup_path(
+    path: &Path,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<PathBuf, RuntimeError> {
     for attempt in 0..100 {
         let backup_path = replacement_backup_path(path, attempt)?;
         match fs::symlink_metadata(&backup_path) {
@@ -2972,10 +3120,13 @@ fn create_replacement_backup_path(path: &Path) -> Result<PathBuf, RuntimeError> 
             }
         }
     }
-    Err(RuntimeError::Protocol(format!(
-        "could not allocate backup replacement path for {}",
-        path.display()
-    )))
+    Err(runtime_protocol_or_denied(
+        denied_reason,
+        format!(
+            "could not allocate backup replacement path for {}",
+            path.display()
+        ),
+    ))
 }
 
 fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
@@ -3018,10 +3169,13 @@ fn ensure_script_target_not_protected(
         return Ok(());
     }
 
-    Err(RuntimeError::Protocol(format!(
-        "tool {} cannot write protected path {scoped_target}",
-        policy.tool_id
-    )))
+    Err(runtime_denied(
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        format!(
+            "tool {} cannot write protected path {scoped_target}",
+            policy.tool_id
+        ),
+    ))
 }
 
 fn ensure_real_workspace_write_path(
@@ -3033,7 +3187,7 @@ fn ensure_real_workspace_write_path(
     let mut path = workspace.to_path_buf();
     while let Some(part) = parts.next() {
         path.push(part);
-        if parts.peek().is_some() && ensure_created_real_directory(&path)? {
+        if parts.peek().is_some() && ensure_created_script_real_directory(&path)? {
             // WHY: a newly created parent directory is already a durable
             // workspace mutation even if the later leaf write fails.
             side_effect_recorder.mark_applied();
@@ -3051,10 +3205,74 @@ fn preflight_real_workspace_write_path(
     while let Some(part) = parts.next() {
         path.push(part);
         if parts.peek().is_some() {
-            ensure_optional_real_directory(&path)?;
+            ensure_optional_script_real_directory(&path)?;
         }
     }
     Ok(path)
+}
+
+fn ensure_optional_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            validate_script_real_directory(path, &metadata)?;
+            Ok(true)
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn ensure_created_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            validate_script_real_directory(path, &metadata)?;
+            Ok(false)
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            match fs::create_dir(path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(source) => {
+                    return Err(RuntimeError::Io {
+                        path: path.to_owned(),
+                        source,
+                    });
+                }
+            }
+            let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+            validate_script_real_directory(path, &metadata)?;
+            Ok(true)
+        }
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn validate_script_real_directory(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
+    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::SymlinkEscapeDenied,
+            format!("{} must not be a symlink or reparse point", path.display()),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("{} must be a directory", path.display()),
+        ));
+    }
+    Ok(())
 }
 
 fn ensure_opened_regular_leaf_matches_path(
@@ -3260,24 +3478,37 @@ fn emit_tool_progress(
 
 fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
-            path.display()
-        ))),
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(runtime_denied(
+            core_policy::DenyReasonCode::SymlinkEscapeDenied,
+            format!("{} must not be a symlink", path.display()),
+        )),
         Ok(metadata) if metadata.is_file() => {
-            ensure_not_hardlinked_file(path, &metadata)?;
+            ensure_script_leaf_not_hardlinked(path, &metadata)?;
             Ok(true)
         }
-        Ok(_) => Err(RuntimeError::Protocol(format!(
-            "{} must be a file",
-            path.display()
-        ))),
+        Ok(_) => Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("{} must be a file", path.display()),
+        )),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
             source,
         }),
     }
+}
+
+fn ensure_script_leaf_not_hardlinked(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
+    if hard_link_count_is_verifiable() && hard_link_count(metadata) > 1 {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("{} must not be hard-linked", path.display()),
+        ));
+    }
+    Ok(())
 }
 
 fn emit_runtime_failure(
@@ -3289,6 +3520,15 @@ fn emit_runtime_failure(
     if failure.emit_tool_failed {
         emit_runtime_tool_failure(invocation, failure, builder)?;
     }
+    emit_runtime_error(invocation, failure, builder)?;
+    emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
+}
+
+fn emit_runtime_error(
+    invocation: &LoopInvocation,
+    failure: &RuntimeFailure,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
     let mut error_payload = serde_json::json!({
         "code": failure.reason,
         "message": failure.message,
@@ -3304,12 +3544,20 @@ fn emit_runtime_failure(
             .expect("error payload is constructed as an object");
         object.insert("data".to_owned(), serde_json::Value::Object(error_data));
     }
-    builder.emit(Some(invocation), EventType::Error, error_payload)?;
+    builder.emit(Some(invocation), EventType::Error, error_payload)
+}
+
+fn emit_runtime_loop_failure(
+    loop_block: &core_script::LoopBlock,
+    invocation: &LoopInvocation,
+    reason: &str,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),
         EventType::LoopFailed,
         serde_json::json!({
-            "error": failure.reason,
+            "error": reason,
             "loop_definition_id": loop_block.identity.id,
         }),
     )
@@ -3339,14 +3587,26 @@ fn emit_propagated_runtime_failure(
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
-    let loop_failure = RuntimeFailure {
-        reason: failure.reason.clone(),
-        message: failure.message,
-        tool_id: None,
-        phase_id: None,
-        emit_tool_failed: false,
-    };
-    emit_runtime_failure(loop_block, invocation, &loop_failure, builder)
+    emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
+}
+
+fn emit_runtime_error_failure(
+    loop_block: &core_script::LoopBlock,
+    invocation: &LoopInvocation,
+    err: &RuntimeError,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
+    let failure = runtime_failure_for_unhandled_error(err);
+    emit_runtime_error(invocation, &failure, builder)?;
+    emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
+}
+
+fn emit_propagated_runtime_error_failure(
+    loop_block: &core_script::LoopBlock,
+    invocation: &LoopInvocation,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
+    emit_runtime_loop_failure(loop_block, invocation, RUNTIME_ERROR_REASON, builder)
 }
 
 fn sandbox_tool_dispatch_failure(
@@ -3474,6 +3734,20 @@ fn sandbox_negative_reason_for_operation(operation: &str) -> Option<core_policy:
     }
 }
 
+fn runtime_denied(reason: core_policy::DenyReasonCode, message: String) -> RuntimeError {
+    RuntimeError::Denied { reason, message }
+}
+
+fn runtime_protocol_or_denied(
+    denied_reason: Option<core_policy::DenyReasonCode>,
+    message: String,
+) -> RuntimeError {
+    match denied_reason {
+        Some(reason) => runtime_denied(reason, message),
+        None => RuntimeError::Protocol(message),
+    }
+}
+
 fn runtime_failure_for_reason(
     reason_code: core_policy::DenyReasonCode,
     tool_id: Option<String>,
@@ -3488,9 +3762,23 @@ fn runtime_failure_for_reason(
     }
 }
 
+fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
+    RuntimeFailure {
+        reason: RUNTIME_ERROR_REASON.to_owned(),
+        message: runtime_error_message(err),
+        tool_id: None,
+        phase_id: None,
+        emit_tool_failed: false,
+    }
+}
+
+fn runtime_error_message(_err: &RuntimeError) -> &'static str {
+    "runtime execution failed"
+}
+
 fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<RuntimeFailure> {
     let reason = match err {
-        RuntimeError::Protocol(message) => runtime_denial_reason_for_protocol_message(message)?,
+        RuntimeError::Denied { reason, .. } => reason.clone(),
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::PermissionDenied => {
             core_policy::DenyReasonCode::WriteDenied
         }
@@ -3498,6 +3786,8 @@ fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<R
         RuntimeError::Json(_)
         | RuntimeError::Policy(_)
         | RuntimeError::Registry(_)
+        | RuntimeError::Protocol(_)
+        | RuntimeError::ActiveSession { .. }
         | RuntimeError::SessionLogExists(_)
         | RuntimeError::TerminalSession(_)
         | RuntimeError::Usage(_) => {
@@ -3505,28 +3795,6 @@ fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<R
         }
     };
     Some(runtime_failure_for_reason(reason, Some(tool_id.to_owned())))
-}
-
-fn runtime_denial_reason_for_protocol_message(
-    message: &str,
-) -> Option<core_policy::DenyReasonCode> {
-    if message.contains("protected path") {
-        return Some(core_policy::DenyReasonCode::ProtectedPathDenied);
-    }
-    if message.contains("symlink") || message.contains("reparse point") {
-        return Some(core_policy::DenyReasonCode::SymlinkEscapeDenied);
-    }
-    if message.contains("lacks write scope")
-        || message.contains("must be a directory")
-        || message.contains("must be a file")
-        || message.contains("must not already exist")
-        || message.contains("temporary replacement path")
-        || message.contains("changed before write")
-        || message.contains("hard-linked")
-    {
-        return Some(core_policy::DenyReasonCode::WriteDenied);
-    }
-    None
 }
 
 fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFailure {

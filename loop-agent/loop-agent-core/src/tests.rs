@@ -81,6 +81,42 @@ fn event_timestamp(sequence: u64) -> String {
     EventClock::fixed_fixture().timestamp(sequence)
 }
 
+fn assert_denied(err: RuntimeError, reason: core_policy::DenyReasonCode, message_fragment: &str) {
+    match err {
+        RuntimeError::Denied {
+            reason: actual,
+            message,
+        } => {
+            assert_eq!(actual, reason);
+            assert!(
+                message.contains(message_fragment),
+                "{message:?} did not contain {message_fragment:?}"
+            );
+        }
+        other => panic!("expected {reason:?} denial, got {other:?}"),
+    }
+}
+
+fn assert_active_session(err: RuntimeError, session_id: &str, lock_name: &str) {
+    match err {
+        RuntimeError::ActiveSession {
+            session_id: actual,
+            lock_path,
+        } => {
+            assert_eq!(actual, session_id);
+            assert!(
+                lock_path.ends_with(lock_name),
+                "{} did not end with {lock_name}",
+                lock_path.display()
+            );
+            let message = active_session_lock_message(&lock_path, &actual);
+            assert!(message.contains("already active"));
+            assert!(message.contains("verify no Loop Agent process"));
+        }
+        other => panic!("expected active session error, got {other:?}"),
+    }
+}
+
 #[test]
 fn m1_surfaces_exclude_rpc_and_embedding() {
     let m1 = m1_runtime_surfaces();
@@ -676,21 +712,27 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
     );
     let mut file_scoped_policy = command_policy.clone();
     file_scoped_policy.filesystem.write_roots = vec!["workspace/out/summary.txt".to_owned()];
-    assert!(matches!(
-        validate_script_write_target(match_mode, &file_scoped_policy, "out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("replacement temp")
-    ));
-    assert!(matches!(
-        validate_script_write_target(match_mode, command_policy, "other/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("lacks write scope")
-    ));
+    assert_denied(
+        validate_script_write_target(match_mode, &file_scoped_policy, "out/summary.txt")
+            .expect_err("file-scoped writes cannot reserve replacement temps"),
+        core_policy::DenyReasonCode::WriteDenied,
+        "replacement temp",
+    );
+    assert_denied(
+        validate_script_write_target(match_mode, command_policy, "other/summary.txt")
+            .expect_err("out-of-scope write must reject"),
+        core_policy::DenyReasonCode::WriteDenied,
+        "lacks write scope",
+    );
 
     let mut broad_policy = command_policy.clone();
     broad_policy.filesystem.write_roots = vec!["workspace".to_owned()];
-    assert!(matches!(
-        validate_script_write_target(match_mode, &broad_policy, ".ssh/id_rsa"),
-        Err(RuntimeError::Protocol(message)) if message.contains("protected path")
-    ));
+    assert_denied(
+        validate_script_write_target(match_mode, &broad_policy, ".ssh/id_rsa")
+            .expect_err("ungranted protected path must reject"),
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        "protected path",
+    );
     broad_policy.filesystem.protected_path_grants = vec!["workspace/.ssh/**".to_owned()];
     assert_eq!(
         validate_script_write_target(match_mode, &broad_policy, ".ssh/id_rsa")
@@ -1295,7 +1337,7 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("undeclared write scope must fail");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("write scope")));
+    assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "write scope");
     assert!(!workspace.join("out/summary.txt").exists());
     assert!(!workspace
         .join(LOCAL_SESSION_DIR)
@@ -1439,7 +1481,11 @@ fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("invalid output path must preflight before runtime setup");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "must be a file",
+    );
     assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
     assert!(!workspace.join(LOCAL_LOG_DIR).exists());
 }
@@ -1491,7 +1537,11 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "must be a file",
+    );
     assert!(!workspace.join("out/partial.txt").exists());
     assert!(!workspace
         .join(LOCAL_SESSION_DIR)
@@ -1627,7 +1677,11 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("ungranted protected path write must reject");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("protected path")));
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        "protected path",
+    );
     assert!(!workspace.join(".env").exists());
     assert!(!workspace
         .join(LOCAL_SESSION_DIR)
@@ -1691,7 +1745,11 @@ fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("windows runtime protected-path matching is case-insensitive");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("protected path")));
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        "protected path",
+    );
     assert!(!workspace.join(".ENV").exists());
     assert!(!workspace
         .join(LOCAL_SESSION_DIR)
@@ -1968,6 +2026,15 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
             .and_then(serde_json::Value::as_str),
         Some("negative-tool")
     );
+    let error_events = events
+        .iter()
+        .filter(|event| event.event_type == EventType::Error)
+        .collect::<Vec<_>>();
+    assert_eq!(error_events.len(), 1);
+    assert_eq!(
+        error_events[0].loop_id.as_deref(),
+        Some(child_loop_id.as_str())
+    );
     for loop_id in [&parent_loop_id, &child_loop_id] {
         assert!(events.iter().any(|event| {
             event.event_type == EventType::LoopFailed
@@ -2169,10 +2236,7 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
     let err = reserve_session_log(&workspace, "reserve001")
         .expect_err("second reservation must fail atomically");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message.contains("already active")
-    ));
+    assert_active_session(err, "reserve001", "reserve001.lock");
     assert!(first.session_path.exists());
     assert!(first.log_path.exists());
     assert!(first.lock_path.exists());
@@ -3793,13 +3857,7 @@ fn resume_rejects_active_session_lock_without_side_effects() {
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("active session must not resume concurrently");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message)
-            if message.contains("already active")
-                && message.contains("hello001.lock")
-                && message.contains("verify no Loop Agent process")
-    ));
+    assert_active_session(err, "hello001", "hello001.lock");
     assert!(!workspace.join("out/summary.txt").exists());
     reservation.rollback();
 }
@@ -4021,9 +4079,10 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("apply-time side effect failure must fail the resume");
 
-    assert!(
-        matches!(err, RuntimeError::Protocol(ref message) if message.contains("temporary replacement path")),
-        "{err:?}"
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "temporary replacement path",
     );
     assert!(!summary_path.exists());
     let resumed = fs::read_to_string(&path).expect("resume marker log readable");
@@ -4097,7 +4156,11 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "must be a file",
+    );
     assert!(!workspace.join("out/partial.txt").exists());
     assert_eq!(
         fs::read_to_string(&path).expect("unchanged log readable"),
@@ -5002,16 +5065,20 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
 }
 
 #[test]
-fn reserve_unique_session_log_skips_in_progress_reservations() {
+fn reserve_unique_session_log_blocks_in_progress_reservations() {
     let workspace = empty_workspace("reserve-in-progress-collision");
     let held = reserve_session_log(&workspace, "smoke001").expect("first reservation succeeds");
 
-    let next = reserve_unique_session_log(&workspace, "smoke001")
-        .expect("in-progress reservation must be treated as occupied");
+    let err = reserve_unique_session_log(&workspace, "smoke001")
+        .expect_err("in-progress reservation must block allocation");
 
-    assert_eq!(next.session_id, "smoke001-2");
+    assert_active_session(err, "smoke001", "smoke001.lock");
     assert!(held.session_path.exists());
-    assert!(next.session_path.exists());
+    assert!(!workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("smoke001-2.jsonl")
+        .exists());
+    held.rollback();
 }
 
 #[test]
@@ -5134,12 +5201,12 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         fs::write(temp_path, "held").expect("temp collision file written");
     }
     assert!(matches!(
-        create_replacement_temp(&path),
+        create_replacement_temp(&path, None),
         Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
     ));
     let missing_parent_temp = workspace.join("missing-temp-dir").join("file.txt");
     assert!(matches!(
-        create_replacement_temp(&missing_parent_temp),
+        create_replacement_temp(&missing_parent_temp, None),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
     for attempt in 0..100 {
@@ -5147,16 +5214,17 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         fs::write(backup_path, "held").expect("backup collision file written");
     }
     assert!(matches!(
-        create_replacement_backup_path(&path),
+        create_replacement_backup_path(&path, None),
         Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
     ));
 
     let dir_leaf = workspace.join("dir-leaf");
     fs::create_dir(&dir_leaf).expect("dir leaf written");
-    assert!(matches!(
-        ensure_writable_regular_leaf(&dir_leaf),
-        Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
-    ));
+    assert_denied(
+        ensure_writable_regular_leaf(&dir_leaf).expect_err("directory leaf must reject"),
+        core_policy::DenyReasonCode::WriteDenied,
+        "must be a file",
+    );
 }
 
 #[test]
@@ -5167,7 +5235,7 @@ fn existing_leaf_replacement_restores_original_when_final_rename_fails() {
     fs::write(&path, "old").expect("file written");
 
     assert!(matches!(
-        replace_existing_leaf_from_temp(&path, &missing_temp_path, SideEffectRecorder::none()),
+        replace_existing_leaf_from_temp(&path, &missing_temp_path, SideEffectRecorder::none(), None),
         Err(RuntimeError::Io { path: failed_path, .. }) if failed_path == path
     ));
     assert_eq!(
@@ -6329,7 +6397,10 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
 
     assert_eq!(
         runtime_failure_for_tool_error(
-            &RuntimeError::Protocol("protected path denied".to_owned()),
+            &RuntimeError::Denied {
+                reason: core_policy::DenyReasonCode::ProtectedPathDenied,
+                message: "protected path denied".to_owned(),
+            },
             "tool"
         )
         .expect("protected path maps")
@@ -6338,7 +6409,10 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
     );
     assert_eq!(
         runtime_failure_for_tool_error(
-            &RuntimeError::Protocol("must be a directory".to_owned()),
+            &RuntimeError::Denied {
+                reason: core_policy::DenyReasonCode::WriteDenied,
+                message: "must be a directory".to_owned(),
+            },
             "tool"
         )
         .expect("write denial maps")
@@ -6347,7 +6421,10 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
     );
     assert_eq!(
         runtime_failure_for_tool_error(
-            &RuntimeError::Protocol("must not be a symlink".to_owned()),
+            &RuntimeError::Denied {
+                reason: core_policy::DenyReasonCode::SymlinkEscapeDenied,
+                message: "must not be a symlink".to_owned(),
+            },
             "tool"
         )
         .expect("symlink denial maps")
@@ -6356,7 +6433,10 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
     );
     assert_eq!(
         runtime_failure_for_tool_error(
-            &RuntimeError::Protocol("changed before write".to_owned()),
+            &RuntimeError::Denied {
+                reason: core_policy::DenyReasonCode::WriteDenied,
+                message: "changed before write".to_owned(),
+            },
             "tool"
         )
         .expect("write guard denial maps")
@@ -6386,6 +6466,11 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
     assert!(
         runtime_failure_for_tool_error(&RuntimeError::Usage("bad".to_owned()), "tool").is_none()
     );
+    assert!(runtime_failure_for_tool_error(
+        &RuntimeError::Protocol("protected path denied".to_owned()),
+        "tool",
+    )
+    .is_none());
 
     let mut non_negative_tool = tool.clone();
     non_negative_tool.command = core_script::ToolCommand::OwnScript("noop".to_owned());
@@ -7134,17 +7219,21 @@ fn file_and_stream_helpers_cover_direct_edges() {
     ));
     let lock_path = workspace.join("active.lock");
     fs::write(&lock_path, b"lock").expect("lock file written");
-    assert!(matches!(
-        reserve_session_lock_file(&lock_path, "active001"),
-        Err(RuntimeError::Protocol(message)) if message.contains("already active")
-    ));
+    assert_active_session(
+        reserve_session_lock_file(&lock_path, "active001").expect_err("active lock must reject"),
+        "active001",
+        "active.lock",
+    );
     let missing_parent_lock = workspace.join("missing-lock-dir").join("active.lock");
     assert!(matches!(
         reserve_session_lock_file(&missing_parent_lock, "active002"),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
     assert!(is_active_session_error(
-        &RuntimeError::Protocol(active_session_lock_message(&lock_path, "active001")),
+        &RuntimeError::ActiveSession {
+            session_id: "active001".to_owned(),
+            lock_path: lock_path.clone(),
+        },
         "active001"
     ));
     assert_eq!(suffixed_session_id(&"a".repeat(140), 42).len(), 128);
@@ -7542,7 +7631,11 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("junction summary ancestor must fail");
 
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("reparse")));
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::SymlinkEscapeDenied,
+        "reparse",
+    );
     assert!(!outside.join("summary.txt").exists());
     assert!(!workspace
         .join(LOCAL_SESSION_DIR)
