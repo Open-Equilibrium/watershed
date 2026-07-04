@@ -684,6 +684,16 @@ fn policy_denial_evaluation_rejects_attempts_allowed_by_policy() {
         err.to_string().contains("policy allows environment"),
         "{err}"
     );
+
+    let err = artifact
+        .evaluate_denied_attempt(&DeniedAttempt::Network {
+            destination: "203.0.113.0/24".to_owned(),
+            port: 443,
+            tool_id: "missing-tool".to_owned(),
+            transport: NetworkTransport::Tcp,
+        })
+        .expect_err("attempts must reference a policy command");
+    assert!(err.to_string().contains("policy missing tool"), "{err}");
 }
 
 #[test]
@@ -797,10 +807,65 @@ fn parameter_and_identifier_shape_helpers_cover_validation_edges() {
     let mut none = valid_parameter("--flag", ParameterValueType::None);
     none.value_pattern = Some("true".to_owned());
     assert!(none.validate("parameter-tool").is_err());
+    none.value_pattern = None;
+    none.max_length = Some(4);
+    assert!(none.validate("parameter-tool").is_err());
+    none.max_length = None;
+    none.min = Some(1);
+    assert!(none.validate("parameter-tool").is_err());
+    none.min = None;
+    none.max = Some(1);
+    assert!(none.validate("parameter-tool").is_err());
 
     let mut path = valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
     path.min = Some(1);
     assert!(path.validate("parameter-tool").is_err());
+}
+
+#[test]
+fn path_denial_helpers_cover_normalization_and_pattern_edges() {
+    let artifact = valid_policy_artifact("path-tool");
+    let command = &artifact.commands[0];
+
+    assert!(write_path_is_denied(command, "../outside.txt"));
+    assert!(!write_path_is_denied(command, "a-out/file.txt"));
+    assert!(!protected_path_attempt_is_denied(command, "../outside.txt"));
+    assert!(protected_path_attempt_is_denied(command, ".ssh/config"));
+    assert!(!protected_path_attempt_is_denied(
+        command,
+        "workspace/z.env"
+    ));
+
+    assert_eq!(
+        normalize_attempt_path("out/file.txt"),
+        Some("workspace/out/file.txt".to_owned())
+    );
+    assert_eq!(
+        normalize_attempt_path("workspace/out/file.txt"),
+        Some("workspace/out/file.txt".to_owned())
+    );
+    assert_eq!(normalize_attempt_path("../outside.txt"), None);
+
+    assert!(protected_path_pattern_matches(
+        "src/main.rs",
+        "workspace/src/main.rs"
+    ));
+    assert!(protected_path_pattern_matches(
+        "**/.ssh/**",
+        "workspace/home/user/.ssh/config"
+    ));
+    assert!(protected_path_pattern_matches(
+        "**/*.env",
+        "workspace/app/.env"
+    ));
+    assert!(protected_path_pattern_matches(
+        "**/secret*",
+        "workspace/app/secret-token"
+    ));
+    assert!(protected_path_pattern_matches(
+        "**/secrets",
+        "workspace/app/secrets"
+    ));
 }
 
 #[test]

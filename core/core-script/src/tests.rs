@@ -922,6 +922,21 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
                 "unsupported parameter value_type",
             ),
             (
+                "integer-with-pattern.yaml",
+                "tool:\n  id: integer-with-pattern\n  name: IntegerWithPattern\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --count\n      value_type: integer\n      required: true\n      value_pattern: '[0-9]+'\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "integer parameters must omit value_pattern and max_length",
+            ),
+            (
+                "integer-with-max-length.yaml",
+                "tool:\n  id: integer-with-max-length\n  name: IntegerWithMaxLength\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --count\n      value_type: integer\n      required: true\n      max_length: 4\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "integer parameters must omit value_pattern and max_length",
+            ),
+            (
+                "none-with-min.yaml",
+                "tool:\n  id: none-with-min\n  name: NoneWithMin\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --flag\n      value_type: none\n      required: false\n      min: 1\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+                "none parameters must omit value_pattern, max_length, min, and max",
+            ),
+            (
                 "enum-without-values.yaml",
                 "tool:\n  id: enum-without-values\n  name: EnumWithoutValues\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --mode\n      value_type: enum\n      required: true\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
                 "enum parameters must declare",
@@ -1297,6 +1312,13 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
     )
     .expect("pending list property flushes before top-level break");
     assert_eq!(object[0]["connection_refs"], "[\"link\"]");
+    let inline_pending_object = list_objects(
+        "inline-pending-list-property.yaml",
+        "phase:\n  steps:\n    - connection_refs:\n        - link\n      id: step\n      name: Step\n",
+        object_shape,
+    )
+    .expect("pending list property may start on the item line");
+    assert_eq!(inline_pending_object[0]["connection_refs"], "[\"link\"]");
     assert!(message(list_objects(
         "steps-empty-field.yaml",
         "phase:\n  steps:\n    - : value\n",

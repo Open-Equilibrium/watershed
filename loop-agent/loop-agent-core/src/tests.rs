@@ -4786,7 +4786,7 @@ fn tail_session_stops_when_writer_closes_before_terminal_event() {
         let _ = tx.send(result);
     });
 
-    let output = match rx.recv_timeout(Duration::from_millis(200)) {
+    let output = match rx.recv_timeout(Duration::from_secs(1)) {
         Ok(result) => result.expect("broken pipe stops tail without error"),
         Err(err) => {
             let completed = EventEnvelope::new(
@@ -6430,6 +6430,614 @@ fn appended_session_validation_covers_incremental_edges() {
         let text = event.canonical_jsonl().expect("edge event serializes");
         assert_invalid_appended_session_log(path, name, &prior, &text, expected);
     }
+}
+
+#[test]
+fn protocol_validation_covers_envelope_and_stream_edges() {
+    let mut empty_correlation = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "meta001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    );
+    empty_correlation.correlation_id = Some(String::new());
+    assert_invalid_event(
+        "empty-correlation.jsonl",
+        empty_correlation,
+        "correlation_id",
+    );
+
+    let mut empty_loop_id = base_event();
+    empty_loop_id.loop_id = Some(String::new());
+    assert_invalid_event("empty-loop-id.jsonl", empty_loop_id, "loop_id");
+
+    let mut empty_parent_loop_id = base_event();
+    empty_parent_loop_id.parent_loop_id = Some(String::new());
+    assert_invalid_event(
+        "empty-parent-loop-id.jsonl",
+        empty_parent_loop_id,
+        "parent_loop_id",
+    );
+
+    assert_invalid_event(
+        "first-sequence.jsonl",
+        EventEnvelope::new(
+            "evt-002",
+            EventType::SessionStarted,
+            "meta001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"fixture-start"}),
+        ),
+        "first sequence",
+    );
+    assert_invalid_stream(
+        "non-increasing-sequence.jsonl",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            session_event_line("meta001", "evt-002", EventType::SessionPaused, 1),
+        ]
+        .concat(),
+        "sequence must increase",
+    );
+    assert_invalid_stream(
+        "after-terminal.jsonl",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            session_event_line("meta001", "evt-002", EventType::SessionCompleted, 2),
+            session_event_line("meta001", "evt-003", EventType::SessionPaused, 3),
+        ]
+        .concat(),
+        "terminal session event",
+    );
+    assert_invalid_stream(
+        "loop-start-missing-loop-id.jsonl",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            event_line(
+                "evt-002",
+                EventType::LoopStarted,
+                "meta001",
+                2,
+                None,
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+        ]
+        .concat(),
+        "loop.started must include loop_id",
+    );
+    assert_invalid_stream(
+        "duplicate-loop-id.jsonl",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            loop_started_line("evt-002", 2),
+            loop_started_line("evt-003", 3),
+        ]
+        .concat(),
+        "unique loop_id",
+    );
+    assert_invalid_stream(
+        "mixed-session-id.jsonl",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            session_event_line("other001", "evt-002", EventType::SessionPaused, 2),
+        ]
+        .concat(),
+        "one session_id",
+    );
+}
+
+fn assert_payload_error(event_type: EventType, payload: serde_json::Value, expected: &str) {
+    let event = EventEnvelope::new(
+        "evt-001",
+        event_type,
+        "meta001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        payload,
+    );
+    let err = validate_event_payload(Path::new("payload-edge.jsonl"), 1, &event)
+        .expect_err("invalid payload must fail");
+
+    assert!(err.to_string().contains(expected), "{err}");
+}
+
+#[test]
+fn protocol_validation_covers_payload_edges() {
+    assert_payload_error(
+        EventType::SessionStarted,
+        serde_json::json!("bad"),
+        "payload",
+    );
+    assert_payload_error(
+        EventType::StepStarted,
+        serde_json::json!({
+            "connection_ids": ["link"],
+            "connection_kinds": ["data", "trigger"],
+            "phase_id": "phase",
+            "step_id": "step",
+            "step_name": "Step",
+        }),
+        "same length",
+    );
+    assert_payload_error(
+        EventType::StepStarted,
+        serde_json::json!({
+            "connection_ids": ["link"],
+            "connection_kinds": ["control"],
+            "phase_id": "phase",
+            "step_id": "step",
+            "step_name": "Step",
+        }),
+        "data, trigger, or refresh",
+    );
+    assert_payload_error(
+        EventType::StepStarted,
+        serde_json::json!({
+            "connection_ids": ["link"],
+            "phase_id": "phase",
+            "step_id": "step",
+            "step_name": "Step",
+        }),
+        "present together",
+    );
+    assert_payload_error(
+        EventType::ToolStarted,
+        serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "read_scope": [],
+            "tool_id": "tool",
+            "tool_kind": "custom",
+            "tool_name": "Tool",
+            "write_scope": [],
+        }),
+        "predefined-command or own-script",
+    );
+    assert_payload_error(
+        EventType::ToolStarted,
+        serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "internet",
+            "read_scope": [],
+            "tool_id": "tool",
+            "tool_kind": "own-script",
+            "tool_name": "Tool",
+            "write_scope": [],
+        }),
+        "deny or declared",
+    );
+    assert_payload_error(
+        EventType::ToolCompleted,
+        serde_json::json!({"exit_code":1.5,"tool_id":"tool"}),
+        "integer",
+    );
+    assert_payload_error(
+        EventType::MetricSample,
+        serde_json::json!({"metric_name":"append_ms","value":"fast"}),
+        "number",
+    );
+    assert_payload_error(
+        EventType::Error,
+        serde_json::json!({"code":"bad","data":"not-object","message":"bad"}),
+        "object",
+    );
+}
+
+fn edge_step_started_line(event_id: &str, sequence: u64, step_id: &str, phase_id: &str) -> String {
+    event_line(
+        event_id,
+        EventType::StepStarted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "phase_id": phase_id,
+            "step_id": step_id,
+            "step_name": "Step",
+        }),
+    )
+}
+
+fn edge_tool_progress_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::ToolProgress,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({"message":"working","tool_id":"tool"}),
+    )
+}
+
+fn edge_tool_completed_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::ToolCompleted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({"exit_code":0,"tool_id":"tool"}),
+    )
+}
+
+fn edge_message_delta_line(event_id: &str, sequence: u64, role: &str) -> String {
+    event_line(
+        event_id,
+        EventType::MessageDelta,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "content_delta": "hello",
+            "message_id": "msg-001",
+            "role": role,
+        }),
+    )
+}
+
+fn edge_message_completed_line(event_id: &str, sequence: u64, role: &str) -> String {
+    event_line(
+        event_id,
+        EventType::MessageCompleted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({"message_id":"msg-001","role":role}),
+    )
+}
+
+#[test]
+fn lifecycle_validation_covers_loop_phase_and_step_edges() {
+    for (name, lines, expected) in [
+        (
+            "loop-completed-before-start.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_completed_line("evt-002", 2),
+            ],
+            "must follow loop.started",
+        ),
+        (
+            "phase-entered-with-active-step.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                phase_entered_line("evt-005", 5),
+            ],
+            "requires no active step",
+        ),
+        (
+            "step-started-phase-mismatch.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                edge_step_started_line("evt-004", 4, "step", "other"),
+            ],
+            "must match active phase",
+        ),
+        (
+            "step-started-with-active-step.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_step_started_line("evt-005", 5, "step-two", "phase"),
+            ],
+            "requires no active step",
+        ),
+        (
+            "step-completed-before-start.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_completed_line("evt-004", 4),
+            ],
+            "must follow step.started",
+        ),
+    ] {
+        assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
+    }
+}
+
+#[test]
+fn lifecycle_validation_covers_tool_and_message_edges() {
+    for (name, lines, expected) in [
+        (
+            "tool-progress-before-start.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_tool_progress_line("evt-005", 5),
+            ],
+            "must follow tool.started",
+        ),
+        (
+            "tool-event-after-terminal.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                tool_started_line("evt-005", 5),
+                edge_tool_completed_line("evt-006", 6),
+                edge_tool_progress_line("evt-007", 7),
+            ],
+            "appears after terminal tool",
+        ),
+        (
+            "tool-failed-after-phase-before-start.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                tool_failed_line("evt-004", 4),
+            ],
+            "must follow tool.started after phase.entered",
+        ),
+        (
+            "message-completed-before-delta.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_message_completed_line("evt-005", 5, "assistant"),
+            ],
+            "must follow message.delta",
+        ),
+        (
+            "message-delta-role-mismatch.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_message_delta_line("evt-005", 5, "assistant"),
+                edge_message_delta_line("evt-006", 6, "user"),
+            ],
+            "role",
+        ),
+        (
+            "message-completed-role-mismatch.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_message_delta_line("evt-005", 5, "assistant"),
+                edge_message_completed_line("evt-006", 6, "user"),
+            ],
+            "role",
+        ),
+        (
+            "message-after-terminal.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_message_delta_line("evt-005", 5, "assistant"),
+                edge_message_completed_line("evt-006", 6, "assistant"),
+                edge_message_delta_line("evt-007", 7, "assistant"),
+            ],
+            "appears after terminal message",
+        ),
+    ] {
+        assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
+    }
+
+    assert_eq!(
+        started_tool_without_progress(
+            &validate_protocol_jsonl_text(
+                Path::new("started-tool-without-progress.jsonl"),
+                &[
+                    session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                    loop_started_line("evt-002", 2),
+                    phase_entered_line("evt-003", 3),
+                    step_started_line("evt-004", 4),
+                    tool_started_line("evt-005", 5),
+                ]
+                .concat(),
+            )
+            .expect("non-terminal stream may leave a started tool")
+        ),
+        Some("tool".to_owned())
+    );
+}
+
+#[test]
+fn lifecycle_validation_covers_terminal_session_open_entity_edges() {
+    for (name, lines, expected) in [
+        (
+            "terminal-session-open-loop.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                session_event_line("meta001", "evt-003", EventType::SessionCompleted, 3),
+            ],
+            "open loop",
+        ),
+        (
+            "terminal-session-open-step.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                loop_completed_line("evt-005", 5),
+                session_event_line("meta001", "evt-006", EventType::SessionCompleted, 6),
+            ],
+            "open step",
+        ),
+        (
+            "terminal-session-open-tool.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                tool_started_line("evt-005", 5),
+                step_completed_line("evt-006", 6),
+                loop_completed_line("evt-007", 7),
+                session_event_line("meta001", "evt-008", EventType::SessionCompleted, 8),
+            ],
+            "open tool",
+        ),
+        (
+            "terminal-session-open-message.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                edge_message_delta_line("evt-005", 5, "assistant"),
+                step_completed_line("evt-006", 6),
+                loop_completed_line("evt-007", 7),
+                session_event_line("meta001", "evt-008", EventType::SessionCompleted, 8),
+            ],
+            "open message",
+        ),
+    ] {
+        assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
+    }
+}
+
+#[test]
+fn file_and_stream_helpers_cover_direct_edges() {
+    let workspace = empty_workspace("file-and-stream-helpers");
+    let missing_dir = workspace.join("missing-dir");
+    assert!(!ensure_optional_real_directory(&missing_dir).expect("missing dir is optional"));
+
+    let created_dir = workspace.join("created-dir");
+    assert!(ensure_created_real_directory(&created_dir).expect("dir is created"));
+    assert!(!ensure_created_real_directory(&created_dir).expect("existing dir is reused"));
+
+    let file_path = workspace.join("file.txt");
+    fs::write(&file_path, b"abc").expect("file written");
+    assert!(matches!(
+        ensure_new_leaf_available(&file_path),
+        Err(RuntimeError::Protocol(message)) if message.contains("must not already exist")
+    ));
+    assert!(matches!(
+        ensure_real_file(&workspace),
+        Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
+    ));
+
+    assert_eq!(
+        read_file_range(&file_path, 1, 2).expect("range reads"),
+        b"bc"
+    );
+    assert!(matches!(
+        read_file_range(&file_path, 4, 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("append-only tail")
+    ));
+    assert!(matches!(
+        read_file_range(&file_path, 0, 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
+    ));
+    assert_eq!(
+        read_file_suffix_to_string(&file_path, 1, 3).expect("suffix reads"),
+        "bc"
+    );
+    assert!(matches!(
+        read_file_suffix_to_string(&file_path, 3, 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("append-only tail")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&file_path, 1, 4),
+        Err(RuntimeError::Protocol(message)) if message.contains("append-only tail")
+    ));
+
+    let invalid_utf8 = workspace.join("invalid-utf8.txt");
+    fs::write(&invalid_utf8, [0xff]).expect("invalid utf8 written");
+    assert!(matches!(
+        read_to_string_with_limit(&invalid_utf8, MAX_SESSION_LOG_BYTES),
+        Err(RuntimeError::Protocol(message)) if message.contains("valid UTF-8")
+    ));
+
+    let transient = RuntimeError::Io {
+        path: file_path.clone(),
+        source: io::Error::from(io::ErrorKind::PermissionDenied),
+    };
+    assert!(runtime_error_is_transient_tail_read(&transient));
+    let not_found = RuntimeError::Io {
+        path: file_path.clone(),
+        source: io::Error::from(io::ErrorKind::NotFound),
+    };
+    assert!(runtime_error_is_transient_tail_read(&not_found));
+    let other = RuntimeError::Io {
+        path: file_path.clone(),
+        source: io::Error::from(io::ErrorKind::Other),
+    };
+    assert!(!runtime_error_is_transient_tail_read(&other));
+
+    let mut attempts = 0usize;
+    let retried = retry_tail_transient_read_error(|| {
+        attempts += 1;
+        if attempts == 1 {
+            Err(RuntimeError::Io {
+                path: file_path.clone(),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            })
+        } else {
+            Ok("ok")
+        }
+    })
+    .expect("transient tail read retries");
+    assert_eq!(retried, "ok");
+    assert_eq!(attempts, 2);
+
+    assert_eq!(
+        session_stream_suffix_bytes("first\nsecond\n", 0).expect("full stream suffix"),
+        b"first\nsecond\n"
+    );
+    assert_eq!(
+        session_stream_suffix_bytes("first\nsecond\n", 1).expect("one-line prefix suffix"),
+        b"second\n"
+    );
+    assert!(matches!(
+        session_stream_suffix_bytes("first", 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("initial event")
+    ));
+    assert!(matches!(
+        session_stream_suffix_bytes("first\n", 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("persisted event prefix")
+    ));
+
+    let reservation = reserve_session_log(&workspace, "helper001").expect("session reserved");
+    persist_reserved_session_prefix(&reservation, "helper001", &[base_event()], 1, None)
+        .expect("single-event prefix is already durable");
+    reservation.rollback();
+
+    let loop_started = EventEnvelope {
+        loop_id: Some("loop-001".to_owned()),
+        ..EventEnvelope::new(
+            "evt-002",
+            EventType::LoopStarted,
+            "meta001",
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        )
+    };
+    assert_eq!(
+        durable_run_prefix_event_count(&[base_event(), loop_started]),
+        2
+    );
 }
 
 #[test]
