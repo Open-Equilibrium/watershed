@@ -3141,6 +3141,7 @@ fn create_replacement_temp(
     ))
 }
 
+#[cfg(not(unix))]
 fn create_replacement_backup_path(
     path: &Path,
     denied_reason: Option<core_policy::DenyReasonCode>,
@@ -3176,6 +3177,7 @@ fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeEr
     Ok(path.with_file_name(file_name))
 }
 
+#[cfg(not(unix))]
 fn replacement_backup_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
     let mut file_name = path
         .file_name()
