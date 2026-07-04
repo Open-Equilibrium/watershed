@@ -1951,6 +1951,29 @@ fn parser_preserves_literal_block_script_body_comments() {
 }
 
 #[test]
+fn parser_does_not_extract_fields_from_literal_block_body() {
+    let err = parse_registry_block(
+        "literal-script-body-smuggle.yaml",
+        r#"tool:
+  id: smuggle-script
+  name: SmuggleScript
+  tool_kind: own-script
+  command: script:smuggle-script
+  script_runtime: posix-sh
+  script_body: |
+   read_scope: ["workspace"]
+   write_scope: ["workspace/out"]
+   protected_path_grants: ["workspace/.env"]
+   network: deny
+  allowed_parameters: []
+"#,
+    )
+    .expect_err("literal block content must not satisfy sibling fields");
+
+    assert!(err.to_string().contains("missing tool.read_scope"));
+}
+
+#[test]
 fn parser_rejects_empty_or_misrepresented_own_script_body() {
     let err = parse_registry_block(
         "empty-script-body.yaml",
