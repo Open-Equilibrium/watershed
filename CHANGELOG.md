@@ -16,6 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - M0/M1 protocol, fixture, policy-artifact, runtime-hardening and Rust workspace scaffold; canonical contracts live in `PROTOCOL.md`, `TESTING.md`, `SECURITY.md` and ADR-0029…ADR-0055.
 
 ### Changed
+- Loop Agent M1 gates now pin CI actions, include Windows in the matrix, isolate timing-sensitive performance tests from llvm-cov, and clarify M1 sandbox emulation versus post-M1 isolation.
 - Local harness topology and closeout flow aligned with `AGENTS.md` and ADR-0023…ADR-0027.
 - Dependency hygiene, formatting, linting, test and docs gates aligned with `TESTING.md`, `SECURITY.md` and ADR-0021.
 - License identifier pinned to SPDX `AGPL-3.0-only`; contributions are DCO-only (no CLA, ADR-0015).

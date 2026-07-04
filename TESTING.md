@@ -18,14 +18,14 @@ Loop Agent MVP tests must not require Watershed-owned project-history/VCS behavi
 - **Config-write audit tests (Meta-Harness)** — every config change yields an audit entry; sensitive changes block on approval.
 - **Workspace history & agent-edit tests (Liquid)** — action-history append; revert (incl. compensating actions); diff; external-agent CLI/API mutation; permission-denied; actor/origin attribution; component mutation schema; snapshot/checkpoint restore; workspace event subscription; and a no-hidden-writes test proving every UI/CLI/API/Liquid-AI/external-agent write passes through the mutation pipeline and records an action. Liquid's workspace history is a workspace VCS over its own data, not a project-code VCS.
 - **Performance gates** — benchmarks assert the `PERFORMANCE.md` targets/budgets relevant to the current milestone. M1 Loop Agent benchmarks run optimized in CI, exercise the runtime emit/append paths through deterministic fixture/stub-model runs, and exclude model latency and tool runtime from Watershed overhead. Failures block release.
-- **Coverage gate** — from M1 (first real crate logic), `cargo llvm-cov nextest --workspace --fail-under-lines 95` enforces **≥95% line coverage**; merge blocks below it. Generated/FFI/CLI-arg-glue code may be excluded (`#[coverage(off)]` or llvm-cov ignore config) so the threshold measures meaningful logic, not boilerplate; region/function coverage are tracked as secondary signals (ADR-0022).
+- **Coverage gate** — from M1 (first real crate logic), `cargo llvm-cov nextest --workspace --fail-under-lines 95` enforces **≥95% line coverage**; merge blocks below it. Timing-sensitive performance tests run optimized outside llvm-cov and are excluded from the coverage command by nextest filter. Generated/FFI/CLI-arg-glue code may be excluded (`#[coverage(off)]` or llvm-cov ignore config) so the threshold measures meaningful logic, not boilerplate; region/function coverage are tracked as secondary signals (ADR-0022).
 
 ## M0 tests / pass-fail checks
 
 M0 is a readiness milestone. It passes when:
 
 - placeholder crates compile;
-- CI runs on Linux + macOS;
+- CI runs on Linux + macOS + Windows;
 - `cargo fmt --check` passes;
 - `cargo clippy` passes;
 - `cargo nextest run` is green (deterministic, process-isolated);
@@ -60,7 +60,7 @@ The same metrics AgentPulse reports (rework ratio, first-attempt success rate, c
 
 ## CI
 
-- Run on Linux + macOS.
-- Mandatory gates: `cargo fmt --check`, `cargo clippy`, `cargo nextest run` (deterministic, process-isolated tests), `cargo audit` + `cargo deny` (dependency hygiene, see `SECURITY.md`), and the `lychee` docs link gate + HTML render check (`pnpm run docs:render-check`; all M0, ADR-0021, ADR-0043, ADR-0045); plus **≥95% line coverage** via `cargo llvm-cov nextest --workspace --fail-under-lines 95` from M1 (ADR-0022).
+- Run on Linux + macOS + Windows.
+- Mandatory gates: `cargo fmt --check`, `cargo clippy`, `cargo nextest run` (deterministic, process-isolated tests), optimized Loop Agent performance tests, `cargo audit` + `cargo deny` (dependency hygiene, see `SECURITY.md`), and the `lychee` docs link gate + HTML render check (`pnpm run docs:render-check`; all M0, ADR-0021, ADR-0043, ADR-0045); plus **>=95% line coverage** via `cargo llvm-cov nextest --workspace --fail-under-lines 95` from M1 (ADR-0022), excluding timing-sensitive tests already covered by the optimized performance gate.
 - Block merge on: failing tests, line coverage below 95% (from M1), failing dependency-hygiene gates (`cargo audit`/`cargo deny`), failing Linux sandbox boundary tests once enforcement lands, missed macOS policy-artifact parity checks, missed performance gates for the current milestone, and docs link (`lychee`)/HTML validation failures.
 - M0 CI starts with compile + `cargo fmt --check` + `cargo clippy` + `cargo nextest` unit tests + `cargo audit`/`cargo deny` + `lychee` docs link validation + `pnpm run docs:render-check`; M1 must add the ≥95% coverage gate, D-015 golden-loop diffs, the Loop Agent budgets in `PERFORMANCE.md`, Linux sandbox-negative enforcement tests and macOS policy-artifact parity checks.

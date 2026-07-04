@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  PERF_TEST_FILTER: 'test(fsm_transition_p95_stays_under_m1_budget) | test(m1_performance_fixture_runtime_paths_are_exercised) | test(near_cap_event_validation_enforces_m1_memory_budget) | test(noop_dispatch_p95_stays_under_m1_budget) | test(smoke_loop_runtime_emit_p95_stays_under_m1_budget) | test(hello_loop_resume_append_p95_stays_under_m1_budget) | test(ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract)'
+  COVERAGE_TEST_FILTER: 'not (test(fsm_transition_p95_stays_under_m1_budget) | test(near_cap_event_validation_enforces_m1_memory_budget) | test(noop_dispatch_p95_stays_under_m1_budget) | test(smoke_loop_runtime_emit_p95_stays_under_m1_budget) | test(hello_loop_resume_append_p95_stays_under_m1_budget) | test(ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract))'
+
 jobs:
   m1:
     name: M1 gates (${{ matrix.os }})
@@ -16,11 +20,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
       - name: Validate Codex harness
         run: python -m unittest discover -s tests -p "test_*.py"
@@ -34,12 +38,12 @@ jobs:
           --component llvm-tools-preview
 
       - name: Install Rust gate tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907
         with:
           tool: cargo-nextest,cargo-llvm-cov,cargo-audit,cargo-deny
 
       - name: Install lychee
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907
         with:
           tool: lychee
 
@@ -53,7 +57,12 @@ jobs:
         run: cargo nextest run --locked --workspace --all-targets
 
       - name: Run optimized performance tests
-        run: cargo test --locked -p loop-agent-core --test performance --release
+        run: >-
+          cargo nextest run
+          --locked
+          -p loop-agent-core
+          --release
+          -E '${{ env.PERF_TEST_FILTER }}'
 
       - name: Check line coverage
         run: >-
@@ -63,6 +72,7 @@ jobs:
           --fail-under-lines 95
           --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)'
           --show-missing-lines
+          -E '${{ env.COVERAGE_TEST_FILTER }}'
 
       - name: Check RustSec advisories
         run: cargo audit

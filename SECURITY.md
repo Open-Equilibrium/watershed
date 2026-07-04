@@ -30,7 +30,7 @@ Loop Agent runs inside normal Git projects in the MVP, but it does not own proje
 3. Filesystem **read/write confined** to declared roots; protect the default protected paths below unless explicitly granted.
 4. **Blast-radius control** via least-capability tools, isolated workspaces when configured, deterministic logs and short-lived bounded runs.
 5. Bounded/headless/timeout execution + `.loop/logs` — for stability, **not** a security boundary by itself.
-6. Optional **container/microVM per loop** for loops touching untrusted content (web, foreign repos).
+6. Post-M1 optional **container/microVM per loop** for loops touching untrusted content (web, foreign repos).
 
 ## Meta-Agent configuration writes
 
@@ -53,12 +53,12 @@ This is Liquid's **workspace** action history (over Liquid's own data), not a pr
 
 ## Plugins & supply chain
 
-- Plugins run as **Wasmtime** modules: capability-scoped, sandboxed, with explicit grants and resource limits — a compromised plugin cannot escape.
+- Post-M1 plugins run as **Wasmtime** modules: capability-scoped, sandboxed, with explicit grants and resource limits.
 - Dependency hygiene: lockfiles + pinning, vendoring, minimal dependencies, and a CI gate of `cargo audit` (RustSec advisories) + `cargo deny` (license/bans/sources/advisory policy via `deny.toml`). Both run as **mandatory M0 CI gates** (ADR-0021); `cargo vet` remains an optional later addition. Rust reduces but does not eliminate supply-chain risk (`build.rs`/proc-macros run at build time); the runtime sandbox limits blast radius regardless of language.
 
 ## M0/M1 sandbox scope
 
-The M0 security packet describes policy artifacts and sandbox-negative tests for forbidden writes, network egress, out-of-phase tools, protected paths, symlink traversal and interpreter misuse; it does not implement the OS sandbox yet. M1 applies the compiled policy through deterministic in-process execution/emulation of modeled decisions; predefined commands are fixture stubs, and own-script writes use the bounded fixture executor. Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0052).
+The M0 security packet describes policy artifacts and sandbox-negative tests for forbidden writes, network egress, out-of-phase tools, protected paths, symlink traversal and interpreter misuse; it does not implement the OS sandbox yet. M1 applies the compiled policy through deterministic in-process execution/emulation of modeled decisions. The `agent-negative` predefined command maps fixture operation labels to expected deny reasons, and the out-of-phase fixture uses registry phase/tool shape rather than prompt prose. Own-script writes use the bounded fixture executor. Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0052).
 
 ### M0 policy artifact contract
 

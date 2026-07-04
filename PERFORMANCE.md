@@ -2,7 +2,7 @@
 
 Non-functional targets. These are **falsifiable budgets**: every target must have a test or benchmark (see `TESTING.md`). Targets are split into product-level goals and implementation budgets so the MVP can fail fast on the actual bottleneck.
 
-Rationale for the Rust core: low per-agent memory footprint, true multi-core parallelism, and Wasmtime plugin isolation — properties a Node runtime cannot meet at the required scale.
+Rationale for the Rust core: low per-agent memory footprint, true multi-core parallelism, and a post-M1 Wasmtime plugin isolation path — properties a Node runtime cannot meet at the required scale.
 
 ## Loop Agent
 
