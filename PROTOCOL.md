@@ -48,6 +48,8 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/ses
 | `payload` | JSON object; event-specific fields below |
 | `correlation_id` | optional non-empty opaque string linking request/result events |
 
+Loop Agent emits wall-clock UTC timestamps by default. Workspaces that set `fixture_profile: stub-model` and `stub_model: deterministic` in `.loop/config.yaml` may emit deterministic fixture timestamps for golden streams.
+
 ## v0 ID safety and loop identity
 
 - `session_id` is a token, not a path. V0 session IDs match `^[a-z0-9_-]{1,128}$`; lowercase-only IDs avoid filename aliasing on case-insensitive targets. Producers reject externally supplied values outside that grammar before reading or writing `.loop/sessions/<session_id>.jsonl`. Reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..` and empty strings before filesystem access. If a future protocol accepts broader external session IDs, it must specify a canonical filename encoding instead of joining raw IDs into paths.

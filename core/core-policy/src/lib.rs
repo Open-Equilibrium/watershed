@@ -107,6 +107,120 @@ impl PolicyArtifact {
         Ok(())
     }
 
+    /// Evaluates a modeled denied attempt against this compiled policy artifact.
+    pub fn evaluate_denied_attempt(
+        &self,
+        attempt: &DeniedAttempt,
+    ) -> Result<DenyReasonCode, ExpectedDecisionValidationError> {
+        attempt.validate()?;
+        match attempt {
+            DeniedAttempt::ToolOutOfPhase { phase_id, tool_id } => {
+                if self.phase_scope.iter().any(|phase| {
+                    phase.phase_id == *phase_id
+                        && phase.tool_ids.iter().any(|scoped| scoped == tool_id)
+                }) {
+                    return Err(expected_decision_error(format!(
+                        "policy allows tool {tool_id} in phase {phase_id}"
+                    )));
+                }
+                Ok(DenyReasonCode::ToolOutOfPhase)
+            }
+            DeniedAttempt::Write {
+                path,
+                from_path,
+                to_path,
+                tool_id,
+                ..
+            } => {
+                let command = self.command_for_attempt(tool_id)?;
+                if attempted_paths(path, from_path, to_path)
+                    .into_iter()
+                    .any(|path| write_path_is_denied(command, path))
+                {
+                    Ok(DenyReasonCode::WriteDenied)
+                } else {
+                    Err(expected_decision_error(format!(
+                        "policy allows write attempt by tool {tool_id}"
+                    )))
+                }
+            }
+            DeniedAttempt::Network {
+                destination,
+                port,
+                tool_id,
+                transport,
+            } => {
+                let command = self.command_for_attempt(tool_id)?;
+                if network_attempt_is_denied(command, destination, *port, transport) {
+                    Ok(DenyReasonCode::NetworkDenied)
+                } else {
+                    Err(expected_decision_error(format!(
+                        "policy allows network attempt by tool {tool_id}"
+                    )))
+                }
+            }
+            DeniedAttempt::Environment { name, tool_id } => {
+                let command = self.command_for_attempt(tool_id)?;
+                if environment_attempt_is_denied(command, name) {
+                    Ok(DenyReasonCode::EnvironmentDenied)
+                } else {
+                    Err(expected_decision_error(format!(
+                        "policy allows environment attempt by tool {tool_id}"
+                    )))
+                }
+            }
+            DeniedAttempt::ProtectedPath {
+                path,
+                from_path,
+                to_path,
+                tool_id,
+                ..
+            } => {
+                let command = self.command_for_attempt(tool_id)?;
+                if attempted_paths(path, from_path, to_path)
+                    .into_iter()
+                    .any(|path| protected_path_attempt_is_denied(command, path))
+                {
+                    Ok(DenyReasonCode::ProtectedPathDenied)
+                } else {
+                    Err(expected_decision_error(format!(
+                        "policy allows protected path attempt by tool {tool_id}"
+                    )))
+                }
+            }
+            DeniedAttempt::SymlinkEscape {
+                symlink_target,
+                tool_id,
+                ..
+            } => {
+                self.command_for_attempt(tool_id)?;
+                if symlink_target_is_escape(symlink_target) {
+                    Ok(DenyReasonCode::SymlinkEscapeDenied)
+                } else {
+                    Err(expected_decision_error(format!(
+                        "policy does not model symlink target {symlink_target:?} as an escape"
+                    )))
+                }
+            }
+            DeniedAttempt::InterpreterEscape {
+                argv,
+                executable,
+                tool_id,
+            } => {
+                let command = self.command_for_attempt(tool_id)?;
+                if command.executable.as_str() != executable
+                    || command.argv.as_slice() != argv.as_slice()
+                {
+                    Ok(DenyReasonCode::InterpreterEscapeDenied)
+                } else {
+                    Err(expected_decision_error(format!(
+                        "policy allows interpreter attempt by tool {tool_id}"
+                    )))
+                }
+            }
+        }
+    }
+
     fn validate_phase_scope(&self) -> Result<(), PolicyArtifactValidationError> {
         let mut command_tool_ids = BTreeSet::new();
         for command in &self.commands {
@@ -141,6 +255,16 @@ impl PolicyArtifact {
 
         Ok(())
     }
+
+    fn command_for_attempt(
+        &self,
+        tool_id: &str,
+    ) -> Result<&CommandPolicy, ExpectedDecisionValidationError> {
+        self.commands
+            .iter()
+            .find(|command| command.tool_id == tool_id)
+            .ok_or_else(|| expected_decision_error(format!("policy missing tool {tool_id}")))
+    }
 }
 
 /// Target sandbox backend represented by a policy artifact.
@@ -151,6 +275,15 @@ pub enum PolicyTarget {
     LinuxLandlockSeccomp,
     /// macOS Seatbelt policy target.
     MacosSeatbelt,
+}
+
+impl PolicyTarget {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::LinuxLandlockSeccomp => "linux-landlock-seccomp",
+            Self::MacosSeatbelt => "macos-seatbelt",
+        }
+    }
 }
 
 /// Error returned while compiling policy artifacts from a script registry.
@@ -1131,6 +1264,39 @@ impl ExpectedDecision {
         }
         Ok(())
     }
+
+    /// Validates this expected decision against a compiled policy artifact.
+    pub fn validate_against_policy(
+        &self,
+        artifact: &PolicyArtifact,
+    ) -> Result<(), ExpectedDecisionValidationError> {
+        self.validate()?;
+        if self.target != artifact.target {
+            return Err(expected_decision_error(format!(
+                "expected decision target {} does not match artifact target {}",
+                self.target.name(),
+                artifact.target.name()
+            )));
+        }
+        if self.fixture_name != artifact.fixture_name
+            || self.fixture_name != artifact.source_loop_definition_id
+        {
+            return Err(expected_decision_error(format!(
+                "expected decision fixture {} does not match artifact fixture {} and loop {}",
+                self.fixture_name, artifact.fixture_name, artifact.source_loop_definition_id
+            )));
+        }
+        let actual = artifact.evaluate_denied_attempt(&self.attempt)?;
+        if actual != self.reason_code {
+            return Err(expected_decision_error(format!(
+                "policy denied {} with {}, expected {}",
+                self.attempt.kind_name(),
+                actual.name(),
+                self.reason_code.name()
+            )));
+        }
+        Ok(())
+    }
 }
 
 /// Modeled attempt that must be denied by sandbox-negative fixtures.
@@ -1280,6 +1446,112 @@ impl DeniedAttempt {
             Self::InterpreterEscape { .. } => "interpreter_escape",
         }
     }
+}
+
+fn attempted_paths<'a>(
+    path: &'a Option<String>,
+    from_path: &'a Option<String>,
+    to_path: &'a Option<String>,
+) -> Vec<&'a str> {
+    [path.as_deref(), from_path.as_deref(), to_path.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+fn write_path_is_denied(command: &CommandPolicy, path: &str) -> bool {
+    let Some(path) = normalize_attempt_path(path) else {
+        return true;
+    };
+    !command
+        .filesystem
+        .write_roots
+        .iter()
+        .filter_map(|root| normalize_policy_relative_path(root))
+        .any(|root| path_is_inside_scope(&path, &root))
+}
+
+fn network_attempt_is_denied(
+    command: &CommandPolicy,
+    destination: &str,
+    port: u16,
+    transport: &NetworkTransport,
+) -> bool {
+    match command.network.default {
+        NetworkDefault::Deny => !command.network.allow.iter().any(|entry| {
+            entry.port == port
+                && &entry.transport == transport
+                && network_allow_matches_destination(entry, destination)
+        }),
+    }
+}
+
+fn network_allow_matches_destination(entry: &NetworkAllowEntry, destination: &str) -> bool {
+    match entry.kind {
+        NetworkAllowKind::Cidr => entry.cidr == destination,
+    }
+}
+
+fn environment_attempt_is_denied(command: &CommandPolicy, name: &str) -> bool {
+    match command.environment.default {
+        EnvironmentDefault::Clear => !command
+            .environment
+            .allow
+            .iter()
+            .any(|allowed| allowed == name),
+    }
+}
+
+fn protected_path_attempt_is_denied(command: &CommandPolicy, path: &str) -> bool {
+    let Some(path) = normalize_attempt_path(path) else {
+        return false;
+    };
+    let granted = command
+        .filesystem
+        .protected_path_grants
+        .iter()
+        .filter_map(|grant| normalize_attempt_path(grant))
+        .any(|grant| grant == path);
+    !granted
+        && command
+            .filesystem
+            .protected_paths
+            .iter()
+            .any(|pattern| protected_path_pattern_matches(pattern, &path))
+}
+
+fn normalize_attempt_path(path: &str) -> Option<String> {
+    let normalized = normalize_policy_relative_path(path)?;
+    if normalized == "workspace" || normalized.starts_with("workspace/") {
+        Some(normalized)
+    } else {
+        Some(format!("workspace/{normalized}"))
+    }
+}
+
+fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
+    let path = path.strip_prefix("workspace/").unwrap_or(path);
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let Some(pattern) = pattern.strip_prefix("**/") else {
+        return pattern == path;
+    };
+    if let Some(directory) = pattern.strip_suffix("/**") {
+        return path == directory
+            || path.starts_with(&format!("{directory}/"))
+            || path.ends_with(&format!("/{directory}"))
+            || path.contains(&format!("/{directory}/"));
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return file_name.ends_with(suffix);
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return file_name.starts_with(prefix);
+    }
+    path == pattern || path.ends_with(&format!("/{pattern}"))
+}
+
+fn symlink_target_is_escape(target: &str) -> bool {
+    target.starts_with('/') || normalize_policy_relative_path(target).is_none()
 }
 
 /// Error returned when an expected-decision fixture is invalid.
@@ -1519,1524 +1791,4 @@ fn canonical_json(value: &Value) -> Result<String, proto::CanonicalJsonError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::{fs, path::Path};
-
-    #[test]
-    fn policy_artifact_fixture_files_are_canonical_and_parseable() {
-        for path in fixture_files("policy.json") {
-            let text = fs::read_to_string(&path).expect("fixture is readable");
-            assert!(text.ends_with('\n'), "{} must end with LF", path.display());
-
-            let artifact: PolicyArtifact = serde_json::from_str(&text)
-                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            artifact
-                .validate()
-                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            assert_eq!(artifact.policy_version, POLICY_VERSION_V0);
-            for command in &artifact.commands {
-                assert_eq!(
-                    command.filesystem.protected_paths,
-                    DEFAULT_PROTECTED_PATHS,
-                    "{} command {} must use the SECURITY.md default protected paths",
-                    path.display(),
-                    command.tool_id
-                );
-            }
-            assert_eq!(
-                canonical_artifact_json(&artifact).expect("canonical JSON"),
-                text,
-                "{} must be canonical",
-                path.display()
-            );
-        }
-    }
-
-    #[test]
-    fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
-        for fixture in ["smoke-loop", "hello-loop"] {
-            let registry = core_script::load_registry_root(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../loop-agent/fixtures")
-                    .join(fixture)
-                    .join("registry"),
-            )
-            .expect("fixture registry loads");
-
-            for (target, file_name) in [
-                (
-                    PolicyTarget::LinuxLandlockSeccomp,
-                    "linux-landlock-seccomp.policy.json",
-                ),
-                (PolicyTarget::MacosSeatbelt, "macos-seatbelt.policy.json"),
-            ] {
-                let artifact = compile_policy_artifact(fixture, &registry, fixture, target.clone())
-                    .expect("policy artifact compiles");
-                let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
-                let expected = fs::read_to_string(
-                    Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("fixtures")
-                        .join(fixture)
-                        .join(file_name),
-                )
-                .expect("expected policy fixture is readable");
-
-                assert_eq!(actual, expected, "{fixture} {file_name}");
-            }
-        }
-    }
-
-    #[test]
-    fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
-        let mut registry = core_script::load_registry_root(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../loop-agent/fixtures/smoke-loop/registry"),
-        )
-        .expect("smoke-loop registry loads");
-        registry.tools.get_mut("echo").expect("echo tool").network =
-            core_script::NetworkPolicy::Declared {
-                default: core_script::NetworkDefault::Deny,
-                allow: vec![core_script::NetworkAllowEntry {
-                    kind: core_script::NetworkAllowKind::Cidr,
-                    transport: core_script::NetworkTransport::Tcp,
-                    cidr: "192.0.2.0/24".to_owned(),
-                    port: 443,
-                }],
-            };
-
-        let err = compile_policy_artifact(
-            "smoke-loop",
-            &registry,
-            "smoke-loop",
-            PolicyTarget::LinuxLandlockSeccomp,
-        )
-        .expect_err("network allowlist is rejected");
-
-        assert!(matches!(
-            err,
-            PolicyCompileError::NonEmptyNetworkAllowlist { .. }
-        ));
-    }
-
-    #[test]
-    fn policy_compiler_preserves_macos_network_allowlists() {
-        let mut registry = core_script::load_registry_root(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../loop-agent/fixtures/smoke-loop/registry"),
-        )
-        .expect("smoke-loop registry loads");
-        registry.tools.get_mut("echo").expect("echo tool").network =
-            core_script::NetworkPolicy::Declared {
-                default: core_script::NetworkDefault::Deny,
-                allow: vec![core_script::NetworkAllowEntry {
-                    kind: core_script::NetworkAllowKind::Cidr,
-                    transport: core_script::NetworkTransport::Tcp,
-                    cidr: "192.0.2.0/24".to_owned(),
-                    port: 443,
-                }],
-            };
-
-        let artifact = compile_policy_artifact(
-            "smoke-loop",
-            &registry,
-            "smoke-loop",
-            PolicyTarget::MacosSeatbelt,
-        )
-        .expect("macOS policy artifacts may carry reviewed CIDR allowlists");
-
-        assert_eq!(artifact.target, PolicyTarget::MacosSeatbelt);
-        assert_eq!(artifact.commands[0].network.default, NetworkDefault::Deny);
-        assert_eq!(
-            artifact.commands[0].network.allow,
-            vec![NetworkAllowEntry {
-                cidr: "192.0.2.0/24".to_owned(),
-                kind: NetworkAllowKind::Cidr,
-                port: 443,
-                transport: NetworkTransport::Tcp,
-            }]
-        );
-    }
-
-    #[test]
-    fn policy_compiler_rejects_unknown_predefined_commands() {
-        let mut registry = core_script::load_registry_root(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../loop-agent/fixtures/smoke-loop/registry"),
-        )
-        .expect("smoke-loop registry loads");
-        registry.tools.get_mut("echo").expect("echo tool").command =
-            core_script::ToolCommand::Predefined {
-                command_id: "agent-custom".to_owned(),
-                argv: Vec::new(),
-            };
-
-        let err = compile_policy_artifact(
-            "smoke-loop",
-            &registry,
-            "smoke-loop",
-            PolicyTarget::LinuxLandlockSeccomp,
-        )
-        .expect_err("unknown predefined command must fail closed");
-
-        assert!(err.to_string().contains("unknown trusted command"), "{err}");
-    }
-
-    #[test]
-    fn policy_compiler_rejects_tool_kind_command_shape_mismatches() {
-        let mut registry = core_script::load_registry_root(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../loop-agent/fixtures/smoke-loop/registry"),
-        )
-        .expect("smoke-loop registry loads");
-        registry.tools.get_mut("echo").expect("echo tool").tool_kind =
-            core_script::ToolKind::OwnScript;
-
-        let err = compile_policy_artifact(
-            "smoke-loop",
-            &registry,
-            "smoke-loop",
-            PolicyTarget::LinuxLandlockSeccomp,
-        )
-        .expect_err("tool kind and command shape mismatch must fail closed");
-
-        assert!(
-            err.to_string()
-                .contains("tool echo command shape does not match tool_kind"),
-            "{err}"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_forbidden_environment_allow_entries() {
-        let forbidden_names = [
-            "AWS_REGION",
-            "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER",
-            "GIT_CONFIG_GLOBAL",
-            "HTTP_PROXY",
-            "KUBECONFIG",
-            "LD_PRELOAD",
-            "MY_CREDENTIALS",
-            "OPENAI_API_KEY",
-            "PATH",
-            "SERVICE_TOKEN",
-        ];
-
-        for name in forbidden_names {
-            let artifact = policy_artifact_with_environment_allow(name);
-
-            let err = artifact
-                .validate()
-                .expect_err("forbidden environment allow entry must fail validation");
-
-            assert!(
-                err.to_string().contains(name),
-                "{name} should be named in {err}"
-            );
-        }
-    }
-
-    #[test]
-    fn policy_artifact_rejects_malformed_environment_allow_entries() {
-        let too_long = "A".repeat(65);
-        for name in ["", "lowercase", "A-B", "1INVALID", too_long.as_str()] {
-            let artifact = policy_artifact_with_environment_allow(name);
-
-            let err = artifact
-                .validate()
-                .expect_err("malformed environment allow entry must fail validation");
-
-            assert!(
-                err.to_string().contains("^[A-Z_][A-Z0-9_]{0,63}$"),
-                "{name:?} should report the environment allow grammar"
-            );
-        }
-    }
-
-    #[test]
-    fn policy_artifact_rejects_malformed_network_allow_entries() {
-        for cidr in [
-            "example.com",
-            "192.0.2.42",
-            "192.0.2.42/24",
-            "192.0.2.0/33",
-            "10.0.0.0/01",
-            "2001:db8::1/32",
-            "2001:DB8::/32",
-        ] {
-            let artifact = policy_artifact_with_network_allow(cidr, 443);
-
-            let err = artifact
-                .validate()
-                .expect_err("malformed network allow entry must fail validation");
-
-            assert!(
-                err.to_string().contains(cidr),
-                "{cidr:?} should be named in {err}"
-            );
-            assert!(
-                err.to_string().contains("canonical CIDR"),
-                "{cidr:?} should report the CIDR contract"
-            );
-        }
-    }
-
-    #[test]
-    fn policy_artifact_rejects_non_empty_linux_network_allow_entries() {
-        let artifact = policy_artifact_with_network_allow("192.0.2.0/24", 443);
-
-        let err = artifact
-            .validate()
-            .expect_err("linux artifacts must reject network allowlists");
-
-        assert_eq!(
-            err.to_string(),
-            "tool network-tool network allow must be empty for linux-landlock-seccomp policy artifacts"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_zero_network_allow_port() {
-        let artifact = policy_artifact_with_network_allow("192.0.2.0/24", 0);
-
-        let err = artifact
-            .validate()
-            .expect_err("port zero must fail validation");
-
-        assert_eq!(
-            err.to_string(),
-            "tool network-tool network allow entry 192.0.2.0/24 must use port 1-65535"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_unsupported_policy_version() {
-        let mut artifact = valid_policy_artifact("version-tool");
-        artifact.policy_version = "1".to_owned();
-
-        let err = artifact
-            .validate()
-            .expect_err("unsupported policy version must fail validation");
-
-        assert_eq!(err.to_string(), "policy_version must be fixed string \"0\"");
-    }
-
-    #[test]
-    fn policy_artifact_rejects_mismatched_command_shapes() {
-        let mut predefined_runtime = valid_policy_artifact("read-file");
-        predefined_runtime.commands[0].script_runtime = Some("posix-sh".to_owned());
-        let err = predefined_runtime
-            .validate()
-            .expect_err("predefined-command must omit script_runtime");
-        assert_eq!(
-            err.to_string(),
-            "predefined-command tool read-file must omit script_runtime"
-        );
-
-        let mut predefined_command_id = valid_policy_artifact("read-file");
-        predefined_command_id.commands[0].command_id = "1-agent-read".to_owned();
-        let err = predefined_command_id
-            .validate()
-            .expect_err("predefined-command id must follow the command id grammar");
-        assert_eq!(
-            err.to_string(),
-            "predefined-command tool read-file command_id \"1-agent-read\" must match ^[a-z][a-z0-9_-]{0,63}$"
-        );
-
-        let mut own_script_command_id = own_script_policy_artifact("write-summary");
-        own_script_command_id.commands[0].command_id = "script:other-tool".to_owned();
-        let err = own_script_command_id
-            .validate()
-            .expect_err("own-script command_id must match tool_id");
-        assert_eq!(
-            err.to_string(),
-            "own-script tool write-summary command_id must be script:write-summary"
-        );
-
-        let mut own_script_runtime = own_script_policy_artifact("write-summary");
-        own_script_runtime.commands[0].script_runtime = None;
-        let err = own_script_runtime
-            .validate()
-            .expect_err("own-script must declare posix-sh runtime");
-        assert_eq!(
-            err.to_string(),
-            "own-script tool write-summary must use script_runtime posix-sh"
-        );
-
-        let mut own_script_argv = own_script_policy_artifact("write-summary");
-        own_script_argv.commands[0].argv = vec!["-c".to_owned()];
-        let err = own_script_argv
-            .validate()
-            .expect_err("own-script must not supply runner arguments");
-        assert_eq!(
-            err.to_string(),
-            "own-script tool write-summary must omit argv"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_malformed_allowed_parameters() {
-        let mut bad_name = valid_policy_artifact("parameter-tool");
-        bad_name.commands[0].allowed_parameters[0].name = "file".to_owned();
-        let err = bad_name
-            .validate()
-            .expect_err("parameter names must be exact flags");
-        assert_eq!(
-            err.to_string(),
-            "tool parameter-tool parameter name \"file\" must match ^--[A-Za-z0-9][A-Za-z0-9_-]*$"
-        );
-
-        let mut string_without_constraints = valid_policy_artifact("parameter-tool");
-        string_without_constraints.commands[0].allowed_parameters[1].max_length = None;
-        let err = string_without_constraints
-            .validate()
-            .expect_err("string parameters require length and pattern constraints");
-        assert_eq!(
-            err.to_string(),
-            "tool parameter-tool string parameter --alpha must set value_pattern and max_length"
-        );
-
-        let mut enum_without_values = valid_policy_artifact("parameter-tool");
-        enum_without_values.commands[0].allowed_parameters[0]
-            .allowed_values
-            .clear();
-        let err = enum_without_values
-            .validate()
-            .expect_err("enum parameters require allowed values");
-        assert_eq!(
-            err.to_string(),
-            "tool parameter-tool enum parameter --beta must set allowed_values"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_non_default_protected_paths() {
-        let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.protected_paths = vec!["**/.env".to_owned()];
-
-        let err = artifact
-            .validate()
-            .expect_err("protected paths must match the SECURITY.md default set");
-
-        assert_eq!(
-            err.to_string(),
-            "tool filesystem-tool filesystem protected_paths must match SECURITY.md defaults"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_protected_path_grants_outside_scope() {
-        let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.protected_path_grants = vec!["secrets/.env".to_owned()];
-
-        let err = artifact
-            .validate()
-            .expect_err("protected path grants must stay inside tool scopes");
-
-        assert_eq!(
-            err.to_string(),
-            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside read_roots or write_roots"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_protected_path_grants_outside_write_scope() {
-        let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.read_roots = vec!["workspace/in".to_owned()];
-        artifact.commands[0].filesystem.write_roots = vec!["workspace/out".to_owned()];
-        artifact.commands[0].filesystem.protected_path_grants =
-            vec!["workspace/secrets/.env".to_owned()];
-
-        let err = artifact
-            .validate()
-            .expect_err("protected path grants must stay inside declared scopes");
-
-        assert_eq!(
-            err.to_string(),
-            "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside read_roots or write_roots"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_accepts_read_only_protected_path_grants() {
-        let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.read_roots = vec!["workspace/secrets".to_owned()];
-        artifact.commands[0].filesystem.write_roots.clear();
-        artifact.commands[0].filesystem.protected_path_grants =
-            vec!["workspace/secrets/.env".to_owned()];
-
-        artifact
-            .validate()
-            .expect("read-only protected path grants inside read scope are valid");
-    }
-
-    #[test]
-    fn policy_artifact_rejects_wildcard_protected_path_grants() {
-        for grant in ["workspace/**", "workspace/*.env", "workspace/.env?"] {
-            let mut artifact = valid_policy_artifact("filesystem-tool");
-            artifact.commands[0].filesystem.protected_path_grants = vec![grant.to_owned()];
-
-            let err = artifact
-                .validate()
-                .expect_err("protected path grants must be exact paths");
-
-            assert_eq!(
-                err.to_string(),
-                format!(
-                    "tool filesystem-tool protected_path_grant {grant:?} must be an exact safe relative path"
-                )
-            );
-        }
-    }
-
-    #[test]
-    fn policy_artifact_rejects_unsafe_protected_path_grants() {
-        for grant in ["workspace/../.env", "/workspace/.env", "C:/workspace/.env"] {
-            let mut artifact = valid_policy_artifact("filesystem-tool");
-            artifact.commands[0].filesystem.protected_path_grants = vec![grant.to_owned()];
-
-            let err = artifact
-                .validate()
-                .expect_err("protected path grants must be safe relative paths");
-
-            assert_eq!(
-                err.to_string(),
-                format!(
-                    "tool filesystem-tool protected_path_grant {grant:?} must be a safe relative path"
-                )
-            );
-        }
-    }
-
-    #[test]
-    fn policy_artifact_rejects_unsafe_filesystem_roots() {
-        for root in ["/workspace", "C:/workspace", "workspace/../out"] {
-            let mut artifact = valid_policy_artifact("filesystem-tool");
-            artifact.commands[0].filesystem.read_roots = vec![root.to_owned()];
-            artifact.commands[0]
-                .filesystem
-                .protected_path_grants
-                .clear();
-
-            let err = artifact
-                .validate()
-                .expect_err("read roots must be safe relative paths");
-
-            assert_eq!(
-                err.to_string(),
-                format!(
-                    "tool filesystem-tool filesystem root {root:?} must be a safe relative path"
-                )
-            );
-        }
-
-        let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.write_roots = vec!["../out".to_owned()];
-        artifact.commands[0]
-            .filesystem
-            .protected_path_grants
-            .clear();
-
-        let err = artifact
-            .validate()
-            .expect_err("write roots must be safe relative paths");
-
-        assert_eq!(
-            err.to_string(),
-            "tool filesystem-tool filesystem root \"../out\" must be a safe relative path"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_phase_scope_unknown_tool_ids() {
-        let mut artifact = valid_policy_artifact("read-file");
-        artifact.phase_scope[0].tool_ids = vec!["missing-tool".to_owned()];
-
-        let err = artifact
-            .validate()
-            .expect_err("phase scope must reference existing commands");
-
-        assert_eq!(
-            err.to_string(),
-            "phase_scope inspect references unknown tool_id missing-tool"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_rejects_commands_missing_from_phase_scope() {
-        let mut artifact = valid_policy_artifact("read-file");
-        artifact
-            .commands
-            .push(valid_command_policy("write-summary"));
-
-        let err = artifact
-            .validate()
-            .expect_err("every command must appear in phase scope");
-
-        assert_eq!(
-            err.to_string(),
-            "command write-summary must appear in phase_scope"
-        );
-    }
-
-    #[test]
-    fn expected_decision_fixture_files_are_canonical_and_deny_side_effects() {
-        for path in fixture_files("expected.json") {
-            let text = fs::read_to_string(&path).expect("fixture is readable");
-            assert!(text.ends_with('\n'), "{} must end with LF", path.display());
-
-            let expected: ExpectedDecision = serde_json::from_str(&text)
-                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            expected
-                .validate()
-                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            assert_eq!(expected.expected, ExpectedDecisionKind::Deny);
-            assert!(!expected.side_effects_allowed);
-            assert_eq!(
-                canonical_artifact_json(&expected).expect("canonical JSON"),
-                text,
-                "{} must be canonical",
-                path.display()
-            );
-        }
-    }
-
-    #[test]
-    fn expected_decision_can_represent_write_rename_without_path() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::Write {
-                from_path: Some("workspace/a.txt".to_owned()),
-                operation: "rename".to_owned(),
-                path: None,
-                to_path: Some("workspace/b.txt".to_owned()),
-                tool_id: "rename-tool".to_owned(),
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-rename".to_owned(),
-            reason_code: DenyReasonCode::WriteDenied,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        expected.validate().expect("rename shape is valid");
-        let json = canonical_artifact_json(&expected).expect("canonical JSON");
-
-        assert!(json.contains("\"from_path\":\"workspace/a.txt\""));
-        assert!(json.contains("\"to_path\":\"workspace/b.txt\""));
-        assert!(!json.contains("\"path\""));
-        serde_json::from_str::<ExpectedDecision>(&json).expect("rename shape deserializes");
-    }
-
-    #[test]
-    fn expected_decision_can_represent_protected_path_rename_without_path() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::ProtectedPath {
-                from_path: Some("workspace/.env".to_owned()),
-                operation: "rename".to_owned(),
-                path: None,
-                to_path: Some("workspace/.env.bak".to_owned()),
-                tool_id: "rename-tool".to_owned(),
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-protected-rename".to_owned(),
-            reason_code: DenyReasonCode::ProtectedPathDenied,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        expected
-            .validate()
-            .expect("protected rename shape is valid");
-        let json = canonical_artifact_json(&expected).expect("canonical JSON");
-
-        assert!(json.contains("\"from_path\":\"workspace/.env\""));
-        assert!(json.contains("\"to_path\":\"workspace/.env.bak\""));
-        assert!(!json.contains("\"path\""));
-        serde_json::from_str::<ExpectedDecision>(&json)
-            .expect("protected rename shape deserializes");
-    }
-
-    #[test]
-    fn expected_decision_rejects_write_create_without_path() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::Write {
-                from_path: None,
-                operation: "create".to_owned(),
-                path: None,
-                to_path: None,
-                tool_id: "write-tool".to_owned(),
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-write".to_owned(),
-            reason_code: DenyReasonCode::WriteDenied,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        let err = expected
-            .validate()
-            .expect_err("create attempts must include path");
-
-        assert_eq!(
-            err.to_string(),
-            "write create attempts must include path and omit from_path/to_path"
-        );
-    }
-
-    #[test]
-    fn expected_decision_rejects_unsupported_write_operation() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::Write {
-                from_path: None,
-                operation: "delete".to_owned(),
-                path: Some("../outside.txt".to_owned()),
-                to_path: None,
-                tool_id: "write-tool".to_owned(),
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-write".to_owned(),
-            reason_code: DenyReasonCode::WriteDenied,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        let err = expected
-            .validate()
-            .expect_err("delete is not a supported write operation");
-
-        assert_eq!(
-            err.to_string(),
-            "write delete attempts use unsupported operation; expected one of write, create, rename"
-        );
-    }
-
-    #[test]
-    fn expected_decision_rejects_unsupported_protected_path_operation() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::ProtectedPath {
-                from_path: None,
-                operation: "chmod".to_owned(),
-                path: Some(".env".to_owned()),
-                to_path: None,
-                tool_id: "protected-tool".to_owned(),
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-protected-path".to_owned(),
-            reason_code: DenyReasonCode::ProtectedPathDenied,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        let err = expected
-            .validate()
-            .expect_err("chmod is not a supported protected-path operation");
-
-        assert_eq!(
-            err.to_string(),
-            "protected_path chmod attempts use unsupported operation; expected one of read, write, create, execute, rename"
-        );
-    }
-
-    #[test]
-    fn expected_decision_rejects_protected_path_rename_without_endpoints() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::ProtectedPath {
-                from_path: Some("workspace/.env".to_owned()),
-                operation: "rename".to_owned(),
-                path: None,
-                to_path: None,
-                tool_id: "rename-tool".to_owned(),
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-protected-rename".to_owned(),
-            reason_code: DenyReasonCode::ProtectedPathDenied,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        let err = expected
-            .validate()
-            .expect_err("rename attempts must include both endpoints");
-
-        assert_eq!(
-            err.to_string(),
-            "protected_path rename attempts must include from_path and to_path and omit path"
-        );
-    }
-
-    #[test]
-    fn expected_decision_rejects_reason_code_mismatches() {
-        let cases = vec![
-            (
-                DeniedAttempt::Write {
-                    from_path: None,
-                    operation: "create".to_owned(),
-                    path: Some("../outside.txt".to_owned()),
-                    to_path: None,
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::NetworkDenied,
-                "write attempts must use reason_code write_denied, got network_denied",
-            ),
-            (
-                DeniedAttempt::Network {
-                    destination: "example.com".to_owned(),
-                    port: 443,
-                    tool_id: "negative".to_owned(),
-                    transport: NetworkTransport::Tcp,
-                },
-                DenyReasonCode::WriteDenied,
-                "network attempts must use reason_code network_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::Environment {
-                    name: "OPENAI_API_KEY".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "environment attempts must use reason_code environment_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::ToolOutOfPhase {
-                    phase_id: "negative-no-tools".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "tool_out_of_phase attempts must use reason_code tool_out_of_phase, got write_denied",
-            ),
-            (
-                DeniedAttempt::ProtectedPath {
-                    from_path: None,
-                    operation: "read".to_owned(),
-                    path: Some(".env".to_owned()),
-                    to_path: None,
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "protected_path attempts must use reason_code protected_path_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::SymlinkEscape {
-                    operation: "create".to_owned(),
-                    path: "links/outside.txt".to_owned(),
-                    symlink_path: "links".to_owned(),
-                    symlink_target: "../outside".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "symlink_escape attempts must use reason_code symlink_escape_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::InterpreterEscape {
-                    argv: vec!["-c".to_owned(), "cat .env".to_owned()],
-                    executable: "python".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "interpreter_escape attempts must use reason_code interpreter_escape_denied, got write_denied",
-            ),
-        ];
-
-        for (attempt, reason_code, expected_message) in cases {
-            let expected = ExpectedDecision {
-                attempt,
-                expected: ExpectedDecisionKind::Deny,
-                fixture_name: "sandbox-negative".to_owned(),
-                reason_code,
-                side_effects_allowed: false,
-                target: PolicyTarget::LinuxLandlockSeccomp,
-            };
-
-            let err = expected
-                .validate()
-                .expect_err("mismatched reason_code must fail");
-
-            assert_eq!(err.to_string(), expected_message);
-        }
-    }
-
-    #[test]
-    fn expected_decision_rejects_allowed_side_effects() {
-        let expected = ExpectedDecision {
-            attempt: DeniedAttempt::Network {
-                destination: "example.com".to_owned(),
-                port: 443,
-                tool_id: "negative".to_owned(),
-                transport: NetworkTransport::Tcp,
-            },
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative-network".to_owned(),
-            reason_code: DenyReasonCode::NetworkDenied,
-            side_effects_allowed: true,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        let err = expected
-            .validate()
-            .expect_err("expected denials must not allow side effects");
-
-        assert_eq!(
-            err.to_string(),
-            "expected denials must set side_effects_allowed to false"
-        );
-    }
-
-    #[test]
-    fn policy_compile_error_messages_and_sources_cover_variants() {
-        let missing_loop = PolicyCompileError::MissingLoop("missing-loop".to_owned());
-        assert_eq!(
-            missing_loop.to_string(),
-            "policy compile references missing loop missing-loop"
-        );
-        assert!(std::error::Error::source(&missing_loop).is_none());
-
-        let missing_phase = PolicyCompileError::MissingPhase("missing-phase".to_owned());
-        assert_eq!(
-            missing_phase.to_string(),
-            "policy compile references missing phase missing-phase"
-        );
-
-        let missing_tool = PolicyCompileError::MissingTool("missing-tool".to_owned());
-        assert_eq!(
-            missing_tool.to_string(),
-            "policy compile references missing tool missing-tool"
-        );
-
-        let depth = PolicyCompileError::LoopDepthExceeded {
-            loop_id: "loop-064".to_owned(),
-            depth: core_script::MAX_LOOP_NESTING_DEPTH + 1,
-            max: core_script::MAX_LOOP_NESTING_DEPTH,
-        };
-        assert_eq!(
-            depth.to_string(),
-            "policy compile loop nesting depth 65 for loop-064 exceeds max 64"
-        );
-        assert!(std::error::Error::source(&depth).is_none());
-
-        let network = PolicyCompileError::NonEmptyNetworkAllowlist {
-            tool_id: "network-tool".to_owned(),
-        };
-        assert_eq!(
-            network.to_string(),
-            "OS-enforced M1 policy for tool network-tool must use a deny-all network allowlist"
-        );
-
-        let mut artifact = valid_policy_artifact("invalid-artifact");
-        artifact.policy_version = "1".to_owned();
-        let validation = artifact.validate().expect_err("invalid artifact");
-        let invalid = PolicyCompileError::InvalidArtifact(validation);
-        assert_eq!(
-            invalid.to_string(),
-            "policy_version must be fixed string \"0\""
-        );
-        assert!(std::error::Error::source(&invalid).is_some());
-    }
-
-    #[test]
-    fn policy_compile_rejects_deep_loop_chains() {
-        compile_policy_artifact(
-            "max-depth",
-            &loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH),
-            "loop-000",
-            PolicyTarget::LinuxLandlockSeccomp,
-        )
-        .expect("max loop nesting depth is accepted");
-
-        let err = compile_policy_artifact(
-            "too-deep",
-            &loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH + 1),
-            "loop-000",
-            PolicyTarget::LinuxLandlockSeccomp,
-        )
-        .expect_err("loop nesting above the max is rejected");
-
-        assert!(matches!(
-            err,
-            PolicyCompileError::LoopDepthExceeded {
-                loop_id,
-                depth,
-                max,
-            } if loop_id == format!("loop-{:03}", core_script::MAX_LOOP_NESTING_DEPTH)
-                && depth == core_script::MAX_LOOP_NESTING_DEPTH + 1
-                && max == core_script::MAX_LOOP_NESTING_DEPTH
-        ));
-    }
-
-    #[test]
-    fn policy_artifact_rejects_duplicate_command_tool_ids() {
-        let mut artifact = valid_policy_artifact("duplicate-tool");
-        artifact
-            .commands
-            .push(valid_command_policy("duplicate-tool"));
-
-        let err = artifact
-            .validate()
-            .expect_err("duplicate command tool_id must fail validation");
-
-        assert_eq!(err.to_string(), "duplicate command tool_id duplicate-tool");
-    }
-
-    #[test]
-    fn policy_artifact_rejects_own_script_executable_mismatch() {
-        let mut artifact = own_script_policy_artifact("write-summary");
-        artifact.commands[0].executable = "registry:agent-echo".to_owned();
-
-        let err = artifact
-            .validate()
-            .expect_err("own-script executable mismatch must fail validation");
-
-        assert_eq!(
-            err.to_string(),
-            "own-script tool write-summary executable must be runner:posix-sh"
-        );
-    }
-
-    #[test]
-    fn allowed_parameter_policy_maps_script_value_types() {
-        let cases = [
-            (
-                core_script::ParameterValueType::None,
-                ParameterValueType::None,
-                Vec::new(),
-            ),
-            (
-                core_script::ParameterValueType::String,
-                ParameterValueType::String,
-                Vec::new(),
-            ),
-            (
-                core_script::ParameterValueType::Integer,
-                ParameterValueType::Integer,
-                Vec::new(),
-            ),
-            (
-                core_script::ParameterValueType::WorkspaceRelativePath,
-                ParameterValueType::WorkspaceRelativePath,
-                Vec::new(),
-            ),
-            (
-                core_script::ParameterValueType::Enum,
-                ParameterValueType::Enum,
-                vec!["fast".to_owned(), "slow".to_owned()],
-            ),
-        ];
-
-        for (script_type, policy_type, allowed_values) in cases {
-            let parameter = core_script::AllowedParameter {
-                name: "--mode".to_owned(),
-                value_type: script_type,
-                required: true,
-                allowed_values: allowed_values.clone(),
-                value_pattern: Some("[a-z]+".to_owned()),
-                max_length: Some(16),
-                min: Some(1),
-                max: Some(3),
-            };
-
-            let policy = allowed_parameter_policy(&parameter);
-
-            assert_eq!(policy.value_type, policy_type);
-            assert_eq!(policy.allowed_values, allowed_values);
-            assert_eq!(policy.name, "--mode");
-            assert!(policy.required);
-        }
-    }
-
-    #[test]
-    fn policy_artifact_rejects_parameter_constraint_mismatches() {
-        let mut cases = Vec::new();
-
-        let mut string_with_values = valid_parameter("--name", ParameterValueType::String);
-        string_with_values.allowed_values = vec!["alice".to_owned()];
-        cases.push((
-            string_with_values,
-            "tool parameter-tool non-enum parameter --name must omit allowed_values",
-        ));
-
-        let mut string_with_range = valid_parameter("--name", ParameterValueType::String);
-        string_with_range.min = Some(1);
-        cases.push((
-            string_with_range,
-            "tool parameter-tool string parameter --name must omit min and max",
-        ));
-
-        let mut enum_with_string_constraints = valid_parameter("--mode", ParameterValueType::Enum);
-        enum_with_string_constraints.value_pattern = Some("[a-z]+".to_owned());
-        enum_with_string_constraints.max_length = Some(16);
-        cases.push((
-            enum_with_string_constraints,
-            "tool parameter-tool enum parameter --mode must omit value_pattern, max_length, min, and max",
-        ));
-
-        let mut enum_with_range = valid_parameter("--mode", ParameterValueType::Enum);
-        enum_with_range.min = Some(1);
-        cases.push((
-            enum_with_range,
-            "tool parameter-tool enum parameter --mode must omit value_pattern, max_length, min, and max",
-        ));
-
-        let mut integer_with_values = valid_parameter("--count", ParameterValueType::Integer);
-        integer_with_values.allowed_values = vec!["1".to_owned()];
-        cases.push((
-            integer_with_values,
-            "tool parameter-tool non-enum parameter --count must omit allowed_values",
-        ));
-
-        let mut integer_with_pattern = valid_parameter("--count", ParameterValueType::Integer);
-        integer_with_pattern.value_pattern = Some("[0-9]+".to_owned());
-        cases.push((
-            integer_with_pattern,
-            "tool parameter-tool integer parameter --count must omit value_pattern and max_length",
-        ));
-
-        let mut integer_with_bad_range = valid_parameter("--count", ParameterValueType::Integer);
-        integer_with_bad_range.min = Some(10);
-        integer_with_bad_range.max = Some(1);
-        cases.push((
-            integer_with_bad_range,
-            "tool parameter-tool integer parameter --count min must be <= max",
-        ));
-
-        let mut none_with_values = valid_parameter("--dry-run", ParameterValueType::None);
-        none_with_values.allowed_values = vec!["true".to_owned()];
-        cases.push((
-            none_with_values,
-            "tool parameter-tool non-enum parameter --dry-run must omit allowed_values",
-        ));
-
-        let mut none_with_string_constraints =
-            valid_parameter("--dry-run", ParameterValueType::None);
-        none_with_string_constraints.value_pattern = Some("^(true|false)$".to_owned());
-        none_with_string_constraints.max_length = Some(5);
-        cases.push((
-            none_with_string_constraints,
-            "tool parameter-tool none parameter --dry-run must omit value_pattern, max_length, min, and max",
-        ));
-
-        let mut path_with_values =
-            valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
-        path_with_values.allowed_values = vec!["out/summary.txt".to_owned()];
-        cases.push((
-            path_with_values,
-            "tool parameter-tool non-enum parameter --path must omit allowed_values",
-        ));
-
-        let mut path_with_range =
-            valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
-        path_with_range.value_pattern = Some("^[A-Za-z0-9_./-]+$".to_owned());
-        path_with_range.max_length = Some(128);
-        path_with_range.min = Some(1);
-        cases.push((
-            path_with_range,
-            "tool parameter-tool workspace-relative-path parameter --path must omit min and max",
-        ));
-
-        for (parameter, expected) in cases {
-            let artifact = policy_artifact_with_parameter(parameter);
-
-            let err = artifact
-                .validate()
-                .expect_err("invalid parameter constraint must fail validation");
-
-            assert_eq!(err.to_string(), expected);
-        }
-    }
-
-    #[test]
-    fn policy_path_and_cidr_helpers_enforce_canonical_forms() {
-        assert_eq!(
-            normalize_policy_relative_path("workspace/out"),
-            Some("workspace/out".to_owned())
-        );
-        for path in [
-            "",
-            ".",
-            "/workspace",
-            "workspace/../out",
-            "workspace//out",
-            "workspace\\out",
-            "workspace/NUL",
-            "workspace/out.",
-            "workspace/out ",
-            "C:/workspace/out",
-        ] {
-            assert_eq!(normalize_policy_relative_path(path), None, "{path}");
-        }
-
-        for cidr in [
-            "192.0.2.0/24/extra",
-            "192.0.2.0/not-a-prefix",
-            "example.com/24",
-            "192.0.2.1/24",
-            "2001:db8::1/32",
-        ] {
-            assert!(!is_valid_canonical_cidr(cidr), "{cidr}");
-        }
-        assert!(is_valid_canonical_cidr("192.0.2.42/32"));
-        assert!(is_valid_canonical_cidr("2001:db8::/128"));
-    }
-
-    #[test]
-    fn canonical_policy_json_helpers_handle_scalar_and_sparse_shapes() {
-        assert_eq!(canonical_json(&Value::Null).expect("null"), "null");
-        assert_eq!(canonical_json(&Value::Bool(false)).expect("bool"), "false");
-        assert_eq!(
-            canonical_json(&serde_json::json!([2, "a"])).expect("array"),
-            "[2,\"a\"]"
-        );
-
-        let mut not_object = Value::Null;
-        canonicalize_policy_artifact_arrays(&mut not_object);
-        assert_eq!(not_object, Value::Null);
-
-        let mut command_not_object = Value::Null;
-        canonicalize_command_policy_arrays(&mut command_not_object);
-        assert_eq!(command_not_object, Value::Null);
-
-        let mut command_without_network = serde_json::json!({"tool_id":"echo"});
-        canonicalize_command_policy_arrays(&mut command_without_network);
-        assert_eq!(
-            command_without_network,
-            serde_json::json!({"tool_id":"echo"})
-        );
-
-        let mut command_with_network_without_allow =
-            serde_json::json!({"network":{"default":"deny"}});
-        canonicalize_command_policy_arrays(&mut command_with_network_without_allow);
-        assert_eq!(
-            command_with_network_without_allow,
-            serde_json::json!({"network":{"default":"deny"}})
-        );
-    }
-
-    #[test]
-    fn policy_artifact_canonical_json_rejects_normalized_duplicate_keys() {
-        let value = serde_json::json!({
-            "é": 1,
-            "e\u{301}": 2,
-        });
-
-        let err = canonical_artifact_json(&value)
-            .expect_err("normalized duplicate object keys must fail");
-
-        assert_eq!(
-            err.to_string(),
-            "failed to serialize canonical policy artifact JSON: normalized object key collision: é"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_error_display_reports_serialization_failure() {
-        struct FailingSerialize;
-
-        impl serde::Serialize for FailingSerialize {
-            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                Err(serde::ser::Error::custom("intentional failure"))
-            }
-        }
-
-        let err = canonical_artifact_json(&FailingSerialize).expect_err("serialization must fail");
-
-        assert_eq!(
-            err.to_string(),
-            "failed to serialize policy artifact: intentional failure"
-        );
-    }
-
-    #[test]
-    fn policy_artifact_canonical_json_sorts_schema_arrays() {
-        let artifact = PolicyArtifact {
-            commands: vec![
-                command_policy("z-tool", vec!["z", "a"], vec!["workspace/z", "workspace/a"]),
-                command_policy(
-                    "a-tool",
-                    vec!["beta", "alpha"],
-                    vec!["workspace/b", "workspace/a"],
-                ),
-            ],
-            fixture_name: "sort-contract".to_owned(),
-            phase_scope: vec![
-                PhaseScope {
-                    phase_id: "phase-z".to_owned(),
-                    tool_ids: vec!["z-tool".to_owned(), "a-tool".to_owned()],
-                },
-                PhaseScope {
-                    phase_id: "phase-a".to_owned(),
-                    tool_ids: vec!["z-tool".to_owned(), "a-tool".to_owned()],
-                },
-            ],
-            policy_version: POLICY_VERSION_V0.to_owned(),
-            runtime_limits: RuntimeLimits {
-                headless: true,
-                timeout_ms: 1000,
-            },
-            source_loop_definition_id: "sort-loop".to_owned(),
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
-
-        let json = canonical_artifact_json(&artifact).expect("canonical JSON");
-        let canonical: PolicyArtifact =
-            serde_json::from_str(&json).expect("canonical artifact deserializes");
-
-        assert_eq!(
-            canonical
-                .commands
-                .iter()
-                .map(|command| command.tool_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["a-tool", "z-tool"]
-        );
-        assert_eq!(
-            canonical.commands[0]
-                .allowed_parameters
-                .iter()
-                .map(|param| param.name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["--alpha", "--beta"]
-        );
-        assert_eq!(
-            canonical.commands[0].allowed_parameters[1].allowed_values,
-            vec!["alpha", "beta"]
-        );
-        assert_eq!(
-            canonical.commands[0].filesystem.read_roots,
-            vec!["workspace/a", "workspace/b"]
-        );
-        assert_eq!(
-            canonical.commands[0].filesystem.protected_path_grants,
-            vec!["workspace/a.env", "workspace/z.env"]
-        );
-        assert_eq!(
-            canonical.commands[0].filesystem.protected_paths,
-            vec!["**/.env", "**/.ssh"]
-        );
-        assert_eq!(
-            canonical.commands[0].filesystem.write_roots,
-            vec!["workspace/a-out", "workspace/z-out"]
-        );
-        assert_eq!(canonical.commands[0].network.allow[0].cidr, "10.0.0.0/24");
-        assert_eq!(
-            canonical.commands[0].environment.allow,
-            vec!["LANG", "TERM"]
-        );
-        assert_eq!(
-            canonical
-                .phase_scope
-                .iter()
-                .map(|phase| phase.phase_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["phase-a", "phase-z"]
-        );
-        assert_eq!(canonical.phase_scope[0].tool_ids, vec!["a-tool", "z-tool"]);
-    }
-
-    fn command_policy(
-        tool_id: &str,
-        allowed_values: Vec<&str>,
-        read_roots: Vec<&str>,
-    ) -> CommandPolicy {
-        CommandPolicy {
-            allowed_parameters: vec![
-                AllowedParameterPolicy {
-                    name: "--beta".to_owned(),
-                    required: false,
-                    max: None,
-                    max_length: None,
-                    min: None,
-                    value_pattern: None,
-                    value_type: ParameterValueType::Enum,
-                    allowed_values: allowed_values
-                        .iter()
-                        .map(|value| (*value).to_owned())
-                        .collect(),
-                },
-                AllowedParameterPolicy {
-                    name: "--alpha".to_owned(),
-                    required: true,
-                    max: None,
-                    max_length: Some(128),
-                    min: None,
-                    value_pattern: Some("[a-z]+".to_owned()),
-                    value_type: ParameterValueType::String,
-                    allowed_values: Vec::new(),
-                },
-            ],
-            argv: vec!["--second".to_owned(), "--first".to_owned()],
-            command_id: format!("{tool_id}-command"),
-            environment: EnvironmentPolicy {
-                allow: vec!["TERM".to_owned(), "LANG".to_owned()],
-                default: EnvironmentDefault::Clear,
-            },
-            executable: format!("/bin/{tool_id}"),
-            filesystem: FilesystemPolicy {
-                protected_path_grants: vec![
-                    "workspace/z.env".to_owned(),
-                    "workspace/a.env".to_owned(),
-                ],
-                protected_paths: vec!["**/.ssh".to_owned(), "**/.env".to_owned()],
-                read_roots: read_roots.iter().map(|root| (*root).to_owned()).collect(),
-                write_roots: vec!["workspace/z-out".to_owned(), "workspace/a-out".to_owned()],
-            },
-            network: NetworkPolicy {
-                allow: vec![
-                    NetworkAllowEntry {
-                        cidr: "10.0.1.0/24".to_owned(),
-                        kind: NetworkAllowKind::Cidr,
-                        port: 443,
-                        transport: NetworkTransport::Udp,
-                    },
-                    NetworkAllowEntry {
-                        cidr: "10.0.0.0/24".to_owned(),
-                        kind: NetworkAllowKind::Cidr,
-                        port: 80,
-                        transport: NetworkTransport::Tcp,
-                    },
-                ],
-                default: NetworkDefault::Deny,
-            },
-            script_runtime: None,
-            tool_id: tool_id.to_owned(),
-            tool_kind: ToolKind::PredefinedCommand,
-        }
-    }
-
-    fn policy_artifact_with_environment_allow(name: &str) -> PolicyArtifact {
-        let mut artifact = valid_policy_artifact("environment-tool");
-        artifact.commands[0].environment.allow = vec![name.to_owned()];
-        artifact
-    }
-
-    fn policy_artifact_with_network_allow(cidr: &str, port: u16) -> PolicyArtifact {
-        let mut artifact = valid_policy_artifact("network-tool");
-        artifact.commands[0].network.allow = vec![NetworkAllowEntry {
-            cidr: cidr.to_owned(),
-            kind: NetworkAllowKind::Cidr,
-            port,
-            transport: NetworkTransport::Tcp,
-        }];
-        artifact
-    }
-
-    fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
-        PolicyArtifact {
-            commands: vec![valid_command_policy(tool_id)],
-            fixture_name: format!("{tool_id}-fixture"),
-            phase_scope: vec![PhaseScope {
-                phase_id: "inspect".to_owned(),
-                tool_ids: vec![tool_id.to_owned()],
-            }],
-            policy_version: POLICY_VERSION_V0.to_owned(),
-            runtime_limits: RuntimeLimits {
-                headless: true,
-                timeout_ms: 1000,
-            },
-            source_loop_definition_id: format!("{tool_id}-loop"),
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        }
-    }
-
-    fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
-        let loops = (0..depth)
-            .map(|index| {
-                let id = format!("loop-{index:03}");
-                (
-                    id.clone(),
-                    core_script::LoopBlock {
-                        identity: core_script::BlockIdentity {
-                            id,
-                            name: format!("Loop {index:03}"),
-                        },
-                        phase_refs: Vec::new(),
-                        subloop_refs: (index + 1 < depth)
-                            .then(|| format!("loop-{:03}", index + 1))
-                            .into_iter()
-                            .collect(),
-                        connection_refs: Vec::new(),
-                    },
-                )
-            })
-            .collect();
-        core_script::ResolvedRegistry {
-            connections: BTreeMap::new(),
-            instructions: BTreeMap::new(),
-            loops,
-            phases: BTreeMap::new(),
-            tools: BTreeMap::new(),
-        }
-    }
-
-    fn valid_command_policy(tool_id: &str) -> CommandPolicy {
-        let mut command = command_policy(tool_id, vec!["a"], vec!["workspace"]);
-        command.filesystem.write_roots = vec!["workspace".to_owned()];
-        command.filesystem.protected_paths = DEFAULT_PROTECTED_PATHS
-            .iter()
-            .map(|path| (*path).to_owned())
-            .collect();
-        command.network.allow.clear();
-        command
-    }
-
-    fn policy_artifact_with_parameter(parameter: AllowedParameterPolicy) -> PolicyArtifact {
-        let mut artifact = valid_policy_artifact("parameter-tool");
-        artifact.commands[0].allowed_parameters = vec![parameter];
-        artifact
-    }
-
-    fn valid_parameter(name: &str, value_type: ParameterValueType) -> AllowedParameterPolicy {
-        let mut parameter = AllowedParameterPolicy {
-            name: name.to_owned(),
-            required: false,
-            max: None,
-            max_length: None,
-            min: None,
-            value_pattern: None,
-            value_type,
-            allowed_values: Vec::new(),
-        };
-        match &parameter.value_type {
-            ParameterValueType::String => {
-                parameter.value_pattern = Some("[a-z]+".to_owned());
-                parameter.max_length = Some(64);
-            }
-            ParameterValueType::Enum => {
-                parameter.allowed_values = vec!["fast".to_owned()];
-            }
-            ParameterValueType::Integer
-            | ParameterValueType::None
-            | ParameterValueType::WorkspaceRelativePath => {}
-        }
-        parameter
-    }
-
-    fn own_script_policy_artifact(tool_id: &str) -> PolicyArtifact {
-        let mut artifact = valid_policy_artifact(tool_id);
-        artifact.commands[0].command_id = format!("script:{tool_id}");
-        artifact.commands[0].executable = "runner:posix-sh".to_owned();
-        artifact.commands[0].script_runtime = Some("posix-sh".to_owned());
-        artifact.commands[0].tool_kind = ToolKind::OwnScript;
-        artifact
-    }
-
-    fn fixture_files(suffix: &str) -> Vec<std::path::PathBuf> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures");
-        let mut files = Vec::new();
-        collect_fixture_files(&root, suffix, &mut files);
-        files.sort();
-        assert!(!files.is_empty(), "expected at least one {suffix} fixture");
-        files
-    }
-
-    fn collect_fixture_files(dir: &Path, suffix: &str, out: &mut Vec<std::path::PathBuf>) {
-        for entry in fs::read_dir(dir).unwrap_or_else(|err| panic!("{}: {err}", dir.display())) {
-            let path = entry.expect("dir entry").path();
-            if path.is_dir() {
-                collect_fixture_files(&path, suffix, out);
-            } else if path.to_string_lossy().ends_with(suffix) {
-                out.push(path);
-            }
-        }
-    }
-}
+mod tests;

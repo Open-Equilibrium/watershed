@@ -10,7 +10,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 /// Workspace-relative directory containing persisted session JSONL logs.
@@ -28,6 +28,7 @@ pub const MAX_LOOP_INVOCATIONS: u64 = 8 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = core_script::MAX_REGISTRY_FILE_BYTES;
 const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
 const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
+const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
     TrustedPredefinedCommand {
         command_id: "agent-echo",
@@ -47,6 +48,40 @@ const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
 struct TrustedPredefinedCommand {
     command_id: &'static str,
     progress: Option<&'static str>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EventClock {
+    base_unix_seconds: i64,
+}
+
+impl EventClock {
+    fn fixed_fixture() -> Self {
+        Self {
+            base_unix_seconds: FIXTURE_CLOCK_UNIX_SECONDS,
+        }
+    }
+
+    fn wall_clock() -> Self {
+        let base_unix_seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
+            .unwrap_or(0);
+        Self { base_unix_seconds }
+    }
+
+    fn from_first_event(event: &EventEnvelope) -> Option<Self> {
+        parse_rfc3339_utc_timestamp(&event.timestamp).map(|base_unix_seconds| Self {
+            base_unix_seconds: base_unix_seconds.saturating_sub(
+                i64::try_from(event.sequence.saturating_sub(1)).unwrap_or(i64::MAX),
+            ),
+        })
+    }
+
+    fn timestamp(self, sequence: u64) -> String {
+        let offset = i64::try_from(sequence.saturating_sub(1)).unwrap_or(i64::MAX);
+        format_unix_timestamp(self.base_unix_seconds.saturating_add(offset))
+    }
 }
 
 /// Runtime surfaces tracked by the Loop Agent MVP.
@@ -254,7 +289,9 @@ pub fn run_loop(
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
-    if let Err(err) = write_initial_session_log(&reservation, &expected_session_id) {
+    if let Err(err) =
+        write_initial_session_log_with_clock(&reservation, &expected_session_id, config.event_clock)
+    {
         reservation.rollback();
         return Err(err);
     }
@@ -273,8 +310,11 @@ pub fn run_loop(
         policy,
         loop_block,
         &expected_session_id,
-        ToolSideEffectMode::DryRun,
-        SideEffectRecorder::none(),
+        LoopExecutionOptions::new(
+            config.event_clock,
+            ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
+        ),
     ) {
         Ok(runtime) => runtime,
         Err(err) => {
@@ -293,46 +333,72 @@ pub fn run_loop(
             return Err(err);
         }
     };
+    let durable_prefix_event_count = durable_run_prefix_event_count(&planned_events);
+    if let Err(err) = persist_reserved_session_prefix(
+        &reservation,
+        &expected_session_id,
+        &planned_events,
+        durable_prefix_event_count,
+        Some(&definition_hashes),
+    ) {
+        reservation.rollback();
+        return Err(err);
+    }
     let result = (|| {
         let session_id = planned_events
             .first()
             .expect("validated streams contain at least one event")
             .session_id
             .clone();
-        let failed = planned_runtime.failed;
         let runtime = execute_loop(
             workspace,
             &registry,
             policy,
             loop_block,
             &expected_session_id,
-            ToolSideEffectMode::ApplyAll,
-            SideEffectRecorder::for_reservation(&reservation),
+            LoopExecutionOptions::new(
+                config.event_clock,
+                ToolSideEffectMode::ApplyAll,
+                SideEffectRecorder::for_reservation(&reservation),
+            ),
         )?;
         reservation.mark_side_effects_applied();
-        if runtime.events != planned_runtime.events {
+        if !runtime.failed && runtime.events != planned_runtime.events {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime did not match deterministic replay",
                 reservation.session_path.display()
             )));
         }
-        commit_reserved_session_log(
+        let (final_stream, final_events) = if runtime.failed {
+            preflight_session_completion_stream_from_prefix(
+                &reservation,
+                &expected_session_id,
+                &runtime.events,
+                durable_prefix_event_count,
+            )?
+        } else {
+            (planned_stream, planned_events)
+        };
+        commit_reserved_session_log_from_prefix(
             &reservation,
             &session_id,
-            &planned_stream,
-            planned_events.len(),
+            &final_stream,
+            final_events.len(),
             Some(&definition_hashes),
+            durable_prefix_event_count,
         )?;
         reservation.release_lock()?;
 
         Ok(RunOutput {
-            event_count: planned_events.len(),
-            failed,
+            event_count: final_events.len(),
+            failed: runtime.failed,
             session_id,
             session_path: reservation.session_path.clone(),
             stdout: match emit {
-                EmitMode::Jsonl => planned_stream,
-                EmitMode::Human if failed => format!("loop {} failed\n", loop_block.identity.id),
+                EmitMode::Jsonl => final_stream,
+                EmitMode::Human if runtime.failed => {
+                    format!("loop {} failed\n", loop_block.identity.id)
+                }
                 EmitMode::Human => format!("loop {} completed\n", loop_block.identity.id),
             },
         })
@@ -558,11 +624,19 @@ pub fn resume_session(
         policy,
         loop_block,
         session_id,
-        ToolSideEffectMode::DryRun,
-        SideEffectRecorder::none(),
+        LoopExecutionOptions::new(
+            resume_event_clock(&config, &events)?,
+            ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
+        ),
     )?;
-    let resume_prefix =
-        validate_resume_replay_prefix(&path, &events, &planned_runtime.events, loop_block)?;
+    let resume_prefix = validate_resume_replay_prefix(
+        &path,
+        &events,
+        &planned_runtime.events,
+        loop_block,
+        resume_event_clock(&config, &events)?,
+    )?;
     if let Some(tool_id) = started_tool_without_progress(&events) {
         return Err(RuntimeError::Protocol(format!(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
@@ -574,10 +648,13 @@ pub fn resume_session(
         policy,
         loop_block,
         session_id,
-        ToolSideEffectMode::PreflightResume {
-            prefix_event_count: resume_prefix.planned_event_count as u64,
-        },
-        SideEffectRecorder::none(),
+        LoopExecutionOptions::new(
+            resume_event_clock(&config, &events)?,
+            ToolSideEffectMode::PreflightResume {
+                prefix_event_count: resume_prefix.planned_event_count as u64,
+            },
+            SideEffectRecorder::none(),
+        ),
     )?;
     if preflight_runtime.events != planned_runtime.events {
         return Err(RuntimeError::Protocol(format!(
@@ -592,6 +669,7 @@ pub fn resume_session(
         &events,
         &planned_runtime.events,
         &resume_prefix,
+        resume_event_clock(&config, &events)?,
     )?;
 
     // WHY: resume side effects need a durable attempt marker before they run, while success
@@ -604,10 +682,13 @@ pub fn resume_session(
         policy,
         loop_block,
         session_id,
-        ToolSideEffectMode::Resume {
-            prefix_event_count: resume_prefix.planned_event_count as u64,
-        },
-        SideEffectRecorder::none(),
+        LoopExecutionOptions::new(
+            resume_event_clock(&config, &events)?,
+            ToolSideEffectMode::Resume {
+                prefix_event_count: resume_prefix.planned_event_count as u64,
+            },
+            SideEffectRecorder::none(),
+        ),
     )?;
     if resumed_runtime.events != planned_runtime.events {
         return Err(RuntimeError::Protocol(format!(
@@ -647,6 +728,7 @@ fn validate_resume_replay_prefix(
     events: &[EventEnvelope],
     planned_events: &[EventEnvelope],
     loop_block: &core_script::LoopBlock,
+    clock: EventClock,
 ) -> Result<ResumeReplayPrefix, RuntimeError> {
     let mut planned_event_count = 0usize;
     let mut resume_marker_count = 0usize;
@@ -660,7 +742,8 @@ fn validate_resume_replay_prefix(
         let Some(planned_event) = planned_events.get(planned_event_count) else {
             return Err(invalid_resume_prefix_error(path, loop_block));
         };
-        let expected_event = shift_resumed_event(planned_event.clone(), resume_marker_count as u64);
+        let expected_event =
+            shift_resumed_event(planned_event.clone(), resume_marker_count as u64, clock);
         if event != &expected_event {
             return Err(invalid_resume_prefix_error(path, loop_block));
         }
@@ -706,6 +789,7 @@ fn preflight_resume_append_plan(
     events: &[EventEnvelope],
     planned_events: &[EventEnvelope],
     resume_prefix: &ResumeReplayPrefix,
+    clock: EventClock,
 ) -> Result<ResumeAppendPlan, RuntimeError> {
     let sequence = events
         .last()
@@ -717,7 +801,7 @@ fn preflight_resume_append_plan(
         EventType::SessionResumed,
         session_id.to_owned(),
         sequence,
-        resume_timestamp(sequence),
+        clock.timestamp(sequence),
         "loop-agent-cli",
         serde_json::json!({"reason":"resume"}),
     );
@@ -725,7 +809,7 @@ fn preflight_resume_append_plan(
     let suffix_events = planned_events[resume_prefix.planned_event_count..]
         .iter()
         .cloned()
-        .map(|event| shift_resumed_event(event, resumed_suffix_offset))
+        .map(|event| shift_resumed_event(event, resumed_suffix_offset, clock))
         .collect::<Vec<_>>();
     let marker_stream = canonical_event_stream(std::slice::from_ref(&resume_event))?;
     let suffix_stream = canonical_event_stream(&suffix_events)?;
@@ -773,10 +857,14 @@ fn ensure_session_log_growth_within_limit(
     Ok(())
 }
 
-fn shift_resumed_event(mut event: EventEnvelope, sequence_offset: u64) -> EventEnvelope {
+fn shift_resumed_event(
+    mut event: EventEnvelope,
+    sequence_offset: u64,
+    clock: EventClock,
+) -> EventEnvelope {
     event.sequence += sequence_offset;
     event.event_id = format!("evt-{:03}", event.sequence);
-    event.timestamp = event_timestamp(event.sequence);
+    event.timestamp = clock.timestamp(event.sequence);
     event
 }
 
@@ -990,15 +1078,21 @@ fn verify_resume_definition_metadata(
     loop_block: &core_script::LoopBlock,
 ) -> Result<(), RuntimeError> {
     // WHY: resume hashes bind a partial session to the registry definitions that produced
-    // it; older logs without metadata stay readable.
+    // it; incomplete metadata cannot prove the prefix matches the current registry.
     let Some(metadata) = read_session_log_metadata(workspace, session_id)? else {
-        return Ok(());
+        return Err(RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: missing definition metadata"
+        )));
     };
     let Some(recorded_registry_hash) = metadata.registry_hash else {
-        return Ok(());
+        return Err(RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: missing registry_hash metadata"
+        )));
     };
     let Some(recorded_loop_definition_hash) = metadata.loop_definition_hash else {
-        return Ok(());
+        return Err(RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: missing loop_definition_hash metadata"
+        )));
     };
 
     let expected = session_definition_hashes(registry, loop_block)?;
@@ -1226,40 +1320,13 @@ fn acquire_session_lock(
     Ok(SessionLockGuard { path })
 }
 
-#[cfg(test)]
-fn write_session_log(
-    workspace: &Path,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-) -> Result<(), RuntimeError> {
-    let reservation = reserve_session_log(workspace, session_id)?;
-    let result = write_reserved_session_log(&reservation, session_id, stream, event_count)
-        .and_then(|()| reservation.release_lock());
-    if result.is_err() {
-        reservation.rollback();
-    }
-    result
-}
-
-#[cfg(test)]
-fn write_reserved_session_log(
-    reservation: &SessionReservation,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-) -> Result<(), RuntimeError> {
-    write_existing_file(&reservation.session_path, stream.as_bytes())?;
-    write_reserved_session_metadata(reservation, session_id, event_count, None)
-}
-
 fn write_reserved_session_metadata(
     reservation: &SessionReservation,
     session_id: &str,
     event_count: usize,
     definition_hashes: Option<&SessionDefinitionHashes>,
 ) -> Result<(), RuntimeError> {
-    write_existing_file(
+    replace_existing_file_atomically(
         &reservation.log_path,
         session_log_metadata_text(session_id, event_count, definition_hashes).as_bytes(),
     )
@@ -1282,16 +1349,17 @@ fn session_log_metadata_text(
     metadata
 }
 
-fn write_initial_session_log(
+fn write_initial_session_log_with_clock(
     reservation: &SessionReservation,
     session_id: &str,
+    clock: EventClock,
 ) -> Result<(), RuntimeError> {
     let stream = EventEnvelope::new(
         "evt-001",
         EventType::SessionStarted,
         session_id.to_owned(),
         1,
-        event_timestamp(1),
+        clock.timestamp(1),
         "loop-agent-cli",
         serde_json::json!({"reason":"fixture-start"}),
     )
@@ -1305,43 +1373,75 @@ fn preflight_session_completion_stream(
     expected_session_id: &str,
     events: &[EventEnvelope],
 ) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
+    preflight_session_completion_stream_from_prefix(reservation, expected_session_id, events, 1)
+}
+
+fn preflight_session_completion_stream_from_prefix(
+    reservation: &SessionReservation,
+    expected_session_id: &str,
+    events: &[EventEnvelope],
+    persisted_event_count: usize,
+) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
     let stream = canonical_event_stream(events)?;
     let validated_events =
         validate_session_log_text(Path::new("runtime.jsonl"), expected_session_id, &stream)?;
-    preflight_complete_reserved_session_log(reservation, &stream)?;
+    preflight_complete_reserved_session_log_from_prefix(
+        reservation,
+        &stream,
+        persisted_event_count,
+    )?;
     Ok((stream, validated_events))
 }
 
-fn preflight_complete_reserved_session_log(
+fn preflight_complete_reserved_session_log_from_prefix(
     reservation: &SessionReservation,
     stream: &str,
+    persisted_event_count: usize,
 ) -> Result<(), RuntimeError> {
-    let append_bytes = session_completion_append_bytes(stream)?;
+    let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
     ensure_session_log_growth_within_limit(&reservation.session_path, append_bytes.len())
 }
 
-#[cfg(test)]
-fn complete_reserved_session_log(
+fn persist_reserved_session_prefix(
     reservation: &SessionReservation,
     session_id: &str,
-    stream: &str,
-    event_count: usize,
+    events: &[EventEnvelope],
+    prefix_event_count: usize,
+    definition_hashes: Option<&SessionDefinitionHashes>,
 ) -> Result<(), RuntimeError> {
-    let commit_result =
-        commit_reserved_session_log(reservation, session_id, stream, event_count, None);
-    let release_result = reservation.release_lock();
-    commit_result?;
-    release_result
+    if prefix_event_count <= 1 {
+        return Ok(());
+    }
+    let prefix_stream = canonical_event_stream(&events[..prefix_event_count])?;
+    preflight_complete_reserved_session_log_from_prefix(reservation, &prefix_stream, 1)?;
+    commit_reserved_session_log_from_prefix(
+        reservation,
+        session_id,
+        &prefix_stream,
+        prefix_event_count,
+        definition_hashes,
+        1,
+    )
 }
 
-fn commit_reserved_session_log(
+fn durable_run_prefix_event_count(events: &[EventEnvelope]) -> usize {
+    events
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none()
+        })
+        .map_or(1, |index| index + 1)
+}
+
+fn commit_reserved_session_log_from_prefix(
     reservation: &SessionReservation,
     session_id: &str,
     stream: &str,
     event_count: usize,
     definition_hashes: Option<&SessionDefinitionHashes>,
+    persisted_event_count: usize,
 ) -> Result<(), RuntimeError> {
-    let append_bytes = session_completion_append_bytes(stream)?;
+    let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
     let append_result = append_session_log_bytes(&reservation.session_path, append_bytes);
     if append_result.is_ok() {
         reservation.mark_committed();
@@ -1355,11 +1455,28 @@ fn commit_reserved_session_log(
     metadata_result
 }
 
-fn session_completion_append_bytes(stream: &str) -> Result<&[u8], RuntimeError> {
+fn session_stream_suffix_bytes(
+    stream: &str,
+    persisted_event_count: usize,
+) -> Result<&[u8], RuntimeError> {
+    if persisted_event_count == 0 {
+        return Ok(stream.as_bytes());
+    }
     let first_line_end = stream.find('\n').ok_or_else(|| {
         RuntimeError::Protocol("validated runtime stream must contain an initial event".to_owned())
     })?;
-    Ok(&stream.as_bytes()[first_line_end + 1..])
+    let mut line_count = 1usize;
+    let mut offset = first_line_end + 1;
+    while line_count < persisted_event_count {
+        let Some(relative_line_end) = stream[offset..].find('\n') else {
+            return Err(RuntimeError::Protocol(format!(
+                "validated runtime stream must contain persisted event prefix of {persisted_event_count}"
+            )));
+        };
+        offset += relative_line_end + 1;
+        line_count += 1;
+    }
+    Ok(&stream.as_bytes()[offset..])
 }
 
 fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {
@@ -1407,10 +1524,16 @@ fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
             Ok(false)
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path).map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })?;
+            match fs::create_dir(path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(source) => {
+                    return Err(RuntimeError::Io {
+                        path: path.to_owned(),
+                        source,
+                    });
+                }
+            }
             let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
                 path: path.to_owned(),
                 source,
@@ -1482,6 +1605,27 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
     })
 }
 
+fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    ensure_parent_real_directory(path)?;
+    ensure_non_hardlinked_real_file(path)?;
+    let (temp_path, mut temp_file) = create_replacement_temp(path)?;
+    if let Err(err) = temp_file
+        .write_all(contents)
+        .map_err(|source| RuntimeError::Io {
+            path: temp_path.clone(),
+            source,
+        })
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    drop(temp_file);
+
+    ensure_parent_real_directory(path)?;
+    ensure_non_hardlinked_real_file(path)?;
+    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none())
+}
+
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_real_file(path)?;
     if !hard_link_count_is_verifiable() {
@@ -1550,11 +1694,6 @@ fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
             source,
         }),
     }
-}
-
-#[cfg(test)]
-fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
-    append_session_log_bytes(path, line.as_bytes())
 }
 
 fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
@@ -1687,6 +1826,27 @@ impl<'a> SideEffectRecorder<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct LoopExecutionOptions<'a> {
+    clock: EventClock,
+    side_effect_mode: ToolSideEffectMode,
+    side_effect_recorder: SideEffectRecorder<'a>,
+}
+
+impl<'a> LoopExecutionOptions<'a> {
+    fn new(
+        clock: EventClock,
+        side_effect_mode: ToolSideEffectMode,
+        side_effect_recorder: SideEffectRecorder<'a>,
+    ) -> Self {
+        Self {
+            clock,
+            side_effect_mode,
+            side_effect_recorder,
+        }
+    }
+}
+
 fn runtime_policy_artifact(
     artifacts: &[core_policy::PolicyArtifact],
 ) -> Result<&core_policy::PolicyArtifact, RuntimeError> {
@@ -1747,6 +1907,7 @@ fn policy_target_name(target: &core_policy::PolicyTarget) -> &'static str {
 }
 
 struct RuntimeEventBuilder {
+    clock: EventClock,
     events: Vec<EventEnvelope>,
     loop_counter: u64,
     message_counter: u64,
@@ -1756,8 +1917,9 @@ struct RuntimeEventBuilder {
 }
 
 impl RuntimeEventBuilder {
-    fn new(session_id: String) -> Self {
+    fn with_clock(session_id: String, clock: EventClock) -> Self {
         Self {
+            clock,
             events: Vec::new(),
             loop_counter: 0,
             message_counter: 0,
@@ -1810,7 +1972,7 @@ impl RuntimeEventBuilder {
             event_type,
             self.session_id.clone(),
             sequence,
-            event_timestamp(sequence),
+            self.clock.timestamp(sequence),
             "loop-agent-cli",
             payload,
         );
@@ -1843,10 +2005,9 @@ fn execute_loop(
     policy: &core_policy::PolicyArtifact,
     root_loop: &core_script::LoopBlock,
     session_id: &str,
-    side_effect_mode: ToolSideEffectMode,
-    side_effect_recorder: SideEffectRecorder<'_>,
+    options: LoopExecutionOptions<'_>,
 ) -> Result<RuntimeExecution, RuntimeError> {
-    let mut builder = RuntimeEventBuilder::new(session_id.to_owned());
+    let mut builder = RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock);
     builder.emit(
         None,
         EventType::SessionStarted,
@@ -1857,8 +2018,8 @@ fn execute_loop(
         workspace,
         registry,
         policy,
-        side_effect_mode,
-        side_effect_recorder,
+        side_effect_mode: options.side_effect_mode,
+        side_effect_recorder: options.side_effect_recorder,
     };
     let failed = emit_loop_block(&context, root_loop, None, &mut builder)?;
     if let Some(failure) = failed {
@@ -2353,13 +2514,23 @@ fn emit_tool(
         completed_sequence
     };
     let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
-        execute_tool(
+        match execute_tool(
             workspace,
             tool,
             policy.protected_path_match_mode,
             policy.command,
             side_effect_recorder,
-        )?
+        ) {
+            Ok(progress) => progress,
+            Err(err) => {
+                if matches!(side_effect_mode, ToolSideEffectMode::ApplyAll) {
+                    if let Some(failure) = runtime_failure_for_tool_error(&err, &tool.identity.id) {
+                        return Ok(Some(failure));
+                    }
+                }
+                return Err(err);
+            }
+        }
     } else if side_effect_mode.should_preflight_tool(replay_guard_sequence) {
         preflight_tool_progress(
             workspace,
@@ -3404,6 +3575,47 @@ fn runtime_failure_for_reason(
     }
 }
 
+fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<RuntimeFailure> {
+    let reason = match err {
+        RuntimeError::Protocol(message) => runtime_denial_reason_for_protocol_message(message)?,
+        RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::PermissionDenied => {
+            core_policy::DenyReasonCode::WriteDenied
+        }
+        RuntimeError::Io { .. } => return None,
+        RuntimeError::Json(_)
+        | RuntimeError::Policy(_)
+        | RuntimeError::Registry(_)
+        | RuntimeError::SessionLogExists(_)
+        | RuntimeError::TerminalSession(_)
+        | RuntimeError::Usage(_) => {
+            return None;
+        }
+    };
+    Some(runtime_failure_for_reason(reason, Some(tool_id.to_owned())))
+}
+
+fn runtime_denial_reason_for_protocol_message(
+    message: &str,
+) -> Option<core_policy::DenyReasonCode> {
+    if message.contains("protected path") {
+        return Some(core_policy::DenyReasonCode::ProtectedPathDenied);
+    }
+    if message.contains("symlink") || message.contains("reparse point") {
+        return Some(core_policy::DenyReasonCode::SymlinkEscapeDenied);
+    }
+    if message.contains("lacks write scope")
+        || message.contains("must be a directory")
+        || message.contains("must be a file")
+        || message.contains("must not already exist")
+        || message.contains("temporary replacement path")
+        || message.contains("changed before write")
+        || message.contains("hard-linked")
+    {
+        return Some(core_policy::DenyReasonCode::WriteDenied);
+    }
+    None
+}
+
 fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFailure {
     RuntimeFailure {
         reason: core_policy::DenyReasonCode::ToolOutOfPhase
@@ -3503,10 +3715,6 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
     hash
 }
 
-fn event_timestamp(sequence: u64) -> String {
-    format!("2026-01-01T00:00:{:02}Z", sequence.saturating_sub(1) % 60)
-}
-
 fn tool_kind_name(kind: &core_script::ToolKind) -> &'static str {
     match kind {
         core_script::ToolKind::PredefinedCommand => "predefined-command",
@@ -3554,7 +3762,11 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
             ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
         ));
     }
-    Ok(WorkspaceConfig { registry_root })
+    let event_clock = workspace_event_clock(&text)?;
+    Ok(WorkspaceConfig {
+        event_clock,
+        registry_root,
+    })
 }
 
 fn registry_root_path(workspace: &Path, registry_root: &Path) -> Result<PathBuf, RuntimeError> {
@@ -3634,7 +3846,49 @@ fn unquote_config_scalar(value: &str) -> String {
 
 #[derive(Debug)]
 struct WorkspaceConfig {
+    event_clock: EventClock,
     registry_root: PathBuf,
+}
+
+fn workspace_event_clock(text: &str) -> Result<EventClock, RuntimeError> {
+    match (
+        config_value(text, "fixture_profile"),
+        config_value(text, "stub_model"),
+    ) {
+        (Some(profile), Some(model)) if profile == "stub-model" && model == "deterministic" => {
+            Ok(EventClock::fixed_fixture())
+        }
+        (Some(profile), None) if profile == "stub-model" => Err(RuntimeError::Usage(
+            ".loop/config.yaml fixture_profile stub-model requires stub_model: deterministic"
+                .to_owned(),
+        )),
+        (Some(profile), _) if profile != "stub-model" => Err(RuntimeError::Usage(format!(
+            "unsupported .loop/config.yaml fixture_profile {profile:?}"
+        ))),
+        (None, Some(model)) if model == "deterministic" => Err(RuntimeError::Usage(
+            ".loop/config.yaml stub_model deterministic requires fixture_profile: stub-model"
+                .to_owned(),
+        )),
+        (_, Some(model)) if model != "deterministic" => Err(RuntimeError::Usage(format!(
+            "unsupported .loop/config.yaml stub_model {model:?}"
+        ))),
+        _ => Ok(EventClock::wall_clock()),
+    }
+}
+
+fn resume_event_clock(
+    config: &WorkspaceConfig,
+    events: &[EventEnvelope],
+) -> Result<EventClock, RuntimeError> {
+    if config.event_clock == EventClock::fixed_fixture() {
+        return Ok(config.event_clock);
+    }
+    let first_event = events
+        .first()
+        .expect("validated streams contain at least one event");
+    EventClock::from_first_event(first_event).ok_or_else(|| {
+        RuntimeError::Protocol("session first event timestamp cannot anchor resume".to_owned())
+    })
 }
 
 fn read_workspace_config_to_string(path: &Path) -> Result<String, RuntimeError> {
@@ -4648,6 +4902,10 @@ fn validate_session_log_text(
     Ok(events)
 }
 
+/// Validates lifecycle invariants after envelope and payload validation:
+/// every loop/step/tool/message must start before use, terminal lifecycle
+/// items cannot receive later events, and terminal sessions cannot leave open
+/// lifecycle items.
 fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(), RuntimeError> {
     if events
         .first()
@@ -4661,15 +4919,12 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
         )));
     }
 
-    let mut started_loops: BTreeSet<String> = BTreeSet::new();
+    let mut loops = LifecycleTracker::<String>::default();
     let mut loop_parents: BTreeMap<String, Option<String>> = BTreeMap::new();
-    let mut terminal_loops: BTreeMap<String, usize> = BTreeMap::new();
-    let mut started_steps: BTreeSet<StepLifecycleKey> = BTreeSet::new();
-    let mut terminal_steps: BTreeMap<StepLifecycleKey, usize> = BTreeMap::new();
-    let mut started_tools: BTreeSet<ToolLifecycleKey> = BTreeSet::new();
-    let mut terminal_tools: BTreeMap<ToolLifecycleKey, usize> = BTreeMap::new();
-    let mut active_messages: BTreeMap<MessageLifecycleKey, String> = BTreeMap::new();
-    let mut terminal_messages: BTreeMap<MessageLifecycleKey, usize> = BTreeMap::new();
+    let mut steps = LifecycleTracker::<StepLifecycleKey>::default();
+    let mut tools = LifecycleTracker::<ToolLifecycleKey>::default();
+    let mut messages = LifecycleTracker::<MessageLifecycleKey>::default();
+    let mut active_message_roles: BTreeMap<MessageLifecycleKey, String> = BTreeMap::new();
     let mut active_phases: BTreeMap<String, String> = BTreeMap::new();
     let mut active_steps: BTreeMap<String, StepLifecycleKey> = BTreeMap::new();
 
@@ -4684,50 +4939,43 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
 
         if event.event_type != EventType::LoopStarted {
             if let Some(loop_id) = &event.loop_id {
-                if !started_loops.contains(loop_id) {
+                if !loops.is_started(loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
                 }
-                if let Some(terminal_line) = terminal_loops.get(loop_id) {
+                if let Some(terminal_line) = loops.terminal_line(loop_id) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "loop",
                         loop_id,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
             }
         }
-        validate_lifecycle_parent(
-            path,
-            line_number,
-            event,
-            &started_loops,
-            &terminal_loops,
-            &loop_parents,
-        )?;
+        validate_lifecycle_parent(path, line_number, event, &loops, &loop_parents)?;
 
         match event.event_type {
             EventType::LoopStarted => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
                 loop_parents.insert(loop_id.clone(), event.parent_loop_id.clone());
-                started_loops.insert(loop_id);
+                loops.start(loop_id);
             }
             EventType::LoopCompleted | EventType::LoopFailed => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if !started_loops.contains(&loop_id) {
+                if !loops.is_started(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
                 }
-                terminal_loops.insert(loop_id, line_number);
+                loops.finish(loop_id, line_number);
             }
             EventType::PhaseEntered => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
@@ -4752,14 +5000,14 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         active_phase
                     )));
                 }
-                if let Some(terminal_line) = terminal_steps.get(&step) {
+                if let Some(terminal_line) = steps.terminal_line(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "step",
                         &step.step_id,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
@@ -4772,21 +5020,21 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     )));
                 }
                 active_steps.insert(loop_id, step.clone());
-                started_steps.insert(step);
+                steps.start(step);
             }
             EventType::StepCompleted => {
                 let step = lifecycle_step_key(event, &active_phases);
-                if let Some(terminal_line) = terminal_steps.get(&step) {
+                if let Some(terminal_line) = steps.terminal_line(&step) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "step",
                         &step.step_id,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
-                if !started_steps.contains(&step) {
+                if !steps.is_started(&step) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
                         path.display(),
@@ -4813,36 +5061,36 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     }
                 }
                 active_steps.remove(&loop_id);
-                terminal_steps.insert(step, line_number);
+                steps.finish(step, line_number);
             }
             EventType::ToolStarted => {
                 require_active_step(path, line_number, event, &active_steps)?;
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                if let Some(terminal_line) = terminal_tools.get(&tool) {
+                if let Some(terminal_line) = tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "tool",
                         &tool.tool_id,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
-                started_tools.insert(tool);
+                tools.start(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                if let Some(terminal_line) = terminal_tools.get(&tool) {
+                if let Some(terminal_line) = tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "tool",
                         &tool.tool_id,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
-                if !started_tools.contains(&tool) {
+                if !tools.is_started(&tool) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow tool.started for tool_id {:?}",
                         path.display(),
@@ -4854,46 +5102,46 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     event.event_type,
                     EventType::ToolCompleted | EventType::ToolTimedOut
                 ) {
-                    terminal_tools.insert(tool, line_number);
+                    tools.finish(tool, line_number);
                 }
             }
             EventType::ToolFailed => {
                 // Pre-dispatch sandbox denials are recorded as tool.failed without tool.started.
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
                 let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                if let Some(terminal_line) = terminal_tools.get(&tool) {
+                if let Some(terminal_line) = tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "tool",
                         &tool.tool_id,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
-                if !started_tools.contains(&tool) && active_phases.contains_key(&loop_id) {
+                if !tools.is_started(&tool) && active_phases.contains_key(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} tool.failed must follow tool.started after phase.entered for loop_id {loop_id:?}",
                         path.display()
                     )));
                 }
-                terminal_tools.insert(tool, line_number);
+                tools.finish(tool, line_number);
             }
             EventType::MessageDelta => {
                 require_active_step(path, line_number, event, &active_steps)?;
                 let message = lifecycle_message_key(path, line_number, event)?;
-                if let Some(terminal_line) = terminal_messages.get(&message) {
+                if let Some(terminal_line) = messages.terminal_line(&message) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "message",
                         &message.1,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
                 let role = lifecycle_payload_string(event, "role");
-                match active_messages.get(&message) {
+                match active_message_roles.get(&message) {
                     Some(active_role) if active_role != &role => {
                         return Err(RuntimeError::Protocol(format!(
                             "{} line {line_number} message.delta role {:?} must match active role {:?} for message_id {:?}",
@@ -4905,25 +5153,26 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                     }
                     Some(_) => {}
                     None => {
-                        active_messages.insert(message, role);
+                        messages.start(message.clone());
+                        active_message_roles.insert(message, role);
                     }
                 }
             }
             EventType::MessageCompleted => {
                 require_active_step(path, line_number, event, &active_steps)?;
                 let message = lifecycle_message_key(path, line_number, event)?;
-                if let Some(terminal_line) = terminal_messages.get(&message) {
+                if let Some(terminal_line) = messages.terminal_line(&message) {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
                         event,
                         "message",
                         &message.1,
-                        *terminal_line,
+                        terminal_line,
                     ));
                 }
                 let role = lifecycle_payload_string(event, "role");
-                let Some(active_role) = active_messages.get(&message) else {
+                let Some(active_role) = active_message_roles.get(&message) else {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} message.completed must follow message.delta for message_id {:?}",
                         path.display(),
@@ -4939,7 +5188,7 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
                         message.1
                     )));
                 }
-                terminal_messages.insert(message, line_number);
+                messages.finish(message, line_number);
             }
             EventType::SessionStarted
             | EventType::SessionPaused
@@ -4959,23 +5208,23 @@ fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(
             EventType::SessionCompleted | EventType::SessionFailed
         )
     }) {
-        for loop_id in &started_loops {
-            if !terminal_loops.contains_key(loop_id) {
+        for loop_id in loops.started_keys() {
+            if !loops.is_terminal(loop_id) {
                 return Err(open_lifecycle_error(path, "loop", loop_id));
             }
         }
-        for step in &started_steps {
-            if !terminal_steps.contains_key(step) {
+        for step in steps.started_keys() {
+            if !steps.is_terminal(step) {
                 return Err(open_lifecycle_error(path, "step", &step.step_id));
             }
         }
-        for tool in &started_tools {
-            if !terminal_tools.contains_key(tool) {
+        for tool in tools.started_keys() {
+            if !tools.is_terminal(tool) {
                 return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
             }
         }
-        for message in active_messages.keys() {
-            if !terminal_messages.contains_key(message) {
+        for message in messages.started_keys() {
+            if !messages.is_terminal(message) {
                 return Err(open_lifecycle_error(path, "message", &message.1));
             }
         }
@@ -4989,6 +5238,46 @@ fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
         "{} terminal session has open {kind} {id:?}",
         path.display()
     ))
+}
+
+struct LifecycleTracker<K: Ord> {
+    started: BTreeSet<K>,
+    terminal: BTreeMap<K, usize>,
+}
+
+impl<K: Ord> Default for LifecycleTracker<K> {
+    fn default() -> Self {
+        Self {
+            started: BTreeSet::new(),
+            terminal: BTreeMap::new(),
+        }
+    }
+}
+
+impl<K: Ord> LifecycleTracker<K> {
+    fn start(&mut self, key: K) {
+        self.started.insert(key);
+    }
+
+    fn finish(&mut self, key: K, line_number: usize) {
+        self.terminal.insert(key, line_number);
+    }
+
+    fn is_started(&self, key: &K) -> bool {
+        self.started.contains(key)
+    }
+
+    fn is_terminal(&self, key: &K) -> bool {
+        self.terminal.contains_key(key)
+    }
+
+    fn terminal_line(&self, key: &K) -> Option<usize> {
+        self.terminal.get(key).copied()
+    }
+
+    fn started_keys(&self) -> impl Iterator<Item = &K> {
+        self.started.iter()
+    }
 }
 
 fn started_tool_without_progress(events: &[EventEnvelope]) -> Option<String> {
@@ -5075,12 +5364,13 @@ fn require_lifecycle_loop_id(
     })
 }
 
+/// Ensures parent loop references are already started, still active, and
+/// consistent with the parent recorded by loop.started.
 fn validate_lifecycle_parent(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
-    started_loops: &BTreeSet<String>,
-    terminal_loops: &BTreeMap<String, usize>,
+    loops: &LifecycleTracker<String>,
     loop_parents: &BTreeMap<String, Option<String>>,
 ) -> Result<(), RuntimeError> {
     if event.parent_loop_id.is_some() && event.loop_id.is_none() {
@@ -5101,13 +5391,13 @@ fn validate_lifecycle_parent(
                 path.display()
             )));
         }
-        if !started_loops.contains(parent_loop_id) {
+        if !loops.is_started(parent_loop_id) {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} parent_loop_id {parent_loop_id:?} must reference an already started loop",
                 path.display()
             )));
         }
-        if let Some(terminal_line) = terminal_loops.get(parent_loop_id) {
+        if let Some(terminal_line) = loops.terminal_line(parent_loop_id) {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} parent_loop_id {parent_loop_id:?} references terminal loop on line {terminal_line}",
                 path.display()
@@ -5257,10 +5547,6 @@ fn stream_is_completed(events: &[EventEnvelope]) -> bool {
         .is_some_and(|event| event.event_type == EventType::SessionCompleted)
 }
 
-fn resume_timestamp(sequence: u64) -> String {
-    format!("2026-01-01T00:00:{:02}Z", (sequence.saturating_sub(1)) % 60)
-}
-
 fn next_event_id(sequence: u64, events: &[EventEnvelope]) -> String {
     let existing = events
         .iter()
@@ -5277,42 +5563,30 @@ fn next_event_id(sequence: u64, events: &[EventEnvelope]) -> String {
 }
 
 fn is_rfc3339_utc_timestamp(value: &str) -> bool {
-    let Some(value) = value.strip_suffix('Z') else {
-        return false;
-    };
-    let Some((date, time)) = value.split_once('T') else {
-        return false;
-    };
+    parse_rfc3339_utc_timestamp(value).is_some()
+}
+
+fn parse_rfc3339_utc_timestamp(value: &str) -> Option<i64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
 
     let mut date_parts = date.split('-');
-    let Some(year) = date_parts.next().and_then(|part| parse_digits(part, 4)) else {
-        return false;
-    };
-    let Some(month) = date_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    let Some(day) = date_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
+    let year = date_parts.next().and_then(|part| parse_digits(part, 4))?;
+    let month = date_parts.next().and_then(|part| parse_digits(part, 2))?;
+    let day = date_parts.next().and_then(|part| parse_digits(part, 2))?;
     if date_parts.next().is_some() || !(1..=12).contains(&month) {
-        return false;
+        return None;
     }
     if day == 0 || day > days_in_month(year, month) {
-        return false;
+        return None;
     }
 
     let mut time_parts = time.split(':');
-    let Some(hour) = time_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    let Some(minute) = time_parts.next().and_then(|part| parse_digits(part, 2)) else {
-        return false;
-    };
-    let Some(second_part) = time_parts.next() else {
-        return false;
-    };
+    let hour = time_parts.next().and_then(|part| parse_digits(part, 2))?;
+    let minute = time_parts.next().and_then(|part| parse_digits(part, 2))?;
+    let second_part = time_parts.next()?;
     if time_parts.next().is_some() {
-        return false;
+        return None;
     }
 
     let (second, fraction) = second_part
@@ -5320,16 +5594,58 @@ fn is_rfc3339_utc_timestamp(value: &str) -> bool {
         .map_or((second_part, None), |(second, fraction)| {
             (second, Some(fraction))
         });
-    let Some(second) = parse_digits(second, 2) else {
-        return false;
-    };
+    let second = parse_digits(second, 2)?;
     if fraction
         .is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()))
     {
-        return false;
+        return None;
     }
 
-    hour <= 23 && minute <= 59 && second <= 59
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+
+    let days = days_from_civil(i64::from(year), i64::from(month), i64::from(day));
+    Some(
+        days.saturating_mul(86_400)
+            .saturating_add(i64::from(hour) * 3_600)
+            .saturating_add(i64::from(minute) * 60)
+            .saturating_add(i64::from(second)),
+    )
+}
+
+fn format_unix_timestamp(seconds: i64) -> String {
+    let days = seconds.div_euclid(86_400);
+    let seconds_of_day = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + i64::from(month <= 2);
+    (year, month, day)
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 fn parse_digits(value: &str, len: usize) -> Option<u16> {

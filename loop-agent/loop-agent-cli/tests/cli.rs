@@ -478,6 +478,14 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
 #[test]
 fn resume_partial_session_prints_human_status() {
     let workspace = workspace_copy("smoke-loop");
+    let seed = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should seed metadata");
+    assert!(seed.status.success());
+    assert!(seed.stderr.is_empty());
+
     let session_dir = workspace.join(".loop/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
     let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
@@ -508,6 +516,14 @@ fn resume_partial_session_prints_human_status() {
 #[test]
 fn failed_jsonl_resume_exits_with_failed_status() {
     let workspace = workspace_copy("sandbox-negative");
+    let seed = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "sandbox-negative-write", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should seed metadata");
+    assert_eq!(seed.status.code(), Some(65));
+    assert!(seed.stderr.is_empty());
+
     let session_dir = workspace.join(".loop/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
     let prefix = expected_stream("sandbox-negative", "sandbox-negative-write.jsonl")

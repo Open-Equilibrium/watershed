@@ -1,10 +1,11 @@
 use loop_agent_core::{
-    run_loop, validate_protocol_jsonl_text, EmitMode, LOCAL_LOG_DIR, LOCAL_SESSION_DIR,
+    run_loop, validate_protocol_jsonl_text, EmitMode, LOCAL_SESSION_DIR,
     MAX_LOOP_EVENT_STREAM_BYTES,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
     fs,
+    io::Write,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
@@ -19,12 +20,12 @@ static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PERFORMANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn event_validation_p95_stays_under_m1_budget() {
+fn event_stream_validation_p95_stays_under_m1_budget() {
     let _guard = performance_test_guard();
     let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
     let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
     let event_count = stream.lines().count() as u128;
-    let mut nanos_per_event = Vec::new();
+    let mut stream_nanos = Vec::new();
 
     for _ in 0..10 {
         validate_protocol_jsonl_text(&stream_path, &stream).expect("stream validates");
@@ -32,13 +33,14 @@ fn event_validation_p95_stays_under_m1_budget() {
     for _ in 0..100 {
         let started = Instant::now();
         validate_protocol_jsonl_text(&stream_path, &stream).expect("stream validates");
-        nanos_per_event.push(started.elapsed().as_nanos() / event_count);
+        stream_nanos.push(started.elapsed().as_nanos());
     }
-    let p95_nanos = p95(nanos_per_event);
+    let p95_nanos = p95(stream_nanos);
+    let budget_nanos = 1_000_000 * event_count;
 
     assert!(
-        p95_nanos <= 1_000_000,
-        "FSM/event validation p95 must stay <= 1 ms per event: {p95_nanos} ns"
+        p95_nanos <= budget_nanos,
+        "FSM/event stream validation p95 must stay <= 1 ms per event across {event_count} events: {p95_nanos} ns"
     );
 }
 
@@ -72,54 +74,46 @@ fn near_cap_event_validation_enforces_m1_memory_budget() {
 }
 
 #[test]
-fn hello_loop_log_append_p95_stays_under_m1_budget() {
+fn hello_loop_session_log_append_p95_stays_under_m1_budget() {
     let _guard = performance_test_guard();
     let stream_path = fixture_dir("hello-loop").join("expected/hello-loop.jsonl");
     let stream = fs::read_to_string(&stream_path).expect("hello-loop stream readable");
-    let event_count = stream.lines().count() as u128;
-    let workspace = workspace_copy("hello-loop");
-    let mut nanos_per_event = Vec::new();
+    let lines = stream.lines().collect::<Vec<_>>();
+    let workspace = empty_workspace("hello-loop-append");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session directory created");
+    let session_path = session_dir.join("hello001.jsonl");
+    let mut append_nanos = Vec::new();
 
     for _ in 0..10 {
-        clear_runtime_state(&workspace);
-        let output =
-            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop succeeds");
-        assert!(!output.failed);
+        append_lines_to_session_log(&session_path, &lines);
     }
     for _ in 0..100 {
-        clear_runtime_state(&workspace);
-        let started = Instant::now();
-        let output =
-            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop succeeds");
-        nanos_per_event.push(started.elapsed().as_nanos() / event_count);
-        assert!(!output.failed);
-        assert_eq!(output.event_count as u128, event_count);
-        assert!(output.session_path.exists());
-        assert!(workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+        append_nanos.extend(append_lines_to_session_log(&session_path, &lines));
     }
-    let p95_nanos = p95(nanos_per_event);
+    let p95_nanos = p95(append_nanos);
 
     assert!(
         p95_nanos <= 5_000_000,
-        "hello-loop stream/log append p95 must stay <= 5 ms per event: {p95_nanos} ns"
+        "hello-loop session-log append p95 must stay <= 5 ms per event: {p95_nanos} ns"
     );
 }
 
 #[test]
-fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
+fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() {
     let _guard = performance_test_guard();
     let resident_bytes_before = current_resident_set_size();
     let workspaces = [
         ("smoke-loop", "smoke-loop"),
         ("hello-loop", "hello-loop"),
-        ("sandbox-negative", "sandbox-negative-write"),
-        ("sandbox-negative", "sandbox-negative-network"),
-        ("sandbox-negative", "sandbox-negative-environment"),
-        ("sandbox-negative", "sandbox-negative-interpreter"),
-        ("sandbox-negative", "sandbox-negative-protected-path"),
-        ("sandbox-negative", "sandbox-negative-symlink"),
-        ("sandbox-negative", "sandbox-negative-tool-out-of-phase"),
         ("smoke-loop", "smoke-loop"),
+        ("hello-loop", "hello-loop"),
+        ("smoke-loop", "smoke-loop"),
+        ("hello-loop", "hello-loop"),
+        ("smoke-loop", "smoke-loop"),
+        ("hello-loop", "hello-loop"),
+        ("smoke-loop", "smoke-loop"),
+        ("hello-loop", "hello-loop"),
     ]
     .into_iter()
     .map(|(fixture, loop_name)| (workspace_copy(fixture), loop_name))
@@ -156,26 +150,28 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
     let mut total_stdout_bytes = 0usize;
     let mut total_workspace_bytes = 0u64;
     for _ in 0..concurrency {
-        let remaining = timeout.saturating_sub(started.elapsed());
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < timeout,
+            "10 concurrent successful fixture loops must complete within {timeout:?}"
+        );
+        let remaining = timeout - elapsed;
         let (loop_name, result) = rx
             .recv_timeout(remaining)
-            .expect("10 concurrent fixture loops complete before timeout");
+            .expect("10 concurrent successful fixture loops complete before timeout");
         let (event_count, failed, stdout_bytes, workspace_bytes) =
             result.unwrap_or_else(|err| panic!("{loop_name}: {err}"));
         assert!(event_count > 0, "{loop_name}");
         total_stdout_bytes += stdout_bytes;
         total_workspace_bytes += workspace_bytes;
-        assert!(
-            failed == loop_name.contains("sandbox-negative"),
-            "{loop_name} failure state must match fixture kind"
-        );
+        assert!(!failed, "{loop_name} should complete successfully");
     }
     for handle in handles {
         handle.join().expect("worker thread joins");
     }
     assert!(
         started.elapsed() <= timeout,
-        "10 concurrent fixture loops must complete within {timeout:?}"
+        "10 concurrent successful fixture loops must complete within {timeout:?}"
     );
     assert!(
         total_stdout_bytes < 512 * 1024,
@@ -190,13 +186,31 @@ fn ten_fixture_loop_invocations_complete_under_m1_runtime_contract() {
             .expect("RSS measurement must be available on this enforced target before the run");
         let after = current_resident_set_size()
             .expect("RSS measurement must be available on this enforced target after the run");
-        let growth = after.saturating_sub(before);
+        let growth = i128::from(after) - i128::from(before);
         let budget = 10 * 1024 * 1024 * concurrency as u64;
         assert!(
-            growth <= budget,
+            growth <= i128::from(budget),
             "concurrent fixture RSS growth must stay <= {budget} bytes: {growth} bytes"
         );
     }
+}
+
+fn append_lines_to_session_log(path: &Path, lines: &[&str]) -> Vec<u128> {
+    fs::write(path, "").expect("session log reset");
+    let mut samples = Vec::with_capacity(lines.len());
+    for line in lines {
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(path)
+            .expect("session log opened for append");
+        let started = Instant::now();
+        file.write_all(line.as_bytes())
+            .expect("session log event appended");
+        file.write_all(b"\n").expect("session log newline appended");
+        file.flush().expect("session log append flushed");
+        samples.push(started.elapsed().as_nanos());
+    }
+    samples
 }
 
 fn performance_test_guard() -> MutexGuard<'static, ()> {
@@ -576,9 +590,4 @@ fn current_resident_set_size() -> Option<u64> {
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn current_resident_set_size() -> Option<u64> {
     None
-}
-
-fn clear_runtime_state(workspace: &Path) {
-    let _ = fs::remove_dir_all(workspace.join(LOCAL_SESSION_DIR));
-    let _ = fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR));
 }

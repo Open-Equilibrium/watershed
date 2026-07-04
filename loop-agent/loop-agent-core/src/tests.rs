@@ -3,13 +3,83 @@ use std::{
     io::{self, Write},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc, Arc, Barrier, Mutex,
     },
     thread,
     time::{Duration, Instant},
 };
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn write_session_log(
+    workspace: &Path,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    let reservation = reserve_session_log(workspace, session_id)?;
+    let result = write_reserved_session_log(&reservation, session_id, stream, event_count)
+        .and_then(|()| reservation.release_lock());
+    if result.is_err() {
+        reservation.rollback();
+    }
+    result
+}
+
+fn write_reserved_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    write_existing_file(&reservation.session_path, stream.as_bytes())?;
+    write_reserved_session_metadata(reservation, session_id, event_count, None)
+}
+
+fn write_initial_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    write_initial_session_log_with_clock(reservation, session_id, EventClock::fixed_fixture())
+}
+
+fn complete_reserved_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+) -> Result<(), RuntimeError> {
+    let commit_result =
+        commit_reserved_session_log(reservation, session_id, stream, event_count, None);
+    let release_result = reservation.release_lock();
+    commit_result?;
+    release_result
+}
+
+fn commit_reserved_session_log(
+    reservation: &SessionReservation,
+    session_id: &str,
+    stream: &str,
+    event_count: usize,
+    definition_hashes: Option<&SessionDefinitionHashes>,
+) -> Result<(), RuntimeError> {
+    commit_reserved_session_log_from_prefix(
+        reservation,
+        session_id,
+        stream,
+        event_count,
+        definition_hashes,
+        1,
+    )
+}
+
+fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
+    append_session_log_bytes(path, line.as_bytes())
+}
+
+fn event_timestamp(sequence: u64) -> String {
+    EventClock::fixed_fixture().timestamp(sequence)
+}
 
 #[test]
 fn m1_surfaces_exclude_rpc_and_embedding() {
@@ -268,8 +338,11 @@ fn runtime_executes_subloops_after_all_parent_phases() {
         &policy,
         loop_block,
         "ordering001",
-        ToolSideEffectMode::DryRun,
-        SideEffectRecorder::none(),
+        LoopExecutionOptions::new(
+            EventClock::fixed_fixture(),
+            ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
+        ),
     )
     .expect("hello loop executes");
     let root_loop_id = loop_id_for_definition(&runtime.events, "hello-loop");
@@ -774,8 +847,11 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             &policy,
             &loop_block,
             "mutated001",
-            ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
+            LoopExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::DryRun,
+                SideEffectRecorder::none(),
+            ),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing phase")
     ));
@@ -793,8 +869,11 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             &policy,
             &loop_block,
             "mutated001",
-            ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
+            LoopExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::DryRun,
+                SideEffectRecorder::none(),
+            ),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
     ));
@@ -816,8 +895,11 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             &deep_policy,
             deep_loop,
             "deep001",
-            ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
+            LoopExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::DryRun,
+                SideEffectRecorder::none(),
+            ),
         ),
         Err(RuntimeError::Protocol(message))
             if message == "loop nesting depth 65 for loop-064 exceeds max 64"
@@ -847,7 +929,8 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         side_effect_mode: ToolSideEffectMode::DryRun,
         side_effect_recorder: SideEffectRecorder::none(),
     };
-    let mut builder = RuntimeEventBuilder::new("mutated001".to_owned());
+    let mut builder =
+        RuntimeEventBuilder::with_clock("mutated001".to_owned(), EventClock::fixed_fixture());
     assert!(matches!(
         emit_phase(
             &missing_instruction_context,
@@ -867,7 +950,8 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         side_effect_mode: ToolSideEffectMode::DryRun,
         side_effect_recorder: SideEffectRecorder::none(),
     };
-    let mut builder = RuntimeEventBuilder::new("mutated001".to_owned());
+    let mut builder =
+        RuntimeEventBuilder::with_clock("mutated001".to_owned(), EventClock::fixed_fixture());
     assert!(matches!(
         emit_phase(
             &missing_connection_context,
@@ -924,8 +1008,11 @@ fn runtime_rejects_duplicate_subloop_work_over_m1_budget() {
         &policy,
         root,
         "budget001",
-        ToolSideEffectMode::DryRun,
-        SideEffectRecorder::none(),
+        LoopExecutionOptions::new(
+            EventClock::fixed_fixture(),
+            ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
+        ),
     ) {
         Ok(runtime) => panic!(
             "duplicated subloop work must be budgeted; emitted {} events",
@@ -1420,23 +1507,35 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
     )
     .expect("phase fixture rewritten");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect_err("later apply-time write must fail after the first write");
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect("later apply-time write is recorded as a failed run");
 
+    assert!(output.failed);
     assert!(
-        matches!(err, RuntimeError::Protocol(ref message) if message.contains("must be a directory")),
-        "{err:?}"
+        output.stdout.contains("\"reason\":\"write_denied\""),
+        "{}",
+        output.stdout
     );
     assert_eq!(
         fs::read_to_string(workspace.join("out/blocker")).expect("first write persisted"),
         "partial\n"
     );
+    let events = validate_session_log_text(
+        Path::new("apply-denial-after-partial-write.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("failed apply stream validates");
+    assert!(events
+        .iter()
+        .any(|event| event.event_type == EventType::ToolFailed));
+    assert!(events
+        .iter()
+        .any(|event| event.event_type == EventType::LoopFailed));
+    assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
     assert!(
-        workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
-            .exists(),
-        "partial side effects must keep the started session audit"
+        fs::read_to_string(&output.session_path).expect("session log readable") == output.stdout,
+        "committed session log must match emitted failure stream"
     );
     assert!(
         workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists(),
@@ -3679,7 +3778,9 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
-    fs::write(&path, prefix).expect("progress prefix written");
+    let event_count = prefix.lines().count();
+    fs::write(&path, &prefix).expect("progress prefix written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
     fs::create_dir_all(workspace.join("out")).expect("output dir created");
     fs::write(workspace.join("out/summary.txt"), "already-written\n")
         .expect("sentinel summary written");
@@ -3740,7 +3841,7 @@ fn resume_rejects_registry_drift_before_side_effects() {
 }
 
 #[test]
-fn resume_definition_metadata_allows_legacy_partial_hashes() {
+fn resume_definition_metadata_rejects_partial_hashes() {
     let workspace = workspace_copy("hello-loop");
     let registry = core_script::load_registry_root(workspace.join("registry"))
         .expect("fixture registry loads");
@@ -3751,16 +3852,32 @@ fn resume_definition_metadata_allows_legacy_partial_hashes() {
 
     fs::write(&metadata_path, "session_id=legacy001\nevents=2\n")
         .expect("legacy metadata without hashes");
-    verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
-        .expect("metadata without registry hash stays readable");
+    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+        .expect_err("metadata without registry hash must fail closed");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("missing registry_hash")
+    ));
 
     fs::write(
         &metadata_path,
         "session_id=legacy001\nevents=2\nregistry_hash=fnv64:legacy\n",
     )
     .expect("legacy metadata with partial hash");
-    verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
-        .expect("metadata without loop hash stays readable");
+    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+        .expect_err("metadata without loop hash must fail closed");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("missing loop_definition_hash")
+    ));
+
+    fs::remove_file(&metadata_path).expect("metadata removed");
+    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+        .expect_err("absent metadata must fail closed");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("missing definition metadata")
+    ));
 }
 
 #[test]
@@ -3811,7 +3928,9 @@ fn resume_human_mode_reports_resumed_status() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    fs::write(&path, prefix).expect("partial log written");
+    let event_count = prefix.lines().count();
+    fs::write(&path, &prefix).expect("partial log written");
+    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop", event_count);
 
     let output = resume_session(&workspace, "smoke001", EmitMode::Human).expect("session resumes");
 
@@ -3831,7 +3950,9 @@ fn resume_rejects_tool_started_prefix_without_side_effects() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
-    fs::write(&path, prefix).expect("started prefix written");
+    let event_count = prefix.lines().count();
+    fs::write(&path, &prefix).expect("started prefix written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
 
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("tool.started prefix is ambiguous and must not resume");
@@ -3850,7 +3971,9 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
+    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("prefix written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
 
     let summary_path = workspace.join("out/summary.txt");
     for attempt in 0..100 {
@@ -3931,7 +4054,9 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
+    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("partial log written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
 
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
@@ -3957,10 +4082,12 @@ fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
+    let event_count = prefix.lines().count();
     let outside_target = outside.join("smoke001.jsonl");
     fs::write(&outside_target, &prefix).expect("outside log written");
     let session_path = session_dir.join("smoke001.jsonl");
     fs::hard_link(&outside_target, &session_path).expect("session hard link");
+    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop", event_count);
 
     let output = resume_session(&workspace, "smoke001", EmitMode::Jsonl).expect("session resumes");
 
@@ -3987,7 +4114,9 @@ fn resume_rejects_noncanonical_prefix_without_rewriting_log() {
         .replace("\"event_id\":\"evt-002\"", "\"event_id\":\"evt-999\"")
         + "\n";
     let path = session_dir.join("smoke001.jsonl");
+    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("partial log written");
+    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop", event_count);
 
     let err = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
         .expect_err("noncanonical prefix must not resume");
@@ -5823,6 +5952,7 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
 fn timestamp_parser_rejects_non_rfc3339_utc_shapes() {
     assert!(is_rfc3339_utc_timestamp("2026-02-28T23:59:59Z"));
     assert!(is_rfc3339_utc_timestamp("2028-02-29T00:00:00.123Z"));
+    assert_eq!(event_timestamp(61), "2026-01-01T00:01:00Z");
     for value in [
         "2026-01-01T00:00:00+00:00",
         "2026-01-01 00:00:00Z",
@@ -5879,6 +6009,7 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
     )
     .expect("valid config");
     let config = load_workspace_config(&workspace).expect("config loads");
+    assert_ne!(config.event_clock, EventClock::fixed_fixture());
     assert_eq!(
         registry_root_path(&workspace, &config.registry_root).expect("registry path resolves"),
         workspace.join("registry")
@@ -5895,6 +6026,34 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
     .expect("commented config");
     let config = load_workspace_config(&workspace).expect("commented config loads");
     assert_eq!(config.registry_root, PathBuf::from("registry"));
+
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n",
+    )
+    .expect("fixture config");
+    let config = load_workspace_config(&workspace).expect("fixture config loads");
+    assert_eq!(config.event_clock, EventClock::fixed_fixture());
+
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "fixture_profile: stub-model\nregistry_root: registry\n",
+    )
+    .expect("fixture config without stub model");
+    assert!(matches!(
+        load_workspace_config(&workspace),
+        Err(RuntimeError::Usage(message)) if message.contains("requires stub_model")
+    ));
+
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "registry_root: registry\nstub_model: deterministic\n",
+    )
+    .expect("stub model without fixture profile");
+    assert!(matches!(
+        load_workspace_config(&workspace),
+        Err(RuntimeError::Usage(message)) if message.contains("requires fixture_profile")
+    ));
 
     fs::write(
         workspace.join(".loop/config.yaml"),
@@ -6056,7 +6215,7 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
 }
 
 #[test]
-fn run_loop_rolls_back_session_log_when_apply_side_effects_fail() {
+fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
     let workspace = workspace_copy("hello-loop");
     let summary_path = workspace.join("out/summary.txt");
     for attempt in 0..100 {
@@ -6065,19 +6224,31 @@ fn run_loop_rolls_back_session_log_when_apply_side_effects_fail() {
         fs::write(temp_path, b"collision").expect("replacement temp collision written");
     }
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect_err("apply-time side effect failure must fail the run");
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect("apply-time side effect failure is recorded as a failed run");
 
+    assert!(output.failed);
     assert!(
-        matches!(err, RuntimeError::Protocol(ref message) if message.contains("temporary replacement path")),
-        "{err:?}"
+        output.stdout.contains("\"reason\":\"write_denied\""),
+        "{}",
+        output.stdout
     );
     assert!(!summary_path.exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    let events = validate_session_log_text(
+        Path::new("apply-denial-temp-collision.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("failed apply stream validates");
+    assert!(events
+        .iter()
+        .any(|event| event.event_type == EventType::ToolFailed));
+    assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
+    assert_eq!(
+        fs::read_to_string(&output.session_path).expect("session log readable"),
+        output.stdout
+    );
+    assert!(workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
 #[cfg(unix)]
@@ -6249,6 +6420,65 @@ fn ten_fixture_loops_complete_concurrently() {
         let output = handle.join().expect("thread joins");
         assert!(!output.failed);
         assert_eq!(output.event_count, 11);
+    }
+}
+
+#[test]
+fn shared_workspace_tool_write_parents_are_concurrent_safe() {
+    let workspace = workspace_copy("hello-loop");
+    fs::remove_dir_all(workspace.join("out")).expect("fixture output dir removed");
+    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
+
+    for index in 0..10 {
+        fs::write(
+            workspace.join(format!("registry/tools/write-summary-{index}.yaml")),
+            format!(
+                "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace/out\"]\n  protected_path_grants: []\n  network: deny\n"
+            ),
+        )
+        .expect("tool fixture written");
+        fs::write(
+            workspace.join(format!("registry/phases/summarize-{index}.yaml")),
+            format!(
+                "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  steps:\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n"
+            ),
+        )
+        .expect("phase fixture written");
+        fs::write(
+            workspace.join(format!("registry/loops/hello-loop-{index}.yaml")),
+            format!(
+                "loop:\n  id: hello-loop-{index}\n  name: HelloLoop{index}\n  phase_refs: [inspect, summarize-{index}]\n  subloop_refs: []\n  connection_refs: [inspect-data, inspect-trigger, summary-refresh]\n"
+            ),
+        )
+        .expect("loop fixture written");
+    }
+
+    let workspace = Arc::new(workspace);
+    let barrier = Arc::new(Barrier::new(10));
+    let handles = (0..10)
+        .map(|index| {
+            let workspace = Arc::clone(&workspace);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                run_loop(
+                    workspace.as_path(),
+                    &format!("hello-loop-{index}"),
+                    EmitMode::Jsonl,
+                )
+                .expect("shared workspace loop runs")
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for (index, handle) in handles.into_iter().enumerate() {
+        let output = handle.join().expect("thread joins");
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(workspace.join(format!("out/summary-{index}.txt")))
+                .expect("summary output readable"),
+            format!("hello {index}\n")
+        );
     }
 }
 
@@ -6833,7 +7063,8 @@ fn emit_noop_dispatch_for_budget(
     policy: RuntimeToolPolicy<'_>,
     invocation: &LoopInvocation,
 ) -> Result<usize, RuntimeError> {
-    let mut builder = RuntimeEventBuilder::new("dispatchprobe001".to_owned());
+    let mut builder =
+        RuntimeEventBuilder::with_clock("dispatchprobe001".to_owned(), EventClock::fixed_fixture());
     emit_tool(
         workspace,
         tool,
