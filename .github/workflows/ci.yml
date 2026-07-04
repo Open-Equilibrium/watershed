@@ -54,7 +54,12 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo nextest run --locked --workspace --all-targets
+        run: >-
+          cargo nextest run
+          --locked
+          --workspace
+          --all-targets
+          -E '${{ env.COVERAGE_TEST_FILTER }}'
 
       - name: Run optimized performance tests
         run: >-
