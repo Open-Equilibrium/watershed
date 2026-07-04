@@ -6290,7 +6290,11 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
         "workspace/out/file?.txt",
         "workspace/out/file1.txt"
     ));
-    assert!(protected_segment_match("file*", "file"));
+    assert!(protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseSensitive,
+        "workspace/out/file*",
+        "workspace/out/file"
+    ));
     assert!(!protected_path_pattern_matches(
         ProtectedPathMatchMode::CaseSensitive,
         "workspace/out/file?.txt",

@@ -1,4 +1,5 @@
 use super::*;
+use proptest::prelude::*;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -22,6 +23,62 @@ fn parser_contract_records_decided_m0_shape() {
     assert!(contract.one_block_per_file);
     assert!(contract.semantic_validation.contains("strict parser"));
     assert!(contract.canonical_serialization.contains("resolved model"));
+}
+
+proptest! {
+    #[test]
+    fn safe_relative_paths_accept_generated_literal_segments(
+        segments in prop::collection::vec("[a-z0-9][a-z0-9_-]{0,7}", 1..8)
+    ) {
+        let path = segments.join("/");
+        let normalized = normalize_safe_relative_path(&path);
+        let child = format!("{}/leaf", path);
+        let sibling = format!("{}x/leaf", path);
+
+        prop_assert_eq!(normalized, Some(path.clone()));
+        prop_assert!(relative_path_is_inside_scope(&child, &path));
+        prop_assert!(!relative_path_is_inside_scope(&sibling, &path));
+    }
+
+    #[test]
+    fn safe_relative_paths_reject_escape_or_windows_alias_components(
+        prefix in prop::collection::vec("[a-z0-9][a-z0-9_-]{0,7}", 0..4),
+        suffix in prop::collection::vec("[a-z0-9][a-z0-9_-]{0,7}", 0..4),
+        bad in prop_oneof![
+            Just(".".to_owned()),
+            Just("..".to_owned()),
+            Just("CON".to_owned()),
+            Just("NUL.txt".to_owned()),
+            Just("COM1".to_owned()),
+            Just("trail.".to_owned()),
+            Just("trail ".to_owned()),
+        ],
+    ) {
+        let mut segments = prefix;
+        segments.push(bad);
+        segments.extend(suffix);
+        let path = segments.join("/");
+
+        prop_assert_eq!(normalize_safe_relative_path(&path), None);
+    }
+
+    #[test]
+    fn parser_rejects_generated_unknown_top_level_blocks(
+        kind in "[a-z][a-z0-9_-]{0,12}"
+    ) {
+        prop_assume!(!matches!(
+            kind.as_str(),
+            "connection" | "instruction" | "loop" | "phase" | "tool"
+        ));
+        let source = format!("{kind}:\n");
+        let error = parse_registry_block("property.yaml", &source).expect_err("unknown kind");
+
+        prop_assert!(
+            error
+                .to_string()
+                .contains("unsupported registry block kind")
+        );
+    }
 }
 
 #[test]

@@ -83,6 +83,25 @@ pub struct PolicyArtifact {
     pub target: PolicyTarget,
 }
 
+/// Case handling used when matching protected path patterns.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProtectedPathMatchMode {
+    /// Match protected path patterns exactly.
+    CaseSensitive,
+    /// Match protected path patterns using ASCII case folding.
+    CaseInsensitive,
+}
+
+/// Returns the documented protected path match mode for a policy target.
+pub fn protected_path_match_mode_for_policy_target(
+    target: &PolicyTarget,
+) -> ProtectedPathMatchMode {
+    match target {
+        PolicyTarget::LinuxLandlockSeccomp => ProtectedPathMatchMode::CaseSensitive,
+        PolicyTarget::MacosSeatbelt => ProtectedPathMatchMode::CaseInsensitive,
+    }
+}
+
 impl PolicyArtifact {
     /// Validates artifact invariants after compile or deserialization.
     pub fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
@@ -178,9 +197,10 @@ impl PolicyArtifact {
                 ..
             } => {
                 let command = self.command_for_attempt(tool_id)?;
+                let match_mode = protected_path_match_mode_for_policy_target(&self.target);
                 if attempted_paths(path, from_path, to_path)
                     .into_iter()
-                    .any(|path| protected_path_attempt_is_denied(command, path))
+                    .any(|path| protected_path_attempt_is_denied(match_mode, command, path))
                 {
                     Ok(DenyReasonCode::ProtectedPathDenied)
                 } else {
@@ -1551,7 +1571,11 @@ fn environment_attempt_is_denied(command: &CommandPolicy, name: &str) -> bool {
     }
 }
 
-fn protected_path_attempt_is_denied(command: &CommandPolicy, path: &str) -> bool {
+fn protected_path_attempt_is_denied(
+    match_mode: ProtectedPathMatchMode,
+    command: &CommandPolicy,
+    path: &str,
+) -> bool {
     let Some(path) = normalize_attempt_path(path) else {
         return false;
     };
@@ -1566,7 +1590,7 @@ fn protected_path_attempt_is_denied(command: &CommandPolicy, path: &str) -> bool
             .filesystem
             .protected_paths
             .iter()
-            .any(|pattern| protected_path_pattern_matches(pattern, &path))
+            .any(|pattern| protected_path_pattern_matches(match_mode, pattern, &path))
 }
 
 fn normalize_attempt_path(path: &str) -> Option<String> {
@@ -1578,25 +1602,118 @@ fn normalize_attempt_path(path: &str) -> Option<String> {
     }
 }
 
-fn protected_path_pattern_matches(pattern: &str, path: &str) -> bool {
-    let path = path.strip_prefix("workspace/").unwrap_or(path);
-    let file_name = path.rsplit('/').next().unwrap_or(path);
-    let Some(pattern) = pattern.strip_prefix("**/") else {
-        return pattern == path;
+/// Returns whether a protected path glob pattern matches a normalized path.
+///
+/// The grammar is slash-normalized, path-segment based, accepts `*` and `?`
+/// within a segment, and treats `**` as a whole segment matching zero or more
+/// path segments. The direct path and its `workspace/`-relative form are both
+/// considered because policy checks compare both workspace-scoped and
+/// workspace-root-relative paths.
+pub fn protected_path_pattern_matches(
+    match_mode: ProtectedPathMatchMode,
+    pattern: &str,
+    path: &str,
+) -> bool {
+    let Some(pattern) = normalize_protected_path_match_input(match_mode, pattern) else {
+        return false;
     };
-    if let Some(directory) = pattern.strip_suffix("/**") {
-        return path == directory
-            || path.starts_with(&format!("{directory}/"))
-            || path.ends_with(&format!("/{directory}"))
-            || path.contains(&format!("/{directory}/"));
+    let Some(path) = normalize_protected_path_match_input(match_mode, path) else {
+        return false;
+    };
+
+    protected_path_pattern_matches_normalized(&pattern, &path)
+        || path
+            .strip_prefix("workspace/")
+            .is_some_and(|root_relative| {
+                !root_relative.is_empty()
+                    && protected_path_pattern_matches_normalized(&pattern, root_relative)
+            })
+}
+
+fn normalize_protected_path_match_input(
+    match_mode: ProtectedPathMatchMode,
+    value: &str,
+) -> Option<String> {
+    let normalized = value.replace('\\', "/");
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || normalized.contains('$')
+        || normalized.split('/').any(|segment| {
+            segment == "." || segment == ".." || segment.contains("**") && segment != "**"
+        })
+        || normalized
+            .as_bytes()
+            .get(1)
+            .is_some_and(|byte| *byte == b':')
+        || core_script::relative_path_has_windows_alias(&normalized)
+    {
+        return None;
     }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return file_name.ends_with(suffix);
+    let normalized = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/");
+    match match_mode {
+        ProtectedPathMatchMode::CaseSensitive => Some(normalized),
+        ProtectedPathMatchMode::CaseInsensitive => Some(normalized.to_ascii_lowercase()),
     }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return file_name.starts_with(prefix);
+}
+
+fn protected_path_pattern_matches_normalized(pattern: &str, path: &str) -> bool {
+    let pattern_segments = pattern.split('/').collect::<Vec<_>>();
+    let path_segments = path.split('/').collect::<Vec<_>>();
+    protected_segments_match(&pattern_segments, &path_segments)
+}
+
+fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
+    match (pattern.split_first(), path.split_first()) {
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some((pattern_segment, rest)), _) if *pattern_segment == "**" => {
+            protected_segments_match(rest, path)
+                || (!path.is_empty() && protected_segments_match(pattern, &path[1..]))
+        }
+        (Some((pattern_segment, rest_pattern)), Some((path_segment, rest_path))) => {
+            protected_segment_match(pattern_segment, path_segment)
+                && protected_segments_match(rest_pattern, rest_path)
+        }
+        (Some(_), None) => false,
     }
-    path == pattern || path.ends_with(&format!("/{pattern}"))
+}
+
+fn protected_segment_match(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let path = path.as_bytes();
+    let mut pattern_index = 0;
+    let mut path_index = 0;
+    let mut star_pattern_index = None;
+    let mut star_path_index = 0;
+
+    while path_index < path.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == path[path_index])
+        {
+            pattern_index += 1;
+            path_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_pattern_index = Some(pattern_index);
+            pattern_index += 1;
+            star_path_index = path_index;
+        } else if let Some(star_index) = star_pattern_index {
+            pattern_index = star_index + 1;
+            star_path_index += 1;
+            path_index = star_path_index;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
 }
 
 fn symlink_target_is_escape(target: &str) -> bool {

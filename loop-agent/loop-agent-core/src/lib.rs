@@ -2,6 +2,10 @@
 
 #![deny(missing_docs)]
 
+use core_policy::{
+    protected_path_match_mode_for_policy_target, protected_path_pattern_matches,
+    ProtectedPathMatchMode,
+};
 use proto::{EventEnvelope, EventType};
 use std::{
     cell::Cell,
@@ -1772,12 +1776,6 @@ struct RuntimeToolPolicy<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ProtectedPathMatchMode {
-    CaseSensitive,
-    CaseInsensitive,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ToolSideEffectMode {
     ApplyAll,
     DryRun,
@@ -1873,15 +1871,6 @@ fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> Prot
 #[cfg(not(windows))]
 fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
     protected_path_match_mode_for_policy_target(target)
-}
-
-fn protected_path_match_mode_for_policy_target(
-    target: &core_policy::PolicyTarget,
-) -> ProtectedPathMatchMode {
-    match target {
-        core_policy::PolicyTarget::LinuxLandlockSeccomp => ProtectedPathMatchMode::CaseSensitive,
-        core_policy::PolicyTarget::MacosSeatbelt => ProtectedPathMatchMode::CaseInsensitive,
-    }
 }
 
 fn runtime_policy_artifact_for_target<'a>(
@@ -3163,82 +3152,6 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
             "own-script write target {target:?} must stay inside the workspace"
         ))
     })
-}
-
-fn protected_path_pattern_matches(
-    match_mode: ProtectedPathMatchMode,
-    pattern: &str,
-    path: &str,
-) -> bool {
-    let pattern = normalize_protected_path_match_input(match_mode, pattern);
-    let path = normalize_protected_path_match_input(match_mode, path);
-    let pattern_segments = pattern
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    let path_segments = path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    protected_segments_match(&pattern_segments, &path_segments)
-}
-
-fn normalize_protected_path_match_input(match_mode: ProtectedPathMatchMode, value: &str) -> String {
-    let normalized = value.replace('\\', "/");
-    match match_mode {
-        ProtectedPathMatchMode::CaseSensitive => normalized,
-        ProtectedPathMatchMode::CaseInsensitive => normalized.to_ascii_lowercase(),
-    }
-}
-
-fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
-    match (pattern.split_first(), path.split_first()) {
-        (None, None) => true,
-        (None, Some(_)) => false,
-        (Some((pattern_segment, rest)), _) if *pattern_segment == "**" => {
-            protected_segments_match(rest, path)
-                || (!path.is_empty() && protected_segments_match(pattern, &path[1..]))
-        }
-        (Some((pattern_segment, rest_pattern)), Some((path_segment, rest_path))) => {
-            protected_segment_match(pattern_segment, path_segment)
-                && protected_segments_match(rest_pattern, rest_path)
-        }
-        (Some(_), None) => false,
-    }
-}
-
-fn protected_segment_match(pattern: &str, path: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let path = path.as_bytes();
-    let mut pattern_index = 0;
-    let mut path_index = 0;
-    let mut star_pattern_index = None;
-    let mut star_path_index = 0;
-
-    while path_index < path.len() {
-        if pattern_index < pattern.len()
-            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == path[path_index])
-        {
-            pattern_index += 1;
-            path_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-            star_pattern_index = Some(pattern_index);
-            pattern_index += 1;
-            star_path_index = path_index;
-        } else if let Some(star_index) = star_pattern_index {
-            pattern_index = star_index + 1;
-            star_path_index += 1;
-            path_index = star_path_index;
-        } else {
-            return false;
-        }
-    }
-
-    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-        pattern_index += 1;
-    }
-
-    pattern_index == pattern.len()
 }
 
 fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
