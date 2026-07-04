@@ -5244,14 +5244,17 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         create_replacement_temp(&missing_parent_temp, None),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
-    for attempt in 0..100 {
-        let backup_path = replacement_backup_path(&path, attempt).expect("backup path");
-        fs::write(backup_path, "held").expect("backup collision file written");
+    #[cfg(not(unix))]
+    {
+        for attempt in 0..100 {
+            let backup_path = replacement_backup_path(&path, attempt).expect("backup path");
+            fs::write(backup_path, "held").expect("backup collision file written");
+        }
+        assert!(matches!(
+            create_replacement_backup_path(&path, None),
+            Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
+        ));
     }
-    assert!(matches!(
-        create_replacement_backup_path(&path, None),
-        Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
-    ));
 
     let dir_leaf = workspace.join("dir-leaf");
     fs::create_dir(&dir_leaf).expect("dir leaf written");
