@@ -313,9 +313,9 @@ fn policy_artifact_rejects_mismatched_command_shapes() {
         .validate()
         .expect_err("predefined-command id must follow the command id grammar");
     assert_eq!(
-            err.to_string(),
-            "predefined-command tool read-file command_id \"1-agent-read\" must match ^[a-z][a-z0-9_-]{0,63}$"
-        );
+        err.to_string(),
+        "predefined-command tool read-file command_id \"1-agent-read\" must match ^[a-z][a-z0-9_-]{0,63}$"
+    );
 
     let mut own_script_command_id = own_script_policy_artifact("write-summary");
     own_script_command_id.commands[0].command_id = "script:other-tool".to_owned();
@@ -408,9 +408,9 @@ fn policy_artifact_rejects_protected_path_grants_outside_scope() {
         .expect_err("protected path grants must stay inside tool scopes");
 
     assert_eq!(
-            err.to_string(),
-            "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside read_roots or write_roots"
-        );
+        err.to_string(),
+        "tool filesystem-tool protected_path_grant \"secrets/.env\" must stay inside read_roots or write_roots"
+    );
 }
 
 #[test]
@@ -426,9 +426,9 @@ fn policy_artifact_rejects_protected_path_grants_outside_write_scope() {
         .expect_err("protected path grants must stay inside declared scopes");
 
     assert_eq!(
-            err.to_string(),
-            "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside read_roots or write_roots"
-        );
+        err.to_string(),
+        "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside read_roots or write_roots"
+    );
 }
 
 #[test]

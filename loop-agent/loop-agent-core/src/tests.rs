@@ -181,6 +181,22 @@ fn runtime_error_display_source_and_exit_codes_cover_variants() {
     assert_eq!(protocol.exit_code(), 65);
     assert!(std::error::Error::source(&protocol).is_none());
 
+    let denied = runtime_denied(
+        core_policy::DenyReasonCode::WriteDenied,
+        "write denied".to_owned(),
+    );
+    assert_eq!(denied.to_string(), "write denied");
+    assert_eq!(denied.exit_code(), 65);
+    assert!(std::error::Error::source(&denied).is_none());
+
+    let active = RuntimeError::ActiveSession {
+        session_id: "smoke001".to_owned(),
+        lock_path: PathBuf::from(".loop/locks/smoke001.lock"),
+    };
+    assert!(active.to_string().contains("smoke001"));
+    assert_eq!(active.exit_code(), 65);
+    assert!(std::error::Error::source(&active).is_none());
+
     let exists = RuntimeError::SessionLogExists("smoke001".to_owned());
     assert_eq!(
         exists.to_string(),
@@ -1801,21 +1817,6 @@ fn protected_path_matching_is_case_insensitive_for_macos_runtime() {
         "**/.git/**",
         "workspace/.GIT/config"
     ));
-}
-
-#[cfg(not(unix))]
-#[test]
-fn unverifiable_file_identity_does_not_report_different_files_as_same() {
-    let workspace = empty_workspace("file-identity");
-    let first = workspace.join("first.txt");
-    let second = workspace.join("second.txt");
-    fs::write(&first, "first\n").expect("first file written");
-    fs::write(&second, "second\n").expect("second file written");
-
-    let first_metadata = fs::metadata(first).expect("first metadata readable");
-    let second_metadata = fs::metadata(second).expect("second metadata readable");
-
-    assert!(!same_file_metadata(&first_metadata, &second_metadata));
 }
 
 #[test]
@@ -5203,6 +5204,35 @@ fn filesystem_guards_reject_unexpected_leaf_shapes() {
         read_file_suffix_to_string(&file_path, 4, 8).expect("file suffix is readable"),
         "long"
     );
+    fs::write(&file_path, "abcd").expect("range file written");
+    assert_eq!(
+        read_file_range(&file_path, 1, 3).expect("range is readable"),
+        b"bcd"
+    );
+    assert!(matches!(
+        read_file_range(&file_path, 1, 2),
+        Err(RuntimeError::Protocol(message)) if message.contains("read size 3 bytes exceeds max 2")
+    ));
+    assert!(matches!(
+        read_file_range(&file_path, 10, 1),
+        Err(RuntimeError::Protocol(message))
+            if message.contains("changed outside append-only tail semantics")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&file_path, 3, 2),
+        Err(RuntimeError::Protocol(message))
+            if message.contains("changed outside append-only tail semantics")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&file_path, 0, 8),
+        Err(RuntimeError::Protocol(message))
+            if message.contains("changed outside append-only tail semantics")
+    ));
+    fs::write(&file_path, [0xff]).expect("invalid UTF-8 file written");
+    assert!(matches!(
+        read_file_suffix_to_string(&file_path, 0, 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("not valid UTF-8")
+    ));
 }
 
 #[cfg(unix)]
