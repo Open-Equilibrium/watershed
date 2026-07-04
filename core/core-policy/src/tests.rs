@@ -599,6 +599,211 @@ fn expected_decision_fixtures_match_compiled_sandbox_negative_policies() {
 }
 
 #[test]
+fn policy_denial_evaluation_rejects_attempts_allowed_by_policy() {
+    let artifact = valid_policy_artifact("allowed-tool");
+
+    for (attempt, expected) in [
+        (
+            DeniedAttempt::ToolOutOfPhase {
+                phase_id: "inspect".to_owned(),
+                tool_id: "allowed-tool".to_owned(),
+            },
+            "policy allows tool",
+        ),
+        (
+            DeniedAttempt::Write {
+                from_path: None,
+                operation: "write".to_owned(),
+                path: Some("workspace/out.txt".to_owned()),
+                to_path: None,
+                tool_id: "allowed-tool".to_owned(),
+            },
+            "policy allows write",
+        ),
+        (
+            DeniedAttempt::ProtectedPath {
+                from_path: None,
+                operation: "read".to_owned(),
+                path: Some("workspace/src/main.rs".to_owned()),
+                to_path: None,
+                tool_id: "allowed-tool".to_owned(),
+            },
+            "policy allows protected path",
+        ),
+        (
+            DeniedAttempt::SymlinkEscape {
+                operation: "read".to_owned(),
+                path: "workspace/link".to_owned(),
+                symlink_path: "workspace/link".to_owned(),
+                symlink_target: "workspace/inside".to_owned(),
+                tool_id: "allowed-tool".to_owned(),
+            },
+            "does not model symlink",
+        ),
+        (
+            DeniedAttempt::InterpreterEscape {
+                argv: artifact.commands[0].argv.clone(),
+                executable: artifact.commands[0].executable.clone(),
+                tool_id: "allowed-tool".to_owned(),
+            },
+            "policy allows interpreter",
+        ),
+    ] {
+        let err = artifact
+            .evaluate_denied_attempt(&attempt)
+            .expect_err("allowed attempt must not validate as a denial");
+
+        assert!(err.to_string().contains(expected), "{err}");
+    }
+
+    let mut network_artifact = valid_policy_artifact("allowed-tool");
+    network_artifact.commands[0].network.allow = vec![NetworkAllowEntry {
+        cidr: "192.0.2.0/24".to_owned(),
+        kind: NetworkAllowKind::Cidr,
+        port: 5353,
+        transport: NetworkTransport::Udp,
+    }];
+    let err = network_artifact
+        .evaluate_denied_attempt(&DeniedAttempt::Network {
+            destination: "192.0.2.0/24".to_owned(),
+            port: 5353,
+            tool_id: "allowed-tool".to_owned(),
+            transport: NetworkTransport::Udp,
+        })
+        .expect_err("allowed network attempt must not validate as a denial");
+    assert!(err.to_string().contains("policy allows network"), "{err}");
+
+    let artifact = policy_artifact_with_environment_allow("SAFE_ENV");
+    let err = artifact
+        .evaluate_denied_attempt(&DeniedAttempt::Environment {
+            name: "SAFE_ENV".to_owned(),
+            tool_id: "environment-tool".to_owned(),
+        })
+        .expect_err("allowed environment attempt must not validate as a denial");
+    assert!(
+        err.to_string().contains("policy allows environment"),
+        "{err}"
+    );
+}
+
+#[test]
+fn expected_decision_rejects_policy_target_and_fixture_mismatches() {
+    let artifact = valid_policy_artifact("write-tool");
+    let expected = ExpectedDecision {
+        attempt: DeniedAttempt::Write {
+            from_path: None,
+            operation: "write".to_owned(),
+            path: Some("/etc/passwd".to_owned()),
+            to_path: None,
+            tool_id: "write-tool".to_owned(),
+        },
+        expected: ExpectedDecisionKind::Deny,
+        fixture_name: artifact.fixture_name.clone(),
+        reason_code: DenyReasonCode::WriteDenied,
+        side_effects_allowed: false,
+        target: PolicyTarget::MacosSeatbelt,
+    };
+
+    let err = expected
+        .validate_against_policy(&artifact)
+        .expect_err("target mismatch must fail");
+    assert!(err.to_string().contains("target"), "{err}");
+
+    let expected = ExpectedDecision {
+        target: artifact.target.clone(),
+        fixture_name: "other-fixture".to_owned(),
+        ..expected
+    };
+    let err = expected
+        .validate_against_policy(&artifact)
+        .expect_err("fixture mismatch must fail");
+    assert!(err.to_string().contains("fixture"), "{err}");
+}
+
+#[test]
+fn policy_helper_mappings_cover_all_parameter_and_network_variants() {
+    let udp = network_allow_entry_from_tool(&core_script::NetworkAllowEntry {
+        cidr: "192.0.2.0/24".to_owned(),
+        kind: core_script::NetworkAllowKind::Cidr,
+        port: 5353,
+        transport: core_script::NetworkTransport::Udp,
+    });
+    assert_eq!(udp.transport, NetworkTransport::Udp);
+
+    for (script_type, policy_type) in [
+        (
+            core_script::ParameterValueType::None,
+            ParameterValueType::None,
+        ),
+        (
+            core_script::ParameterValueType::String,
+            ParameterValueType::String,
+        ),
+        (
+            core_script::ParameterValueType::Integer,
+            ParameterValueType::Integer,
+        ),
+        (
+            core_script::ParameterValueType::WorkspaceRelativePath,
+            ParameterValueType::WorkspaceRelativePath,
+        ),
+        (
+            core_script::ParameterValueType::Enum,
+            ParameterValueType::Enum,
+        ),
+    ] {
+        let parameter = core_script::AllowedParameter {
+            allowed_values: Vec::new(),
+            max: None,
+            max_length: None,
+            min: None,
+            name: "--value".to_owned(),
+            required: false,
+            value_pattern: None,
+            value_type: script_type,
+        };
+
+        assert_eq!(allowed_parameter_policy(&parameter).value_type, policy_type);
+    }
+}
+
+#[test]
+fn parameter_and_identifier_shape_helpers_cover_validation_edges() {
+    assert!(!has_valid_environment_allow_name_shape(""));
+    assert!(!has_valid_environment_allow_name_shape("lower"));
+    assert!(!has_valid_environment_allow_name_shape(&"A".repeat(65)));
+    assert!(has_valid_environment_allow_name_shape("_A1"));
+
+    assert!(!has_valid_command_id_shape(""));
+    assert!(!has_valid_command_id_shape("Agent"));
+    assert!(!has_valid_command_id_shape(&"a".repeat(65)));
+    assert!(has_valid_command_id_shape("agent_1"));
+
+    assert!(!has_valid_parameter_name_shape("--"));
+    assert!(!has_valid_parameter_name_shape("value"));
+    assert!(has_valid_parameter_name_shape("--value_1"));
+
+    let mut integer = valid_parameter("--count", ParameterValueType::Integer);
+    integer.allowed_values = vec!["1".to_owned()];
+    assert!(integer.validate("parameter-tool").is_err());
+    integer.allowed_values.clear();
+    integer.value_pattern = Some("[0-9]+".to_owned());
+    assert!(integer.validate("parameter-tool").is_err());
+    integer.value_pattern = None;
+    integer.min = Some(2);
+    integer.max = Some(1);
+    assert!(integer.validate("parameter-tool").is_err());
+
+    let mut none = valid_parameter("--flag", ParameterValueType::None);
+    none.value_pattern = Some("true".to_owned());
+    assert!(none.validate("parameter-tool").is_err());
+
+    let mut path = valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
+    path.min = Some(1);
+    assert!(path.validate("parameter-tool").is_err());
+}
+
+#[test]
 fn expected_decision_can_represent_write_rename_without_path() {
     let expected = ExpectedDecision {
         attempt: DeniedAttempt::Write {

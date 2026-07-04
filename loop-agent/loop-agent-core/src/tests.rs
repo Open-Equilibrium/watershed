@@ -5971,6 +5971,468 @@ fn timestamp_parser_rejects_non_rfc3339_utc_shapes() {
 }
 
 #[test]
+fn event_clock_config_and_payload_helpers_cover_success_paths() {
+    let first = EventEnvelope::new(
+        "evt-010",
+        EventType::SessionStarted,
+        "meta001",
+        10,
+        "2026-01-01T00:00:09Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    );
+    let clock = EventClock::from_first_event(&first).expect("valid first event anchors clock");
+    assert_eq!(clock.timestamp(1), "2026-01-01T00:00:00Z");
+    let mut invalid_first = first.clone();
+    invalid_first.timestamp = "not-a-time".to_owned();
+    assert_eq!(EventClock::from_first_event(&invalid_first), None);
+
+    assert_eq!(
+        config_value(
+            "registry_root: 'reg''istry # still scalar'\n",
+            "registry_root"
+        ),
+        Some("reg'istry # still scalar".to_owned())
+    );
+    assert!(matches!(
+        workspace_event_clock("fixture_profile: live\n"),
+        Err(RuntimeError::Usage(message)) if message.contains("fixture_profile")
+    ));
+    assert!(matches!(
+        workspace_event_clock("stub_model: live\n"),
+        Err(RuntimeError::Usage(message)) if message.contains("stub_model")
+    ));
+
+    for (event_type, payload) in [
+        (
+            EventType::SessionStarted,
+            serde_json::json!({"reason":"start"}),
+        ),
+        (EventType::SessionPaused, serde_json::json!({})),
+        (
+            EventType::SessionResumed,
+            serde_json::json!({"reason":"resume"}),
+        ),
+        (EventType::SessionCompleted, serde_json::json!({})),
+        (
+            EventType::SessionFailed,
+            serde_json::json!({"reason":"failed"}),
+        ),
+        (
+            EventType::LoopStarted,
+            serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"Smoke"}),
+        ),
+        (
+            EventType::LoopCompleted,
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        ),
+        (
+            EventType::LoopFailed,
+            serde_json::json!({"error":"write_denied","loop_definition_id":"smoke-loop"}),
+        ),
+        (
+            EventType::PhaseEntered,
+            serde_json::json!({
+                "instruction_ids": ["inspect"],
+                "phase_id": "phase",
+                "phase_name": "Phase",
+                "tool_ids": ["tool"],
+            }),
+        ),
+        (
+            EventType::StepStarted,
+            serde_json::json!({
+                "connection_ids": ["data-link"],
+                "connection_kinds": ["data"],
+                "instruction_id": "inspect",
+                "phase_id": "phase",
+                "step_id": "step",
+                "step_name": "Step",
+            }),
+        ),
+        (
+            EventType::StepCompleted,
+            serde_json::json!({"phase_id":"phase","step_id":"step","step_name":"Step"}),
+        ),
+        (
+            EventType::MessageDelta,
+            serde_json::json!({
+                "content_delta": "hello",
+                "message_id": "msg-001",
+                "role": "assistant",
+            }),
+        ),
+        (
+            EventType::MessageCompleted,
+            serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+        ),
+        (
+            EventType::ToolStarted,
+            serde_json::json!({
+                "allowed_parameters": ["--message"],
+                "network_access": "declared",
+                "read_scope": ["workspace"],
+                "tool_id": "tool",
+                "tool_kind": "own-script",
+                "tool_name": "Tool",
+                "write_scope": ["workspace/out"],
+            }),
+        ),
+        (
+            EventType::ToolProgress,
+            serde_json::json!({"message":"done","tool_id":"tool"}),
+        ),
+        (
+            EventType::ToolCompleted,
+            serde_json::json!({"exit_code":0,"tool_id":"tool"}),
+        ),
+        (
+            EventType::ToolFailed,
+            serde_json::json!({"error":"write_denied","tool_id":"tool"}),
+        ),
+        (
+            EventType::ToolTimedOut,
+            serde_json::json!({"error":"timeout","tool_id":"tool"}),
+        ),
+        (
+            EventType::ArtifactLogged,
+            serde_json::json!({
+                "artifact_id": "artifact-001",
+                "artifact_type": "text",
+                "uri": "workspace/out/summary.txt",
+            }),
+        ),
+        (
+            EventType::AttentionRequested,
+            serde_json::json!({"reason":"human","request_id":"req-001"}),
+        ),
+        (
+            EventType::MetricSample,
+            serde_json::json!({"metric_name":"append_ms","value":1.25}),
+        ),
+        (
+            EventType::Error,
+            serde_json::json!({"code":"write_denied","data":{"tool_id":"tool"},"message":"denied"}),
+        ),
+    ] {
+        let event = EventEnvelope::new(
+            "evt-001",
+            event_type,
+            "meta001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            payload,
+        );
+        validate_event_payload(Path::new("valid-payload.jsonl"), 1, &event)
+            .unwrap_or_else(|err| panic!("{}: {err}", event.event_type.as_str()));
+    }
+}
+
+#[test]
+fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
+    let mut builder =
+        RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture());
+    builder.loop_counter = MAX_LOOP_INVOCATIONS;
+    assert!(matches!(
+        builder.next_loop_invocation(None),
+        Err(RuntimeError::Protocol(message)) if message.contains("loop invocation budget")
+    ));
+    assert_eq!(builder.next_message_id(), "msg-001");
+
+    builder.sequence = MAX_LOOP_EVENTS;
+    assert!(matches!(
+        builder.emit(
+            None,
+            EventType::SessionPaused,
+            serde_json::json!({"reason":"budget"})
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("runtime event budget")
+    ));
+
+    let mut builder =
+        RuntimeEventBuilder::with_clock("stream001".to_owned(), EventClock::fixed_fixture());
+    builder.stream_bytes = MAX_LOOP_EVENT_STREAM_BYTES;
+    assert!(matches!(
+        builder.emit(
+            None,
+            EventType::SessionPaused,
+            serde_json::json!({"reason":"budget"})
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("event stream budget")
+    ));
+
+    assert_eq!(
+        policy_target_name(&core_policy::PolicyTarget::MacosSeatbelt),
+        "macos"
+    );
+    assert_eq!(
+        session_id_for_loop("sandbox-negative-protected-path"),
+        "negpath001"
+    );
+    assert!(session_id_for_loop(&"x".repeat(160)).len() <= 128);
+
+    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let phase = registry
+        .phase_block("summarize")
+        .expect("summarize phase exists");
+    let tool = registry
+        .tool_block("write-summary")
+        .expect("write tool exists");
+    let command_policy =
+        command_policy_for_phase(&policy, &phase.identity.id, tool).expect("policy exists");
+    let match_mode = runtime_protected_path_match_mode(&policy.target);
+
+    let operations = compile_own_script_operations(
+        match_mode,
+        command_policy,
+        "\n# comment\n---\necho hello\nprintf 'ok\\n' > out/coverage.txt\n",
+    )
+    .expect("literal own-script operations compile");
+    assert!(matches!(operations[0], ScriptOperation::Noop));
+    assert!(matches!(operations[1], ScriptOperation::Noop));
+    assert!(matches!(operations[2], ScriptOperation::Noop));
+    assert!(matches!(operations[3], ScriptOperation::Noop));
+    assert!(matches!(
+        &operations[4],
+        ScriptOperation::Write { contents, target }
+            if contents == b"ok\n" && target == "out/coverage.txt"
+    ));
+    assert!(matches!(
+        compile_own_script_operations(
+            match_mode,
+            command_policy,
+            "printf 'a' > out/a.txt\nprintf 'b' > out/b.txt\n"
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("multiple write")
+    ));
+
+    for line in [
+        "> out/file.txt",
+        "printf 'x' > out/a.txt > out/b.txt",
+        "printf 'x' >> out/file.txt",
+        "printf 'x > out/file.txt",
+    ] {
+        assert!(
+            script_redirection(line).is_err(),
+            "{line} must fail redirection parsing"
+        );
+    }
+    for target in ["", "\"unterminated", "two words", "bad\"quote"] {
+        assert!(
+            unquote_script_path(target).is_err(),
+            "{target:?} must fail target literal parsing"
+        );
+    }
+    for target in ["", "/abs", "C:tmp", "a\\b", "$HOME", "*.txt", "../out.txt"] {
+        assert!(
+            normalize_script_write_target(target).is_err(),
+            "{target:?} must fail target normalization"
+        );
+    }
+
+    assert!(protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseInsensitive,
+        "**/*.ENV",
+        "workspace/app/.env"
+    ));
+    assert!(protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseSensitive,
+        "workspace/out/file?.txt",
+        "workspace/out/file1.txt"
+    ));
+    assert!(!protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseSensitive,
+        "workspace/out/file?.txt",
+        "workspace/out/file10.txt"
+    ));
+
+    assert_eq!(
+        evaluate_script_command("printf '%s\\n' \"$SUMMARY\"").expect("printf summary"),
+        b"hello\n"
+    );
+    assert_eq!(
+        evaluate_script_command("echo 'hello'").expect("echo literal"),
+        b"hello\n"
+    );
+    for command in [
+        "printf \"bad\"",
+        "printf 'bad' $OTHER",
+        "printf '\\t'",
+        "printf 'dangling\\'",
+        "echo $HOME",
+        "cat file",
+    ] {
+        assert!(
+            evaluate_script_command(command).is_err(),
+            "{command:?} must fail script evaluation"
+        );
+    }
+
+    assert_eq!(
+        runtime_failure_for_tool_error(
+            &RuntimeError::Protocol("protected path denied".to_owned()),
+            "tool"
+        )
+        .expect("protected path maps")
+        .reason,
+        core_policy::DenyReasonCode::ProtectedPathDenied.as_str()
+    );
+    assert_eq!(
+        runtime_failure_for_tool_error(
+            &RuntimeError::Protocol("must be a directory".to_owned()),
+            "tool"
+        )
+        .expect("write denial maps")
+        .reason,
+        core_policy::DenyReasonCode::WriteDenied.as_str()
+    );
+    assert_eq!(
+        runtime_failure_for_tool_error(
+            &RuntimeError::Io {
+                path: PathBuf::from("out/file"),
+                source: io::Error::from(io::ErrorKind::PermissionDenied),
+            },
+            "tool"
+        )
+        .expect("permission denied maps")
+        .reason,
+        core_policy::DenyReasonCode::WriteDenied.as_str()
+    );
+    assert!(
+        runtime_failure_for_tool_error(&RuntimeError::Usage("bad".to_owned()), "tool").is_none()
+    );
+}
+
+#[test]
+fn appended_session_validation_covers_incremental_edges() {
+    let path = Path::new("append-edges.jsonl");
+    let prior = vec![base_event()];
+    assert!(
+        validate_appended_session_log_text(path, "meta001", &prior, "")
+            .expect("empty append is valid")
+            .is_empty()
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(path, "other001", &prior, &loop_started_line("evt-002", 2)),
+        Err(RuntimeError::Protocol(message)) if message.contains("expected")
+    ));
+    assert!(matches!(
+        validate_appended_session_log_text(path, "meta001", &prior, "not-json"),
+        Err(RuntimeError::Protocol(message)) if message.contains("end with LF")
+    ));
+
+    let appended = validate_appended_session_log_text(
+        path,
+        "meta001",
+        &prior,
+        &loop_started_line("evt-002", 2),
+    )
+    .expect("loop start append validates");
+    assert_eq!(appended.len(), 1);
+
+    let invalid_session_prior = vec![EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "bad session",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )];
+    let invalid_session_append = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionPaused,
+        "bad session",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"pause"}),
+    )
+    .canonical_jsonl()
+    .expect("edge event serializes");
+    let err = validate_appended_session_log_text(
+        path,
+        "bad session",
+        &invalid_session_prior,
+        &invalid_session_append,
+    )
+    .expect_err("invalid appended session log must fail");
+    assert!(err.to_string().contains("valid session_id"), "{err}");
+
+    for (name, event, expected) in [
+        (
+            "wrong-session",
+            EventEnvelope::new(
+                "evt-002",
+                EventType::SessionPaused,
+                "other001",
+                2,
+                "2026-01-01T00:00:01Z",
+                "loop-agent-cli",
+                serde_json::json!({"reason":"pause"}),
+            ),
+            "one session_id",
+        ),
+        (
+            "empty-event-id",
+            EventEnvelope::new(
+                "",
+                EventType::SessionPaused,
+                "meta001",
+                2,
+                "2026-01-01T00:00:01Z",
+                "loop-agent-cli",
+                serde_json::json!({"reason":"pause"}),
+            ),
+            "event_id",
+        ),
+        (
+            "empty-source",
+            EventEnvelope::new(
+                "evt-002",
+                EventType::SessionPaused,
+                "meta001",
+                2,
+                "2026-01-01T00:00:01Z",
+                "",
+                serde_json::json!({"reason":"pause"}),
+            ),
+            "source",
+        ),
+        (
+            "invalid-timestamp",
+            EventEnvelope::new(
+                "evt-002",
+                EventType::SessionPaused,
+                "meta001",
+                2,
+                "not-a-time",
+                "loop-agent-cli",
+                serde_json::json!({"reason":"pause"}),
+            ),
+            "timestamp",
+        ),
+        (
+            "duplicate-event-id",
+            EventEnvelope::new(
+                "evt-001",
+                EventType::SessionPaused,
+                "meta001",
+                2,
+                "2026-01-01T00:00:01Z",
+                "loop-agent-cli",
+                serde_json::json!({"reason":"pause"}),
+            ),
+            "unique event_id",
+        ),
+    ] {
+        let text = event.canonical_jsonl().expect("edge event serializes");
+        assert_invalid_appended_session_log(path, name, &prior, &text, expected);
+    }
+}
+
+#[test]
 fn workspace_config_helpers_reject_unsafe_registry_roots() {
     let workspace = empty_workspace("workspace-config-helpers");
     fs::create_dir_all(workspace.join(".loop")).expect("loop config dir");
@@ -6881,6 +7343,19 @@ fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected
         .expect_err("invalid session log must fail");
 
     assert!(err.to_string().contains(expected), "{err}");
+}
+
+fn assert_invalid_appended_session_log(
+    path: &Path,
+    name: &str,
+    prior: &[EventEnvelope],
+    text: &str,
+    expected: &str,
+) {
+    let err = validate_appended_session_log_text(path, "meta001", prior, text)
+        .expect_err("invalid appended session log must fail");
+
+    assert!(err.to_string().contains(expected), "{name}: {err}");
 }
 
 fn linux_sandbox_expected_decision(

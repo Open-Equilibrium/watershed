@@ -234,3 +234,6 @@ fn os_string_to_string(value: OsString) -> Result<String, &'static str> {
 fn usage() -> String {
     "usage: loop run <loop> [--emit jsonl] | replay <session_id> [--emit jsonl] | tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | resume <session_id> [--emit jsonl] | sessions | chat".to_owned()
 }
+
+#[cfg(test)]
+mod tests;

@@ -420,6 +420,15 @@ fn registry_and_parse_errors_report_sources_and_conversions() {
             },
             "registry/tool.yaml: registry read size 17 bytes exceeds max 16",
         ),
+        (
+            RegistryError::TraversalLimitExceeded {
+                path: PathBuf::from("registry/deep"),
+                limit: "depth",
+                observed: 65,
+                max: 64,
+            },
+            "registry/deep: registry traversal depth 65 exceeds max 64",
+        ),
     ];
     for (err, expected) in cases {
         assert_eq!(err.to_string(), expected);
@@ -441,6 +450,22 @@ fn registry_and_parse_errors_report_sources_and_conversions() {
     assert_eq!(
         schema.to_string(),
         "tool schema violation for bad-tool: bad schema"
+    );
+    let own_script = SemanticValidationError::OwnScriptCommandIdMismatch {
+        command: "agent-echo".to_owned(),
+        tool_id: "write-summary".to_owned(),
+    };
+    assert_eq!(
+        own_script.to_string(),
+        "own-script command must be script:<tool-id>: write-summary used agent-echo"
+    );
+    let invalid_cidr = SemanticValidationError::InvalidCanonicalCidr {
+        cidr: "192.0.2.1/24".to_owned(),
+        tool_id: "network-tool".to_owned(),
+    };
+    assert_eq!(
+        invalid_cidr.to_string(),
+        "invalid canonical CIDR for tool network-tool: 192.0.2.1/24"
     );
     let semantic_registry = RegistryError::from(schema.clone());
     assert!(std::error::Error::source(&semantic_registry).is_some());
@@ -1201,6 +1226,142 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
         &["id", "name"],
     ))
     .contains("unsupported phase.steps property unexpected"));
+}
+
+#[test]
+fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
+    fn message<T: std::fmt::Debug>(result: Result<T, RegistryError>) -> String {
+        result.expect_err("expected registry error").to_string()
+    }
+
+    assert!(message(raw_section_field_value(
+        "duplicate-section-field.yaml",
+        "tool:\n  id: first\n  id: second\n",
+        "tool",
+        "id",
+    ))
+    .contains("duplicate tool.id"));
+    assert!(message(raw_nested_field_value(
+        "duplicate-nested-field.yaml",
+        "tool:\n  command:\n    argv: []\n    argv: [--again]\n",
+        "tool",
+        "command",
+        "argv",
+    ))
+    .contains("duplicate tool.command.argv"));
+    assert!(message(reject_unknown_section_fields(
+        "section-field-without-colon.yaml",
+        "tool:\n  id\n",
+        "tool",
+        &["id"],
+    ))
+    .contains("must use key: value"));
+    assert!(message(reject_unknown_nested_fields(
+        "nested-field-without-colon.yaml",
+        "tool:\n  command:\n    argv\n",
+        "tool",
+        "command",
+        &["argv"],
+    ))
+    .contains("must use key: value"));
+
+    let scalar_shape = ScalarListShape {
+        section: "loop",
+        parent: None,
+        field: "phase_refs",
+        field_indent: 2,
+        item_indent: 4,
+    };
+    assert_eq!(
+        block_string_list(
+            "block-list-breaks-at-next-section.yaml",
+            "loop:\n  phase_refs:\n    - inspect\nphase:\n  id: inspect\n",
+            scalar_shape,
+        )
+        .expect("block list stops at next top-level section"),
+        vec!["inspect"]
+    );
+
+    let object_shape = ListObjectShape {
+        section: "phase",
+        parent: None,
+        field: "steps",
+        field_indent: 2,
+        item_indent: 4,
+        property_indent: 6,
+    };
+    let object = list_objects(
+        "pending-list-property.yaml",
+        "phase:\n  steps:\n    - id: step\n      name: Step\n      connection_refs:\n        - link\nnext:\n  id: after\n",
+        object_shape,
+    )
+    .expect("pending list property flushes before top-level break");
+    assert_eq!(object[0]["connection_refs"], "[\"link\"]");
+    assert!(message(list_objects(
+        "steps-empty-field.yaml",
+        "phase:\n  steps:\n    - : value\n",
+        object_shape,
+    ))
+    .contains("must use key: value"));
+
+    let mut item = BTreeMap::new();
+    assert_eq!(
+        parse_object_property("list-property.yaml", "connection_refs:", &mut item)
+            .expect("empty connection_refs starts pending list"),
+        Some("connection_refs".to_owned())
+    );
+    assert!(
+        message(parse_object_property("empty-value.yaml", "id:", &mut item,))
+            .contains("must use key: value")
+    );
+    assert!(message(push_inline_list_item(
+        "malformed-quoted-list-item.yaml",
+        "argv",
+        &mut Vec::new(),
+        "\"unterminated",
+    ))
+    .contains("malformed quoted scalar"));
+    assert!(message(unquote_yaml_scalar(
+        "dangling-double-quote-escape.yaml",
+        "field",
+        r#""abc\""#,
+    ))
+    .contains("dangling escape"));
+
+    let mut sortable = serde_json::json!({
+        "outer": [{
+            "allowed_parameters": [
+                {"name": "--z"},
+                {"description": "missing name"},
+                {"name": "--a"}
+            ]
+        }],
+        "allowed_parameters": [
+            {"name": "--b"},
+            {"name": "--a"}
+        ]
+    });
+    sort_allowed_parameters(&mut sortable);
+    assert_eq!(
+        sortable["allowed_parameters"]
+            .as_array()
+            .expect("root parameters")
+            .iter()
+            .map(|value| value["name"].as_str().unwrap_or(""))
+            .collect::<Vec<_>>(),
+        vec!["--a", "--b"]
+    );
+    assert_eq!(
+        sortable["outer"][0]["allowed_parameters"][2]["name"],
+        serde_json::json!("--z")
+    );
+
+    assert!(!is_valid_allowed_parameter_name("--"));
+    assert!(!is_valid_allowed_parameter_name("value"));
+    assert!(is_valid_allowed_parameter_name("--value_1"));
+    assert!(value_forbids_nested_yaml_content("deny"));
+    assert!(!value_forbids_nested_yaml_content("|"));
+    assert!(!value_forbids_nested_yaml_content(">"));
 }
 
 #[cfg(unix)]
