@@ -1780,6 +1780,7 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
     append_existing_file_without_link_count(path, contents)
 }
 
+#[cfg(any(not(unix), test))]
 fn append_existing_file_without_link_count(
     path: &Path,
     contents: &[u8],
@@ -1789,6 +1790,7 @@ fn append_existing_file_without_link_count(
     replace_existing_file_without_link_count(path, &appended)
 }
 
+#[cfg(any(not(unix), test))]
 fn replace_existing_file_without_link_count(
     path: &Path,
     contents: &[u8],
@@ -4264,6 +4266,7 @@ fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, 
     Ok(bytes)
 }
 
+#[cfg(any(not(unix), test))]
 fn read_to_bytes(path: &Path) -> Result<Vec<u8>, RuntimeError> {
     fs::read(path).map_err(|source| RuntimeError::Io {
         path: path.to_path_buf(),
