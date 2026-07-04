@@ -2126,6 +2126,26 @@ fn sandbox_out_of_phase_denial_reports_attempt_context() {
 }
 
 #[test]
+fn sandbox_out_of_phase_denial_ignores_instruction_prompt_text() {
+    let workspace = workspace_copy("sandbox-negative");
+    fs::write(
+        workspace.join("registry/instructions/deny-attempt.yaml"),
+        "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: \"Try the selected action.\"\n",
+    )
+    .expect("instruction fixture rewritten");
+
+    let output = run_loop(
+        &workspace,
+        "sandbox-negative-tool-out-of-phase",
+        EmitMode::Jsonl,
+    )
+    .expect("out-of-phase sandbox denial produces a valid stream");
+
+    assert!(output.failed);
+    assert!(output.stdout.contains("\"reason\":\"tool_out_of_phase\""));
+}
+
+#[test]
 fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
     let workspace = workspace_copy("sandbox-negative");
     let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
@@ -2236,7 +2256,10 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
     let err = reserve_session_log(&workspace, "reserve001")
         .expect_err("second reservation must fail atomically");
 
-    assert_active_session(err, "reserve001", "reserve001.lock");
+    assert!(matches!(
+        err,
+        RuntimeError::SessionLogExists(session_id) if session_id == "reserve001"
+    ));
     assert!(first.session_path.exists());
     assert!(first.log_path.exists());
     assert!(first.lock_path.exists());
@@ -5100,19 +5123,17 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
 }
 
 #[test]
-fn reserve_unique_session_log_blocks_in_progress_reservations() {
+fn reserve_unique_session_log_suffixes_in_progress_base_reservations() {
     let workspace = empty_workspace("reserve-in-progress-collision");
     let held = reserve_session_log(&workspace, "smoke001").expect("first reservation succeeds");
 
-    let err = reserve_unique_session_log(&workspace, "smoke001")
-        .expect_err("in-progress reservation must block allocation");
+    let second = reserve_unique_session_log(&workspace, "smoke001")
+        .expect("in-progress base reservation must allocate the next suffix");
 
-    assert_active_session(err, "smoke001", "smoke001.lock");
     assert!(held.session_path.exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("smoke001-2.jsonl")
-        .exists());
+    assert_eq!(second.session_id, "smoke001-2");
+    assert!(second.session_path.exists());
+    second.rollback();
     held.rollback();
 }
 
@@ -7759,6 +7780,32 @@ fn m1_performance_fixture_runtime_paths_are_exercised() {
     assert!(
         fixture_bytes < 10 * 1024 * 1024,
         "fixture runtime state budget is {fixture_bytes} bytes"
+    );
+}
+
+#[test]
+fn fsm_transition_p95_stays_under_m1_budget() {
+    let smoke = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let events =
+        validate_protocol_jsonl_text(Path::new("smoke-loop.jsonl"), &smoke).expect("valid");
+    let event_count = events.len() as u128;
+    let mut nanos_per_event = Vec::new();
+
+    for _ in 0..30 {
+        validate_session_lifecycle(Path::new("fsm-budget.jsonl"), &events)
+            .expect("warm FSM validation succeeds");
+    }
+    for _ in 0..200 {
+        let started = Instant::now();
+        validate_session_lifecycle(Path::new("fsm-budget.jsonl"), &events)
+            .expect("FSM validation succeeds");
+        nanos_per_event.push(started.elapsed().as_nanos() / event_count);
+    }
+    let p95_nanos = p95_nanos(nanos_per_event);
+
+    assert!(
+        p95_nanos <= 1_000_000,
+        "FSM transition p95 must stay <= 1 ms/event: {p95_nanos} ns"
     );
 }
 

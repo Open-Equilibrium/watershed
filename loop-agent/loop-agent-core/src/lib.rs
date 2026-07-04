@@ -1259,9 +1259,9 @@ fn reserve_session_log(
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
     let log_path = log_dir.join(format!("{session_id}.log"));
     let lock_path = session_lock_path(workspace, session_id)?;
-    reserve_session_lock_file(&lock_path, session_id)?;
-    if let Err(err) = reserve_session_file(&session_path, session_id) {
-        let _ = fs::remove_file(&lock_path);
+    reserve_session_file(&session_path, session_id)?;
+    if let Err(err) = reserve_session_lock_file(&lock_path, session_id) {
+        let _ = fs::remove_file(&session_path);
         return Err(err);
     }
     if let Err(err) = reserve_new_file(&log_path) {
@@ -1599,13 +1599,30 @@ fn ensure_existing_real_directory(path: &Path) -> Result<(), RuntimeError> {
         path: path.to_owned(),
         source,
     })?;
-    validate_real_directory(path, &metadata)
+    validate_real_directory_with(path, &metadata, DirectoryErrorMode::Protocol)
 }
 
 fn ensure_optional_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    ensure_optional_directory_with(path, DirectoryErrorMode::Protocol)
+}
+
+fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    ensure_created_directory_with(path, DirectoryErrorMode::Protocol)
+}
+
+#[derive(Clone, Copy)]
+enum DirectoryErrorMode {
+    Protocol,
+    ScriptWrite,
+}
+
+fn ensure_optional_directory_with(
+    path: &Path,
+    error_mode: DirectoryErrorMode,
+) -> Result<bool, RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
-            validate_real_directory(path, &metadata)?;
+            validate_real_directory_with(path, &metadata, error_mode)?;
             Ok(true)
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
@@ -1616,10 +1633,13 @@ fn ensure_optional_real_directory(path: &Path) -> Result<bool, RuntimeError> {
     }
 }
 
-fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+fn ensure_created_directory_with(
+    path: &Path,
+    error_mode: DirectoryErrorMode,
+) -> Result<bool, RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) => {
-            validate_real_directory(path, &metadata)?;
+            validate_real_directory_with(path, &metadata, error_mode)?;
             Ok(false)
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
@@ -1637,7 +1657,7 @@ fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
                 path: path.to_owned(),
                 source,
             })?;
-            validate_real_directory(path, &metadata)?;
+            validate_real_directory_with(path, &metadata, error_mode)?;
             Ok(true)
         }
         Err(source) => Err(RuntimeError::Io {
@@ -1647,18 +1667,28 @@ fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
     }
 }
 
-fn validate_real_directory(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
+fn validate_real_directory_with(
+    path: &Path,
+    metadata: &fs::Metadata,
+    error_mode: DirectoryErrorMode,
+) -> Result<(), RuntimeError> {
     if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink or reparse point",
-            path.display()
-        )));
+        let message = format!("{} must not be a symlink or reparse point", path.display());
+        return Err(match error_mode {
+            DirectoryErrorMode::Protocol => RuntimeError::Protocol(message),
+            DirectoryErrorMode::ScriptWrite => {
+                runtime_denied(core_policy::DenyReasonCode::SymlinkEscapeDenied, message)
+            }
+        });
     }
     if !metadata.is_dir() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must be a directory",
-            path.display()
-        )));
+        let message = format!("{} must be a directory", path.display());
+        return Err(match error_mode {
+            DirectoryErrorMode::Protocol => RuntimeError::Protocol(message),
+            DirectoryErrorMode::ScriptWrite => {
+                runtime_denied(core_policy::DenyReasonCode::WriteDenied, message)
+            }
+        });
     }
     Ok(())
 }
@@ -3252,67 +3282,11 @@ fn preflight_real_workspace_write_path(
 }
 
 fn ensure_optional_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            validate_script_real_directory(path, &metadata)?;
-            Ok(true)
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
+    ensure_optional_directory_with(path, DirectoryErrorMode::ScriptWrite)
 }
 
 fn ensure_created_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            validate_script_real_directory(path, &metadata)?;
-            Ok(false)
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            match fs::create_dir(path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(source) => {
-                    return Err(RuntimeError::Io {
-                        path: path.to_owned(),
-                        source,
-                    });
-                }
-            }
-            let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })?;
-            validate_script_real_directory(path, &metadata)?;
-            Ok(true)
-        }
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
-}
-
-fn validate_script_real_directory(
-    path: &Path,
-    metadata: &fs::Metadata,
-) -> Result<(), RuntimeError> {
-    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
-        return Err(runtime_denied(
-            core_policy::DenyReasonCode::SymlinkEscapeDenied,
-            format!("{} must not be a symlink or reparse point", path.display()),
-        ));
-    }
-    if !metadata.is_dir() {
-        return Err(runtime_denied(
-            core_policy::DenyReasonCode::WriteDenied,
-            format!("{} must be a directory", path.display()),
-        ));
-    }
-    Ok(())
+    ensure_created_directory_with(path, DirectoryErrorMode::ScriptWrite)
 }
 
 fn ensure_opened_regular_leaf_matches_path(
@@ -3671,7 +3645,6 @@ fn sandbox_out_of_phase_failure(
     if !phase.tool_refs.is_empty()
         || !phase.identity.id.starts_with("negative-")
         || !phase.identity.id.contains("no-tools")
-        || !phase_attempts_sandbox_negative_action(registry, phase)
     {
         return None;
     }
@@ -3693,23 +3666,6 @@ fn sandbox_out_of_phase_failure(
         phase.identity.id.clone(),
         unavailable_sentinel.identity.id.clone(),
     ))
-}
-
-fn phase_attempts_sandbox_negative_action(
-    registry: &core_script::ResolvedRegistry,
-    phase: &core_script::PhaseBlock,
-) -> bool {
-    phase.instruction_refs.iter().any(|instruction_ref| {
-        registry
-            .instruction_block(instruction_ref)
-            .is_some_and(|instruction| {
-                instruction.identity.id == "deny-attempt"
-                    && instruction
-                        .prompt
-                        .to_ascii_lowercase()
-                        .contains("sandbox-negative")
-            })
-    })
 }
 
 fn is_sandbox_negative_sentinel_tool(tool: &core_script::ToolBlock) -> bool {
