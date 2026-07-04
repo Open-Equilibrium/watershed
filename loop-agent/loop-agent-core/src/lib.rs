@@ -1851,9 +1851,9 @@ fn ensure_non_hardlinked_real_file(path: &Path) -> Result<(), RuntimeError> {
 }
 
 fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if metadata.file_type().is_symlink() {
+    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
         return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
+            "{} must not be a symlink or reparse point",
             path.display()
         )));
     }
@@ -4082,10 +4082,7 @@ fn read_session_log_to_string(path: &Path) -> Result<String, RuntimeError> {
 }
 
 fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
-    let metadata = fs::metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let (_file, metadata) = open_real_file_for_read(path)?;
     let len = metadata.len();
     if len > MAX_SESSION_LOG_BYTES {
         return Err(RuntimeError::Protocol(format!(
@@ -4113,6 +4110,71 @@ fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, Runt
     })
 }
 
+fn open_real_file_for_read(path: &Path) -> Result<(fs::File, fs::Metadata), RuntimeError> {
+    let expected_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    validate_real_file(path, &expected_metadata)?;
+    let file =
+        open_file_for_read_without_following_reparse(path).map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let file_metadata =
+        ensure_opened_real_file_for_read_matches_path(path, &expected_metadata, &file)?;
+    Ok((file, file_metadata))
+}
+
+#[cfg(windows)]
+fn open_file_for_read_without_following_reparse(path: &Path) -> io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_file_for_read_without_following_reparse(path: &Path) -> io::Result<fs::File> {
+    fs::File::open(path)
+}
+
+fn ensure_opened_real_file_for_read_matches_path(
+    path: &Path,
+    expected_metadata: &fs::Metadata,
+    file: &fs::File,
+) -> Result<fs::Metadata, RuntimeError> {
+    #[cfg(not(unix))]
+    let _ = expected_metadata;
+
+    let current_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    validate_real_file(path, &current_metadata)?;
+
+    let file_metadata = file.metadata().map_err(|source| RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    validate_real_file(path, &file_metadata)?;
+
+    #[cfg(unix)]
+    if !same_file_metadata(expected_metadata, &current_metadata)
+        || !same_file_metadata(&current_metadata, &file_metadata)
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed before read",
+            path.display()
+        )));
+    }
+
+    Ok(file_metadata)
+}
+
 fn read_file_suffix_to_string(
     path: &Path,
     offset: usize,
@@ -4125,10 +4187,7 @@ fn read_file_suffix_to_string(
         )));
     }
     let suffix_len = expected_len - offset;
-    let metadata = fs::metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let (mut file, metadata) = open_real_file_for_read(path)?;
     let total_len = metadata.len();
     if total_len > MAX_SESSION_LOG_BYTES {
         return Err(RuntimeError::Protocol(format!(
@@ -4151,10 +4210,6 @@ fn read_file_suffix_to_string(
     }
     let offset = u64::try_from(offset).unwrap_or(u64::MAX);
     let suffix_len = u64::try_from(suffix_len).unwrap_or(u64::MAX);
-    let mut file = fs::File::open(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
     file.seek(SeekFrom::Start(offset))
         .map_err(|source| RuntimeError::Io {
             path: path.to_path_buf(),
@@ -4215,10 +4270,7 @@ fn runtime_error_is_transient_tail_read(err: &RuntimeError) -> bool {
 }
 
 fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
-    let metadata = fs::metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let (mut file, metadata) = open_real_file_for_read(path)?;
     let total_len = metadata.len();
     if total_len > MAX_SESSION_LOG_BYTES {
         return Err(RuntimeError::Protocol(format!(
@@ -4240,10 +4292,6 @@ fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, 
             path.display()
         )));
     }
-    let mut file = fs::File::open(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
     file.seek(SeekFrom::Start(offset))
         .map_err(|source| RuntimeError::Io {
             path: path.to_path_buf(),
