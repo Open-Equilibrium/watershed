@@ -62,7 +62,8 @@ A Loop Agent workspace has this M1 layout:
 .loop/config.yaml                         workspace config
 registry/{tools,instructions,phases,loops,connections}/
 .loop/sessions/<session_id>.jsonl         runtime event log
-.loop/logs/<session_id>.log               structured run log
+.loop/sessions/<session_id>.lock          active-session lock
+.loop/logs/<session_id>.log               resume metadata sidecar
 out/                                      fixture/runtime output
 ```
 

@@ -28,6 +28,8 @@ Protocol v0 is designed for the Loop Agent CLI MVP and later Meta-Harness integr
 
 Runtime events use the v0 Loop Agent short-form name set decided in ADR-0036. `message.delta` and `tool.progress` stay first-class for near-real-time consumers. Do not maintain a second event naming convention.
 
+M1 Loop Agent emits the families exercised by the D-015 fixtures and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
+
 Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029); ADR-0055 selects the initial method set as `loop.start`, `loop.status`, `loop.cancel`, `loop.tail` and `loop.export`. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
 
 ## Required v0 event-envelope fields
@@ -48,7 +50,7 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/ses
 | `payload` | JSON object; event-specific fields below |
 | `correlation_id` | optional non-empty opaque string linking request/result events |
 
-Loop Agent emits wall-clock UTC timestamps by default. Workspaces that set `fixture_profile: stub-model` and `stub_model: deterministic` in `.loop/config.yaml` may emit deterministic fixture timestamps for golden streams.
+M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequence - 1) seconds`. Fixture workspaces use a fixed base for byte-stable golden streams. Wall-clock emission is deferred until the event clock source is made configurable for non-fixture runs.
 
 ## v0 ID safety and loop identity
 
@@ -56,11 +58,18 @@ Loop Agent emits wall-clock UTC timestamps by default. Workspaces that set `fixt
 - `loop_id` is a runtime invocation id, not the registry/definition id. The root loop and every subloop invocation get distinct `loop_id` values within the session. Reusing one subloop definition twice therefore emits two different `loop_id` values, each with `parent_loop_id` equal to the containing runtime loop invocation id.
 - Loop definition identity travels in payload fields, not in `loop_id`. `loop.*` events carry `loop_definition_id`; `loop_name` is optional display metadata.
 
+## M1 local session storage
+
+- `.loop/sessions/<session_id>.jsonl` is the append-only canonical event log. Replay, tail and resume first validate the stored prefix; resume only appends a `session.resumed` suffix and never rewrites prior events.
+- `.loop/logs/<session_id>.log` is a resume metadata sidecar, not the structured event log.
+- `.loop/sessions/<session_id>.lock` is the active-session lock. Run/resume refuses a locked session and never auto-steals stale locks. Manual recovery is: verify no Loop Agent process owns the session, preserve or inspect the log if needed, remove the lock, then replay or resume.
+- Resume rejects registry or loop-definition drift before tool side effects by comparing the metadata sidecar to the current workspace registry.
+
 Minimum v0 payload fields:
 
 All listed payload fields are strings unless noted otherwise; string arrays are JSON arrays of strings. `role` is `system | user | assistant | tool`, `value` is a JSON number, `exit_code` is an integer and `data` is a JSON object.
 
-- `session.*`: `reason` optional except failure events, where it is required.
+- `session.*`: `reason` optional except failure events, where it is required. M1 currently emits `reason: "fixture-start"` on `session.started` for all run starts.
 - `loop.*`: `loop_definition_id` required; `loop_name` optional; `error` required for `loop.failed`.
 - `phase.entered`: `phase_id`, `phase_name`, `instruction_ids` and `tool_ids` (string arrays; empty when none).
 - `step.started | step.completed`: `step_id`, `step_name`, optional `phase_id`, optional `instruction_id`, optional `connection_ids` and `connection_kinds` (string arrays; `connection_kinds` values are `data | trigger | refresh`). If either connection array is present, both are present with the same length; index `i` in `connection_ids` pairs with index `i` in `connection_kinds`, in the owning Step block's `connection_refs` order after registry resolution. With no connections, omit both arrays or emit both as empty arrays.
@@ -74,6 +83,12 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `attention.requested`: `request_id`, `reason`.
 - `metric.sample`: `metric_name`, `value`.
 - `error`: `code`, `message`, optional `data`.
+
+## CLI exit status
+
+- `0`: command completed successfully.
+- `64`: command-line usage or input validation error.
+- `65`: runtime, registry, policy, protocol, session-state or I/O failure.
 
 ## Canonical event JSONL serialization (v0)
 
