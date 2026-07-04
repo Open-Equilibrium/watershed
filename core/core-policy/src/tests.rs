@@ -1530,6 +1530,7 @@ fn policy_artifact_canonical_json_rejects_normalized_duplicate_keys() {
         err.to_string(),
         "failed to serialize canonical policy artifact JSON: normalized object key collision: é"
     );
+    assert!(std::error::Error::source(&err).is_some());
 }
 
 #[test]
@@ -1551,6 +1552,7 @@ fn policy_artifact_error_display_reports_serialization_failure() {
         err.to_string(),
         "failed to serialize policy artifact: intentional failure"
     );
+    assert!(std::error::Error::source(&err).is_some());
 }
 
 #[test]

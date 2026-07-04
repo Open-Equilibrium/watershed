@@ -260,6 +260,84 @@ fn registry_file_reader_rejects_file_replaced_after_collection() {
 }
 
 #[test]
+fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
+    let root = temp_registry_dir("registry-file-reader-edges");
+    let invalid_utf8 = root.join("invalid.yaml");
+    std::fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 registry file written");
+    let mut files = Vec::new();
+    collect_registry_files(&root, &mut files).expect("registry file collected");
+    assert_eq!(files.len(), 1);
+    assert!(matches!(
+        read_registry_file_to_string(&files[0], MAX_REGISTRY_FILE_BYTES),
+        Err(RegistryError::Io { source, .. }) if source.kind() == std::io::ErrorKind::InvalidData
+    ));
+    let existing_metadata = std::fs::symlink_metadata(&invalid_utf8).expect("file metadata");
+    let missing_file = RegistryFile {
+        path: root.join("missing.yaml"),
+        bytes: 0,
+        identity: registry_file_identity(&invalid_utf8, &existing_metadata)
+            .expect("existing file identity"),
+    };
+    assert!(matches!(
+        read_registry_file_to_string(&missing_file, MAX_REGISTRY_FILE_BYTES),
+        Err(RegistryError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound
+    ));
+
+    let dir_metadata = std::fs::symlink_metadata(&root).expect("directory metadata");
+    let dir_file = RegistryFile {
+        path: root.clone(),
+        bytes: 0,
+        identity: registry_file_identity(&root, &dir_metadata).expect("directory identity"),
+    };
+    assert!(matches!(
+        ensure_opened_registry_file_matches(&dir_file, &dir_metadata),
+        Err(RegistryError::UnsafePath { message, .. }) if message.contains("symlinks")
+    ));
+    let mut collected = Vec::new();
+    let mut state = RegistryTraversalState::default();
+    assert!(matches!(
+        collect_registry_files_with_limits(
+            &invalid_utf8,
+            &invalid_utf8,
+            &mut collected,
+            RegistryTraversalLimits {
+                max_file_bytes: MAX_REGISTRY_FILE_BYTES,
+                max_total_bytes: MAX_REGISTRY_TOTAL_BYTES,
+                max_files: MAX_REGISTRY_FILES,
+                max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
+            },
+            0,
+            &mut state,
+        ),
+        Err(RegistryError::UnsafePath { message, .. }) if message.contains("must be a directory")
+    ));
+
+    let first = root.join("first.yaml");
+    let second = root.join("second.yaml");
+    std::fs::write(
+        &first,
+        "instruction:\n  id: first\n  name: First\n  prompt: First\n",
+    )
+    .expect("first registry file written");
+    std::fs::write(
+        &second,
+        "instruction:\n  id: second\n  name: Second\n  prompt: Second\n",
+    )
+    .expect("second registry file written");
+    let first_metadata = std::fs::symlink_metadata(&first).expect("first metadata");
+    let second_metadata = std::fs::symlink_metadata(&second).expect("second metadata");
+    let first_file = RegistryFile {
+        path: first.clone(),
+        bytes: first_metadata.len(),
+        identity: registry_file_identity(&first, &first_metadata).expect("first identity"),
+    };
+    assert!(matches!(
+        ensure_opened_registry_file_matches(&first_file, &second_metadata),
+        Err(RegistryError::UnsafePath { message, .. }) if message.contains("changed before open")
+    ));
+}
+
+#[test]
 fn registry_loader_rejects_total_bytes_above_read_limit() {
     let root = temp_registry_dir("registry-total-read-limit");
     let first = "instruction:\n  id: inspect-a\n  name: InspectA\n  prompt: Inspect\n";
@@ -1279,6 +1357,37 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
         &["argv"],
     ))
     .contains("must use key: value"));
+    assert!(message(reject_unknown_nested_fields(
+        "unsupported-nested-field.yaml",
+        "other:\n  command:\n    unexpected: value\n\ntool:\n  other:\n    unexpected: value\n  command:\n    unexpected: value\n",
+        "tool",
+        "command",
+        &["argv"],
+    ))
+    .contains("unsupported tool.command field unexpected"));
+
+    assert_eq!(
+        raw_nested_field_value(
+            "nested-field-skips-unrelated.yaml",
+            "other:\n  command:\n    argv: [ignored]\n\ntool:\n  other:\n    argv: [ignored]\n  command:\n    argv: [--ok]\n",
+            "tool",
+            "command",
+            "argv",
+        )
+        .expect("nested field parses"),
+        Some("[--ok]".to_owned())
+    );
+    assert_eq!(
+        parse_literal_block_scalar(
+            "literal-block-edges.yaml",
+            "other:\n  script_body: |\n    ignored\n\ntool:\n  name: Tool\n  script_body: |-\n    printf hi\n\n  network: deny\n",
+            "tool",
+            "script_body",
+            "|-",
+        )
+        .expect("literal block parses"),
+        "printf hi"
+    );
 
     let scalar_shape = ScalarListShape {
         section: "loop",
@@ -1295,6 +1404,22 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
         )
         .expect("block list stops at next top-level section"),
         vec!["inspect"]
+    );
+    let nested_scalar_shape = ScalarListShape {
+        section: "tool",
+        parent: Some("command"),
+        field: "argv",
+        field_indent: 4,
+        item_indent: 6,
+    };
+    assert_eq!(
+        block_string_list(
+            "nested-block-list-skips-unrelated.yaml",
+            "other:\n  command:\n    argv:\n      - ignored\n\ntool:\n  other:\n    argv:\n      - ignored\n  command:\n    argv:\n      - --ok\nnext:\n  id: after\n",
+            nested_scalar_shape,
+        )
+        .expect("nested block list parses"),
+        vec!["--ok"]
     );
 
     let object_shape = ListObjectShape {
@@ -1319,6 +1444,21 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
     )
     .expect("pending list property may start on the item line");
     assert_eq!(inline_pending_object[0]["connection_refs"], "[\"link\"]");
+    let nested_object_shape = ListObjectShape {
+        section: "tool",
+        parent: Some("network"),
+        field: "allow",
+        field_indent: 4,
+        item_indent: 6,
+        property_indent: 8,
+    };
+    let nested_object = list_objects(
+        "nested-object-list-skips-unrelated.yaml",
+        "other:\n  network:\n    allow:\n      - kind: cidr\n\ntool:\n  command:\n    allow:\n      - kind: ignored\n  network:\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\nnext:\n  id: after\n",
+        nested_object_shape,
+    )
+    .expect("nested object list parses");
+    assert_eq!(nested_object[0]["cidr"], "192.0.2.0/24");
     assert!(message(list_objects(
         "steps-empty-field.yaml",
         "phase:\n  steps:\n    - : value\n",

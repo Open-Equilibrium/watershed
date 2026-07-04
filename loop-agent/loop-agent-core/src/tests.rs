@@ -225,6 +225,42 @@ fn session_id_and_resume_helpers_cover_fallback_edges() {
         Err(RuntimeError::Protocol(message))
             if message.contains("does not identify a resumable loop")
     ));
+    let mut ambiguous_registry = core_script::ResolvedRegistry {
+        connections: BTreeMap::new(),
+        instructions: BTreeMap::new(),
+        loops: BTreeMap::new(),
+        phases: BTreeMap::new(),
+        tools: BTreeMap::new(),
+    };
+    ambiguous_registry.loops.insert(
+        "loop!".to_owned(),
+        core_script::LoopBlock {
+            identity: core_script::BlockIdentity {
+                id: "loop!".to_owned(),
+                name: "Loop Bang".to_owned(),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: Vec::new(),
+            connection_refs: Vec::new(),
+        },
+    );
+    ambiguous_registry.loops.insert(
+        "loop?".to_owned(),
+        core_script::LoopBlock {
+            identity: core_script::BlockIdentity {
+                id: "loop?".to_owned(),
+                name: "Loop Question".to_owned(),
+            },
+            phase_refs: Vec::new(),
+            subloop_refs: Vec::new(),
+            connection_refs: Vec::new(),
+        },
+    );
+    assert!(matches!(
+        resumable_loop_id(&[], &ambiguous_registry, "loop001"),
+        Err(RuntimeError::Protocol(message))
+            if message.contains("ambiguously identifies a resumable loop")
+    ));
 
     let missing_definition = EventEnvelope {
         loop_id: Some("loop-001".to_owned()),
@@ -5101,6 +5137,19 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         create_replacement_temp(&path),
         Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
     ));
+    let missing_parent_temp = workspace.join("missing-temp-dir").join("file.txt");
+    assert!(matches!(
+        create_replacement_temp(&missing_parent_temp),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    for attempt in 0..100 {
+        let backup_path = replacement_backup_path(&path, attempt).expect("backup path");
+        fs::write(backup_path, "held").expect("backup collision file written");
+    }
+    assert!(matches!(
+        create_replacement_backup_path(&path),
+        Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
+    ));
 
     let dir_leaf = workspace.join("dir-leaf");
     fs::create_dir(&dir_leaf).expect("dir leaf written");
@@ -6241,6 +6290,7 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
         "workspace/out/file?.txt",
         "workspace/out/file1.txt"
     ));
+    assert!(protected_segment_match("file*", "file"));
     assert!(!protected_path_pattern_matches(
         ProtectedPathMatchMode::CaseSensitive,
         "workspace/out/file?.txt",
@@ -6254,6 +6304,10 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
     assert_eq!(
         evaluate_script_command("echo 'hello'").expect("echo literal"),
         b"hello\n"
+    );
+    assert_eq!(
+        evaluate_script_command("printf 'a\\\\b'").expect("printf backslash escape"),
+        b"a\\b"
     );
     for command in [
         "printf \"bad\"",
@@ -6289,6 +6343,24 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
     );
     assert_eq!(
         runtime_failure_for_tool_error(
+            &RuntimeError::Protocol("must not be a symlink".to_owned()),
+            "tool"
+        )
+        .expect("symlink denial maps")
+        .reason,
+        core_policy::DenyReasonCode::SymlinkEscapeDenied.as_str()
+    );
+    assert_eq!(
+        runtime_failure_for_tool_error(
+            &RuntimeError::Protocol("changed before write".to_owned()),
+            "tool"
+        )
+        .expect("write guard denial maps")
+        .reason,
+        core_policy::DenyReasonCode::WriteDenied.as_str()
+    );
+    assert_eq!(
+        runtime_failure_for_tool_error(
             &RuntimeError::Io {
                 path: PathBuf::from("out/file"),
                 source: io::Error::from(io::ErrorKind::PermissionDenied),
@@ -6299,9 +6371,46 @@ fn runtime_builder_script_and_failure_helpers_cover_edge_paths() {
         .reason,
         core_policy::DenyReasonCode::WriteDenied.as_str()
     );
+    assert!(runtime_failure_for_tool_error(
+        &RuntimeError::Io {
+            path: PathBuf::from("out/file"),
+            source: io::Error::from(io::ErrorKind::Other),
+        },
+        "tool",
+    )
+    .is_none());
     assert!(
         runtime_failure_for_tool_error(&RuntimeError::Usage("bad".to_owned()), "tool").is_none()
     );
+
+    let mut non_negative_tool = tool.clone();
+    non_negative_tool.command = core_script::ToolCommand::OwnScript("noop".to_owned());
+    assert_eq!(
+        sandbox_negative_operation_for_tool(&non_negative_tool),
+        None
+    );
+    let mut other_command = registry
+        .tool_block("read-file")
+        .expect("read-file tool exists")
+        .clone();
+    other_command.command = core_script::ToolCommand::Predefined {
+        command_id: "agent-read".to_owned(),
+        argv: vec!["write".to_owned()],
+    };
+    assert_eq!(sandbox_negative_operation_for_tool(&other_command), None);
+    let mut wrong_argv_count = other_command.clone();
+    wrong_argv_count.command = core_script::ToolCommand::Predefined {
+        command_id: "agent-negative".to_owned(),
+        argv: vec!["write".to_owned(), "extra".to_owned()],
+    };
+    assert_eq!(sandbox_negative_operation_for_tool(&wrong_argv_count), None);
+
+    let mut prior_event = base_event();
+    prior_event.event_id = "evt-001".to_owned();
+    assert_eq!(next_event_id(1, &[prior_event]), "evt-002");
+    assert!(!is_rfc3339_utc_timestamp("2026-01-01T00:00:00:00Z"));
+    assert_eq!(days_in_month(2025, 4), 30);
+    assert_eq!(days_in_month(2025, 13), 0);
 }
 
 #[test]
@@ -6960,6 +7069,81 @@ fn file_and_stream_helpers_cover_direct_edges() {
         read_file_suffix_to_string(&file_path, 1, 4),
         Err(RuntimeError::Protocol(message)) if message.contains("append-only tail")
     ));
+
+    write_existing_file(&file_path, b"rewritten").expect("existing file is rewritten");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("rewritten file readable"),
+        "rewritten"
+    );
+    append_existing_file(&file_path, b"+append").expect("existing file is appended");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("appended file readable"),
+        "rewritten+append"
+    );
+    append_existing_file_without_link_count(&file_path, b"+fallback")
+        .expect("fallback append rewrites through temp file");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("fallback appended file readable"),
+        "rewritten+append+fallback"
+    );
+    replace_existing_file_without_link_count(&file_path, b"fallback-replace")
+        .expect("fallback replace rewrites through temp file");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("fallback replaced file readable"),
+        "fallback-replace"
+    );
+    replace_existing_file_atomically(&file_path, b"atomic-replace")
+        .expect("atomic replace succeeds");
+    assert_eq!(
+        fs::read_to_string(&file_path).expect("atomic replaced file readable"),
+        "atomic-replace"
+    );
+
+    let missing_parent_child = workspace.join("missing-parent").join("child");
+    assert!(matches!(
+        ensure_created_real_directory(&missing_parent_child),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    let missing_file = workspace.join("missing-file.txt");
+    assert!(matches!(
+        ensure_real_file(&missing_file),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    assert!(matches!(
+        ensure_non_hardlinked_real_file(&missing_file),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    let reserved_dir = workspace.join("reserved-dir.jsonl");
+    fs::create_dir(&reserved_dir).expect("reserved dir created");
+    assert!(matches!(
+        reserve_session_file(&reserved_dir, "reserved001"),
+        Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
+    ));
+    let missing_parent_reserved = workspace.join("missing-reserved-dir").join("session.jsonl");
+    assert!(matches!(
+        reserve_new_file(&missing_parent_reserved),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    assert!(matches!(
+        reserve_session_file(&missing_parent_reserved, "reserved002"),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    let lock_path = workspace.join("active.lock");
+    fs::write(&lock_path, b"lock").expect("lock file written");
+    assert!(matches!(
+        reserve_session_lock_file(&lock_path, "active001"),
+        Err(RuntimeError::Protocol(message)) if message.contains("already active")
+    ));
+    let missing_parent_lock = workspace.join("missing-lock-dir").join("active.lock");
+    assert!(matches!(
+        reserve_session_lock_file(&missing_parent_lock, "active002"),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    assert!(is_active_session_error(
+        &RuntimeError::Protocol(active_session_lock_message(&lock_path, "active001")),
+        "active001"
+    ));
+    assert_eq!(suffixed_session_id(&"a".repeat(140), 42).len(), 128);
 
     let invalid_utf8 = workspace.join("invalid-utf8.txt");
     fs::write(&invalid_utf8, [0xff]).expect("invalid utf8 written");
