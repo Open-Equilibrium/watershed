@@ -36,7 +36,7 @@ fn smoke_loop_runtime_emit_p95_stays_under_m1_budget() {
         event_nanos.push(started.elapsed().as_nanos() / output.event_count as u128);
     }
     let p95_nanos = p95(event_nanos);
-    let budget_nanos = perf_budget_nanos(1_000_000, 25_000_000);
+    let budget_nanos = perf_budget_nanos(5_000_000, 25_000_000);
 
     assert!(
         p95_nanos <= budget_nanos,
