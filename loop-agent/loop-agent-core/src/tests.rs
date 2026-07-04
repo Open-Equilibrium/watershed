@@ -5256,6 +5256,46 @@ fn filesystem_guards_reject_symlink_leaves_directly() {
     ));
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn file_readers_reject_symlink_leaves_directly() {
+    let workspace = empty_workspace("file-reader-symlink-guards");
+    let target = workspace.join("target.txt");
+    let link = workspace.join("link.txt");
+    fs::write(&target, "target").expect("target file written");
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&target, &link).expect("leaf symlink created");
+    #[cfg(windows)]
+    match std::os::windows::fs::symlink_file(&target, &link) {
+        Ok(()) => {}
+        Err(err)
+            if err.kind() == io::ErrorKind::PermissionDenied
+                || err.raw_os_error() == Some(1314) =>
+        {
+            return;
+        }
+        Err(err) => panic!("leaf symlink created: {err}"),
+    }
+
+    assert!(matches!(
+        read_to_string_with_limit(&link, MAX_SESSION_LOG_BYTES),
+        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
+    ));
+    assert!(matches!(
+        session_log_len(&link),
+        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
+    ));
+    assert!(matches!(
+        read_file_suffix_to_string(&link, 0, 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
+    ));
+    assert!(matches!(
+        read_file_range(&link, 0, MAX_SESSION_LOG_BYTES),
+        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
+    ));
+}
+
 #[test]
 fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
     let workspace = empty_workspace("fallback-file-replacement");
