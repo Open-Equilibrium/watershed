@@ -41,6 +41,24 @@ class CodexHarnessValidatorTest(unittest.TestCase):
     def test_current_harness_is_valid(self) -> None:
         self.assertEqual([], validator.validate_repo(ROOT))
 
+    def test_project_python_launcher_runs_python(self) -> None:
+        result = subprocess.run(
+            [
+                "node",
+                str(ROOT / "scripts" / "run-python.mjs"),
+                "-c",
+                "import sys; sys.stdout.write('ok')",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        self.assertEqual("ok", result.stdout)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+
     def test_rejects_unknown_config_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -123,6 +141,24 @@ class CodexHarnessValidatorTest(unittest.TestCase):
 
         self.assertIn(
             ".codex/hooks.json: hook command references missing script .codex/hooks/missing.py",
+            errors,
+        )
+
+    def test_rejects_posix_shell_hook_launcher(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            hooks_path = root / ".codex" / "hooks.json"
+            payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+            payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = (
+                'sh -c \'exec python "$1"\' sh ".codex/hooks/pre_tool_use_guard.py"'
+            )
+            hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = validator.validate_repo(root)
+
+        self.assertIn(
+            ".codex/hooks.json: hook command must not require a POSIX shell",
             errors,
         )
 

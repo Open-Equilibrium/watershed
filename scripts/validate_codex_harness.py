@@ -179,6 +179,8 @@ def validate_hook_command(
     command = hook.get("command")
     if not isinstance(command, str) or not command:
         return errors + [f"{prefix}.command must be a non-empty string"]
+    if re.search(r"(?:^|\s)(?:bash|sh)\s+-c(?:\s|$)", command):
+        errors.append(f"{rel}: hook command must not require a POSIX shell")
     timeout = hook.get("timeout")
     if not isinstance(timeout, int) or timeout <= 0:
         errors.append(f"{prefix}.timeout must be a positive integer")
