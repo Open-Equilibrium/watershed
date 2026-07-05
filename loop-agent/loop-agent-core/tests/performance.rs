@@ -8,7 +8,7 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc, Barrier, Mutex, MutexGuard,
     },
     thread,
@@ -96,7 +96,13 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
 #[test]
 fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() {
     let _guard = performance_test_guard();
-    let resident_bytes_before = current_resident_set_size();
+    let peak_rss_sampler = if rss_budget_must_be_enforced() {
+        let baseline = current_resident_set_size()
+            .expect("RSS measurement must be available on this enforced target before the run");
+        Some(PeakRssSampler::start(baseline))
+    } else {
+        None
+    };
     let workspaces = [
         ("smoke-loop", "smoke-loop"),
         ("hello-loop", "hello-loop"),
@@ -175,16 +181,14 @@ fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() 
         total_workspace_bytes < 64 * 1024 * 1024,
         "concurrent fixture workspaces must stay bounded: {total_workspace_bytes} bytes"
     );
-    if rss_budget_must_be_enforced() {
-        let before = resident_bytes_before
-            .expect("RSS measurement must be available on this enforced target before the run");
-        let after = current_resident_set_size()
-            .expect("RSS measurement must be available on this enforced target after the run");
-        let growth = i128::from(after) - i128::from(before);
-        let budget = 10 * 1024 * 1024 * concurrency as u64;
+    if let Some(mut sampler) = peak_rss_sampler {
+        let baseline = sampler.baseline();
+        let peak_growth = sampler.finish().saturating_sub(baseline);
+        let per_loop_budget = 10 * 1024 * 1024;
+        let budget = per_loop_budget * concurrency as u64;
         assert!(
-            growth <= i128::from(budget),
-            "concurrent fixture RSS growth must stay <= {budget} bytes: {growth} bytes"
+            peak_growth <= budget,
+            "concurrent fixture peak RSS growth must stay <= {per_loop_budget} bytes per active top-level loop ({budget} bytes total): {peak_growth} bytes"
         );
     }
 }
@@ -245,6 +249,63 @@ fn performance_test_guard() -> MutexGuard<'static, ()> {
     PERFORMANCE_TEST_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+struct PeakRssSampler {
+    baseline: u64,
+    peak: Arc<AtomicU64>,
+    running: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl PeakRssSampler {
+    fn start(baseline: u64) -> Self {
+        let peak = Arc::new(AtomicU64::new(baseline));
+        let running = Arc::new(AtomicBool::new(true));
+        let sampler_peak = Arc::clone(&peak);
+        let sampler_running = Arc::clone(&running);
+        let handle = thread::spawn(move || {
+            // Sample while workers are live: post-join RSS deltas can miss transient peaks.
+            while sampler_running.load(Ordering::Acquire) {
+                if let Some(current) = current_resident_set_size() {
+                    sampler_peak.fetch_max(current, Ordering::AcqRel);
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            if let Some(current) = current_resident_set_size() {
+                sampler_peak.fetch_max(current, Ordering::AcqRel);
+            }
+        });
+
+        Self {
+            baseline,
+            peak,
+            running,
+            handle: Some(handle),
+        }
+    }
+
+    fn baseline(&self) -> u64 {
+        self.baseline
+    }
+
+    fn finish(&mut self) -> u64 {
+        self.stop();
+        self.peak.load(Ordering::Acquire)
+    }
+
+    fn stop(&mut self) {
+        self.running.store(false, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            handle.join().expect("RSS sampler joins");
+        }
+    }
+}
+
+impl Drop for PeakRssSampler {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 #[test]

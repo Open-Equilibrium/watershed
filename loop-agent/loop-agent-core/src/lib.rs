@@ -340,10 +340,11 @@ pub fn run_loop(
         policy,
         loop_block,
         &expected_session_id,
-        LoopExecutionOptions::new(
+        LoopExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
             ToolSideEffectMode::DryRun,
             SideEffectRecorder::none(),
+            config.stub_model_fixture_profile,
         ),
     ) {
         Ok(runtime) => runtime,
@@ -386,10 +387,11 @@ pub fn run_loop(
             policy,
             loop_block,
             &expected_session_id,
-            LoopExecutionOptions::new(
+            LoopExecutionOptions::with_stub_model_fixture_profile(
                 config.event_clock,
                 ToolSideEffectMode::ApplyAll,
                 SideEffectRecorder::for_reservation(&reservation),
+                config.stub_model_fixture_profile,
             ),
         )?;
         reservation.mark_side_effects_applied();
@@ -677,10 +679,11 @@ pub fn resume_session(
         policy,
         loop_block,
         session_id,
-        LoopExecutionOptions::new(
+        LoopExecutionOptions::with_stub_model_fixture_profile(
             resume_event_clock(&config, &events)?,
             ToolSideEffectMode::DryRun,
             SideEffectRecorder::none(),
+            config.stub_model_fixture_profile,
         ),
     )?;
     let resume_prefix = validate_resume_replay_prefix(
@@ -701,12 +704,13 @@ pub fn resume_session(
         policy,
         loop_block,
         session_id,
-        LoopExecutionOptions::new(
+        LoopExecutionOptions::with_stub_model_fixture_profile(
             resume_event_clock(&config, &events)?,
             ToolSideEffectMode::PreflightResume {
                 prefix_event_count: resume_prefix.planned_event_count as u64,
             },
             SideEffectRecorder::none(),
+            config.stub_model_fixture_profile,
         ),
     )?;
     if preflight_runtime.events != planned_runtime.events {
@@ -735,12 +739,13 @@ pub fn resume_session(
         policy,
         loop_block,
         session_id,
-        LoopExecutionOptions::new(
+        LoopExecutionOptions::with_stub_model_fixture_profile(
             resume_event_clock(&config, &events)?,
             ToolSideEffectMode::Resume {
                 prefix_event_count: resume_prefix.planned_event_count as u64,
             },
             SideEffectRecorder::none(),
+            config.stub_model_fixture_profile,
         ),
     )?;
     let terminal_error = resumed_runtime.terminal_error;
@@ -1723,7 +1728,7 @@ fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
 
 #[cfg(unix)]
 fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    ensure_real_file(path)?;
+    ensure_non_hardlinked_real_file(path)?;
     let mut file = fs::OpenOptions::new()
         .write(true)
         .open(path)
@@ -1775,7 +1780,7 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
 
 #[cfg(unix)]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    ensure_real_file(path)?;
+    ensure_non_hardlinked_real_file(path)?;
     let mut file = fs::OpenOptions::new()
         .append(true)
         .open(path)
@@ -1837,7 +1842,7 @@ fn replace_existing_file_without_link_count(
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
     ensure_parent_real_directory(path)?;
-    ensure_real_file(path)?;
+    ensure_non_hardlinked_real_file(path)?;
     let (temp_path, mut temp_file) = create_replacement_temp(path, None)?;
     if let Err(err) = temp_file
         .write_all(contents)
@@ -1852,7 +1857,7 @@ fn replace_existing_file_without_link_count(
     drop(temp_file);
 
     ensure_parent_real_directory(path)?;
-    ensure_real_file(path)?;
+    ensure_non_hardlinked_real_file(path)?;
     replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
 }
 
@@ -1907,9 +1912,9 @@ fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), Runtim
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn ensure_not_hardlinked_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if hard_link_count(metadata) > 1 {
+    if hard_link_count(path, metadata)? > 1 {
         return Err(RuntimeError::Protocol(format!(
             "{} must not be hard-linked",
             path.display()
@@ -1918,7 +1923,7 @@ fn ensure_not_hardlinked_file(path: &Path, metadata: &fs::Metadata) -> Result<()
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn ensure_not_hardlinked_file(_path: &Path, _metadata: &fs::Metadata) -> Result<(), RuntimeError> {
     Ok(())
 }
@@ -1954,6 +1959,7 @@ struct RuntimeFailure {
 struct RuntimeToolPolicy<'a> {
     command: &'a core_policy::CommandPolicy,
     protected_path_match_mode: ProtectedPathMatchMode,
+    stub_model_fixture_profile: bool,
     target: &'a core_policy::PolicyTarget,
 }
 
@@ -2011,9 +2017,11 @@ struct LoopExecutionOptions<'a> {
     clock: EventClock,
     side_effect_mode: ToolSideEffectMode,
     side_effect_recorder: SideEffectRecorder<'a>,
+    stub_model_fixture_profile: bool,
 }
 
 impl<'a> LoopExecutionOptions<'a> {
+    #[cfg(test)]
     fn new(
         clock: EventClock,
         side_effect_mode: ToolSideEffectMode,
@@ -2023,6 +2031,21 @@ impl<'a> LoopExecutionOptions<'a> {
             clock,
             side_effect_mode,
             side_effect_recorder,
+            stub_model_fixture_profile: true,
+        }
+    }
+
+    fn with_stub_model_fixture_profile(
+        clock: EventClock,
+        side_effect_mode: ToolSideEffectMode,
+        side_effect_recorder: SideEffectRecorder<'a>,
+        stub_model_fixture_profile: bool,
+    ) -> Self {
+        Self {
+            clock,
+            side_effect_mode,
+            side_effect_recorder,
+            stub_model_fixture_profile,
         }
     }
 }
@@ -2192,6 +2215,7 @@ fn execute_loop(
         policy,
         side_effect_mode: options.side_effect_mode,
         side_effect_recorder: options.side_effect_recorder,
+        stub_model_fixture_profile: options.stub_model_fixture_profile,
     };
     let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
         Ok(failed) => failed,
@@ -2290,11 +2314,11 @@ fn preflight_phase_tools(
         })?;
         let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
         ensure_tool_matches_policy(tool, &policy.target, command_policy)?;
-        preflight_tool_progress(
-            workspace,
+        tool_dispatch_progress(
             tool,
             runtime_protected_path_match_mode(&policy.target),
             command_policy,
+            ToolDispatchMode::Preflight { workspace },
         )?;
     }
     Ok(())
@@ -2315,6 +2339,7 @@ struct LoopEmitContext<'a> {
     policy: &'a core_policy::PolicyArtifact,
     side_effect_mode: ToolSideEffectMode,
     side_effect_recorder: SideEffectRecorder<'a>,
+    stub_model_fixture_profile: bool,
 }
 
 fn emit_loop_block_at_depth(
@@ -2470,9 +2495,12 @@ fn emit_phase(
         }
 
         if step_index == 0 {
-            if let Some(failure) =
-                sandbox_out_of_phase_failure(context.registry, context.policy, phase)
-            {
+            if let Some(failure) = sandbox_out_of_phase_failure(
+                context.registry,
+                context.policy,
+                phase,
+                context.stub_model_fixture_profile,
+            ) {
                 builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
                 return Ok(Some(failure));
             }
@@ -2488,6 +2516,7 @@ fn emit_phase(
                     protected_path_match_mode: runtime_protected_path_match_mode(
                         &context.policy.target,
                     ),
+                    stub_model_fixture_profile: context.stub_model_fixture_profile,
                     target: &context.policy.target,
                 };
                 match emit_tool(
@@ -2717,8 +2746,12 @@ fn emit_tool(
     builder: &mut RuntimeEventBuilder,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     ensure_tool_matches_policy(tool, policy.target, policy.command)?;
-    let planned_progress =
-        planned_tool_progress(tool, policy.protected_path_match_mode, policy.command)?;
+    let planned_progress = tool_dispatch_progress(
+        tool,
+        policy.protected_path_match_mode,
+        policy.command,
+        ToolDispatchMode::Plan,
+    )?;
     builder.emit(
         Some(invocation),
         EventType::ToolStarted,
@@ -2733,7 +2766,12 @@ fn emit_tool(
         }),
     )?;
 
-    if let Some(failure) = sandbox_tool_dispatch_failure(tool, policy.target, policy.command)? {
+    if let Some(failure) = sandbox_tool_dispatch_failure(
+        tool,
+        policy.target,
+        policy.command,
+        policy.stub_model_fixture_profile,
+    )? {
         return Ok(Some(failure));
     }
 
@@ -2745,12 +2783,14 @@ fn emit_tool(
         completed_sequence
     };
     let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
-        match execute_tool(
-            workspace,
+        match tool_dispatch_progress(
             tool,
             policy.protected_path_match_mode,
             policy.command,
-            side_effect_recorder,
+            ToolDispatchMode::Execute {
+                workspace,
+                side_effect_recorder,
+            },
         ) {
             Ok(progress) => progress,
             Err(err) => {
@@ -2763,11 +2803,11 @@ fn emit_tool(
             }
         }
     } else if side_effect_mode.should_preflight_tool(replay_guard_sequence) {
-        preflight_tool_progress(
-            workspace,
+        tool_dispatch_progress(
             tool,
             policy.protected_path_match_mode,
             policy.command,
+            ToolDispatchMode::Preflight { workspace },
         )?
     } else {
         planned_progress
@@ -2788,39 +2828,22 @@ fn emit_tool(
     Ok(None)
 }
 
-fn execute_tool(
-    workspace: &Path,
-    tool: &core_script::ToolBlock,
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
-    side_effect_recorder: SideEffectRecorder<'_>,
-) -> Result<Option<&'static str>, RuntimeError> {
-    match (&tool.tool_kind, &tool.command) {
-        (
-            core_script::ToolKind::PredefinedCommand,
-            core_script::ToolCommand::Predefined { command_id, argv },
-        ) => execute_predefined_command(policy, command_id, argv),
-        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            execute_own_script(
-                workspace,
-                tool,
-                protected_path_match_mode,
-                policy,
-                side_effect_recorder,
-            )?;
-            Ok(Some("stub write completed"))
-        }
-        _ => Err(RuntimeError::Protocol(format!(
-            "tool command shape does not match {}",
-            tool.identity.id
-        ))),
-    }
+enum ToolDispatchMode<'a> {
+    Plan,
+    Preflight {
+        workspace: &'a Path,
+    },
+    Execute {
+        workspace: &'a Path,
+        side_effect_recorder: SideEffectRecorder<'a>,
+    },
 }
 
-fn planned_tool_progress(
+fn tool_dispatch_progress(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
+    mode: ToolDispatchMode<'_>,
 ) -> Result<Option<&'static str>, RuntimeError> {
     match (&tool.tool_kind, &tool.command) {
         (
@@ -2828,30 +2851,25 @@ fn planned_tool_progress(
             core_script::ToolCommand::Predefined { command_id, argv },
         ) => execute_predefined_command(policy, command_id, argv),
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            plan_own_script(tool, protected_path_match_mode, policy)?;
-            Ok(Some("stub write completed"))
-        }
-        _ => Err(RuntimeError::Protocol(format!(
-            "tool command shape does not match {}",
-            tool.identity.id
-        ))),
-    }
-}
-
-fn preflight_tool_progress(
-    workspace: &Path,
-    tool: &core_script::ToolBlock,
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
-) -> Result<Option<&'static str>, RuntimeError> {
-    match (&tool.tool_kind, &tool.command) {
-        (
-            core_script::ToolKind::PredefinedCommand,
-            core_script::ToolCommand::Predefined { command_id, argv },
-        ) => execute_predefined_command(policy, command_id, argv),
-        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
-            preflight_own_script_outputs(workspace, &operations)?;
+            match mode {
+                ToolDispatchMode::Plan => {
+                    plan_own_script(tool, protected_path_match_mode, policy)?;
+                }
+                ToolDispatchMode::Preflight { workspace } => {
+                    let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
+                    preflight_own_script_outputs(workspace, &operations)?;
+                }
+                ToolDispatchMode::Execute {
+                    workspace,
+                    side_effect_recorder,
+                } => execute_own_script(
+                    workspace,
+                    tool,
+                    protected_path_match_mode,
+                    policy,
+                    side_effect_recorder,
+                )?,
+            }
             Ok(Some("stub write completed"))
         }
         _ => Err(RuntimeError::Protocol(format!(
@@ -3398,10 +3416,83 @@ fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
 }
 
 #[cfg(unix)]
-fn hard_link_count(metadata: &fs::Metadata) -> u64 {
+fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
     use std::os::unix::fs::MetadataExt;
 
-    metadata.nlink()
+    Ok(metadata.nlink())
+}
+
+#[cfg(windows)]
+fn hard_link_count(path: &Path, _metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
+    use std::{ffi::c_void, os::windows::io::AsRawHandle};
+
+    #[repr(C)]
+    struct FileTime {
+        low_date_time: u32,
+        high_date_time: u32,
+    }
+
+    #[repr(C)]
+    struct ByHandleFileInformation {
+        file_attributes: u32,
+        creation_time: FileTime,
+        last_access_time: FileTime,
+        last_write_time: FileTime,
+        volume_serial_number: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(
+            file: *mut c_void,
+            file_information: *mut ByHandleFileInformation,
+        ) -> i32;
+    }
+
+    let file = fs::File::open(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    let mut information = ByHandleFileInformation {
+        file_attributes: 0,
+        creation_time: FileTime {
+            low_date_time: 0,
+            high_date_time: 0,
+        },
+        last_access_time: FileTime {
+            low_date_time: 0,
+            high_date_time: 0,
+        },
+        last_write_time: FileTime {
+            low_date_time: 0,
+            high_date_time: 0,
+        },
+        volume_serial_number: 0,
+        file_size_high: 0,
+        file_size_low: 0,
+        number_of_links: 0,
+        file_index_high: 0,
+        file_index_low: 0,
+    };
+    let ok = unsafe {
+        GetFileInformationByHandle(
+            file.as_raw_handle().cast::<c_void>(),
+            &mut information as *mut ByHandleFileInformation,
+        )
+    };
+    if ok == 0 {
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source: io::Error::last_os_error(),
+        });
+    }
+
+    Ok(u64::from(information.number_of_links))
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
@@ -3557,12 +3648,12 @@ fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn ensure_script_leaf_not_hardlinked(
     path: &Path,
     metadata: &fs::Metadata,
 ) -> Result<(), RuntimeError> {
-    if hard_link_count(metadata) > 1 {
+    if hard_link_count(path, metadata)? > 1 {
         return Err(runtime_denied(
             core_policy::DenyReasonCode::WriteDenied,
             format!("{} must not be hard-linked", path.display()),
@@ -3571,7 +3662,7 @@ fn ensure_script_leaf_not_hardlinked(
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn ensure_script_leaf_not_hardlinked(
     _path: &Path,
     _metadata: &fs::Metadata,
@@ -3681,8 +3772,12 @@ fn sandbox_tool_dispatch_failure(
     tool: &core_script::ToolBlock,
     target: &core_policy::PolicyTarget,
     command_policy: &core_policy::CommandPolicy,
+    stub_model_fixture_profile: bool,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     ensure_tool_matches_policy(tool, target, command_policy)?;
+    if !stub_model_fixture_profile {
+        return Ok(None);
+    }
     let Some(reason_code) = sandbox_negative_reason_for_tool(tool)? else {
         return Ok(None);
     };
@@ -3696,8 +3791,10 @@ fn sandbox_out_of_phase_failure(
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     phase: &core_script::PhaseBlock,
+    stub_model_fixture_profile: bool,
 ) -> Option<RuntimeFailure> {
-    if !phase.tool_refs.is_empty()
+    if !stub_model_fixture_profile
+        || !phase.tool_refs.is_empty()
         || !phase.identity.id.starts_with("negative-")
         || !phase.identity.id.contains("no-tools")
     {
@@ -3994,10 +4091,16 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
             ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
         ));
     }
-    let event_clock = workspace_event_clock(&text)?;
+    let stub_model_fixture_profile = workspace_stub_model_fixture_profile(&text)?;
+    let event_clock = if stub_model_fixture_profile {
+        EventClock::fixed_fixture()
+    } else {
+        EventClock::wall_clock()
+    };
     Ok(WorkspaceConfig {
         event_clock,
         registry_root,
+        stub_model_fixture_profile,
     })
 }
 
@@ -4080,15 +4183,25 @@ fn unquote_config_scalar(value: &str) -> String {
 struct WorkspaceConfig {
     event_clock: EventClock,
     registry_root: PathBuf,
+    stub_model_fixture_profile: bool,
 }
 
+#[cfg(test)]
 fn workspace_event_clock(text: &str) -> Result<EventClock, RuntimeError> {
+    if workspace_stub_model_fixture_profile(text)? {
+        Ok(EventClock::fixed_fixture())
+    } else {
+        Ok(EventClock::wall_clock())
+    }
+}
+
+fn workspace_stub_model_fixture_profile(text: &str) -> Result<bool, RuntimeError> {
     match (
         config_value(text, "fixture_profile"),
         config_value(text, "stub_model"),
     ) {
         (Some(profile), Some(model)) if profile == "stub-model" && model == "deterministic" => {
-            Ok(EventClock::fixed_fixture())
+            Ok(true)
         }
         (Some(profile), None) if profile == "stub-model" => Err(RuntimeError::Usage(
             ".loop/config.yaml fixture_profile stub-model requires stub_model: deterministic"
@@ -4104,7 +4217,7 @@ fn workspace_event_clock(text: &str) -> Result<EventClock, RuntimeError> {
         (_, Some(model)) if model != "deterministic" => Err(RuntimeError::Usage(format!(
             "unsupported .loop/config.yaml stub_model {model:?}"
         ))),
-        _ => Ok(EventClock::wall_clock()),
+        _ => Ok(false),
     }
 }
 

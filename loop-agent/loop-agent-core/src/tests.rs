@@ -908,16 +908,23 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
     let mut mismatched_shape = write_tool.clone();
     mismatched_shape.tool_kind = core_script::ToolKind::PredefinedCommand;
     assert!(matches!(
-        planned_tool_progress(&mismatched_shape, match_mode, write_policy),
-        Err(RuntimeError::Protocol(message)) if message.contains("command shape")
-    ));
-    assert!(matches!(
-        execute_tool(
-            Path::new("."),
+        tool_dispatch_progress(
             &mismatched_shape,
             match_mode,
             write_policy,
-            SideEffectRecorder::none(),
+            ToolDispatchMode::Plan,
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("command shape")
+    ));
+    assert!(matches!(
+        tool_dispatch_progress(
+            &mismatched_shape,
+            match_mode,
+            write_policy,
+            ToolDispatchMode::Execute {
+                workspace: Path::new("."),
+                side_effect_recorder: SideEffectRecorder::none(),
+            },
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("command shape")
     ));
@@ -1026,6 +1033,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         policy: &policy,
         side_effect_mode: ToolSideEffectMode::DryRun,
         side_effect_recorder: SideEffectRecorder::none(),
+        stub_model_fixture_profile: true,
     };
     let mut builder =
         RuntimeEventBuilder::with_clock("mutated001".to_owned(), EventClock::fixed_fixture());
@@ -1047,6 +1055,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         policy: &policy,
         side_effect_mode: ToolSideEffectMode::DryRun,
         side_effect_recorder: SideEffectRecorder::none(),
+        stub_model_fixture_profile: true,
     };
     let mut builder =
         RuntimeEventBuilder::with_clock("mutated001".to_owned(), EventClock::fixed_fixture());
@@ -1981,6 +1990,25 @@ fn sandbox_negative_write_reaches_tool_dispatch_before_denial() {
 }
 
 #[test]
+fn sandbox_negative_dispatch_requires_stub_model_fixture_profile() {
+    let workspace = workspace_copy("sandbox-negative");
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "registry_root: registry\n",
+    )
+    .expect("config rewritten without fixture profile");
+
+    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+        .expect("non-fixture workspace runs");
+
+    assert!(!output.failed);
+    assert!(output
+        .stdout
+        .contains("\"event_type\":\"session.completed\""));
+    assert!(!output.stdout.contains("write_denied"));
+}
+
+#[test]
 fn nested_sandbox_denial_emits_child_tool_failure_only() {
     let workspace = workspace_copy("sandbox-negative");
     fs::write(
@@ -2128,6 +2156,29 @@ fn sandbox_out_of_phase_denial_reports_attempt_context() {
     );
     assert!(error.payload.get("phase_id").is_none());
     assert!(error.payload.get("tool_id").is_none());
+}
+
+#[test]
+fn sandbox_out_of_phase_denial_requires_stub_model_fixture_profile() {
+    let workspace = workspace_copy("sandbox-negative");
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "registry_root: registry\n",
+    )
+    .expect("config rewritten without fixture profile");
+
+    let output = run_loop(
+        &workspace,
+        "sandbox-negative-tool-out-of-phase",
+        EmitMode::Jsonl,
+    )
+    .expect("non-fixture workspace runs");
+
+    assert!(!output.failed);
+    assert!(output
+        .stdout
+        .contains("\"event_type\":\"session.completed\""));
+    assert!(!output.stdout.contains("tool_out_of_phase"));
 }
 
 #[test]
@@ -2488,7 +2539,7 @@ fn completed_session_log_append_rejects_streams_above_size_limit() {
     reservation.rollback();
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn write_existing_file_rejects_hardlinked_leaf_without_truncating_target() {
     let workspace = empty_workspace("session-hardlink");
@@ -4049,7 +4100,7 @@ fn session_metadata_helpers_reject_malformed_inputs() {
     ));
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn resume_rejects_hardlinked_session_log_before_side_effects() {
     let workspace = workspace_copy("hello-loop");
@@ -4269,7 +4320,7 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
     );
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 #[test]
 fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
     let workspace = workspace_copy("smoke-loop");
@@ -6186,11 +6237,11 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     let command_policy = command_policy_for_phase(&policy, &phase.identity.id, tool)
         .expect("negative tool policy exists");
     assert!(
-        sandbox_tool_dispatch_failure(tool, &policy.target, command_policy)
+        sandbox_tool_dispatch_failure(tool, &policy.target, command_policy, true)
             .expect("sandbox failure resolves")
             .is_some()
     );
-    assert!(sandbox_out_of_phase_failure(&registry, &policy, phase).is_none());
+    assert!(sandbox_out_of_phase_failure(&registry, &policy, phase, true).is_none());
 
     let mut extra_arg_tool = tool.clone();
     extra_arg_tool.command = core_script::ToolCommand::Predefined {
@@ -7839,7 +7890,7 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
     let workspace = workspace_copy("hello-loop");
@@ -7864,7 +7915,7 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 #[test]
 fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified(
 ) {
@@ -7913,27 +7964,28 @@ fn m1_performance_fixture_runtime_paths_are_exercised() {
 
 #[test]
 fn fsm_transition_p95_stays_under_m1_budget() {
-    let smoke = expected_stream("smoke-loop", "smoke-loop.jsonl");
-    let events =
-        validate_protocol_jsonl_text(Path::new("smoke-loop.jsonl"), &smoke).expect("valid");
-    let event_count = events.len() as u128;
+    let event_count = emit_runtime_events_for_budget().expect("warm runtime emit succeeds") as u128;
     let mut nanos_per_event = Vec::new();
 
     for _ in 0..30 {
-        validate_session_lifecycle(Path::new("fsm-budget.jsonl"), &events)
-            .expect("warm FSM validation succeeds");
+        assert_eq!(
+            emit_runtime_events_for_budget().expect("warm runtime emit succeeds") as u128,
+            event_count
+        );
     }
     for _ in 0..200 {
         let started = Instant::now();
-        validate_session_lifecycle(Path::new("fsm-budget.jsonl"), &events)
-            .expect("FSM validation succeeds");
+        assert_eq!(
+            emit_runtime_events_for_budget().expect("runtime emit succeeds") as u128,
+            event_count
+        );
         nanos_per_event.push(started.elapsed().as_nanos() / event_count);
     }
     let p95_nanos = p95_nanos(nanos_per_event);
 
     assert!(
         p95_nanos <= 1_000_000,
-        "FSM transition p95 must stay <= 1 ms/event: {p95_nanos} ns"
+        "runtime event emit and serialization p95 must stay <= 1 ms/event: {p95_nanos} ns"
     );
 }
 
@@ -7948,6 +8000,7 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
     let tool_policy = RuntimeToolPolicy {
         command: command_policy,
         protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
+        stub_model_fixture_profile: true,
         target: &policy.target,
     };
     let invocation = LoopInvocation {
@@ -8625,6 +8678,94 @@ fn sandbox_expected_decision_texts(
         (core_policy::PolicyTarget::LinuxLandlockSeccomp, linux),
         (core_policy::PolicyTarget::MacosSeatbelt, macos),
     ])
+}
+
+fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
+    let mut builder =
+        RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture());
+    let invocation = LoopInvocation {
+        loop_id: "loop-001".to_owned(),
+        parent_loop_id: None,
+    };
+
+    builder.emit(
+        None,
+        EventType::SessionStarted,
+        serde_json::json!({"reason":"fixture-start"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::LoopStarted,
+        serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::PhaseEntered,
+        serde_json::json!({
+            "instruction_ids": ["say-hello"],
+            "phase_id": "smoke",
+            "phase_name": "Smoke",
+            "tool_ids": ["echo"],
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::StepStarted,
+        serde_json::json!({
+            "phase_id": "smoke",
+            "step_id": "say",
+            "step_name": "Say",
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::MessageDelta,
+        serde_json::json!({
+            "content_delta": "hello",
+            "message_id": "msg-001",
+            "role": "assistant",
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::MessageCompleted,
+        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::ToolStarted,
+        serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "read_scope": ["workspace"],
+            "tool_id": "echo",
+            "tool_kind": "predefined-command",
+            "tool_name": "Echo",
+            "write_scope": [],
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::ToolCompleted,
+        serde_json::json!({"exit_code":0,"tool_id":"echo"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::StepCompleted,
+        serde_json::json!({
+            "phase_id": "smoke",
+            "step_id": "say",
+            "step_name": "Say",
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::LoopCompleted,
+        serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
+    )?;
+    builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
+
+    Ok(builder.events.len())
 }
 
 fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
