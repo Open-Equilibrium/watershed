@@ -5225,13 +5225,10 @@ fn filesystem_guards_reject_unexpected_leaf_shapes() {
         ensure_parent_real_directory(&workspace.join("missing-parent/file.txt")),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
-    assert_eq!(
-        read_to_bytes(&file_path).expect("file bytes are readable"),
-        b"x"
-    );
+    assert_eq!(fs::read(&file_path).expect("file bytes are readable"), b"x");
     assert!(matches!(
-        read_to_bytes(&missing_file),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+        fs::read(&missing_file),
+        Err(source) if source.kind() == io::ErrorKind::NotFound
     ));
     assert_eq!(
         read_to_string_with_limit(&file_path, 1).expect("limited file text is readable"),
@@ -5353,6 +5350,23 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
     assert_eq!(
         fs::read_to_string(&path).expect("replaced file readable"),
         "new"
+    );
+    let oversized = workspace.join("oversized.log");
+    fs::File::create(&oversized)
+        .expect("oversized file created")
+        .set_len(MAX_SESSION_LOG_BYTES)
+        .expect("oversized file length set");
+    let err = append_existing_file_without_link_count(&oversized, b"x")
+        .expect_err("fallback append must enforce session log budget");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("session log")
+    ));
+    assert_eq!(
+        fs::metadata(&oversized)
+            .expect("oversized file metadata")
+            .len(),
+        MAX_SESSION_LOG_BYTES
     );
 
     assert!(replacement_temp_path(&path, 7)

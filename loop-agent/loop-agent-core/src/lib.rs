@@ -1800,9 +1800,42 @@ fn append_existing_file_without_link_count(
     path: &Path,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
-    let mut appended = read_to_bytes(path)?;
+    let mut appended = read_existing_file_for_session_log_append(path, contents.len())?;
     appended.extend_from_slice(contents);
     replace_existing_file_without_link_count(path, &appended)
+}
+
+#[cfg(any(not(unix), test))]
+fn read_existing_file_for_session_log_append(
+    path: &Path,
+    appended_bytes: usize,
+) -> Result<Vec<u8>, RuntimeError> {
+    let (file, metadata) = open_real_file_for_read(path)?;
+    let existing_bytes = metadata.len();
+    let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
+    let total = existing_bytes.saturating_add(appended_bytes);
+    if total > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} session log size {total} bytes exceeds max {}",
+            path.display(),
+            MAX_SESSION_LOG_BYTES
+        )));
+    }
+
+    let mut bytes = Vec::with_capacity(usize::try_from(total).unwrap_or(0));
+    file.take(existing_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != existing_bytes {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed outside append-only tail semantics",
+            path.display()
+        )));
+    }
+    Ok(bytes)
 }
 
 #[cfg(any(not(unix), test))]
@@ -4337,14 +4370,6 @@ fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, 
         )));
     }
     Ok(bytes)
-}
-
-#[cfg(any(not(unix), test))]
-fn read_to_bytes(path: &Path) -> Result<Vec<u8>, RuntimeError> {
-    fs::read(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })
 }
 
 /// Validates public v0 event JSONL canonical bytes, envelope fields, payload
