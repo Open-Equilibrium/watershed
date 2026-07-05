@@ -134,25 +134,28 @@ class M1ValidationContractTest(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        decisions = (ROOT / "docs" / "decisions" / "open-decisions.html").read_text(
+        open_decisions = (ROOT / "docs" / "decisions" / "open-decisions.html").read_text(
             encoding="utf-8"
         )
+        adr_log = (ROOT / "docs" / "adr" / "ADR-LOG.md").read_text(encoding="utf-8")
         plan = (ROOT / "PLAN.md").read_text(encoding="utf-8")
 
         self.assertIn("pull_request:\n    branches: [main]", workflow)
         self.assertIn('push:\n    branches: [main, "feat/**"]', workflow)
+        self.assertNotIn('id="d-056"', open_decisions)
         for token in [
-            'id="d-056"',
-            "D-056 - CI Trigger And Branch Protection Scope",
-            "CI runs for pull requests targeting main, pushes to main and pushes to feat/**",
-            "Which GitHub branch protection or ruleset should require the M1 gates",
+            "ADR-0056",
+            "M1 merge protection requires the main-branch ruleset",
+            "`feat/**` push CI stays advisory",
         ]:
-            self.assertIn(token, decisions)
-        self.assertIn(
-            "CI runs for PRs targeting `main`, pushes to `main` and pushes to `feat/**`; "
-            "branch protection/ruleset activation remains D-056.",
-            plan,
-        )
+            self.assertIn(token, adr_log)
+        for token in [
+            "D-056 is closed by ADR-0056",
+            "main-branch protection requires the M1 gates for PR merges",
+            "ADR-0056 keeps the main-branch ruleset as the required M1 merge gate",
+            "`feat/**` push CI stays advisory",
+        ]:
+            self.assertIn(token, plan)
 
 
 if __name__ == "__main__":
