@@ -1,0 +1,767 @@
+fn execute_own_script(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+    side_effect_recorder: SideEffectRecorder<'_>,
+) -> Result<(), RuntimeError> {
+    if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} must use script_runtime posix-sh",
+            tool.identity.id
+        )));
+    }
+    let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
+    for operation in operations {
+        match operation {
+            ScriptOperation::Noop => {}
+            ScriptOperation::Write { contents, target } => {
+                write_script_output(workspace, &target, &contents, side_effect_recorder)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn plan_own_script(
+    tool: &core_script::ToolBlock,
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+) -> Result<Vec<ScriptOperation>, RuntimeError> {
+    if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} must use script_runtime posix-sh",
+            tool.identity.id
+        )));
+    }
+    let script_body = tool.script_body.as_deref().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "tool {} must include script_body",
+            tool.identity.id
+        ))
+    })?;
+    compile_own_script_operations(protected_path_match_mode, policy, script_body)
+}
+
+enum ScriptOperation {
+    Noop,
+    Write { contents: Vec<u8>, target: String },
+}
+
+fn compile_own_script_operations(
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+    script_body: &str,
+) -> Result<Vec<ScriptOperation>, RuntimeError> {
+    let mut operations = Vec::new();
+    let mut write_count = 0usize;
+    for line in script_body.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line == "---" {
+            operations.push(ScriptOperation::Noop);
+            continue;
+        }
+        if let Some((command, target)) = script_redirection(line)? {
+            write_count += 1;
+            if write_count > 1 {
+                return Err(RuntimeError::Protocol(
+                    "own-script multiple write operations are not supported in M1".to_owned(),
+                ));
+            }
+            let target = validate_script_write_target(protected_path_match_mode, policy, &target)?;
+            let contents = evaluate_script_command(&command)?;
+            operations.push(ScriptOperation::Write { contents, target });
+        } else {
+            evaluate_script_command(line)?;
+            operations.push(ScriptOperation::Noop);
+        }
+    }
+    Ok(operations)
+}
+
+fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
+    let positions = redirection_positions(line)?;
+    let Some(&redirection_index) = positions.first() else {
+        return Ok(None);
+    };
+    if positions.len() > 1 {
+        return Err(RuntimeError::Protocol(
+            "own-script multiple redirections are not supported in M1".to_owned(),
+        ));
+    }
+    let command = line[..redirection_index].trim();
+    if command.is_empty() {
+        return Err(RuntimeError::Protocol(
+            "own-script redirection must include a command".to_owned(),
+        ));
+    }
+    let target = unquote_script_path(line[redirection_index + 1..].trim())?;
+    Ok(Some((command.to_owned(), target)))
+}
+
+fn redirection_positions(line: &str) -> Result<Vec<usize>, RuntimeError> {
+    let mut positions = Vec::new();
+    let mut quote = None;
+    let mut chars = line.char_indices().peekable();
+
+    while let Some((index, ch)) = chars.next() {
+        match quote {
+            Some(active) if ch == active => quote = None,
+            Some(_) => {}
+            None if matches!(ch, '\'' | '"') => quote = Some(ch),
+            None if ch == '>' => {
+                if matches!(chars.peek(), Some((_, '>'))) {
+                    return Err(RuntimeError::Protocol(
+                        "own-script append redirection is not supported in M1".to_owned(),
+                    ));
+                }
+                positions.push(index);
+            }
+            None => {}
+        }
+    }
+
+    if quote.is_some() {
+        return Err(RuntimeError::Protocol(
+            "own-script command contains an unterminated quote".to_owned(),
+        ));
+    }
+
+    Ok(positions)
+}
+
+fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
+    if value.is_empty() {
+        return Err(RuntimeError::Protocol(
+            "own-script redirection target must be one literal path".to_owned(),
+        ));
+    }
+    if let Some(quote) = value.chars().next().filter(|ch| matches!(ch, '"' | '\'')) {
+        if value.len() < 2 || !value.ends_with(quote) {
+            return Err(RuntimeError::Protocol(
+                "own-script redirection target must be one literal path".to_owned(),
+            ));
+        }
+        return Ok(value[1..value.len() - 1].to_owned());
+    }
+    if value.contains('"') || value.contains('\'') || value.split_whitespace().count() != 1 {
+        return Err(RuntimeError::Protocol(
+            "own-script redirection target must be one literal path".to_owned(),
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn validate_script_write_target(
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+    target: &str,
+) -> Result<String, RuntimeError> {
+    let relative = normalize_script_write_target(target)?;
+    let scoped = format!("workspace/{relative}");
+    if !policy
+        .filesystem
+        .write_roots
+        .iter()
+        .any(|root| core_script::relative_path_is_inside_scope(&scoped, root))
+    {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("tool {} lacks write scope {scoped}", policy.tool_id),
+        ));
+    }
+    let temp_parent_scoped = script_replacement_temp_parent_scope(&relative);
+    if !policy
+        .filesystem
+        .write_roots
+        .iter()
+        .any(|root| core_script::relative_path_is_inside_scope(&temp_parent_scoped, root))
+    {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!(
+                "tool {} lacks write scope for replacement temp under {temp_parent_scoped}",
+                policy.tool_id
+            ),
+        ));
+    }
+    ensure_script_target_not_protected(protected_path_match_mode, policy, &scoped)?;
+    Ok(relative)
+}
+
+fn script_replacement_temp_parent_scope(relative: &str) -> String {
+    relative.rsplit_once('/').map_or_else(
+        || "workspace".to_owned(),
+        |(parent, _)| format!("workspace/{parent}"),
+    )
+}
+
+fn write_script_output(
+    workspace: &Path,
+    target: &str,
+    contents: &[u8],
+    side_effect_recorder: SideEffectRecorder<'_>,
+) -> Result<(), RuntimeError> {
+    let path = ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    replace_script_output_atomically(workspace, target, &path, contents, side_effect_recorder)
+}
+
+fn preflight_own_script_outputs(
+    workspace: &Path,
+    operations: &[ScriptOperation],
+) -> Result<(), RuntimeError> {
+    for operation in operations {
+        if let ScriptOperation::Write { target, .. } = operation {
+            let path = preflight_real_workspace_write_path(workspace, target)?;
+            ensure_writable_regular_leaf(&path)?;
+        }
+    }
+    Ok(())
+}
+
+fn replace_script_output_atomically(
+    workspace: &Path,
+    target: &str,
+    path: &Path,
+    contents: &[u8],
+    side_effect_recorder: SideEffectRecorder<'_>,
+) -> Result<(), RuntimeError> {
+    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
+    let (temp_path, mut temp_file) =
+        create_replacement_temp(path, Some(core_policy::DenyReasonCode::WriteDenied))?;
+    if let Err(err) = temp_file
+        .write_all(contents)
+        .map_err(|source| RuntimeError::Io {
+            path: temp_path.clone(),
+            source,
+        })
+    {
+        let _ = fs::remove_file(&temp_path);
+        return Err(err);
+    }
+    drop(temp_file);
+
+    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    if initial_leaf_existed {
+        if ensure_writable_regular_leaf(path)? {
+            return replace_existing_leaf_from_temp(
+                path,
+                &temp_path,
+                side_effect_recorder,
+                Some(core_policy::DenyReasonCode::WriteDenied),
+            );
+        }
+    } else {
+        ensure_new_leaf_available(path)?;
+    }
+    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    if let Err(source) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    side_effect_recorder.mark_applied();
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_existing_leaf_from_temp(
+    path: &Path,
+    temp_path: &Path,
+    side_effect_recorder: SideEffectRecorder<'_>,
+    _denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<(), RuntimeError> {
+    if let Err(source) = fs::rename(temp_path, path) {
+        let _ = fs::remove_file(temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    side_effect_recorder.mark_applied();
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn replace_existing_leaf_from_temp(
+    path: &Path,
+    temp_path: &Path,
+    side_effect_recorder: SideEffectRecorder<'_>,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<(), RuntimeError> {
+    let backup_path = create_replacement_backup_path(path, denied_reason)?;
+    if let Err(source) = fs::rename(path, &backup_path) {
+        let _ = fs::remove_file(temp_path);
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    // WHY: once the original target is moved aside, a later failure must not
+    // erase the session attempt that explains the workspace change.
+    side_effect_recorder.mark_applied();
+    if let Err(source) = fs::rename(temp_path, path) {
+        if fs::rename(&backup_path, path).is_ok() {
+            let _ = fs::remove_file(temp_path);
+        }
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        });
+    }
+    fs::remove_file(&backup_path).map_err(|source| RuntimeError::Io {
+        path: backup_path,
+        source,
+    })
+}
+
+fn create_replacement_temp(
+    path: &Path,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<(PathBuf, fs::File), RuntimeError> {
+    for attempt in 0..100 {
+        let temp_path = replacement_temp_path(path, attempt)?;
+        match fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp_path)
+        {
+            Ok(file) => return Ok((temp_path, file)),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(source) => {
+                return Err(RuntimeError::Io {
+                    path: temp_path,
+                    source,
+                });
+            }
+        }
+    }
+    Err(runtime_protocol_or_denied(
+        denied_reason,
+        format!(
+            "could not allocate temporary replacement path for {}",
+            path.display()
+        ),
+    ))
+}
+
+#[cfg(not(unix))]
+fn create_replacement_backup_path(
+    path: &Path,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+) -> Result<PathBuf, RuntimeError> {
+    for attempt in 0..100 {
+        let backup_path = replacement_backup_path(path, attempt)?;
+        match fs::symlink_metadata(&backup_path) {
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(backup_path),
+            Ok(_) => {}
+            Err(source) => {
+                return Err(RuntimeError::Io {
+                    path: backup_path,
+                    source,
+                });
+            }
+        }
+    }
+    Err(runtime_protocol_or_denied(
+        denied_reason,
+        format!(
+            "could not allocate backup replacement path for {}",
+            path.display()
+        ),
+    ))
+}
+
+fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
+    let mut file_name = path
+        .file_name()
+        .ok_or_else(|| RuntimeError::Protocol("replacement path must have a file name".to_owned()))?
+        .to_os_string();
+    file_name.push(format!(".watershed-{}-{attempt}.tmp", std::process::id()));
+    Ok(path.with_file_name(file_name))
+}
+
+#[cfg(not(unix))]
+fn replacement_backup_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
+    let mut file_name = path
+        .file_name()
+        .ok_or_else(|| RuntimeError::Protocol("replacement path must have a file name".to_owned()))?
+        .to_os_string();
+    file_name.push(format!(".watershed-{}-{attempt}.bak", std::process::id()));
+    Ok(path.with_file_name(file_name))
+}
+
+fn ensure_script_target_not_protected(
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+    scoped_target: &str,
+) -> Result<(), RuntimeError> {
+    if !policy.filesystem.protected_paths.iter().any(|pattern| {
+        protected_path_pattern_matches(protected_path_match_mode, pattern, scoped_target)
+    }) {
+        return Ok(());
+    }
+
+    if policy
+        .filesystem
+        .protected_path_grants
+        .iter()
+        .any(|pattern| {
+            protected_path_pattern_matches(protected_path_match_mode, pattern, scoped_target)
+        })
+    {
+        return Ok(());
+    }
+
+    Err(runtime_denied(
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        format!(
+            "tool {} cannot write protected path {scoped_target}",
+            policy.tool_id
+        ),
+    ))
+}
+
+fn ensure_real_workspace_write_path(
+    workspace: &Path,
+    target: &str,
+    side_effect_recorder: SideEffectRecorder<'_>,
+) -> Result<PathBuf, RuntimeError> {
+    let mut parts = target.split('/').peekable();
+    let mut path = workspace.to_path_buf();
+    while let Some(part) = parts.next() {
+        path.push(part);
+        if parts.peek().is_some() && ensure_created_script_real_directory(&path)? {
+            // WHY: a newly created parent directory is already a durable
+            // workspace mutation even if the later leaf write fails.
+            side_effect_recorder.mark_applied();
+        }
+    }
+    Ok(path)
+}
+
+fn preflight_real_workspace_write_path(
+    workspace: &Path,
+    target: &str,
+) -> Result<PathBuf, RuntimeError> {
+    let mut parts = target.split('/').peekable();
+    let mut path = workspace.to_path_buf();
+    while let Some(part) = parts.next() {
+        path.push(part);
+        if parts.peek().is_some() {
+            ensure_optional_script_real_directory(&path)?;
+        }
+    }
+    Ok(path)
+}
+
+fn ensure_optional_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    ensure_optional_directory_with(path, DirectoryErrorMode::ScriptWrite)
+}
+
+fn ensure_created_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
+    ensure_created_directory_with(path, DirectoryErrorMode::ScriptWrite)
+}
+
+#[cfg(unix)]
+fn ensure_opened_regular_leaf_matches_path(
+    path: &Path,
+    file: &fs::File,
+) -> Result<(), RuntimeError> {
+    let path_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    if path_metadata.file_type().is_symlink() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink",
+            path.display()
+        )));
+    }
+    if !path_metadata.is_file() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a file",
+            path.display()
+        )));
+    }
+
+    let file_metadata = file.metadata().map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    if !file_metadata.is_file() || !same_file_metadata(&path_metadata, &file_metadata) {
+        return Err(RuntimeError::Protocol(format!(
+            "{} changed before write",
+            path.display()
+        )));
+    }
+    ensure_not_hardlinked_file(path, &file_metadata)?;
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
+#[cfg(unix)]
+fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(metadata.nlink())
+}
+
+#[cfg(windows)]
+fn hard_link_count(path: &Path, _metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
+    use std::{ffi::c_void, os::windows::io::AsRawHandle};
+
+    #[repr(C)]
+    struct FileTime {
+        low_date_time: u32,
+        high_date_time: u32,
+    }
+
+    #[repr(C)]
+    struct ByHandleFileInformation {
+        file_attributes: u32,
+        creation_time: FileTime,
+        last_access_time: FileTime,
+        last_write_time: FileTime,
+        volume_serial_number: u32,
+        file_size_high: u32,
+        file_size_low: u32,
+        number_of_links: u32,
+        file_index_high: u32,
+        file_index_low: u32,
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(
+            file: *mut c_void,
+            file_information: *mut ByHandleFileInformation,
+        ) -> i32;
+    }
+
+    let file = fs::File::open(path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    let mut information = ByHandleFileInformation {
+        file_attributes: 0,
+        creation_time: FileTime {
+            low_date_time: 0,
+            high_date_time: 0,
+        },
+        last_access_time: FileTime {
+            low_date_time: 0,
+            high_date_time: 0,
+        },
+        last_write_time: FileTime {
+            low_date_time: 0,
+            high_date_time: 0,
+        },
+        volume_serial_number: 0,
+        file_size_high: 0,
+        file_size_low: 0,
+        number_of_links: 0,
+        file_index_high: 0,
+        file_index_low: 0,
+    };
+    let ok = unsafe {
+        GetFileInformationByHandle(
+            file.as_raw_handle().cast::<c_void>(),
+            &mut information as *mut ByHandleFileInformation,
+        )
+    };
+    if ok == 0 {
+        return Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source: io::Error::last_os_error(),
+        });
+    }
+
+    Ok(u64::from(information.number_of_links))
+}
+
+fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
+    // WHY: script write targets use one shared slash-only path policy across parser,
+    // policy and runtime checks.
+    if target.is_empty()
+        || target.starts_with('/')
+        || target.contains(':')
+        || target.contains('\\')
+        || target.contains('$')
+        || target.contains('*')
+        || target.contains('?')
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "own-script write target {target:?} must be a literal workspace-relative path"
+        )));
+    }
+    if core_script::relative_path_has_windows_alias(target) {
+        return Err(RuntimeError::Protocol(format!(
+            "own-script write target {target:?} must not use a Windows path alias"
+        )));
+    }
+    core_script::normalize_safe_relative_path(target).ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "own-script write target {target:?} must stay inside the workspace"
+        ))
+    })
+}
+
+fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
+    let command = command.trim();
+    if let Some(rest) = command.strip_prefix("printf ") {
+        evaluate_printf_command(rest)
+    } else if let Some(rest) = command.strip_prefix("echo ") {
+        let mut out = unquote_script_argument(rest.trim())?;
+        out.push('\n');
+        Ok(out.into_bytes())
+    } else {
+        Err(RuntimeError::Protocol(format!(
+            "unsupported own-script command {command:?}"
+        )))
+    }
+}
+
+fn evaluate_printf_command(rest: &str) -> Result<Vec<u8>, RuntimeError> {
+    let (format, rest) = parse_single_quoted_argument(rest.trim())?;
+    let rest = rest.trim();
+    let formatted = if rest.is_empty() {
+        decode_printf_escapes(&format)?
+    } else if matches!(rest, "\"$SUMMARY\"" | "$SUMMARY") {
+        decode_printf_escapes(&format)?.replacen("%s", "hello", 1)
+    } else {
+        return Err(RuntimeError::Protocol(format!(
+            "unsupported own-script printf argument {rest:?}"
+        )));
+    };
+    Ok(formatted.into_bytes())
+}
+
+fn parse_single_quoted_argument(value: &str) -> Result<(String, &str), RuntimeError> {
+    let Some(rest) = value.strip_prefix('\'') else {
+        return Err(RuntimeError::Protocol(
+            "own-script printf format must be single-quoted".to_owned(),
+        ));
+    };
+    let Some(end) = rest.find('\'') else {
+        return Err(RuntimeError::Protocol(
+            "own-script printf format is unterminated".to_owned(),
+        ));
+    };
+    Ok((rest[..end].to_owned(), &rest[end + 1..]))
+}
+
+fn decode_printf_escapes(value: &str) -> Result<String, RuntimeError> {
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('\\') => out.push('\\'),
+            Some(other) => {
+                return Err(RuntimeError::Protocol(format!(
+                    "unsupported own-script printf escape \\{other}"
+                )));
+            }
+            None => {
+                return Err(RuntimeError::Protocol(
+                    "own-script printf format contains a dangling escape".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
+    let unquoted = if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    };
+    if unquoted.chars().any(|ch| matches!(ch, '$' | '`' | '\\')) {
+        Err(RuntimeError::Protocol(format!(
+            "unsupported own-script argument {value:?}"
+        )))
+    } else {
+        Ok(unquoted.to_owned())
+    }
+}
+
+fn emit_tool_progress(
+    message: &'static str,
+    tool: &core_script::ToolBlock,
+    invocation: &LoopInvocation,
+    builder: &mut RuntimeEventBuilder,
+) -> Result<(), RuntimeError> {
+    builder.emit(
+        Some(invocation),
+        EventType::ToolProgress,
+        serde_json::json!({
+            "message": message,
+            "tool_id": tool.identity.id,
+        }),
+    )
+}
+
+fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(runtime_denied(
+            core_policy::DenyReasonCode::SymlinkEscapeDenied,
+            format!("{} must not be a symlink", path.display()),
+        )),
+        Ok(metadata) if metadata.is_file() => {
+            ensure_script_leaf_not_hardlinked(path, &metadata)?;
+            Ok(true)
+        }
+        Ok(_) => Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("{} must be a file", path.display()),
+        )),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn ensure_script_leaf_not_hardlinked(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
+    if hard_link_count(path, metadata)? > 1 {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!("{} must not be hard-linked", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn ensure_script_leaf_not_hardlinked(
+    _path: &Path,
+    _metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
+    Ok(())
+}
+

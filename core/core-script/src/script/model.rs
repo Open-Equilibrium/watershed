@@ -1,0 +1,378 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::fs;
+use std::io::{self, Read};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::{Path, PathBuf};
+use unicode_normalization::UnicodeNormalization;
+
+/// Script schema version string accepted by the v0 parser.
+pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
+/// YAML version targeted by checked-in registry files.
+pub const YAML_VERSION: &str = "1.2";
+/// Maximum allowed recursive loop nesting depth.
+pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
+/// Maximum size for one registry YAML file.
+pub const MAX_REGISTRY_FILE_BYTES: u64 = 1024 * 1024;
+/// Maximum cumulative size for a registry root.
+pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
+/// Maximum number of registry YAML files under one root.
+pub const MAX_REGISTRY_FILES: usize = 4096;
+/// Maximum directory nesting depth walked below one registry root.
+pub const MAX_REGISTRY_TRAVERSAL_DEPTH: usize = 64;
+
+/// Shared id/name pair for every registry block.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BlockIdentity {
+    /// Stable block id used by references and canonical maps.
+    pub id: String,
+    /// Human-readable block name, also valid as a reference when unambiguous.
+    pub name: String,
+}
+
+/// One parsed registry block.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RegistryBlock {
+    /// Tool block.
+    Tool(ToolBlock),
+    /// Instruction block.
+    Instruction(InstructionBlock),
+    /// Phase block.
+    Phase(PhaseBlock),
+    /// Connection block.
+    Connection(ConnectionBlock),
+    /// Loop block.
+    Loop(LoopBlock),
+}
+
+/// Tool definition block.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ToolBlock {
+    /// Tool identity.
+    #[serde(flatten)]
+    pub identity: BlockIdentity,
+    /// Tool execution kind.
+    pub tool_kind: ToolKind,
+    /// Command declaration for this tool.
+    pub command: ToolCommand,
+    /// Script runtime for `own-script` tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_runtime: Option<ScriptRuntime>,
+    /// Inline script source for `own-script` tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_body: Option<String>,
+    /// Parameters accepted by the tool.
+    pub allowed_parameters: Vec<AllowedParameter>,
+    /// Workspace-relative read scopes.
+    pub read_scope: Vec<String>,
+    /// Workspace-relative write scopes.
+    pub write_scope: Vec<String>,
+    /// Protected paths this tool may access.
+    pub protected_path_grants: Vec<String>,
+    /// Network policy declared for this tool.
+    pub network: NetworkPolicy,
+}
+
+/// Tool execution family.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ToolKind {
+    /// Trusted predefined command resolved from the command registry.
+    PredefinedCommand,
+    /// Inline script owned by the tool definition.
+    OwnScript,
+}
+
+/// Tool command shape.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolCommand {
+    /// Predefined command id plus literal argv.
+    Predefined {
+        /// Registry command id.
+        command_id: String,
+        /// Literal argv values supplied by the block.
+        argv: Vec<String>,
+    },
+    /// `script:<tool-id>` command for an own-script tool.
+    OwnScript(String),
+}
+
+/// Script runtime supported by v0 own-script tools.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ScriptRuntime {
+    /// POSIX shell subset interpreted by M1 fixtures.
+    PosixSh,
+}
+
+/// Tool parameter contract.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AllowedParameter {
+    /// Exact parameter name, including the leading `--`.
+    pub name: String,
+    /// Accepted value type.
+    pub value_type: ParameterValueType,
+    /// Whether the parameter is required.
+    pub required: bool,
+    /// Allowed enum values when [`ParameterValueType::Enum`] is used.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_values: Vec<String>,
+    /// Optional string value pattern.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_pattern: Option<String>,
+    /// Optional maximum string length.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u16>,
+    /// Optional minimum integer value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<i64>,
+    /// Optional maximum integer value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<i64>,
+}
+
+/// Parameter value type.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ParameterValueType {
+    /// Flag-style parameter with no value.
+    None,
+    /// UTF-8 string value.
+    String,
+    /// Integer value.
+    Integer,
+    /// Workspace-relative path value.
+    WorkspaceRelativePath,
+    /// Value selected from an explicit set.
+    Enum,
+}
+
+/// Network policy declared by a tool.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NetworkPolicy {
+    /// Deny all network access.
+    Deny(NetworkDeny),
+    /// Explicit default plus allowlist entries.
+    Declared {
+        /// Default network behavior.
+        default: NetworkDefault,
+        /// Allowed network destinations.
+        allow: Vec<NetworkAllowEntry>,
+    },
+}
+
+/// Marker serialized as the literal `deny` network policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NetworkDeny;
+
+impl Serialize for NetworkDeny {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str("deny")
+    }
+}
+
+impl<'de> Deserialize<'de> for NetworkDeny {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        if value == "deny" {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom("expected \"deny\""))
+        }
+    }
+}
+
+/// Default network policy.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkDefault {
+    /// Deny access unless a matching allow entry exists.
+    Deny,
+}
+
+/// One declared network allow entry.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NetworkAllowEntry {
+    /// Allow entry kind.
+    pub kind: NetworkAllowKind,
+    /// Transport protocol.
+    pub transport: NetworkTransport,
+    /// Canonical CIDR range.
+    pub cidr: String,
+    /// Destination port.
+    pub port: u16,
+}
+
+/// Network allow entry kind.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkAllowKind {
+    /// CIDR destination range.
+    Cidr,
+}
+
+/// Network transport protocol.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NetworkTransport {
+    /// TCP transport.
+    Tcp,
+    /// UDP transport.
+    Udp,
+}
+
+/// Prompt instruction block.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct InstructionBlock {
+    /// Instruction identity.
+    #[serde(flatten)]
+    pub identity: BlockIdentity,
+    /// Prompt text.
+    pub prompt: String,
+}
+
+/// Ordered phase definition.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PhaseBlock {
+    /// Phase identity.
+    #[serde(flatten)]
+    pub identity: BlockIdentity,
+    /// Instruction references loaded for the phase.
+    pub instruction_refs: Vec<String>,
+    /// Tool references available in the phase.
+    pub tool_refs: Vec<String>,
+    /// Ordered phase steps.
+    pub steps: Vec<StepBlock>,
+}
+
+/// Phase-local step definition.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StepBlock {
+    /// Phase-local step id.
+    pub id: String,
+    /// Human-readable step name.
+    pub name: String,
+    /// Ordered connection references active on this step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connection_refs: Vec<String>,
+}
+
+/// Connection between registry blocks or scoped steps.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConnectionBlock {
+    /// Connection identity.
+    #[serde(flatten)]
+    pub identity: BlockIdentity,
+    /// Connection semantics.
+    pub connection_kind: ConnectionKind,
+    /// Source endpoint reference.
+    pub from_ref: String,
+    /// Destination endpoint reference.
+    pub to_ref: String,
+}
+
+/// Connection semantics.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConnectionKind {
+    /// Data dependency.
+    Data,
+    /// Trigger dependency.
+    Trigger,
+    /// Refresh dependency.
+    Refresh,
+}
+
+/// Loop definition block.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LoopBlock {
+    /// Loop identity.
+    #[serde(flatten)]
+    pub identity: BlockIdentity,
+    /// Ordered phase references executed by the loop.
+    pub phase_refs: Vec<String>,
+    /// Ordered subloop references executed after phases.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subloop_refs: Vec<String>,
+    /// Connections declared at loop scope.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connection_refs: Vec<String>,
+}
+
+/// Static parser contract summary for docs/tests.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParserContract {
+    /// Supported schema version.
+    pub schema_version: &'static str,
+    /// Supported YAML version.
+    pub yaml_version: &'static str,
+    /// Whether each registry file contains exactly one top-level block.
+    pub one_block_per_file: bool,
+    /// Semantic validation summary.
+    pub semantic_validation: &'static str,
+    /// Canonical serialization summary.
+    pub canonical_serialization: &'static str,
+}
+
+impl Default for ParserContract {
+    fn default() -> Self {
+        Self {
+            schema_version: SCRIPT_SCHEMA_VERSION_V0,
+            yaml_version: YAML_VERSION,
+            one_block_per_file: true,
+            semantic_validation: "strict parser plus identity and canonical CIDR checks",
+            canonical_serialization: "deterministic UTF-8 JSON of the resolved model",
+        }
+    }
+}
+
+/// Parser interface for registry block sources.
+pub trait ScriptParser {
+    /// Parses one registry block from a named source.
+    fn parse_registry_block(
+        &self,
+        source_name: &str,
+        source: &str,
+    ) -> Result<RegistryBlock, ParseError>;
+}
+
+/// v0 parser implementation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V0ScriptParser;
+
+impl ScriptParser for V0ScriptParser {
+    fn parse_registry_block(
+        &self,
+        source_name: &str,
+        source: &str,
+    ) -> Result<RegistryBlock, ParseError> {
+        parse_registry_block(source_name, source).map_err(ParseError::from)
+    }
+}
+
+/// Fully resolved registry keyed by block id.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ResolvedRegistry {
+    /// Connection blocks keyed by id.
+    pub connections: BTreeMap<String, ConnectionBlock>,
+    /// Instruction blocks keyed by id.
+    pub instructions: BTreeMap<String, InstructionBlock>,
+    /// Loop blocks keyed by id.
+    pub loops: BTreeMap<String, LoopBlock>,
+    /// Phase blocks keyed by id.
+    pub phases: BTreeMap<String, PhaseBlock>,
+    /// Tool blocks keyed by id.
+    pub tools: BTreeMap<String, ToolBlock>,
+}
+

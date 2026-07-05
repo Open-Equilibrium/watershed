@@ -1,0 +1,900 @@
+fn fixture_dir(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("fixtures")
+        .join(name)
+}
+
+fn workspace_copy(fixture: &str) -> PathBuf {
+    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let target = std::env::temp_dir().join(format!(
+        "watershed-loop-agent-core-{}-{id}",
+        std::process::id()
+    ));
+    if target.exists() {
+        fs::remove_dir_all(&target).expect("stale temp workspace removed");
+    }
+    copy_fixture_workspace(&fixture_dir(fixture), &target);
+    target
+}
+
+
+fn empty_workspace(label: &str) -> PathBuf {
+    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let target = std::env::temp_dir().join(format!(
+        "watershed-loop-agent-core-{label}-{}-{id}",
+        std::process::id()
+    ));
+    if target.exists() {
+        fs::remove_dir_all(&target).expect("stale temp workspace removed");
+    }
+    fs::create_dir_all(&target).expect("temp workspace created");
+    target
+}
+
+#[cfg(windows)]
+fn create_windows_junction(link: &Path, target: &Path) {
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .expect("mklink command runs");
+    assert!(
+        output.status.success(),
+        "junction creation failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+struct FixtureRuntimeStateGuard {
+    paths: Vec<PathBuf>,
+}
+
+impl FixtureRuntimeStateGuard {
+    fn new(paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        Self {
+            paths: paths.into_iter().collect(),
+        }
+    }
+}
+
+impl Drop for FixtureRuntimeStateGuard {
+    fn drop(&mut self) {
+        for path in &self.paths {
+            let _ = fs::remove_file(path);
+        }
+        for path in &self.paths {
+            if let Some(parent) = path.parent() {
+                let _ = fs::remove_dir(parent);
+            }
+        }
+    }
+}
+
+fn copy_fixture_workspace(source: &Path, target: &Path) {
+    copy_dir(source, target);
+    copy_workspace_config(source, target);
+}
+
+fn copy_dir(source: &Path, target: &Path) {
+    fs::create_dir_all(target).expect("target directory created");
+    for entry in fs::read_dir(source).expect("source directory readable") {
+        let entry = entry.expect("source entry readable");
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if source_path.is_dir() && entry.file_name() == ".loop" {
+            continue;
+        }
+        if source_path.is_dir() && entry.file_name() == "out" {
+            fs::create_dir_all(&target_path).expect("output directory shape copied");
+            continue;
+        }
+        if source_path.is_dir() {
+            copy_dir(&source_path, &target_path);
+        } else {
+            fs::copy(&source_path, &target_path).expect("fixture file copied");
+        }
+    }
+}
+
+fn copy_workspace_config(source: &Path, target: &Path) {
+    let source_config = source.join(".loop/config.yaml");
+    if !source_config.exists() {
+        return;
+    }
+    let target_config = target.join(".loop/config.yaml");
+    fs::create_dir_all(target_config.parent().expect("config path has parent"))
+        .expect("workspace config directory created");
+    fs::copy(source_config, target_config).expect("workspace config copied");
+}
+
+fn expected_stream(fixture: &str, stream: &str) -> String {
+    fs::read_to_string(fixture_dir(fixture).join("expected").join(stream))
+        .expect("expected stream is readable")
+}
+
+fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {
+    prefix_through_tool_event(stream, "tool.progress", tool_id)
+}
+
+fn prefix_through_tool_started(stream: &str, tool_id: &str) -> String {
+    prefix_through_tool_event(stream, "tool.started", tool_id)
+}
+
+fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
+    let event_marker = "\"event_type\":\"tool.started\"";
+    let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
+    let mut prefix = String::new();
+    for line in stream.lines() {
+        if line.contains(event_marker) && line.contains(&tool_marker) {
+            return prefix;
+        }
+        prefix.push_str(line);
+        prefix.push('\n');
+    }
+    panic!("missing tool.started for {tool_id}");
+}
+
+fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> String {
+    let event_marker = format!("\"event_type\":\"{event_type}\"");
+    let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
+    let mut prefix = String::new();
+    for line in stream.lines() {
+        prefix.push_str(line);
+        prefix.push('\n');
+        if line.contains(&event_marker) && line.contains(&tool_marker) {
+            return prefix;
+        }
+    }
+    panic!("missing {event_type} for {tool_id}");
+}
+
+fn write_definition_hash_metadata(
+    workspace: &Path,
+    session_id: &str,
+    loop_ref: &str,
+    event_count: usize,
+) {
+    let registry =
+        core_script::load_registry_root(workspace.join("registry")).expect("registry loads");
+    let loop_block = registry.loop_block(loop_ref).expect("loop exists");
+    let registry_json = registry.canonical_json().expect("registry serializes");
+    let loop_json = proto::canonical_json(
+        &serde_json::to_value(loop_block).expect("loop definition converts to JSON"),
+    )
+    .expect("loop definition serializes");
+    let log_dir = workspace.join(LOCAL_LOG_DIR);
+    fs::create_dir_all(&log_dir).expect("log dir created");
+    fs::write(
+        log_dir.join(format!("{session_id}.log")),
+        format!(
+            "session_id={session_id}\nevents={event_count}\nregistry_hash=fnv64:{:016x}\nloop_definition_hash=fnv64:{:016x}\n",
+            stable_hash64(registry_json.as_bytes()),
+            stable_hash64(loop_json.as_bytes())
+        ),
+    )
+    .expect("definition hash metadata written");
+}
+
+fn first_event_line(fixture: &str, stream: &str) -> String {
+    expected_stream(fixture, stream)
+        .lines()
+        .next()
+        .expect("stream has first event")
+        .to_owned()
+        + "\n"
+}
+
+fn event_line(
+    event_id: &str,
+    event_type: EventType,
+    session_id: &str,
+    sequence: u64,
+    loop_id: Option<&str>,
+    payload: serde_json::Value,
+) -> String {
+    EventEnvelope {
+        loop_id: loop_id.map(str::to_owned),
+        ..EventEnvelope::new(
+            event_id,
+            event_type,
+            session_id,
+            sequence,
+            event_timestamp(sequence),
+            "loop-agent-cli",
+            payload,
+        )
+    }
+    .canonical_jsonl()
+    .expect("event serializes")
+}
+
+fn event_line_with_parent(
+    event_id: &str,
+    event_type: EventType,
+    session_id: &str,
+    sequence: u64,
+    loop_id: Option<&str>,
+    parent_loop_id: Option<&str>,
+    payload: serde_json::Value,
+) -> String {
+    EventEnvelope {
+        loop_id: loop_id.map(str::to_owned),
+        parent_loop_id: parent_loop_id.map(str::to_owned),
+        ..EventEnvelope::new(
+            event_id,
+            event_type,
+            session_id,
+            sequence,
+            event_timestamp(sequence),
+            "loop-agent-cli",
+            payload,
+        )
+    }
+    .canonical_jsonl()
+    .expect("event serializes")
+}
+
+fn loop_started_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::LoopStarted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+    )
+}
+
+fn loop_completed_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::LoopCompleted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+    )
+}
+
+fn phase_entered_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::PhaseEntered,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "instruction_ids": [],
+            "phase_id": "phase",
+            "phase_name": "Phase",
+            "tool_ids": [],
+        }),
+    )
+}
+
+fn step_started_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::StepStarted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "phase_id": "phase",
+            "step_id": "step",
+            "step_name": "Step",
+        }),
+    )
+}
+
+fn step_completed_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::StepCompleted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "phase_id": "phase",
+            "step_id": "step",
+            "step_name": "Step",
+        }),
+    )
+}
+
+fn tool_started_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::ToolStarted,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "read_scope": ["workspace"],
+            "tool_id": "tool",
+            "tool_kind": "predefined-command",
+            "tool_name": "Tool",
+            "write_scope": [],
+        }),
+    )
+}
+
+fn tool_failed_line(event_id: &str, sequence: u64) -> String {
+    event_line(
+        event_id,
+        EventType::ToolFailed,
+        "meta001",
+        sequence,
+        Some("loop-001"),
+        serde_json::json!({
+            "error": "denied",
+            "tool_id": "tool",
+        }),
+    )
+}
+
+fn base_event() -> EventEnvelope {
+    EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "meta001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+}
+
+fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
+    let text = event.canonical_jsonl().expect("event serializes");
+    assert_invalid_stream(name, &text, expected);
+}
+
+fn assert_invalid_stream(name: &str, text: &str, expected: &str) {
+    let err =
+        validate_protocol_jsonl_text(Path::new(name), text).expect_err("invalid event must fail");
+
+    assert!(err.to_string().contains(expected), "{err}");
+}
+
+fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected: &str) {
+    let err = validate_session_log_text(Path::new(name), session_id, text)
+        .expect_err("invalid session log must fail");
+
+    assert!(err.to_string().contains(expected), "{err}");
+}
+
+fn assert_invalid_appended_session_log(
+    path: &Path,
+    name: &str,
+    prior: &[EventEnvelope],
+    text: &str,
+    expected: &str,
+) {
+    let err = validate_appended_session_log_text(path, "meta001", prior, text)
+        .expect_err("invalid appended session log must fail");
+
+    assert!(err.to_string().contains(expected), "{name}: {err}");
+}
+
+fn linux_sandbox_expected_decision(
+    fixture_name: &'static str,
+) -> Result<core_policy::ExpectedDecision, RuntimeError> {
+    let Some(text) = linux_sandbox_expected_decision_text(fixture_name) else {
+        return Err(RuntimeError::Protocol(format!(
+            "missing linux expected decision for {fixture_name}"
+        )));
+    };
+    let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+    decision.validate().map_err(|err| {
+        RuntimeError::Protocol(format!("{fixture_name} linux expected decision: {err}"))
+    })?;
+    if decision.fixture_name != fixture_name {
+        return Err(RuntimeError::Protocol(format!(
+            "{fixture_name} expected decision fixture_name mismatch"
+        )));
+    }
+    Ok(decision)
+}
+
+fn linux_sandbox_expected_decision_text(loop_id: &str) -> Option<&'static str> {
+    sandbox_expected_decision_texts(loop_id)?
+        .into_iter()
+        .find_map(|(target, text)| {
+            (target == core_policy::PolicyTarget::LinuxLandlockSeccomp).then_some(text)
+        })
+}
+
+fn validate_failed_sandbox_decisions(
+    fixture_name: &str,
+    events: &[EventEnvelope],
+) -> Result<(), RuntimeError> {
+    let Some(decision_texts) = sandbox_expected_decision_texts(fixture_name) else {
+        return Ok(());
+    };
+    let reason = terminal_failure_reason(events).ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "sandbox-negative fixture {fixture_name} must end with session.failed reason"
+        ))
+    })?;
+
+    for (target, text) in decision_texts {
+        let decision: core_policy::ExpectedDecision = serde_json::from_str(text)?;
+        decision.validate().map_err(|err| {
+            RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision: {err}"
+            ))
+        })?;
+        if decision.fixture_name != fixture_name {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision fixture_name mismatch"
+            )));
+        }
+        if decision.target != target {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision target mismatch"
+            )));
+        }
+        if decision.expected != core_policy::ExpectedDecisionKind::Deny {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision must deny"
+            )));
+        }
+        if decision.side_effects_allowed {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision must disallow side effects"
+            )));
+        }
+        if decision.reason_code.as_str() != reason {
+            return Err(RuntimeError::Protocol(format!(
+                "{fixture_name} {target:?} expected decision reason {} does not match stream reason {reason}",
+                decision.reason_code.as_str()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
+    events
+        .iter()
+        .rev()
+        .find(|event| event.event_type == EventType::SessionFailed)?
+        .payload
+        .get("reason")?
+        .as_str()
+}
+
+fn sandbox_expected_decision_texts(
+    loop_id: &str,
+) -> Option<[(core_policy::PolicyTarget, &'static str); 2]> {
+    let (linux, macos) = match loop_id {
+        "sandbox-negative-environment" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-environment/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-environment/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-interpreter" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-interpreter/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-interpreter/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-network" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-network/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-network/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-protected-path" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-protected-path/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-protected-path/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-symlink" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-symlink/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-symlink/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-tool-out-of-phase" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-tool-out-of-phase/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-tool-out-of-phase/macos-seatbelt.expected.json"
+            ),
+        ),
+        "sandbox-negative-write" => (
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-write/linux-landlock-seccomp.expected.json"
+            ),
+            include_str!(
+                "../../../../core/core-policy/fixtures/sandbox-negative-write/macos-seatbelt.expected.json"
+            ),
+        ),
+        _ => return None,
+    };
+
+    Some([
+        (core_policy::PolicyTarget::LinuxLandlockSeccomp, linux),
+        (core_policy::PolicyTarget::MacosSeatbelt, macos),
+    ])
+}
+
+fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
+    let mut builder =
+        RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture());
+    let invocation = LoopInvocation {
+        loop_id: "loop-001".to_owned(),
+        parent_loop_id: None,
+    };
+
+    builder.emit(
+        None,
+        EventType::SessionStarted,
+        serde_json::json!({"reason":"fixture-start"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::LoopStarted,
+        serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::PhaseEntered,
+        serde_json::json!({
+            "instruction_ids": ["say-hello"],
+            "phase_id": "smoke",
+            "phase_name": "Smoke",
+            "tool_ids": ["echo"],
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::StepStarted,
+        serde_json::json!({
+            "phase_id": "smoke",
+            "step_id": "say",
+            "step_name": "Say",
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::MessageDelta,
+        serde_json::json!({
+            "content_delta": "hello",
+            "message_id": "msg-001",
+            "role": "assistant",
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::MessageCompleted,
+        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::ToolStarted,
+        serde_json::json!({
+            "allowed_parameters": [],
+            "network_access": "deny",
+            "read_scope": ["workspace"],
+            "tool_id": "echo",
+            "tool_kind": "predefined-command",
+            "tool_name": "Echo",
+            "write_scope": [],
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::ToolCompleted,
+        serde_json::json!({"exit_code":0,"tool_id":"echo"}),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::StepCompleted,
+        serde_json::json!({
+            "phase_id": "smoke",
+            "step_id": "say",
+            "step_name": "Say",
+        }),
+    )?;
+    builder.emit(
+        Some(&invocation),
+        EventType::LoopCompleted,
+        serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
+    )?;
+    builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
+
+    Ok(builder.events.len())
+}
+
+fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
+    events
+        .iter()
+        .find(|event| {
+            event.event_type == EventType::LoopStarted
+                && event
+                    .payload
+                    .get("loop_definition_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(definition_id)
+        })
+        .and_then(|event| event.loop_id.as_deref())
+        .expect("loop definition starts")
+        .to_owned()
+}
+
+fn emit_noop_dispatch_for_budget(
+    workspace: &Path,
+    tool: &core_script::ToolBlock,
+    policy: RuntimeToolPolicy<'_>,
+    invocation: &LoopInvocation,
+) -> Result<usize, RuntimeError> {
+    let mut builder =
+        RuntimeEventBuilder::with_clock("dispatchprobe001".to_owned(), EventClock::fixed_fixture());
+    emit_tool(
+        workspace,
+        tool,
+        policy,
+        invocation,
+        ToolSideEffectMode::ApplyAll,
+        SideEffectRecorder::none(),
+        &mut builder,
+    )?;
+    Ok(builder.events.len())
+}
+
+fn p95_nanos(mut values: Vec<u128>) -> u128 {
+    assert!(!values.is_empty(), "p95 requires at least one value");
+    values.sort_unstable();
+    let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
+    values[index]
+}
+
+fn fixture_runtime_policy(
+    fixture: &str,
+    loop_id: &str,
+) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
+    let registry = core_script::load_registry_root(fixture_dir(fixture).join("registry"))
+        .expect("fixture registry loads");
+    let artifacts = core_policy::compile_policy_artifacts(loop_id, &registry, loop_id)
+        .expect("fixture policy compiles");
+    let policy = runtime_policy_artifact(&artifacts)
+        .expect("linux runtime policy exists")
+        .clone();
+    (registry, policy)
+}
+
+fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
+    let loops = (0..depth)
+        .map(|index| {
+            let id = format!("loop-{index:03}");
+            (
+                id.clone(),
+                core_script::LoopBlock {
+                    identity: core_script::BlockIdentity {
+                        id,
+                        name: format!("Loop {index:03}"),
+                    },
+                    phase_refs: vec!["phase".to_owned()],
+                    subloop_refs: (index + 1 < depth)
+                        .then(|| format!("loop-{:03}", index + 1))
+                        .into_iter()
+                        .collect(),
+                    connection_refs: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    core_script::ResolvedRegistry {
+        connections: std::collections::BTreeMap::new(),
+        instructions: std::collections::BTreeMap::new(),
+        loops,
+        phases: [(
+            "phase".to_owned(),
+            core_script::PhaseBlock {
+                identity: core_script::BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                steps: Vec::new(),
+                tool_refs: Vec::new(),
+            },
+        )]
+        .into_iter()
+        .collect(),
+        tools: std::collections::BTreeMap::new(),
+    }
+}
+
+fn duplicated_subloop_registry(depth: usize) -> core_script::ResolvedRegistry {
+    let loops = (0..depth)
+        .map(|index| {
+            let id = format!("loop-{index:03}");
+            let next = format!("loop-{:03}", index + 1);
+            (
+                id.clone(),
+                core_script::LoopBlock {
+                    identity: core_script::BlockIdentity {
+                        id,
+                        name: format!("Loop {index:03}"),
+                    },
+                    phase_refs: vec!["phase".to_owned()],
+                    subloop_refs: if index + 1 < depth {
+                        vec![next.clone(), next]
+                    } else {
+                        Vec::new()
+                    },
+                    connection_refs: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    core_script::ResolvedRegistry {
+        connections: std::collections::BTreeMap::new(),
+        instructions: std::collections::BTreeMap::new(),
+        loops,
+        phases: [(
+            "phase".to_owned(),
+            core_script::PhaseBlock {
+                identity: core_script::BlockIdentity {
+                    id: "phase".to_owned(),
+                    name: "Phase".to_owned(),
+                },
+                instruction_refs: Vec::new(),
+                steps: Vec::new(),
+                tool_refs: Vec::new(),
+            },
+        )]
+        .into_iter()
+        .collect(),
+        tools: std::collections::BTreeMap::new(),
+    }
+}
+
+fn empty_policy_artifact(loop_id: &str) -> core_policy::PolicyArtifact {
+    core_policy::PolicyArtifact {
+        commands: Vec::new(),
+        fixture_name: loop_id.to_owned(),
+        phase_scope: Vec::new(),
+        policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
+        runtime_limits: core_policy::RuntimeLimits {
+            headless: true,
+            timeout_ms: 30_000,
+        },
+        source_loop_definition_id: loop_id.to_owned(),
+        target: core_policy::PolicyTarget::LinuxLandlockSeccomp,
+    }
+}
+
+fn fixture_size(fixture: &str) -> u64 {
+    dir_size(&fixture_dir(fixture))
+}
+
+fn session_event_line(
+    session_id: &str,
+    event_id: &str,
+    event_type: EventType,
+    sequence: u64,
+) -> String {
+    let payload = if event_type == EventType::SessionStarted {
+        serde_json::json!({"reason":"fixture-start"})
+    } else {
+        serde_json::json!({})
+    };
+    EventEnvelope::new(
+        event_id,
+        event_type,
+        session_id,
+        sequence,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        payload,
+    )
+    .canonical_jsonl()
+    .expect("session event serializes")
+}
+
+struct NotifyingWriter {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    first_write: Option<mpsc::Sender<()>>,
+}
+
+impl Write for NotifyingWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.bytes
+            .lock()
+            .expect("tail bytes lock")
+            .extend_from_slice(buf);
+        if let Some(sender) = self.first_write.take() {
+            let _ = sender.send(());
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if let Some(sender) = self.first_write.take() {
+            let _ = sender.send(());
+        }
+        Ok(())
+    }
+}
+
+struct BrokenPipeWriter;
+
+impl Write for BrokenPipeWriter {
+    fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+        Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct ClosingAfterFirstWrite {
+    first_write: Option<mpsc::Sender<()>>,
+}
+
+impl Write for ClosingAfterFirstWrite {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(sender) = self.first_write.take() {
+            let _ = sender.send(());
+            Ok(buf.len())
+        } else {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+struct ErrorWriter;
+
+impl Write for ErrorWriter {
+    fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+        Err(io::Error::new(io::ErrorKind::Other, "writer failed"))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn dir_size(path: &Path) -> u64 {
+    fs::read_dir(path)
+        .expect("fixture dir readable")
+        .map(|entry| {
+            let path = entry.expect("fixture entry readable").path();
+            if path.is_dir() {
+                dir_size(&path)
+            } else {
+                fs::metadata(&path).expect("fixture metadata").len()
+            }
+        })
+        .sum()
+}
+

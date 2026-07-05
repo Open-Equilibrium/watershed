@@ -1,0 +1,55 @@
+fn canonical_json(value: &Value) -> Result<String, proto::CanonicalJsonError> {
+    proto::canonical_json(value)
+}
+
+fn materialize_registry_defaults(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(materialize_registry_defaults),
+        Value::Object(map) => {
+            if map.contains_key("phase_refs") {
+                map.entry("connection_refs".to_owned())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                map.entry("subloop_refs".to_owned())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+            }
+            if let Some(Value::Array(steps)) = map.get_mut("steps") {
+                for step in steps {
+                    if let Value::Object(step) = step {
+                        step.entry("connection_refs".to_owned())
+                            .or_insert_with(|| Value::Array(Vec::new()));
+                    }
+                }
+            }
+            for child in map.values_mut() {
+                materialize_registry_defaults(child);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn sort_allowed_parameters(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(sort_allowed_parameters),
+        Value::Object(map) => {
+            if let Some(Value::Array(parameters)) = map.get_mut("allowed_parameters") {
+                parameters.sort_by(|left, right| {
+                    left.get("name")
+                        .and_then(Value::as_str)
+                        .cmp(&right.get("name").and_then(Value::as_str))
+                });
+            }
+            for child in map.values_mut() {
+                sort_allowed_parameters(child);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
+fn parse_error(source_name: &str, message: String) -> RegistryError {
+    RegistryError::Parse {
+        source_name: source_name.to_owned(),
+        message,
+    }
+}
