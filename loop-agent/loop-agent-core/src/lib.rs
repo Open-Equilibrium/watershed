@@ -1810,8 +1810,7 @@ fn read_existing_file_for_session_log_append(
     path: &Path,
     appended_bytes: usize,
 ) -> Result<Vec<u8>, RuntimeError> {
-    let (file, metadata) = open_real_file_for_read(path)?;
-    let existing_bytes = metadata.len();
+    let existing_bytes = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
     let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     let total = existing_bytes.saturating_add(appended_bytes);
     if total > MAX_SESSION_LOG_BYTES {
@@ -1822,13 +1821,7 @@ fn read_existing_file_for_session_log_append(
         )));
     }
 
-    let mut bytes = Vec::with_capacity(usize::try_from(total).unwrap_or(0));
-    file.take(existing_bytes.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let bytes = read_file_range(path, 0, existing_bytes)?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != existing_bytes {
         return Err(RuntimeError::Protocol(format!(
             "{} changed outside append-only tail semantics",
