@@ -902,6 +902,25 @@ fn path_denial_helpers_cover_normalization_and_pattern_edges() {
         "**/.SSH/**",
         "workspace/home/user/.ssh/config"
     ));
+
+    for (pattern, path) in [
+        ("", "workspace/app/.env"),
+        ("/absolute", "workspace/app/.env"),
+        ("bad$pattern", "workspace/app/.env"),
+        ("bad/**suffix", "workspace/app/.env"),
+        (".", "workspace/app/.env"),
+        ("..", "workspace/app/.env"),
+        ("C:/secret", "workspace/app/.env"),
+        ("**/.env", ""),
+        ("**/.env", "/absolute"),
+        ("**/.env", "workspace/$secret"),
+        ("**/.env", "workspace/../secret"),
+    ] {
+        assert!(
+            !protected_path_pattern_matches(ProtectedPathMatchMode::CaseSensitive, pattern, path),
+            "{pattern:?} must not match {path:?}"
+        );
+    }
 }
 
 #[test]

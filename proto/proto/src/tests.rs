@@ -264,3 +264,15 @@ fn event_envelope_deserialization_rejects_unsupported_protocol_version() {
 
     assert!(err.to_string().contains("unsupported protocol_version"));
 }
+
+#[test]
+fn canonical_json_error_formats_serialize_source() {
+    let source = serde_json::from_str::<Value>("{").expect_err("invalid JSON produces an error");
+    let err = CanonicalJsonError::Serialize(source);
+
+    assert!(
+        err.to_string()
+            .starts_with("failed to serialize canonical JSON:"),
+        "{err}"
+    );
+}

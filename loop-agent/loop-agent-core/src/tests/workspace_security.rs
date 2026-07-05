@@ -309,6 +309,26 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
 
     fs::write(
         workspace.join(".loop/config.yaml"),
+        "fixture_profile: live\nregistry_root: registry\nstub_model: deterministic\n",
+    )
+    .expect("unsupported fixture profile");
+    assert!(matches!(
+        load_workspace_config(&workspace),
+        Err(RuntimeError::Usage(message)) if message.contains("unsupported .loop/config.yaml fixture_profile")
+    ));
+
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "fixture_profile: stub-model\nregistry_root: registry\nstub_model: live\n",
+    )
+    .expect("unsupported stub model");
+    assert!(matches!(
+        load_workspace_config(&workspace),
+        Err(RuntimeError::Usage(message)) if message.contains("unsupported .loop/config.yaml stub_model")
+    ));
+
+    fs::write(
+        workspace.join(".loop/config.yaml"),
         "registry_root: ../registry\n",
     )
     .expect("unsafe config");
