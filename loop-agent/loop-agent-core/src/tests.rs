@@ -4162,6 +4162,44 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
 }
 
 #[test]
+fn resume_rejects_prior_resume_marker_tail_without_rerunning_tool() {
+    let workspace = workspace_copy("hello-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let prefix = prefix_before_tool_started(
+        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        "write-summary",
+    );
+    let path = session_dir.join("hello001.jsonl");
+    let event_count = prefix.lines().count();
+    let resume_sequence = event_count as u64 + 1;
+    let resume_marker = event_line(
+        &format!("evt-{resume_sequence:03}"),
+        EventType::SessionResumed,
+        "hello001",
+        resume_sequence,
+        None,
+        serde_json::json!({"reason":"resume"}),
+    );
+    let before = format!("{prefix}{resume_marker}");
+    fs::write(&path, &before).expect("prior resume marker written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+
+    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect_err("marker-only resume tail must fail closed");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("incomplete resume marker")
+    ));
+    assert_eq!(
+        fs::read_to_string(&path).expect("marker-only log remains readable"),
+        before
+    );
+    assert!(!workspace.join("out/summary.txt").exists());
+}
+
+#[test]
 fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
