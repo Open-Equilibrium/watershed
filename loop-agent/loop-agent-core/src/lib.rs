@@ -1913,6 +1913,7 @@ struct RuntimeFailure {
 struct RuntimeToolPolicy<'a> {
     command: &'a core_policy::CommandPolicy,
     protected_path_match_mode: ProtectedPathMatchMode,
+    target: &'a core_policy::PolicyTarget,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2247,7 +2248,7 @@ fn preflight_phase_tools(
             RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
         })?;
         let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
-        ensure_tool_matches_policy(tool, command_policy)?;
+        ensure_tool_matches_policy(tool, &policy.target, command_policy)?;
         preflight_tool_progress(
             workspace,
             tool,
@@ -2446,6 +2447,7 @@ fn emit_phase(
                     protected_path_match_mode: runtime_protected_path_match_mode(
                         &context.policy.target,
                     ),
+                    target: &context.policy.target,
                 };
                 match emit_tool(
                     context.workspace,
@@ -2595,6 +2597,7 @@ fn command_policy_for_phase<'a>(
 
 fn ensure_tool_matches_policy(
     tool: &core_script::ToolBlock,
+    target: &core_policy::PolicyTarget,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
     if policy.tool_id != tool.identity.id {
@@ -2609,8 +2612,14 @@ fn ensure_tool_matches_policy(
             tool.identity.id
         )));
     }
-    if policy.network.default != core_policy::NetworkDefault::Deny
-        || !policy.network.allow.is_empty()
+    if policy.network.default != core_policy::NetworkDefault::Deny {
+        return Err(RuntimeError::Protocol(format!(
+            "tool {} must use deny-all network policy",
+            tool.identity.id
+        )));
+    }
+    if matches!(target, core_policy::PolicyTarget::LinuxLandlockSeccomp)
+        && !policy.network.allow.is_empty()
     {
         return Err(RuntimeError::Protocol(format!(
             "tool {} must use deny-all network policy",
@@ -2666,7 +2675,7 @@ fn emit_tool(
     side_effect_recorder: SideEffectRecorder<'_>,
     builder: &mut RuntimeEventBuilder,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    ensure_tool_matches_policy(tool, policy.command)?;
+    ensure_tool_matches_policy(tool, policy.target, policy.command)?;
     let planned_progress =
         planned_tool_progress(tool, policy.protected_path_match_mode, policy.command)?;
     builder.emit(
@@ -2683,7 +2692,7 @@ fn emit_tool(
         }),
     )?;
 
-    if let Some(failure) = sandbox_tool_dispatch_failure(tool, policy.command)? {
+    if let Some(failure) = sandbox_tool_dispatch_failure(tool, policy.target, policy.command)? {
         return Ok(Some(failure));
     }
 
@@ -3629,9 +3638,10 @@ fn emit_propagated_runtime_error_failure(
 
 fn sandbox_tool_dispatch_failure(
     tool: &core_script::ToolBlock,
+    target: &core_policy::PolicyTarget,
     command_policy: &core_policy::CommandPolicy,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    ensure_tool_matches_policy(tool, command_policy)?;
+    ensure_tool_matches_policy(tool, target, command_policy)?;
     let Some(reason_code) = sandbox_negative_reason_for_tool(tool)? else {
         return Ok(None);
     };

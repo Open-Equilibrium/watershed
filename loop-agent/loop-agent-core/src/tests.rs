@@ -799,6 +799,8 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
     let write_policy =
         command_policy_for_phase(&policy, "summarize", write_tool).expect("policy scoped");
     let match_mode = runtime_protected_path_match_mode(&policy.target);
+    let linux_target = core_policy::PolicyTarget::LinuxLandlockSeccomp;
+    let macos_target = core_policy::PolicyTarget::MacosSeatbelt;
 
     let mut unscoped = policy.clone();
     unscoped.phase_scope.clear();
@@ -819,14 +821,14 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
     let mut wrong_tool_id = write_policy.clone();
     wrong_tool_id.tool_id = "other-tool".to_owned();
     assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &wrong_tool_id),
+        ensure_tool_matches_policy(write_tool, &linux_target, &wrong_tool_id),
         Err(RuntimeError::Protocol(message)) if message.contains("does not match tool")
     ));
 
     let mut wrong_kind = write_policy.clone();
     wrong_kind.tool_kind = core_policy::ToolKind::PredefinedCommand;
     assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &wrong_kind),
+        ensure_tool_matches_policy(write_tool, &linux_target, &wrong_kind),
         Err(RuntimeError::Protocol(message)) if message.contains("kind does not match")
     ));
 
@@ -841,14 +843,16 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
             transport: core_policy::NetworkTransport::Tcp,
         });
     assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &network_allow),
+        ensure_tool_matches_policy(write_tool, &linux_target, &network_allow),
         Err(RuntimeError::Protocol(message)) if message.contains("deny-all network")
     ));
+    ensure_tool_matches_policy(write_tool, &macos_target, &network_allow)
+        .expect("macOS policy artifacts may carry reviewed network allowlists");
 
     let mut wrong_script_command = write_policy.clone();
     wrong_script_command.executable = "runner:custom".to_owned();
     assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &wrong_script_command),
+        ensure_tool_matches_policy(write_tool, &linux_target, &wrong_script_command),
         Err(RuntimeError::Protocol(message)) if message.contains("script command")
     ));
 
@@ -873,7 +877,7 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
     let mut wrong_predefined_command = read_policy.clone();
     wrong_predefined_command.executable = "registry:custom".to_owned();
     assert!(matches!(
-        ensure_tool_matches_policy(read_tool, &wrong_predefined_command),
+        ensure_tool_matches_policy(read_tool, &linux_target, &wrong_predefined_command),
         Err(RuntimeError::Protocol(message)) if message.contains("runtime policy command")
     ));
 
@@ -6129,9 +6133,11 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
         .expect("negative tool exists");
     let command_policy = command_policy_for_phase(&policy, &phase.identity.id, tool)
         .expect("negative tool policy exists");
-    assert!(sandbox_tool_dispatch_failure(tool, command_policy)
-        .expect("sandbox failure resolves")
-        .is_some());
+    assert!(
+        sandbox_tool_dispatch_failure(tool, &policy.target, command_policy)
+            .expect("sandbox failure resolves")
+            .is_some()
+    );
     assert!(sandbox_out_of_phase_failure(&registry, &policy, phase).is_none());
 
     let mut extra_arg_tool = tool.clone();
@@ -7890,6 +7896,7 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
     let tool_policy = RuntimeToolPolicy {
         command: command_policy,
         protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
+        target: &policy.target,
     };
     let invocation = LoopInvocation {
         loop_id: "loop-001".to_owned(),
