@@ -91,7 +91,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **M0-blocking decisions:** none remain. D-002, D-006, D-012…D-018 and D-047…D-050 are decided in ADR-0029…ADR-0037 and ADR-0041…ADR-0045.
 
-D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is deterministic rule/window selection only, and the post-M1 RPC command shape starts as a minimal local JSON-RPC control set. ADR-0051/ADR-0052 close the M1 network/sandbox behavior: M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, while D-046 remains open for post-M1 positive CIDR egress enforcement. D-020 (embedded core API scope) remains a post-M1 seam and does not block M1.
+D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is deterministic rule/window selection only, and the post-M1 RPC command shape starts as a minimal local JSON-RPC control set. ADR-0051/ADR-0052 close the M1 network/sandbox behavior: M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, while D-046 remains open for post-M1 positive CIDR egress enforcement. D-020 (embedded core API scope) remains a post-M1 seam and does not block M1. D-056 is closed by ADR-0056: main-branch protection requires the M1 gates for PR merges, while `feat/**` push CI stays advisory.
 
 **DoD / pass-fail definition:**
 
@@ -170,12 +170,13 @@ M3 delivers Liquid as a **self-contained native workspace/app-building product**
 
 1. Keep the M1 topic branch scoped to Loop Agent runtime hardening until the DoD is green.
 2. Keep runtime gates green as implementation changes: ≥95% production-code coverage, D-015 golden diffs, M1 performance budgets, sandbox-negative policy emulation and macOS policy-artifact parity.
-3. CI runs for PRs targeting `main`, pushes to `main` and pushes to `feat/**`; branch protection/ruleset activation remains D-056.
+3. CI runs for PRs targeting `main`, pushes to `main` and pushes to `feat/**`; ADR-0056 keeps the main-branch ruleset as the required M1 merge gate while `feat/**` push CI stays advisory.
 4. Finish M1 only after the full closeout chain in `AGENTS.md` is green and Loop Agent remains standalone.
 5. Start Meta-Harness M2 planning only after Loop Agent M1 is green and standalone.
 
 ## Progress Log (timestamped)
 
+- `2026-07-05` — M1 governance decision D-056 closed: main-branch protection is the required M1 merge gate; `feat/**` push CI remains advisory.
 - `2026-07-03` — M1 Loop Agent implementation is active: standalone CLI run/replay/tail/resume, local session logs, registry loading, deterministic fixture streams and sandbox-negative validation are in place; current work is governance hardening against the M1 DoD.
 - `2026-07-01` — M1 hardening decisions closed: recursive Loop nesting is capped at 64 levels (ADR-0053), registry/session-log reads use fixed M1 byte caps with tail suffix validation (ADR-0054), and the post-M1 Loop Agent RPC shape starts with a minimal local JSON-RPC control method set (ADR-0055).
 - `2026-06-24` — M1 preflight decisions closed: Loop Agent M1 performance budgets (ADR-0049), deterministic M1 context scope (ADR-0050), fail-closed Linux-target network policy with non-empty allowlists rejected (ADR-0051). Decision docs cleaned up: live open decisions stay in `open-decisions.html`, accepted decisions stay compact in `ADR-LOG.md`.

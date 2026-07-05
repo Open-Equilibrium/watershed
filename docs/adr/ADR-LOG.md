@@ -63,3 +63,4 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0053** | 2026-07-01 | Accepted | Recursive loop composition is capped at 64 levels across registry validation, policy compilation and runtime emission — Loop Agent V-Spec.
 - **ADR-0054** | 2026-07-01 | Accepted | M1 registry/session-log reads use fixed caps: 1 MiB per registry file, 16 MiB registry total and 16 MiB per session log; tail validates appended JSONL suffixes against prior state — Loop Agent V-Spec.
 - **ADR-0055** | 2026-07-01 | Accepted | Post-M1 Loop Agent control starts with minimal local JSON-RPC `loop.start`/`loop.status`/`loop.cancel`/`loop.tail`/`loop.export`; no `cmd.*` runtime events — `PROTOCOL.md`, Loop Agent V-Spec.
+- **ADR-0056** | 2026-07-05 | Accepted | M1 merge protection requires the main-branch ruleset to gate PR merges on the M1 CI jobs; `feat/**` push CI stays advisory — `PLAN.md`, `AGENTS.md`.

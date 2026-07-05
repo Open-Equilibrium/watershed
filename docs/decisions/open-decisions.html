@@ -15,25 +15,11 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1">
-    <h2>M1 - Governance</h2>
-    <div class="grid">
-      <article id="d-056" class="decision">
-        <h3>D-056 - CI Trigger And Branch Protection Scope</h3>
-        <p><strong>Status:</strong> Open before declaring M1 protected/PR-ready.</p>
-        <p><strong>Question:</strong> CI runs for pull requests targeting main, pushes to main and pushes to feat/**. Which GitHub branch protection or ruleset should require the M1 gates before merging?</p>
-        <ul><li><strong>A:</strong> Protect main with the existing M1 job required on main-targeting PRs. Pro: matches the PR-only main model. Con: topic branch pushes can still fail until the PR is updated.</li><li><strong>B:</strong> Also add a ruleset for feat/** branches. Pro: blocks stale or broken topic branches earlier. Con: more administrative noise for short-lived branches.</li></ul>
-        <p><strong>Recommendation:</strong> A for M1; use feat/** push CI for early feedback and require the M1 job on protected main once the checks are stable.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>
