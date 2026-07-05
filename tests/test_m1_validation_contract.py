@@ -14,6 +14,18 @@ def coverage_ignore_regex(text: str) -> re.Pattern[str]:
     return re.compile(match.group(1))
 
 
+def read_rust_sources(*paths: Path) -> str:
+    chunks: list[str] = []
+    for path in paths:
+        if path.is_dir():
+            chunks.extend(
+                child.read_text(encoding="utf-8") for child in sorted(path.glob("*.rs"))
+            )
+        else:
+            chunks.append(path.read_text(encoding="utf-8"))
+    return "\n".join(chunks)
+
+
 class M1ValidationContractTest(unittest.TestCase):
     def assert_git_ignore(self, path: str, *, ignored: bool) -> None:
         result = subprocess.run(
@@ -137,12 +149,14 @@ class M1ValidationContractTest(unittest.TestCase):
 
     def test_hardening_surfaces_remain_present(self) -> None:
         sources = {
-            "core_script": (ROOT / "core" / "core-script" / "src" / "lib.rs").read_text(
-                encoding="utf-8"
+            "core_script": read_rust_sources(
+                ROOT / "core" / "core-script" / "src" / "lib.rs",
+                ROOT / "core" / "core-script" / "src" / "script",
             ),
-            "loop_agent_core": (
-                ROOT / "loop-agent" / "loop-agent-core" / "src" / "lib.rs"
-            ).read_text(encoding="utf-8"),
+            "loop_agent_core": read_rust_sources(
+                ROOT / "loop-agent" / "loop-agent-core" / "src" / "lib.rs",
+                ROOT / "loop-agent" / "loop-agent-core" / "src" / "runtime",
+            ),
         }
 
         for source_key, token in [
