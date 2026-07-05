@@ -177,6 +177,7 @@ M3 delivers Liquid as a **self-contained native workspace/app-building product**
 ## Progress Log (timestamped)
 
 - `2026-07-05` — M1 governance decision D-056 closed: main-branch protection is the required M1 merge gate; `feat/**` push CI remains advisory.
+- `2026-07-05` — Codex project config decision ADR-0057 recorded: trusted checkouts keep workspace-write network access enabled for networked closeout, while approval prompts and web search stay disabled.
 - `2026-07-03` — M1 Loop Agent implementation is active: standalone CLI run/replay/tail/resume, local session logs, registry loading, deterministic fixture streams and sandbox-negative validation are in place; current work is governance hardening against the M1 DoD.
 - `2026-07-01` — M1 hardening decisions closed: recursive Loop nesting is capped at 64 levels (ADR-0053), registry/session-log reads use fixed M1 byte caps with tail suffix validation (ADR-0054), and the post-M1 Loop Agent RPC shape starts with a minimal local JSON-RPC control method set (ADR-0055).
 - `2026-06-24` — M1 preflight decisions closed: Loop Agent M1 performance budgets (ADR-0049), deterministic M1 context scope (ADR-0050), fail-closed Linux-target network policy with non-empty allowlists rejected (ADR-0051). Decision docs cleaned up: live open decisions stay in `open-decisions.html`, accepted decisions stay compact in `ADR-LOG.md`.

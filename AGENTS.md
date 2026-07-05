@@ -56,7 +56,7 @@ docs/adr/ADR-LOG.md                  decided records (agents)
 
 ## Codex setup
 
-- Project config: `.codex/config.toml` (model/sandbox/approval/web-search posture; applies when the project is trusted).
+- Project config: `.codex/config.toml` (model/sandbox/approval/web-search posture; applies when the project is trusted). ADR-0057 keeps `sandbox_workspace_write.network_access = true` for networked repo closeout while `approval_policy = "never"` and `web_search = "disabled"` remain fixed; this is contributor/agent harness configuration, not product runtime egress.
 - Repo skills (`.agents/skills/`, each self-documenting in its `SKILL.md`):
   - `tdd` — red/green implementation loop; default for all code changes.
   - `git` — branching model (topic branches off `main`), stable-state commits, squash-ready PR body DCO sign-off, PR-ready closeout (canonical order: tests → autoreview → clawpatch → doc-sync → PR).

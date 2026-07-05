@@ -157,6 +157,33 @@ class M1ValidationContractTest(unittest.TestCase):
         ]:
             self.assertIn(token, plan)
 
+    def test_codex_project_network_access_decision_is_recorded(self) -> None:
+        config = (ROOT / ".codex" / "config.toml").read_text(encoding="utf-8")
+        adr_log = (ROOT / "docs" / "adr" / "ADR-LOG.md").read_text(encoding="utf-8")
+        agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+
+        for token in [
+            'approval_policy = "never"',
+            'web_search = "disabled"',
+            "network_access = true",
+        ]:
+            self.assertIn(token, config)
+        for token in [
+            "ADR-0057",
+            "networked repo closeout",
+            "not product runtime egress",
+        ]:
+            self.assertIn(token, adr_log)
+        for token in [
+            "ADR-0057",
+            "networked repo closeout",
+            "not product runtime egress",
+        ]:
+            self.assertIn(token, agents)
+        self.assertIn("ADR-0001…ADR-0057", changelog)
+        self.assertIn("ADR-0057", changelog)
+
 
 if __name__ == "__main__":
     unittest.main()
