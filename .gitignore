@@ -3,7 +3,8 @@
 **/target/
 
 # Loop Agent runtime state & logs (see docs/concept/V-Spec_LoopAgent.html, SECURITY.md)
-**/.loop/
+**/.loop/sessions/
+**/.loop/logs/
 **/out/
 .flow/
 
