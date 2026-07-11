@@ -798,4 +798,3 @@ fn ensure_tool_matches_policy(
 
     Ok(())
 }
-

@@ -792,4 +792,3 @@ fn write_tail_bytes_reports_non_broken_pipe_writer_errors() {
             if path == PathBuf::from("<tail>") && source.kind() == io::ErrorKind::Other
     ));
 }
-

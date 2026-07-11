@@ -164,4 +164,3 @@ fn trusted_predefined_command(command_id: &str) -> Option<TrustedPredefinedComma
         .copied()
         .find(|command| command.command_id == command_id)
 }
-

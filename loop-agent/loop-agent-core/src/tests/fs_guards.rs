@@ -332,4 +332,3 @@ fn opened_file_identity_guard_detects_symlink_directory_and_replaced_paths() {
         Err(RuntimeError::Protocol(message)) if message.contains("changed before write")
     ));
 }
-

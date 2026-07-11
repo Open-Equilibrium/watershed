@@ -28,4 +28,3 @@ fn workspace_copy_skips_fixture_runtime_state() {
         "fixture output state must not be copied"
     );
 }
-

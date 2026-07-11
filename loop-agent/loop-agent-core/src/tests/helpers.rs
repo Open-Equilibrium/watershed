@@ -897,4 +897,3 @@ fn dir_size(path: &Path) -> u64 {
         })
         .sum()
 }
-

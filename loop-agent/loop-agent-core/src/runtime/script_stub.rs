@@ -764,4 +764,3 @@ fn ensure_script_leaf_not_hardlinked(
 ) -> Result<(), RuntimeError> {
     Ok(())
 }
-

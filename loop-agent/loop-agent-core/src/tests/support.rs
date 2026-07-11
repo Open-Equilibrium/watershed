@@ -116,4 +116,3 @@ fn assert_active_session(err: RuntimeError, session_id: &str, lock_name: &str) {
         other => panic!("expected active session error, got {other:?}"),
     }
 }
-

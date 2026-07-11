@@ -986,4 +986,3 @@ fn session_stream_suffix_bytes(
     }
     Ok(&stream.as_bytes()[offset..])
 }
-

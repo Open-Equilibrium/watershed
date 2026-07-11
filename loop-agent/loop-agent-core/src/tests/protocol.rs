@@ -1892,4 +1892,3 @@ fn lifecycle_validation_covers_terminal_session_open_entity_edges() {
         assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
     }
 }
-

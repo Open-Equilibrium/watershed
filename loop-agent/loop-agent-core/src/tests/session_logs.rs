@@ -2182,4 +2182,3 @@ fn resume_rejects_noncanonical_prefix_without_rewriting_log() {
         2
     );
 }
-

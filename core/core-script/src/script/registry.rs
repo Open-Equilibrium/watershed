@@ -453,4 +453,3 @@ struct LoopTailDepth {
     deepest_loop_id: String,
     depth: usize,
 }
-

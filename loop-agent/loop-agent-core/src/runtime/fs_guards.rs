@@ -334,4 +334,3 @@ fn ensure_parent_real_directory(path: &Path) -> Result<(), RuntimeError> {
     })?;
     ensure_existing_real_directory(parent)
 }
-

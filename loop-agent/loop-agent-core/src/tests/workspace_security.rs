@@ -627,4 +627,3 @@ fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_
         "hello\n"
     );
 }
-

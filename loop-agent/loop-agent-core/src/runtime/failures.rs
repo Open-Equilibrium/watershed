@@ -400,4 +400,3 @@ fn connection_kind_name(kind: &core_script::ConnectionKind) -> &'static str {
         core_script::ConnectionKind::Refresh => "refresh",
     }
 }
-

@@ -758,4 +758,3 @@ fn phase_scoped_tools_run_once_for_multi_step_phase() {
         "hello\n"
     );
 }
-

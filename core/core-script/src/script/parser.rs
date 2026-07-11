@@ -1909,4 +1909,3 @@ fn decode_yaml_hex_escape(
 fn leading_spaces(value: &str) -> usize {
     value.bytes().take_while(|byte| *byte == b' ').count()
 }
-

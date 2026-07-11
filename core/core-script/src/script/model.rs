@@ -375,4 +375,3 @@ pub struct ResolvedRegistry {
     /// Tool blocks keyed by id.
     pub tools: BTreeMap<String, ToolBlock>,
 }
-

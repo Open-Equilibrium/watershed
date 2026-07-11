@@ -156,4 +156,3 @@ fn host_bits_are_zero_v6(addr: Ipv6Addr, prefix: u8) -> bool {
         }
     }
 }
-

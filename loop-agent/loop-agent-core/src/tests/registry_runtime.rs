@@ -802,4 +802,3 @@ fn runtime_rejects_duplicate_subloop_work_over_m1_budget() {
         RuntimeError::Protocol(message) if message.contains("loop invocation budget")
     ));
 }
-

@@ -359,4 +359,3 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
         .contains("\"event_type\":\"session.completed\""));
     assert!(!output.stdout.contains("tool_out_of_phase"));
 }
-

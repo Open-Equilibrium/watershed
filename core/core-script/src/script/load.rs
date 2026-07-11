@@ -308,4 +308,3 @@ fn has_windows_reparse_point(metadata: &fs::Metadata) -> bool {
 fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
-
