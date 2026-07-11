@@ -1,15 +1,21 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync as defaultSpawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
-const args = process.argv.slice(2);
-if (args.length === 0) {
-  console.error("usage: node scripts/run-python.mjs <python-args...>");
-  process.exit(2);
+const WINDOWS_LAUNCHER_PROBE_ARGS = ["-3", "-c", "import sys"];
+
+function writeError(stderr, message) {
+  stderr.write(`${message}\n`);
 }
 
-const candidates =
-  process.platform === "win32"
+function pythonCandidates(platform, args) {
+  return platform === "win32"
     ? [
-        { executable: "py", args: ["-3", ...args] },
+        {
+          executable: "py",
+          args: ["-3", ...args],
+          probeArgs: WINDOWS_LAUNCHER_PROBE_ARGS,
+          missingName: "py -3",
+        },
         { executable: "python3", args },
         { executable: "python", args },
       ]
@@ -17,24 +23,51 @@ const candidates =
         { executable: "python3", args },
         { executable: "python", args },
       ];
-
-const missing = [];
-for (const candidate of candidates) {
-  const result = spawnSync(candidate.executable, candidate.args, { stdio: "inherit" });
-  if (result.error?.code === "ENOENT") {
-    missing.push(candidate.executable);
-    continue;
-  }
-  if (result.error) {
-    console.error(`${candidate.executable}: ${result.error.message}`);
-    process.exit(1);
-  }
-  if (result.signal) {
-    console.error(`${candidate.executable}: stopped by signal ${result.signal}`);
-    process.exit(1);
-  }
-  process.exit(result.status ?? 1);
 }
 
-console.error(`missing Python interpreter: tried ${missing.join(", ")}`);
-process.exit(127);
+function launcherProbeFailed(result) {
+  return result.error || result.signal || (result.status ?? 1) !== 0;
+}
+
+export function runPython(
+  args,
+  { platform = process.platform, spawnSync = defaultSpawnSync, stderr = process.stderr } = {},
+) {
+  if (args.length === 0) {
+    writeError(stderr, "usage: node scripts/run-python.mjs <python-args...>");
+    return 2;
+  }
+
+  const missing = [];
+  for (const candidate of pythonCandidates(platform, args)) {
+    if (candidate.probeArgs) {
+      const probe = spawnSync(candidate.executable, candidate.probeArgs, { stdio: "ignore" });
+      if (launcherProbeFailed(probe)) {
+        missing.push(candidate.missingName);
+        continue;
+      }
+    }
+
+    const result = spawnSync(candidate.executable, candidate.args, { stdio: "inherit" });
+    if (result.error?.code === "ENOENT") {
+      missing.push(candidate.executable);
+      continue;
+    }
+    if (result.error) {
+      writeError(stderr, `${candidate.executable}: ${result.error.message}`);
+      return 1;
+    }
+    if (result.signal) {
+      writeError(stderr, `${candidate.executable}: stopped by signal ${result.signal}`);
+      return 1;
+    }
+    return result.status ?? 1;
+  }
+
+  writeError(stderr, `missing Python interpreter: tried ${missing.join(", ")}`);
+  return 127;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exit(runPython(process.argv.slice(2)));
+}

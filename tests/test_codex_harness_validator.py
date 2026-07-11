@@ -37,6 +37,19 @@ def write_valid_harness(root: Path) -> None:
         shutil.copy(skill_path, target / "SKILL.md")
 
 
+def run_node_module_test(source: str) -> subprocess.CompletedProcess[str]:
+    node = shutil.which("node")
+    if node is None:
+        raise AssertionError("node executable is required")
+    return subprocess.run(
+        [node, "--input-type=module", "-e", source],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+
 class CodexHarnessValidatorTest(unittest.TestCase):
     def test_current_harness_is_valid(self) -> None:
         self.assertEqual([], validator.validate_repo(ROOT))
@@ -56,6 +69,69 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         )
 
         self.assertEqual("ok", result.stdout)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+
+    def test_windows_python_launcher_failure_falls_back_to_python(self) -> None:
+        result = run_node_module_test(
+            f"""
+            import assert from "node:assert/strict";
+            import {{ runPython }} from {json.dumps((ROOT / "scripts" / "run-python.mjs").as_uri())};
+
+            const calls = [];
+            const stderr = {{ text: "", write(chunk) {{ this.text += chunk; }} }};
+            const status = runPython(["script.py"], {{
+              platform: "win32",
+              stderr,
+              spawnSync(executable, args) {{
+                calls.push({{ executable, args }});
+                if (executable === "py") return {{ status: 103 }};
+                if (executable === "python3") {{
+                  return {{ error: Object.assign(new Error("missing"), {{ code: "ENOENT" }}) }};
+                }}
+                if (executable === "python") return {{ status: 0 }};
+                throw new Error(`unexpected executable ${{executable}}`);
+              }},
+            }});
+
+            assert.equal(status, 0);
+            assert.equal(stderr.text, "");
+            assert.deepEqual(calls.map((call) => call.executable), ["py", "python3", "python"]);
+            assert.deepEqual(calls[0].args.slice(0, 2), ["-3", "-c"]);
+            """
+        )
+
+        self.assertEqual("", result.stdout)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+
+    def test_windows_python_launcher_preserves_script_failure(self) -> None:
+        result = run_node_module_test(
+            f"""
+            import assert from "node:assert/strict";
+            import {{ runPython }} from {json.dumps((ROOT / "scripts" / "run-python.mjs").as_uri())};
+
+            const calls = [];
+            const stderr = {{ text: "", write(chunk) {{ this.text += chunk; }} }};
+            const status = runPython(["script.py"], {{
+              platform: "win32",
+              stderr,
+              spawnSync(executable, args) {{
+                calls.push({{ executable, args }});
+                if (executable !== "py") throw new Error(`unexpected fallback ${{executable}}`);
+                return calls.length === 1 ? {{ status: 0 }} : {{ status: 7 }};
+              }},
+            }});
+
+            assert.equal(status, 7);
+            assert.equal(stderr.text, "");
+            assert.deepEqual(calls.map((call) => call.executable), ["py", "py"]);
+            assert.deepEqual(calls[0].args.slice(0, 2), ["-3", "-c"]);
+            assert.deepEqual(calls[1].args, ["-3", "script.py"]);
+            """
+        )
+
+        self.assertEqual("", result.stdout)
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
 
