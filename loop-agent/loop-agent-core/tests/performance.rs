@@ -19,18 +19,18 @@ static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PERFORMANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn smoke_loop_runtime_emit_p95_stays_under_m1_budget() {
+fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
     let _guard = performance_test_guard();
     let mut event_nanos = Vec::new();
 
     for _ in 0..3 {
-        let workspace = workspace_copy("smoke-loop");
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("warm runtime emit succeeds");
+        let workspace = workspace_copy("hello-loop");
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("warm runtime emit succeeds");
     }
     for _ in 0..25 {
-        let workspace = workspace_copy("smoke-loop");
+        let workspace = workspace_copy("hello-loop");
         let started = Instant::now();
-        let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
             .expect("runtime emit path succeeds");
         assert!(!output.failed);
         event_nanos.push(started.elapsed().as_nanos() / output.event_count as u128);
@@ -40,7 +40,7 @@ fn smoke_loop_runtime_emit_p95_stays_under_m1_budget() {
 
     assert!(
         p95_nanos <= budget_nanos,
-        "smoke-loop runtime emit p95 must stay within the per-event budget: {p95_nanos} ns"
+        "hello-loop runtime emit p95 must stay within the per-event budget: {p95_nanos} ns"
     );
 }
 
