@@ -159,6 +159,16 @@ fn policy_compiler_rejects_unknown_predefined_commands() {
 }
 
 #[test]
+fn trusted_predefined_command_membership_has_one_policy_authority() {
+    for command_id in ["agent-echo", "agent-negative", "agent-read"] {
+        assert!(is_trusted_predefined_command_id(command_id));
+    }
+    for command_id in ["", "agent-custom", "agent-read-extra"] {
+        assert!(!is_trusted_predefined_command_id(command_id));
+    }
+}
+
+#[test]
 fn policy_compiler_rejects_tool_kind_command_shape_mismatches() {
     let mut registry = core_script::load_registry_root(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/smoke-loop/registry"),

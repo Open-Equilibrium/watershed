@@ -30,26 +30,6 @@ const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
 const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
 const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 const RUNTIME_ERROR_REASON: &str = "runtime_error";
-const TRUSTED_PREDEFINED_COMMANDS: &[TrustedPredefinedCommand] = &[
-    TrustedPredefinedCommand {
-        command_id: "agent-echo",
-        progress: None,
-    },
-    TrustedPredefinedCommand {
-        command_id: "agent-negative",
-        progress: None,
-    },
-    TrustedPredefinedCommand {
-        command_id: "agent-read",
-        progress: Some("stub read completed"),
-    },
-];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TrustedPredefinedCommand {
-    command_id: &'static str,
-    progress: Option<&'static str>,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct EventClock {
@@ -83,41 +63,6 @@ impl EventClock {
         let offset = i64::try_from(sequence.saturating_sub(1)).unwrap_or(i64::MAX);
         format_unix_timestamp(self.base_unix_seconds.saturating_add(offset))
     }
-}
-
-/// Runtime surfaces tracked by the Loop Agent MVP.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeSurface {
-    /// Human CLI commands.
-    HumanCli,
-    /// Headless JSONL event stream.
-    JsonlEventStream,
-    /// Local append-only session log.
-    LocalSessionLog,
-    /// Session tail, replay and resume commands.
-    TailReplayResume,
-    /// Designed future RPC surface.
-    DesignedRpc,
-    /// Designed future embedded core API.
-    FutureEmbeddedCoreApi,
-}
-
-/// Returns the runtime surfaces implemented in M1.
-pub fn m1_runtime_surfaces() -> &'static [RuntimeSurface] {
-    &[
-        RuntimeSurface::HumanCli,
-        RuntimeSurface::JsonlEventStream,
-        RuntimeSurface::LocalSessionLog,
-        RuntimeSurface::TailReplayResume,
-    ]
-}
-
-/// Returns runtime surfaces intentionally deferred beyond M1.
-pub fn designed_future_surfaces() -> &'static [RuntimeSurface] {
-    &[
-        RuntimeSurface::DesignedRpc,
-        RuntimeSurface::FutureEmbeddedCoreApi,
-    ]
 }
 
 /// Output format for CLI/runtime calls.
@@ -308,9 +253,4 @@ impl From<serde_json::Error> for RuntimeError {
 /// Returns whether `session_id` is a valid path-safe v0 session id.
 pub fn validate_session_id(session_id: &str) -> bool {
     proto::is_valid_session_id(session_id)
-}
-
-/// Returns the current runtime enforcement notice used by docs/tests.
-pub fn m0_runtime_notice() -> &'static str {
-    "M1 runs deterministic in-process Loop Agent execution; OS sandbox enforcement is post-M1"
 }

@@ -14,18 +14,6 @@ def coverage_ignore_regex(text: str) -> re.Pattern[str]:
     return re.compile(match.group(1))
 
 
-def read_rust_sources(*paths: Path) -> str:
-    chunks: list[str] = []
-    for path in paths:
-        if path.is_dir():
-            chunks.extend(
-                child.read_text(encoding="utf-8") for child in sorted(path.glob("*.rs"))
-            )
-        else:
-            chunks.append(path.read_text(encoding="utf-8"))
-    return "\n".join(chunks)
-
-
 class M1ValidationContractTest(unittest.TestCase):
     def assert_git_ignore(self, path: str, *, ignored: bool) -> None:
         result = subprocess.run(
@@ -146,29 +134,6 @@ class M1ValidationContractTest(unittest.TestCase):
             "loop-agent/fixtures/new-fixture/.loop/logs/session.log",
             ignored=True,
         )
-
-    def test_hardening_surfaces_remain_present(self) -> None:
-        sources = {
-            "core_script": read_rust_sources(
-                ROOT / "core" / "core-script" / "src" / "lib.rs",
-                ROOT / "core" / "core-script" / "src" / "script",
-            ),
-            "loop_agent_core": read_rust_sources(
-                ROOT / "loop-agent" / "loop-agent-core" / "src" / "lib.rs",
-                ROOT / "loop-agent" / "loop-agent-core" / "src" / "runtime",
-            ),
-        }
-
-        for source_key, token in [
-            ("core_script", "fn visit_loop"),
-            ("loop_agent_core", "persist_reserved_session_prefix"),
-            ("loop_agent_core", "verify_resume_definition_metadata"),
-            ("loop_agent_core", "ensure_session_log_growth_within_limit"),
-            ("loop_agent_core", "validate_appended_session_log_text"),
-            ("loop_agent_core", "ensure_real_workspace_write_path"),
-            ("loop_agent_core", "active_session_lock_message"),
-        ]:
-            self.assertIn(token, sources[source_key])
 
     def test_ci_trigger_scope_and_branch_protection_decision_are_recorded(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(

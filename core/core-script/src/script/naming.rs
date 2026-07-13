@@ -245,65 +245,6 @@ impl From<SemanticValidationError> for RegistryError {
     }
 }
 
-/// Error returned by a script parser.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ParseError {
-    /// Parser implementation is not available on this surface.
-    ContractOnly,
-    /// Block id was invalid.
-    InvalidBlockId(String),
-    /// Command id was invalid.
-    InvalidCommandId(String),
-    /// Parser rejected the source.
-    Parse(String),
-    /// Semantic validation failed.
-    Semantic(SemanticValidationError),
-}
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ContractOnly => write!(
-                f,
-                "M0 defines the parser contract; parser execution lands in M1"
-            ),
-            Self::InvalidBlockId(value) => write!(f, "invalid block id: {value}"),
-            Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
-            Self::Parse(message) => f.write_str(message),
-            Self::Semantic(err) => write!(f, "{err}"),
-        }
-    }
-}
-
-impl std::error::Error for ParseError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Semantic(err) => Some(err),
-            Self::ContractOnly
-            | Self::InvalidBlockId(_)
-            | Self::InvalidCommandId(_)
-            | Self::Parse(_) => None,
-        }
-    }
-}
-
-impl From<SemanticValidationError> for ParseError {
-    fn from(err: SemanticValidationError) -> Self {
-        Self::Semantic(err)
-    }
-}
-
-impl From<RegistryError> for ParseError {
-    fn from(err: RegistryError) -> Self {
-        match err {
-            RegistryError::InvalidBlockId(value) => Self::InvalidBlockId(value),
-            RegistryError::InvalidCommandId(value) => Self::InvalidCommandId(value),
-            RegistryError::Semantic(err) => Self::Semantic(err),
-            other => Self::Parse(other.to_string()),
-        }
-    }
-}
-
 /// Semantic validation failure for a registry block.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SemanticValidationError {

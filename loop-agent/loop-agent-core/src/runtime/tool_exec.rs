@@ -151,21 +151,23 @@ fn execute_predefined_command(
     command_id: &str,
     argv: &[String],
 ) -> Result<Option<&'static str>, RuntimeError> {
-    let command = trusted_predefined_command(command_id).ok_or_else(|| {
-        RuntimeError::Protocol(format!("unsupported predefined command {command_id:?}"))
-    })?;
+    let progress = trusted_predefined_command_progress(command_id)?;
     let executable = format!("registry:{command_id}");
     if policy.executable != executable || policy.argv != argv {
         return Err(RuntimeError::Protocol(format!(
             "runtime policy executable does not match trusted command {command_id:?}"
         )));
     }
-    Ok(command.progress)
+    Ok(progress)
 }
 
-fn trusted_predefined_command(command_id: &str) -> Option<TrustedPredefinedCommand> {
-    TRUSTED_PREDEFINED_COMMANDS
-        .iter()
-        .copied()
-        .find(|command| command.command_id == command_id)
+fn trusted_predefined_command_progress(
+    command_id: &str,
+) -> Result<Option<&'static str>, RuntimeError> {
+    if !core_policy::is_trusted_predefined_command_id(command_id) {
+        return Err(RuntimeError::Protocol(format!(
+            "unsupported predefined command {command_id:?}"
+        )));
+    }
+    Ok((command_id == "agent-read").then_some("stub read completed"))
 }

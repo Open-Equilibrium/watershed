@@ -596,6 +596,30 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
 }
 
 #[test]
+fn predefined_command_runtime_uses_policy_membership_and_local_progress() {
+    for (command_id, expected_progress) in [
+        ("agent-echo", None),
+        ("agent-negative", None),
+        ("agent-read", Some("stub read completed")),
+    ] {
+        assert!(core_policy::is_trusted_predefined_command_id(command_id));
+        assert_eq!(
+            trusted_predefined_command_progress(command_id)
+                .expect("policy-trusted command is accepted at runtime"),
+            expected_progress
+        );
+    }
+
+    assert!(!core_policy::is_trusted_predefined_command_id(
+        "agent-custom"
+    ));
+    assert!(matches!(
+        trusted_predefined_command_progress("agent-custom"),
+        Err(RuntimeError::Protocol(message)) if message.contains("unsupported predefined")
+    ));
+}
+
+#[test]
 fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     let workspace = empty_workspace("mutated-preflight");
     let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");

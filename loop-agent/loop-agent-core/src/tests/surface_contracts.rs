@@ -1,29 +1,4 @@
 #[test]
-fn m1_surfaces_exclude_rpc_and_embedding() {
-    let m1 = m1_runtime_surfaces();
-
-    assert!(m1.contains(&RuntimeSurface::HumanCli));
-    assert!(m1.contains(&RuntimeSurface::JsonlEventStream));
-    assert!(!m1.contains(&RuntimeSurface::DesignedRpc));
-    assert!(!m1.contains(&RuntimeSurface::FutureEmbeddedCoreApi));
-}
-
-#[test]
-fn designed_future_surfaces_are_documented_but_not_m1() {
-    assert_eq!(
-        designed_future_surfaces(),
-        &[
-            RuntimeSurface::DesignedRpc,
-            RuntimeSurface::FutureEmbeddedCoreApi
-        ]
-    );
-    assert_eq!(
-        m0_runtime_notice(),
-        "M1 runs deterministic in-process Loop Agent execution; OS sandbox enforcement is post-M1"
-    );
-}
-
-#[test]
 fn runtime_error_display_source_and_exit_codes_cover_variants() {
     let io_error = RuntimeError::Io {
         path: PathBuf::from("session.jsonl"),

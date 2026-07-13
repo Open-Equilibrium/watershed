@@ -14,17 +14,6 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(),
     collect_registry_files_with_limits(dir, dir, out, limits, 0, &mut state)
 }
 
-#[test]
-fn parser_contract_records_decided_m0_shape() {
-    let contract = ParserContract::default();
-
-    assert_eq!(contract.schema_version, "0");
-    assert_eq!(contract.yaml_version, "1.2");
-    assert!(contract.one_block_per_file);
-    assert!(contract.semantic_validation.contains("strict parser"));
-    assert!(contract.canonical_serialization.contains("resolved model"));
-}
-
 proptest! {
     #[test]
     fn safe_relative_paths_accept_generated_literal_segments(
@@ -110,7 +99,7 @@ fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
 }
 
 #[test]
-fn public_parser_surfaces_resolve_all_block_kinds_and_canonical_output() {
+fn registry_model_resolves_all_block_kinds_and_canonical_output() {
     assert_eq!(
         serde_json::to_string(&NetworkDeny).expect("deny serializes"),
         "\"deny\""
@@ -121,13 +110,11 @@ fn public_parser_surfaces_resolve_all_block_kinds_and_canonical_output() {
     );
     assert!(serde_json::from_str::<NetworkDeny>("\"allow\"").is_err());
 
-    let parser: &dyn ScriptParser = &V0ScriptParser;
-    let parsed = parser
-            .parse_registry_block(
-                "instruction.yaml",
-                "instruction:\n  id: inspect-instruction\n  name: InspectInstruction\n  prompt: Inspect\n",
-            )
-            .expect("trait parser dispatches to v0 parser");
+    let parsed = parse_registry_block(
+        "instruction.yaml",
+        "instruction:\n  id: inspect-instruction\n  name: InspectInstruction\n  prompt: Inspect\n",
+    )
+    .expect("instruction parses");
     let RegistryBlock::Instruction(instruction) = parsed else {
         panic!("expected instruction block");
     };
@@ -472,7 +459,7 @@ fn registry_loader_rejects_directories_above_traversal_depth_limit() {
 }
 
 #[test]
-fn registry_and_parse_errors_report_sources_and_conversions() {
+fn registry_errors_report_sources_and_conversions() {
     let io_error = RegistryError::Io {
         path: PathBuf::from("registry"),
         source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
@@ -625,48 +612,6 @@ fn registry_and_parse_errors_report_sources_and_conversions() {
         .to_string()
         .contains("failed to serialize resolved registry"));
     assert!(std::error::Error::source(&serialize_error).is_some());
-
-    let parse_cases = [
-        (
-            ParseError::ContractOnly,
-            "M0 defines the parser contract; parser execution lands in M1",
-        ),
-        (
-            ParseError::InvalidBlockId("Bad".to_owned()),
-            "invalid block id: Bad",
-        ),
-        (
-            ParseError::InvalidCommandId("bad command".to_owned()),
-            "invalid command id: bad command",
-        ),
-        (ParseError::Parse("bad shape".to_owned()), "bad shape"),
-    ];
-    for (err, expected) in parse_cases {
-        assert_eq!(err.to_string(), expected);
-        assert!(std::error::Error::source(&err).is_none());
-    }
-    let semantic_parse = ParseError::from(semantic.clone());
-    assert_eq!(semantic_parse.to_string(), semantic.to_string());
-    assert!(std::error::Error::source(&semantic_parse).is_some());
-    assert!(matches!(
-        ParseError::from(RegistryError::InvalidBlockId("Bad".to_owned())),
-        ParseError::InvalidBlockId(value) if value == "Bad"
-    ));
-    assert!(matches!(
-        ParseError::from(RegistryError::InvalidCommandId("bad command".to_owned())),
-        ParseError::InvalidCommandId(value) if value == "bad command"
-    ));
-    assert!(matches!(
-        ParseError::from(RegistryError::from(semantic.clone())),
-        ParseError::Semantic(value) if value == semantic
-    ));
-    assert!(matches!(
-        ParseError::from(RegistryError::Parse {
-            source_name: "bad.yaml".to_owned(),
-            message: "bad shape".to_owned(),
-        }),
-        ParseError::Parse(message) if message == "bad.yaml: bad shape"
-    ));
 }
 
 #[test]
@@ -3497,45 +3442,6 @@ fn semantic_validation_rejects_noncanonical_network_cidr() {
         allow[0].cidr = "192.0.2.0/24".to_owned();
     }
     validate_registry_block_semantics(&RegistryBlock::Tool(tool)).expect("canonical CIDR accepted");
-}
-
-#[test]
-fn parser_errors_can_carry_semantic_validation_failures() {
-    struct SemanticParser;
-
-    impl ScriptParser for SemanticParser {
-        fn parse_registry_block(
-            &self,
-            _source_name: &str,
-            _source: &str,
-        ) -> Result<RegistryBlock, ParseError> {
-            let mut tool = own_script_tool("network-tool", "script:network-tool");
-            tool.network = NetworkPolicy::Declared {
-                allow: vec![NetworkAllowEntry {
-                    cidr: "192.0.2.42/24".to_owned(),
-                    kind: NetworkAllowKind::Cidr,
-                    port: 443,
-                    transport: NetworkTransport::Tcp,
-                }],
-                default: NetworkDefault::Deny,
-            };
-            let block = RegistryBlock::Tool(tool);
-            validate_registry_block_semantics(&block)?;
-            Ok(block)
-        }
-    }
-
-    let err = SemanticParser
-        .parse_registry_block("network-tool.yaml", "")
-        .expect_err("semantic validation error must flow through parser");
-
-    assert_eq!(
-        err,
-        ParseError::Semantic(SemanticValidationError::InvalidCanonicalCidr {
-            cidr: "192.0.2.42/24".to_owned(),
-            tool_id: "network-tool".to_owned(),
-        })
-    );
 }
 
 fn own_script_tool(id: &str, command: &str) -> ToolBlock {

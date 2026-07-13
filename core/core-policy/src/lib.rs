@@ -64,6 +64,11 @@ pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/secrets/**",
 ];
 
+/// Returns whether `command_id` names a trusted predefined command.
+pub fn is_trusted_predefined_command_id(command_id: &str) -> bool {
+    TRUSTED_PREDEFINED_COMMAND_IDS.contains(&command_id)
+}
+
 /// Compiled policy artifact for one target sandbox backend.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PolicyArtifact {
@@ -608,9 +613,7 @@ fn network_allow_entry_from_tool(entry: &core_script::NetworkAllowEntry) -> Netw
 }
 
 fn trusted_predefined_command_executable(command_id: &str) -> Option<String> {
-    TRUSTED_PREDEFINED_COMMAND_IDS
-        .contains(&command_id)
-        .then(|| format!("registry:{command_id}"))
+    is_trusted_predefined_command_id(command_id).then(|| format!("registry:{command_id}"))
 }
 
 fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> AllowedParameterPolicy {

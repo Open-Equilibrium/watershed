@@ -8,10 +8,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
-/// Script schema version string accepted by the v0 parser.
-pub const SCRIPT_SCHEMA_VERSION_V0: &str = "0";
-/// YAML version targeted by checked-in registry files.
-pub const YAML_VERSION: &str = "1.2";
 /// Maximum allowed recursive loop nesting depth.
 pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
 /// Maximum size for one registry YAML file.
@@ -308,57 +304,6 @@ pub struct LoopBlock {
     /// Connections declared at loop scope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connection_refs: Vec<String>,
-}
-
-/// Static parser contract summary for docs/tests.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ParserContract {
-    /// Supported schema version.
-    pub schema_version: &'static str,
-    /// Supported YAML version.
-    pub yaml_version: &'static str,
-    /// Whether each registry file contains exactly one top-level block.
-    pub one_block_per_file: bool,
-    /// Semantic validation summary.
-    pub semantic_validation: &'static str,
-    /// Canonical serialization summary.
-    pub canonical_serialization: &'static str,
-}
-
-impl Default for ParserContract {
-    fn default() -> Self {
-        Self {
-            schema_version: SCRIPT_SCHEMA_VERSION_V0,
-            yaml_version: YAML_VERSION,
-            one_block_per_file: true,
-            semantic_validation: "strict parser plus identity and canonical CIDR checks",
-            canonical_serialization: "deterministic UTF-8 JSON of the resolved model",
-        }
-    }
-}
-
-/// Parser interface for registry block sources.
-pub trait ScriptParser {
-    /// Parses one registry block from a named source.
-    fn parse_registry_block(
-        &self,
-        source_name: &str,
-        source: &str,
-    ) -> Result<RegistryBlock, ParseError>;
-}
-
-/// v0 parser implementation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct V0ScriptParser;
-
-impl ScriptParser for V0ScriptParser {
-    fn parse_registry_block(
-        &self,
-        source_name: &str,
-        source: &str,
-    ) -> Result<RegistryBlock, ParseError> {
-        parse_registry_block(source_name, source).map_err(ParseError::from)
-    }
 }
 
 /// Fully resolved registry keyed by block id.
