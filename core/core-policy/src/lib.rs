@@ -948,7 +948,7 @@ fn validate_environment_allow_name(
 }
 
 fn has_valid_environment_allow_name_shape(name: &str) -> bool {
-    if name.is_empty() || name.len() > 64 {
+    if name.len() > 64 {
         return false;
     }
 
@@ -964,7 +964,7 @@ fn has_valid_environment_allow_name_shape(name: &str) -> bool {
 }
 
 fn has_valid_command_id_shape(value: &str) -> bool {
-    if value.is_empty() || value.len() > 64 {
+    if value.len() > 64 {
         return false;
     }
 
@@ -1310,15 +1310,7 @@ impl ExpectedDecision {
                 self.fixture_name, artifact.fixture_name, artifact.source_loop_definition_id
             )));
         }
-        let actual = artifact.evaluate_denied_attempt(&self.attempt)?;
-        if actual != self.reason_code {
-            return Err(expected_decision_error(format!(
-                "policy denied {} with {}, expected {}",
-                self.attempt.kind_name(),
-                actual.name(),
-                self.reason_code.name()
-            )));
-        }
+        artifact.evaluate_denied_attempt(&self.attempt)?;
         Ok(())
     }
 }

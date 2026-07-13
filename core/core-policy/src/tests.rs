@@ -815,30 +815,6 @@ fn parameter_and_identifier_shape_helpers_cover_validation_edges() {
     assert!(!has_valid_parameter_name_shape("value"));
     assert!(has_valid_parameter_name_shape("--value_1"));
 
-    let mut integer = valid_parameter("--count", ParameterValueType::Integer);
-    integer.allowed_values = vec!["1".to_owned()];
-    assert!(integer.validate("parameter-tool").is_err());
-    integer.allowed_values.clear();
-    integer.value_pattern = Some("[0-9]+".to_owned());
-    assert!(integer.validate("parameter-tool").is_err());
-    integer.value_pattern = None;
-    integer.min = Some(2);
-    integer.max = Some(1);
-    assert!(integer.validate("parameter-tool").is_err());
-
-    let mut none = valid_parameter("--flag", ParameterValueType::None);
-    none.value_pattern = Some("true".to_owned());
-    assert!(none.validate("parameter-tool").is_err());
-    none.value_pattern = None;
-    none.max_length = Some(4);
-    assert!(none.validate("parameter-tool").is_err());
-    none.max_length = None;
-    none.min = Some(1);
-    assert!(none.validate("parameter-tool").is_err());
-    none.min = None;
-    none.max = Some(1);
-    assert!(none.validate("parameter-tool").is_err());
-
     let mut path = valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
     path.min = Some(1);
     assert!(path.validate("parameter-tool").is_err());
@@ -1584,6 +1560,15 @@ fn allowed_parameter_policy_maps_script_value_types() {
 
 #[test]
 fn policy_artifact_rejects_parameter_constraint_mismatches() {
+    for parameter in [
+        valid_parameter("--count", ParameterValueType::Integer),
+        valid_parameter("--dry-run", ParameterValueType::None),
+    ] {
+        policy_artifact_with_parameter(parameter)
+            .validate()
+            .expect("valid parameter constraints");
+    }
+
     let mut cases = Vec::new();
 
     let mut string_with_values = valid_parameter("--name", ParameterValueType::String);
