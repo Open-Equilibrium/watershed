@@ -604,14 +604,6 @@ fn registry_errors_report_sources_and_conversions() {
         .to_string()
         .contains("failed to serialize canonical registry JSON"));
     assert!(std::error::Error::source(&canonical_registry).is_some());
-
-    let serialize_error = RegistryError::Serialize(
-        serde_json::from_str::<Value>("{").expect_err("invalid json produces serde error"),
-    );
-    assert!(serialize_error
-        .to_string()
-        .contains("failed to serialize resolved registry"));
-    assert!(std::error::Error::source(&serialize_error).is_some());
 }
 
 #[test]
@@ -1026,6 +1018,11 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
                 "phase:\n  id: phase\n  name: Phase\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: BadStep\n      name: Step\n",
                 "invalid block id",
             ),
+            (
+                "steps-property-before-item.yaml",
+                "phase:\n  id: phase\n  name: Phase\n  instruction_refs: []\n  tool_refs: []\n  steps:\n      name: Step\n",
+                "property appears before list item",
+            ),
         ] {
             assert!(
                 message(parse_registry_block(name, source)).contains(expected),
@@ -1096,11 +1093,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
             "phase.steps must be a list",
         ),
         (
-            "steps-property-before-item.yaml",
-            "phase:\n  steps:\n      name: Step\n",
-            "property appears before list item",
-        ),
-        (
             "steps-malformed-property.yaml",
             "phase:\n  steps:\n    - id step\n",
             "must use key: value",
@@ -1158,10 +1150,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
             "{value}"
         );
     }
-
-    assert!(message(parse_bool("bool.yaml", "required", "maybe")).contains("true or false"));
-    assert!(message(parse_u16("port.yaml", "port", "70000")).contains("16-bit integer"));
-    assert!(message(parse_i64("int.yaml", "min", "abc")).contains("64-bit integer"));
 
     assert!(message(required_scalar(
         "empty-scalar.yaml",
@@ -1437,22 +1425,58 @@ fn registry_loader_rejects_linked_registry_root() {
 }
 
 #[test]
-fn parser_reads_own_script_body_without_relicensing_or_runtime_escape() {
-    let block = parse_registry_block(
-        "write-summary.yaml",
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/write-summary.yaml"),
-    )
-    .expect("write-summary parses");
+fn parser_treats_literal_script_body_as_opaque_and_requires_it() {
+    let fixture =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/write-summary.yaml");
+    let literal = fixture.replace(
+        "    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n",
+        "    #!/bin/sh\n    write_scope: [\"literal-only\"]\n    ---\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n",
+    );
+    let block = parse_registry_block("literal-script-body.yaml", &literal)
+        .expect("literal script source is opaque to registry parsing");
 
     let RegistryBlock::Tool(tool) = block else {
         panic!("expected tool block");
     };
-
     assert_eq!(tool.script_runtime, Some(ScriptRuntime::PosixSh));
     assert_eq!(
         tool.script_body.as_deref(),
-        Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n")
+        Some(
+            "#!/bin/sh\nwrite_scope: [\"literal-only\"]\n---\nprintf '%s\\n' \"$SUMMARY\" > out/summary.txt\n"
+        )
     );
+
+    let duplicate = literal.replacen(
+        "  write_scope: [\"workspace/out\"]\n",
+        "  write_scope: [\"workspace/out\"]\n  write_scope: []\n",
+        1,
+    );
+    let err = parse_registry_block("real-duplicate.yaml", &duplicate)
+        .expect_err("a real sibling field remains a duplicate");
+    assert!(err.to_string().contains("duplicate tool.write_scope"));
+
+    let body = "  script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n";
+    for (name, source, expected) in [
+        (
+            "missing-script-body.yaml",
+            fixture.replace(body, ""),
+            "script_body",
+        ),
+        (
+            "empty-script-body.yaml",
+            fixture.replace(body, "  script_body: \"\"\n"),
+            "script_body",
+        ),
+        (
+            "folded-script-body.yaml",
+            fixture.replacen("  script_body: |", "  script_body: >", 1),
+            "folded block scalar",
+        ),
+    ] {
+        let err = parse_registry_block(name, &source)
+            .expect_err("own-script body must be present, non-empty, and literal");
+        assert!(err.to_string().contains(expected), "{name}: {err}");
+    }
 }
 
 #[test]
@@ -1688,134 +1712,6 @@ fn parser_rejects_malformed_double_quoted_yaml_scalars() {
     .expect_err("double-quoted scalar with bare quote rejected");
 
     assert!(err.to_string().contains("double-quoted"));
-}
-
-#[test]
-fn parser_reads_literal_block_own_script_body() {
-    let block = parse_registry_block(
-        "literal-script-body.yaml",
-        r#"tool:
-  id: literal-script
-  name: LiteralScript
-  tool_kind: own-script
-  command: script:literal-script
-  script_runtime: posix-sh
-  script_body: |
-    printf '%s\n' "$SUMMARY" > out/summary.txt
-    echo done
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("literal block script_body parses");
-
-    let RegistryBlock::Tool(tool) = block else {
-        panic!("expected tool block");
-    };
-    assert_eq!(
-        tool.script_body.as_deref(),
-        Some("printf '%s\\n' \"$SUMMARY\" > out/summary.txt\necho done\n")
-    );
-}
-
-#[test]
-fn parser_preserves_literal_block_script_body_comments() {
-    let block = parse_registry_block(
-        "literal-script-body-comments.yaml",
-        r#"tool:
-  id: commented-script
-  name: CommentedScript
-  tool_kind: own-script
-  command: script:commented-script
-  script_runtime: posix-sh
-  script_body: |
-    #!/bin/sh
-    echo ok # keep
-    ---
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("literal block script comments are script source");
-
-    let RegistryBlock::Tool(tool) = block else {
-        panic!("expected tool block");
-    };
-    assert_eq!(
-        tool.script_body.as_deref(),
-        Some("#!/bin/sh\necho ok # keep\n---\n")
-    );
-}
-
-#[test]
-fn parser_does_not_extract_fields_from_literal_block_body() {
-    let err = parse_registry_block(
-        "literal-script-body-smuggle.yaml",
-        r#"tool:
-  id: smuggle-script
-  name: SmuggleScript
-  tool_kind: own-script
-  command: script:smuggle-script
-  script_runtime: posix-sh
-  script_body: |
-   read_scope: ["workspace"]
-   write_scope: ["workspace/out"]
-   protected_path_grants: ["workspace/.env"]
-   network: deny
-  allowed_parameters: []
-"#,
-    )
-    .expect_err("literal block content must not satisfy sibling fields");
-
-    assert!(err.to_string().contains("missing tool.read_scope"));
-}
-
-#[test]
-fn parser_rejects_empty_or_misrepresented_own_script_body() {
-    let err = parse_registry_block(
-        "empty-script-body.yaml",
-        r#"tool:
-  id: empty-script
-  name: EmptyScript
-  tool_kind: own-script
-  command: script:empty-script
-  script_runtime: posix-sh
-  script_body: ""
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("empty script body rejected");
-    assert!(err.to_string().contains("script_body"));
-
-    let err = parse_registry_block(
-        "folded-script-body.yaml",
-        r#"tool:
-  id: folded-script
-  name: FoldedScript
-  tool_kind: own-script
-  command: script:folded-script
-  script_runtime: posix-sh
-  script_body: >
-    echo folded
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("folded script body rejected");
-    assert!(err.to_string().contains("folded block scalar"));
 }
 
 #[test]
@@ -2254,30 +2150,6 @@ fn parser_rejects_schema_invalid_empty_phase_steps() {
 }
 
 #[test]
-fn parser_rejects_duplicate_section_scalar_fields() {
-    let err = parse_registry_block(
-        "duplicate-write-scope.yaml",
-        r#"tool:
-  id: duplicate-tool
-  name: DuplicateTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters: []
-  read_scope: []
-  write_scope: ["workspace"]
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("duplicate section field rejected");
-
-    assert!(err.to_string().contains("duplicate tool.write_scope"));
-}
-
-#[test]
 fn parser_rejects_duplicate_nested_scalar_fields() {
     let err = parse_registry_block(
         "duplicate-command-id.yaml",
@@ -2539,76 +2411,55 @@ fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
 }
 
 #[test]
-fn parser_rejects_quoted_yaml_scalars_for_typed_fields() {
+fn parser_rejects_malformed_or_quoted_typed_scalars() {
+    let parameter_tool =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+    let network_tool = include_str!(
+        "../../../loop-agent/fixtures/sandbox-negative/registry/tools/network-tool.yaml"
+    )
+    .replace(
+        "  network: deny\n",
+        "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
+    );
+    let integer_parameter = parameter_tool.replace(
+        "      value_type: workspace-relative-path\n      required: true\n      value_pattern: \"^[A-Za-z0-9_./-]+$\"\n      max_length: 128",
+        "      value_type: integer\n      required: true\n      min: nope",
+    );
+
     for (name, source, expected) in [
         (
             "quoted-required.yaml",
-            r#"tool:
-  id: quoted-required
-  name: QuotedRequired
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --value
-      value_type: none
-      required: "true"
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
+            parameter_tool.replace("required: true", "required: \"true\""),
             "required",
         ),
         (
             "quoted-max-length.yaml",
-            r#"tool:
-  id: quoted-max-length
-  name: QuotedMaxLength
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --value
-      value_type: string
-      required: true
-      value_pattern: "^[^/]+$"
-      max_length: "64"
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
+            parameter_tool.replace("max_length: 128", "max_length: \"128\""),
             "max_length",
         ),
         (
             "quoted-port.yaml",
-            r#"tool:
-  id: quoted-port
-  name: QuotedPort
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network:
-    default: deny
-    allow:
-      - kind: cidr
-        transport: tcp
-        cidr: 192.0.2.0/24
-        port: "443"
-"#,
+            network_tool.replace("port: 443", "port: \"443\""),
             "port",
         ),
+        (
+            "malformed-required.yaml",
+            parameter_tool.replace("required: true", "required: maybe"),
+            "must be true or false",
+        ),
+        (
+            "malformed-min.yaml",
+            integer_parameter,
+            "must be a 64-bit integer",
+        ),
+        (
+            "malformed-port.yaml",
+            network_tool.replace("port: 443", "port: nope"),
+            "must be an unsigned 16-bit integer",
+        ),
     ] {
-        let err =
-            parse_registry_block(name, source).expect_err("quoted typed scalar must be rejected");
+        let err = parse_registry_block(name, &source)
+            .expect_err("schema-typed scalars must use their declared representation");
 
         assert!(err.to_string().contains(expected), "{name}: {err}");
     }

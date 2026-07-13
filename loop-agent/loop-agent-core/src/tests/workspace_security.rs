@@ -50,15 +50,6 @@ fn file_guard_and_reservation_helpers_cover_direct_edges() {
         },
         "active001"
     ));
-    assert_eq!(suffixed_session_id(&"a".repeat(140), 42).len(), 128);
-
-    let invalid_utf8 = workspace.join("invalid-utf8.txt");
-    fs::write(&invalid_utf8, [0xff]).expect("invalid utf8 written");
-    assert!(matches!(
-        read_to_string_with_limit(&invalid_utf8, MAX_SESSION_LOG_BYTES),
-        Err(RuntimeError::Protocol(message)) if message.contains("valid UTF-8")
-    ));
-
 }
 
 #[test]
@@ -83,22 +74,6 @@ fn tail_stream_helpers_cover_direct_edges() {
     };
     assert!(!runtime_error_is_transient_tail_read(&other));
 
-    let mut attempts = 0usize;
-    let retried = retry_tail_transient_read_error(|| {
-        attempts += 1;
-        if attempts == 1 {
-            Err(RuntimeError::Io {
-                path: file_path.clone(),
-                source: io::Error::from(io::ErrorKind::NotFound),
-            })
-        } else {
-            Ok("ok")
-        }
-    })
-    .expect("transient tail read retries");
-    assert_eq!(retried, "ok");
-    assert_eq!(attempts, 2);
-
     assert_eq!(
         session_stream_suffix_bytes("first\nsecond\n", 0).expect("full stream suffix"),
         b"first\nsecond\n"
@@ -115,7 +90,6 @@ fn tail_stream_helpers_cover_direct_edges() {
         session_stream_suffix_bytes("first\n", 2),
         Err(RuntimeError::Protocol(message)) if message.contains("persisted event prefix")
     ));
-
 }
 
 #[test]

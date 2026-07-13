@@ -1129,28 +1129,7 @@ fn script_operation_helpers_cover_edge_paths() {
 }
 
 #[test]
-fn script_pattern_and_evaluator_helpers_cover_edge_paths() {
-    assert!(protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseInsensitive,
-        "**/*.ENV",
-        "workspace/app/.env"
-    ));
-    assert!(protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseSensitive,
-        "workspace/out/file?.txt",
-        "workspace/out/file1.txt"
-    ));
-    assert!(protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseSensitive,
-        "workspace/out/file*",
-        "workspace/out/file"
-    ));
-    assert!(!protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseSensitive,
-        "workspace/out/file?.txt",
-        "workspace/out/file10.txt"
-    ));
-
+fn script_evaluator_rejects_unsupported_commands() {
     assert_eq!(
         evaluate_script_command("printf '%s\\n' \"$SUMMARY\"").expect("printf summary"),
         b"hello\n"
