@@ -802,3 +802,66 @@ fn runtime_rejects_duplicate_subloop_work_over_m1_budget() {
         RuntimeError::Protocol(message) if message.contains("loop invocation budget")
     ));
 }
+
+#[test]
+fn run_loop_preflight_rejects_duplicate_subloop_work_before_reservation() {
+    let workspace = empty_workspace("duplicate-subloop-preflight-budget");
+    fs::create_dir_all(workspace.join(".loop")).expect("workspace config directory created");
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n",
+    )
+    .expect("workspace config written");
+    let instructions_dir = workspace.join("registry/instructions");
+    fs::create_dir_all(&instructions_dir).expect("instruction registry directory created");
+    fs::write(
+        instructions_dir.join("instruction.yaml"),
+        "instruction:\n  id: instruction\n  name: Instruction\n  prompt: deterministic\n",
+    )
+    .expect("instruction definition written");
+    let phases_dir = workspace.join("registry/phases");
+    fs::create_dir_all(&phases_dir).expect("phase registry directory created");
+    fs::write(
+        phases_dir.join("phase.yaml"),
+        "phase:\n  id: phase\n  name: Phase\n  instruction_refs: [instruction]\n  tool_refs: []\n  steps:\n    - id: step\n      name: Step\n",
+    )
+    .expect("phase definition written");
+    let loops_dir = workspace.join("registry/loops");
+    fs::create_dir_all(&loops_dir).expect("loop registry directory created");
+    for index in 0..24 {
+        let id = format!("loop-{index:03}");
+        let subloop_refs = if index == 23 {
+            "[]".to_owned()
+        } else {
+            let next = format!("loop-{:03}", index + 1);
+            format!("[{next}, {next}]")
+        };
+        fs::write(
+            loops_dir.join(format!("{id}.yaml")),
+            format!(
+                "loop:\n  id: {id}\n  name: Loop{index:03}\n  phase_refs: [phase]\n  subloop_refs: {subloop_refs}\n  connection_refs: []\n"
+            ),
+        )
+        .expect("loop definition written");
+    }
+
+    let started = Instant::now();
+    let err = run_loop(&workspace, "loop-000", EmitMode::Jsonl)
+        .expect_err("preflight must reject duplicate subloop work over the invocation budget");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "public preflight budget rejection must not traverse the exponential invocation tree"
+    );
+    assert!(
+        matches!(
+            &err,
+            RuntimeError::Protocol(message) if message.contains("loop invocation budget")
+        ),
+        "{err}"
+    );
+    assert!(
+        !workspace.join(LOCAL_SESSION_DIR).exists(),
+        "preflight rejection must happen before session reservation"
+    );
+}

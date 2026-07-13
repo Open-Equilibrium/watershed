@@ -330,7 +330,15 @@ fn preflight_loop_tools(
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
 ) -> Result<(), RuntimeError> {
-    preflight_loop_tools_at_depth(workspace, registry, policy, loop_block, 1)
+    let mut invocation_count = 0;
+    preflight_loop_tools_at_depth(
+        workspace,
+        registry,
+        policy,
+        loop_block,
+        1,
+        &mut invocation_count,
+    )
 }
 
 fn preflight_loop_tools_at_depth(
@@ -339,7 +347,16 @@ fn preflight_loop_tools_at_depth(
     policy: &core_policy::PolicyArtifact,
     loop_block: &core_script::LoopBlock,
     depth: usize,
+    invocation_count: &mut u64,
 ) -> Result<(), RuntimeError> {
+    *invocation_count = invocation_count.checked_add(1).ok_or_else(|| {
+        RuntimeError::Protocol("loop invocation budget counter overflowed".to_owned())
+    })?;
+    if *invocation_count > MAX_LOOP_INVOCATIONS {
+        return Err(RuntimeError::Protocol(format!(
+            "loop invocation budget exceeded: next invocation {invocation_count} exceeds max {MAX_LOOP_INVOCATIONS}"
+        )));
+    }
     if depth > core_script::MAX_LOOP_NESTING_DEPTH {
         return Err(RuntimeError::Protocol(format!(
             "loop nesting depth {depth} for {} exceeds max {}",
@@ -359,7 +376,14 @@ fn preflight_loop_tools_at_depth(
         let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
         })?;
-        preflight_loop_tools_at_depth(workspace, registry, policy, subloop, depth + 1)?;
+        preflight_loop_tools_at_depth(
+            workspace,
+            registry,
+            policy,
+            subloop,
+            depth + 1,
+            invocation_count,
+        )?;
     }
 
     Ok(())
