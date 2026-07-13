@@ -48,9 +48,7 @@ fn normalize_string(value: &str) -> String {
 }
 
 fn normalized_eq(left: &str, right: &str) -> bool {
-    let normalized_left = normalize_string(left);
-    let normalized_right = normalize_string(right);
-    normalized_left == normalized_right
+    left.nfc().eq(right.nfc())
 }
 
 /// Error returned while loading, resolving or serializing a registry.

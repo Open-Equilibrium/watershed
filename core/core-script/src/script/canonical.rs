@@ -1,7 +1,3 @@
-fn canonical_json(value: &Value) -> Result<String, proto::CanonicalJsonError> {
-    proto::canonical_json(value)
-}
-
 fn materialize_registry_defaults(value: &mut Value) {
     match value {
         Value::Array(items) => items.iter_mut().for_each(materialize_registry_defaults),

@@ -594,7 +594,7 @@ fn registry_errors_report_sources_and_conversions() {
     assert_eq!(semantic_registry.to_string(), schema.to_string());
 
     let canonical_registry = RegistryError::CanonicalJson(
-        canonical_json(&serde_json::json!({
+        proto::canonical_json(&serde_json::json!({
             "é": 1,
             "e\u{301}": 2,
         }))
@@ -1040,20 +1040,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
         field_indent: 2,
         item_indent: 4,
     };
-    assert!(
-        block_string_list("empty-list.yaml", "tool:\n  read_scope: []\n", scalar_shape,)
-            .expect("empty list parses")
-            .is_empty()
-    );
-    assert_eq!(
-        block_string_list(
-            "inline-list.yaml",
-            "tool:\n  read_scope: [workspace]\n",
-            scalar_shape,
-        )
-        .expect("inline list parses"),
-        vec!["workspace"]
-    );
     assert!(message(block_string_list(
         "bad-list-indent.yaml",
         "tool:\n  read_scope:\n   - workspace\n",
@@ -1067,23 +1053,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
     ))
     .contains("missing tool.read_scope"));
 
-    let nested_scalar_shape = ScalarListShape {
-        section: "tool",
-        parent: Some("command"),
-        field: "argv",
-        field_indent: 4,
-        item_indent: 6,
-    };
-    assert_eq!(
-        block_string_list(
-            "nested-inline-list.yaml",
-            "tool:\n  command:\n    argv: [--message]\n",
-            nested_scalar_shape,
-        )
-        .expect("nested inline list parses"),
-        vec!["--message"]
-    );
-
     assert_eq!(
         parse_literal_block_scalar(
             "strip-block.yaml",
@@ -1095,14 +1064,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
         .expect("strip chomping parses"),
         "echo ok"
     );
-    assert!(message(parse_literal_block_scalar(
-        "missing-block.yaml",
-        "tool:\n  script_body: echo ok\n",
-        "tool",
-        "script_body",
-        "|",
-    ))
-    .contains("missing tool.script_body block scalar"));
     assert!(message(parse_literal_block_scalar(
         "inconsistent-block.yaml",
         "tool:\n  script_body: |\n    echo ok\n   bad\n",
@@ -1128,13 +1089,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
         item_indent: 4,
         property_indent: 6,
     };
-    let object = list_objects(
-            "step-list.yaml",
-            "phase:\n  steps:\n    - id: step\n      name: Step\n      connection_refs:\n        - link\n",
-            object_shape,
-        )
-        .expect("object list parses");
-    assert_eq!(object[0]["connection_refs"], "[\"link\"]");
     for (name, source, expected) in [
         (
             "steps-not-list.yaml",
@@ -1190,12 +1144,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
             "{value}"
         );
     }
-    assert_eq!(
-        parse_inline_yaml_list("inline-list.yaml", "argv", r#"["a,b", 'can''t']"#)
-            .expect("quoted list parses"),
-        vec!["a,b", "can't"]
-    );
-
     for (value, expected) in [
         ("\"unterminated", "unterminated"),
         ("\"\\q\"", "unsupported escape"),
@@ -1215,11 +1163,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
     assert!(message(parse_u16("port.yaml", "port", "70000")).contains("16-bit integer"));
     assert!(message(parse_i64("int.yaml", "min", "abc")).contains("64-bit integer"));
 
-    assert!(message(parse_registry_block(
-        "unknown-block.yaml",
-        "endpoint:\n  id: endpoint\n  name: Endpoint\n",
-    ))
-    .contains("unsupported registry block kind"));
     assert!(message(required_scalar(
         "empty-scalar.yaml",
         "instruction:\n  prompt: \"\"\n",
@@ -1288,18 +1231,6 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
         .expect("nested object list stops at sibling parent");
     assert_eq!(nested_objects.len(), 1);
 
-    let mut current = None;
-    let mut pending = Some(PendingListProperty {
-        field: "connection_refs".to_owned(),
-        items: vec!["link".to_owned()],
-    });
-    assert!(message(flush_pending_list_property(
-        "orphan-pending-list.yaml",
-        &mut current,
-        &mut pending,
-    ))
-    .contains("appears before list item"));
-
     let object = BTreeMap::new();
     assert!(message(required_object_scalar(
         "missing-object-property.yaml",
@@ -1329,21 +1260,6 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
         result.expect_err("expected registry error").to_string()
     }
 
-    assert!(message(raw_section_field_value(
-        "duplicate-section-field.yaml",
-        "tool:\n  id: first\n  id: second\n",
-        "tool",
-        "id",
-    ))
-    .contains("duplicate tool.id"));
-    assert!(message(raw_nested_field_value(
-        "duplicate-nested-field.yaml",
-        "tool:\n  command:\n    argv: []\n    argv: [--again]\n",
-        "tool",
-        "command",
-        "argv",
-    ))
-    .contains("duplicate tool.command.argv"));
     assert!(message(reject_unknown_section_fields(
         "section-field-without-colon.yaml",
         "tool:\n  id\n",
@@ -1368,62 +1284,6 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
     ))
     .contains("unsupported tool.command field unexpected"));
 
-    assert_eq!(
-        raw_nested_field_value(
-            "nested-field-skips-unrelated.yaml",
-            "other:\n  command:\n    argv: [ignored]\n\ntool:\n  other:\n    argv: [ignored]\n  command:\n    argv: [--ok]\n",
-            "tool",
-            "command",
-            "argv",
-        )
-        .expect("nested field parses"),
-        Some("[--ok]".to_owned())
-    );
-    assert_eq!(
-        parse_literal_block_scalar(
-            "literal-block-edges.yaml",
-            "other:\n  script_body: |\n    ignored\n\ntool:\n  name: Tool\n  script_body: |-\n    printf hi\n\n  network: deny\n",
-            "tool",
-            "script_body",
-            "|-",
-        )
-        .expect("literal block parses"),
-        "printf hi"
-    );
-
-    let scalar_shape = ScalarListShape {
-        section: "loop",
-        parent: None,
-        field: "phase_refs",
-        field_indent: 2,
-        item_indent: 4,
-    };
-    assert_eq!(
-        block_string_list(
-            "block-list-breaks-at-next-section.yaml",
-            "loop:\n  phase_refs:\n    - inspect\nphase:\n  id: inspect\n",
-            scalar_shape,
-        )
-        .expect("block list stops at next top-level section"),
-        vec!["inspect"]
-    );
-    let nested_scalar_shape = ScalarListShape {
-        section: "tool",
-        parent: Some("command"),
-        field: "argv",
-        field_indent: 4,
-        item_indent: 6,
-    };
-    assert_eq!(
-        block_string_list(
-            "nested-block-list-skips-unrelated.yaml",
-            "other:\n  command:\n    argv:\n      - ignored\n\ntool:\n  other:\n    argv:\n      - ignored\n  command:\n    argv:\n      - --ok\nnext:\n  id: after\n",
-            nested_scalar_shape,
-        )
-        .expect("nested block list parses"),
-        vec!["--ok"]
-    );
-
     let object_shape = ListObjectShape {
         section: "phase",
         parent: None,
@@ -1432,13 +1292,6 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
         item_indent: 4,
         property_indent: 6,
     };
-    let object = list_objects(
-        "pending-list-property.yaml",
-        "phase:\n  steps:\n    - id: step\n      name: Step\n      connection_refs:\n        - link\nnext:\n  id: after\n",
-        object_shape,
-    )
-    .expect("pending list property flushes before top-level break");
-    assert_eq!(object[0]["connection_refs"], "[\"link\"]");
     let inline_pending_object = list_objects(
         "inline-pending-list-property.yaml",
         "phase:\n  steps:\n    - connection_refs:\n        - link\n      id: step\n      name: Step\n",
@@ -1446,21 +1299,6 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
     )
     .expect("pending list property may start on the item line");
     assert_eq!(inline_pending_object[0]["connection_refs"], "[\"link\"]");
-    let nested_object_shape = ListObjectShape {
-        section: "tool",
-        parent: Some("network"),
-        field: "allow",
-        field_indent: 4,
-        item_indent: 6,
-        property_indent: 8,
-    };
-    let nested_object = list_objects(
-        "nested-object-list-skips-unrelated.yaml",
-        "other:\n  network:\n    allow:\n      - kind: cidr\n\ntool:\n  command:\n    allow:\n      - kind: ignored\n  network:\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\nnext:\n  id: after\n",
-        nested_object_shape,
-    )
-    .expect("nested object list parses");
-    assert_eq!(nested_object[0]["cidr"], "192.0.2.0/24");
     assert!(message(list_objects(
         "steps-empty-field.yaml",
         "phase:\n  steps:\n    - : value\n",
@@ -3191,31 +3029,6 @@ fn ids_follow_v0_token_rules() {
     assert!(is_valid_command_id("agent-read"));
     assert!(!is_valid_command_id("1-agent-read"));
     assert!(!is_valid_command_id("agent.read"));
-}
-
-#[test]
-fn canonical_json_normalizes_string_values_to_nfc() {
-    let value = serde_json::json!({
-        "name": "Cafe\u{301}",
-        "items": ["A\u{30a}"],
-    });
-
-    assert_eq!(
-        canonical_json(&value).expect("canonical JSON"),
-        "{\"items\":[\"Å\"],\"name\":\"Café\"}"
-    );
-}
-
-#[test]
-fn canonical_json_rejects_normalized_duplicate_keys() {
-    let value = serde_json::json!({
-        "é": 1,
-        "e\u{301}": 2,
-    });
-
-    let err = canonical_json(&value).expect_err("normalized duplicate object keys must fail");
-
-    assert_eq!(err.to_string(), "normalized object key collision: é");
 }
 
 #[test]

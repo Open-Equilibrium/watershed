@@ -1024,7 +1024,7 @@ fn raw_section_field_value(
     let section_header = format!("{section}:");
     let field_prefix = format!("{field}:");
     let mut in_section = false;
-    let mut block_scalar_parent_indent = None::<usize>;
+    let mut block_scalar_indent = None::<usize>;
     let mut found = None::<String>;
 
     for raw_line in source.lines() {
@@ -1032,7 +1032,7 @@ fn raw_section_field_value(
         if line.trim().is_empty() {
             continue;
         }
-        if line_is_block_scalar_content(line, &mut block_scalar_parent_indent) {
+        if line_is_block_scalar_content(line, &mut block_scalar_indent) {
             continue;
         }
         let indent = leading_spaces(line);
@@ -1041,8 +1041,8 @@ fn raw_section_field_value(
             continue;
         }
         if !in_section || indent != 2 {
-            if let Some(parent_indent) = block_scalar_parent_indent_of_line(line) {
-                block_scalar_parent_indent = Some(parent_indent);
+            if let Some(parent_indent) = block_scalar_parent_indent(line) {
+                block_scalar_indent = Some(parent_indent);
             }
             continue;
         }
@@ -1055,8 +1055,8 @@ fn raw_section_field_value(
                 ));
             }
         }
-        if let Some(parent_indent) = block_scalar_parent_indent_of_line(line) {
-            block_scalar_parent_indent = Some(parent_indent);
+        if let Some(parent_indent) = block_scalar_parent_indent(line) {
+            block_scalar_indent = Some(parent_indent);
         }
     }
     Ok(found)
@@ -1074,7 +1074,7 @@ fn raw_nested_field_value(
     let field_prefix = format!("{field}:");
     let mut in_section = false;
     let mut in_parent = false;
-    let mut block_scalar_parent_indent = None::<usize>;
+    let mut block_scalar_indent = None::<usize>;
     let mut found = None::<String>;
 
     for raw_line in source.lines() {
@@ -1082,7 +1082,7 @@ fn raw_nested_field_value(
         if line.trim().is_empty() {
             continue;
         }
-        if line_is_block_scalar_content(line, &mut block_scalar_parent_indent) {
+        if line_is_block_scalar_content(line, &mut block_scalar_indent) {
             continue;
         }
         let indent = leading_spaces(line);
@@ -1096,14 +1096,14 @@ fn raw_nested_field_value(
         }
         if indent == 2 {
             in_parent = line.trim() == parent_header;
-            if let Some(parent_indent) = block_scalar_parent_indent_of_line(line) {
-                block_scalar_parent_indent = Some(parent_indent);
+            if let Some(parent_indent) = block_scalar_parent_indent(line) {
+                block_scalar_indent = Some(parent_indent);
             }
             continue;
         }
         if !in_parent || indent != 4 {
-            if let Some(parent_indent) = block_scalar_parent_indent_of_line(line) {
-                block_scalar_parent_indent = Some(parent_indent);
+            if let Some(parent_indent) = block_scalar_parent_indent(line) {
+                block_scalar_indent = Some(parent_indent);
             }
             continue;
         }
@@ -1116,8 +1116,8 @@ fn raw_nested_field_value(
                 ));
             }
         }
-        if let Some(parent_indent) = block_scalar_parent_indent_of_line(line) {
-            block_scalar_parent_indent = Some(parent_indent);
+        if let Some(parent_indent) = block_scalar_parent_indent(line) {
+            block_scalar_indent = Some(parent_indent);
         }
     }
     Ok(found)
@@ -1132,10 +1132,6 @@ fn line_is_block_scalar_content(line: &str, parent_indent: &mut Option<usize>) -
     }
     *parent_indent = None;
     false
-}
-
-fn block_scalar_parent_indent_of_line(line: &str) -> Option<usize> {
-    block_scalar_parent_indent(line)
 }
 
 fn section_list_objects(

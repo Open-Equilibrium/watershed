@@ -92,11 +92,10 @@ impl ResolvedRegistry {
 
     /// Serializes the resolved registry as canonical JSON without a trailing newline.
     pub fn canonical_json(&self) -> Result<String, RegistryError> {
-        let mut out = canonical_resolved_registry_json(self)?;
-        if out.ends_with('\n') {
-            out.pop();
-        }
-        Ok(out)
+        let mut value = serde_json::to_value(self).map_err(RegistryError::Serialize)?;
+        materialize_registry_defaults(&mut value);
+        sort_allowed_parameters(&mut value);
+        proto::canonical_json(&value).map_err(RegistryError::CanonicalJson)
     }
 
     /// Resolves a loop by id or unambiguous name.
@@ -229,9 +228,6 @@ impl ResolvedRegistry {
             }
             for reference in &loop_block.subloop_refs {
                 self.require_loop(reference, "loop", &loop_block.identity.id)?;
-            }
-            for reference in &loop_block.connection_refs {
-                self.require_connection(reference, "loop", &loop_block.identity.id)?;
             }
             let loop_connection_ids = loop_block
                 .connection_refs

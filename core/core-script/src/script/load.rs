@@ -34,10 +34,7 @@ pub fn parse_registry_block(
 pub fn canonical_resolved_registry_json(
     registry: &ResolvedRegistry,
 ) -> Result<String, RegistryError> {
-    let mut value = serde_json::to_value(registry).map_err(RegistryError::Serialize)?;
-    materialize_registry_defaults(&mut value);
-    sort_allowed_parameters(&mut value);
-    let mut out = canonical_json(&value).map_err(RegistryError::CanonicalJson)?;
+    let mut out = registry.canonical_json()?;
     out.push('\n');
     Ok(out)
 }
