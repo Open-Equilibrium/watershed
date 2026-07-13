@@ -270,7 +270,14 @@ impl<'a> RuntimeEventBuilder<'a> {
             )));
         }
         if let Some(sink) = self.sink.as_deref_mut() {
-            sink.commit(&event, &event_bytes, measurement_started_at)?;
+            let context_manifests = (event.event_type == EventType::MessageCompleted)
+                .then_some(self.context_manifests.as_slice());
+            sink.commit(
+                &event,
+                &event_bytes,
+                context_manifests,
+                measurement_started_at,
+            )?;
         }
         self.sequence = sequence;
         self.stream_bytes = next_stream_bytes;

@@ -272,12 +272,19 @@ fn compile_provider_turn_context(
                     "resolved registry missing connection {connection_ref}"
                 ))
             })?;
-            Ok(serde_json::json!({
-                "connection": connection,
-                "typed_value": {"present": false},
-            }))
+            Ok(connection_targets_scoped_step(registry, phase, step, &connection.to_ref).then(
+                || {
+                    serde_json::json!({
+                        "connection": connection,
+                        "typed_value": {"present": false},
+                    })
+                },
+            ))
         })
-        .collect::<Result<Vec<_>, RuntimeError>>()?;
+        .collect::<Result<Vec<_>, RuntimeError>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     let (tier_one, omitted) = context_continuity(prior_events)?;
     let tier_zero = vec![
         ContextSource {
@@ -331,6 +338,27 @@ fn compile_provider_turn_context(
         },
     ];
     compile_context(&ContextModelProfile::stub_v0(), tier_zero, tier_one, omitted)
+}
+
+fn connection_targets_scoped_step(
+    registry: &core_script::ResolvedRegistry,
+    phase: &core_script::PhaseBlock,
+    step: &core_script::StepBlock,
+    endpoint_ref: &str,
+) -> bool {
+    if registry.tool_block(endpoint_ref).is_some()
+        || registry.instruction_block(endpoint_ref).is_some()
+        || registry.phase_block(endpoint_ref).is_some()
+        || registry.loop_block(endpoint_ref).is_some()
+    {
+        return false;
+    }
+    let Some((phase_ref, step_id)) = endpoint_ref.split_once('.') else {
+        return false;
+    };
+    registry.phase_block(phase_ref).is_some_and(|endpoint_phase| {
+        endpoint_phase.identity.id == phase.identity.id && step_id == step.id
+    })
 }
 
 fn context_continuity(
@@ -425,7 +453,12 @@ fn verify_recorded_context_manifests(
         .join(format!("{session_id}.contexts.jsonl"));
     match fs::symlink_metadata(&path) {
         Ok(metadata) => validate_real_file(&path, &metadata)?,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest stream is missing",
+                path.display()
+            )))
+        }
         Err(source) => return Err(RuntimeError::Io { path, source }),
     }
     let text = read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES)?;
@@ -471,7 +504,10 @@ fn verify_recorded_context_manifests(
         .iter()
         .filter(|event| event.event_type == EventType::MessageCompleted)
         .count();
-    if recorded.len() < completed_turns
+    let recoverable_manifest_count = completed_turns.saturating_add(1);
+    if completed_turns > planned.len()
+        || recorded.len() < completed_turns
+        || recorded.len() > recoverable_manifest_count
         || recorded.len() > planned.len()
         || recorded != planned[..recorded.len()]
     {

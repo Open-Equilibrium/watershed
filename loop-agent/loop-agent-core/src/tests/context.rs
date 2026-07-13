@@ -28,6 +28,53 @@ fn tier_zero(turn_value: &str) -> Vec<ContextSource> {
     ]
 }
 
+fn compile_summarize_turn_context(
+    registry: &core_script::ResolvedRegistry,
+) -> CompiledContext {
+    let loop_block = registry.loop_block("hello-loop").expect("loop exists");
+    let phase = registry.phase_block("summarize").expect("phase exists");
+    let step = phase
+        .steps
+        .iter()
+        .find(|step| step.id == "write")
+        .expect("step exists");
+    compile_provider_turn_context(
+        registry,
+        loop_block,
+        phase,
+        step,
+        &LoopInvocation {
+            loop_id: "hello-loop#1".to_owned(),
+            parent_loop_id: None,
+        },
+        "contextdirection001",
+        &[],
+    )
+    .expect("context compiles")
+}
+
+fn context_source_content(compiled: &CompiledContext, source_id: &str) -> serde_json::Value {
+    std::str::from_utf8(&compiled.provider_bytes)
+        .expect("provider context is UTF-8")
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("source parses"))
+        .find(|source| source["source_id"] == source_id)
+        .unwrap_or_else(|| panic!("missing {source_id} context source"))["content"]
+        .clone()
+}
+
+fn prefix_before_message_completed(stream: &str) -> String {
+    let mut prefix = String::new();
+    for line in stream.lines() {
+        if line.contains("\"event_type\":\"message.completed\"") {
+            break;
+        }
+        prefix.push_str(line);
+        prefix.push('\n');
+    }
+    prefix
+}
+
 #[test]
 fn context_compiler_is_deterministic_and_preserves_the_cache_prefix() {
     let first = compile_context(
@@ -57,6 +104,108 @@ fn context_compiler_is_deterministic_and_preserves_the_cache_prefix() {
     assert!(std::str::from_utf8(&first.provider_bytes)
         .expect("provider context is UTF-8")
         .contains("\"active-available-tools\""));
+}
+
+#[test]
+fn typed_connection_inputs_exclude_outbound_step_connections() {
+    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let with_outbound_reference = compile_summarize_turn_context(&registry);
+    let mut inbound_reference_only = registry.clone();
+    inbound_reference_only
+        .phases
+        .get_mut("summarize")
+        .expect("phase exists")
+        .steps[0]
+        .connection_refs = vec!["inspect-trigger".to_owned()];
+    let without_outbound_reference = compile_summarize_turn_context(&inbound_reference_only);
+
+    let inputs = context_source_content(&with_outbound_reference, "typed-connection-inputs");
+    assert_eq!(inputs.as_array().map(Vec::len), Some(1));
+    assert_eq!(inputs[0]["connection"]["id"], "inspect-trigger");
+    assert_eq!(
+        with_outbound_reference.provider_bytes,
+        without_outbound_reference.provider_bytes
+    );
+    assert_eq!(
+        with_outbound_reference.context_hash,
+        without_outbound_reference.context_hash
+    );
+    assert_eq!(
+        with_outbound_reference.manifest,
+        without_outbound_reference.manifest
+    );
+}
+
+#[test]
+fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order() {
+    let (mut registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    registry
+        .connections
+        .get_mut("inspect-trigger")
+        .expect("trigger exists")
+        .to_ref = "Summarize.write".to_owned();
+    registry
+        .connections
+        .get_mut("inspect-data")
+        .expect("data connection exists")
+        .to_ref = "summarize.write".to_owned();
+    registry
+        .phases
+        .get_mut("summarize")
+        .expect("phase exists")
+        .steps[0]
+        .connection_refs = vec![
+            "InspectTrigger".to_owned(),
+            "inspect-data".to_owned(),
+            "SummaryRefresh".to_owned(),
+        ];
+    let declared = compile_summarize_turn_context(&registry);
+
+    let inputs = context_source_content(&declared, "typed-connection-inputs");
+    assert_eq!(inputs.as_array().map(Vec::len), Some(2));
+    assert_eq!(inputs[0]["connection"]["id"], "inspect-trigger");
+    assert_eq!(inputs[1]["connection"]["id"], "inspect-data");
+
+    registry
+        .phases
+        .get_mut("summarize")
+        .expect("phase exists")
+        .steps[0]
+        .connection_refs
+        .swap(0, 1);
+    let reordered = compile_summarize_turn_context(&registry);
+    let reordered_inputs = context_source_content(&reordered, "typed-connection-inputs");
+    assert_eq!(reordered_inputs[0]["connection"]["id"], "inspect-data");
+    assert_eq!(reordered_inputs[1]["connection"]["id"], "inspect-trigger");
+    assert_eq!(declared.cache_prefix_bytes, reordered.cache_prefix_bytes);
+    assert_eq!(
+        &declared.provider_bytes[..declared.cache_prefix_bytes],
+        &reordered.provider_bytes[..reordered.cache_prefix_bytes]
+    );
+    assert_ne!(declared.provider_bytes, reordered.provider_bytes);
+    assert_ne!(declared.context_hash, reordered.context_hash);
+    assert_ne!(declared.manifest, reordered.manifest);
+}
+
+#[test]
+fn context_direction_filter_does_not_change_step_event_connections() {
+    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let phase = registry.phase_block("summarize").expect("phase exists");
+    let step = phase
+        .steps
+        .iter()
+        .find(|step| step.id == "write")
+        .expect("step exists");
+    let payload = step_payload(&registry, phase, step).expect("step payload compiles");
+
+    assert_eq!(
+        payload["connection_ids"],
+        serde_json::json!(["inspect-trigger", "summary-refresh"])
+    );
+    assert_eq!(
+        payload["connection_kinds"],
+        serde_json::json!(["trigger", "refresh"])
+    );
 }
 
 #[test]
@@ -275,4 +424,120 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
         err,
         RuntimeError::Protocol(message) if message.contains("context profile")
     ));
+}
+
+#[test]
+fn resume_rejects_missing_context_manifest_stream_before_side_effects() {
+    let workspace = workspace_copy("hello-loop");
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect("fixture loop completes");
+    let prefix = prefix_before_tool_started(&output.stdout, "write-summary");
+    fs::write(&output.session_path, &prefix).expect("partial session prefix written");
+    write_definition_hash_metadata(
+        &workspace,
+        &output.session_id,
+        "hello-loop",
+        prefix.lines().count(),
+    );
+    let context_path = workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{}.contexts.jsonl", output.session_id));
+    fs::remove_file(&context_path).expect("context manifest stream removed");
+    fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
+    let before = fs::read_to_string(&output.session_path).expect("session prefix reads");
+
+    let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
+        .expect_err("missing context audit evidence must block resume");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("context manifest stream is missing")
+    ));
+    assert_eq!(
+        fs::read_to_string(&output.session_path).expect("session remains readable"),
+        before
+    );
+    assert!(!workspace.join("out/summary.txt").exists());
+}
+
+#[test]
+fn resume_recovers_one_deterministic_inflight_context_manifest() {
+    let workspace = workspace_copy("smoke-loop");
+    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+        .expect("fixture loop completes");
+    let context_path = workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{}.contexts.jsonl", output.session_id));
+    let context_stream = fs::read_to_string(&context_path).expect("context manifest reads");
+    let prefix = prefix_before_message_completed(&output.stdout);
+    fs::write(&output.session_path, &prefix).expect("incomplete event prefix written");
+    write_definition_hash_metadata(
+        &workspace,
+        &output.session_id,
+        "smoke-loop",
+        prefix.lines().count(),
+    );
+    fs::write(&context_path, &context_stream).expect("in-flight manifest restored");
+
+    let resumed = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
+        .expect("one in-flight deterministic manifest is recoverable");
+
+    assert!(!resumed.failed);
+    assert_eq!(
+        fs::read_to_string(&context_path).expect("recovered manifest reads"),
+        context_stream
+    );
+    let committed = fs::read_to_string(&output.session_path).expect("recovered session reads");
+    let events = validate_session_log_text(
+        &output.session_path,
+        &output.session_id,
+        &committed,
+    )
+    .expect("recovered session validates");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::MessageCompleted)
+            .count(),
+        1
+    );
+    assert_eq!(
+        events.last().map(|event| &event.event_type),
+        Some(&EventType::SessionCompleted)
+    );
+}
+
+#[test]
+fn resume_rejects_more_than_one_future_context_manifest() {
+    let workspace = workspace_copy("hello-loop");
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect("fixture loop completes");
+    let context_path = workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{}.contexts.jsonl", output.session_id));
+    let context_stream = fs::read_to_string(&context_path).expect("context manifests read");
+    assert!(context_stream.lines().count() > 1);
+    let prefix = prefix_before_message_completed(&output.stdout);
+    fs::write(&output.session_path, &prefix).expect("incomplete event prefix written");
+    write_definition_hash_metadata(
+        &workspace,
+        &output.session_id,
+        "hello-loop",
+        prefix.lines().count(),
+    );
+    fs::write(&context_path, context_stream).expect("future manifests restored");
+    let before = fs::read_to_string(&output.session_path).expect("event prefix reads");
+
+    let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
+        .expect_err("arbitrary future context suffix must remain invalid");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message)
+            if message.contains("context manifests do not match deterministic replay")
+    ));
+    assert_eq!(
+        fs::read_to_string(&output.session_path).expect("event prefix remains readable"),
+        before
+    );
 }

@@ -142,7 +142,12 @@ pub fn tail_session_to_writer_with_options(
         stream.push_str(&appended);
     }
 
-    if emit == EmitMode::Human && !write_tail_chunk(writer, emit, session_id, "")? {
+    if emit == EmitMode::Human
+        && !write_tail_bytes(
+            writer,
+            human_session_status(session_id, "tailed", &events).as_bytes(),
+        )?
+    {
         return Ok(RunOutput {
             event_count: events.len(),
             failed: stream_is_failed(&events),

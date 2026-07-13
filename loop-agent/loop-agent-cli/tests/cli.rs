@@ -74,6 +74,33 @@ fn copy_workspace_config(source: &Path, target: &Path) {
     fs::copy(source_config, target_config).expect("workspace config copied");
 }
 
+fn replace_seeded_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {
+    fs::write(
+        workspace
+            .join(".loop/sessions")
+            .join(format!("{session_id}.jsonl")),
+        prefix,
+    )
+    .expect("partial session log written");
+    let context_path = workspace
+        .join(".loop/logs")
+        .join(format!("{session_id}.contexts.jsonl"));
+    let manifests = fs::read_to_string(&context_path).expect("context manifests readable");
+    let completed_turns = prefix
+        .lines()
+        .filter(|line| line.contains("\"event_type\":\"message.completed\""))
+        .count();
+    let mut manifest_prefix = manifests
+        .lines()
+        .take(completed_turns)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !manifest_prefix.is_empty() {
+        manifest_prefix.push('\n');
+    }
+    fs::write(context_path, manifest_prefix).expect("context manifest prefix written");
+}
+
 #[test]
 fn workspace_copy_skips_fixture_runtime_state() {
     let fixture = fixture_dir("hello-loop");
@@ -494,7 +521,7 @@ fn resume_partial_session_prints_human_status() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    fs::write(session_dir.join("smoke001.jsonl"), prefix).expect("partial session log written");
+    replace_seeded_session_with_prefix(&workspace, "smoke001", &prefix);
 
     let output = loop_command()
         .current_dir(&workspace)
@@ -532,8 +559,7 @@ fn failed_jsonl_resume_exits_with_failed_status() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    fs::write(session_dir.join("negwrite001.jsonl"), prefix)
-        .expect("partial failed-session log written");
+    replace_seeded_session_with_prefix(&workspace, "negwrite001", &prefix);
 
     let output = loop_command()
         .current_dir(&workspace)
@@ -748,7 +774,7 @@ fn replay_and_tail_failed_sessions_exit_with_failed_status() {
 }
 
 #[test]
-fn failed_human_run_does_not_report_completion() {
+fn failed_human_commands_report_the_terminal_reason() {
     let workspace = workspace_copy("sandbox-negative");
     let output = loop_command()
         .current_dir(&workspace)
@@ -759,12 +785,37 @@ fn failed_human_run_does_not_report_completion() {
     assert_eq!(output.status.code(), Some(65));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
-    assert_eq!(stdout, "loop sandbox-negative-write failed\n");
+    assert_eq!(stdout, "loop sandbox-negative-write failed: write_denied\n");
     assert!(!stdout.contains("completed"));
     assert!(
         !workspace.join("out/forbidden.txt").exists(),
         "failed human run must not create side effects after rejection"
     );
+
+    for (command, expected) in [
+        (
+            "replay",
+            "session negwrite001 replayed: failed (write_denied)\n",
+        ),
+        (
+            "tail",
+            "session negwrite001 tailed: failed (write_denied)\n",
+        ),
+    ] {
+        let output = loop_command()
+            .current_dir(&workspace)
+            .args([command, "negwrite001"])
+            .output()
+            .expect("loop binary should run");
+
+        assert_eq!(output.status.code(), Some(65), "{command}");
+        assert!(output.stderr.is_empty(), "{command}");
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+            expected,
+            "{command}"
+        );
+    }
 }
 
 #[test]

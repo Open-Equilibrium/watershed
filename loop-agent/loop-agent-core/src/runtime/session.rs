@@ -131,14 +131,6 @@ where
             return Err(err);
         }
     };
-    if let Err(err) = persist_reserved_context_manifests(
-        &reservation,
-        &planned_runtime.context_manifests,
-    ) {
-        reservation.rollback();
-        return Err(err);
-    }
-
     let result = (|| {
         let mut serial_writer =
             SerialSessionWriter::start(&reservation, emit, writer, timings)?;
@@ -193,8 +185,9 @@ where
         if let Some(err) = runtime.terminal_error {
             return Err(err);
         }
-        let status = if runtime_failed {
-            format!("loop {} failed\n", loop_block.identity.id)
+        let status = if let Some(reason) = terminal_failure_reason(&runtime.events) {
+            let reason = escape_human_failure_reason(reason);
+            format!("loop {} failed: {reason}\n", loop_block.identity.id)
         } else {
             format!("loop {} completed\n", loop_block.identity.id)
         };

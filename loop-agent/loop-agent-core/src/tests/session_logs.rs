@@ -1951,6 +1951,40 @@ fn resume_human_mode_reports_resumed_status() {
 }
 
 #[test]
+fn resume_human_mode_reports_the_terminal_failure_reason() {
+    let workspace = workspace_copy("sandbox-negative");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("negwrite001.jsonl");
+    let prefix = expected_stream("sandbox-negative", "sandbox-negative-write.jsonl")
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let event_count = prefix.lines().count();
+    fs::write(&path, &prefix).expect("partial log written");
+    write_definition_hash_metadata(
+        &workspace,
+        "negwrite001",
+        "sandbox-negative-write",
+        event_count,
+    );
+
+    let output = resume_session(&workspace, "negwrite001", EmitMode::Human)
+        .expect("session resumes to its deterministic failed terminal state");
+
+    assert!(output.failed);
+    assert_eq!(
+        output.stdout,
+        "session negwrite001 resumed: failed (write_denied)\n"
+    );
+    assert!(fs::read_to_string(&path)
+        .expect("resumed log readable")
+        .contains("\"event_type\":\"session.failed\""));
+}
+
+#[test]
 fn resume_rejects_tool_started_prefix_without_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);

@@ -363,10 +363,10 @@ fn validation_failure_is_not_published_and_closes_the_serial_writer() {
     let canonical = invalid.canonical_jsonl().expect("event serializes");
 
     let first_error = writer
-        .commit(&invalid, &canonical, Some(Instant::now()))
+        .commit(&invalid, &canonical, None, Some(Instant::now()))
         .expect_err("invalid event must close the writer");
     let second_error = writer
-        .commit(&invalid, &canonical, Some(Instant::now()))
+        .commit(&invalid, &canonical, None, Some(Instant::now()))
         .expect_err("closed writer must reject later events");
     drop(writer);
 
@@ -405,6 +405,225 @@ impl EventLogAppender for SyncFailAppender {
     }
 }
 
+struct MessageCompletedFailAppender {
+    inner: SessionLogAppender,
+}
+
+impl EventLogAppender for MessageCompletedFailAppender {
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        let event: EventEnvelope = serde_json::from_slice(bytes)?;
+        if event.event_type == EventType::MessageCompleted {
+            return Err(RuntimeError::Io {
+                path: path.to_owned(),
+                source: io::Error::other("injected message completion append failure"),
+            });
+        }
+        self.inner.append(path, bytes)
+    }
+
+    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
+        self.inner.sync(path)
+    }
+}
+
+fn test_context_manifest(label: &str) -> ContextManifest {
+    let mut line = proto::canonical_json(&serde_json::json!({
+        "context_hash": label,
+        "context_profile_id": CONTEXT_PROFILE_ID,
+        "context_profile_version": CONTEXT_PROFILE_VERSION,
+        "model_profile_id": ContextModelProfile::stub_v0().id,
+    }))
+    .expect("test context manifest serializes");
+    line.push('\n');
+    ContextManifest { line }
+}
+
+#[test]
+fn manifest_checkpoint_precedes_message_completion_append_and_is_recoverable() {
+    let workspace = empty_workspace("event-writer-manifest-checkpoint");
+    let reservation = reserve_session_log(&workspace, "smoke001").expect("session reserved");
+    let appender =
+        SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
+    let mut writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(&reservation),
+            emit: EmitMode::Human,
+            timings: None,
+        },
+        Vec::new(),
+        MessageCompletedFailAppender { inner: appender },
+    )
+    .expect("writer starts");
+    let manifest = test_context_manifest("first-turn");
+    let manifests = vec![manifest.clone()];
+    let mut completion_error = None;
+    for line in expected_stream("smoke-loop", "smoke-loop.jsonl").lines() {
+        let event: EventEnvelope = serde_json::from_str(line).expect("fixture event parses");
+        let canonical = event.canonical_jsonl().expect("fixture event serializes");
+        let context_prefix = (event.event_type == EventType::MessageCompleted)
+            .then_some(manifests.as_slice());
+        match writer.commit(&event, &canonical, context_prefix, Some(Instant::now())) {
+            Ok(()) => {}
+            Err(err) => {
+                completion_error = Some(err);
+                break;
+            }
+        }
+    }
+    drop(writer);
+
+    assert!(matches!(
+        completion_error,
+        Some(RuntimeError::EventWriter(source))
+            if matches!(source.as_ref(), RuntimeError::Io { source, .. }
+                if source.to_string().contains("injected message completion append failure"))
+    ));
+    assert_eq!(
+        fs::read_to_string(&reservation.context_path).expect("context stream reads"),
+        manifest.line
+    );
+    let stream = fs::read_to_string(&reservation.session_path).expect("session stream reads");
+    let events = validate_session_log_text(
+        &reservation.session_path,
+        &reservation.session_id,
+        &stream,
+    )
+    .expect("event prefix remains valid");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::MessageCompleted)
+            .count(),
+        0
+    );
+    verify_recorded_context_manifests(&workspace, "smoke001", &events, &manifests)
+        .expect("one deterministic in-flight manifest is recoverable");
+    reservation.rollback();
+}
+
+struct FailSecondContextAppender {
+    calls: usize,
+    inner: SessionLogAppender,
+    staged_path: PathBuf,
+}
+
+impl EventLogAppender for FailSecondContextAppender {
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        self.inner.append(path, bytes)
+    }
+
+    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
+        self.inner.sync(path)
+    }
+
+    fn persist_context_manifests(
+        &mut self,
+        path: &Path,
+        manifests: &[ContextManifest],
+    ) -> Result<(), RuntimeError> {
+        self.calls += 1;
+        if self.calls == 1 {
+            return persist_context_manifests(path, manifests);
+        }
+        let staged = manifests
+            .iter()
+            .map(|manifest| manifest.line.as_str())
+            .collect::<String>();
+        fs::write(&self.staged_path, staged).map_err(|source| RuntimeError::Io {
+            path: self.staged_path.clone(),
+            source,
+        })?;
+        Err(RuntimeError::Io {
+            path: self.staged_path.clone(),
+            source: io::Error::other("injected context replacement failure after staging"),
+        })
+    }
+}
+
+#[test]
+fn context_sidecar_failure_preserves_the_prior_valid_manifest_prefix() {
+    let workspace = empty_workspace("event-writer-context-sidecar-failure");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+    let appender =
+        SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
+    let staged_path = reservation.context_path.with_extension("staged");
+    let mut writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(&reservation),
+            emit: EmitMode::Human,
+            timings: None,
+        },
+        Vec::new(),
+        FailSecondContextAppender {
+            calls: 0,
+            inner: appender,
+            staged_path: staged_path.clone(),
+        },
+    )
+    .expect("writer starts");
+    let manifests = [
+        test_context_manifest("first-turn"),
+        test_context_manifest("second-turn"),
+    ];
+    let mut completed_turns = 0;
+    let mut sidecar_error = None;
+    for line in expected_stream("hello-loop", "hello-loop.jsonl").lines() {
+        let event: EventEnvelope = serde_json::from_str(line).expect("fixture event parses");
+        let canonical = event.canonical_jsonl().expect("fixture event serializes");
+        let context_prefix = if event.event_type == EventType::MessageCompleted {
+            completed_turns += 1;
+            Some(&manifests[..completed_turns])
+        } else {
+            None
+        };
+        match writer.commit(&event, &canonical, context_prefix, Some(Instant::now())) {
+            Ok(()) => {}
+            Err(err) => {
+                sidecar_error = Some(err);
+                break;
+            }
+        }
+        if completed_turns == manifests.len() {
+            break;
+        }
+    }
+    drop(writer);
+
+    assert!(matches!(sidecar_error, Some(RuntimeError::EventWriter(_))));
+    assert_eq!(
+        fs::read_to_string(&reservation.context_path).expect("prior context prefix reads"),
+        manifests[0].line
+    );
+    assert_eq!(
+        fs::read_to_string(&staged_path).expect("staged replacement reads"),
+        format!("{}{}", manifests[0].line, manifests[1].line)
+    );
+    let stream = fs::read_to_string(&reservation.session_path).expect("session stream reads");
+    let events = validate_session_log_text(
+        &reservation.session_path,
+        &reservation.session_id,
+        &stream,
+    )
+    .expect("event prefix remains valid");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::MessageCompleted)
+            .count(),
+        1
+    );
+    fs::remove_file(&staged_path).expect("staged replacement removed");
+    reservation.rollback();
+}
+
 #[test]
 fn appended_checkpoint_is_published_before_sync_failure_stops_the_writer() {
     let workspace = empty_workspace("event-writer-sync-failure");
@@ -413,6 +632,7 @@ fn appended_checkpoint_is_published_before_sync_failure_stops_the_writer() {
     let appended = Arc::new(Mutex::new(Vec::new()));
     let mut writer = SerialSessionWriter::start_with_appender(
         SerialWriterStart {
+            context_path: reservation.context_path.clone(),
             path: reservation.session_path.clone(),
             session_id: reservation.session_id.clone(),
             validation: SessionAppendValidationState::empty(&reservation.session_id),
@@ -448,10 +668,10 @@ fn appended_checkpoint_is_published_before_sync_failure_stops_the_writer() {
     let completed_jsonl = completed.canonical_jsonl().expect("completed serializes");
 
     writer
-        .commit(&started, &started_jsonl, Some(Instant::now()))
+        .commit(&started, &started_jsonl, None, Some(Instant::now()))
         .expect("non-checkpoint append succeeds");
     let err = writer
-        .commit(&completed, &completed_jsonl, Some(Instant::now()))
+        .commit(&completed, &completed_jsonl, None, Some(Instant::now()))
         .expect_err("checkpoint sync failure is reported");
     drop(writer);
 

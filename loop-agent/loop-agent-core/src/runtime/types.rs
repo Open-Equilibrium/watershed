@@ -89,6 +89,29 @@ pub struct RunOutput {
     pub stdout: String,
 }
 
+fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
+    events
+        .last()
+        .filter(|event| event.event_type == EventType::SessionFailed)?
+        .payload
+        .get("reason")?
+        .as_str()
+}
+
+fn escape_human_failure_reason(reason: &str) -> String {
+    reason.chars().flat_map(char::escape_debug).collect()
+}
+
+fn human_session_status(session_id: &str, action: &str, events: &[EventEnvelope]) -> String {
+    terminal_failure_reason(events).map_or_else(
+        || format!("session {session_id} {action}\n"),
+        |reason| {
+            let reason = escape_human_failure_reason(reason);
+            format!("session {session_id} {action}: failed ({reason})\n")
+        },
+    )
+}
+
 /// Tail behavior options.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TailOptions {

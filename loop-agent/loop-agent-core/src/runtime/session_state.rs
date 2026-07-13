@@ -180,14 +180,26 @@ where
     )?;
 
     let clock = resume_event_clock(&config, &events)?;
-    let mut serial_writer = SerialSessionWriter::start_existing(
+    let context_path = workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{session_id}.contexts.jsonl"));
+    let validation = SessionAppendValidationState::from_prior_events(
         &path,
         session_id,
         &events,
         before.len(),
-        emit,
+    )?;
+    let mut serial_writer = SerialSessionWriter::start_prevalidated(
+        SerialWriterStart {
+            context_path,
+            path: path.clone(),
+            session_id: session_id.to_owned(),
+            validation,
+            commit_reservation: None,
+            emit,
+            timings,
+        },
         writer,
-        timings,
     )?;
     let runtime_result = {
         let mut resume_sink = ResumeEventSink {
@@ -227,7 +239,6 @@ where
             path.display()
         )));
     }
-
     let committed = read_session_log_to_string(&path)?;
     let combined_events = validate_session_log_text(&path, session_id, &committed)?;
     write_existing_session_metadata(
@@ -240,7 +251,11 @@ where
         return Err(err);
     }
 
-    serial_writer.publish_human_status(&format!("session {session_id} resumed\n"));
+    serial_writer.publish_human_status(&human_session_status(
+        session_id,
+        "resumed",
+        &combined_events,
+    ));
 
     Ok(RunOutput {
         event_count: combined_events.len(),
@@ -483,7 +498,7 @@ fn read_existing_session(
         session_path: path,
         stdout: match emit {
             EmitMode::Jsonl => stream,
-            EmitMode::Human => format!("session {session_id} replayed\n"),
+            EmitMode::Human => human_session_status(session_id, "replayed", &events),
         },
     })
 }
@@ -745,8 +760,8 @@ fn reserve_session_log(
     })
 }
 
-fn persist_reserved_context_manifests(
-    reservation: &SessionReservation,
+fn persist_context_manifests(
+    path: &Path,
     manifests: &[ContextManifest],
 ) -> Result<(), RuntimeError> {
     let byte_count = manifests
@@ -756,14 +771,14 @@ fn persist_reserved_context_manifests(
     if u64::try_from(byte_count).unwrap_or(u64::MAX) > MAX_SESSION_LOG_BYTES {
         return Err(RuntimeError::Protocol(format!(
             "{} context manifest size {byte_count} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
-            reservation.context_path.display()
+            path.display()
         )));
     }
     let mut stream = String::with_capacity(byte_count);
     for manifest in manifests {
         stream.push_str(&manifest.line);
     }
-    write_existing_file(&reservation.context_path, stream.as_bytes())
+    replace_existing_file_atomically(path, stream.as_bytes())
 }
 
 fn reserve_unique_session_log(

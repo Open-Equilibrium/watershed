@@ -1,7 +1,7 @@
 const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
 const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 const EVENT_OBSERVER_QUEUE_CAPACITY: usize = 1;
-const EVENT_OBSERVER_DELIVERY_TIMEOUT: Duration = Duration::from_millis(50);
+const EVENT_OBSERVER_DELIVERY_TIMEOUT: Duration = Duration::from_millis(250);
 const EVENT_OBSERVER_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 trait RuntimeEventSink {
@@ -13,6 +13,7 @@ trait RuntimeEventSink {
         &mut self,
         event: &EventEnvelope,
         canonical_jsonl: &str,
+        context_manifests: Option<&[ContextManifest]>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError>;
 }
@@ -33,6 +34,7 @@ enum SessionWriterCommand {
     Commit {
         acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
         canonical_jsonl: String,
+        context_manifests: Option<Vec<ContextManifest>>,
         measurement_started_at: Option<Instant>,
         event: EventEnvelope,
     },
@@ -192,6 +194,7 @@ struct SerialSessionWriter<'a> {
 }
 
 struct SerialWriterStart<'a> {
+    context_path: PathBuf,
     path: PathBuf,
     session_id: String,
     validation: SessionAppendValidationState,
@@ -210,71 +213,29 @@ impl<'a> SerialSessionWriter<'a> {
     where
         W: Write + Send + 'static,
     {
-        Self::start_with_validation(
-            &reservation.session_path,
-            &reservation.session_id,
-            SessionAppendValidationState::empty(&reservation.session_id),
-            Some(reservation),
-            emit,
-            observer,
-            timings,
-        )
-    }
-
-    fn start_existing<W>(
-        path: &Path,
-        session_id: &str,
-        prior_events: &[EventEnvelope],
-        prior_stream_bytes: usize,
-        emit: EmitMode,
-        observer: W,
-        timings: Option<&'a mut EventWriterTimings>,
-    ) -> Result<Self, RuntimeError>
-    where
-        W: Write + Send + 'static,
-    {
-        let validation = SessionAppendValidationState::from_prior_events(
-            path,
-            session_id,
-            prior_events,
-            prior_stream_bytes,
-        )?;
-        Self::start_with_validation(
-            path,
-            session_id,
-            validation,
-            None,
-            emit,
-            observer,
-            timings,
-        )
-    }
-
-    fn start_with_validation<W>(
-        path: &Path,
-        session_id: &str,
-        validation: SessionAppendValidationState,
-        commit_reservation: Option<&'a SessionReservation>,
-        emit: EmitMode,
-        observer: W,
-        timings: Option<&'a mut EventWriterTimings>,
-    ) -> Result<Self, RuntimeError>
-    where
-        W: Write + Send + 'static,
-    {
-        let appender = SessionLogAppender::open(path)?;
-        Self::start_with_appender(
+        Self::start_prevalidated(
             SerialWriterStart {
-                path: path.to_owned(),
-                session_id: session_id.to_owned(),
-                validation,
-                commit_reservation,
+                context_path: reservation.context_path.clone(),
+                path: reservation.session_path.clone(),
+                session_id: reservation.session_id.clone(),
+                validation: SessionAppendValidationState::empty(&reservation.session_id),
+                commit_reservation: Some(reservation),
                 emit,
                 timings,
             },
             observer,
-            appender,
         )
+    }
+
+    fn start_prevalidated<W>(
+        start: SerialWriterStart<'a>,
+        observer: W,
+    ) -> Result<Self, RuntimeError>
+    where
+        W: Write + Send + 'static,
+    {
+        let appender = SessionLogAppender::open(&start.path)?;
+        Self::start_with_appender(start, observer, appender)
     }
 
     fn start_with_appender<W, A>(
@@ -287,6 +248,7 @@ impl<'a> SerialSessionWriter<'a> {
         A: EventLogAppender + Send + 'static,
     {
         let SerialWriterStart {
+            context_path,
             path,
             session_id,
             validation,
@@ -298,7 +260,15 @@ impl<'a> SerialSessionWriter<'a> {
             std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()
             .name(format!("loop-event-writer-{session_id}"))
-            .spawn(move || session_writer_worker(&path, validation, appender, &receiver))
+            .spawn(move || {
+                session_writer_worker(
+                    &path,
+                    &context_path,
+                    validation,
+                    appender,
+                    &receiver,
+                )
+            })
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<event-writer-thread>"),
                 source,
@@ -368,6 +338,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
         &mut self,
         event: &EventEnvelope,
         canonical_jsonl: &str,
+        context_manifests: Option<&[ContextManifest]>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if self.failed {
@@ -383,6 +354,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
             .send(SessionWriterCommand::Commit {
                 acknowledgement,
                 canonical_jsonl: canonical_jsonl.to_owned(),
+                context_manifests: context_manifests.map(<[ContextManifest]>::to_vec),
                 measurement_started_at,
                 event: event.clone(),
             })
@@ -437,6 +409,7 @@ impl RuntimeEventSink for ResumeEventSink<'_, '_> {
         &mut self,
         event: &EventEnvelope,
         _canonical_jsonl: &str,
+        context_manifests: Option<&[ContextManifest]>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.sequence <= self.planned_event_count as u64 {
@@ -444,8 +417,12 @@ impl RuntimeEventSink for ResumeEventSink<'_, '_> {
         }
         if !self.marker_committed {
             let marker_started_at = self.writer.measurement_started_at();
-            self.writer
-                .commit(&self.marker_event, &self.marker_stream, marker_started_at)?;
+            self.writer.commit(
+                &self.marker_event,
+                &self.marker_stream,
+                None,
+                marker_started_at,
+            )?;
             self.marker_committed = true;
         }
         let shifted = shift_resumed_event(
@@ -458,8 +435,12 @@ impl RuntimeEventSink for ResumeEventSink<'_, '_> {
                 "failed to serialize resumed runtime event: {err}"
             ))
         })?;
-        self.writer
-            .commit(&shifted, &canonical, measurement_started_at)
+        self.writer.commit(
+            &shifted,
+            &canonical,
+            context_manifests,
+            measurement_started_at,
+        )
     }
 }
 
@@ -507,10 +488,18 @@ impl DirtySyncState {
 trait EventLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError>;
     fn sync(&mut self, path: &Path) -> Result<(), RuntimeError>;
+    fn persist_context_manifests(
+        &mut self,
+        path: &Path,
+        manifests: &[ContextManifest],
+    ) -> Result<(), RuntimeError> {
+        persist_context_manifests(path, manifests)
+    }
 }
 
 fn session_writer_worker<A>(
     path: &Path,
+    context_path: &Path,
     mut validation: SessionAppendValidationState,
     mut appender: A,
     receiver: &std::sync::mpsc::Receiver<SessionWriterCommand>,
@@ -531,6 +520,7 @@ fn session_writer_worker<A>(
             Ok(SessionWriterCommand::Commit {
                 acknowledgement,
                 canonical_jsonl,
+                context_manifests,
                 measurement_started_at,
                 event,
             }) => {
@@ -551,12 +541,16 @@ fn session_writer_worker<A>(
                     }
                 } else {
                     commit_session_event(
-                        path,
+                        SessionEventCommit {
+                            path,
+                            context_path,
+                            event: &event,
+                            canonical_jsonl: &canonical_jsonl,
+                            context_manifests: context_manifests.as_deref(),
+                            measurement_started_at,
+                        },
                         &mut appender,
                         &mut validation,
-                        &event,
-                        &canonical_jsonl,
-                        measurement_started_at,
                         &mut dirty,
                     )
                 };
@@ -598,18 +592,32 @@ fn session_writer_worker<A>(
     }
 }
 
+struct SessionEventCommit<'a> {
+    path: &'a Path,
+    context_path: &'a Path,
+    event: &'a EventEnvelope,
+    canonical_jsonl: &'a str,
+    context_manifests: Option<&'a [ContextManifest]>,
+    measurement_started_at: Option<Instant>,
+}
+
 fn commit_session_event<A>(
-    path: &Path,
+    commit: SessionEventCommit<'_>,
     appender: &mut A,
     validation: &mut SessionAppendValidationState,
-    event: &EventEnvelope,
-    canonical_jsonl: &str,
-    measurement_started_at: Option<Instant>,
     dirty: &mut DirtySyncState,
 ) -> WriterOutcome
 where
     A: EventLogAppender,
 {
+    let SessionEventCommit {
+        path,
+        context_path,
+        event,
+        canonical_jsonl,
+        context_manifests,
+        measurement_started_at,
+    } = commit;
     if let Err(err) = validation.validate_constructed_event(
         path,
         event,
@@ -621,6 +629,39 @@ where
             error: Some(err),
         };
     }
+    let mut checkpoint_sync_duration = Duration::ZERO;
+    match (&event.event_type, context_manifests) {
+        (EventType::MessageCompleted, Some(manifests)) => {
+            let checkpoint_started_at = Instant::now();
+            if let Err(err) = appender.persist_context_manifests(context_path, manifests) {
+                return WriterOutcome {
+                    append_latency_nanos: None,
+                    appended: false,
+                    error: Some(err),
+                };
+            }
+            checkpoint_sync_duration = checkpoint_started_at.elapsed();
+        }
+        (EventType::MessageCompleted, None) => {
+            return WriterOutcome {
+                append_latency_nanos: None,
+                appended: false,
+                error: Some(RuntimeError::Protocol(
+                    "message.completed requires its full context manifest prefix".to_owned(),
+                )),
+            };
+        }
+        (_, Some(_)) => {
+            return WriterOutcome {
+                append_latency_nanos: None,
+                appended: false,
+                error: Some(RuntimeError::Protocol(
+                    "context manifests are only valid for message.completed".to_owned(),
+                )),
+            };
+        }
+        (_, None) => {}
+    }
     if let Err(err) = appender.append(path, canonical_jsonl.as_bytes()) {
         return WriterOutcome {
             append_latency_nanos: None,
@@ -628,8 +669,12 @@ where
             error: Some(err),
         };
     }
-    let append_latency_nanos =
-        measurement_started_at.map(|started_at| started_at.elapsed().as_nanos());
+    let append_latency_nanos = measurement_started_at.map(|started_at| {
+        started_at
+            .elapsed()
+            .saturating_sub(checkpoint_sync_duration)
+            .as_nanos()
+    });
     dirty.mark_dirty(Instant::now());
     if is_event_sync_checkpoint(&event.event_type) {
         if let Err(err) = appender.sync(path) {

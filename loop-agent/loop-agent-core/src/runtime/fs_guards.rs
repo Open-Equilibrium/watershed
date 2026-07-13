@@ -126,7 +126,7 @@ fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_non_hardlinked_real_file(path)?;
     let mut file = fs::OpenOptions::new()
@@ -152,7 +152,7 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), test))]
 fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     replace_existing_file_without_link_count(path, contents)
 }
@@ -170,6 +170,13 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
     {
         let _ = fs::remove_file(&temp_path);
         return Err(err);
+    }
+    if let Err(source) = temp_file.sync_all() {
+        let _ = fs::remove_file(&temp_path);
+        return Err(RuntimeError::Io {
+            path: temp_path,
+            source,
+        });
     }
     drop(temp_file);
 
@@ -295,7 +302,7 @@ fn read_existing_file_for_session_log_append(
     Ok(bytes)
 }
 
-#[cfg(any(not(unix), test))]
+#[cfg(any(not(any(unix, windows)), test))]
 fn replace_existing_file_without_link_count(
     path: &Path,
     contents: &[u8],

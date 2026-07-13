@@ -176,6 +176,45 @@ fn write_definition_hash_metadata(
         ),
     )
     .expect("definition hash metadata written");
+
+    let session_text = fs::read_to_string(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join(format!("{session_id}.jsonl")),
+    )
+    .expect("session prefix reads for context fixture");
+    let completed_turns = session_text
+        .lines()
+        .filter(|line| line.contains("\"event_type\":\"message.completed\""))
+        .count();
+    let config = load_workspace_config(workspace).expect("workspace config loads");
+    let artifacts = core_policy::compile_policy_artifacts(loop_ref, &registry, loop_ref)
+        .expect("runtime policy compiles");
+    let policy = runtime_policy_artifact(&artifacts).expect("runtime policy resolves");
+    let planned = execute_loop(
+        workspace,
+        &registry,
+        policy,
+        loop_block,
+        session_id,
+        LoopExecutionOptions::with_stub_model_fixture_profile(
+            config.event_clock,
+            ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
+            config.stub_model_fixture_profile,
+        ),
+    )
+    .expect("context fixture replay plans");
+    assert!(completed_turns <= planned.context_manifests.len());
+    let context_stream = planned.context_manifests[..completed_turns]
+        .iter()
+        .map(|manifest| manifest.line.as_str())
+        .collect::<String>();
+    fs::write(
+        log_dir.join(format!("{session_id}.contexts.jsonl")),
+        context_stream,
+    )
+    .expect("context fixture manifests written");
 }
 
 fn first_event_line(fixture: &str, stream: &str) -> String {

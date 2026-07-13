@@ -105,6 +105,47 @@ fn human_run_replay_tail_and_session_listing_report_status() {
 }
 
 #[test]
+fn human_replay_and_tail_escape_control_characters_in_failure_reasons() {
+    let workspace = empty_workspace("human-failure-reason-controls");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    let session_id = "controls001";
+    let stream = event_line(
+        "evt-001",
+        EventType::SessionStarted,
+        session_id,
+        1,
+        None,
+        serde_json::json!({"reason":"fixture-start"}),
+    ) + &event_line(
+        "evt-002",
+        EventType::SessionFailed,
+        session_id,
+        2,
+        None,
+        serde_json::json!({"reason":"line\nbreak\u{1b}[31m"}),
+    );
+    fs::write(session_dir.join(format!("{session_id}.jsonl")), stream)
+        .expect("failed session written");
+
+    for (output, action) in [
+        (
+            replay_session(&workspace, session_id, EmitMode::Human).expect("session replays"),
+            "replayed",
+        ),
+        (
+            tail_session(&workspace, session_id, EmitMode::Human).expect("session tails"),
+            "tailed",
+        ),
+    ] {
+        assert_eq!(
+            output.stdout,
+            format!("session controls001 {action}: failed (line\\nbreak\\u{{1b}}[31m)\n")
+        );
+    }
+}
+
+#[test]
 fn list_sessions_handles_missing_dirs_and_filters_unsafe_names() {
     let workspace = empty_workspace("list-sessions");
 
@@ -516,6 +557,17 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
         workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists(),
         "partial side effects must keep the run log"
     );
+    let manifests = fs::read_to_string(
+        workspace
+            .join(LOCAL_LOG_DIR)
+            .join(format!("{}.contexts.jsonl", output.session_id)),
+    )
+    .expect("actual-turn manifests remain readable");
+    let completed_turns = events
+        .iter()
+        .filter(|event| event.event_type == EventType::MessageCompleted)
+        .count();
+    assert_eq!(manifests.lines().count(), completed_turns);
 }
 
 #[test]
