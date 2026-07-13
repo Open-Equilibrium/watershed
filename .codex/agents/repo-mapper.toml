@@ -1,12 +1,12 @@
 # Project subagent: fast structural orientation at the start of a session so the
 # main thread doesn't burn context reading many files to find its bearings. A
-# read-heavy scan => gpt-5.4-mini / low effort. Read-only. Returns a concise map,
+# read-heavy scan => gpt-5.6-luna / medium effort. Read-only. Returns a concise map,
 # not contract answers (that is docs_scout).
 name = "repo_mapper"
 nickname_candidates = ["Where The Files At", "Captain Breadcrumbs", "Pathological Cartographer"]
 description = "Read-only repo cartographer: scans the Watershed workspace and returns a concise structural map — top-level layout, crates/packages and their roles, key entry points, where tests/fixtures/CI/config/docs live, and where a given concern is implemented — with file references. Use at the start of a session (and after large structural changes) for orientation. Does not answer contract questions (that is docs_scout)."
-model = "gpt-5.4-mini"
-model_reasoning_effort = "low"
+model = "gpt-5.6-luna"
+model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
 Follow AGENTS.md (read it if needed): English-only, read-only, never decide for

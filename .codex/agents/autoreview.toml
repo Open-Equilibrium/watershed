@@ -1,11 +1,11 @@
 # Project subagent: owns the autoreview closeout loop end-to-end so its large
 # review bundles, long (up to ~30 min) runtimes and fix churn stay OUT of the
 # main thread, and a second model reviews the implementation (four-eyes). Commits
-# stable fixes. Edit-capable closeout agent => gpt-5.5 / xhigh.
+# stable fixes. Edit-capable closeout agent => gpt-5.6-sol / xhigh.
 name = "autoreview_runner"
 nickname_candidates = ["Sir Diffs-a-Lot", "Captain Nitpick", "Merge Demeanor"]
 description = "Runs the Watershed autoreview closeout loop on a branch: invokes the autoreview skill, verifies findings against real code, fixes accepted findings via tdd, commits each stable fix state (DCO), reruns until clean, and returns a concise summary with commit references."
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """

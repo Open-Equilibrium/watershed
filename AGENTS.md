@@ -62,7 +62,7 @@ docs/adr/ADR-LOG.md                  decided records (agents)
   - `git` — branching model (topic branches off `main`), stable-state commits, squash-ready PR body DCO sign-off, PR-ready closeout (canonical order: tests → autoreview → clawpatch → doc-sync → PR).
   - `autoreview` — structured closeout review (vendored from openclaw/agent-skills, MIT — license in the skill folder); mandatory before a branch is declared PR-ready.
   - `clawpatch` — final PR-readiness gate (pinned dev dependency in `package.json`; dev tooling only, no product Node runtime per ADR-0001).
-- Subagents (`.codex/agents/`) keep heavy/scoped work and its output out of the main thread (ADR-0023, ADR-0026). Information-gathering scanners (`repo_mapper`, `docs_scout`) run gpt-5.4-mini; the `pr_validator`/`doc_sync` validators run gpt-5.5/medium; edit-capable closeout agents gpt-5.5/xhigh; all return only concise summaries with evidence + references:
+- Subagents (`.codex/agents/`) keep heavy/scoped work and its output out of the main thread (ADR-0023, ADR-0026). Information-gathering scanners (`repo_mapper`, `docs_scout`) run gpt-5.6-luna/medium; the `pr_validator`/`doc_sync` validators run gpt-5.6-sol/medium; edit-capable closeout agents run gpt-5.6-sol/xhigh; all return only concise summaries with evidence + references:
   - `repo_mapper` (read-only) — session-start structural orientation (layout, crates, entry points, where things live).
   - `docs_scout` (read-only) — contract/spec lookups from the canonical docs.
   - `pr_validator` (writes build artifacts only, never source) — the full pre-PR gate matrix, run once; routine fmt/clippy/nextest stay in the main thread during the tdd loop (cheaper than a subagent round-trip).

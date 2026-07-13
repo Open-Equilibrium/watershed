@@ -1,12 +1,12 @@
 # Project subagent: read-only pre-PR audit that the branch followed the project's
 # documentation and commit standards. Runs after the clawpatch gate, before PR
-# creation. Read-only (reads files + git history only) => gpt-5.5 / medium.
+# creation. Read-only (reads files + git history only) => gpt-5.6-sol / medium.
 # Kept separate from docs_scout on purpose: docs_scout researches contracts,
 # doc_sync audits compliance (different job, different time).
 name = "doc_sync"
 nickname_candidates = ["Citation Needed", "Professor Parenthesis", "The Semicolon Sommelier"]
 description = "Read-only pre-PR auditor: checks branch changes against Watershed documentation standards (minimal, clean, non-overlapping, single source of truth, GLOSSARY terms, reference-don't-duplicate) and PR/commit standards (squash-ready PR body with DCO trailers and decision/ADR references, no AI/agent references, imperative <=72-char commit subjects), plus correct docs/commit cross-references. Reports tersely; never edits files."
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """

@@ -1,7 +1,7 @@
 # Codex project config for trusted Watershed checkouts.
 # Canonical repo rules live in AGENTS.md; security details live in SECURITY.md.
 
-model = "gpt-5.5"
+model = "gpt-5.6-sol"
 model_reasoning_effort = "xhigh"
 model_verbosity = "low"
 personality = "pragmatic"

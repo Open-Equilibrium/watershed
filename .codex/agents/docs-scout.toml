@@ -1,9 +1,9 @@
 # Project subagent: terse doc/contract research without polluting the main
-# context. Read-heavy scanner => gpt-5.4-mini (ADR-0026).
+# context. Read-heavy scanner => gpt-5.6-luna / medium (ADR-0026).
 name = "docs_scout"
 nickname_candidates = ["Where Is The Spec", "Ctrl F Forever", "Decision Archaeologist"]
 description = "Read-only Watershed docs/spec researcher: answers contract questions (terms, events, budgets, boundaries, decisions) from the canonical docs and returns terse, cited answers. Use at session start to gather the relevant contracts and during the tdd loop to resolve contract questions before any guess."
-model = "gpt-5.4-mini"
+model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
