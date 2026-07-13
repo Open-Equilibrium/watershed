@@ -611,6 +611,22 @@ fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, Runtime
 
 #[cfg(windows)]
 fn hard_link_count(path: &Path, _metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    hard_link_count_for_open_file(path, &file)
+}
+
+#[cfg(windows)]
+fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, RuntimeError> {
     use std::{ffi::c_void, os::windows::io::AsRawHandle};
 
     #[repr(C)]
@@ -641,10 +657,6 @@ fn hard_link_count(path: &Path, _metadata: &fs::Metadata) -> Result<u64, Runtime
         ) -> i32;
     }
 
-    let file = fs::File::open(path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
     let mut information = ByHandleFileInformation {
         file_attributes: 0,
         creation_time: FileTime {

@@ -177,11 +177,13 @@ fn disconnected_observer_is_detached_without_rolling_back_committed_events() {
     );
 }
 
+#[cfg(unix)]
 struct RemoveLogAfterFirstPublish {
     published_events: usize,
     workspace: PathBuf,
 }
 
+#[cfg(unix)]
 impl Write for RemoveLogAfterFirstPublish {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let event: EventEnvelope = serde_json::from_slice(bytes)
@@ -202,6 +204,7 @@ impl Write for RemoveLogAfterFirstPublish {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn append_failure_is_not_published_and_closes_the_serial_writer() {
     let workspace = workspace_copy("smoke-loop");
@@ -224,4 +227,63 @@ fn append_failure_is_not_published_and_closes_the_serial_writer() {
             if matches!(source.as_ref(), RuntimeError::Io { .. })
     ));
     assert_eq!(observer.published_events, 1);
+}
+
+#[test]
+fn validation_failure_is_not_published_and_closes_the_serial_writer() {
+    let workspace = empty_workspace("event-writer-validation");
+    let reservation = reserve_session_log(&workspace, "invalid001").expect("session reserved");
+    let mut observer = Vec::new();
+    let mut writer = SerialSessionWriter::start(
+        &reservation,
+        EmitMode::Jsonl,
+        &mut observer,
+        None,
+    )
+    .expect("writer starts");
+    let invalid = EventEnvelope::new(
+        "evt-invalid",
+        EventType::SessionStarted,
+        "invalid001",
+        2,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"test"}),
+    );
+    let canonical = invalid.canonical_jsonl().expect("event serializes");
+
+    let first_error = writer
+        .commit(&invalid, &canonical, Some(Instant::now()))
+        .expect_err("invalid event must close the writer");
+    let second_error = writer
+        .commit(&invalid, &canonical, Some(Instant::now()))
+        .expect_err("closed writer must reject later events");
+    drop(writer);
+
+    assert!(matches!(
+        first_error,
+        RuntimeError::EventWriter(source)
+            if matches!(source.as_ref(), RuntimeError::Protocol(message) if message.contains("first sequence"))
+    ));
+    assert!(matches!(second_error, RuntimeError::EventWriter(_)));
+    assert!(observer.is_empty());
+    assert_eq!(
+        fs::read(&reservation.session_path).expect("session log reads"),
+        b""
+    );
+    reservation.rollback();
+}
+
+#[test]
+fn later_events_do_not_extend_the_dirty_sync_deadline() {
+    let first_append = Instant::now();
+    let mut state = DirtySyncState::default();
+    state.mark_dirty(first_append);
+    state.mark_dirty(first_append + Duration::from_millis(900));
+
+    assert_eq!(
+        state.wait_timeout(first_append + EVENT_WRITER_DIRTY_SYNC_INTERVAL),
+        Duration::ZERO
+    );
+    assert!(state.is_due(first_append + EVENT_WRITER_DIRTY_SYNC_INTERVAL));
 }

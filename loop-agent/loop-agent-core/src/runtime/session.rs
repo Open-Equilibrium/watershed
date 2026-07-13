@@ -23,6 +23,27 @@ pub fn run_loop_to_writer(
     emit: EmitMode,
     writer: &mut dyn Write,
 ) -> Result<RunOutput, RuntimeError> {
+    run_loop_to_writer_internal(workspace, loop_ref, emit, writer, None)
+}
+
+#[cfg(test)]
+fn run_loop_to_writer_with_timings<'a>(
+    workspace: impl AsRef<Path>,
+    loop_ref: &str,
+    emit: EmitMode,
+    writer: &'a mut dyn Write,
+    timings: &'a mut EventWriterTimings,
+) -> Result<RunOutput, RuntimeError> {
+    run_loop_to_writer_internal(workspace, loop_ref, emit, writer, Some(timings))
+}
+
+fn run_loop_to_writer_internal<'a>(
+    workspace: impl AsRef<Path>,
+    loop_ref: &str,
+    emit: EmitMode,
+    writer: &'a mut dyn Write,
+    timings: Option<&'a mut EventWriterTimings>,
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
     let registry_path = registry_root_path(workspace, &config.registry_root)?;
@@ -86,7 +107,8 @@ pub fn run_loop_to_writer(
     }
 
     let result = (|| {
-        let mut serial_writer = SerialSessionWriter::start(&reservation, emit, writer)?;
+        let mut serial_writer =
+            SerialSessionWriter::start(&reservation, emit, writer, timings)?;
         let runtime_result = execute_loop_with_sink(
             workspace,
             &registry,

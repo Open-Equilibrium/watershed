@@ -239,6 +239,10 @@ impl<'a> RuntimeEventBuilder<'a> {
                 "runtime event budget exceeded: next event {sequence} exceeds max {MAX_LOOP_EVENTS}"
             )));
         }
+        let measurement_started_at = self
+            .sink
+            .as_deref()
+            .and_then(RuntimeEventSink::measurement_started_at);
         let mut event = EventEnvelope::new(
             format!("evt-{:03}", sequence),
             event_type,
@@ -266,7 +270,7 @@ impl<'a> RuntimeEventBuilder<'a> {
             )));
         }
         if let Some(sink) = self.sink.as_deref_mut() {
-            sink.commit(&event, &event_bytes)?;
+            sink.commit(&event, &event_bytes, measurement_started_at)?;
         }
         self.sequence = sequence;
         self.stream_bytes = next_stream_bytes;

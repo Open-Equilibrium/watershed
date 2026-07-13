@@ -180,8 +180,17 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
 
 #[cfg(unix)]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    let mut file = open_session_log_append_file(path)?;
+    file.write_all(contents).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+#[cfg(unix)]
+fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
     ensure_non_hardlinked_real_file(path)?;
-    let mut file = fs::OpenOptions::new()
+    let file = fs::OpenOptions::new()
         .append(true)
         .open(path)
         .map_err(|source| RuntimeError::Io {
@@ -189,18 +198,58 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
             source,
         })?;
     ensure_opened_regular_leaf_matches_path(path, &file)?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    let mut file = open_session_log_append_file(path)?;
     file.write_all(contents).map_err(|source| RuntimeError::Io {
         path: path.to_owned(),
         source,
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_SHARE_READ: u32 = 0x0000_0001;
+    ensure_parent_real_directory(path)?;
+    // WHY: a no-follow handle without write/delete sharing makes the checked file the file
+    // we append to for the writer lifetime while still allowing replay/tail readers;
+    // rewriting the full log per event misses the M1 latency budget on Windows.
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    let metadata = file.metadata().map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
+    validate_real_file(path, &metadata)?;
+    if hard_link_count_for_open_file(path, &file)? > 1 {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be hard-linked",
+            path.display()
+        )));
+    }
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     append_existing_file_without_link_count(path, contents)
 }
 
-#[cfg(any(not(unix), test))]
+#[cfg(any(not(any(unix, windows)), test))]
 fn append_existing_file_without_link_count(
     path: &Path,
     contents: &[u8],
@@ -210,7 +259,7 @@ fn append_existing_file_without_link_count(
     replace_existing_file_without_link_count(path, &appended)
 }
 
-#[cfg(any(not(unix), test))]
+#[cfg(any(not(any(unix, windows)), test))]
 fn read_existing_file_for_session_log_append(
     path: &Path,
     appended_bytes: usize,

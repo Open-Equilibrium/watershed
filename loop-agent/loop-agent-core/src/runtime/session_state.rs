@@ -58,6 +58,27 @@ pub fn resume_session_to_writer(
     emit: EmitMode,
     writer: &mut dyn Write,
 ) -> Result<RunOutput, RuntimeError> {
+    resume_session_to_writer_internal(workspace, session_id, emit, writer, None)
+}
+
+#[cfg(test)]
+fn resume_session_to_writer_with_timings<'a>(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+    writer: &'a mut dyn Write,
+    timings: &'a mut EventWriterTimings,
+) -> Result<RunOutput, RuntimeError> {
+    resume_session_to_writer_internal(workspace, session_id, emit, writer, Some(timings))
+}
+
+fn resume_session_to_writer_internal<'a>(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+    writer: &'a mut dyn Write,
+    timings: Option<&'a mut EventWriterTimings>,
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
@@ -152,6 +173,7 @@ pub fn resume_session_to_writer(
         before.len(),
         emit,
         writer,
+        timings,
     )?;
     let runtime_result = {
         let mut resume_sink = ResumeEventSink {
@@ -342,15 +364,12 @@ fn preflight_resume_append_plan(
     })
 }
 
-fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
-    append_session_log_bytes(path, text.as_bytes())
-}
-
 fn prepare_session_log_append(path: &Path, text: &str) -> Result<(), RuntimeError> {
     ensure_session_log_growth_within_limit(path, text.len())?;
     append_existing_file(path, b"")
 }
 
+#[cfg(any(not(any(unix, windows)), test))]
 fn append_session_log_bytes(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     ensure_session_log_growth_within_limit(path, contents.len())?;
     append_existing_file(path, contents)

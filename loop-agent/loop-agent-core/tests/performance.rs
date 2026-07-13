@@ -1,6 +1,5 @@
 use loop_agent_core::{
-    resume_session, run_loop, validate_protocol_jsonl_text, EmitMode, LOCAL_LOG_DIR,
-    MAX_LOOP_EVENT_STREAM_BYTES,
+    run_loop, validate_protocol_jsonl_text, EmitMode, MAX_LOOP_EVENT_STREAM_BYTES,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
@@ -17,32 +16,6 @@ use std::{
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 static PERFORMANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-#[test]
-fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
-    let _guard = performance_test_guard();
-    let mut event_nanos = Vec::new();
-
-    for _ in 0..3 {
-        let workspace = workspace_copy("hello-loop");
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("warm runtime emit succeeds");
-    }
-    for _ in 0..25 {
-        let workspace = workspace_copy("hello-loop");
-        let started = Instant::now();
-        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-            .expect("runtime emit path succeeds");
-        assert!(!output.failed);
-        event_nanos.push(started.elapsed().as_nanos() / output.event_count as u128);
-    }
-    let p95_nanos = p95(event_nanos);
-    let budget_nanos = perf_budget_nanos(5_000_000, 25_000_000);
-
-    assert!(
-        p95_nanos <= budget_nanos,
-        "hello-loop runtime emit p95 must stay within the per-event budget: {p95_nanos} ns"
-    );
-}
 
 #[test]
 fn near_cap_event_validation_enforces_m1_memory_budget() {
@@ -71,26 +44,6 @@ fn near_cap_event_validation_enforces_m1_memory_budget() {
     let err = validate_protocol_jsonl_text(Path::new("oversized-near-cap.jsonl"), &oversized)
         .expect_err("oversized stream must fail the event-stream budget");
     assert!(err.to_string().contains("event stream budget"), "{err}");
-}
-
-#[test]
-fn hello_loop_resume_append_p95_stays_under_m1_budget() {
-    let _guard = performance_test_guard();
-    let mut append_nanos = Vec::new();
-
-    for _ in 0..3 {
-        measure_hello_loop_resume_append();
-    }
-    for _ in 0..25 {
-        append_nanos.push(measure_hello_loop_resume_append());
-    }
-    let p95_nanos = p95(append_nanos);
-    let budget_nanos = perf_budget_nanos(5_000_000, 50_000_000);
-
-    assert!(
-        p95_nanos <= budget_nanos,
-        "hello-loop resume append p95 must stay within the per-event budget: {p95_nanos} ns"
-    );
 }
 
 #[test]
@@ -193,58 +146,6 @@ fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() 
     }
 }
 
-fn measure_hello_loop_resume_append() -> u128 {
-    let workspace = workspace_copy("hello-loop");
-    let completed =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop completes");
-    let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
-    let prefix_events = prefix.lines().count();
-    fs::write(&completed.session_path, &prefix).expect("partial prefix written");
-    rewrite_session_metadata_event_count(&workspace, &completed.session_id, prefix_events);
-    fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
-
-    let started = Instant::now();
-    let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
-        .expect("resume append succeeds");
-    let elapsed = started.elapsed().as_nanos();
-    let appended_events = output.event_count.saturating_sub(prefix_events).max(1);
-    elapsed / appended_events as u128
-}
-
-fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
-    let event_marker = "\"event_type\":\"tool.started\"";
-    let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
-    let mut prefix = String::new();
-    for line in stream.lines() {
-        if line.contains(event_marker) && line.contains(&tool_marker) {
-            return prefix;
-        }
-        prefix.push_str(line);
-        prefix.push('\n');
-    }
-    panic!("missing tool.started for {tool_id}");
-}
-
-fn rewrite_session_metadata_event_count(workspace: &Path, session_id: &str, event_count: usize) {
-    let metadata_path = workspace
-        .join(LOCAL_LOG_DIR)
-        .join(format!("{session_id}.log"));
-    let metadata = fs::read_to_string(&metadata_path).expect("metadata readable");
-    let updated = metadata
-        .lines()
-        .map(|line| {
-            if line.starts_with("events=") {
-                format!("events={event_count}")
-            } else {
-                line.to_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n";
-    fs::write(metadata_path, updated).expect("metadata event count rewritten");
-}
-
 fn performance_test_guard() -> MutexGuard<'static, ()> {
     PERFORMANCE_TEST_LOCK
         .lock()
@@ -318,21 +219,6 @@ fn temp_workspace_guard_removes_directory_on_drop() {
     };
 
     assert!(!path.exists(), "temporary workspace should be removed");
-}
-
-fn p95(mut values: Vec<u128>) -> u128 {
-    assert!(!values.is_empty(), "p95 requires at least one value");
-    values.sort_unstable();
-    let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
-    values[index]
-}
-
-fn perf_budget_nanos(release_budget_nanos: u128, debug_budget_nanos: u128) -> u128 {
-    if cfg!(debug_assertions) {
-        debug_budget_nanos
-    } else {
-        release_budget_nanos
-    }
 }
 
 fn near_cap_valid_event_stream() -> String {

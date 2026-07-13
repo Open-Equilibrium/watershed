@@ -279,7 +279,7 @@ fn completed_session_log_append_rejects_streams_above_size_limit() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn write_existing_file_rejects_hardlinked_leaf_without_truncating_target() {
+fn write_and_append_reject_hardlinked_leaf_without_changing_target() {
     let workspace = empty_workspace("session-hardlink");
     let outside = empty_workspace("outside-session-hardlink");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -289,6 +289,9 @@ fn write_existing_file_rejects_hardlinked_leaf_without_truncating_target() {
     let session_path = session_dir.join("race001.jsonl");
     fs::hard_link(&outside_target, &session_path).expect("session hard link");
 
+    let err = append_existing_file(&session_path, b"appended\n")
+        .expect_err("hard-linked session leaf must reject before append");
+    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
     let err = write_existing_file(&session_path, b"changed\n")
         .expect_err("hard-linked session leaf must reject before truncate");
 

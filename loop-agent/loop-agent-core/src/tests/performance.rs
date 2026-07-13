@@ -20,6 +20,103 @@ fn m1_performance_fixture_runtime_paths_are_exercised() {
 }
 
 #[test]
+fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
+    let mut append_nanos = Vec::new();
+    let mut delivery_nanos = Vec::new();
+
+    for _ in 0..5 {
+        let workspace = workspace_copy("hello-loop");
+        let mut observer = io::sink();
+        let mut timings = EventWriterTimings::default();
+        let output = run_loop_to_writer_with_timings(
+            &workspace,
+            "hello-loop",
+            EmitMode::Jsonl,
+            &mut observer,
+            &mut timings,
+        )
+        .expect("measured runtime emit succeeds");
+        assert!(!output.failed);
+        assert_eq!(timings.append_nanos.len(), output.event_count);
+        append_nanos.extend(timings.append_nanos);
+        delivery_nanos.extend(timings.delivery_nanos);
+    }
+
+    assert_event_writer_p95(append_nanos, delivery_nanos, "hello-loop run");
+}
+
+#[test]
+fn hello_loop_resume_append_p95_stays_under_m1_budget() {
+    let mut append_nanos = Vec::new();
+    let mut delivery_nanos = Vec::new();
+
+    for _ in 0..5 {
+        let workspace = workspace_copy("hello-loop");
+        let completed =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop completes");
+        let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
+        let prefix_events = prefix.lines().count();
+        fs::write(&completed.session_path, &prefix).expect("partial prefix written");
+        write_definition_hash_metadata(
+            &workspace,
+            &completed.session_id,
+            "hello-loop",
+            prefix_events,
+        );
+        fs::remove_file(workspace.join("out/summary.txt"))
+            .expect("completed side effect removed");
+        let mut observer = io::sink();
+        let mut timings = EventWriterTimings::default();
+
+        let output = resume_session_to_writer_with_timings(
+            &workspace,
+            &completed.session_id,
+            EmitMode::Jsonl,
+            &mut observer,
+            &mut timings,
+        )
+        .expect("measured resume succeeds");
+        assert_eq!(
+            timings.append_nanos.len(),
+            output.event_count - prefix_events
+        );
+        append_nanos.extend(timings.append_nanos);
+        delivery_nanos.extend(timings.delivery_nanos);
+    }
+
+    assert_event_writer_p95(append_nanos, delivery_nanos, "hello-loop resume");
+}
+
+fn assert_event_writer_p95(
+    append_nanos: Vec<u128>,
+    delivery_nanos: Vec<u128>,
+    path: &str,
+) {
+    assert!(!delivery_nanos.is_empty(), "{path} must publish events");
+    let append_p95 = p95_nanos(append_nanos);
+    let delivery_p95 = p95_nanos(delivery_nanos);
+    let append_budget = if cfg!(debug_assertions) {
+        100_000_000
+    } else {
+        5_000_000
+    };
+    let delivery_budget = if cfg!(debug_assertions) {
+        150_000_000
+    } else {
+        50_000_000
+    };
+
+    assert!(
+        append_p95 <= append_budget,
+        "{path} individual-event append p95 must stay <= {append_budget} ns: {append_p95} ns"
+    );
+    assert!(
+        delivery_p95 <= delivery_budget,
+        "{path} individual-event observer delivery p95 must stay <= {delivery_budget} ns: {delivery_p95} ns"
+    );
+}
+
+#[test]
 fn fsm_transition_p95_stays_under_m1_budget() {
     let event_count = emit_runtime_events_for_budget().expect("warm runtime emit succeeds") as u128;
     let mut nanos_per_event = Vec::new();
