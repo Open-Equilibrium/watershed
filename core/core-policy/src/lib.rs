@@ -1055,7 +1055,7 @@ impl FilesystemPolicy {
         let declared_scopes = self.validate_roots(tool_id)?;
 
         for grant in &self.protected_path_grants {
-            let Some(normalized_grant) = normalize_policy_relative_path(grant) else {
+            let Some(normalized_grant) = core_script::normalize_safe_relative_path(grant) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path"
                 )));
@@ -1068,7 +1068,7 @@ impl FilesystemPolicy {
 
             if !declared_scopes
                 .iter()
-                .any(|scope| path_is_inside_scope(&normalized_grant, scope))
+                .any(|scope| core_script::relative_path_is_inside_scope(&normalized_grant, scope))
             {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} protected_path_grant {grant:?} must stay inside read_roots or write_roots"
@@ -1082,7 +1082,7 @@ impl FilesystemPolicy {
     fn validate_roots(&self, tool_id: &str) -> Result<Vec<String>, PolicyArtifactValidationError> {
         let mut declared_scopes = Vec::new();
         for root in &self.read_roots {
-            let Some(normalized_root) = normalize_policy_relative_path(root) else {
+            let Some(normalized_root) = core_script::normalize_safe_relative_path(root) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} filesystem root {root:?} must be a safe relative path"
                 )));
@@ -1091,7 +1091,7 @@ impl FilesystemPolicy {
         }
 
         for root in &self.write_roots {
-            let Some(normalized_root) = normalize_policy_relative_path(root) else {
+            let Some(normalized_root) = core_script::normalize_safe_relative_path(root) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} filesystem root {root:?} must be a safe relative path"
                 )));
@@ -1111,16 +1111,8 @@ fn matches_default_protected_paths(paths: &[String]) -> bool {
             .eq(DEFAULT_PROTECTED_PATHS.iter().copied())
 }
 
-fn normalize_policy_relative_path(value: &str) -> Option<String> {
-    core_script::normalize_safe_relative_path(value)
-}
-
 fn protected_path_grant_has_wildcard(value: &str) -> bool {
     value.contains('*') || value.contains('?')
-}
-
-fn path_is_inside_scope(path: &str, scope: &str) -> bool {
-    core_script::relative_path_is_inside_scope(path, scope)
 }
 
 /// Network access policy for a command.
@@ -1145,7 +1137,7 @@ impl NetworkPolicy {
             match entry.transport {
                 NetworkTransport::Tcp | NetworkTransport::Udp => {}
             }
-            if !is_valid_canonical_cidr(&entry.cidr) {
+            if !core_script::is_valid_canonical_cidr(&entry.cidr) {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} network allow entry {:?} must use a canonical CIDR",
                     entry.cidr
@@ -1200,10 +1192,6 @@ pub enum NetworkTransport {
     Tcp,
     /// UDP transport.
     Udp,
-}
-
-fn is_valid_canonical_cidr(value: &str) -> bool {
-    core_script::is_valid_canonical_cidr(value)
 }
 
 /// Tools available within a phase.
@@ -1456,8 +1444,8 @@ fn write_path_is_denied(command: &CommandPolicy, path: &str) -> bool {
         .filesystem
         .write_roots
         .iter()
-        .filter_map(|root| normalize_policy_relative_path(root))
-        .any(|root| path_is_inside_scope(&path, &root))
+        .filter_map(|root| core_script::normalize_safe_relative_path(root))
+        .any(|root| core_script::relative_path_is_inside_scope(&path, &root))
 }
 
 fn network_attempt_is_denied(
@@ -1562,7 +1550,7 @@ fn protected_path_attempt_is_denied(
 }
 
 fn normalize_attempt_path(path: &str) -> Option<String> {
-    let normalized = normalize_policy_relative_path(path)?;
+    let normalized = core_script::normalize_safe_relative_path(path)?;
     if normalized == "workspace" || normalized.starts_with("workspace/") {
         Some(normalized)
     } else {
@@ -1685,7 +1673,7 @@ fn protected_segment_match(pattern: &str, path: &str) -> bool {
 }
 
 fn symlink_target_is_escape(target: &str) -> bool {
-    target.starts_with('/') || normalize_policy_relative_path(target).is_none()
+    target.starts_with('/') || core_script::normalize_safe_relative_path(target).is_none()
 }
 
 /// Error returned when an expected-decision fixture is invalid.

@@ -961,17 +961,9 @@ fn commit_reserved_session_log_from_prefix(
     persisted_event_count: usize,
 ) -> Result<(), RuntimeError> {
     let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
-    let append_result = append_session_log_bytes(&reservation.session_path, append_bytes);
-    if append_result.is_ok() {
-        reservation.mark_committed();
-    }
-    let metadata_result = if append_result.is_ok() {
-        write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
-    } else {
-        Ok(())
-    };
-    append_result?;
-    metadata_result
+    append_session_log_bytes(&reservation.session_path, append_bytes)?;
+    reservation.mark_committed();
+    write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
 }
 
 fn session_stream_suffix_bytes(
