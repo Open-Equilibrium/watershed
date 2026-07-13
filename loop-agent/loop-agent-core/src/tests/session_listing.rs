@@ -302,7 +302,6 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
 #[test]
 fn run_loop_rejects_unsupported_own_script_before_side_effects() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -356,7 +355,6 @@ fn run_loop_writes_quoted_own_script_target_with_spaces() {
 #[test]
 fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     fs::write(
         workspace.join("registry/tools/bad-write.yaml"),
         r#"tool:
@@ -403,7 +401,6 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
 #[test]
 fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let loop_path = workspace.join("registry/loops/hello-loop.yaml");
     let loop_source = fs::read_to_string(&loop_path).expect("loop fixture readable");
     fs::write(
@@ -446,7 +443,6 @@ fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
 #[test]
 fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -506,7 +502,6 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
 #[test]
 fn run_loop_keeps_started_audit_after_partial_apply_failure() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -596,7 +591,6 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
 #[test]
 fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
     let workspace = workspace_copy("smoke-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let loop_path = workspace.join("registry/loops/smoke-loop.yaml");
     let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
     fs::write(
@@ -621,7 +615,6 @@ fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
 #[test]
 fn run_loop_rejects_protected_own_script_write_without_grant() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -658,7 +651,6 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
 #[test]
 fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -689,7 +681,6 @@ fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
 #[test]
 fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(

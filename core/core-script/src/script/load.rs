@@ -26,7 +26,8 @@ pub fn parse_registry_block(
             ));
         }
     };
-    validate_registry_block_semantics(&block)?;
+    validate_registry_block_semantics(&block)
+        .map_err(|error| registry_source_error(source_name, error.into()))?;
     Ok(block)
 }
 

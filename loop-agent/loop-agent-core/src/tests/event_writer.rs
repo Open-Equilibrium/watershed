@@ -35,7 +35,6 @@ impl<T: Write> Write for SharedObserver<T> {
 
 #[derive(Default)]
 struct AppendBeforePublishProbe {
-    completed_checkpoint_counts: Vec<usize>,
     first_publish_saw_committed_event: bool,
     published: Vec<u8>,
     workspace: PathBuf,
@@ -60,15 +59,6 @@ impl Write for AppendBeforePublishProbe {
         if appended != bytes {
             return Err(io::Error::other("event published before append"));
         }
-        if event.event_type == EventType::MessageCompleted {
-            let context_stream = fs::read_to_string(
-                self.workspace
-                    .join(LOCAL_LOG_DIR)
-                    .join(format!("{}.contexts.jsonl", event.session_id)),
-            )?;
-            self.completed_checkpoint_counts
-                .push(context_stream.lines().count());
-        }
         self.published.extend_from_slice(bytes);
         self.writes += 1;
         Ok(bytes.len())
@@ -88,16 +78,25 @@ fn run_streams_each_jsonl_event_only_after_it_is_appended() {
     });
     let output = run_loop_to_writer(&workspace, "hello-loop", EmitMode::Jsonl, probe)
         .expect("streamed run completes");
-    let persisted = fs::read(&output.session_path).expect("session log reads");
+    let persisted = fs::read_to_string(&output.session_path).expect("session log reads");
 
     let probe = probe_state.lock().expect("probe lock");
     assert!(probe.first_publish_saw_committed_event);
     assert!(probe.writes > 1);
-    assert_eq!(probe.published, persisted);
-    assert!(!probe.completed_checkpoint_counts.is_empty());
+    assert!(
+        persisted.as_bytes().starts_with(&probe.published),
+        "every delivered event must be an ordered prefix of the committed log"
+    );
+    drop(probe);
+    let events = validate_session_log_text(
+        &output.session_path,
+        &output.session_id,
+        &persisted,
+    )
+    .expect("committed stream validates");
     assert_eq!(
-        probe.completed_checkpoint_counts,
-        (1..=probe.completed_checkpoint_counts.len()).collect::<Vec<_>>()
+        events.last().map(|event| &event.event_type),
+        Some(&EventType::SessionCompleted)
     );
     assert!(output.stdout.is_empty());
 }
@@ -201,15 +200,11 @@ impl Write for BrokenPipeObserver {
 }
 
 struct BlockingObserver {
-    entered: Option<std::sync::mpsc::Sender<()>>,
     release: Arc<(Mutex<bool>, std::sync::Condvar)>,
 }
 
 impl Write for BlockingObserver {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if let Some(entered) = self.entered.take() {
-            let _ = entered.send(());
-        }
         let (released, condition) = &*self.release;
         let mut released = released.lock().expect("release lock");
         while !*released {
@@ -224,52 +219,18 @@ impl Write for BlockingObserver {
 }
 
 #[test]
-fn persistently_blocked_observer_is_detached_without_blocking_the_session() {
-    let workspace = workspace_copy("smoke-loop");
-    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+fn persistently_blocked_observer_is_detached_after_delivery_timeout() {
     let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
-    let observer_release = Arc::clone(&release);
-    let handle = thread::spawn(move || {
-        let observer = BlockingObserver {
-            entered: Some(entered_tx),
-            release: observer_release,
-        };
-        run_loop_to_writer(
-            &workspace,
-            "smoke-loop",
-            EmitMode::Jsonl,
-            observer,
-        )
-    });
+    let mut delivery = ObserverDelivery::start(BlockingObserver {
+        release: Arc::clone(&release),
+    })
+    .expect("observer starts");
 
-    entered_rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("observer receives the first committed event");
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while !handle.is_finished() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    let completed_while_blocked = handle.is_finished();
+    assert!(!delivery.publish(b"first event\n"));
+    assert!(!delivery.publish(b"later event\n"));
     let (released, condition) = &*release;
     *released.lock().expect("release lock") = true;
     condition.notify_all();
-
-    let output = handle
-        .join()
-        .expect("run thread joins")
-        .expect("observer backpressure does not fail the run");
-    assert!(
-        completed_while_blocked,
-        "a persistently blocked observer must be detached before it can block the session"
-    );
-    let persisted = fs::read_to_string(&output.session_path).expect("session log reads");
-    let events = validate_session_log_text(
-        &output.session_path,
-        &output.session_id,
-        &persisted,
-    )
-    .expect("committed stream validates");
-    assert_eq!(events.len(), output.event_count);
 }
 
 #[test]

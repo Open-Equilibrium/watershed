@@ -896,26 +896,6 @@ fn session_log_metadata_text(
     metadata
 }
 
-#[cfg(test)]
-fn write_initial_session_log_with_clock(
-    reservation: &SessionReservation,
-    session_id: &str,
-    clock: EventClock,
-) -> Result<(), RuntimeError> {
-    let stream = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        session_id.to_owned(),
-        1,
-        clock.timestamp(1),
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .map_err(|err| RuntimeError::Protocol(format!("failed to serialize initial event: {err}")))?;
-    write_existing_file(&reservation.session_path, stream.as_bytes())
-}
-
 fn preflight_session_completion_stream(
     reservation: &SessionReservation,
     expected_session_id: &str,
@@ -935,21 +915,6 @@ fn preflight_complete_reserved_session_log_from_prefix(
 ) -> Result<(), RuntimeError> {
     let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
     ensure_session_log_growth_within_limit(&reservation.session_path, append_bytes.len())
-}
-
-#[cfg(test)]
-fn commit_reserved_session_log_from_prefix(
-    reservation: &SessionReservation,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-    definition_hashes: Option<&SessionDefinitionHashes>,
-    persisted_event_count: usize,
-) -> Result<(), RuntimeError> {
-    let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
-    append_session_log_bytes(&reservation.session_path, append_bytes)?;
-    reservation.mark_committed();
-    write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
 }
 
 fn session_stream_suffix_bytes(

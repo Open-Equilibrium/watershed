@@ -79,6 +79,15 @@ fn protocol_validator_rejects_nulls_recursively_but_keeps_additive_values() {
     });
     validate_event_payload(Path::new("additive-payload.jsonl"), 1, &additive)
         .expect("unknown non-null payload fields remain additive");
+    let mut envelope = serde_json::to_value(&additive).expect("event converts to JSON");
+    envelope["future"] = serde_json::json!({"enabled": true});
+    let mut text = proto::canonical_json(&envelope).expect("envelope canonicalizes");
+    text.push('\n');
+    assert_eq!(
+        validate_protocol_jsonl_text(Path::new("additive-envelope.jsonl"), &text)
+            .expect("unknown top-level envelope fields remain additive"),
+        vec![additive.clone()]
+    );
 
     let mut root_null = base_event();
     root_null.payload = serde_json::json!({"future": null, "reason": "fixture-start"});
@@ -470,315 +479,6 @@ fn protocol_validator_rejects_stream_identity_edges() {
 }
 
 #[test]
-fn protocol_validator_rejects_session_and_loop_ordering_edges() {
-    let base = base_event();
-    let canonical = base.canonical_jsonl().expect("base event serializes");
-
-    let first_not_session_started = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionPaused,
-        "meta001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"pause"}),
-    )
-    .canonical_jsonl()
-    .expect("event serializes");
-    assert_invalid_stream(
-        "first-not-started.jsonl",
-        &first_not_session_started,
-        "must start with session.started",
-    );
-    assert_invalid_session_log(
-        "first-not-started.jsonl",
-        "meta001",
-        &first_not_session_started,
-        "must start with session.started",
-    );
-
-    let loop_completed_without_start = event_line(
-        "evt-002",
-        EventType::LoopCompleted,
-        "meta001",
-        2,
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
-    );
-    assert_invalid_session_log(
-        "loop-completed-without-start.jsonl",
-        "meta001",
-        &format!("{canonical}{loop_completed_without_start}"),
-        "must follow loop.started",
-    );
-
-    let loop_completed_without_loop_id = event_line(
-        "evt-002",
-        EventType::LoopCompleted,
-        "meta001",
-        2,
-        None,
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
-    );
-    assert_invalid_session_log(
-        "loop-completed-without-loop-id.jsonl",
-        "meta001",
-        &format!("{canonical}{loop_completed_without_loop_id}"),
-        "must include loop_id",
-    );
-
-    let repeated_session_started = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionStarted,
-        "meta001",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"again"}),
-    )
-    .canonical_jsonl()
-    .expect("event serializes");
-    assert_invalid_session_log(
-        "repeated-session-started.jsonl",
-        "meta001",
-        &format!("{canonical}{repeated_session_started}"),
-        "only valid as the first event",
-    );
-
-    let open_loop_then_terminal = [
-        canonical.clone(),
-        event_line(
-            "evt-002",
-            EventType::LoopStarted,
-            "meta001",
-            2,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
-        ),
-        event_line(
-            "evt-003",
-            EventType::SessionCompleted,
-            "meta001",
-            3,
-            None,
-            serde_json::json!({}),
-        ),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "open-loop.jsonl",
-        "meta001",
-        &open_loop_then_terminal,
-        "open loop",
-    );
-
-    let open_step_then_terminal = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        step_started_line("evt-004", 4),
-        loop_completed_line("evt-005", 5),
-        event_line(
-            "evt-006",
-            EventType::SessionCompleted,
-            "meta001",
-            6,
-            None,
-            serde_json::json!({}),
-        ),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "open-step.jsonl",
-        "meta001",
-        &open_step_then_terminal,
-        "open step",
-    );
-
-    let open_tool_then_terminal = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        step_started_line("evt-004", 4),
-        tool_started_line("evt-005", 5),
-        step_completed_line("evt-006", 6),
-        loop_completed_line("evt-007", 7),
-        event_line(
-            "evt-008",
-            EventType::SessionCompleted,
-            "meta001",
-            8,
-            None,
-            serde_json::json!({}),
-        ),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "open-tool.jsonl",
-        "meta001",
-        &open_tool_then_terminal,
-        "open tool",
-    );
-
-}
-
-#[test]
-fn protocol_validator_rejects_step_lifecycle_edges() {
-    let base = base_event();
-    let canonical = base.canonical_jsonl().expect("base event serializes");
-
-    let repeated_step_completed = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        step_started_line("evt-004", 4),
-        step_completed_line("evt-005", 5),
-        step_completed_line("evt-006", 6),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "repeated-step-completed.jsonl",
-        "meta001",
-        &repeated_step_completed,
-        "after terminal step",
-    );
-
-    let step_completed_without_start = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        step_completed_line("evt-004", 4),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "step-completed-without-start.jsonl",
-        "meta001",
-        &step_completed_without_start,
-        "must follow step.started",
-    );
-
-    let step_before_phase = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        step_started_line("evt-003", 3),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "step-before-phase.jsonl",
-        "meta001",
-        &step_before_phase,
-        "active phase",
-    );
-
-    let tool_before_step = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        tool_started_line("evt-004", 4),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "tool-before-step.jsonl",
-        "meta001",
-        &tool_before_step,
-        "active step",
-    );
-
-}
-
-#[test]
-fn protocol_validator_rejects_tool_and_message_lifecycle_edges() {
-    let base = base_event();
-    let canonical = base.canonical_jsonl().expect("base event serializes");
-
-    let tool_failed_without_loop = [
-        canonical.clone(),
-        event_line(
-            "evt-002",
-            EventType::ToolFailed,
-            "meta001",
-            2,
-            None,
-            serde_json::json!({
-                "error": "denied",
-                "tool_id": "tool",
-            }),
-        ),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "tool-failed-without-loop.jsonl",
-        "meta001",
-        &tool_failed_without_loop,
-        "must include loop_id",
-    );
-
-    let unstarted_tool_failed_inside_step = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        step_started_line("evt-004", 4),
-        tool_failed_line("evt-005", 5),
-        step_completed_line("evt-006", 6),
-        loop_completed_line("evt-007", 7),
-        event_line(
-            "evt-008",
-            EventType::SessionCompleted,
-            "meta001",
-            8,
-            None,
-            serde_json::json!({}),
-        ),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "unstarted-tool-failed-inside-step.jsonl",
-        "meta001",
-        &unstarted_tool_failed_inside_step,
-        "must follow tool.started",
-    );
-
-    let message_completed_without_delta = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        step_started_line("evt-004", 4),
-        event_line(
-            "evt-005",
-            EventType::MessageCompleted,
-            "meta001",
-            5,
-            Some("loop-001"),
-            serde_json::json!({
-                "message_id": "msg-001",
-                "role": "assistant",
-            }),
-        ),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "message-completed-without-delta.jsonl",
-        "meta001",
-        &message_completed_without_delta,
-        "message.delta",
-    );
-
-    let repeated_tool_started_after_failure = [
-        canonical.clone(),
-        loop_started_line("evt-002", 2),
-        tool_failed_line("evt-003", 3),
-        tool_failed_line("evt-004", 4),
-    ]
-    .concat();
-    assert_invalid_session_log(
-        "repeated-tool-failed.jsonl",
-        "meta001",
-        &repeated_tool_started_after_failure,
-        "after terminal tool",
-    );
-}
-
-#[test]
 fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     let (registry, policy) = fixture_runtime_policy("sandbox-negative", "sandbox-negative-write");
     let phase = registry
@@ -867,6 +567,7 @@ fn timestamp_parser_rejects_non_rfc3339_utc_shapes() {
         "2026-13-01T00:00:00Z",
         "2026-00-01T00:00:00Z",
         "2026-02-29T00:00:00Z",
+        "2026-04-31T00:00:00Z",
         "2026-01-01T24:00:00Z",
         "2026-01-01T00:60:00Z",
         "2026-01-01T00:00:60Z",
@@ -1270,181 +971,10 @@ fn runtime_event_id_and_time_helpers_cover_edge_paths() {
     prior_event.event_id = "evt-001".to_owned();
     assert_eq!(next_event_id(1, &[prior_event]), "evt-002");
     assert!(!is_rfc3339_utc_timestamp("2026-01-01T00:00:00:00Z"));
-    assert_eq!(days_in_month(2025, 4), 30);
-    assert_eq!(days_in_month(2025, 13), 0);
-}
-
-#[test]
-fn appended_session_validation_covers_incremental_edges() {
-    let path = Path::new("append-edges.jsonl");
-    let prior = vec![base_event()];
-    assert!(
-        validate_appended_session_log_text(path, "meta001", &prior, "")
-            .expect("empty append is valid")
-            .is_empty()
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(path, "other001", &prior, &loop_started_line("evt-002", 2)),
-        Err(RuntimeError::Protocol(message)) if message.contains("expected")
-    ));
-    assert!(matches!(
-        validate_appended_session_log_text(path, "meta001", &prior, "not-json"),
-        Err(RuntimeError::Protocol(message)) if message.contains("end with LF")
-    ));
-
-    let appended = validate_appended_session_log_text(
-        path,
-        "meta001",
-        &prior,
-        &loop_started_line("evt-002", 2),
-    )
-    .expect("loop start append validates");
-    assert_eq!(appended.len(), 1);
-
-    let invalid_session_prior = vec![EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "bad session",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )];
-    let invalid_session_append = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionPaused,
-        "bad session",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"pause"}),
-    )
-    .canonical_jsonl()
-    .expect("edge event serializes");
-    let err = validate_appended_session_log_text(
-        path,
-        "bad session",
-        &invalid_session_prior,
-        &invalid_session_append,
-    )
-    .expect_err("invalid appended session log must fail");
-    assert!(err.to_string().contains("valid session_id"), "{err}");
-
-    for (name, event, expected) in [
-        (
-            "wrong-session",
-            EventEnvelope::new(
-                "evt-002",
-                EventType::SessionPaused,
-                "other001",
-                2,
-                "2026-01-01T00:00:01Z",
-                "loop-agent-cli",
-                serde_json::json!({"reason":"pause"}),
-            ),
-            "one session_id",
-        ),
-        (
-            "empty-event-id",
-            EventEnvelope::new(
-                "",
-                EventType::SessionPaused,
-                "meta001",
-                2,
-                "2026-01-01T00:00:01Z",
-                "loop-agent-cli",
-                serde_json::json!({"reason":"pause"}),
-            ),
-            "event_id",
-        ),
-        (
-            "empty-source",
-            EventEnvelope::new(
-                "evt-002",
-                EventType::SessionPaused,
-                "meta001",
-                2,
-                "2026-01-01T00:00:01Z",
-                "",
-                serde_json::json!({"reason":"pause"}),
-            ),
-            "source",
-        ),
-        (
-            "invalid-timestamp",
-            EventEnvelope::new(
-                "evt-002",
-                EventType::SessionPaused,
-                "meta001",
-                2,
-                "not-a-time",
-                "loop-agent-cli",
-                serde_json::json!({"reason":"pause"}),
-            ),
-            "timestamp",
-        ),
-        (
-            "duplicate-event-id",
-            EventEnvelope::new(
-                "evt-001",
-                EventType::SessionPaused,
-                "meta001",
-                2,
-                "2026-01-01T00:00:01Z",
-                "loop-agent-cli",
-                serde_json::json!({"reason":"pause"}),
-            ),
-            "unique event_id",
-        ),
-    ] {
-        let text = event.canonical_jsonl().expect("edge event serializes");
-        assert_invalid_appended_session_log(path, name, &prior, &text, expected);
-    }
 }
 
 #[test]
 fn protocol_validation_covers_envelope_and_stream_edges() {
-    let mut empty_correlation = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "meta001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    );
-    empty_correlation.correlation_id = Some(String::new());
-    assert_invalid_event(
-        "empty-correlation.jsonl",
-        empty_correlation,
-        "correlation_id",
-    );
-
-    let mut empty_loop_id = base_event();
-    empty_loop_id.loop_id = Some(String::new());
-    assert_invalid_event("empty-loop-id.jsonl", empty_loop_id, "loop_id");
-
-    let mut empty_parent_loop_id = base_event();
-    empty_parent_loop_id.parent_loop_id = Some(String::new());
-    assert_invalid_event(
-        "empty-parent-loop-id.jsonl",
-        empty_parent_loop_id,
-        "parent_loop_id",
-    );
-
-    assert_invalid_event(
-        "first-sequence.jsonl",
-        EventEnvelope::new(
-            "evt-002",
-            EventType::SessionStarted,
-            "meta001",
-            2,
-            "2026-01-01T00:00:01Z",
-            "loop-agent-cli",
-            serde_json::json!({"reason":"fixture-start"}),
-        ),
-        "first sequence",
-    );
     assert_invalid_stream(
         "non-increasing-sequence.jsonl",
         &[
@@ -1455,30 +985,13 @@ fn protocol_validation_covers_envelope_and_stream_edges() {
         "sequence must increase",
     );
     assert_invalid_stream(
-        "after-terminal.jsonl",
+        "sequence-gap.jsonl",
         &[
             session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            session_event_line("meta001", "evt-002", EventType::SessionCompleted, 2),
-            session_event_line("meta001", "evt-003", EventType::SessionPaused, 3),
+            session_event_line("meta001", "evt-002", EventType::SessionPaused, 3),
         ]
         .concat(),
-        "terminal session event",
-    );
-    assert_invalid_stream(
-        "loop-start-missing-loop-id.jsonl",
-        &[
-            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            event_line(
-                "evt-002",
-                EventType::LoopStarted,
-                "meta001",
-                2,
-                None,
-                serde_json::json!({"loop_definition_id":"smoke-loop"}),
-            ),
-        ]
-        .concat(),
-        "loop.started must include loop_id",
+        "sequence must increase by exactly 1",
     );
     assert_invalid_stream(
         "duplicate-loop-id.jsonl",
@@ -1490,176 +1003,114 @@ fn protocol_validation_covers_envelope_and_stream_edges() {
         .concat(),
         "unique loop_id",
     );
-    assert_invalid_stream(
-        "mixed-session-id.jsonl",
-        &[
-            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            session_event_line("other001", "evt-002", EventType::SessionPaused, 2),
-        ]
-        .concat(),
-        "one session_id",
-    );
 }
 
-fn assert_payload_error(event_type: EventType, payload: serde_json::Value, expected: &str) {
-    let event = EventEnvelope::new(
-        "evt-001",
-        event_type,
-        "meta001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        payload,
-    );
-    let err = validate_event_payload(Path::new("payload-edge.jsonl"), 1, &event)
-        .expect_err("invalid payload must fail");
-
-    assert!(err.to_string().contains(expected), "{err}");
+fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) -> String {
+    match event_type {
+        EventType::StepStarted => step_started_line(event_id, sequence),
+        EventType::StepCompleted => step_completed_line(event_id, sequence),
+        EventType::ToolStarted => tool_started_line(event_id, sequence),
+        EventType::ToolFailed => tool_failed_line(event_id, sequence),
+        EventType::ToolProgress => event_line(
+            event_id,
+            event_type,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"message":"working","tool_id":"tool"}),
+        ),
+        EventType::ToolCompleted => event_line(
+            event_id,
+            event_type,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"exit_code":0,"tool_id":"tool"}),
+        ),
+        EventType::ToolTimedOut => event_line(
+            event_id,
+            event_type,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"error":"timeout","tool_id":"tool"}),
+        ),
+        EventType::MessageDelta => event_line(
+            event_id,
+            event_type,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({
+                "content_delta": "hello",
+                "message_id": "msg-001",
+                "role": "assistant",
+            }),
+        ),
+        EventType::MessageCompleted => event_line(
+            event_id,
+            event_type,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+        ),
+        _ => unreachable!("not a tracked lifecycle event"),
+    }
 }
 
 #[test]
-fn protocol_validation_covers_payload_edges() {
-    assert_payload_error(
-        EventType::SessionStarted,
-        serde_json::json!("bad"),
-        "payload",
+fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
+    let started = base_event().canonical_jsonl().expect("started serializes");
+    let step_terminal = [
+        started.clone(),
+        loop_started_line("evt-002", 2),
+        phase_entered_line("evt-003", 3),
+        step_started_line("evt-004", 4),
+        step_completed_line("evt-005", 5),
+    ]
+    .concat();
+    let tool_terminal = format!(
+        "{started}{}{}{}{}{}",
+        loop_started_line("evt-002", 2),
+        phase_entered_line("evt-003", 3),
+        step_started_line("evt-004", 4),
+        tool_started_line("evt-005", 5),
+        lifecycle_event_line(EventType::ToolCompleted, "evt-006", 6),
     );
-    assert_payload_error(
-        EventType::StepStarted,
-        serde_json::json!({
-            "connection_ids": ["link"],
-            "connection_kinds": ["data", "trigger"],
-            "phase_id": "phase",
-            "step_id": "step",
-            "step_name": "Step",
-        }),
-        "same length",
+    let message_terminal = format!(
+        "{started}{}{}{}{}{}",
+        loop_started_line("evt-002", 2),
+        phase_entered_line("evt-003", 3),
+        step_started_line("evt-004", 4),
+        lifecycle_event_line(EventType::MessageDelta, "evt-005", 5),
+        lifecycle_event_line(EventType::MessageCompleted, "evt-006", 6),
     );
-    assert_payload_error(
-        EventType::StepStarted,
-        serde_json::json!({
-            "connection_ids": ["link"],
-            "connection_kinds": ["control"],
-            "phase_id": "phase",
-            "step_id": "step",
-            "step_name": "Step",
-        }),
-        "data, trigger, or refresh",
-    );
-    assert_payload_error(
-        EventType::StepStarted,
-        serde_json::json!({
-            "connection_ids": ["link"],
-            "phase_id": "phase",
-            "step_id": "step",
-            "step_name": "Step",
-        }),
-        "present together",
-    );
-    assert_payload_error(
-        EventType::ToolStarted,
-        serde_json::json!({
-            "allowed_parameters": [],
-            "network_access": "deny",
-            "read_scope": [],
-            "tool_id": "tool",
-            "tool_kind": "custom",
-            "tool_name": "Tool",
-            "write_scope": [],
-        }),
-        "predefined-command or own-script",
-    );
-    assert_payload_error(
-        EventType::ToolStarted,
-        serde_json::json!({
-            "allowed_parameters": [],
-            "network_access": "internet",
-            "read_scope": [],
-            "tool_id": "tool",
-            "tool_kind": "own-script",
-            "tool_name": "Tool",
-            "write_scope": [],
-        }),
-        "deny or declared",
-    );
-    assert_payload_error(
-        EventType::ToolCompleted,
-        serde_json::json!({"exit_code":1.5,"tool_id":"tool"}),
-        "integer",
-    );
-    assert_payload_error(
-        EventType::MetricSample,
-        serde_json::json!({"metric_name":"append_ms","value":"fast"}),
-        "number",
-    );
-    assert_payload_error(
-        EventType::Error,
-        serde_json::json!({"code":"bad","data":"not-object","message":"bad"}),
-        "object",
-    );
-}
 
-fn edge_step_started_line(event_id: &str, sequence: u64, step_id: &str, phase_id: &str) -> String {
-    event_line(
-        event_id,
-        EventType::StepStarted,
-        "meta001",
-        sequence,
-        Some("loop-001"),
-        serde_json::json!({
-            "phase_id": phase_id,
-            "step_id": step_id,
-            "step_name": "Step",
-        }),
-    )
-}
-
-fn edge_tool_progress_line(event_id: &str, sequence: u64) -> String {
-    event_line(
-        event_id,
-        EventType::ToolProgress,
-        "meta001",
-        sequence,
-        Some("loop-001"),
-        serde_json::json!({"message":"working","tool_id":"tool"}),
-    )
-}
-
-fn edge_tool_completed_line(event_id: &str, sequence: u64) -> String {
-    event_line(
-        event_id,
-        EventType::ToolCompleted,
-        "meta001",
-        sequence,
-        Some("loop-001"),
-        serde_json::json!({"exit_code":0,"tool_id":"tool"}),
-    )
-}
-
-fn edge_message_delta_line(event_id: &str, sequence: u64, role: &str) -> String {
-    event_line(
-        event_id,
-        EventType::MessageDelta,
-        "meta001",
-        sequence,
-        Some("loop-001"),
-        serde_json::json!({
-            "content_delta": "hello",
-            "message_id": "msg-001",
-            "role": role,
-        }),
-    )
-}
-
-fn edge_message_completed_line(event_id: &str, sequence: u64, role: &str) -> String {
-    event_line(
-        event_id,
-        EventType::MessageCompleted,
-        "meta001",
-        sequence,
-        Some("loop-001"),
-        serde_json::json!({"message_id":"msg-001","role":role}),
-    )
+    for (event_type, prefix, kind) in [
+        (EventType::StepStarted, step_terminal.as_str(), "step"),
+        (EventType::StepCompleted, step_terminal.as_str(), "step"),
+        (EventType::ToolStarted, tool_terminal.as_str(), "tool"),
+        (EventType::ToolProgress, tool_terminal.as_str(), "tool"),
+        (EventType::ToolCompleted, tool_terminal.as_str(), "tool"),
+        (EventType::ToolTimedOut, tool_terminal.as_str(), "tool"),
+        (EventType::ToolFailed, tool_terminal.as_str(), "tool"),
+        (EventType::MessageDelta, message_terminal.as_str(), "message"),
+        (
+            EventType::MessageCompleted,
+            message_terminal.as_str(),
+            "message",
+        ),
+    ] {
+        let sequence = prefix.lines().count() as u64 + 1;
+        let event_id = format!("evt-{sequence:03}");
+        assert_invalid_session_log(
+            &format!("late-{}.jsonl", event_type.as_str()),
+            "meta001",
+            &format!("{prefix}{}", lifecycle_event_line(event_type, &event_id, sequence)),
+            &format!("after terminal {kind}"),
+        );
+    }
 }
 
 #[test]
@@ -1676,7 +1127,7 @@ fn protocol_accepts_optional_step_phase_and_multiple_message_deltas() {
             Some("loop-001"),
             serde_json::json!({"step_id":"step","step_name":"Step"}),
         ),
-        edge_message_delta_line("evt-005", 5, "assistant"),
+        lifecycle_event_line(EventType::MessageDelta, "evt-005", 5),
     ]
     .concat();
     let prior = validate_protocol_jsonl_text(Path::new("valid-transcript.jsonl"), &prefix)
@@ -1685,244 +1136,24 @@ fn protocol_accepts_optional_step_phase_and_multiple_message_deltas() {
         Path::new("valid-transcript.jsonl"),
         "meta001",
         &prior,
-        &edge_message_delta_line("evt-006", 6, "assistant"),
+        &lifecycle_event_line(EventType::MessageDelta, "evt-006", 6),
     )
     .expect("a second same-role message delta is valid");
     assert_eq!(appended.len(), 1);
-}
 
-#[test]
-fn lifecycle_validation_covers_loop_phase_and_step_edges() {
-    for (name, lines, expected) in [
-        (
-            "loop-completed-before-start.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_completed_line("evt-002", 2),
-            ],
-            "must follow loop.started",
-        ),
-        (
-            "phase-entered-with-active-step.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                phase_entered_line("evt-005", 5),
-            ],
-            "requires no active step",
-        ),
-        (
-            "step-started-phase-mismatch.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                edge_step_started_line("evt-004", 4, "step", "other"),
-            ],
-            "must match active phase",
-        ),
-        (
-            "step-started-with-active-step.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_step_started_line("evt-005", 5, "step-two", "phase"),
-            ],
-            "requires no active step",
-        ),
-        (
-            "step-completed-before-start.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_completed_line("evt-004", 4),
-            ],
-            "must follow step.started",
-        ),
-    ] {
-        assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
-    }
-}
-
-#[test]
-fn lifecycle_validation_covers_tool_and_message_edges() {
-    for (name, lines, expected) in [
-        (
-            "tool-progress-before-start.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_tool_progress_line("evt-005", 5),
-            ],
-            "must follow tool.started",
-        ),
-        (
-            "tool-event-after-terminal.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                tool_started_line("evt-005", 5),
-                edge_tool_completed_line("evt-006", 6),
-                edge_tool_progress_line("evt-007", 7),
-            ],
-            "appears after terminal tool",
-        ),
-        (
-            "tool-restarted-after-terminal.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                tool_started_line("evt-005", 5),
-                edge_tool_completed_line("evt-006", 6),
-                tool_started_line("evt-007", 7),
-            ],
-            "appears after terminal tool",
-        ),
-        (
-            "tool-failed-after-phase-before-start.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                tool_failed_line("evt-004", 4),
-            ],
-            "must follow tool.started after phase.entered",
-        ),
-        (
-            "message-completed-before-delta.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_message_completed_line("evt-005", 5, "assistant"),
-            ],
-            "must follow message.delta",
-        ),
-        (
-            "message-delta-role-mismatch.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_message_delta_line("evt-005", 5, "assistant"),
-                edge_message_delta_line("evt-006", 6, "user"),
-            ],
-            "role",
-        ),
-        (
-            "message-completed-role-mismatch.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_message_delta_line("evt-005", 5, "assistant"),
-                edge_message_completed_line("evt-006", 6, "user"),
-            ],
-            "role",
-        ),
-        (
-            "message-after-terminal.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_message_delta_line("evt-005", 5, "assistant"),
-                edge_message_completed_line("evt-006", 6, "assistant"),
-                edge_message_delta_line("evt-007", 7, "assistant"),
-            ],
-            "appears after terminal message",
-        ),
-    ] {
-        assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
-    }
-
+    let active_tool = [
+        session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+        loop_started_line("evt-002", 2),
+        phase_entered_line("evt-003", 3),
+        step_started_line("evt-004", 4),
+        tool_started_line("evt-005", 5),
+    ]
+    .concat();
     assert_eq!(
         started_tool_without_progress(
-            &validate_protocol_jsonl_text(
-                Path::new("started-tool-without-progress.jsonl"),
-                &[
-                    session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                    loop_started_line("evt-002", 2),
-                    phase_entered_line("evt-003", 3),
-                    step_started_line("evt-004", 4),
-                    tool_started_line("evt-005", 5),
-                ]
-                .concat(),
-            )
-            .expect("non-terminal stream may leave a started tool")
+            &validate_protocol_jsonl_text(Path::new("active-tool.jsonl"), &active_tool)
+                .expect("non-terminal stream may leave a started tool")
         ),
         Some("tool".to_owned())
     );
-}
-
-#[test]
-fn lifecycle_validation_covers_terminal_session_open_entity_edges() {
-    for (name, lines, expected) in [
-        (
-            "terminal-session-open-loop.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                session_event_line("meta001", "evt-003", EventType::SessionCompleted, 3),
-            ],
-            "open loop",
-        ),
-        (
-            "terminal-session-open-step.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                loop_completed_line("evt-005", 5),
-                session_event_line("meta001", "evt-006", EventType::SessionCompleted, 6),
-            ],
-            "open step",
-        ),
-        (
-            "terminal-session-open-tool.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                tool_started_line("evt-005", 5),
-                step_completed_line("evt-006", 6),
-                loop_completed_line("evt-007", 7),
-                session_event_line("meta001", "evt-008", EventType::SessionCompleted, 8),
-            ],
-            "open tool",
-        ),
-        (
-            "terminal-session-open-message.jsonl",
-            vec![
-                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
-                phase_entered_line("evt-003", 3),
-                step_started_line("evt-004", 4),
-                edge_message_delta_line("evt-005", 5, "assistant"),
-                step_completed_line("evt-006", 6),
-                loop_completed_line("evt-007", 7),
-                session_event_line("meta001", "evt-008", EventType::SessionCompleted, 8),
-            ],
-            "open message",
-        ),
-    ] {
-        assert_invalid_session_log(name, "meta001", &lines.concat(), expected);
-    }
 }

@@ -85,20 +85,6 @@ struct LoopExecutionOptions<'a> {
 }
 
 impl<'a> LoopExecutionOptions<'a> {
-    #[cfg(test)]
-    fn new(
-        clock: EventClock,
-        side_effect_mode: ToolSideEffectMode,
-        side_effect_recorder: SideEffectRecorder<'a>,
-    ) -> Self {
-        Self {
-            clock,
-            side_effect_mode,
-            side_effect_recorder,
-            stub_model_fixture_profile: true,
-        }
-    }
-
     fn with_stub_model_fixture_profile(
         clock: EventClock,
         side_effect_mode: ToolSideEffectMode,

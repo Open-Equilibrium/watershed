@@ -65,7 +65,6 @@ fn registry_root_rejects_junction_path_components() {
 #[test]
 fn run_loop_executes_registry_without_expected_streams() {
     let workspace = workspace_copy("smoke-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
 
     let output =
         run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("loop executes from registry");
@@ -130,7 +129,6 @@ fn runtime_executes_subloops_after_all_parent_phases() {
 #[test]
 fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     let workspace = workspace_copy("smoke-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/echo.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -155,7 +153,6 @@ fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
 #[test]
 fn run_loop_executes_own_script_without_exact_fixture_body() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -181,7 +178,6 @@ fn run_loop_executes_own_script_without_exact_fixture_body() {
 #[test]
 fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -206,7 +202,6 @@ fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
 #[test]
 fn run_loop_replaces_existing_own_script_output_on_repeat_run() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
 
     let first = run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("first run succeeds");
     assert!(!first.failed);

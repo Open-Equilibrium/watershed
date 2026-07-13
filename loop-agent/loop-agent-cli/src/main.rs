@@ -165,6 +165,9 @@ fn emit_mode(args: &[String]) -> Result<EmitMode, RuntimeError> {
         [_, _, flag, value] if flag == "--emit" => Err(RuntimeError::Usage(format!(
             "unsupported emit mode {value:?}"
         ))),
+        [_, _, flag] if flag == "--emit" => {
+            Err(RuntimeError::Usage("missing value for --emit".to_owned()))
+        }
         [_, _, flag, ..] => Err(RuntimeError::Usage(format!("unknown argument {flag:?}"))),
         _ => Ok(EmitMode::Human),
     }
@@ -235,5 +238,5 @@ fn os_string_to_string(value: OsString) -> Result<String, &'static str> {
 }
 
 fn usage() -> String {
-    "usage: loop run <loop> [--emit jsonl] | replay <session_id> [--emit jsonl] | tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | resume <session_id> [--emit jsonl] | sessions | chat".to_owned()
+    "usage: loop run <loop> [--emit jsonl] | loop replay <session_id> [--emit jsonl] | loop tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | loop resume <session_id> [--emit jsonl] | loop sessions | loop chat".to_owned()
 }

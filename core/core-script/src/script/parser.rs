@@ -15,7 +15,10 @@ fn parse_tool_block(source_name: &str, source: &str) -> Result<ToolBlock, Regist
             let command_id =
                 required_nested_scalar(source_name, source, "tool", "command", "command_id")?;
             if !is_valid_command_id(&command_id) {
-                return Err(RegistryError::InvalidCommandId(command_id));
+                return Err(registry_source_error(
+                    source_name,
+                    RegistryError::InvalidCommandId(command_id),
+                ));
             }
             ToolCommand::Predefined {
                 command_id,
@@ -140,7 +143,10 @@ fn validated_block_id(
 ) -> Result<String, RegistryError> {
     let id = required_scalar(source_name, source, section, "id")?;
     if !is_valid_block_id(&id) {
-        return Err(RegistryError::InvalidBlockId(id));
+        return Err(registry_source_error(
+            source_name,
+            RegistryError::InvalidBlockId(id),
+        ));
     }
     Ok(id)
 }
@@ -303,7 +309,10 @@ fn phase_steps(source_name: &str, source: &str) -> Result<Vec<StepBlock>, Regist
             )?;
             let id = required_object_scalar(source_name, &object, "id")?;
             if !is_valid_block_id(&id) {
-                return Err(RegistryError::InvalidBlockId(id));
+                return Err(registry_source_error(
+                    source_name,
+                    RegistryError::InvalidBlockId(id),
+                ));
             }
             Ok(StepBlock {
                 id,

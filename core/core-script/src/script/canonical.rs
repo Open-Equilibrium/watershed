@@ -49,3 +49,7 @@ fn parse_error(source_name: &str, message: String) -> RegistryError {
         message,
     }
 }
+
+fn registry_source_error(source_name: &str, error: RegistryError) -> RegistryError {
+    parse_error(source_name, error.to_string())
+}

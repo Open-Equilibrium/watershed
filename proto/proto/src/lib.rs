@@ -33,7 +33,10 @@ pub struct EventEnvelope {
     )]
     pub payload: Value,
     /// Protocol version. v0 envelopes must use [`PROTOCOL_VERSION_V0`].
-    #[serde(deserialize_with = "deserialize_protocol_version_v0")]
+    #[serde(
+        deserialize_with = "deserialize_protocol_version_v0",
+        serialize_with = "serialize_protocol_version_v0"
+    )]
     pub protocol_version: String,
     /// One-based event order within the session stream.
     pub sequence: u64,
@@ -409,6 +412,19 @@ where
         Ok(value)
     } else {
         Err(serde::de::Error::custom(format!(
+            "unsupported protocol_version {value:?}; expected {PROTOCOL_VERSION_V0:?}"
+        )))
+    }
+}
+
+fn serialize_protocol_version_v0<S>(value: &String, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if value == PROTOCOL_VERSION_V0 {
+        value.serialize(serializer)
+    } else {
+        Err(serde::ser::Error::custom(format!(
             "unsupported protocol_version {value:?}; expected {PROTOCOL_VERSION_V0:?}"
         )))
     }

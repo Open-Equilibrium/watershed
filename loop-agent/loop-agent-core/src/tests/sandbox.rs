@@ -329,7 +329,6 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
 #[test]
 fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
     let workspace = workspace_copy("smoke-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     fs::write(
         workspace.join("registry/tools/unrelated-negative.yaml"),
         "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",

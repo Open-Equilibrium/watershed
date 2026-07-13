@@ -12,40 +12,20 @@ Protect meaningful functionality from every milestone, including behavior establ
 
 ## Layers
 
-- **Unit/integration per crate** — standard Rust tests run with `cargo nextest` for deterministic, process-isolated execution (no shared-state leakage between tests) and flaky-test detection; timing-sensitive performance tests run only in the optimized performance gate.
+- **Unit/integration per crate** — standard Rust tests run with `cargo nextest` for deterministic, process-isolated execution (no shared-state leakage between tests) and flaky-test detection. Rust `#[ignore]` is reserved for timing-sensitive tests, which run only in the optimized performance gate.
 - **Deterministic FSM tests (Loop Agent)** — given a loop script + fixed inputs, phase/step transitions, instruction loading, connection resolution and the *set* of available tools are asserted. LLM/tool outputs are mocked inputs to deterministic transitions.
 - **Context compiler tests (Loop Agent)** — `loop-context-v0` tests assert Tier 0 section/order completeness, active-scope filtering, whole-unit recent-interaction selection/eviction, cache-prefix boundaries, budget/estimator behavior, fail-before-provider errors, canonical context hashes/manifests and byte-identical reconstruction on resume. M1 records deterministic absence for runtime inputs without a decided source/schema; typed connection values and artifact/tool-output projections require such a contract before tests can require them. Tests also prove older sources remain in durable history while omitted from provider context (ADR-0058).
 - **Golden loops** — recorded end-to-end loops replayed against stub-model/tool responses; event streams and output artifacts are byte-stable and diffed.
-- **Event-ordering & transcript persistence (Loop Agent)** — tests assert the ADR-0059 `PROTOCOL.md` lifecycle: canonical events append before identical live publication, a pre-terminal event is observable before run completion, sequence/publication order cannot overtake, append failure exposes no event and blocks later publication, bounded batches preserve order, observer disconnect/duplicate/gap recovery uses replay, and semantic checkpoints synchronize without per-delta `fsync`. Invalid path-like or uppercase `session_id` values are rejected before local-log access, and the local log (ADR-0037) replays/tails/resumes to the same transcript. This is runtime state, not project VCS/history.
+- **Event-ordering & transcript persistence (Loop Agent)** — tests assert the ADR-0059 `PROTOCOL.md` lifecycle: canonical events append before identical live publication, a pre-terminal event is observable before run completion, sequence/publication order cannot overtake, append failure exposes no event and blocks later publication, observer disconnect/duplicate/gap recovery uses replay, and semantic checkpoints synchronize without per-delta `fsync`. Invalid path-like or uppercase `session_id` values are rejected before local-log access, and the local log (ADR-0037) replays/tails/resumes to the same transcript. This is runtime state, not project VCS/history.
 - **Script/schema tests** — valid building-block scripts parse into the expected model; invalid scripts fail with useful diagnostics.
 - **Sandbox boundary tests (SECURITY)** — sandbox-negative fixtures attempt prohibited path access, forbidden writes, symlink traversal including create-through-symlink ancestors, disallowed network egress including hostname/DNS attempts, forbidden environment inheritance/secret reads, interpreter misuse through allowed commands, out-of-phase tool use and protected-path access using the default list in `SECURITY.md`; expected-decision fixtures validate compiled policy artifacts in M0, while M1 attempts are denied by deterministic in-process policy execution/emulation. Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity remain post-M1 (ADR-0051/ADR-0052).
 - **Control-plane tests (Meta-Harness)** — Meta-Harness runs headlessly without Liquid; its CLI/API/service surface exposes the session registry, event/transcript streams and AgentPulse queries; at least two agents are represented through one normalized session/event model; shared config resolves to agent-specific runtime config without duplicate per-agent config directories. Liquid integration is exercised against the public API, not a duplicate backend.
 - **Config-write audit tests (Meta-Harness)** — every config change yields an audit entry; sensitive changes block on approval.
 - **Workspace history & agent-edit tests (Liquid)** — action-history append; revert (incl. compensating actions); diff; external-agent CLI/API mutation; permission-denied; actor/origin attribution; component mutation schema; snapshot/checkpoint restore; workspace event subscription; and a no-hidden-writes test proving every UI/CLI/API/Liquid-AI/external-agent write passes through the mutation pipeline and records an action. Liquid's workspace history is a workspace VCS over its own data, not a project-code VCS.
 - **Performance gates** — benchmarks assert the `PERFORMANCE.md` targets/budgets relevant to the current milestone. M1 Loop Agent benchmarks run optimized in CI, measure per-event distributions (not batch-average distributions), exercise append-before-publish and observer-delivery paths through deterministic fixture/stub-model runs, and exclude model latency, tool runtime, checkpoint synchronization and blocked external consumers from Watershed overhead. Failures block release.
-- **Coverage gate** — from M1 (first real crate logic), `cargo llvm-cov nextest --workspace --fail-under-lines 90` enforces **≥90% line coverage**; merge blocks below it. Timing-sensitive performance tests run optimized outside llvm-cov and are excluded from the coverage command by nextest filter. Generated/FFI/CLI-arg-glue code may be excluded through llvm-cov ignore configuration so the threshold measures meaningful logic, not boilerplate; region/function coverage are tracked as secondary signals (ADR-0022/ADR-0060).
+- **Coverage gate** — from M1 (first real crate logic), `cargo llvm-cov nextest --workspace --fail-under-lines 90` enforces **≥90% line coverage**; merge blocks below it. Ignored timing tests run optimized outside llvm-cov. Generated/FFI/CLI-arg-glue code may be excluded through llvm-cov ignore configuration so the threshold measures meaningful logic, not boilerplate; region/function coverage are tracked as secondary signals (ADR-0022/ADR-0060).
 
-## M0 tests / pass-fail checks
-
-M0 is a readiness milestone. It passes when:
-
-- placeholder crates compile;
-- CI runs on Linux + macOS + Windows;
-- `cargo fmt --check` passes;
-- `cargo clippy` passes;
-- `cargo nextest run` is green (deterministic, process-isolated);
-- the dependency-hygiene gate (`cargo audit` + `cargo deny`) passes;
-- docs links pass the `lychee` link gate and HTML render checks pass;
-- the coverage harness (`cargo llvm-cov`) runs in CI; the coverage gate applies from M1, not over the empty M0 scaffold;
-- the D-015 fixture suite is specified and deterministic through a stub model: `smoke-loop`, `hello-loop` and sandbox-negative fixtures;
-- `smoke-loop` is the minimal first gate: one phase, one tool and one instruction, with the smallest byte-stable golden event stream;
-- `hello-loop` is the contract-spanning showcase golden: at least two phases, at least two tools spanning predefined-command vs own-script and read-only vs declared write scope, one allowed-parameter case, at least two phase-bound instructions, data plus trigger/refresh connections, and one subloop definition referenced at least twice to prove recursion, reuse, distinct runtime `loop_id` values and `parent_loop_id`;
-- sandbox-negative fixtures cover forbidden write, forbidden network including hostname/DNS attempts, forbidden environment inheritance/secret reads, out-of-phase tool, protected-path access, symlink traversal including create-through-symlink ancestors and interpreter misuse attempts and must be rejected;
-- the later M0 scaffold checks in exact golden JSONL stream files that follow the D-015 fixture contract below; executable headless validation with `loop run <name> --emit jsonl` begins when the M1 runtime exists;
-- the policy compiler contract has expected-output fixtures for Linux and macOS targets using the `SECURITY.md` policy artifact contract;
-- no M0 implementation task requires Codex to choose protocol transport, script schema, sandbox depth, crate layout, CLI shape or D-015 fixture strategy, coverage and invocation contract.
-
-M0 fails if any of those decisions remain implicit.
+Milestone pass/fail criteria and DoD are canonical in [`PLAN.md`](PLAN.md).
 
 ## D-015 fixture contract
 
@@ -66,5 +46,5 @@ The same metrics AgentPulse reports (rework ratio, first-attempt success rate, c
 ## CI
 
 - Run on Linux + macOS + Windows.
-- Mandatory gates: `cargo fmt --check`, `cargo clippy`, `cargo nextest run` with timing-sensitive tests excluded, optimized Loop Agent performance tests, the M1 coverage gate, `cargo audit` + `cargo deny`, and the `lychee` docs link + HTML render checks.
+- Mandatory gates: `cargo fmt --check`, `cargo clippy`, `cargo nextest run` (ignored timing tests run separately), optimized Loop Agent performance tests, the M1 coverage gate, `cargo audit` + `cargo deny`, and the `lychee` docs link + HTML render checks.
 - Block merge on any mandatory gate failure, including current-milestone performance checks and planned platform sandbox/parity checks once implemented.

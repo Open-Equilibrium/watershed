@@ -106,26 +106,17 @@ fn path_component_has_windows_alias(component: &str) -> bool {
     let basename = component
         .split_once('.')
         .map_or(component, |(basename, _)| basename);
-    matches!(
-        basename.to_ascii_uppercase().as_str(),
-        "CON" | "PRN" | "AUX" | "NUL"
-    ) || matches!(
-        basename.as_bytes(),
-        [first, second, third, digit]
-            if first.eq_ignore_ascii_case(&b'C')
-                && second.eq_ignore_ascii_case(&b'O')
-                && third.eq_ignore_ascii_case(&b'M')
-                && *digit >= b'1'
-                && *digit <= b'9'
-    ) || matches!(
-        basename.as_bytes(),
-        [first, second, third, digit]
-            if first.eq_ignore_ascii_case(&b'L')
-                && second.eq_ignore_ascii_case(&b'P')
-                && third.eq_ignore_ascii_case(&b'T')
-                && *digit >= b'1'
-                && *digit <= b'9'
-    )
+    let uppercase = basename.to_ascii_uppercase();
+    matches!(uppercase.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || uppercase
+            .strip_prefix("COM")
+            .or_else(|| uppercase.strip_prefix("LPT"))
+            .is_some_and(|digit| {
+                matches!(
+                    digit,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
 }
 
 fn path_component_has_windows_invalid_character(component: &str) -> bool {

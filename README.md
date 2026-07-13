@@ -56,27 +56,7 @@ cargo run -p loop-agent-cli -- tail smoke001 --emit jsonl --no-follow
 cargo run -p loop-agent-cli -- sessions
 ```
 
-A Loop Agent workspace has this M1 layout:
-
-```text
-.loop/config.yaml                         workspace config
-registry/{tools,instructions,phases,loops,connections}/
-.loop/sessions/<session_id>.jsonl         runtime event log
-.loop/sessions/<session_id>.lock          active-session lock
-.loop/logs/<session_id>.log               resume metadata sidecar
-.loop/logs/<session_id>.contexts.jsonl    provider-context manifests
-out/                                      fixture/runtime output
-```
-
-The minimal `.loop/config.yaml` shape used by the fixtures is:
-
-```yaml
-fixture_profile: stub-model
-registry_root: registry
-stub_model: deterministic
-```
-
-Registry block fields are defined in [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html); the checked-in examples live under [`loop-agent/fixtures/`](loop-agent/fixtures/).
+Workspace layout and registry fields are defined in [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html); checked-in examples live under [`loop-agent/fixtures/`](loop-agent/fixtures/).
 
 ## Loop Agent is a standalone product
 

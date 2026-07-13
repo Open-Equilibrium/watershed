@@ -470,193 +470,6 @@ fn session_log_rejects_events_after_loop_terminal() {
 }
 
 #[test]
-fn session_log_rejects_events_after_step_terminal() {
-    let stream = [
-        event_line(
-            "evt-001",
-            EventType::SessionStarted,
-            "step-terminal",
-            1,
-            None,
-            serde_json::json!({"reason":"fixture-start"}),
-        ),
-        event_line(
-            "evt-002",
-            EventType::LoopStarted,
-            "step-terminal",
-            2,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
-        ),
-        event_line(
-            "evt-003",
-            EventType::PhaseEntered,
-            "step-terminal",
-            3,
-            Some("loop-001"),
-            serde_json::json!({
-                "instruction_ids": [],
-                "phase_id": "phase-001",
-                "phase_name": "Inspect",
-                "tool_ids": [],
-            }),
-        ),
-        event_line(
-            "evt-004",
-            EventType::StepStarted,
-            "step-terminal",
-            4,
-            Some("loop-001"),
-            serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
-        ),
-        event_line(
-            "evt-005",
-            EventType::StepCompleted,
-            "step-terminal",
-            5,
-            Some("loop-001"),
-            serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
-        ),
-        event_line(
-            "evt-006",
-            EventType::StepStarted,
-            "step-terminal",
-            6,
-            Some("loop-001"),
-            serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
-        ),
-    ]
-    .concat();
-
-    let err = validate_session_log_text(Path::new("step-terminal.jsonl"), "step-terminal", &stream)
-        .expect_err("step events after step terminal must be rejected");
-
-    assert!(
-        matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
-    );
-}
-
-#[test]
-fn session_log_rejects_events_after_tool_terminal() {
-    let stream = [
-        event_line(
-            "evt-001",
-            EventType::SessionStarted,
-            "tool-terminal",
-            1,
-            None,
-            serde_json::json!({"reason":"fixture-start"}),
-        ),
-        event_line(
-            "evt-002",
-            EventType::LoopStarted,
-            "tool-terminal",
-            2,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
-        ),
-        event_line(
-            "evt-003",
-            EventType::PhaseEntered,
-            "tool-terminal",
-            3,
-            Some("loop-001"),
-            serde_json::json!({
-                "instruction_ids": [],
-                "phase_id": "phase-001",
-                "phase_name": "Inspect",
-                "tool_ids": [],
-            }),
-        ),
-        event_line(
-            "evt-004",
-            EventType::StepStarted,
-            "tool-terminal",
-            4,
-            Some("loop-001"),
-            serde_json::json!({"phase_id":"phase-001","step_id":"step-001","step_name":"Inspect"}),
-        ),
-        event_line(
-            "evt-005",
-            EventType::ToolStarted,
-            "tool-terminal",
-            5,
-            Some("loop-001"),
-            serde_json::json!({
-                "allowed_parameters": [],
-                "network_access": "deny",
-                "read_scope": [],
-                "tool_id": "tool-001",
-                "tool_kind": "predefined-command",
-                "tool_name": "Echo",
-                "write_scope": [],
-            }),
-        ),
-        event_line(
-            "evt-006",
-            EventType::ToolCompleted,
-            "tool-terminal",
-            6,
-            Some("loop-001"),
-            serde_json::json!({"exit_code":0,"tool_id":"tool-001"}),
-        ),
-        event_line(
-            "evt-007",
-            EventType::ToolProgress,
-            "tool-terminal",
-            7,
-            Some("loop-001"),
-            serde_json::json!({"message":"late progress","tool_id":"tool-001"}),
-        ),
-    ]
-    .concat();
-
-    let err = validate_session_log_text(Path::new("tool-terminal.jsonl"), "tool-terminal", &stream)
-        .expect_err("tool events after tool terminal must be rejected");
-
-    assert!(
-        matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal tool"))
-    );
-}
-
-#[test]
-fn session_log_rejects_terminal_session_with_open_lifecycle_state() {
-    let stream = [
-        event_line(
-            "evt-001",
-            EventType::SessionStarted,
-            "open-lifecycle",
-            1,
-            None,
-            serde_json::json!({"reason":"fixture-start"}),
-        ),
-        event_line(
-            "evt-002",
-            EventType::LoopStarted,
-            "open-lifecycle",
-            2,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
-        ),
-        event_line(
-            "evt-003",
-            EventType::SessionCompleted,
-            "open-lifecycle",
-            3,
-            None,
-            serde_json::json!({}),
-        ),
-    ]
-    .concat();
-
-    let err =
-        validate_session_log_text(Path::new("open-lifecycle.jsonl"), "open-lifecycle", &stream)
-            .expect_err("terminal session must close active loops first");
-
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("open loop")));
-}
-
-#[test]
 fn session_log_allows_step_and_tool_reuse_in_later_phase() {
     let stream = [
         event_line(
@@ -1006,6 +819,23 @@ fn appended_session_log_validator_rejects_sequence_and_terminal_edges() {
             &same_sequence
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("sequence must increase")
+    ));
+    let gap_sequence = event_line(
+        "evt-002",
+        EventType::SessionCompleted,
+        "meta001",
+        3,
+        None,
+        serde_json::json!({}),
+    );
+    assert!(matches!(
+        validate_appended_session_log_text(
+            Path::new("append.jsonl"),
+            "meta001",
+            &prior_events,
+            &gap_sequence
+        ),
+        Err(RuntimeError::Protocol(message)) if message.contains("sequence must increase by exactly 1")
     ));
     let duplicate_event_id = event_line(
         "evt-001",
@@ -1405,14 +1235,16 @@ fn session_lifecycle_rejects_message_edges() {
         step_started_line("evt-004", 4)
     );
 
-    let message_delta = event_line(
-        "evt-005",
-        EventType::MessageDelta,
-        "meta001",
-        5,
-        Some("loop-001"),
-        serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
-    );
+    let message_delta_line = |event_id, sequence| {
+        event_line(
+            event_id,
+            EventType::MessageDelta,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
+        )
+    };
     assert_invalid_session_log(
         "message-without-step.jsonl",
         "meta001",
@@ -1420,26 +1252,32 @@ fn session_lifecycle_rejects_message_edges() {
             "{started}{}{}{}",
             loop_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
-            message_delta
+            message_delta_line("evt-004", 4)
         ),
         "requires active step",
     );
 
-    let message_completed = event_line(
-        "evt-006",
-        EventType::MessageCompleted,
-        "meta001",
-        6,
-        Some("loop-001"),
-        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
-    );
+    let message_completed_line = |event_id, sequence, role| {
+        event_line(
+            event_id,
+            EventType::MessageCompleted,
+            "meta001",
+            sequence,
+            Some("loop-001"),
+            serde_json::json!({"message_id":"msg-001","role":role}),
+        )
+    };
     assert_invalid_session_log(
         "message-completed-without-delta.jsonl",
         "meta001",
-        &format!("{active_step_prefix}{message_completed}"),
+        &format!(
+            "{active_step_prefix}{}",
+            message_completed_line("evt-005", 5, "assistant")
+        ),
         "must follow message.delta",
     );
 
+    let message_delta = message_delta_line("evt-005", 5);
     let user_delta_same_id = event_line(
         "evt-006",
         EventType::MessageDelta,
@@ -1455,34 +1293,14 @@ fn session_lifecycle_rejects_message_edges() {
         "must match active role",
     );
 
-    let user_completed_same_id = event_line(
-        "evt-006",
-        EventType::MessageCompleted,
-        "meta001",
-        6,
-        Some("loop-001"),
-        serde_json::json!({"message_id":"msg-001","role":"user"}),
-    );
     assert_invalid_session_log(
         "message-completed-role-mismatch.jsonl",
         "meta001",
-        &format!("{active_step_prefix}{message_delta}{user_completed_same_id}"),
+        &format!(
+            "{active_step_prefix}{message_delta}{}",
+            message_completed_line("evt-006", 6, "user")
+        ),
         "must match active role",
-    );
-
-    let late_completed = event_line(
-        "evt-007",
-        EventType::MessageCompleted,
-        "meta001",
-        7,
-        Some("loop-001"),
-        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
-    );
-    assert_invalid_session_log(
-        "message-after-terminal.jsonl",
-        "meta001",
-        &format!("{active_step_prefix}{message_delta}{message_completed}{late_completed}"),
-        "after terminal message",
     );
 }
 
@@ -1504,14 +1322,24 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
         serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
     );
 
-    let loop_completed = loop_completed_line("evt-006", 6);
+    let loop_completed = loop_completed_line("evt-005", 5);
     let session_completed = event_line(
-        "evt-007",
+        "evt-006",
         EventType::SessionCompleted,
         "meta001",
-        7,
+        6,
         None,
         serde_json::json!({}),
+    );
+    assert_invalid_session_log(
+        "terminal-with-open-loop.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}",
+            loop_started_line("evt-002", 2),
+            session_event_line("meta001", "evt-003", EventType::SessionCompleted, 3),
+        ),
+        "open loop",
     );
     assert_invalid_session_log(
         "terminal-with-open-step.jsonl",
@@ -1773,7 +1601,6 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
 #[test]
 fn resume_accepts_canonical_names_and_equivalent_references() {
     let workspace = workspace_copy("hello-loop");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let loop_path = workspace.join("registry/loops/hello-loop.yaml");
     let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
     fs::write(

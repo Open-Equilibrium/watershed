@@ -79,7 +79,7 @@ pub enum EmitMode {
 pub struct RunOutput {
     /// Number of events represented by this output.
     pub event_count: usize,
-    /// Whether the represented session ended or is known to be failed.
+    /// Whether the represented session is known to have failed.
     pub failed: bool,
     /// Session id.
     pub session_id: String,

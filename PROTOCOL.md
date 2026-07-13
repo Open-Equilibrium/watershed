@@ -44,7 +44,7 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/ses
 | `session_id` | path-safe v0 token; opaque to consumers |
 | `loop_id` | optional runtime loop invocation id when loop-scoped; unique within the session |
 | `parent_loop_id` | optional parent runtime loop invocation id for subloop events |
-| `sequence` | unsigned integer, starts at 1 and strictly increases per `session_id` |
+| `sequence` | unsigned integer, starts at 1 and increases by exactly 1 per `session_id` |
 | `timestamp` | RFC 3339 UTC timestamp string |
 | `source` | non-empty opaque string identifying the emitter, e.g. `loop-agent-cli` |
 | `payload` | JSON object; event-specific fields below |
@@ -60,10 +60,7 @@ M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequ
 
 ## M1 local session storage
 
-- `.loop/sessions/<session_id>.jsonl` is the append-only canonical event log. Replay, tail and resume first validate the stored prefix; resume only appends a `session.resumed` suffix and never rewrites prior events.
-- `.loop/logs/<session_id>.log` is a resume metadata sidecar, not the structured event log.
-- `.loop/sessions/<session_id>.lock` is the active-session lock. Run/resume refuses a locked session and never auto-steals stale locks. Manual recovery is: verify no Loop Agent process owns the session, preserve or inspect the log if needed, remove the lock, then replay or resume.
-- Resume rejects registry or loop-definition drift before tool side effects by comparing the metadata sidecar to the current workspace registry.
+The append-only session event log is authoritative for replay and catch-up. Local paths, locks, recovery and replay/resume behavior are defined in the [Loop Agent V-Spec](docs/concept/V-Spec_LoopAgent.html#surfaces); other tools consume public surfaces, never this store directly (see "No co-location assumption" below).
 
 ## M1 local append and live delivery (ADR-0059)
 
@@ -131,8 +128,8 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
 - **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Loop Agent's `.loop/sessions` is consumed via the event stream or tail/export surfaces, and RPC when implemented, never from disk by Meta-Harness or Liquid). This keeps the local-only M0 transport (D-002) from foreclosing later remote topologies (D-043/ADR-0038).
 
-## M0 implementation packet required before coding
+## Implementation constraints
 
-The M0/M1 transport, runtime event-envelope fields and runtime event names are decided (ADR-0029, ADR-0036). The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Do not add `cmd.*` event names; D-019 is closed by ADR-0055 as JSON-RPC control methods separate from runtime events.
+The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Control methods stay separate from runtime events; do not add `cmd.*` event names.
 
-D-044/ADR-0039 constrains later cloud/remote execution: durability is replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Local M1 append/sync behavior is fixed above; remote replication cadence, resume on a new host, crash replay to the last durable `sequence` and the session-ownership lease remain to be defined before remote execution ships. M0 local session storage remains ADR-0037.
+Later cloud/remote durability requires replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Remote replication cadence, resume on a new host, crash replay to the last durable `sequence` and the session-ownership lease must be defined before remote execution ships.

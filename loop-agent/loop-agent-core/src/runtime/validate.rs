@@ -11,7 +11,7 @@ pub fn validate_protocol_jsonl_text(
         )));
     }
 
-    let mut previous_sequence = 0;
+    let mut previous_sequence = 0_u64;
     let mut session_id = None::<String>;
     let mut event_ids = BTreeSet::new();
     let mut loop_started_ids = BTreeSet::new();
@@ -43,16 +43,7 @@ pub fn validate_protocol_jsonl_text(
                 path.display()
             )));
         }
-        let event: EventEnvelope = serde_json::from_str(line)?;
-        let canonical = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
-        })?;
-        if canonical != format!("{line}\n") {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use canonical JSONL bytes",
-                path.display()
-            )));
-        }
+        let event = parse_canonical_event(path, line_number, line)?;
         validate_event_metadata(path, line_number, &event)?;
         if line_number == 1 && event.sequence != 1 {
             return Err(RuntimeError::Protocol(format!(
@@ -60,9 +51,9 @@ pub fn validate_protocol_jsonl_text(
                 path.display()
             )));
         }
-        if event.sequence <= previous_sequence {
+        if previous_sequence.checked_add(1) != Some(event.sequence) {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} sequence must increase",
+                "{} line {line_number} sequence must increase by exactly 1",
                 path.display()
             )));
         }
@@ -464,34 +455,6 @@ impl PayloadValidator<'_> {
     }
 }
 
-#[cfg(any(test, doctest))]
-fn validate_appended_session_log_text(
-    path: &Path,
-    expected_session_id: &str,
-    prior_events: &[EventEnvelope],
-    text: &str,
-) -> Result<Vec<EventEnvelope>, RuntimeError> {
-    if prior_events.is_empty() {
-        return validate_session_log_text(path, expected_session_id, text);
-    }
-    let mut stream_bytes = 0usize;
-    for event in prior_events {
-        let canonical = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("{} prior event stream: {err}", path.display()))
-        })?;
-        stream_bytes = stream_bytes
-            .checked_add(canonical.len())
-            .unwrap_or(usize::MAX);
-    }
-    let mut state = SessionAppendValidationState::from_prior_events(
-        path,
-        expected_session_id,
-        prior_events,
-        stream_bytes,
-    )?;
-    state.validate_appended(path, text)
-}
-
 struct SessionAppendValidationState {
     expected_session_id: String,
     previous_sequence: u64,
@@ -607,16 +570,7 @@ impl SessionAppendValidationState {
                     path.display()
                 )));
             }
-            let event: EventEnvelope = serde_json::from_str(line)?;
-            let canonical = event.canonical_jsonl().map_err(|err| {
-                RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
-            })?;
-            if canonical != format!("{line}\n") {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use canonical JSONL bytes",
-                    path.display()
-                )));
-            }
+            let event = parse_canonical_event(path, line_number, line)?;
             self.validate_constructed_event(path, &event, line.len().saturating_add(1))?;
             appended_events.push(event);
         }
@@ -670,9 +624,9 @@ impl SessionAppendValidationState {
                 )));
             }
         }
-        if event.sequence <= self.previous_sequence {
+        if self.previous_sequence.checked_add(1) != Some(event.sequence) {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} sequence must increase",
+                "{} line {line_number} sequence must increase by exactly 1",
                 path.display()
             )));
         }
@@ -720,6 +674,24 @@ impl SessionAppendValidationState {
         }
         Ok(())
     }
+}
+
+fn parse_canonical_event(
+    path: &Path,
+    line_number: usize,
+    line: &str,
+) -> Result<EventEnvelope, RuntimeError> {
+    let value: serde_json::Value = serde_json::from_str(line)?;
+    let canonical = proto::canonical_json(&value).map_err(|err| {
+        RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
+    })?;
+    if canonical != line {
+        return Err(RuntimeError::Protocol(format!(
+            "{} line {line_number} must use canonical JSONL bytes",
+            path.display()
+        )));
+    }
+    Ok(serde_json::from_value(value)?)
 }
 
 fn validate_session_log_text(
@@ -996,7 +968,7 @@ impl SessionLifecycleState {
                         line_number,
                         event,
                         "message",
-                        &message.1,
+                        &message.message_id,
                         terminal_line,
                     ));
                 }
@@ -1008,7 +980,7 @@ impl SessionLifecycleState {
                             path.display(),
                             role,
                             active_role,
-                            message.1
+                            message.message_id
                         )));
                     }
                     Some(_) => {}
@@ -1027,7 +999,7 @@ impl SessionLifecycleState {
                         line_number,
                         event,
                         "message",
-                        &message.1,
+                        &message.message_id,
                         terminal_line,
                     ));
                 }
@@ -1036,7 +1008,7 @@ impl SessionLifecycleState {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} message.completed must follow message.delta for message_id {:?}",
                         path.display(),
-                        message.1
+                        message.message_id
                     )));
                 };
                 if active_role != &role {
@@ -1045,7 +1017,7 @@ impl SessionLifecycleState {
                         path.display(),
                         role,
                         active_role,
-                        message.1
+                        message.message_id
                     )));
                 }
                 self.messages.finish(message, line_number);
@@ -1093,7 +1065,7 @@ impl SessionLifecycleState {
         }
         for message in self.messages.started_keys() {
             if !self.messages.is_terminal(message) {
-                return Err(open_lifecycle_error(path, "message", &message.1));
+                return Err(open_lifecycle_error(path, "message", &message.message_id));
             }
         }
         Ok(())
@@ -1284,7 +1256,11 @@ fn validate_lifecycle_parent(
     Ok(())
 }
 
-type MessageLifecycleKey = (String, String);
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct MessageLifecycleKey {
+    loop_id: String,
+    message_id: String,
+}
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct StepLifecycleKey {
@@ -1387,10 +1363,10 @@ fn lifecycle_message_key(
     line_number: usize,
     event: &EventEnvelope,
 ) -> Result<MessageLifecycleKey, RuntimeError> {
-    Ok((
-        require_lifecycle_loop_id(path, line_number, event)?,
-        lifecycle_payload_string(event, "message_id"),
-    ))
+    Ok(MessageLifecycleKey {
+        loop_id: require_lifecycle_loop_id(path, line_number, event)?,
+        message_id: lifecycle_payload_string(event, "message_id"),
+    })
 }
 
 fn lifecycle_payload_string(event: &EventEnvelope, field: &str) -> String {
@@ -1525,11 +1501,10 @@ fn parse_digits(value: &str, len: usize) -> Option<u16> {
 
 fn days_in_month(year: u16, month: u16) -> u16 {
     match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 if is_leap_year(year) => 29,
         2 => 28,
-        _ => 0,
+        _ => 31,
     }
 }
 

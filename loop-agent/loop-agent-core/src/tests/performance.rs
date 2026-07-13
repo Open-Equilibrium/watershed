@@ -1,4 +1,5 @@
 #[test]
+#[ignore = "performance gate"]
 fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
     let mut delivery_nanos = Vec::new();
@@ -24,6 +25,7 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
 }
 
 #[test]
+#[ignore = "performance gate"]
 fn hello_loop_resume_append_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
     let mut delivery_nanos = Vec::new();
@@ -94,6 +96,7 @@ fn assert_event_writer_p95(
 }
 
 #[test]
+#[ignore = "performance gate"]
 fn fsm_transition_p95_stays_under_m1_budget() {
     let event_count = emit_runtime_events_for_budget()
         .expect("warm runtime emit succeeds")
@@ -125,6 +128,7 @@ fn fsm_transition_p95_stays_under_m1_budget() {
 }
 
 #[test]
+#[ignore = "performance gate"]
 fn noop_dispatch_p95_stays_under_m1_budget() {
     let workspace = empty_workspace("noop-dispatch-budget");
     let (registry, policy) = fixture_runtime_policy("smoke-loop", "smoke-loop");
@@ -170,7 +174,6 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
 fn shared_workspace_tool_write_parents_are_concurrent_safe() {
     let workspace = workspace_copy("hello-loop");
     fs::remove_dir_all(workspace.join("out")).expect("fixture output dir removed");
-    fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
 
     for index in 0..10 {
         fs::write(

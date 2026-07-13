@@ -1,3 +1,7 @@
+#[path = "../../test_support.rs"]
+mod test_support;
+use test_support::{copy_dir, copy_fixture_workspace};
+
 include!("tests/support.rs");
 include!("tests/helpers.rs");
 
@@ -59,9 +63,4 @@ mod context {
 mod event_writer {
     use super::*;
     include!("tests/event_writer.rs");
-}
-
-mod workspace_fixtures {
-    use super::*;
-    include!("tests/workspace_fixtures.rs");
 }

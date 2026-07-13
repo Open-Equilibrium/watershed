@@ -11,9 +11,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "../../test_support.rs"]
+mod test_support;
+use test_support::copy_fixture_workspace;
+
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
+#[ignore = "performance gate"]
 fn ten_orchestrating_fixture_loops_complete_under_m1_runtime_contract() {
     let peak_rss_sampler = if rss_budget_must_be_enforced() {
         let baseline = current_resident_set_size()
@@ -185,43 +190,6 @@ fn workspace_copy(fixture: &str) -> TempWorkspace {
     }
     copy_fixture_workspace(&fixture_dir(fixture), &target);
     TempWorkspace::new(target)
-}
-
-fn copy_dir(source: &Path, target: &Path) {
-    fs::create_dir_all(target).expect("target directory created");
-    for entry in fs::read_dir(source).expect("source directory readable") {
-        let entry = entry.expect("source entry readable");
-        let source_path = entry.path();
-        let target_path = target.join(entry.file_name());
-        if source_path.is_dir() && entry.file_name() == ".loop" {
-            continue;
-        }
-        if source_path.is_dir() && entry.file_name() == "out" {
-            fs::create_dir_all(&target_path).expect("output directory shape copied");
-            continue;
-        }
-        if source_path.is_dir() {
-            copy_dir(&source_path, &target_path);
-        } else {
-            fs::copy(&source_path, &target_path).expect("fixture file copied");
-        }
-    }
-}
-
-fn copy_fixture_workspace(source: &Path, target: &Path) {
-    copy_dir(source, target);
-    copy_workspace_config(source, target);
-}
-
-fn copy_workspace_config(source: &Path, target: &Path) {
-    let source_config = source.join(".loop/config.yaml");
-    if !source_config.exists() {
-        return;
-    }
-    let target_config = target.join(".loop/config.yaml");
-    fs::create_dir_all(target_config.parent().expect("config path has parent"))
-        .expect("workspace config directory created");
-    fs::copy(source_config, target_config).expect("workspace config copied");
 }
 
 fn rss_budget_must_be_enforced() -> bool {

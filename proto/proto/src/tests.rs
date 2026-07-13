@@ -183,6 +183,9 @@ fn canonical_event_jsonl_rejects_unsupported_protocol_version() {
         err.to_string(),
         "unsupported protocol_version \"1\"; expected \"0\""
     );
+    let err = serde_json::to_string(&event)
+        .expect_err("ordinary serialization must reject unsupported protocol versions");
+    assert!(err.to_string().contains("unsupported protocol_version"));
 }
 
 #[test]

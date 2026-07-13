@@ -43,6 +43,9 @@ proptest! {
             Just("CON".to_owned()),
             Just("NUL.txt".to_owned()),
             Just("COM1".to_owned()),
+            Just("COM¹".to_owned()),
+            Just("com².txt".to_owned()),
+            Just("LPT³.tar.gz".to_owned()),
             Just("trail.".to_owned()),
             Just("trail ".to_owned()),
             prop::sample::select(vec!['<', '>', ':', '"', '|', '?', '*', '\u{1}'])
@@ -1062,10 +1065,9 @@ fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
                 "property appears before list item",
             ),
         ] {
-            assert!(
-                message(parse_registry_block(name, source)).contains(expected),
-                "{name}"
-            );
+            let error = message(parse_registry_block(name, source));
+            assert!(error.starts_with(name), "{name}: {error}");
+            assert!(error.contains(expected), "{name}: {error}");
         }
 
     let scalar_shape = ScalarListShape {
