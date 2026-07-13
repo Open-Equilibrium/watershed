@@ -37,6 +37,18 @@ def write_valid_harness(root: Path) -> None:
         shutil.copy(skill_path, target / "SKILL.md")
 
 
+def validate_text_replacement(relative_path: str, old: str, new: str) -> list[str]:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        write_valid_harness(root)
+        path = root / relative_path
+        text = path.read_text(encoding="utf-8")
+        if old not in text:
+            raise AssertionError(f"missing {old!r} in {relative_path}")
+        path.write_text(text.replace(old, new), encoding="utf-8")
+        return validator.validate_repo(root)
+
+
 def run_node_module_test(source: str) -> subprocess.CompletedProcess[str]:
     node = shutil.which("node")
     if node is None:
@@ -136,56 +148,31 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         self.assertEqual(0, result.returncode)
 
     def test_rejects_unknown_config_key(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            config_path = root / ".codex" / "config.toml"
-            config_path.write_text(
-                config_path.read_text(encoding="utf-8").replace(
-                    "\n[sandbox_workspace_write]",
-                    "\nunknown_key = true\n\n[sandbox_workspace_write]",
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".codex/config.toml",
+            "\n[sandbox_workspace_write]",
+            "\nunknown_key = true\n\n[sandbox_workspace_write]",
+        )
 
         self.assertIn(".codex/config.toml: unknown root key 'unknown_key'", errors)
 
-    def test_accepts_boolean_network_access_values(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            config_path = root / ".codex" / "config.toml"
-            config_path.write_text(
-                config_path.read_text(encoding="utf-8").replace(
-                    "network_access = true",
-                    "network_access = false",
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
-
-        self.assertEqual([], errors)
-
-    def test_rejects_non_boolean_network_access(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            config_path = root / ".codex" / "config.toml"
-            config_path.write_text(
-                config_path.read_text(encoding="utf-8").replace(
-                    "network_access = true",
-                    'network_access = "true"',
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+    def test_rejects_disabled_network_access(self) -> None:
+        errors = validate_text_replacement(
+            ".codex/config.toml", "network_access = true", "network_access = false"
+        )
 
         self.assertIn(
-            ".codex/config.toml: sandbox_workspace_write.network_access must be a boolean",
+            ".codex/config.toml: sandbox_workspace_write.network_access must be true",
+            errors,
+        )
+
+    def test_rejects_non_boolean_network_access(self) -> None:
+        errors = validate_text_replacement(
+            ".codex/config.toml", "network_access = true", 'network_access = "true"'
+        )
+
+        self.assertIn(
+            ".codex/config.toml: sandbox_workspace_write.network_access must be true",
             errors,
         )
 
@@ -239,18 +226,11 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         )
 
     def test_rejects_agent_name_file_drift(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            agent_path = root / ".codex" / "agents" / "docs-scout.toml"
-            agent_path.write_text(
-                agent_path.read_text(encoding="utf-8").replace(
-                    'name = "docs_scout"', 'name = "wrong_name"'
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".codex/agents/docs-scout.toml",
+            'name = "docs_scout"',
+            'name = "wrong_name"',
+        )
 
         self.assertIn(
             ".codex/agents/docs-scout.toml: name must be 'docs_scout'",
@@ -258,16 +238,11 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         )
 
     def test_rejects_unknown_agent_key(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            agent_path = root / ".codex" / "agents" / "repo-mapper.toml"
-            agent_path.write_text(
-                agent_path.read_text(encoding="utf-8") + '\nunknown_key = "drift"\n',
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".codex/agents/repo-mapper.toml",
+            'sandbox_mode = "read-only"',
+            'sandbox_mode = "read-only"\nunknown_key = "drift"',
+        )
 
         self.assertIn(
             ".codex/agents/repo-mapper.toml: unknown key 'unknown_key'",
@@ -275,32 +250,16 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         )
 
     def test_rejects_skill_name_file_drift(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            skill_path = root / ".agents" / "skills" / "tdd" / "SKILL.md"
-            skill_path.write_text(
-                skill_path.read_text(encoding="utf-8").replace(
-                    "name: tdd", "name: test_driven"
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".agents/skills/tdd/SKILL.md", "name: tdd", "name: test_driven"
+        )
 
         self.assertIn(".agents/skills/tdd/SKILL.md: name must be 'tdd'", errors)
 
     def test_rejects_skill_without_canonical_rules_reference(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            skill_path = root / ".agents" / "skills" / "tdd" / "SKILL.md"
-            skill_path.write_text(
-                skill_path.read_text(encoding="utf-8").replace("AGENTS.md", "RULES.md"),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".agents/skills/tdd/SKILL.md", "AGENTS.md", "RULES.md"
+        )
 
         self.assertIn(
             ".agents/skills/tdd/SKILL.md: must reference AGENTS.md or canonical repo rules",
@@ -308,18 +267,9 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         )
 
     def test_rejects_git_skill_without_windows_ci_coverage_guidance(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            skill_path = root / ".agents" / "skills" / "git" / "SKILL.md"
-            skill_path.write_text(
-                skill_path.read_text(encoding="utf-8").replace(
-                    "gh pr checks", "gh checks"
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".agents/skills/git/SKILL.md", "gh pr checks", "gh checks"
+        )
 
         self.assertIn(
             ".agents/skills/git/SKILL.md: git skill must direct Windows coverage to CI with gh",
@@ -327,18 +277,9 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         )
 
     def test_rejects_pr_validator_without_windows_ci_coverage_guidance(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            agent_path = root / ".codex" / "agents" / "pr-validator.toml"
-            agent_path.write_text(
-                agent_path.read_text(encoding="utf-8").replace(
-                    "CI-only", "local-only"
-                ),
-                encoding="utf-8",
-            )
-
-            errors = validator.validate_repo(root)
+        errors = validate_text_replacement(
+            ".codex/agents/pr-validator.toml", "CI-only", "local-only"
+        )
 
         self.assertIn(
             ".codex/agents/pr-validator.toml: pr_validator must direct Windows coverage to CI with gh",
