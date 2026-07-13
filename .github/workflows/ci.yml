@@ -15,7 +15,7 @@ env:
 
 jobs:
   m1:
-    name: M1 gates (${{ matrix.os }})
+    name: M1 gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
