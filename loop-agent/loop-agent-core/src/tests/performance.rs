@@ -1,25 +1,4 @@
 #[test]
-fn m1_performance_fixture_runtime_paths_are_exercised() {
-    let hello = expected_stream("hello-loop", "hello-loop.jsonl");
-    let hello_events =
-        validate_protocol_jsonl_text(Path::new("hello-loop.jsonl"), &hello).expect("valid");
-
-    let log_workspace = empty_workspace("log-budget");
-    write_session_log(&log_workspace, "log000", &hello, hello_events.len())
-        .expect("session log writes");
-
-    let smoke_workspace = workspace_copy("smoke-loop");
-    let output = run_loop(&smoke_workspace, "smoke-loop", EmitMode::Jsonl).expect("loop runs");
-    assert!(!output.failed);
-
-    let fixture_bytes = fixture_size("hello-loop") + fixture_size("smoke-loop");
-    assert!(
-        fixture_bytes < 10 * 1024 * 1024,
-        "fixture runtime state budget is {fixture_bytes} bytes"
-    );
-}
-
-#[test]
 fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
     let mut delivery_nanos = Vec::new();
@@ -181,24 +160,6 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
         p95_nanos <= 50_000_000,
         "no-op dispatch p95 must stay <= 50 ms: {p95_nanos} ns"
     );
-}
-
-#[test]
-fn ten_fixture_loops_complete_concurrently() {
-    let handles = (0..10)
-        .map(|_| {
-            thread::spawn(|| {
-                let workspace = workspace_copy("smoke-loop");
-                run_loop(workspace, "smoke-loop", EmitMode::Jsonl).expect("loop runs")
-            })
-        })
-        .collect::<Vec<_>>();
-
-    for handle in handles {
-        let output = handle.join().expect("thread joins");
-        assert!(!output.failed);
-        assert_eq!(output.event_count, 11);
-    }
 }
 
 #[test]

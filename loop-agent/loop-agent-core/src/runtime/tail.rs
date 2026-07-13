@@ -44,7 +44,8 @@ pub fn tail_session_to_writer_with_options(
     let mut initial = read_file_range(&path, 0, MAX_SESSION_LOG_BYTES)?;
     let complete_len = complete_jsonl_prefix_len(&initial);
     let mut pending = initial.split_off(complete_len);
-    let mut stream = decode_jsonl_bytes(&path, initial)?;
+    let stream = decode_jsonl_bytes(&path, initial)?;
+    let mut validated_len = stream.len();
     let mut events = if stream.is_empty() {
         Vec::new()
     } else {
@@ -57,7 +58,7 @@ pub fn tail_session_to_writer_with_options(
             &path,
             session_id,
             &events,
-            stream.len(),
+            validated_len,
         )?)
     };
     let mut observed_len = complete_len + pending.len();
@@ -78,6 +79,7 @@ pub fn tail_session_to_writer_with_options(
             stdout: String::new(),
         });
     }
+    drop(stream);
 
     let started = Instant::now();
     while !stream_is_failed(&events) && !stream_is_completed(&events) {
@@ -91,7 +93,7 @@ pub fn tail_session_to_writer_with_options(
         thread::sleep(tail_poll_interval(&options, started));
         let current_len = tail_session_log_len(&path)?;
         if current_len < observed_len {
-            if current_len < stream.len() {
+            if current_len < validated_len {
                 return Err(RuntimeError::Protocol(format!(
                     "{} changed outside append-only tail semantics",
                     path.display()
@@ -99,7 +101,7 @@ pub fn tail_session_to_writer_with_options(
             }
             // WHY: a failed append may roll back only bytes that have never formed a complete
             // event. The validated prefix remains immutable and authoritative.
-            pending.truncate(current_len - stream.len());
+            pending.truncate(current_len - validated_len);
             observed_len = current_len;
             continue;
         }
@@ -139,7 +141,7 @@ pub fn tail_session_to_writer_with_options(
                 stdout: String::new(),
             });
         }
-        stream.push_str(&appended);
+        validated_len += appended_len;
     }
 
     if emit == EmitMode::Human

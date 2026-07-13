@@ -827,10 +827,6 @@ fn empty_policy_artifact(loop_id: &str) -> core_policy::PolicyArtifact {
     }
 }
 
-fn fixture_size(fixture: &str) -> u64 {
-    dir_size(&fixture_dir(fixture))
-}
-
 fn session_event_line(
     session_id: &str,
     event_id: &str,
@@ -921,18 +917,4 @@ impl Write for ErrorWriter {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
-
-fn dir_size(path: &Path) -> u64 {
-    fs::read_dir(path)
-        .expect("fixture dir readable")
-        .map(|entry| {
-            let path = entry.expect("fixture entry readable").path();
-            if path.is_dir() {
-                dir_size(&path)
-            } else {
-                fs::metadata(&path).expect("fixture metadata").len()
-            }
-        })
-        .sum()
 }

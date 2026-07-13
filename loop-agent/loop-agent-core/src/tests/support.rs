@@ -11,31 +11,6 @@ use std::{
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-fn write_session_log(
-    workspace: &Path,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-) -> Result<(), RuntimeError> {
-    let reservation = reserve_session_log(workspace, session_id)?;
-    let result = write_reserved_session_log(&reservation, session_id, stream, event_count)
-        .and_then(|()| reservation.release_lock());
-    if result.is_err() {
-        reservation.rollback();
-    }
-    result
-}
-
-fn write_reserved_session_log(
-    reservation: &SessionReservation,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-) -> Result<(), RuntimeError> {
-    write_existing_file(&reservation.session_path, stream.as_bytes())?;
-    write_reserved_session_metadata(reservation, session_id, event_count, None)
-}
-
 fn write_initial_session_log(
     reservation: &SessionReservation,
     session_id: &str,

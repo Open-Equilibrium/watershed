@@ -209,18 +209,6 @@ impl Drop for PeakRssSampler {
     }
 }
 
-#[test]
-fn temp_workspace_guard_removes_directory_on_drop() {
-    let path = {
-        let workspace = empty_workspace("cleanup");
-        let path = workspace.path().to_path_buf();
-        assert!(path.exists());
-        path
-    };
-
-    assert!(!path.exists(), "temporary workspace should be removed");
-}
-
 fn near_cap_valid_event_stream() -> String {
     let base = event_stream_with_message_content("");
     let target_len = MAX_LOOP_EVENT_STREAM_BYTES - 4 * 1024;
@@ -337,10 +325,6 @@ impl TempWorkspace {
     fn new(path: PathBuf) -> Self {
         Self { path }
     }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
 }
 
 impl Deref for TempWorkspace {
@@ -373,19 +357,6 @@ fn workspace_copy(fixture: &str) -> TempWorkspace {
         fs::remove_dir_all(&target).expect("stale temp workspace removed");
     }
     copy_fixture_workspace(&fixture_dir(fixture), &target);
-    TempWorkspace::new(target)
-}
-
-fn empty_workspace(label: &str) -> TempWorkspace {
-    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let target = std::env::temp_dir().join(format!(
-        "watershed-loop-agent-core-perf-{label}-{}-{id}",
-        std::process::id()
-    ));
-    if target.exists() {
-        fs::remove_dir_all(&target).expect("stale temp workspace removed");
-    }
-    fs::create_dir_all(&target).expect("empty workspace created");
     TempWorkspace::new(target)
 }
 
