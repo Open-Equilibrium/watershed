@@ -1,10 +1,2 @@
 # Review routing only; this file does not define copyright or license ownership.
 * @benediktweber
-
-/.github/ @benediktweber
-/AGENTS.md @benediktweber
-/CONTRIBUTING.md @benediktweber
-/SECURITY.md @benediktweber
-/LICENSE @benediktweber
-/THIRD_PARTY_NOTICES.md @benediktweber
-/deny.toml @benediktweber

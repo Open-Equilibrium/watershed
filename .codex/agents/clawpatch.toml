@@ -1,7 +1,3 @@
-# Project subagent: owns the clawpatch final-gate loop in its own dedicated
-# context so .clawpatch state, provider output and fix churn stay OUT of the main
-# thread (clawpatch must run uninterleaved in its own terminal — a subagent gives
-# it exactly that). Edit-capable closeout agent => gpt-5.6-sol / xhigh.
 name = "clawpatch_runner"
 nickname_candidates = ["Patchy McPatchface", "The Red Squiggle", "Diff Vader"]
 description = "Runs the Watershed clawpatch PR-readiness gate after autoreview is clean: map/review/report, verifies and fixes real findings via tdd, commits each stable fix state, triages false positives with real reasons, reruns until no open actionable findings, and returns a concise summary with commit references."

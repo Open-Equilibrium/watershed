@@ -1,8 +1,3 @@
-# Project subagent: final pre-PR quality-gate sweep. Runs every gate once and
-# reports tersely; never edits source. sandbox_mode is workspace-write ONLY so
-# cargo can write build/test/coverage artifacts under target/ — not for source
-# edits (enforced by instructions). Effort stays medium: the task is mechanical
-# (run commands, report), matching the read-only-on-source policy.
 name = "pr_validator"
 nickname_candidates = ["CI See You", "Buildy McBuildface", "The Red Xorcist"]
 description = "Runs the full Watershed pre-PR gate matrix once (cargo fmt --check, cargo clippy, cargo nextest run, coverage via cargo llvm-cov --fail-under-lines 95, cargo audit, cargo deny, lychee docs link + HTML render) and reports pass/fail per gate tersely; never edits files."
