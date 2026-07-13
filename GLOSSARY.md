@@ -54,11 +54,17 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 ## Loop Agent runtime surfaces
 
 - **Session** — One Loop Agent run, identified by a lowercase path-safe `session_id` token per `PROTOCOL.md`; the unit that is started, resumed, tailed and persisted.
-- **Transcript** — The ordered record of a session's messages and runtime events; persisted to the local session store and reconstructable by replay.
+- **Transcript** — The ordered record of a session's messages and runtime events; part of durable session history and reconstructable by replay.
+- **Durable session history** — The complete append-only session event history plus referenced source artifacts; authoritative for resume, replay, audit, debugging and future retrieval, and never deleted by provider-context optimization.
+- **Resolved loop state** — The current loop invocation, phase, step, active instructions/tools, connections, typed outputs, current user input and runtime state.
+- **Provider context** — The deterministic, bounded projection compiled from resolved loop state and narrowly selected durable history for one model turn; not the full transcript.
+- **Context profile** — A versioned deterministic contract for provider-context ordering, budgeting, tokenization/estimation, projections, hashing and cache boundaries; M1 exposes only `loop-context-v0`.
+- **Context manifest** — The reproducible per-provider-turn record of the context profile, budget inputs, ordered included/projected sources, omissions, cache boundaries, token estimate and final context hash.
 - **Runtime event** — One normalized event Loop Agent emits over its public contract (see `PROTOCOL.md`); the same events feed JSONL mode, future RPC mode and the session store.
 - **JSONL event stream** — Loop Agent's headless mode that streams newline-delimited JSON runtime events to stdout for automation/CI/consumers.
 - **RPC mode** — Loop Agent's designed-for bidirectional stdin/stdout control mode. ADR-0055 selects the initial command/request shape; runtime events remain the public event contract.
 - **Session store** — Loop Agent's local append-only transcript persistence (e.g. `.loop/sessions/<session_id>.jsonl`). Runtime state only; **not** a project VCS/history engine.
+- **Append-before-publish** — The local event guarantee that one serial session writer successfully appends a canonical event to the authoritative log before publishing that same committed event to live observers; physical `fsync` follows separate bounded durability checkpoints.
 - **Loop registry** — The name/id index used by `loop run <name>` and interactive slash commands such as `/hello-loop` inside `loop chat` to resolve a loop definition without requiring a path.
 - **Fixture workspace** — A checked-in test workspace for a golden loop; D-047 decides how it points Loop Agent at the fixture registry and deterministic stub-model profile.
 - **Loop definition ID** — The registry/building-block id of a Loop definition; carried in event payloads as `loop_definition_id`.

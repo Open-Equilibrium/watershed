@@ -15,32 +15,11 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1">
-    <h2>M1 - Loop Agent Completion</h2>
-    <div class="grid">
-      <article id="d-057" class="decision">
-        <h3>D-057 - Deterministic Context Window Contract</h3>
-        <p><strong>Status:</strong> Open, blocks M1 completion.</p>
-        <p><strong>Question:</strong> What exact input and selection rules implement ADR-0050's deterministic M1 context window? The decision must fix the CLI input surface, source order, size metric and cap, truncation priority, resume transcript prefix and fixture-data placement.</p>
-        <ul><li><strong>A:</strong> Repeatable plain-text CLI inputs with one byte-bounded context assembled in a fixed source order. Pro: smallest deterministic M1 surface. Con: coarse source handling and a byte cap differs from model tokens.</li><li><strong>B:</strong> A structured input document with separate source quotas. Pro: clearer provenance and limits. Con: adds schema and CLI complexity.</li><li><strong>C:</strong> Remove context-window selection from M1. Pro: smaller milestone. Con: reverses ADR-0050 and the current M1 specification.</li></ul>
-        <p><strong>Recommendation:</strong> A with whole-item selection and rejection of an individually oversized item; explicitly choose the byte cap, ordering, truncation and transcript rules before implementation.</p>
-      </article>
-      <article id="d-058" class="decision">
-        <h3>D-058 - Local Live Event Publication</h3>
-        <p><strong>Status:</strong> Open, blocks M1 completion.</p>
-        <p><strong>Question:</strong> When a local run produces each event, what ordering and failure rules govern session-log append, stdout publication and side effects? The decision must fix per-event versus batched flushing, log-versus-stdout order, broken-writer behavior, crash-visible prefixes and the boundary measured by the per-event append latency gate. Remote fsync and ownership-lease behavior remains post-M1 under ADR-0039.</p>
-        <ul><li><strong>A:</strong> Validate each event, append it to the local log, then flush it to stdout before continuing. Pro: tail and stdout become live while the log remains the first local record. Con: writer and append failures need explicit terminal behavior.</li><li><strong>B:</strong> Publish to stdout before appending to the log. Pro: lowest consumer latency. Con: consumers can observe an event that is not locally recorded.</li><li><strong>C:</strong> Keep terminal batching and revise the live/near-real-time M1 contract. Pro: preserves the current implementation. Con: removes the behavior promised to automation and tail consumers.</li></ul>
-        <p><strong>Recommendation:</strong> A; preserve any valid appended prefix, do not replay completed side effects, and measure serialization, local append and in-process publication per event while excluding fsync and blocked external consumers. Explicitly choose whether execution continues after a consumer disconnects.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>

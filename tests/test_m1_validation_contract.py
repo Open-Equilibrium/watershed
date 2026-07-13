@@ -221,7 +221,7 @@ class M1ValidationContractTest(unittest.TestCase):
             "not product runtime egress",
         ]:
             self.assertIn(token, agents)
-        self.assertIn("ADR-0001…ADR-0057", changelog)
+        self.assertIn("ADR-0001…ADR-0059", changelog)
         self.assertIn("ADR-0057", changelog)
 
 

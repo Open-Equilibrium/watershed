@@ -19,6 +19,8 @@ Because scripts are human-reviewable security/capability artifacts, they must pa
 - **Command allowlisting limits names, not effects.** Interpreters and deploy commands (`python`, `cf push`, build scripts, git hooks) are Turing-complete escapes; argument filters are bypassable via path traversal, symlinks and shell metacharacters.
 - **Agent intent is untrusted (prompt injection / confused-deputy).** Reading untrusted content + holding private data + an exfiltration path is unconditionally exploitable regardless of prompt hardening ("lethal trifecta"). The fix is architectural separation, not a longer allowlist.
 
+`loop-context-v0` always includes base runtime/security instructions in mandatory Tier 0 and fails before provider contact if they do not fit (ADR-0058). This protects instruction integrity and provider-cache consistency, but prompt text remains defense in depth: compiled capability policy and runtime enforcement are the security boundary.
+
 ## MVP VCS boundary
 
 Loop Agent runs inside normal Git projects in the MVP, but it does not own project history and does not implement project VCS behavior. Security and auditability in the MVP come from deterministic loop state, structured logs, protocol events, config-review/audit records and sandbox enforcement. Host Git operations may run only when explicitly declared as Tool commands and sandboxed like any other command.

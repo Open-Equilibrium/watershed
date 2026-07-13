@@ -65,6 +65,24 @@ M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequ
 - `.loop/sessions/<session_id>.lock` is the active-session lock. Run/resume refuses a locked session and never auto-steals stale locks. Manual recovery is: verify no Loop Agent process owns the session, preserve or inspect the log if needed, remove the lock, then replay or resume.
 - Resume rejects registry or loop-definition drift before tool side effects by comparing the metadata sidecar to the current workspace registry.
 
+## M1 local append and live delivery (ADR-0059)
+
+One asynchronous serial writer owns each session's event order. For every event or ordered micro-batch it:
+
+1. constructs the typed event and validates it against the active protocol version;
+2. assigns or validates the stable `event_id`, then assigns the next per-session `sequence`;
+3. canonically serializes the event once;
+4. appends the canonical bytes to the session's append-only log and confirms the process-level write;
+5. publishes the same committed event, in sequence, to the internal bus and live observers.
+
+Publication never overtakes persistence. Publication order equals log sequence order; an append failure is not visible to observers, stops the session writer, and prevents every later event from passing it. A retry preserves the logical `event_id` and `sequence`. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status while leaving the prior log as a valid prefix.
+
+The writer uses bounded queues and backpressure. `message.delta` and `tool.progress` may share an ordered micro-batch for at most 25 ms; the complete batch is appended first and then published in sequence. A semantic/terminal event closes any pending batch immediately. Normal delivery is event-driven, not polling, and buffering is never unbounded. A disconnected or persistently lagging observer is detached rather than rolling back an appended event or blocking the session indefinitely; it catches up from its highest contiguous `sequence`. Live delivery is therefore at least once: consumers ignore duplicate `event_id` values, detect gaps through `sequence`, and use replay/catch-up after a gap or reconnect. Do not claim exactly-once network delivery.
+
+Append-before-publish is distinct from machine/power-loss durability. A successful append means the ordered bytes have crossed Loop Agent's userspace buffering boundary into the local log; it does not mean one `fsync` per event. The writer flushes and synchronizes at `message.completed`, `tool.completed`, `tool.failed`, `tool.timed_out`, `session.paused`, `session.completed` and `session.failed`, and at least once per second while an active stream has unsynchronized events. High-frequency deltas may share these boundaries. Remote replication cadence, crash recovery on a new host and the durable ownership lease remain post-M1 under ADR-0039.
+
+Future Liquid/Meta-Harness consumers render published events immediately, retain the highest contiguous sequence, deduplicate by `event_id`, request catch-up on a gap and reconnect from that sequence. Live delivery supplies low latency; the authoritative log and sequence replay supply correctness.
+
 Minimum v0 payload fields:
 
 All listed payload fields are strings unless noted otherwise; string arrays are JSON arrays of strings. `role` is `system | user | assistant | tool`, `value` is a JSON number, `exit_code` is an integer and `data` is a JSON object.
@@ -117,4 +135,4 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 
 The M0/M1 transport, runtime event-envelope fields and runtime event names are decided (ADR-0029, ADR-0036). The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Do not add `cmd.*` event names; D-019 is closed by ADR-0055 as JSON-RPC control methods separate from runtime events.
 
-D-044/ADR-0039 constrains later cloud/remote execution: durability is replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Before that ships, define the flush/fsync cadence, resume-from-log on a new container, crash replay to the last good `sequence` and the session-ownership lease. M0 local session storage remains ADR-0037.
+D-044/ADR-0039 constrains later cloud/remote execution: durability is replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Local M1 append/sync behavior is fixed above; remote replication cadence, resume on a new host, crash replay to the last durable `sequence` and the session-ownership lease remain to be defined before remote execution ships. M0 local session storage remains ADR-0037.

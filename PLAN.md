@@ -3,7 +3,7 @@
 Implementation plan as milestones with deliverables and a Definition of Done (DoD). Performance targets are **not** repeated here — see `PERFORMANCE.md`. Dates are targets the maintainer fills in; the Progress Log is timestamped on completion.
 
 Created: 2026-06-05
-Updated: 2026-07-03
+Updated: 2026-07-13
 
 ## MVP boundary
 
@@ -91,7 +91,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **M0-blocking decisions:** none remain. D-002, D-006, D-012…D-018 and D-047…D-050 are decided in ADR-0029…ADR-0037 and ADR-0041…ADR-0045.
 
-D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is deterministic rule/window selection only, and the post-M1 RPC command shape starts as a minimal local JSON-RPC control set. ADR-0051/ADR-0052 close the M1 network/sandbox behavior: M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, while D-046 remains open for post-M1 positive CIDR egress enforcement. D-020 (embedded core API scope) remains a post-M1 seam and does not block M1. D-056 is closed by ADR-0056: main-branch protection requires the M1 gates for PR merges, while `feat/**` push CI stays advisory.
+D-008/D-057 are closed for M1 in ADR-0050/ADR-0058: M1 provider context uses the single deterministic, cache-stable `loop-context-v0` profile; compaction and retrieval remain post-M1. D-058 is closed by ADR-0059: canonical events append through one serial session writer before bounded near-real-time publication. ADR-0051/ADR-0052 close the M1 network/sandbox behavior: M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, while D-046 remains open for post-M1 positive CIDR egress enforcement. D-019 is closed by ADR-0055; D-020 remains a non-blocking post-M1 embedded-API seam. D-056 is closed by ADR-0056: main-branch protection requires the M1 gates for PR merges, while `feat/**` push CI stays advisory. No open decision blocks M1.
 
 **DoD / pass-fail definition:**
 
@@ -110,10 +110,10 @@ D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is d
 - Standalone CLI Loop Agent (human CLI run path).
 - Headless JSONL event stream over stdout.
 - Local append-only session/transcript log (ADR-0037); initial resume/tail/replay behavior over the log.
-- Public runtime event emission as a stable contract (ADR-0036).
+- Public runtime event emission as a stable append-before-publish contract with bounded near-real-time delivery and sequence replay (ADR-0036, ADR-0059).
 - Building-block registry for Tools, Instructions, Phases, Loops and Connections using explicit by-name/id references, canonical serialization and cycle detection (ADR-0031).
 - Deterministic FSM phase/step engine: phase order, available tools, instruction loading and state transitions are deterministic; LLM/tool outputs are inputs to deterministic transitions.
-- Deterministic M1 context window selection over explicit inputs, instructions, transcript prefix and fixture data only; embeddings, RAG and adaptive compaction are post-M1 (ADR-0050).
+- Deterministic, cache-stable `loop-context-v0` compilation over mandatory active scope plus narrowly bounded continuity, with reproducible per-turn manifests; persisted compaction and retrieval are post-M1 (ADR-0050, ADR-0058).
 - Script-defined Tools/Instructions/Phases/Loops with recursive composition (`Loop` as a building block).
 - Event-driven execution: no polling loop for normal agent progress.
 - Runtime kernel: bounded/headless tool runs, timeouts, structured stdout/stderr, `.loop/logs` or equivalent run logs.
@@ -121,7 +121,7 @@ D-008 and D-019 are closed for M1 in ADR-0050/ADR-0055: M1 context handling is d
 - Protocol adapter that emits normalized `proto` v0 events.
 - D-015 golden loops and sandbox-negative tests.
 
-**DoD:** a multi-phase local loop with a subloop runs headless from the CLI, emits the expected JSONL event stream, persists it to the local session log, enforces phase/tool scoping, writes structured logs, passes deterministic FSM tests, event-ordering and transcript-persistence tests, and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks), meets the ≥95% line-coverage gate (`cargo llvm-cov`, ADR-0022) and the Loop Agent M1 performance budgets in `PERFORMANCE.md` (ADR-0049). Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
+**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes structured logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the ≥95% line-coverage gate (`cargo llvm-cov`, ADR-0022) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 
@@ -176,6 +176,7 @@ M3 delivers Liquid as a **self-contained native workspace/app-building product**
 
 ## Progress Log (timestamped)
 
+- `2026-07-13` — M1 completion decisions D-057/D-058 closed: ADR-0058 fixes deterministic, cache-stable `loop-context-v0`; ADR-0059 fixes serial append-before-publish with bounded near-real-time delivery and checkpoint durability.
 - `2026-07-05` — M1 governance decision D-056 closed: main-branch protection is the required M1 merge gate; `feat/**` push CI remains advisory.
 - `2026-07-05` — Codex project config decision ADR-0057 recorded: trusted checkouts keep workspace-write network access enabled for networked closeout, while approval prompts and web search stay disabled.
 - `2026-07-03` — M1 Loop Agent implementation is active: standalone CLI run/replay/tail/resume, local session logs, registry loading, deterministic fixture streams and sandbox-negative validation are in place; current work is governance hardening against the M1 DoD.
