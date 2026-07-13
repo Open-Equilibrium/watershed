@@ -187,6 +187,13 @@ fn validate_event_payload(
             event.event_type.as_str()
         ))
     })?;
+    reject_payload_nulls(
+        path,
+        line_number,
+        event.event_type,
+        &event.payload,
+        "payload",
+    )?;
 
     match event.event_type {
         EventType::SessionStarted
@@ -392,6 +399,48 @@ fn validate_event_payload(
     }
 
     Ok(())
+}
+
+fn reject_payload_nulls(
+    path: &Path,
+    line_number: usize,
+    event_type: EventType,
+    value: &serde_json::Value,
+    location: &str,
+) -> Result<(), RuntimeError> {
+    match value {
+        serde_json::Value::Null => Err(payload_contract_error(
+            path,
+            line_number,
+            event_type,
+            &format!("{location} must not be null in protocol v0"),
+        )),
+        serde_json::Value::Array(values) => {
+            for (index, value) in values.iter().enumerate() {
+                reject_payload_nulls(
+                    path,
+                    line_number,
+                    event_type,
+                    value,
+                    &format!("{location}[{index}]"),
+                )?;
+            }
+            Ok(())
+        }
+        serde_json::Value::Object(values) => {
+            for (field, value) in values {
+                reject_payload_nulls(
+                    path,
+                    line_number,
+                    event_type,
+                    value,
+                    &format!("{location}.{field}"),
+                )?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 fn require_payload_string<'a>(

@@ -71,6 +71,34 @@ fn protocol_validator_rejects_scalar_and_session_payload_edges() {
 }
 
 #[test]
+fn protocol_validator_rejects_nulls_recursively_but_keeps_additive_values() {
+    let mut additive = base_event();
+    additive.payload = serde_json::json!({
+        "future": {"enabled": true, "weights": [1, 2]},
+        "reason": "fixture-start",
+    });
+    validate_event_payload(Path::new("additive-payload.jsonl"), 1, &additive)
+        .expect("unknown non-null payload fields remain additive");
+
+    let mut root_null = base_event();
+    root_null.payload = serde_json::json!({"future": null, "reason": "fixture-start"});
+    assert_invalid_event("root-null.jsonl", root_null, "payload.future must not be null");
+
+    let mut nested_null = base_event();
+    nested_null.event_type = EventType::Error;
+    nested_null.payload = serde_json::json!({
+        "code": "E_PROTOCOL",
+        "data": {"details": [{"value": null}]},
+        "message": "invalid nested payload",
+    });
+    assert_invalid_event(
+        "nested-null.jsonl",
+        nested_null,
+        "payload.data.details[0].value must not be null",
+    );
+}
+
+#[test]
 fn protocol_validator_rejects_tool_started_required_payload_edges() {
     let mut incomplete_tool = base_event();
     incomplete_tool.event_type = EventType::ToolStarted;
