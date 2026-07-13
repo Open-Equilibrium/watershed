@@ -6,6 +6,10 @@ Verification strategy. Tests are how the budgets in `PERFORMANCE.md` and the bou
 
 Loop Agent MVP tests must not require Watershed-owned project-history/VCS behavior. Tests may run in a normal Git checkout, but Loop Agent does not auto-commit, branch, slice or rewrite project history in the MVP.
 
+## Test economy
+
+Keep tests within the active milestone. Each test must protect a distinct requirement, risk or regression; consolidate overlapping cases and shared setup. Coverage remains a gate, not a reason for redundant or coverage-only tests.
+
 ## Layers
 
 - **Unit/integration per crate** — standard Rust tests run with `cargo nextest` for deterministic, process-isolated execution (no shared-state leakage between tests) and flaky-test detection; timing-sensitive performance tests run only in the optimized performance gate.
