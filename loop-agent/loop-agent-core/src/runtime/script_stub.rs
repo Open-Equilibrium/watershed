@@ -468,7 +468,8 @@ fn resolved_workspace_scoped_target(
     })?;
     let mut resolved = canonical_workspace.clone();
     let mut unresolved_suffix = false;
-    for component in target.split('/') {
+    let mut components = target.split('/').peekable();
+    while let Some(component) = components.next() {
         if unresolved_suffix {
             resolved.push(component);
             continue;
@@ -484,6 +485,21 @@ fn resolved_workspace_scoped_target(
                     return Err(RuntimeError::Protocol(format!(
                         "own-script write target {target:?} resolves outside the workspace"
                     )));
+                }
+                if components.peek().is_some() {
+                    let metadata = fs::metadata(&resolved).map_err(|source| RuntimeError::Io {
+                        path: resolved.clone(),
+                        source,
+                    })?;
+                    if !metadata.is_dir() {
+                        return Err(runtime_denied(
+                            core_policy::DenyReasonCode::WriteDenied,
+                            format!(
+                                "own-script write target {target:?} has non-directory component {}",
+                                resolved.display()
+                            ),
+                        ));
+                    }
                 }
             }
             Err(source) if source.kind() == io::ErrorKind::NotFound => {
