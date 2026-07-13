@@ -1,3 +1,5 @@
+use std::io::{Read, Seek, SeekFrom};
+
 #[derive(Clone)]
 struct SharedObserver<T> {
     inner: Arc<Mutex<T>>,
@@ -48,12 +50,14 @@ impl Write for AppendBeforePublishProbe {
             .workspace
             .join(LOCAL_SESSION_DIR)
             .join(format!("{}.jsonl", event.session_id));
-        let persisted = fs::read(&path)?;
+        let mut persisted = fs::File::open(&path)?;
+        persisted.seek(SeekFrom::Start(self.published.len() as u64))?;
+        let mut appended = vec![0; bytes.len()];
+        persisted.read_exact(&mut appended)?;
         if self.writes == 0 {
-            self.first_publish_saw_committed_event = persisted.starts_with(bytes);
+            self.first_publish_saw_committed_event = appended == bytes;
         }
-        let published_through_event = [self.published.as_slice(), bytes].concat();
-        if !persisted.starts_with(&published_through_event) {
+        if appended != bytes {
             return Err(io::Error::other("event published before append"));
         }
         if event.event_type == EventType::MessageCompleted {
