@@ -953,6 +953,11 @@ proptest! {
     #[test]
     fn protected_path_double_star_matches_any_depth(
         segments in prop::collection::vec("[a-z0-9][a-z0-9_-]{0,7}", 0..6)
+            .prop_filter("portable path components", |segments| {
+                segments
+                    .iter()
+                    .all(|segment| !core_script::relative_path_has_windows_alias(segment))
+            })
     ) {
         let middle = if segments.is_empty() {
             String::new()

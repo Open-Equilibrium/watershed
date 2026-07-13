@@ -18,6 +18,11 @@ proptest! {
     #[test]
     fn safe_relative_paths_accept_generated_literal_segments(
         segments in prop::collection::vec("[a-z0-9][a-z0-9_-]{0,7}", 1..8)
+            .prop_filter("portable path components", |segments| {
+                segments
+                    .iter()
+                    .all(|segment| !relative_path_has_windows_alias(segment))
+            })
     ) {
         let path = segments.join("/");
         let normalized = normalize_safe_relative_path(&path);
