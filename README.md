@@ -64,6 +64,7 @@ registry/{tools,instructions,phases,loops,connections}/
 .loop/sessions/<session_id>.jsonl         runtime event log
 .loop/sessions/<session_id>.lock          active-session lock
 .loop/logs/<session_id>.log               resume metadata sidecar
+.loop/logs/<session_id>.contexts.jsonl    provider-context manifests
 out/                                      fixture/runtime output
 ```
 

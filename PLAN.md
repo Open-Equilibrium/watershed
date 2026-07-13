@@ -72,7 +72,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
   - list of sandbox-negative policy-emulation tests to implement in M1;
   - network deny-by-default policy model;
   - declared read/write roots model;
-  - timeout/headless execution model.
+  - headless in-process M1 boundary and post-M1 subprocess-timeout model.
 - CI packet:
   - Linux + macOS workflow plan;
   - `cargo fmt --check`, `cargo clippy` and `cargo nextest run` (deterministic,
@@ -116,12 +116,12 @@ D-008/D-057 are closed for M1 in ADR-0050/ADR-0058: M1 provider context uses the
 - Deterministic, cache-stable `loop-context-v0` compilation over mandatory active scope plus narrowly bounded continuity, with reproducible per-turn manifests; persisted compaction and retrieval are post-M1 (ADR-0050, ADR-0058).
 - Script-defined Tools/Instructions/Phases/Loops with recursive composition (`Loop` as a building block).
 - Event-driven execution: no polling loop for normal agent progress.
-- Runtime kernel: bounded/headless tool runs, timeouts, structured stdout/stderr, `.loop/logs` or equivalent run logs.
+- Runtime kernel: deterministic bounded in-process fixture interpretation plus session event and context-manifest logs. External subprocess timeouts, bounded stdout/stderr, per-tool run logs and `tool.timed_out` remain post-M1.
 - Deterministic in-process enforcement/emulation for declared command, parameter, read/write, protected-path and deny-all network capabilities per loop. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
 - Protocol adapter that emits normalized `proto` v0 events.
 - D-015 golden loops and sandbox-negative tests.
 
-**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes structured logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the ≥95% line-coverage gate (`cargo llvm-cov`, ADR-0022) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
+**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the ≥95% line-coverage gate (`cargo llvm-cov`, ADR-0022) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 
