@@ -51,6 +51,11 @@ mod performance {
     include!("tests/performance.rs");
 }
 
+mod context {
+    use super::*;
+    include!("tests/context.rs");
+}
+
 mod workspace_fixtures {
     use super::*;
     include!("tests/workspace_fixtures.rs");

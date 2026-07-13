@@ -705,6 +705,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     assert!(matches!(
         emit_phase(
             &missing_instruction_context,
+            &loop_block,
             &inspect_phase,
             &invocation,
             &mut builder,
@@ -727,6 +728,7 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     assert!(matches!(
         emit_phase(
             &missing_connection_context,
+            &loop_block,
             &inspect_phase,
             &invocation,
             &mut builder,

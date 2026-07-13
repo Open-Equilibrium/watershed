@@ -239,9 +239,15 @@ fn runtime_failure_for_reason(
 }
 
 fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
+    let (reason, message) = match err {
+        RuntimeError::ContextBudgetExceeded { .. } => {
+            ("context_budget_exceeded", "mandatory context exceeds the model input budget")
+        }
+        _ => (RUNTIME_ERROR_REASON, runtime_error_message(err)),
+    };
     RuntimeFailure {
-        reason: RUNTIME_ERROR_REASON.to_owned(),
-        message: runtime_error_message(err),
+        reason: reason.to_owned(),
+        message,
         tool_id: None,
         phase_id: None,
         emit_tool_failed: false,
@@ -263,6 +269,7 @@ fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<R
         | RuntimeError::Policy(_)
         | RuntimeError::Registry(_)
         | RuntimeError::Protocol(_)
+        | RuntimeError::ContextBudgetExceeded { .. }
         | RuntimeError::ActiveSession { .. }
         | RuntimeError::SessionLogExists(_)
         | RuntimeError::TerminalSession(_)

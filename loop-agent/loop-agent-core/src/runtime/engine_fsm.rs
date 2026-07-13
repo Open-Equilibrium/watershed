@@ -1,4 +1,5 @@
 struct RuntimeExecution {
+    context_manifests: Vec<ContextManifest>,
     events: Vec<EventEnvelope>,
     failed: bool,
     terminal_error: Option<RuntimeError>,
@@ -165,6 +166,7 @@ fn policy_target_name(target: &core_policy::PolicyTarget) -> &'static str {
 
 struct RuntimeEventBuilder {
     clock: EventClock,
+    context_manifests: Vec<ContextManifest>,
     events: Vec<EventEnvelope>,
     loop_counter: u64,
     message_counter: u64,
@@ -177,6 +179,7 @@ impl RuntimeEventBuilder {
     fn with_clock(session_id: String, clock: EventClock) -> Self {
         Self {
             clock,
+            context_manifests: Vec::new(),
             events: Vec::new(),
             loop_counter: 0,
             message_counter: 0,
@@ -282,13 +285,14 @@ fn execute_loop(
     };
     let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
         Ok(failed) => failed,
-        Err(err) if should_terminalize_runtime_error(options.side_effect_mode) => {
+        Err(err) if should_terminalize_error(options.side_effect_mode, &err) => {
             builder.emit(
                 None,
                 EventType::SessionFailed,
                 serde_json::json!({"reason":RUNTIME_ERROR_REASON}),
             )?;
             return Ok(RuntimeExecution {
+                context_manifests: builder.context_manifests,
                 events: builder.events,
                 failed: true,
                 terminal_error: Some(err),
@@ -303,6 +307,7 @@ fn execute_loop(
             serde_json::json!({"reason":failure.reason}),
         )?;
         Ok(RuntimeExecution {
+            context_manifests: builder.context_manifests,
             events: builder.events,
             failed: true,
             terminal_error: None,
@@ -310,6 +315,7 @@ fn execute_loop(
     } else {
         builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
         Ok(RuntimeExecution {
+            context_manifests: builder.context_manifests,
             events: builder.events,
             failed: false,
             terminal_error: None,
@@ -322,6 +328,11 @@ fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> boo
         side_effect_mode,
         ToolSideEffectMode::ApplyAll | ToolSideEffectMode::Resume { .. }
     )
+}
+
+fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &RuntimeError) -> bool {
+    should_terminalize_runtime_error(side_effect_mode)
+        || matches!(err, RuntimeError::ContextBudgetExceeded { .. })
 }
 
 fn preflight_loop_tools(
@@ -458,13 +469,13 @@ fn emit_loop_block_at_depth(
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        match emit_phase(context, phase, &invocation, builder) {
+        match emit_phase(context, loop_block, phase, &invocation, builder) {
             Ok(Some(failure)) => {
                 emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
                 return Ok(Some(failure));
             }
             Ok(None) => {}
-            Err(err) if should_terminalize_runtime_error(context.side_effect_mode) => {
+            Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
                 emit_runtime_error_failure(loop_block, &invocation, &err, builder)?;
                 return Err(err);
             }
@@ -488,7 +499,7 @@ fn emit_loop_block_at_depth(
                 return Ok(Some(failure));
             }
             Ok(None) => {}
-            Err(err) if should_terminalize_runtime_error(context.side_effect_mode) => {
+            Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
                 emit_propagated_runtime_error_failure(loop_block, &invocation, builder)?;
                 return Err(err);
             }
@@ -509,6 +520,7 @@ fn emit_loop_block_at_depth(
 
 fn emit_phase(
     context: &LoopEmitContext<'_>,
+    loop_block: &core_script::LoopBlock,
     phase: &core_script::PhaseBlock,
     invocation: &LoopInvocation,
     builder: &mut RuntimeEventBuilder,
@@ -560,7 +572,22 @@ fn emit_phase(
             step_payload.clone(),
         )?;
 
-        if let Some(content) = stub_message_content(context.registry, phase)? {
+        if phase_uses_stub_model(context.registry, phase)? {
+            let compiled = compile_provider_turn_context(
+                context.registry,
+                loop_block,
+                phase,
+                step,
+                invocation,
+                &builder.session_id,
+                &builder.events,
+            )?;
+            let content = stub_message_content(
+                context.registry,
+                phase,
+                &compiled.provider_bytes,
+            )?;
+            builder.context_manifests.push(compiled.manifest);
             let message_id = builder.next_message_id();
             builder.emit(
                 Some(invocation),
@@ -692,17 +719,27 @@ fn step_payload(
     Ok(payload)
 }
 
-fn stub_message_content(
+fn phase_uses_stub_model(
     registry: &core_script::ResolvedRegistry,
     phase: &core_script::PhaseBlock,
-) -> Result<Option<&'static str>, RuntimeError> {
+) -> Result<bool, RuntimeError> {
     let has_predefined_tool = phase.tool_refs.iter().any(|tool_ref| {
         registry
             .tool_block(tool_ref)
             .is_some_and(|tool| tool.tool_kind == core_script::ToolKind::PredefinedCommand)
     });
-    if !has_predefined_tool {
-        return Ok(None);
+    Ok(has_predefined_tool)
+}
+
+fn stub_message_content(
+    registry: &core_script::ResolvedRegistry,
+    phase: &core_script::PhaseBlock,
+    provider_context: &[u8],
+) -> Result<&'static str, RuntimeError> {
+    if provider_context.is_empty() {
+        return Err(RuntimeError::Protocol(
+            "stub model received empty compiled context".to_owned(),
+        ));
     }
 
     for instruction_ref in &phase.instruction_refs {
@@ -712,11 +749,11 @@ fn stub_message_content(
             ))
         })?;
         if instruction.prompt.to_ascii_lowercase().contains("smoke") {
-            return Ok(Some("smoke"));
+            return Ok("smoke");
         }
     }
 
-    Ok(Some("hello"))
+    Ok("hello")
 }
 
 fn command_policy_for_phase<'a>(

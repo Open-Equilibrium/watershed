@@ -115,6 +115,7 @@ fn created_parent_directory_keeps_reserved_audit_on_rollback() {
 fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let workspace = empty_workspace("reservation-helper-edges");
     let missing_lock = SessionReservation {
+        context_path: workspace.join(".loop/logs/missing.contexts.jsonl"),
         log_path: workspace.join(".loop/logs/missing.log"),
         lock_path: workspace.join(".loop/sessions/missing.lock"),
         session_path: workspace.join(".loop/sessions/missing.jsonl"),

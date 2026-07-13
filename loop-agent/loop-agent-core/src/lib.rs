@@ -8,6 +8,7 @@ include!("runtime/tail.rs");
 include!("runtime/session_state.rs");
 include!("runtime/fs_guards.rs");
 include!("runtime/engine_fsm.rs");
+include!("runtime/context.rs");
 include!("runtime/tool_exec.rs");
 include!("runtime/script_stub.rs");
 include!("runtime/failures.rs");

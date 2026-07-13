@@ -196,6 +196,13 @@ pub enum RuntimeError {
     },
     /// Runtime protocol invariant was violated.
     Protocol(String),
+    /// Mandatory provider context exceeded the selected model profile's input budget.
+    ContextBudgetExceeded {
+        /// Available input budget under the selected model profile.
+        input_budget: usize,
+        /// Canonical mandatory context bytes required by the turn.
+        required_bytes: usize,
+    },
     /// A session lock already exists for the requested session.
     ActiveSession {
         /// Requested session id.
@@ -217,6 +224,7 @@ impl RuntimeError {
         match self {
             Self::Denied { .. }
             | Self::Protocol(_)
+            | Self::ContextBudgetExceeded { .. }
             | Self::ActiveSession { .. }
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_) => 65,
@@ -235,6 +243,13 @@ impl fmt::Display for RuntimeError {
             Self::Registry(err) => write!(f, "{err}"),
             Self::Denied { message, .. } => f.write_str(message),
             Self::Protocol(message) | Self::Usage(message) => f.write_str(message),
+            Self::ContextBudgetExceeded {
+                input_budget,
+                required_bytes,
+            } => write!(
+                f,
+                "context_budget_exceeded: mandatory context requires {required_bytes} estimated tokens, input budget is {input_budget}"
+            ),
             Self::ActiveSession {
                 session_id,
                 lock_path,
@@ -258,6 +273,7 @@ impl std::error::Error for RuntimeError {
             Self::Registry(err) => Some(err),
             Self::Denied { .. }
             | Self::Protocol(_)
+            | Self::ContextBudgetExceeded { .. }
             | Self::ActiveSession { .. }
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)

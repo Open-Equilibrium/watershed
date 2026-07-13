@@ -75,6 +75,13 @@ pub fn run_loop(
         reservation.rollback();
         return Err(err);
     }
+    if let Err(err) = persist_reserved_context_manifests(
+        &reservation,
+        &planned_runtime.context_manifests,
+    ) {
+        reservation.rollback();
+        return Err(err);
+    }
     let result = (|| {
         let session_id = planned_events
             .first()
@@ -97,7 +104,10 @@ pub fn run_loop(
         reservation.mark_side_effects_applied();
         let runtime_failed = runtime.failed;
         let terminal_error = runtime.terminal_error;
-        if !runtime_failed && runtime.events != planned_runtime.events {
+        if !runtime_failed
+            && (runtime.events != planned_runtime.events
+                || runtime.context_manifests != planned_runtime.context_manifests)
+        {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime did not match deterministic replay",
                 reservation.session_path.display()

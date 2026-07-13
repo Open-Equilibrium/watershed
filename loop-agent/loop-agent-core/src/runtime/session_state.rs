@@ -75,6 +75,12 @@ pub fn resume_session(
             config.stub_model_fixture_profile,
         ),
     )?;
+    verify_recorded_context_manifests(
+        workspace,
+        session_id,
+        &events,
+        &planned_runtime.context_manifests,
+    )?;
     let resume_prefix = validate_resume_replay_prefix(
         &path,
         &events,
@@ -486,6 +492,7 @@ fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeEr
 
 #[derive(Debug)]
 struct SessionReservation {
+    context_path: PathBuf,
     log_path: PathBuf,
     lock_path: PathBuf,
     session_path: PathBuf,
@@ -503,6 +510,7 @@ impl SessionReservation {
         if !self.committed.get() && !self.side_effects_applied.get() {
             let _ = fs::remove_file(&self.session_path);
             let _ = fs::remove_file(&self.log_path);
+            let _ = fs::remove_file(&self.context_path);
         }
         let _ = fs::remove_file(&self.lock_path);
         self.cleanup_on_drop.set(false);
@@ -667,6 +675,7 @@ fn reserve_session_log(
     let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
     let log_path = log_dir.join(format!("{session_id}.log"));
+    let context_path = log_dir.join(format!("{session_id}.contexts.jsonl"));
     let lock_path = session_lock_path(workspace, session_id)?;
     reserve_session_file(&session_path, session_id)?;
     if let Err(err) = reserve_session_lock_file(&lock_path, session_id) {
@@ -678,7 +687,14 @@ fn reserve_session_log(
         let _ = fs::remove_file(&lock_path);
         return Err(err);
     }
+    if let Err(err) = reserve_new_file(&context_path) {
+        let _ = fs::remove_file(&session_path);
+        let _ = fs::remove_file(&lock_path);
+        let _ = fs::remove_file(&log_path);
+        return Err(err);
+    }
     Ok(SessionReservation {
+        context_path,
         log_path,
         lock_path,
         session_path,
@@ -687,6 +703,27 @@ fn reserve_session_log(
         committed: Cell::new(false),
         side_effects_applied: Cell::new(false),
     })
+}
+
+fn persist_reserved_context_manifests(
+    reservation: &SessionReservation,
+    manifests: &[ContextManifest],
+) -> Result<(), RuntimeError> {
+    let byte_count = manifests
+        .iter()
+        .map(|manifest| manifest.line.len())
+        .sum::<usize>();
+    if u64::try_from(byte_count).unwrap_or(u64::MAX) > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} context manifest size {byte_count} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+            reservation.context_path.display()
+        )));
+    }
+    let mut stream = String::with_capacity(byte_count);
+    for manifest in manifests {
+        stream.push_str(&manifest.line);
+    }
+    write_existing_file(&reservation.context_path, stream.as_bytes())
 }
 
 fn reserve_unique_session_log(
