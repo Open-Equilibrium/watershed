@@ -902,15 +902,6 @@ fn event_clock_config_and_payload_helpers_cover_success_paths() {
         ),
         Some("reg'istry # still scalar".to_owned())
     );
-    assert!(matches!(
-        workspace_event_clock("fixture_profile: live\n"),
-        Err(RuntimeError::Usage(message)) if message.contains("fixture_profile")
-    ));
-    assert!(matches!(
-        workspace_event_clock("stub_model: live\n"),
-        Err(RuntimeError::Usage(message)) if message.contains("stub_model")
-    ));
-
     for (event_type, payload) in [
         (
             EventType::SessionStarted,

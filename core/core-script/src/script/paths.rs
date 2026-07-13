@@ -9,7 +9,8 @@ pub fn is_valid_command_id(value: &str) -> bool {
         && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
 }
 
-fn is_valid_allowed_parameter_name(value: &str) -> bool {
+/// Returns whether `value` is a valid allowed-parameter name.
+pub fn is_valid_allowed_parameter_name(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("--") else {
         return false;
     };

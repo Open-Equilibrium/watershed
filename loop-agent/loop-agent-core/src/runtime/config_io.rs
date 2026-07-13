@@ -111,15 +111,6 @@ struct WorkspaceConfig {
     stub_model_fixture_profile: bool,
 }
 
-#[cfg(test)]
-fn workspace_event_clock(text: &str) -> Result<EventClock, RuntimeError> {
-    if workspace_stub_model_fixture_profile(text)? {
-        Ok(EventClock::fixed_fixture())
-    } else {
-        Ok(EventClock::wall_clock())
-    }
-}
-
 fn workspace_stub_model_fixture_profile(text: &str) -> Result<bool, RuntimeError> {
     match (
         config_value(text, "fixture_profile"),

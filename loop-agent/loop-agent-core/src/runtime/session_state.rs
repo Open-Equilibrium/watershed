@@ -952,39 +952,6 @@ fn preflight_complete_reserved_session_log_from_prefix(
 }
 
 #[cfg(test)]
-fn persist_reserved_session_prefix(
-    reservation: &SessionReservation,
-    session_id: &str,
-    events: &[EventEnvelope],
-    prefix_event_count: usize,
-    definition_hashes: Option<&SessionDefinitionHashes>,
-) -> Result<(), RuntimeError> {
-    if prefix_event_count <= 1 {
-        return Ok(());
-    }
-    let prefix_stream = canonical_event_stream(&events[..prefix_event_count])?;
-    preflight_complete_reserved_session_log_from_prefix(reservation, &prefix_stream, 1)?;
-    commit_reserved_session_log_from_prefix(
-        reservation,
-        session_id,
-        &prefix_stream,
-        prefix_event_count,
-        definition_hashes,
-        1,
-    )
-}
-
-#[cfg(test)]
-fn durable_run_prefix_event_count(events: &[EventEnvelope]) -> usize {
-    events
-        .iter()
-        .position(|event| {
-            event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none()
-        })
-        .map_or(1, |index| index + 1)
-}
-
-#[cfg(test)]
 fn commit_reserved_session_log_from_prefix(
     reservation: &SessionReservation,
     session_id: &str,

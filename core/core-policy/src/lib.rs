@@ -679,7 +679,7 @@ impl CommandPolicy {
     fn validate_command_shape(&self) -> Result<(), PolicyArtifactValidationError> {
         match self.tool_kind {
             ToolKind::PredefinedCommand => {
-                if !has_valid_command_id_shape(&self.command_id) {
+                if !core_script::is_valid_command_id(&self.command_id) {
                     return Err(policy_artifact_error(format!(
                         "predefined-command tool {} command_id {:?} must match ^[a-z][a-z0-9_-]{{0,63}}$",
                         self.tool_id, self.command_id
@@ -753,7 +753,7 @@ pub struct AllowedParameterPolicy {
 
 impl AllowedParameterPolicy {
     fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
-        if !has_valid_parameter_name_shape(&self.name) {
+        if !core_script::is_valid_allowed_parameter_name(&self.name) {
             return Err(policy_artifact_error(format!(
                 "tool {tool_id} parameter name {:?} must match ^--[A-Za-z0-9][A-Za-z0-9_-]*$",
                 self.name
@@ -961,33 +961,6 @@ fn has_valid_environment_allow_name_shape(name: &str) -> bool {
     }
 
     bytes.all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
-}
-
-fn has_valid_command_id_shape(value: &str) -> bool {
-    if value.len() > 64 {
-        return false;
-    }
-
-    let mut bytes = value.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    first.is_ascii_lowercase()
-        && bytes.all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
-        })
-}
-
-fn has_valid_parameter_name_shape(name: &str) -> bool {
-    let Some(rest) = name.strip_prefix("--") else {
-        return false;
-    };
-    let mut bytes = rest.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    (first.is_ascii_alphanumeric())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 fn is_forbidden_environment_allow_name(name: &str) -> bool {

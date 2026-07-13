@@ -119,33 +119,6 @@ fn tail_stream_helpers_cover_direct_edges() {
 }
 
 #[test]
-fn durable_prefix_helpers_cover_direct_edges() {
-    let workspace = empty_workspace("durable-prefix-helpers");
-
-    let reservation = reserve_session_log(&workspace, "helper001").expect("session reserved");
-    persist_reserved_session_prefix(&reservation, "helper001", &[base_event()], 1, None)
-        .expect("single-event prefix is already durable");
-    reservation.rollback();
-
-    let loop_started = EventEnvelope {
-        loop_id: Some("loop-001".to_owned()),
-        ..EventEnvelope::new(
-            "evt-002",
-            EventType::LoopStarted,
-            "meta001",
-            2,
-            "2026-01-01T00:00:01Z",
-            "loop-agent-cli",
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
-        )
-    };
-    assert_eq!(
-        durable_run_prefix_event_count(&[base_event(), loop_started]),
-        2
-    );
-}
-
-#[test]
 fn workspace_config_helpers_reject_unsafe_registry_roots() {
     let workspace = empty_workspace("workspace-config-helpers");
     fs::create_dir_all(workspace.join(".loop")).expect("loop config dir");
