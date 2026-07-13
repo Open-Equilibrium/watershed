@@ -8,7 +8,7 @@ Loop Agent MVP tests must not require Watershed-owned project-history/VCS behavi
 
 ## Test economy
 
-Keep tests within the active milestone. Each test must protect a distinct requirement, risk or regression; consolidate overlapping cases and shared setup. Coverage remains a gate, not a reason for redundant or coverage-only tests.
+Protect meaningful functionality from every milestone, including behavior established earlier. Each test must cover a distinct function, contract, risk or regression. Prefer compact table-driven or end-to-end cases and shared setup over line-by-line tests. Coverage remains a gate, not a reason for redundant or coverage-only tests.
 
 ## Layers
 

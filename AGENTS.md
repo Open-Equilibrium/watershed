@@ -52,7 +52,7 @@ docs/adr/ADR-LOG.md                  decided records (agents)
 ## Conventions
 
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior, without duplicating code, tests, docs or abstractions.
-- **Milestone-scoped tests:** follow the test-economy rules in `TESTING.md`; keep only distinct current-milestone behavior and meet coverage through meaningful cases.
+- **Meaningful tests:** follow the test-economy rules in `TESTING.md`; protect all established behavior, including prior milestones, through distinct functional, contract, risk or regression cases—never line-by-line coverage tests.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
 - **Definition of Done:** code + tests (per `TESTING.md`, run with `cargo nextest`; ≥95% line coverage from M1 via `cargo llvm-cov`) + relevant budget checks (per `PERFORMANCE.md`) + green CI gates (`cargo fmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
 
