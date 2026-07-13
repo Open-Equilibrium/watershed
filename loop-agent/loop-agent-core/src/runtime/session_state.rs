@@ -69,20 +69,6 @@ where
     resume_session_to_writer_internal(workspace, session_id, emit, writer, None)
 }
 
-#[cfg(test)]
-fn resume_session_to_writer_with_timings<W>(
-    workspace: impl AsRef<Path>,
-    session_id: &str,
-    emit: EmitMode,
-    writer: W,
-    timings: &mut EventWriterTimings,
-) -> Result<RunOutput, RuntimeError>
-where
-    W: Write + Send + 'static,
-{
-    resume_session_to_writer_internal(workspace, session_id, emit, writer, Some(timings))
-}
-
 fn resume_session_to_writer_internal<W>(
     workspace: impl AsRef<Path>,
     session_id: &str,

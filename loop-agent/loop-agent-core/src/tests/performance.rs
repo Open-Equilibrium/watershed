@@ -6,12 +6,12 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
     for _ in 0..5 {
         let workspace = workspace_copy("hello-loop");
         let mut timings = EventWriterTimings::default();
-        let output = run_loop_to_writer_with_timings(
+        let output = run_loop_to_writer_internal(
             &workspace,
             "hello-loop",
             EmitMode::Jsonl,
             io::sink(),
-            &mut timings,
+            Some(&mut timings),
         )
         .expect("measured runtime emit succeeds");
         assert!(!output.failed);
@@ -45,12 +45,12 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
             .expect("completed side effect removed");
         let mut timings = EventWriterTimings::default();
 
-        let output = resume_session_to_writer_with_timings(
+        let output = resume_session_to_writer_internal(
             &workspace,
             &completed.session_id,
             EmitMode::Jsonl,
             io::sink(),
-            &mut timings,
+            Some(&mut timings),
         )
         .expect("measured resume succeeds");
         assert_eq!(

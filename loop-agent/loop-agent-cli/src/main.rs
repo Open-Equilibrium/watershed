@@ -6,11 +6,11 @@ use std::{
     ffi::{OsStr, OsString},
     io::{self, BufRead, Write},
     path::PathBuf,
-    process,
+    process::ExitCode,
     time::Duration,
 };
 
-fn main() {
+fn main() -> ExitCode {
     let args = match env::args_os()
         .skip(1)
         .map(os_string_to_string)
@@ -19,7 +19,7 @@ fn main() {
         Ok(args) => args,
         Err(err) => {
             eprintln!("error: {err}");
-            process::exit(64);
+            return ExitCode::from(64);
         }
     };
 
@@ -27,20 +27,25 @@ fn main() {
         .first()
         .is_some_and(|arg| arg == "--version" || arg == "-V")
     {
-        if let Err(err) = write_stdout(&format!("loop {}\n", env!("CARGO_PKG_VERSION"))) {
-            eprintln!("error: {err}");
-            process::exit(err.exit_code());
-        }
-        return;
+        return match write_stdout(&format!("loop {}\n", env!("CARGO_PKG_VERSION"))) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("error: {err}");
+                ExitCode::from(err.exit_code() as u8)
+            }
+        };
     }
 
-    if let Err(err) = dispatch(&args) {
-        eprintln!("error: {err}");
-        process::exit(err.exit_code());
+    match dispatch(&args) {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("error: {err}");
+            ExitCode::from(err.exit_code() as u8)
+        }
     }
 }
 
-fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
+fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
     let workspace = env::current_dir().map_err(|source| RuntimeError::Io {
         path: PathBuf::from("."),
         source,
@@ -55,20 +60,14 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
             let emit = emit_mode(args)?;
             let output =
                 loop_agent_core::run_loop_to_writer(workspace, loop_ref, emit, io::stdout())?;
-            if output.failed {
-                process::exit(65);
-            }
-            Ok(())
+            Ok(command_exit_code(output.failed))
         }
         "replay" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
             let output = loop_agent_core::replay_session(workspace, session_id, emit)?;
             write_stdout(&output.stdout)?;
-            if output.failed {
-                process::exit(65);
-            }
-            Ok(())
+            Ok(command_exit_code(output.failed))
         }
         "tail" => {
             let session_id = positional(args, 1, "session_id")?;
@@ -81,10 +80,7 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
                 tail_options,
                 &mut stdout,
             )?;
-            if output.failed {
-                process::exit(65);
-            }
-            Ok(())
+            Ok(command_exit_code(output.failed))
         }
         "resume" => {
             let session_id = positional(args, 1, "session_id")?;
@@ -95,10 +91,7 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
                 emit,
                 io::stdout(),
             )?;
-            if output.failed {
-                process::exit(65);
-            }
-            Ok(())
+            Ok(command_exit_code(output.failed))
         }
         "sessions" => {
             reject_extra_args(args, 1)?;
@@ -107,7 +100,8 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
                 output.push_str(&session_id);
                 output.push('\n');
             }
-            write_stdout(&output)
+            write_stdout(&output)?;
+            Ok(ExitCode::SUCCESS)
         }
         "chat" => {
             reject_extra_args(args, 1)?;
@@ -117,7 +111,7 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
     }
 }
 
-fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
+fn chat(workspace: PathBuf) -> Result<ExitCode, RuntimeError> {
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         let line = line.map_err(|source| RuntimeError::Io {
@@ -132,10 +126,7 @@ fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
                     EmitMode::Jsonl,
                     io::stdout(),
                 )?;
-                if output.failed {
-                    process::exit(65);
-                }
-                return Ok(());
+                return Ok(command_exit_code(output.failed));
             }
             "" => {}
             other => {
@@ -145,7 +136,11 @@ fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
             }
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
+}
+
+fn command_exit_code(failed: bool) -> ExitCode {
+    ExitCode::from(if failed { 65 } else { 0 })
 }
 
 fn write_stdout(contents: &str) -> Result<(), RuntimeError> {

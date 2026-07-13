@@ -53,20 +53,6 @@ where
     run_loop_to_writer_internal(workspace, loop_ref, emit, writer, None)
 }
 
-#[cfg(test)]
-fn run_loop_to_writer_with_timings<W>(
-    workspace: impl AsRef<Path>,
-    loop_ref: &str,
-    emit: EmitMode,
-    writer: W,
-    timings: &mut EventWriterTimings,
-) -> Result<RunOutput, RuntimeError>
-where
-    W: Write + Send + 'static,
-{
-    run_loop_to_writer_internal(workspace, loop_ref, emit, writer, Some(timings))
-}
-
 fn run_loop_to_writer_internal<W>(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
