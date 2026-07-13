@@ -735,6 +735,39 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
     ));
 }
 
+#[cfg(windows)]
+#[test]
+fn run_loop_rejects_windows_short_alias_of_protected_directory() {
+    let workspace = workspace_copy("hello-loop");
+    fs::create_dir(workspace.join(".git")).expect("protected directory created");
+    assert!(
+        workspace.join("GIT~1").is_dir(),
+        "fixture requires the Windows short alias for .git"
+    );
+    fs::write(
+        workspace.join("registry/tools/write-summary.yaml"),
+        "tool:\n  id: write-summary\n  name: WriteSummary\n  tool_kind: own-script\n  command: script:write-summary\n  script_runtime: posix-sh\n  script_body: |\n    printf '%s\\n' \"$SUMMARY\" > GIT~1/config\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace\"]\n  protected_path_grants: []\n  network: deny\n",
+    )
+    .expect("alias write tool written");
+
+    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect_err("resolved protected directory alias must fail before execution");
+
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        "protected path",
+    );
+    assert!(
+        !workspace.join(".git/config").exists(),
+        "protected target must remain untouched"
+    );
+    assert!(
+        !workspace.join(LOCAL_SESSION_DIR).exists(),
+        "protected alias must fail during preflight"
+    );
+}
+
 #[test]
 fn runtime_policy_target_helpers_report_missing_artifacts() {
     assert_eq!(

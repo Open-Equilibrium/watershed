@@ -119,7 +119,12 @@ fn tool_dispatch_progress(
                 }
                 ToolDispatchMode::Preflight { workspace } => {
                     let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
-                    preflight_own_script_outputs(workspace, &operations)?;
+                    preflight_own_script_outputs(
+                        workspace,
+                        &operations,
+                        protected_path_match_mode,
+                        policy,
+                    )?;
                 }
                 ToolDispatchMode::Execute {
                     workspace,

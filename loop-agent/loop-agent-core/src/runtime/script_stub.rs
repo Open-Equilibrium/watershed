@@ -16,7 +16,14 @@ fn execute_own_script(
         match operation {
             ScriptOperation::Noop => {}
             ScriptOperation::Write { contents, target } => {
-                write_script_output(workspace, &target, &contents, side_effect_recorder)?;
+                write_script_output(
+                    workspace,
+                    &target,
+                    &contents,
+                    protected_path_match_mode,
+                    policy,
+                    side_effect_recorder,
+                )?;
             }
         }
     }
@@ -200,8 +207,16 @@ fn write_script_output(
     workspace: &Path,
     target: &str,
     contents: &[u8],
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
     side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
+    ensure_resolved_script_target_not_protected(
+        workspace,
+        target,
+        protected_path_match_mode,
+        policy,
+    )?;
     let path = ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
     replace_script_output_atomically(workspace, target, &path, contents, side_effect_recorder)
 }
@@ -209,10 +224,18 @@ fn write_script_output(
 fn preflight_own_script_outputs(
     workspace: &Path,
     operations: &[ScriptOperation],
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
     for operation in operations {
         if let ScriptOperation::Write { target, .. } = operation {
             let path = preflight_real_workspace_write_path(workspace, target)?;
+            ensure_resolved_script_target_not_protected(
+                workspace,
+                target,
+                protected_path_match_mode,
+                policy,
+            )?;
             ensure_writable_regular_leaf(&path)?;
         }
     }
@@ -423,6 +446,75 @@ fn ensure_script_target_not_protected(
             policy.tool_id
         ),
     ))
+}
+
+fn ensure_resolved_script_target_not_protected(
+    workspace: &Path,
+    target: &str,
+    protected_path_match_mode: ProtectedPathMatchMode,
+    policy: &core_policy::CommandPolicy,
+) -> Result<(), RuntimeError> {
+    let resolved_target = resolved_workspace_scoped_target(workspace, target)?;
+    ensure_script_target_not_protected(protected_path_match_mode, policy, &resolved_target)
+}
+
+fn resolved_workspace_scoped_target(
+    workspace: &Path,
+    target: &str,
+) -> Result<String, RuntimeError> {
+    let canonical_workspace = fs::canonicalize(workspace).map_err(|source| RuntimeError::Io {
+        path: workspace.to_owned(),
+        source,
+    })?;
+    let mut resolved = canonical_workspace.clone();
+    let mut unresolved_suffix = false;
+    for component in target.split('/') {
+        if unresolved_suffix {
+            resolved.push(component);
+            continue;
+        }
+        let candidate = resolved.join(component);
+        match fs::symlink_metadata(&candidate) {
+            Ok(_) => {
+                resolved = fs::canonicalize(&candidate).map_err(|source| RuntimeError::Io {
+                    path: candidate,
+                    source,
+                })?;
+                if !resolved.starts_with(&canonical_workspace) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "own-script write target {target:?} resolves outside the workspace"
+                    )));
+                }
+            }
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                unresolved_suffix = true;
+                resolved.push(component);
+            }
+            Err(source) => {
+                return Err(RuntimeError::Io {
+                    path: candidate,
+                    source,
+                });
+            }
+        }
+    }
+    let relative = resolved.strip_prefix(&canonical_workspace).map_err(|_| {
+        RuntimeError::Protocol(format!(
+            "own-script write target {target:?} resolves outside the workspace"
+        ))
+    })?;
+    let relative = relative
+        .components()
+        .map(|component| {
+            component.as_os_str().to_str().ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "own-script write target {target:?} resolves to a non-UTF-8 path"
+                ))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .join("/");
+    Ok(format!("workspace/{relative}"))
 }
 
 fn ensure_real_workspace_write_path(
