@@ -103,12 +103,11 @@ where
     if stream_is_failed(&events) || stream_is_completed(&events) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
-    ensure_resume_has_durable_loop_progress(&path, session_id, &events)?;
+    let loop_id = resumable_loop_id(&path, session_id, &events)?;
 
     let config = load_workspace_config(workspace)?;
     let registry_path = registry_root_path(workspace, &config.registry_root)?;
     let registry = core_script::load_registry_root(registry_path)?;
-    let loop_id = resumable_loop_id(&events, &registry, session_id)?;
     let loop_block = registry.loop_block(&loop_id).ok_or_else(|| {
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;
@@ -117,6 +116,7 @@ where
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, &loop_id)?;
     let policy = runtime_policy_artifact(&artifacts)?;
+    let clock = resume_event_clock(&config, &events)?;
     let planned_runtime = execute_loop(
         workspace,
         &registry,
@@ -124,7 +124,7 @@ where
         loop_block,
         session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(
-            resume_event_clock(&config, &events)?,
+            clock,
             ToolSideEffectMode::DryRun,
             SideEffectRecorder::none(),
             config.stub_model_fixture_profile,
@@ -141,7 +141,7 @@ where
         &events,
         &planned_runtime.events,
         loop_block,
-        resume_event_clock(&config, &events)?,
+        clock,
     )?;
     if let Some(tool_id) = started_tool_without_progress(&events) {
         return Err(RuntimeError::Protocol(format!(
@@ -155,7 +155,7 @@ where
         loop_block,
         session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(
-            resume_event_clock(&config, &events)?,
+            clock,
             ToolSideEffectMode::PreflightResume {
                 prefix_event_count: resume_prefix.planned_event_count as u64,
             },
@@ -176,10 +176,9 @@ where
         &events,
         &planned_runtime.events,
         &resume_prefix,
-        resume_event_clock(&config, &events)?,
+        clock,
     )?;
 
-    let clock = resume_event_clock(&config, &events)?;
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{session_id}.contexts.jsonl"));
@@ -332,24 +331,6 @@ fn incomplete_resume_marker_error(
     ))
 }
 
-fn ensure_resume_has_durable_loop_progress(
-    path: &Path,
-    session_id: &str,
-    events: &[EventEnvelope],
-) -> Result<(), RuntimeError> {
-    if events
-        .iter()
-        .any(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
-    {
-        return Ok(());
-    }
-
-    Err(RuntimeError::Protocol(format!(
-        "{} cannot resume session {session_id} before durable loop progress",
-        path.display()
-    )))
-}
-
 fn preflight_resume_append_plan(
     path: &Path,
     session_id: &str,
@@ -433,53 +414,20 @@ fn shift_resumed_event(
 }
 
 fn resumable_loop_id(
-    events: &[EventEnvelope],
-    registry: &core_script::ResolvedRegistry,
+    path: &Path,
     session_id: &str,
+    events: &[EventEnvelope],
 ) -> Result<String, RuntimeError> {
-    if let Some(event) = events
+    let event = events
         .iter()
         .find(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
-    {
-        return event
-            .payload
-            .get("loop_definition_id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned)
-            .ok_or_else(|| {
-                RuntimeError::Protocol("loop.started missing loop_definition_id".to_owned())
-            });
-    }
-
-    let matches = registry
-        .loops
-        .values()
-        .filter(|loop_block| session_id_matches_loop(session_id, &loop_block.identity.id))
-        .map(|loop_block| loop_block.identity.id.clone())
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [loop_id] => Ok(loop_id.clone()),
-        [] => Err(RuntimeError::Protocol(format!(
-            "session {session_id} does not identify a resumable loop"
-        ))),
-        _ => Err(RuntimeError::Protocol(format!(
-            "session {session_id} ambiguously identifies a resumable loop"
-        ))),
-    }
-}
-
-fn session_id_matches_loop(session_id: &str, loop_id: &str) -> bool {
-    let base = session_id_for_loop(loop_id);
-    if session_id == base {
-        return true;
-    }
-    let Some((_, suffix)) = session_id.rsplit_once('-') else {
-        return false;
-    };
-    let Ok(ordinal) = suffix.parse::<u32>() else {
-        return false;
-    };
-    (2..=10_000).contains(&ordinal) && suffixed_session_id(&base, ordinal) == session_id
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "{} cannot resume session {session_id} before durable loop progress",
+                path.display()
+            ))
+        })?;
+    Ok(lifecycle_payload_string(event, "loop_definition_id"))
 }
 
 fn read_existing_session(
@@ -986,25 +934,12 @@ fn preflight_session_completion_stream(
     reservation: &SessionReservation,
     expected_session_id: &str,
     events: &[EventEnvelope],
-) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
-    preflight_session_completion_stream_from_prefix(reservation, expected_session_id, events, 0)
-}
-
-fn preflight_session_completion_stream_from_prefix(
-    reservation: &SessionReservation,
-    expected_session_id: &str,
-    events: &[EventEnvelope],
-    persisted_event_count: usize,
-) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
+) -> Result<Vec<EventEnvelope>, RuntimeError> {
     let stream = canonical_event_stream(events)?;
     let validated_events =
         validate_session_log_text(Path::new("runtime.jsonl"), expected_session_id, &stream)?;
-    preflight_complete_reserved_session_log_from_prefix(
-        reservation,
-        &stream,
-        persisted_event_count,
-    )?;
-    Ok((stream, validated_events))
+    preflight_complete_reserved_session_log_from_prefix(reservation, &stream, 0)?;
+    Ok(validated_events)
 }
 
 fn preflight_complete_reserved_session_log_from_prefix(

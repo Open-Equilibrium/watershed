@@ -185,7 +185,7 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
     replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     let mut file = open_session_log_append_file(path)?;
     file.seek(SeekFrom::End(0))
@@ -209,22 +209,8 @@ fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
             path: path.to_owned(),
             source,
         })?;
-    ensure_opened_regular_leaf_matches_path(path, &file)?;
+    validate_open_session_log_append_file(path, &file)?;
     Ok(file)
-}
-
-#[cfg(windows)]
-fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    let mut file = open_session_log_append_file(path)?;
-    file.seek(SeekFrom::End(0))
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    file.write_all(contents).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })
 }
 
 #[cfg(windows)]
@@ -247,18 +233,30 @@ fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
             path: path.to_owned(),
             source,
         })?;
-    let metadata = file.metadata().map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    validate_real_file(path, &metadata)?;
-    if hard_link_count_for_open_file(path, &file)? > 1 {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be hard-linked",
-            path.display()
-        )));
-    }
+    validate_open_session_log_append_file(path, &file)?;
     Ok(file)
+}
+
+#[cfg(any(unix, windows))]
+fn validate_open_session_log_append_file(path: &Path, file: &fs::File) -> Result<(), RuntimeError> {
+    #[cfg(unix)]
+    ensure_opened_regular_leaf_matches_path(path, file)?;
+
+    #[cfg(windows)]
+    {
+        let metadata = file.metadata().map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        validate_real_file(path, &metadata)?;
+        if hard_link_count_for_open_file(path, file)? > 1 {
+            return Err(RuntimeError::Protocol(format!(
+                "{} must not be hard-linked",
+                path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]

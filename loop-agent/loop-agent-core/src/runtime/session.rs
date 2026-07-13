@@ -92,16 +92,13 @@ where
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
-    if let Err(err) = write_reserved_session_metadata(
+    write_reserved_session_metadata(
         &reservation,
         &expected_session_id,
         0,
         Some(&definition_hashes),
-    ) {
-        reservation.rollback();
-        return Err(err);
-    }
-    let planned_runtime = match execute_loop(
+    )?;
+    let planned_runtime = execute_loop(
         workspace,
         &registry,
         policy,
@@ -113,95 +110,76 @@ where
             SideEffectRecorder::none(),
             config.stub_model_fixture_profile,
         ),
-    ) {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            reservation.rollback();
-            return Err(err);
-        }
-    };
-    let planned_events = match preflight_session_completion_stream(
+    )?;
+    let planned_events = preflight_session_completion_stream(
         &reservation,
         &expected_session_id,
         &planned_runtime.events,
-    ) {
-        Ok((_, events)) => events,
-        Err(err) => {
-            reservation.rollback();
-            return Err(err);
-        }
-    };
-    let result = (|| {
-        let mut serial_writer =
-            SerialSessionWriter::start(&reservation, emit, writer, timings)?;
-        let runtime_result = execute_loop_with_sink(
-            workspace,
-            &registry,
-            policy,
-            loop_block,
-            &expected_session_id,
-            LoopExecutionOptions::with_stub_model_fixture_profile(
-                config.event_clock,
-                ToolSideEffectMode::ApplyAll,
-                SideEffectRecorder::for_reservation(&reservation),
-                config.stub_model_fixture_profile,
-            ),
-            Some(&mut serial_writer),
-        );
-        let finish_result = serial_writer.finish();
-        let runtime = runtime_result?;
-        finish_result?;
-        reservation.mark_side_effects_applied();
-        let runtime_failed = runtime.failed;
-        if !runtime_failed
-            && (runtime.events != planned_runtime.events
-                || runtime.context_manifests != planned_runtime.context_manifests)
-        {
-            return Err(RuntimeError::Protocol(format!(
-                "{} runtime did not match deterministic replay",
-                reservation.session_path.display()
-            )));
-        }
-        if runtime_failed {
-            let stream = canonical_event_stream(&runtime.events)?;
-            validate_session_log_text(
-                &reservation.session_path,
-                &expected_session_id,
-                &stream,
-            )?;
-        } else if runtime.events != planned_events {
-            return Err(RuntimeError::Protocol(format!(
-                "{} committed runtime did not match its validated plan",
-                reservation.session_path.display()
-            )));
-        }
-        write_reserved_session_metadata(
-            &reservation,
-            &expected_session_id,
-            runtime.events.len(),
-            Some(&definition_hashes),
-        )?;
-        reservation.release_lock()?;
-        if let Some(err) = runtime.terminal_error {
-            return Err(err);
-        }
-        let status = if let Some(reason) = terminal_failure_reason(&runtime.events) {
-            let reason = escape_human_failure_reason(reason);
-            format!("loop {} failed: {reason}\n", loop_block.identity.id)
-        } else {
-            format!("loop {} completed\n", loop_block.identity.id)
-        };
-        serial_writer.publish_human_status(&status);
-        Ok(RunOutput {
-            event_count: runtime.events.len(),
-            failed: runtime_failed,
-            session_id: expected_session_id.clone(),
-            session_path: reservation.session_path.clone(),
-            stdout: String::new(),
-        })
-    })();
-    if result.is_err() {
-        reservation.rollback();
+    )?;
+    let mut serial_writer = SerialSessionWriter::start(&reservation, emit, writer, timings)?;
+    let runtime_result = execute_loop_with_sink(
+        workspace,
+        &registry,
+        policy,
+        loop_block,
+        &expected_session_id,
+        LoopExecutionOptions::with_stub_model_fixture_profile(
+            config.event_clock,
+            ToolSideEffectMode::ApplyAll,
+            SideEffectRecorder::for_reservation(&reservation),
+            config.stub_model_fixture_profile,
+        ),
+        Some(&mut serial_writer),
+    );
+    let finish_result = serial_writer.finish();
+    let runtime = runtime_result?;
+    finish_result?;
+    reservation.mark_side_effects_applied();
+    let runtime_failed = runtime.failed;
+    if !runtime_failed
+        && (runtime.events != planned_runtime.events
+            || runtime.context_manifests != planned_runtime.context_manifests)
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "{} runtime did not match deterministic replay",
+            reservation.session_path.display()
+        )));
     }
-    result
+    if runtime_failed {
+        let stream = canonical_event_stream(&runtime.events)?;
+        validate_session_log_text(
+            &reservation.session_path,
+            &expected_session_id,
+            &stream,
+        )?;
+    } else if runtime.events != planned_events {
+        return Err(RuntimeError::Protocol(format!(
+            "{} committed runtime did not match its validated plan",
+            reservation.session_path.display()
+        )));
+    }
+    write_reserved_session_metadata(
+        &reservation,
+        &expected_session_id,
+        runtime.events.len(),
+        Some(&definition_hashes),
+    )?;
+    reservation.release_lock()?;
+    if let Some(err) = runtime.terminal_error {
+        return Err(err);
+    }
+    let status = if let Some(reason) = terminal_failure_reason(&runtime.events) {
+        let reason = escape_human_failure_reason(reason);
+        format!("loop {} failed: {reason}\n", loop_block.identity.id)
+    } else {
+        format!("loop {} completed\n", loop_block.identity.id)
+    };
+    serial_writer.publish_human_status(&status);
+    Ok(RunOutput {
+        event_count: runtime.events.len(),
+        failed: runtime_failed,
+        session_id: expected_session_id,
+        session_path: reservation.session_path.clone(),
+        stdout: String::new(),
+    })
 }

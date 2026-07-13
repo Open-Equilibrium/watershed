@@ -102,6 +102,29 @@ fn human_run_replay_tail_and_session_listing_report_status() {
         list_sessions(&workspace).expect("sessions list"),
         vec!["smoke001"]
     );
+
+    let before = fs::read_to_string(&run.session_path).expect("terminal session readable");
+    assert!(matches!(
+        resume_session(&workspace, &run.session_id, EmitMode::Jsonl),
+        Err(RuntimeError::TerminalSession(session_id)) if session_id == run.session_id
+    ));
+    assert_eq!(
+        fs::read_to_string(&run.session_path).expect("terminal session remains readable"),
+        before
+    );
+
+    let failed_workspace = workspace_copy("sandbox-negative");
+    let failed = run_loop(
+        &failed_workspace,
+        "sandbox-negative-write",
+        EmitMode::Human,
+    )
+    .expect("negative fixture reaches its deterministic terminal state");
+    assert!(failed.failed);
+    assert_eq!(
+        failed.stdout,
+        "loop sandbox-negative-write failed: write_denied\n"
+    );
 }
 
 #[test]

@@ -758,21 +758,6 @@ fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
 
 #[test]
 fn tail_session_rejects_invalid_appended_suffix() {
-    let workspace = empty_workspace("tail-invalid-suffix");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailinvalid001.jsonl");
-    let started = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "tailinvalid001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
     let invalid_completed = EventEnvelope::new(
         "evt-002",
         EventType::SessionCompleted,
@@ -784,6 +769,54 @@ fn tail_session_rejects_invalid_appended_suffix() {
     )
     .canonical_jsonl()
     .expect("invalid completed event serializes");
+    let err = tail_protocol_error_after_append("tailinvalid001", &invalid_completed);
+    assert!(
+        matches!(err, RuntimeError::Protocol(ref message) if message.contains("sequence must increase")),
+        "{err}"
+    );
+}
+
+#[test]
+fn tail_session_rejects_empty_ids_in_appended_envelopes() {
+    for (label, session_id, field) in [
+        ("tail-empty-loop-id", "tailemptyloop001", "loop_id"),
+        (
+            "tail-empty-parent-loop-id",
+            "tailemptyparent001",
+            "parent_loop_id",
+        ),
+    ] {
+        let mut invalid = EventEnvelope::new(
+            "evt-002",
+            EventType::SessionPaused,
+            session_id,
+            2,
+            "2026-01-01T00:00:01Z",
+            "loop-agent-cli",
+            serde_json::json!({"reason":"pause"}),
+        );
+        match field {
+            "loop_id" => invalid.loop_id = Some(String::new()),
+            "parent_loop_id" => invalid.parent_loop_id = Some(String::new()),
+            _ => unreachable!("test field is fixed"),
+        }
+        let invalid = invalid
+            .canonical_jsonl()
+            .expect("invalid envelope serializes canonically");
+        let err = tail_protocol_error_after_append(session_id, &invalid);
+        assert!(
+            matches!(err, RuntimeError::Protocol(ref message) if message.contains(&format!("must use a non-empty {field}"))),
+            "{label}: {err}"
+        );
+    }
+}
+
+fn tail_protocol_error_after_append(session_id: &'static str, appended: &str) -> RuntimeError {
+    let workspace = empty_workspace(session_id);
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join(format!("{session_id}.jsonl"));
+    let started = session_event_line(session_id, "evt-001", EventType::SessionStarted, 1);
     fs::write(&path, &started).expect("initial session log written");
 
     let bytes = Arc::new(Mutex::new(Vec::new()));
@@ -794,31 +827,22 @@ fn tail_session_rejects_invalid_appended_suffix() {
     };
     let tail_workspace = workspace.clone();
     let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailinvalid001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
+        tail_session_to_writer(&tail_workspace, session_id, EmitMode::Jsonl, &mut writer)
     });
 
     rx.recv_timeout(Duration::from_secs(1))
         .expect("tail writes current prefix before invalid append");
-    append_session_log_line(&path, &invalid_completed).expect("invalid terminal event appended");
-
+    append_session_log_line(&path, appended).expect("invalid event appended");
     let err = handle
         .join()
         .expect("tail thread joins")
-        .expect_err("tail must reject invalid appended suffix");
-    assert!(
-        matches!(err, RuntimeError::Protocol(ref message) if message.contains("sequence must increase")),
-        "{err}"
-    );
+        .expect_err("tail must reject the invalid appended event");
     assert_eq!(
         String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
             .expect("tail prefix is utf8"),
         started
     );
+    err
 }
 
 #[test]
@@ -952,6 +976,24 @@ fn tail_options_no_follow_reads_current_prefix_without_waiting() {
         String::from_utf8(writer).expect("tail output is utf8"),
         started
     );
+
+    fs::write(session_dir.join("tailnowait001.jsonl"), [0xff, b'\n'])
+        .expect("invalid UTF-8 session log written");
+    let mut writer = Vec::new();
+    let err = tail_session_to_writer_with_options(
+        &workspace,
+        "tailnowait001",
+        EmitMode::Jsonl,
+        TailOptions::no_follow(),
+        &mut writer,
+    )
+    .expect_err("tail must reject non-UTF-8 JSONL");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("not valid UTF-8")
+    ));
+    assert!(writer.is_empty());
 }
 
 #[test]

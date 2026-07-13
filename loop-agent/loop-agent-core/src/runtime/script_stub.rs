@@ -5,27 +5,15 @@ fn execute_own_script(
     policy: &core_policy::CommandPolicy,
     side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
-    if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
-        return Err(RuntimeError::Protocol(format!(
-            "tool {} must use script_runtime posix-sh",
-            tool.identity.id
-        )));
-    }
-    let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
-    for operation in operations {
-        match operation {
-            ScriptOperation::Noop => {}
-            ScriptOperation::Write { contents, target } => {
-                write_script_output(
-                    workspace,
-                    &target,
-                    &contents,
-                    protected_path_match_mode,
-                    policy,
-                    side_effect_recorder,
-                )?;
-            }
-        }
+    if let Some(write) = plan_own_script(tool, protected_path_match_mode, policy)? {
+        write_script_output(
+            workspace,
+            &write.target,
+            &write.contents,
+            protected_path_match_mode,
+            policy,
+            side_effect_recorder,
+        )?;
     }
     Ok(())
 }
@@ -34,7 +22,7 @@ fn plan_own_script(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
-) -> Result<Vec<ScriptOperation>, RuntimeError> {
+) -> Result<Option<ScriptWrite>, RuntimeError> {
     if tool.script_runtime.as_ref() != Some(&core_script::ScriptRuntime::PosixSh) {
         return Err(RuntimeError::Protocol(format!(
             "tool {} must use script_runtime posix-sh",
@@ -50,40 +38,36 @@ fn plan_own_script(
     compile_own_script_operations(protected_path_match_mode, policy, script_body)
 }
 
-enum ScriptOperation {
-    Noop,
-    Write { contents: Vec<u8>, target: String },
+struct ScriptWrite {
+    contents: Vec<u8>,
+    target: String,
 }
 
 fn compile_own_script_operations(
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
     script_body: &str,
-) -> Result<Vec<ScriptOperation>, RuntimeError> {
-    let mut operations = Vec::new();
-    let mut write_count = 0usize;
+) -> Result<Option<ScriptWrite>, RuntimeError> {
+    let mut write = None;
     for line in script_body.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') || line == "---" {
-            operations.push(ScriptOperation::Noop);
             continue;
         }
         if let Some((command, target)) = script_redirection(line)? {
-            write_count += 1;
-            if write_count > 1 {
+            if write.is_some() {
                 return Err(RuntimeError::Protocol(
                     "own-script multiple write operations are not supported in M1".to_owned(),
                 ));
             }
             let target = validate_script_write_target(protected_path_match_mode, policy, &target)?;
             let contents = evaluate_script_command(&command)?;
-            operations.push(ScriptOperation::Write { contents, target });
+            write = Some(ScriptWrite { contents, target });
         } else {
             evaluate_script_command(line)?;
-            operations.push(ScriptOperation::Noop);
         }
     }
-    Ok(operations)
+    Ok(write)
 }
 
 fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
@@ -223,21 +207,19 @@ fn write_script_output(
 
 fn preflight_own_script_outputs(
     workspace: &Path,
-    operations: &[ScriptOperation],
+    write: Option<&ScriptWrite>,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
-    for operation in operations {
-        if let ScriptOperation::Write { target, .. } = operation {
-            let path = preflight_real_workspace_write_path(workspace, target)?;
-            ensure_resolved_script_target_not_protected(
-                workspace,
-                target,
-                protected_path_match_mode,
-                policy,
-            )?;
-            ensure_writable_regular_leaf(&path)?;
-        }
+    if let Some(write) = write {
+        let path = preflight_real_workspace_write_path(workspace, &write.target)?;
+        ensure_resolved_script_target_not_protected(
+            workspace,
+            &write.target,
+            protected_path_match_mode,
+            policy,
+        )?;
+        ensure_writable_regular_leaf(&path)?;
     }
     Ok(())
 }

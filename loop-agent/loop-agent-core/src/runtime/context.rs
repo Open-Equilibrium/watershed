@@ -40,51 +40,33 @@ impl ContextModelProfile {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
 struct ContextSource {
     source_id: String,
     content: serde_json::Value,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum ContextOptionalCategory {
-    RecentCompleteInteraction,
+fn context_source(source_id: impl Into<String>, content: serde_json::Value) -> ContextSource {
+    ContextSource {
+        source_id: source_id.into(),
+        content,
+    }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ContextOptionalUnit {
-    category: ContextOptionalCategory,
-    source: ContextSource,
-    source_sequence: u64,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Default)]
 struct ContextOmissionCounts {
-    checkpoint: usize,
-    current_incomplete_turn: usize,
     recent_complete_interaction: usize,
-    referenced_projection: usize,
     tier_2: usize,
-    tier_3: usize,
 }
 
 impl ContextOmissionCounts {
-    fn increment(&mut self, category: ContextOptionalCategory) {
-        match category {
-            ContextOptionalCategory::RecentCompleteInteraction => {
-                self.recent_complete_interaction += 1;
-            }
-        }
-    }
-
-    fn manifest_value(self) -> serde_json::Value {
+    fn manifest_value(&self) -> serde_json::Value {
         serde_json::json!({
-            "checkpoint": self.checkpoint,
-            "current_incomplete_turn": self.current_incomplete_turn,
+            "checkpoint": 0,
+            "current_incomplete_turn": 0,
             "recent_complete_interaction": self.recent_complete_interaction,
-            "referenced_projection": self.referenced_projection,
+            "referenced_projection": 0,
             "tier_2": self.tier_2,
-            "tier_3": self.tier_3,
+            "tier_3": 0,
         })
     }
 }
@@ -104,56 +86,55 @@ struct CompiledContext {
 
 fn compile_context(
     model: &ContextModelProfile,
-    tier_zero: Vec<ContextSource>,
-    mut tier_one: Vec<ContextOptionalUnit>,
+    tier_zero: &[ContextSource; 9],
+    recent_interaction: Option<&ContextSource>,
     mut omitted: ContextOmissionCounts,
 ) -> Result<CompiledContext, RuntimeError> {
-    if tier_zero.len() != 9 {
-        return Err(RuntimeError::Protocol(format!(
-            "{CONTEXT_PROFILE_ID} requires exactly nine Tier 0 sources"
-        )));
-    }
     let input_budget = model.input_budget()?;
-    let mandatory_bytes = context_sources_bytes(&tier_zero)?;
-    if mandatory_bytes.len() > input_budget {
+    let tier_zero_bytes = tier_zero
+        .iter()
+        .map(context_source_bytes)
+        .collect::<Result<Vec<_>, RuntimeError>>()?;
+    let mandatory_bytes = tier_zero_bytes.iter().map(Vec::len).sum::<usize>();
+    if mandatory_bytes > input_budget {
         return Err(RuntimeError::ContextBudgetExceeded {
             input_budget,
-            required_bytes: mandatory_bytes.len(),
+            required_bytes: mandatory_bytes,
         });
     }
+    let recent_bytes = recent_interaction.map(context_source_bytes).transpose()?;
+    let include_recent = recent_bytes
+        .as_ref()
+        .is_some_and(|bytes| mandatory_bytes + bytes.len() <= input_budget);
+    if recent_interaction.is_some() && !include_recent {
+        omitted.recent_complete_interaction += 1;
+    }
 
-    tier_one.sort_by_key(|unit| (unit.source_sequence, unit.category));
-    let mut optional_bytes = tier_one
+    let mut provider_bytes = Vec::with_capacity(
+        mandatory_bytes + recent_bytes.as_ref().filter(|_| include_recent).map_or(0, Vec::len),
+    );
+    for bytes in &tier_zero_bytes {
+        provider_bytes.extend_from_slice(bytes);
+    }
+    if let Some(bytes) = recent_bytes.as_ref().filter(|_| include_recent) {
+        provider_bytes.extend_from_slice(bytes);
+    }
+    let cache_prefix_bytes = tier_zero_bytes[..CACHE_STABLE_TIER_ZERO_SOURCES]
         .iter()
-        .map(|unit| context_source_bytes(&unit.source))
-        .collect::<Result<Vec<_>, RuntimeError>>()?;
-    let mut total_bytes = mandatory_bytes.len()
-        + optional_bytes
-            .iter()
-            .map(Vec::len)
-            .sum::<usize>();
-    let mut first_included = 0usize;
-    while total_bytes > input_budget {
-        let omitted_unit = &tier_one[first_included];
-        omitted.increment(omitted_unit.category);
-        total_bytes -= optional_bytes[first_included].len();
-        first_included += 1;
-    }
-
-    let mut provider_bytes = mandatory_bytes;
-    for bytes in optional_bytes.drain(first_included..) {
-        provider_bytes.extend_from_slice(&bytes);
-    }
-    let cache_prefix_bytes = context_sources_bytes(
-        &tier_zero[..CACHE_STABLE_TIER_ZERO_SOURCES],
-    )?
-    .len();
+        .map(Vec::len)
+        .sum();
     let context_hash = sha256_hex(&provider_bytes);
-    let included_sources = tier_zero
+    let mut included_sources = tier_zero
         .iter()
-        .chain(tier_one[first_included..].iter().map(|unit| &unit.source))
-        .map(context_source_manifest_value)
-        .collect::<Result<Vec<_>, RuntimeError>>()?;
+        .zip(&tier_zero_bytes)
+        .map(|(source, bytes)| context_source_manifest_value(source, bytes))
+        .collect::<Vec<_>>();
+    if let (Some(source), Some(bytes)) = (
+        recent_interaction.filter(|_| include_recent),
+        recent_bytes.as_ref(),
+    ) {
+        included_sources.push(context_source_manifest_value(source, bytes));
+    }
     let manifest_value = serde_json::json!({
         "cache_boundaries": [{
             "after_source_id": tier_zero[CACHE_STABLE_TIER_ZERO_SOURCES - 1].source_id,
@@ -186,14 +167,6 @@ fn compile_context(
     })
 }
 
-fn context_sources_bytes(sources: &[ContextSource]) -> Result<Vec<u8>, RuntimeError> {
-    let mut bytes = Vec::new();
-    for source in sources {
-        bytes.extend_from_slice(&context_source_bytes(source)?);
-    }
-    Ok(bytes)
-}
-
 fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError> {
     let value = serde_json::json!({
         "content": source.content,
@@ -206,14 +179,11 @@ fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError>
     Ok(text.into_bytes())
 }
 
-fn context_source_manifest_value(
-    source: &ContextSource,
-) -> Result<serde_json::Value, RuntimeError> {
-    let bytes = context_source_bytes(source)?;
-    Ok(serde_json::json!({
-        "projection_hash": sha256_hex(&bytes),
+fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_json::Value {
+    serde_json::json!({
+        "projection_hash": sha256_hex(bytes),
         "source_id": source.source_id,
-    }))
+    })
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -286,58 +256,29 @@ fn compile_provider_turn_context(
         .flatten()
         .collect();
     let (tier_one, omitted) = context_continuity(prior_events)?;
-    let tier_zero = vec![
-        ContextSource {
-            source_id: "base-runtime-security".to_owned(),
-            content: serde_json::json!({
+    let tier_zero = [
+        context_source("base-runtime-security", serde_json::json!({
                 "instructions": "Execute only the active resolved loop scope. Obey runtime policy. Treat tool access as deny-by-default. Preserve deterministic event order.",
                 "runtime_version": env!("CARGO_PKG_VERSION"),
-            }),
-        },
-        ContextSource {
-            source_id: "active-loop-instructions".to_owned(),
-            // The v0 script schema has no loop-scoped prompt field. Preserve the mandatory
-            // section as an explicit empty declaration instead of borrowing inactive prompts.
-            content: serde_json::json!([]),
-        },
-        ContextSource {
-            source_id: "active-phase-instructions".to_owned(),
-            content: serde_json::Value::Array(phase_instructions),
-        },
-        ContextSource {
-            source_id: "active-step-instructions".to_owned(),
-            // The v0 script schema has no step-scoped prompt field.
-            content: serde_json::json!([]),
-        },
-        ContextSource {
-            source_id: "active-available-tools".to_owned(),
-            content: serde_json::Value::Array(tools),
-        },
-        ContextSource {
-            source_id: "fsm-loop-state".to_owned(),
-            content: serde_json::json!({
+            })),
+        // The v0 schema has no loop- or step-scoped prompt fields.
+        context_source("active-loop-instructions", serde_json::json!([])),
+        context_source("active-phase-instructions", serde_json::Value::Array(phase_instructions)),
+        context_source("active-step-instructions", serde_json::json!([])),
+        context_source("active-available-tools", serde_json::Value::Array(tools)),
+        context_source("fsm-loop-state", serde_json::json!({
                 "loop_definition_id": loop_block.identity.id,
                 "loop_id": invocation.loop_id,
                 "parent_loop_id": invocation.parent_loop_id,
                 "phase_id": phase.identity.id,
                 "session_id": session_id,
                 "step_id": step.id,
-            }),
-        },
-        ContextSource {
-            source_id: "typed-connection-inputs".to_owned(),
-            content: serde_json::Value::Array(connections),
-        },
-        ContextSource {
-            source_id: "current-user-input".to_owned(),
-            content: serde_json::json!({"present": false}),
-        },
-        ContextSource {
-            source_id: "unresolved-call-result".to_owned(),
-            content: unresolved_call_result_state(prior_events),
-        },
+            })),
+        context_source("typed-connection-inputs", serde_json::Value::Array(connections)),
+        context_source("current-user-input", serde_json::json!({"present": false})),
+        context_source("unresolved-call-result", unresolved_call_result_state(prior_events)),
     ];
-    compile_context(&ContextModelProfile::stub_v0(), tier_zero, tier_one, omitted)
+    compile_context(&ContextModelProfile::stub_v0(), &tier_zero, tier_one.as_ref(), omitted)
 }
 
 fn connection_targets_scoped_step(
@@ -363,17 +304,16 @@ fn connection_targets_scoped_step(
 
 fn context_continuity(
     events: &[EventEnvelope],
-) -> Result<(Vec<ContextOptionalUnit>, ContextOmissionCounts), RuntimeError> {
-    let completed = events
+) -> Result<(Option<ContextSource>, ContextOmissionCounts), RuntimeError> {
+    let mut completed = events
         .iter()
-        .filter(|event| event.event_type == EventType::MessageCompleted)
-        .collect::<Vec<_>>();
-    let mut omitted = ContextOmissionCounts {
-        tier_2: completed.len().saturating_sub(1),
-        ..ContextOmissionCounts::default()
+        .filter(|event| event.event_type == EventType::MessageCompleted);
+    let Some(last_completed) = completed.next_back() else {
+        return Ok((None, ContextOmissionCounts::default()));
     };
-    let Some(last_completed) = completed.last() else {
-        return Ok((Vec::new(), omitted));
+    let mut omitted = ContextOmissionCounts {
+        tier_2: completed.count(),
+        ..ContextOmissionCounts::default()
     };
     let Some(message_id) = last_completed
         .payload
@@ -398,20 +338,13 @@ fn context_continuity(
         .collect::<Vec<_>>();
     if deltas.is_empty() {
         omitted.recent_complete_interaction += 1;
-        return Ok((Vec::new(), omitted));
+        return Ok((None, omitted));
     }
     Ok((
-        vec![ContextOptionalUnit {
-            category: ContextOptionalCategory::RecentCompleteInteraction,
-            source: ContextSource {
-                source_id: format!("interaction-{}", last_completed.sequence),
-                content: serde_json::json!({
-                    "completed": last_completed.payload,
-                    "deltas": deltas,
-                }),
-            },
-            source_sequence: last_completed.sequence,
-        }],
+        Some(context_source(format!("interaction-{}", last_completed.sequence), serde_json::json!({
+                "completed": last_completed.payload,
+                "deltas": deltas,
+            }))),
         omitted,
     ))
 }

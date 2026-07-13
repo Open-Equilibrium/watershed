@@ -1094,21 +1094,15 @@ fn script_operation_helpers_cover_edge_paths() {
         command_policy_for_phase(&policy, &phase.identity.id, tool).expect("policy exists");
     let match_mode = runtime_protected_path_match_mode(&policy.target);
 
-    let operations = compile_own_script_operations(
+    let write = compile_own_script_operations(
         match_mode,
         command_policy,
         "\n# comment\n---\necho hello\nprintf 'ok\\n' > out/coverage.txt\n",
     )
-    .expect("literal own-script operations compile");
-    assert!(matches!(operations[0], ScriptOperation::Noop));
-    assert!(matches!(operations[1], ScriptOperation::Noop));
-    assert!(matches!(operations[2], ScriptOperation::Noop));
-    assert!(matches!(operations[3], ScriptOperation::Noop));
-    assert!(matches!(
-        &operations[4],
-        ScriptOperation::Write { contents, target }
-            if contents == b"ok\n" && target == "out/coverage.txt"
-    ));
+    .expect("literal own-script compiles")
+    .expect("literal own-script plans one write");
+    assert_eq!(write.contents, b"ok\n");
+    assert_eq!(write.target, "out/coverage.txt");
     assert!(matches!(
         compile_own_script_operations(
             match_mode,
@@ -1699,6 +1693,35 @@ fn edge_message_completed_line(event_id: &str, sequence: u64, role: &str) -> Str
 }
 
 #[test]
+fn protocol_accepts_optional_step_phase_and_multiple_message_deltas() {
+    let prefix = [
+        session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+        loop_started_line("evt-002", 2),
+        phase_entered_line("evt-003", 3),
+        event_line(
+            "evt-004",
+            EventType::StepStarted,
+            "meta001",
+            4,
+            Some("loop-001"),
+            serde_json::json!({"step_id":"step","step_name":"Step"}),
+        ),
+        edge_message_delta_line("evt-005", 5, "assistant"),
+    ]
+    .concat();
+    let prior = validate_protocol_jsonl_text(Path::new("valid-transcript.jsonl"), &prefix)
+        .expect("optional step phase metadata is valid");
+    let appended = validate_appended_session_log_text(
+        Path::new("valid-transcript.jsonl"),
+        "meta001",
+        &prior,
+        &edge_message_delta_line("evt-006", 6, "assistant"),
+    )
+    .expect("a second same-role message delta is valid");
+    assert_eq!(appended.len(), 1);
+}
+
+#[test]
 fn lifecycle_validation_covers_loop_phase_and_step_edges() {
     for (name, lines, expected) in [
         (
@@ -1780,6 +1803,19 @@ fn lifecycle_validation_covers_tool_and_message_edges() {
                 tool_started_line("evt-005", 5),
                 edge_tool_completed_line("evt-006", 6),
                 edge_tool_progress_line("evt-007", 7),
+            ],
+            "appears after terminal tool",
+        ),
+        (
+            "tool-restarted-after-terminal.jsonl",
+            vec![
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                phase_entered_line("evt-003", 3),
+                step_started_line("evt-004", 4),
+                tool_started_line("evt-005", 5),
+                edge_tool_completed_line("evt-006", 6),
+                tool_started_line("evt-007", 7),
             ],
             "appears after terminal tool",
         ),

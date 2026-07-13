@@ -97,94 +97,15 @@ fn fallback_session_ids_preserve_valid_loop_id_separators() {
 }
 
 #[test]
-fn session_id_suffix_matching_accepts_only_allocated_suffixes() {
-    assert!(session_id_matches_loop("smoke001", "smoke-loop"));
-    assert!(session_id_matches_loop("smoke001-2", "smoke-loop"));
-    assert!(session_id_matches_loop("smoke001-10000", "smoke-loop"));
-    assert!(!session_id_matches_loop("smoke001-1", "smoke-loop"));
-    assert!(!session_id_matches_loop("smoke001-10001", "smoke-loop"));
-    assert!(!session_id_matches_loop("smoke001-two", "smoke-loop"));
-    assert!(!session_id_matches_loop("smoke001", "hello-loop"));
-}
-
-#[test]
-fn session_id_and_resume_helpers_cover_fallback_edges() {
+fn session_id_generation_helpers_cover_edges() {
     assert_eq!(
         session_id_for_loop("sandbox-negative-custom-word"),
         "negcustomword001"
     );
     assert_eq!(session_id_for_loop("!!!"), "session001");
 
-    assert!(!session_id_matches_loop("hello001later", "hello-loop"));
-
     let long = "a".repeat(128);
     let suffixed = suffixed_session_id(&long, 10_000);
     assert_eq!(suffixed.len(), 128);
     assert!(suffixed.ends_with("-10000"));
-
-    let registry = loop_chain_registry(1);
-    assert_eq!(
-        resumable_loop_id(&[], &registry, &session_id_for_loop("loop-000"))
-            .expect("session id fallback resolves the loop"),
-        "loop-000"
-    );
-    assert!(matches!(
-        resumable_loop_id(&[], &registry, "unknown001"),
-        Err(RuntimeError::Protocol(message))
-            if message.contains("does not identify a resumable loop")
-    ));
-    let mut ambiguous_registry = core_script::ResolvedRegistry {
-        connections: BTreeMap::new(),
-        instructions: BTreeMap::new(),
-        loops: BTreeMap::new(),
-        phases: BTreeMap::new(),
-        tools: BTreeMap::new(),
-    };
-    ambiguous_registry.loops.insert(
-        "loop!".to_owned(),
-        core_script::LoopBlock {
-            identity: core_script::BlockIdentity {
-                id: "loop!".to_owned(),
-                name: "Loop Bang".to_owned(),
-            },
-            phase_refs: Vec::new(),
-            subloop_refs: Vec::new(),
-            connection_refs: Vec::new(),
-        },
-    );
-    ambiguous_registry.loops.insert(
-        "loop?".to_owned(),
-        core_script::LoopBlock {
-            identity: core_script::BlockIdentity {
-                id: "loop?".to_owned(),
-                name: "Loop Question".to_owned(),
-            },
-            phase_refs: Vec::new(),
-            subloop_refs: Vec::new(),
-            connection_refs: Vec::new(),
-        },
-    );
-    assert!(matches!(
-        resumable_loop_id(&[], &ambiguous_registry, "loop001"),
-        Err(RuntimeError::Protocol(message))
-            if message.contains("ambiguously identifies a resumable loop")
-    ));
-
-    let missing_definition = EventEnvelope {
-        loop_id: Some("loop-001".to_owned()),
-        ..EventEnvelope::new(
-            "evt-001",
-            EventType::LoopStarted,
-            "resume001",
-            1,
-            "2026-01-01T00:00:00Z",
-            "loop-agent-cli",
-            serde_json::json!({}),
-        )
-    };
-    assert!(matches!(
-        resumable_loop_id(&[missing_definition], &registry, "resume001"),
-        Err(RuntimeError::Protocol(message))
-            if message.contains("loop.started missing loop_definition_id")
-    ));
 }

@@ -118,10 +118,10 @@ fn tool_dispatch_progress(
                     plan_own_script(tool, protected_path_match_mode, policy)?;
                 }
                 ToolDispatchMode::Preflight { workspace } => {
-                    let operations = plan_own_script(tool, protected_path_match_mode, policy)?;
+                    let write = plan_own_script(tool, protected_path_match_mode, policy)?;
                     preflight_own_script_outputs(
                         workspace,
-                        &operations,
+                        write.as_ref(),
                         protected_path_match_mode,
                         policy,
                     )?;

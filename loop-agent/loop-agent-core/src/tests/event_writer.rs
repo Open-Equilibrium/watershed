@@ -33,6 +33,7 @@ impl<T: Write> Write for SharedObserver<T> {
 
 #[derive(Default)]
 struct AppendBeforePublishProbe {
+    completed_checkpoint_counts: Vec<usize>,
     first_publish_saw_committed_event: bool,
     published: Vec<u8>,
     workspace: PathBuf,
@@ -55,6 +56,15 @@ impl Write for AppendBeforePublishProbe {
         if !persisted.starts_with(&published_through_event) {
             return Err(io::Error::other("event published before append"));
         }
+        if event.event_type == EventType::MessageCompleted {
+            let context_stream = fs::read_to_string(
+                self.workspace
+                    .join(LOCAL_LOG_DIR)
+                    .join(format!("{}.contexts.jsonl", event.session_id)),
+            )?;
+            self.completed_checkpoint_counts
+                .push(context_stream.lines().count());
+        }
         self.published.extend_from_slice(bytes);
         self.writes += 1;
         Ok(bytes.len())
@@ -67,25 +77,24 @@ impl Write for AppendBeforePublishProbe {
 
 #[test]
 fn run_streams_each_jsonl_event_only_after_it_is_appended() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("hello-loop");
     let (probe, probe_state) = SharedObserver::new(AppendBeforePublishProbe {
         workspace: workspace.clone(),
         ..AppendBeforePublishProbe::default()
     });
-
-    let output = run_loop_to_writer(
-        &workspace,
-        "smoke-loop",
-        EmitMode::Jsonl,
-        probe,
-    )
-    .expect("streamed run completes");
+    let output = run_loop_to_writer(&workspace, "hello-loop", EmitMode::Jsonl, probe)
+        .expect("streamed run completes");
     let persisted = fs::read(&output.session_path).expect("session log reads");
 
     let probe = probe_state.lock().expect("probe lock");
     assert!(probe.first_publish_saw_committed_event);
     assert!(probe.writes > 1);
     assert_eq!(probe.published, persisted);
+    assert!(!probe.completed_checkpoint_counts.is_empty());
+    assert_eq!(
+        probe.completed_checkpoint_counts,
+        (1..=probe.completed_checkpoint_counts.len()).collect::<Vec<_>>()
+    );
     assert!(output.stdout.is_empty());
 }
 

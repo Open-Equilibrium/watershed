@@ -5,9 +5,7 @@ const EVENT_OBSERVER_DELIVERY_TIMEOUT: Duration = Duration::from_millis(250);
 const EVENT_OBSERVER_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 trait RuntimeEventSink {
-    fn measurement_started_at(&self) -> Option<Instant> {
-        None
-    }
+    fn measurement_started_at(&self) -> Option<Instant>;
 
     fn commit(
         &mut self,
@@ -30,6 +28,16 @@ struct WriterOutcome {
     error: Option<RuntimeError>,
 }
 
+impl WriterOutcome {
+    fn failed(error: RuntimeError) -> Self {
+        Self {
+            append_latency_nanos: None,
+            appended: false,
+            error: Some(error),
+        }
+    }
+}
+
 enum SessionWriterCommand {
     Commit {
         acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
@@ -43,18 +51,10 @@ enum SessionWriterCommand {
     },
 }
 
-enum ObserverCommand {
-    Publish {
-        acknowledgement: std::sync::mpsc::SyncSender<bool>,
-        bytes: Vec<u8>,
-    },
-    Shutdown {
-        acknowledgement: std::sync::mpsc::SyncSender<()>,
-    },
-}
+type ObserverMessage = (Vec<u8>, std::sync::mpsc::SyncSender<bool>);
 
 struct ObserverDelivery {
-    sender: Option<std::sync::mpsc::SyncSender<ObserverCommand>>,
+    sender: Option<std::sync::mpsc::SyncSender<ObserverMessage>>,
     worker: Option<thread::JoinHandle<()>>,
 }
 
@@ -63,8 +63,7 @@ impl ObserverDelivery {
     where
         W: Write + Send + 'static,
     {
-        let (sender, receiver) =
-            std::sync::mpsc::sync_channel(EVENT_OBSERVER_QUEUE_CAPACITY);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_OBSERVER_QUEUE_CAPACITY);
         let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("loop-event-observer".to_owned())
@@ -99,13 +98,7 @@ impl ObserverDelivery {
             return false;
         };
         let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
-        if sender
-            .try_send(ObserverCommand::Publish {
-                acknowledgement,
-                bytes: bytes.to_vec(),
-            })
-            .is_err()
-        {
+        if sender.try_send((bytes.to_vec(), acknowledgement)).is_err() {
             self.detach();
             return false;
         }
@@ -121,22 +114,9 @@ impl ObserverDelivery {
     }
 
     fn finish(&mut self) {
-        let Some(sender) = self.sender.take() else {
-            return;
-        };
-        let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
-        let sent = sender.try_send(ObserverCommand::Shutdown { acknowledgement });
-        drop(sender);
-        if sent.is_ok()
-            && response
-                .recv_timeout(EVENT_OBSERVER_DELIVERY_TIMEOUT)
-                .is_ok()
-        {
-            if let Some(worker) = self.worker.take() {
-                let _ = worker.join();
-            }
-        } else {
-            self.worker.take();
+        self.sender.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
     }
 
@@ -154,31 +134,18 @@ impl Drop for ObserverDelivery {
     }
 }
 
-fn observer_delivery_worker<W>(
-    mut writer: W,
-    receiver: &std::sync::mpsc::Receiver<ObserverCommand>,
-) where
+fn observer_delivery_worker<W>(mut writer: W, receiver: &std::sync::mpsc::Receiver<ObserverMessage>)
+where
     W: Write,
 {
-    while let Ok(command) = receiver.recv() {
-        match command {
-            ObserverCommand::Publish {
-                acknowledgement,
-                bytes,
-            } => {
-                let delivered = writer
-                    .write_all(&bytes)
-                    .and_then(|()| writer.flush())
-                    .is_ok();
-                let _ = acknowledgement.send(delivered);
-                if !delivered {
-                    break;
-                }
-            }
-            ObserverCommand::Shutdown { acknowledgement } => {
-                let _ = acknowledgement.send(());
-                break;
-            }
+    while let Ok((bytes, acknowledgement)) = receiver.recv() {
+        let delivered = writer
+            .write_all(&bytes)
+            .and_then(|()| writer.flush())
+            .is_ok();
+        let _ = acknowledgement.send(delivered);
+        if !delivered {
+            break;
         }
     }
 }
@@ -187,7 +154,7 @@ struct SerialSessionWriter<'a> {
     commit_reservation: Option<&'a SessionReservation>,
     emit: EmitMode,
     failed: bool,
-    observer: Option<ObserverDelivery>,
+    observer: ObserverDelivery,
     sender: Option<std::sync::mpsc::SyncSender<SessionWriterCommand>>,
     timings: Option<&'a mut EventWriterTimings>,
     worker: Option<thread::JoinHandle<()>>,
@@ -256,18 +223,11 @@ impl<'a> SerialSessionWriter<'a> {
             emit,
             timings,
         } = start;
-        let (sender, receiver) =
-            std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()
             .name(format!("loop-event-writer-{session_id}"))
             .spawn(move || {
-                session_writer_worker(
-                    &path,
-                    &context_path,
-                    validation,
-                    appender,
-                    &receiver,
-                )
+                session_writer_worker(&path, &context_path, validation, appender, &receiver)
             })
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<event-writer-thread>"),
@@ -277,7 +237,7 @@ impl<'a> SerialSessionWriter<'a> {
             commit_reservation,
             emit,
             failed: false,
-            observer: Some(ObserverDelivery::start(observer)?),
+            observer: ObserverDelivery::start(observer)?,
             sender: Some(sender),
             timings,
             worker: Some(worker),
@@ -316,13 +276,9 @@ impl<'a> SerialSessionWriter<'a> {
     }
 
     fn publish(&mut self, bytes: &[u8]) -> bool {
-        let Some(observer) = self.observer.as_mut() else {
-            return false;
-        };
-        if !observer.publish(bytes) {
+        if !self.observer.publish(bytes) {
             // WHY: the append-only log is authoritative. A disconnected or failed observer
             // detaches and can catch up by sequence without rolling back committed events.
-            self.observer = None;
             return false;
         }
         true
@@ -431,9 +387,7 @@ impl RuntimeEventSink for ResumeEventSink<'_, '_> {
             self.clock,
         );
         let canonical = shifted.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!(
-                "failed to serialize resumed runtime event: {err}"
-            ))
+            RuntimeError::Protocol(format!("failed to serialize resumed runtime event: {err}"))
         })?;
         self.writer.commit(
             &shifted,
@@ -476,12 +430,13 @@ impl DirtySyncState {
     }
 
     fn wait_timeout(&self, now: Instant) -> Duration {
-        self.dirty_since.map_or(EVENT_WRITER_DIRTY_SYNC_INTERVAL, |started_at| {
-            EVENT_WRITER_DIRTY_SYNC_INTERVAL.saturating_sub(
-                now.checked_duration_since(started_at)
-                    .unwrap_or(Duration::ZERO),
-            )
-        })
+        self.dirty_since
+            .map_or(EVENT_WRITER_DIRTY_SYNC_INTERVAL, |started_at| {
+                EVENT_WRITER_DIRTY_SYNC_INTERVAL.saturating_sub(
+                    now.checked_duration_since(started_at)
+                        .unwrap_or(Duration::ZERO),
+                )
+            })
     }
 }
 
@@ -526,19 +481,7 @@ fn session_writer_worker<A>(
             }) => {
                 let outcome = if let Some(err) = pending_error.take() {
                     stopped = true;
-                    WriterOutcome {
-                        append_latency_nanos: None,
-                        appended: false,
-                        error: Some(err),
-                    }
-                } else if stopped {
-                    WriterOutcome {
-                        append_latency_nanos: None,
-                        appended: false,
-                        error: Some(RuntimeError::Protocol(
-                            "session event writer is closed after a prior failure".to_owned(),
-                        )),
-                    }
+                    WriterOutcome::failed(err)
                 } else {
                     commit_session_event(
                         SessionEventCommit {
@@ -573,13 +516,6 @@ fn session_writer_worker<A>(
                     error,
                 });
                 break;
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) if dirty.is_dirty() && !stopped => {
-                if let Err(err) = appender.sync(path) {
-                    pending_error = Some(err);
-                } else {
-                    dirty.mark_synced();
-                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -618,56 +554,32 @@ where
         context_manifests,
         measurement_started_at,
     } = commit;
-    if let Err(err) = validation.validate_constructed_event(
-        path,
-        event,
-        canonical_jsonl.len(),
-    ) {
-        return WriterOutcome {
-            append_latency_nanos: None,
-            appended: false,
-            error: Some(err),
-        };
+    if let Err(err) = validation.validate_constructed_event(path, event, canonical_jsonl.len()) {
+        return WriterOutcome::failed(err);
     }
     let mut checkpoint_sync_duration = Duration::ZERO;
     match (&event.event_type, context_manifests) {
         (EventType::MessageCompleted, Some(manifests)) => {
             let checkpoint_started_at = Instant::now();
             if let Err(err) = appender.persist_context_manifests(context_path, manifests) {
-                return WriterOutcome {
-                    append_latency_nanos: None,
-                    appended: false,
-                    error: Some(err),
-                };
+                return WriterOutcome::failed(err);
             }
             checkpoint_sync_duration = checkpoint_started_at.elapsed();
         }
         (EventType::MessageCompleted, None) => {
-            return WriterOutcome {
-                append_latency_nanos: None,
-                appended: false,
-                error: Some(RuntimeError::Protocol(
-                    "message.completed requires its full context manifest prefix".to_owned(),
-                )),
-            };
+            return WriterOutcome::failed(RuntimeError::Protocol(
+                "message.completed requires its full context manifest prefix".to_owned(),
+            ));
         }
         (_, Some(_)) => {
-            return WriterOutcome {
-                append_latency_nanos: None,
-                appended: false,
-                error: Some(RuntimeError::Protocol(
-                    "context manifests are only valid for message.completed".to_owned(),
-                )),
-            };
+            return WriterOutcome::failed(RuntimeError::Protocol(
+                "context manifests are only valid for message.completed".to_owned(),
+            ));
         }
         (_, None) => {}
     }
     if let Err(err) = appender.append(path, canonical_jsonl.as_bytes()) {
-        return WriterOutcome {
-            append_latency_nanos: None,
-            appended: false,
-            error: Some(err),
-        };
+        return WriterOutcome::failed(err);
     }
     let append_latency_nanos = measurement_started_at.map(|started_at| {
         started_at
@@ -727,18 +639,6 @@ impl SessionLogAppender {
         }
     }
 
-    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        #[cfg(any(unix, windows))]
-        {
-            self.append_native_with(path, bytes, |file, bytes| file.write_all(bytes))
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            append_session_log_bytes(path, bytes)
-        }
-    }
-
     #[cfg(any(unix, windows))]
     fn append_native_with<F>(
         &mut self,
@@ -749,34 +649,16 @@ impl SessionLogAppender {
     where
         F: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
     {
-        #[cfg(unix)]
-        {
-            // WHY: retaining the checked handle avoids a reopen per event, while this
-            // identity check still rejects replacement or removal between commits.
-            ensure_opened_regular_leaf_matches_path(path, &self.file)?;
-        }
+        validate_open_session_log_append_file(path, &self.file)?;
 
-        #[cfg(windows)]
-        {
-            // WHY: the handle denies write/delete sharing for its lifetime, so validating
-            // that same handle preserves the no-reparse/no-hard-link write boundary.
-            let metadata = self.file.metadata().map_err(|source| RuntimeError::Io {
+        let original_len = self
+            .file
+            .metadata()
+            .map_err(|source| RuntimeError::Io {
                 path: path.to_owned(),
                 source,
-            })?;
-            validate_real_file(path, &metadata)?;
-            if hard_link_count_for_open_file(path, &self.file)? > 1 {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} must not be hard-linked",
-                    path.display()
-                )));
-            }
-        }
-
-        let original_len = self.file.metadata().map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?.len();
+            })?
+            .len();
         self.file
             .seek(SeekFrom::End(0))
             .map_err(|source| RuntimeError::Io {
@@ -801,51 +683,35 @@ impl SessionLogAppender {
         }
         Ok(())
     }
+}
 
-    fn sync(&self, path: &Path) -> Result<(), RuntimeError> {
-        #[cfg(unix)]
-        ensure_opened_regular_leaf_matches_path(path, &self.file)?;
-
-        #[cfg(windows)]
-        {
-            let metadata = self.file.metadata().map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })?;
-            validate_real_file(path, &metadata)?;
-            if hard_link_count_for_open_file(path, &self.file)? > 1 {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} must not be hard-linked",
-                    path.display()
-                )));
-            }
-        }
-
+impl EventLogAppender for SessionLogAppender {
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
         #[cfg(any(unix, windows))]
         {
-            self
-                .file
-                .sync_all()
-                .map_err(|source| RuntimeError::Io {
-                    path: path.to_owned(),
-                    source,
-                })
+            self.append_native_with(path, bytes, |file, bytes| file.write_all(bytes))
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            append_session_log_bytes(path, bytes)
+        }
+    }
+
+    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
+        #[cfg(any(unix, windows))]
+        {
+            validate_open_session_log_append_file(path, &self.file)?;
+            self.file.sync_all().map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            })
         }
 
         #[cfg(not(any(unix, windows)))]
         {
             sync_session_log(path)
         }
-    }
-}
-
-impl EventLogAppender for SessionLogAppender {
-    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        SessionLogAppender::append(self, path, bytes)
-    }
-
-    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
-        SessionLogAppender::sync(self, path)
     }
 }
 
@@ -857,12 +723,11 @@ fn sync_session_log(path: &Path) -> Result<(), RuntimeError> {
         source,
     })?;
     validate_real_file(path, &expected_metadata)?;
-    let file = open_file_for_sync_without_following_reparse(path).map_err(|source| {
-        RuntimeError::Io {
+    let file =
+        open_file_for_sync_without_following_reparse(path).map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
-        }
-    })?;
+        })?;
     ensure_opened_real_file_for_read_matches_path(path, &expected_metadata, &file)?;
     file.sync_all().map_err(|source| RuntimeError::Io {
         path: path.to_owned(),

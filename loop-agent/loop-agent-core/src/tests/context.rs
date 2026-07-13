@@ -1,10 +1,3 @@
-fn source(id: &str, content: serde_json::Value) -> ContextSource {
-    ContextSource {
-        source_id: id.to_owned(),
-        content,
-    }
-}
-
 fn test_profile(input_budget: usize) -> ContextModelProfile {
     ContextModelProfile {
         context_limit: input_budget + 20,
@@ -14,17 +7,17 @@ fn test_profile(input_budget: usize) -> ContextModelProfile {
     }
 }
 
-fn tier_zero(turn_value: &str) -> Vec<ContextSource> {
-    vec![
-        source("base-runtime-security", serde_json::json!({"policy":"deny"})),
-        source("active-loop-instructions", serde_json::json!([])),
-        source("active-phase-instructions", serde_json::json!(["phase"])),
-        source("active-step-instructions", serde_json::json!([])),
-        source("active-available-tools", serde_json::json!({"z":1,"a":2})),
-        source("fsm-loop-state", serde_json::json!({"turn":turn_value})),
-        source("typed-connection-inputs", serde_json::json!([])),
-        source("current-user-input", serde_json::json!({"present":false})),
-        source("unresolved-call-result", serde_json::json!([])),
+fn tier_zero(turn_value: &str) -> [ContextSource; 9] {
+    [
+        context_source("base-runtime-security", serde_json::json!({"policy":"deny"})),
+        context_source("active-loop-instructions", serde_json::json!([])),
+        context_source("active-phase-instructions", serde_json::json!(["phase"])),
+        context_source("active-step-instructions", serde_json::json!([])),
+        context_source("active-available-tools", serde_json::json!({"z":1,"a":2})),
+        context_source("fsm-loop-state", serde_json::json!({"turn":turn_value})),
+        context_source("typed-connection-inputs", serde_json::json!([])),
+        context_source("current-user-input", serde_json::json!({"present":false})),
+        context_source("unresolved-call-result", serde_json::json!([])),
     ]
 }
 
@@ -79,15 +72,15 @@ fn prefix_before_message_completed(stream: &str) -> String {
 fn context_compiler_is_deterministic_and_preserves_the_cache_prefix() {
     let first = compile_context(
         &test_profile(16 * 1024),
-        tier_zero("first"),
-        Vec::new(),
+        &tier_zero("first"),
+        None,
         ContextOmissionCounts::default(),
     )
     .expect("first context compiles");
     let second = compile_context(
         &test_profile(16 * 1024),
-        tier_zero("second"),
-        Vec::new(),
+        &tier_zero("second"),
+        None,
         ContextOmissionCounts::default(),
     )
     .expect("second context compiles");
@@ -211,11 +204,14 @@ fn context_direction_filter_does_not_change_step_event_connections() {
 #[test]
 fn context_compiler_rejects_mandatory_content_over_budget() {
     let mandatory = tier_zero("large");
-    let required = context_sources_bytes(&mandatory).expect("mandatory context serializes");
+    let required = mandatory
+        .iter()
+        .map(|source| context_source_bytes(source).expect("mandatory source serializes").len())
+        .sum::<usize>();
     let err = compile_context(
-        &test_profile(required.len() - 1),
-        mandatory,
-        Vec::new(),
+        &test_profile(required - 1),
+        &mandatory,
+        None,
         ContextOmissionCounts::default(),
     )
     .expect_err("mandatory context must not be truncated");
@@ -225,46 +221,78 @@ fn context_compiler_rejects_mandatory_content_over_budget() {
         RuntimeError::ContextBudgetExceeded {
             required_bytes,
             input_budget
-        } if required_bytes == required.len() && input_budget == required.len() - 1
+        } if required_bytes == required && input_budget == required - 1
     ));
 }
 
 #[test]
-fn context_compiler_omits_oldest_optional_units_whole() {
+fn context_compiler_selects_the_latest_interaction_and_omits_it_whole() {
+    let events = [
+        (EventType::MessageDelta, "old"),
+        (EventType::MessageCompleted, "old"),
+        (EventType::MessageDelta, "recent"),
+        (EventType::MessageCompleted, "recent"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (event_type, message_id))| {
+        let sequence = index as u64 + 1;
+        let mut payload = serde_json::json!({"message_id":message_id,"role":"assistant"});
+        if event_type == EventType::MessageDelta {
+            payload["content_delta"] = serde_json::json!(message_id);
+        }
+        EventEnvelope::new(
+            format!("evt-{sequence}"),
+            event_type,
+            "context001",
+            sequence,
+            "2026-01-01T00:00:00Z",
+            "loop-agent-cli",
+            payload,
+        )
+    })
+    .collect::<Vec<_>>();
+    let (recent, omitted) = context_continuity(&events).expect("continuity compiles");
+    let recent = recent.expect("latest complete interaction is selected");
+    assert_eq!(recent.source_id, "interaction-4");
+    assert_eq!(recent.content["deltas"][0]["content_delta"], "recent");
+    assert_eq!(omitted.tier_2, 1);
+
     let mandatory = tier_zero("turn");
-    let mandatory_bytes = context_sources_bytes(&mandatory)
-        .expect("mandatory context serializes")
-        .len();
-    let old = ContextOptionalUnit {
-        category: ContextOptionalCategory::RecentCompleteInteraction,
-        source: source("interaction-2", serde_json::json!({"message":"old"})),
-        source_sequence: 2,
-    };
-    let recent = ContextOptionalUnit {
-        category: ContextOptionalCategory::RecentCompleteInteraction,
-        source: source("interaction-8", serde_json::json!({"message":"recent"})),
-        source_sequence: 8,
-    };
-    let recent_bytes = context_sources_bytes(std::slice::from_ref(&recent.source))
+    let mandatory_bytes = mandatory
+        .iter()
+        .map(|source| context_source_bytes(source).expect("mandatory source serializes").len())
+        .sum::<usize>();
+    let recent_bytes = context_source_bytes(&recent)
         .expect("recent interaction serializes")
         .len();
-    let compiled = compile_context(
+    let fitting = compile_context(
         &test_profile(mandatory_bytes + recent_bytes),
-        mandatory,
-        vec![old, recent],
+        &mandatory,
+        Some(&recent),
         ContextOmissionCounts::default(),
+    )
+    .expect("fitting interaction compiles");
+    assert!(std::str::from_utf8(&fitting.provider_bytes)
+        .expect("context is UTF-8")
+        .contains("interaction-4"));
+    let compiled = compile_context(
+        &test_profile(mandatory_bytes + recent_bytes - 1),
+        &mandatory,
+        Some(&recent),
+        omitted,
     )
     .expect("bounded context compiles");
     let text = std::str::from_utf8(&compiled.provider_bytes).expect("context is UTF-8");
 
-    assert!(!text.contains("interaction-2"));
-    assert!(text.contains("interaction-8"));
+    assert!(!text.contains("interaction-4"));
     let manifest: serde_json::Value = serde_json::from_str(compiled.manifest.line.trim_end())
         .expect("manifest parses");
     assert_eq!(
         manifest["omitted_source_counts"]["recent_complete_interaction"],
         1
     );
+    assert_eq!(manifest["omitted_source_counts"]["tier_2"], 1);
 }
 
 #[test]
@@ -427,37 +455,48 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
 }
 
 #[test]
-fn resume_rejects_missing_context_manifest_stream_before_side_effects() {
-    let workspace = workspace_copy("hello-loop");
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect("fixture loop completes");
-    let prefix = prefix_before_tool_started(&output.stdout, "write-summary");
-    fs::write(&output.session_path, &prefix).expect("partial session prefix written");
-    write_definition_hash_metadata(
-        &workspace,
-        &output.session_id,
-        "hello-loop",
-        prefix.lines().count(),
-    );
-    let context_path = workspace
-        .join(LOCAL_LOG_DIR)
-        .join(format!("{}.contexts.jsonl", output.session_id));
-    fs::remove_file(&context_path).expect("context manifest stream removed");
-    fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
-    let before = fs::read_to_string(&output.session_path).expect("session prefix reads");
+fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
+    for (tamper, expected) in [
+        ("missing", "context manifest stream is missing"),
+        ("missing-lf", "context manifest stream must end with LF"),
+        ("whitespace", "context manifest is not canonical JSONL"),
+    ] {
+        let workspace = workspace_copy("hello-loop");
+        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect("fixture loop completes");
+        let before = prefix_before_tool_started(&output.stdout, "write-summary");
+        fs::write(&output.session_path, &before).expect("partial session prefix written");
+        write_definition_hash_metadata(
+            &workspace,
+            &output.session_id,
+            "hello-loop",
+            before.lines().count(),
+        );
+        let context_path = workspace
+            .join(LOCAL_LOG_DIR)
+            .join(format!("{}.contexts.jsonl", output.session_id));
+        let context_stream = fs::read_to_string(&context_path).expect("context manifests read");
+        match tamper {
+            "missing" => fs::remove_file(&context_path).expect("context stream removed"),
+            "missing-lf" => fs::write(&context_path, context_stream.trim_end_matches('\n'))
+                .expect("unframed context stream written"),
+            "whitespace" => fs::write(&context_path, context_stream.replacen('{', "{ ", 1))
+                .expect("noncanonical context stream written"),
+            _ => unreachable!(),
+        }
+        fs::remove_file(workspace.join("out/summary.txt"))
+            .expect("completed side effect removed");
 
-    let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
-        .expect_err("missing context audit evidence must block resume");
+        let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
+            .expect_err("invalid context audit evidence must block resume");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message.contains("context manifest stream is missing")
-    ));
-    assert_eq!(
-        fs::read_to_string(&output.session_path).expect("session remains readable"),
-        before
-    );
-    assert!(!workspace.join("out/summary.txt").exists());
+        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains(expected)));
+        assert_eq!(
+            fs::read_to_string(&output.session_path).expect("session remains readable"),
+            before
+        );
+        assert!(!workspace.join("out/summary.txt").exists());
+    }
 }
 
 #[test]

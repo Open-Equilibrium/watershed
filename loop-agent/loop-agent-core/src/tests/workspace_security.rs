@@ -491,6 +491,36 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
 }
 
 #[test]
+fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
+    for (leaf_is_directory, expected) in
+        [(true, "must be a file"), (false, "must be a directory")]
+    {
+        let workspace = workspace_copy("hello-loop");
+        let output_parent = workspace.join("out");
+        if leaf_is_directory {
+            fs::create_dir_all(output_parent.join("summary.txt"))
+                .expect("directory created at write leaf");
+        } else {
+            if output_parent.exists() {
+                fs::remove_dir_all(&output_parent).expect("fixture output directory removed");
+            }
+            fs::write(&output_parent, "not a directory\n")
+                .expect("file created in write ancestor");
+        }
+
+        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+            .expect_err("non-file declared write path must fail preflight");
+
+        assert_denied(err, core_policy::DenyReasonCode::WriteDenied, expected);
+        assert!(!workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    }
+}
+
+#[test]
 fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
     let workspace = workspace_copy("hello-loop");
     let summary_path = workspace.join("out/summary.txt");

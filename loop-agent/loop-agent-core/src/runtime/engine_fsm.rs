@@ -622,7 +622,7 @@ fn emit_phase(
             step_payload.clone(),
         )?;
 
-        if phase_uses_stub_model(context.registry, phase)? {
+        if phase_uses_stub_model(context.registry, phase) {
             let compiled = compile_provider_turn_context(
                 context.registry,
                 loop_block,
@@ -728,7 +728,7 @@ fn step_payload(
         "step_name": step.name,
     });
     if !step.connection_refs.is_empty() {
-        let connection_kinds = step
+        let connections = step
             .connection_refs
             .iter()
             .map(|connection_ref| {
@@ -737,23 +737,14 @@ fn step_payload(
                         "resolved registry missing connection {connection_ref}"
                     ))
                 })?;
-                Ok(connection_kind_name(&connection.connection_kind))
+                Ok((
+                    connection.identity.id.clone(),
+                    connection_kind_name(&connection.connection_kind),
+                ))
             })
             .collect::<Result<Vec<_>, RuntimeError>>()?;
-        let connection_ids = step
-            .connection_refs
-            .iter()
-            .map(|connection_ref| {
-                registry
-                    .connection_block(connection_ref)
-                    .map(|connection| connection.identity.id.clone())
-                    .ok_or_else(|| {
-                        RuntimeError::Protocol(format!(
-                            "resolved registry missing connection {connection_ref}"
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<_>, RuntimeError>>()?;
+        let (connection_ids, connection_kinds): (Vec<_>, Vec<_>) =
+            connections.into_iter().unzip();
         let object = payload
             .as_object_mut()
             .expect("step payload is constructed as an object");
@@ -772,13 +763,12 @@ fn step_payload(
 fn phase_uses_stub_model(
     registry: &core_script::ResolvedRegistry,
     phase: &core_script::PhaseBlock,
-) -> Result<bool, RuntimeError> {
-    let has_predefined_tool = phase.tool_refs.iter().any(|tool_ref| {
+) -> bool {
+    phase.tool_refs.iter().any(|tool_ref| {
         registry
             .tool_block(tool_ref)
             .is_some_and(|tool| tool.tool_kind == core_script::ToolKind::PredefinedCommand)
-    });
-    Ok(has_predefined_tool)
+    })
 }
 
 fn stub_message_content(

@@ -1851,7 +1851,7 @@ fn resume_rejects_registry_drift_before_side_effects() {
 }
 
 #[test]
-fn resume_definition_metadata_rejects_partial_hashes() {
+fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     let workspace = workspace_copy("hello-loop");
     let registry = core_script::load_registry_root(workspace.join("registry"))
         .expect("fixture registry loads");
@@ -1888,10 +1888,18 @@ fn resume_definition_metadata_rejects_partial_hashes() {
         err,
         RuntimeError::Protocol(message) if message.contains("missing definition metadata")
     ));
+
+    fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR)).expect("metadata directory removed");
+    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+        .expect_err("missing metadata directory must fail closed");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("missing definition metadata")
+    ));
 }
 
 #[test]
-fn session_metadata_helpers_reject_malformed_inputs() {
+fn session_metadata_and_resume_paths_reject_malformed_inputs() {
     assert!(matches!(
         parse_session_log_metadata("not key value\n"),
         Err(RuntimeError::Protocol(message)) if message.contains("key=value")
@@ -1900,6 +1908,13 @@ fn session_metadata_helpers_reject_malformed_inputs() {
         session_log_metadata_path(Path::new("."), "../bad"),
         Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
     ));
+
+    let workspace = empty_workspace("resume-unsafe-session-id");
+    assert!(matches!(
+        resume_session(&workspace, "../outside", EmitMode::Jsonl),
+        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
+    ));
+    assert!(!workspace.join(".loop").exists());
 }
 
 #[cfg(any(unix, windows))]
@@ -1927,27 +1942,50 @@ fn resume_rejects_hardlinked_session_log_before_side_effects() {
 }
 
 #[test]
-fn resume_human_mode_reports_resumed_status() {
+fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
     let workspace = workspace_copy("smoke-loop");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("smoke001.jsonl");
-    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    fs::write(
+        workspace.join(".loop/config.yaml"),
+        "registry_root: registry\n",
+    )
+    .expect("live workspace config written");
+    let completed =
+        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("live-profile run completes");
+    let prefix = completed
+        .stdout
         .lines()
         .take(2)
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let event_count = prefix.lines().count();
-    fs::write(&path, &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop", event_count);
+    fs::write(&completed.session_path, &prefix).expect("partial live session written");
+    write_definition_hash_metadata(
+        &workspace,
+        &completed.session_id,
+        "smoke-loop",
+        prefix.lines().count(),
+    );
 
-    let output = resume_session(&workspace, "smoke001", EmitMode::Human).expect("session resumes");
+    let output = resume_session(&workspace, &completed.session_id, EmitMode::Human)
+        .expect("live-profile session resumes");
 
     assert_eq!(output.stdout, "session smoke001 resumed\n");
-    assert!(fs::read_to_string(&path)
-        .expect("resumed log readable")
-        .contains("\"event_type\":\"session.completed\""));
+    let resumed_text =
+        fs::read_to_string(&completed.session_path).expect("resumed session remains readable");
+    let resumed_events = validate_session_log_text(
+        &completed.session_path,
+        &completed.session_id,
+        &resumed_text,
+    )
+    .expect("resumed live-profile stream validates");
+    let anchored_clock = EventClock::from_first_event(&resumed_events[0])
+        .expect("recorded timestamp anchors the resumed clock");
+    assert!(resumed_events
+        .iter()
+        .any(|event| event.event_type == EventType::SessionResumed));
+    assert!(resumed_events
+        .iter()
+        .all(|event| event.timestamp == anchored_clock.timestamp(event.sequence)));
 }
 
 #[test]

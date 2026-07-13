@@ -162,13 +162,13 @@ fn run_loop_executes_own_script_without_exact_fixture_body() {
         &tool_path,
         source.replace(
             "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
+            "script_body: |\n    # Explain the reviewed deterministic write.\n\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
         ),
     )
     .expect("tool fixture rewritten");
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect("own-script body executes through M1 runner");
+        .expect("own-script comments and body execute through M1 runner");
 
     assert!(!output.failed);
     assert_eq!(
@@ -367,14 +367,11 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
         Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script command")
     ));
 
-    let operations =
+    assert!(
         compile_own_script_operations(match_mode, command_policy, "\n# comment\n---\necho noop\n")
-            .expect("noop-like lines and echo compile");
-    assert_eq!(operations.len(), 4);
-    assert!(matches!(operations[0], ScriptOperation::Noop));
-    assert!(matches!(operations[1], ScriptOperation::Noop));
-    assert!(matches!(operations[2], ScriptOperation::Noop));
-    assert!(matches!(operations[3], ScriptOperation::Noop));
+            .expect("noop-like lines and echo compile")
+            .is_none()
+    );
 }
 
 #[test]

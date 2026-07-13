@@ -1578,6 +1578,26 @@ tool:
     );
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn registry_loader_rejects_linked_registry_root() {
+    let parent = temp_registry_dir("linked-root-parent");
+    let outside = temp_registry_dir("linked-root-target");
+    let linked_root = parent.join("linked-root");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, &linked_root).expect("registry root symlink created");
+    #[cfg(windows)]
+    create_windows_junction(&linked_root, &outside);
+
+    let err = load_registry_root(&linked_root).expect_err("linked registry root must be rejected");
+
+    assert!(
+        matches!(err, RegistryError::UnsafePath { ref path, ref message }
+            if path == &linked_root && (message.contains("symlink") || message.contains("reparse"))),
+        "unexpected error: {err:?}"
+    );
+}
+
 #[test]
 fn parser_reads_own_script_body_without_relicensing_or_runtime_escape() {
     let block = parse_registry_block(
