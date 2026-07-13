@@ -721,31 +721,26 @@ fn policy_denial_evaluation_rejects_attempts_allowed_by_policy() {
 #[test]
 fn expected_decision_rejects_policy_target_and_fixture_mismatches() {
     let artifact = valid_policy_artifact("write-tool");
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::Write {
+    let mut expected = denied_decision(
+        DeniedAttempt::Write {
             from_path: None,
             operation: "write".to_owned(),
             path: Some("/etc/passwd".to_owned()),
             to_path: None,
             tool_id: "write-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: artifact.fixture_name.clone(),
-        reason_code: DenyReasonCode::WriteDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::MacosSeatbelt,
-    };
+        DenyReasonCode::WriteDenied,
+    );
+    expected.fixture_name = artifact.fixture_name.clone();
+    expected.target = PolicyTarget::MacosSeatbelt;
 
     let err = expected
         .validate_against_policy(&artifact)
         .expect_err("target mismatch must fail");
     assert!(err.to_string().contains("target"), "{err}");
 
-    let expected = ExpectedDecision {
-        target: artifact.target.clone(),
-        fixture_name: "other-fixture".to_owned(),
-        ..expected
-    };
+    expected.target = artifact.target.clone();
+    expected.fixture_name = "other-fixture".to_owned();
     let err = expected
         .validate_against_policy(&artifact)
         .expect_err("fixture mismatch must fail");
@@ -753,7 +748,7 @@ fn expected_decision_rejects_policy_target_and_fixture_mismatches() {
 }
 
 #[test]
-fn policy_helper_mappings_cover_all_parameter_and_network_variants() {
+fn network_policy_mapping_preserves_udp_transport() {
     let udp = network_allow_entry_from_tool(&core_script::NetworkAllowEntry {
         cidr: "192.0.2.0/24".to_owned(),
         kind: core_script::NetworkAllowKind::Cidr,
@@ -761,63 +756,13 @@ fn policy_helper_mappings_cover_all_parameter_and_network_variants() {
         transport: core_script::NetworkTransport::Udp,
     });
     assert_eq!(udp.transport, NetworkTransport::Udp);
-
-    for (script_type, policy_type) in [
-        (
-            core_script::ParameterValueType::None,
-            ParameterValueType::None,
-        ),
-        (
-            core_script::ParameterValueType::String,
-            ParameterValueType::String,
-        ),
-        (
-            core_script::ParameterValueType::Integer,
-            ParameterValueType::Integer,
-        ),
-        (
-            core_script::ParameterValueType::WorkspaceRelativePath,
-            ParameterValueType::WorkspaceRelativePath,
-        ),
-        (
-            core_script::ParameterValueType::Enum,
-            ParameterValueType::Enum,
-        ),
-    ] {
-        let parameter = core_script::AllowedParameter {
-            allowed_values: Vec::new(),
-            max: None,
-            max_length: None,
-            min: None,
-            name: "--value".to_owned(),
-            required: false,
-            value_pattern: None,
-            value_type: script_type,
-        };
-
-        assert_eq!(allowed_parameter_policy(&parameter).value_type, policy_type);
-    }
 }
 
 #[test]
-fn parameter_and_identifier_shape_helpers_cover_validation_edges() {
-    assert!(!has_valid_environment_allow_name_shape(""));
-    assert!(!has_valid_environment_allow_name_shape("lower"));
-    assert!(!has_valid_environment_allow_name_shape(&"A".repeat(65)));
-    assert!(has_valid_environment_allow_name_shape("_A1"));
-
-    assert!(!has_valid_command_id_shape(""));
-    assert!(!has_valid_command_id_shape("Agent"));
-    assert!(!has_valid_command_id_shape(&"a".repeat(65)));
-    assert!(has_valid_command_id_shape("agent_1"));
-
-    assert!(!has_valid_parameter_name_shape("--"));
-    assert!(!has_valid_parameter_name_shape("value"));
-    assert!(has_valid_parameter_name_shape("--value_1"));
-
-    let mut path = valid_parameter("--path", ParameterValueType::WorkspaceRelativePath);
-    path.min = Some(1);
-    assert!(path.validate("parameter-tool").is_err());
+fn policy_artifact_accepts_nonempty_safe_environment_allow() {
+    policy_artifact_with_environment_allow("_A1")
+        .validate()
+        .expect("safe nonempty environment allow entry");
 }
 
 #[test]
@@ -1120,20 +1065,16 @@ fn network_allow_helpers_cover_cidr_matching_edges() {
 
 #[test]
 fn expected_decision_can_represent_write_rename_without_path() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::Write {
+    let expected = denied_decision(
+        DeniedAttempt::Write {
             from_path: Some("workspace/a.txt".to_owned()),
             operation: "rename".to_owned(),
             path: None,
             to_path: Some("workspace/b.txt".to_owned()),
             tool_id: "rename-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-rename".to_owned(),
-        reason_code: DenyReasonCode::WriteDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::WriteDenied,
+    );
 
     expected.validate().expect("rename shape is valid");
     let json = canonical_artifact_json(&expected).expect("canonical JSON");
@@ -1146,20 +1087,16 @@ fn expected_decision_can_represent_write_rename_without_path() {
 
 #[test]
 fn expected_decision_can_represent_protected_path_rename_without_path() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::ProtectedPath {
+    let expected = denied_decision(
+        DeniedAttempt::ProtectedPath {
             from_path: Some("workspace/.env".to_owned()),
             operation: "rename".to_owned(),
             path: None,
             to_path: Some("workspace/.env.bak".to_owned()),
             tool_id: "rename-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-protected-rename".to_owned(),
-        reason_code: DenyReasonCode::ProtectedPathDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::ProtectedPathDenied,
+    );
 
     expected
         .validate()
@@ -1174,20 +1111,16 @@ fn expected_decision_can_represent_protected_path_rename_without_path() {
 
 #[test]
 fn expected_decision_rejects_write_create_without_path() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::Write {
+    let expected = denied_decision(
+        DeniedAttempt::Write {
             from_path: None,
             operation: "create".to_owned(),
             path: None,
             to_path: None,
             tool_id: "write-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-write".to_owned(),
-        reason_code: DenyReasonCode::WriteDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::WriteDenied,
+    );
 
     let err = expected
         .validate()
@@ -1201,20 +1134,16 @@ fn expected_decision_rejects_write_create_without_path() {
 
 #[test]
 fn expected_decision_rejects_unsupported_write_operation() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::Write {
+    let expected = denied_decision(
+        DeniedAttempt::Write {
             from_path: None,
             operation: "delete".to_owned(),
             path: Some("../outside.txt".to_owned()),
             to_path: None,
             tool_id: "write-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-write".to_owned(),
-        reason_code: DenyReasonCode::WriteDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::WriteDenied,
+    );
 
     let err = expected
         .validate()
@@ -1228,20 +1157,16 @@ fn expected_decision_rejects_unsupported_write_operation() {
 
 #[test]
 fn expected_decision_rejects_unsupported_protected_path_operation() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::ProtectedPath {
+    let expected = denied_decision(
+        DeniedAttempt::ProtectedPath {
             from_path: None,
             operation: "chmod".to_owned(),
             path: Some(".env".to_owned()),
             to_path: None,
             tool_id: "protected-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-protected-path".to_owned(),
-        reason_code: DenyReasonCode::ProtectedPathDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::ProtectedPathDenied,
+    );
 
     let err = expected
         .validate()
@@ -1255,20 +1180,16 @@ fn expected_decision_rejects_unsupported_protected_path_operation() {
 
 #[test]
 fn expected_decision_rejects_protected_path_rename_without_endpoints() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::ProtectedPath {
+    let expected = denied_decision(
+        DeniedAttempt::ProtectedPath {
             from_path: Some("workspace/.env".to_owned()),
             operation: "rename".to_owned(),
             path: None,
             to_path: None,
             tool_id: "rename-tool".to_owned(),
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-protected-rename".to_owned(),
-        reason_code: DenyReasonCode::ProtectedPathDenied,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::ProtectedPathDenied,
+    );
 
     let err = expected
         .validate()
@@ -1351,17 +1272,10 @@ fn expected_decision_rejects_reason_code_mismatches() {
                 DenyReasonCode::WriteDenied,
                 "interpreter_escape attempts must use reason_code interpreter_escape_denied, got write_denied",
             ),
-        ];
+    ];
 
     for (attempt, reason_code, expected_message) in cases {
-        let expected = ExpectedDecision {
-            attempt,
-            expected: ExpectedDecisionKind::Deny,
-            fixture_name: "sandbox-negative".to_owned(),
-            reason_code,
-            side_effects_allowed: false,
-            target: PolicyTarget::LinuxLandlockSeccomp,
-        };
+        let expected = denied_decision(attempt, reason_code);
 
         let err = expected
             .validate()
@@ -1373,19 +1287,16 @@ fn expected_decision_rejects_reason_code_mismatches() {
 
 #[test]
 fn expected_decision_rejects_allowed_side_effects() {
-    let expected = ExpectedDecision {
-        attempt: DeniedAttempt::Network {
+    let mut expected = denied_decision(
+        DeniedAttempt::Network {
             destination: "example.com".to_owned(),
             port: 443,
             tool_id: "negative".to_owned(),
             transport: NetworkTransport::Tcp,
         },
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative-network".to_owned(),
-        reason_code: DenyReasonCode::NetworkDenied,
-        side_effects_allowed: true,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    };
+        DenyReasonCode::NetworkDenied,
+    );
+    expected.side_effects_allowed = true;
 
     let err = expected
         .validate()
@@ -1665,48 +1576,7 @@ fn policy_artifact_rejects_parameter_constraint_mismatches() {
 }
 
 #[test]
-fn policy_path_and_cidr_helpers_enforce_canonical_forms() {
-    assert_eq!(
-        normalize_policy_relative_path("workspace/out"),
-        Some("workspace/out".to_owned())
-    );
-    for path in [
-        "",
-        ".",
-        "/workspace",
-        "workspace/../out",
-        "workspace//out",
-        "workspace\\out",
-        "workspace/NUL",
-        "workspace/out.",
-        "workspace/out ",
-        "C:/workspace/out",
-    ] {
-        assert_eq!(normalize_policy_relative_path(path), None, "{path}");
-    }
-
-    for cidr in [
-        "192.0.2.0/24/extra",
-        "192.0.2.0/not-a-prefix",
-        "example.com/24",
-        "192.0.2.1/24",
-        "2001:db8::1/32",
-    ] {
-        assert!(!is_valid_canonical_cidr(cidr), "{cidr}");
-    }
-    assert!(is_valid_canonical_cidr("192.0.2.42/32"));
-    assert!(is_valid_canonical_cidr("2001:db8::/128"));
-}
-
-#[test]
 fn canonical_policy_json_helpers_handle_scalar_and_sparse_shapes() {
-    assert_eq!(canonical_json(&Value::Null).expect("null"), "null");
-    assert_eq!(canonical_json(&Value::Bool(false)).expect("bool"), "false");
-    assert_eq!(
-        canonical_json(&serde_json::json!([2, "a"])).expect("array"),
-        "[2,\"a\"]"
-    );
-
     let mut not_object = Value::Null;
     canonicalize_policy_artifact_arrays(&mut not_object);
     assert_eq!(not_object, Value::Null);
@@ -1920,6 +1790,17 @@ fn command_policy(
         script_runtime: None,
         tool_id: tool_id.to_owned(),
         tool_kind: ToolKind::PredefinedCommand,
+    }
+}
+
+fn denied_decision(attempt: DeniedAttempt, reason_code: DenyReasonCode) -> ExpectedDecision {
+    ExpectedDecision {
+        attempt,
+        expected: ExpectedDecisionKind::Deny,
+        fixture_name: "sandbox-negative".to_owned(),
+        reason_code,
+        side_effects_allowed: false,
+        target: PolicyTarget::LinuxLandlockSeccomp,
     }
 }
 

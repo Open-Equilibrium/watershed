@@ -200,12 +200,16 @@ fn no_arguments_and_unknown_commands_print_usage_errors() {
 }
 
 #[test]
-fn invalid_emit_and_extra_arguments_print_usage_errors() {
+fn invalid_command_arguments_print_usage_errors() {
     let workspace = workspace_copy("smoke-loop");
-    for args in [
-        vec!["run", "smoke-loop", "--emit", "human"],
-        vec!["run", "smoke-loop", "--bogus"],
-        vec!["sessions", "--bogus"],
+    for (args, expected) in [
+        (
+            vec!["run", "smoke-loop", "--emit", "human"],
+            "unsupported emit mode",
+        ),
+        (vec!["run", "smoke-loop", "--bogus"], "unknown argument"),
+        (vec!["sessions", "--bogus"], "unknown argument"),
+        (vec!["replay"], "missing session_id"),
     ] {
         let output = loop_command()
             .current_dir(&workspace)
@@ -215,10 +219,7 @@ fn invalid_emit_and_extra_arguments_print_usage_errors() {
 
         assert_eq!(output.status.code(), Some(64));
         let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-        assert!(
-            stderr.contains("unsupported emit mode") || stderr.contains("unknown argument"),
-            "{stderr}"
-        );
+        assert!(stderr.contains(expected), "{stderr}");
         assert!(output.stdout.is_empty());
     }
 }
@@ -230,6 +231,10 @@ fn invalid_tail_arguments_print_usage_errors() {
         (
             vec!["tail", "smoke001", "--emit", "human"],
             "unsupported emit mode",
+        ),
+        (
+            vec!["tail", "smoke001", "--emit"],
+            "missing value for --emit",
         ),
         (
             vec!["tail", "smoke001", "--timeout-ms"],
@@ -433,7 +438,15 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
 
     let output = loop_command()
         .current_dir(&fixture)
-        .args(["tail", "smoke001", "--emit", "jsonl", "--no-follow"])
+        .args([
+            "tail",
+            "smoke001",
+            "--emit",
+            "jsonl",
+            "--no-follow",
+            "--timeout-ms",
+            "25",
+        ])
         .output()
         .expect("loop binary should run");
 

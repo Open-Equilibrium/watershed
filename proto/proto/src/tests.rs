@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 
 #[test]
-fn event_type_names_match_protocol_v0_set() {
+fn event_type_names_match_protocol_v0_set_and_round_trip() {
     let names = event_type_names();
 
     assert_eq!(names.len(), 22);
@@ -10,11 +10,7 @@ fn event_type_names_match_protocol_v0_set() {
     assert!(names.contains(&"tool.progress"));
     assert!(names.contains(&"attention.requested"));
     assert!(names.contains(&"error"));
-}
-
-#[test]
-fn event_type_names_round_trip_through_serializer() {
-    for name in event_type_names() {
+    for name in names {
         let event_type = EventType::try_from(*name).expect("event type name parses");
 
         assert_eq!(event_type.as_str(), *name);
@@ -116,16 +112,23 @@ fn event_envelope_build_normalizes_string_values_to_nfc() {
 }
 
 #[test]
-fn canonical_json_serializes_scalar_values() {
-    assert_eq!(
-        canonical_json(&Value::Null).expect("null canonicalizes"),
-        "null"
-    );
-    assert_eq!(
-        canonical_json(&Value::Bool(true)).expect("bool canonicalizes"),
-        "true"
-    );
-    assert_eq!(canonical_json(&json!(-7)).expect("i64 canonicalizes"), "-7");
+fn canonical_json_serializes_scalars_in_shortest_form() {
+    for (input, expected) in [
+        ("null", "null"),
+        ("true", "true"),
+        ("-7", "-7"),
+        ("-0", "0"),
+        ("1.0", "1"),
+        ("-2.0", "-2"),
+        ("1.50", "1.5"),
+    ] {
+        let value: Value = serde_json::from_str(input).expect("valid JSON scalar");
+        assert_eq!(
+            canonical_json(&value).expect("value canonicalizes"),
+            expected,
+            "{input}"
+        );
+    }
 }
 
 #[test]
@@ -152,46 +155,8 @@ fn canonical_json_rejects_normalized_object_key_collisions() {
 }
 
 #[test]
-fn canonical_json_serializes_negative_zero_as_zero() {
-    let negative_zero: Value = serde_json::from_str("-0").expect("valid JSON number");
-
-    assert_eq!(
-        canonical_json(&negative_zero).expect("value canonicalizes"),
-        "0"
-    );
-}
-
-#[test]
-fn canonical_json_normalizes_number_spellings() {
-    let integer_float: Value = serde_json::from_str("1.0").expect("valid JSON number");
-    let negative_integer_float: Value = serde_json::from_str("-2.0").expect("valid JSON number");
-    let non_integer: Value = serde_json::from_str("1.50").expect("valid JSON number");
-
-    assert_eq!(
-        canonical_json(&integer_float).expect("value canonicalizes"),
-        "1"
-    );
-    assert_eq!(
-        canonical_json(&negative_integer_float).expect("value canonicalizes"),
-        "-2"
-    );
-    assert_eq!(
-        canonical_json(&non_integer).expect("value canonicalizes"),
-        "1.5"
-    );
-}
-
-#[test]
 fn canonical_event_jsonl_rejects_non_object_payload() {
-    let event = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "smoke001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        Value::Null,
-    );
+    let event = test_event(Value::Null);
 
     let err = event
         .canonical_jsonl()
@@ -203,15 +168,7 @@ fn canonical_event_jsonl_rejects_non_object_payload() {
 
 #[test]
 fn canonical_event_jsonl_rejects_unsupported_protocol_version() {
-    let mut event = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "smoke001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        json!({"reason": "fixture-start"}),
-    );
+    let mut event = test_event(json!({"reason": "fixture-start"}));
     event.protocol_version = "1".to_owned();
 
     let err = event
@@ -230,19 +187,23 @@ fn canonical_event_jsonl_rejects_unsupported_protocol_version() {
 
 #[test]
 fn event_envelope_serializer_rejects_non_object_payload() {
-    let event = EventEnvelope::new(
+    let event = test_event(Value::Null);
+
+    let err = serde_json::to_string(&event).expect_err("non-object payload must fail");
+
+    assert!(err.to_string().contains("payload must be a JSON object"));
+}
+
+fn test_event(payload: Value) -> EventEnvelope {
+    EventEnvelope::new(
         "evt-001",
         EventType::SessionStarted,
         "smoke001",
         1,
         "2026-01-01T00:00:00Z",
         "loop-agent-cli",
-        Value::Null,
-    );
-
-    let err = serde_json::to_string(&event).expect_err("non-object payload must fail");
-
-    assert!(err.to_string().contains("payload must be a JSON object"));
+        payload,
+    )
 }
 
 #[test]

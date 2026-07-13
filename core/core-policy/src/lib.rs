@@ -1277,8 +1277,8 @@ impl ExpectedDecision {
             return Err(expected_decision_error(format!(
                 "{} attempts must use reason_code {}, got {}",
                 self.attempt.kind_name(),
-                expected.name(),
-                self.reason_code.name()
+                expected.as_str(),
+                self.reason_code.as_str()
             )));
         }
         if self.side_effects_allowed {
@@ -1798,10 +1798,6 @@ pub enum DenyReasonCode {
 impl DenyReasonCode {
     /// Returns the stable serialized reason-code string.
     pub fn as_str(&self) -> &'static str {
-        self.name()
-    }
-
-    fn name(&self) -> &'static str {
         match self {
             Self::WriteDenied => "write_denied",
             Self::NetworkDenied => "network_denied",
@@ -1850,7 +1846,7 @@ impl std::error::Error for PolicyArtifactError {
 pub fn canonical_artifact_json<T: Serialize>(artifact: &T) -> Result<String, PolicyArtifactError> {
     let mut value = serde_json::to_value(artifact).map_err(PolicyArtifactError::Serialize)?;
     canonicalize_policy_artifact_arrays(&mut value);
-    let mut out = canonical_json(&value).map_err(PolicyArtifactError::CanonicalJson)?;
+    let mut out = proto::canonical_json(&value).map_err(PolicyArtifactError::CanonicalJson)?;
     out.push('\n');
     Ok(out)
 }
@@ -1945,10 +1941,6 @@ fn network_allow_key(value: &Value) -> (String, String, u64) {
             .and_then(Value::as_u64)
             .unwrap_or_default(),
     )
-}
-
-fn canonical_json(value: &Value) -> Result<String, proto::CanonicalJsonError> {
-    proto::canonical_json(value)
 }
 
 #[cfg(test)]
