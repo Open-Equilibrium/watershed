@@ -137,6 +137,189 @@ fn tail_session_buffers_partial_appended_line_until_lf() {
 }
 
 #[test]
+fn tail_session_emits_complete_line_before_following_partial_line() {
+    let workspace = empty_workspace("tail-complete-before-partial");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailcompletepartial001.jsonl");
+    let started = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "tailcompletepartial001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+    .canonical_jsonl()
+    .expect("started event serializes");
+    let error = EventEnvelope::new(
+        "evt-002",
+        EventType::Error,
+        "tailcompletepartial001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({"code":"E_TEST","message":"recoverable"}),
+    )
+    .canonical_jsonl()
+    .expect("error event serializes");
+    let completed = EventEnvelope::new(
+        "evt-003",
+        EventType::SessionCompleted,
+        "tailcompletepartial001",
+        3,
+        "2026-01-01T00:00:02Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    )
+    .canonical_jsonl()
+    .expect("completed event serializes");
+    fs::write(&path, &started).expect("initial session log written");
+
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let mut writer = NotifyingWriter {
+        bytes: Arc::clone(&bytes),
+        first_write: Some(tx),
+    };
+    let tail_workspace = workspace.clone();
+    let handle = thread::spawn(move || {
+        tail_session_to_writer(
+            &tail_workspace,
+            "tailcompletepartial001",
+            EmitMode::Jsonl,
+            &mut writer,
+        )
+    });
+
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("tail writes current prefix before append");
+    let split = completed.len() - 1;
+    append_session_log_line(&path, &format!("{error}{}", &completed[..split]))
+        .expect("complete and partial events appended");
+    let expected_prefix = format!("{started}{error}");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while bytes.lock().expect("tail bytes lock").len() < expected_prefix.len()
+        && Instant::now() < deadline
+    {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail prefix is utf8"),
+        expected_prefix,
+        "a complete line must not wait for the following partial line"
+    );
+    assert!(!handle.is_finished(), "tail must wait for the partial event");
+
+    append_session_log_line(&path, &completed[split..]).expect("event newline appended");
+    let output = handle
+        .join()
+        .expect("tail thread joins")
+        .expect("tail succeeds after partial line completes");
+    assert_eq!(output.event_count, 3);
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail stream is utf8"),
+        format!("{started}{error}{completed}")
+    );
+}
+
+#[test]
+fn tail_session_buffers_split_utf8_code_point_until_line_is_complete() {
+    let workspace = empty_workspace("tail-split-utf8");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailsplitutf8001.jsonl");
+    let started = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "tailsplitutf8001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    )
+    .canonical_jsonl()
+    .expect("started event serializes");
+    let error = EventEnvelope::new(
+        "evt-002",
+        EventType::Error,
+        "tailsplitutf8001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({"code":"E_TEST","message":"café"}),
+    )
+    .canonical_jsonl()
+    .expect("error event serializes");
+    let completed = EventEnvelope::new(
+        "evt-003",
+        EventType::SessionCompleted,
+        "tailsplitutf8001",
+        3,
+        "2026-01-01T00:00:02Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    )
+    .canonical_jsonl()
+    .expect("completed event serializes");
+    fs::write(&path, &started).expect("initial session log written");
+
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let (tx, rx) = mpsc::channel();
+    let mut writer = NotifyingWriter {
+        bytes: Arc::clone(&bytes),
+        first_write: Some(tx),
+    };
+    let tail_workspace = workspace.clone();
+    let handle = thread::spawn(move || {
+        tail_session_to_writer(
+            &tail_workspace,
+            "tailsplitutf8001",
+            EmitMode::Jsonl,
+            &mut writer,
+        )
+    });
+
+    rx.recv_timeout(Duration::from_secs(1))
+        .expect("tail writes current prefix before append");
+    let split = error
+        .as_bytes()
+        .windows(2)
+        .position(|window| window == [0xc3, 0xa9])
+        .expect("fixture contains a two-byte UTF-8 code point")
+        + 1;
+    append_session_log_bytes(&path, &error.as_bytes()[..split])
+        .expect("first UTF-8 byte appended");
+    thread::sleep(Duration::from_millis(100));
+    assert!(
+        !handle.is_finished(),
+        "tail must buffer an incomplete UTF-8 code point"
+    );
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail prefix is utf8"),
+        started
+    );
+
+    let mut remainder = error.as_bytes()[split..].to_vec();
+    remainder.extend_from_slice(completed.as_bytes());
+    append_session_log_bytes(&path, &remainder).expect("remaining events appended");
+    let output = handle
+        .join()
+        .expect("tail thread joins")
+        .expect("tail succeeds after UTF-8 code point completes");
+    assert_eq!(output.event_count, 3);
+    assert_eq!(
+        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail stream is utf8"),
+        format!("{started}{error}{completed}")
+    );
+}
+
+#[test]
 fn tail_session_tolerates_transient_append_replacement_gap() {
     let workspace = empty_workspace("tail-transient-replacement");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);

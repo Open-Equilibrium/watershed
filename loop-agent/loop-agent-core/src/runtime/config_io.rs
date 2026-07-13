@@ -264,11 +264,23 @@ fn ensure_opened_real_file_for_read_matches_path(
     Ok(file_metadata)
 }
 
+#[cfg(test)]
 fn read_file_suffix_to_string(
     path: &Path,
     offset: usize,
     expected_len: usize,
 ) -> Result<String, RuntimeError> {
+    let bytes = read_file_suffix(path, offset, expected_len)?;
+    String::from_utf8(bytes).map_err(|source| {
+        RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
+    })
+}
+
+fn read_file_suffix(
+    path: &Path,
+    offset: usize,
+    expected_len: usize,
+) -> Result<Vec<u8>, RuntimeError> {
     if expected_len < offset {
         return Err(RuntimeError::Protocol(format!(
             "{} changed outside append-only tail semantics",
@@ -317,17 +329,24 @@ fn read_file_suffix_to_string(
             path.display()
         )));
     }
-    String::from_utf8(bytes).map_err(|source| {
-        RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
-    })
+    Ok(bytes)
 }
 
+#[cfg(test)]
 fn read_tail_file_suffix_to_string(
     path: &Path,
     offset: usize,
     expected_len: usize,
 ) -> Result<String, RuntimeError> {
     retry_tail_transient_read_error(|| read_file_suffix_to_string(path, offset, expected_len))
+}
+
+fn read_tail_file_suffix(
+    path: &Path,
+    offset: usize,
+    expected_len: usize,
+) -> Result<Vec<u8>, RuntimeError> {
+    retry_tail_transient_read_error(|| read_file_suffix(path, offset, expected_len))
 }
 
 fn retry_tail_transient_read_error<T>(

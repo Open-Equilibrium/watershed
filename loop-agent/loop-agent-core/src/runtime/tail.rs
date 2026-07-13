@@ -41,8 +41,10 @@ pub fn tail_session_to_writer_with_options(
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
-    let initial = read_session_log_to_string(&path)?;
-    let mut stream = complete_jsonl_prefix(&initial).to_owned();
+    let mut initial = read_file_range(&path, 0, MAX_SESSION_LOG_BYTES)?;
+    let complete_len = complete_jsonl_prefix_len(&initial);
+    let mut pending = initial.split_off(complete_len);
+    let mut stream = decode_jsonl_bytes(&path, initial)?;
     let mut events = if stream.is_empty() {
         Vec::new()
     } else {
@@ -58,9 +60,8 @@ pub fn tail_session_to_writer_with_options(
             stream.len(),
         )?)
     };
-    let mut pending = initial[stream.len()..].to_owned();
-    let mut observed_len = initial.len();
-    if initial.len() > stream.len() && (stream_is_failed(&events) || stream_is_completed(&events)) {
+    let mut observed_len = complete_len + pending.len();
+    if !pending.is_empty() && (stream_is_failed(&events) || stream_is_completed(&events)) {
         return Err(RuntimeError::Protocol(format!(
             "{} contains a partial line after a terminal event",
             path.display()
@@ -98,13 +99,17 @@ pub fn tail_session_to_writer_with_options(
         if current_len == observed_len {
             continue;
         }
-        let suffix = read_tail_file_suffix_to_string(&path, observed_len, current_len)?;
+        let suffix = read_tail_file_suffix(&path, observed_len, current_len)?;
         observed_len = current_len;
-        pending.push_str(&suffix);
-        if !pending.ends_with('\n') {
+        pending.extend_from_slice(&suffix);
+        let complete_len = complete_jsonl_prefix_len(&pending);
+        if complete_len == 0 {
             continue;
         }
-        let appended = std::mem::take(&mut pending);
+        let remainder = pending.split_off(complete_len);
+        let appended_bytes = std::mem::replace(&mut pending, remainder);
+        let appended_len = appended_bytes.len();
+        let appended = decode_jsonl_bytes(&path, appended_bytes)?;
         let appended_events = if let Some(state) = &mut append_state {
             state.validate_appended(&path, &appended)?
         } else {
@@ -113,7 +118,7 @@ pub fn tail_session_to_writer_with_options(
                 &path,
                 session_id,
                 &appended_events,
-                appended.len(),
+                appended_len,
             )?);
             appended_events
         };
@@ -156,7 +161,15 @@ fn tail_poll_interval(options: &TailOptions, started: Instant) -> Duration {
     })
 }
 
-fn complete_jsonl_prefix(text: &str) -> &str {
-    text.rfind('\n')
-        .map_or("", |newline_index| &text[..=newline_index])
+fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |newline_index| newline_index + 1)
+}
+
+fn decode_jsonl_bytes(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {
+    String::from_utf8(bytes).map_err(|source| {
+        RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
+    })
 }
