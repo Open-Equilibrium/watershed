@@ -1,6 +1,39 @@
+#[derive(Clone)]
+struct SharedObserver<T> {
+    inner: Arc<Mutex<T>>,
+}
+
+impl<T> SharedObserver<T> {
+    fn new(inner: T) -> (Self, Arc<Mutex<T>>) {
+        let inner = Arc::new(Mutex::new(inner));
+        (
+            Self {
+                inner: Arc::clone(&inner),
+            },
+            inner,
+        )
+    }
+}
+
+impl<T: Write> Write for SharedObserver<T> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.inner
+            .lock()
+            .map_err(|_| io::Error::other("shared observer lock was poisoned"))?
+            .write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner
+            .lock()
+            .map_err(|_| io::Error::other("shared observer lock was poisoned"))?
+            .flush()
+    }
+}
+
 #[derive(Default)]
 struct AppendBeforePublishProbe {
-    first_publish_saw_only_first_event: bool,
+    first_publish_saw_committed_event: bool,
     published: Vec<u8>,
     workspace: PathBuf,
     writes: usize,
@@ -16,7 +49,7 @@ impl Write for AppendBeforePublishProbe {
             .join(format!("{}.jsonl", event.session_id));
         let persisted = fs::read(&path)?;
         if self.writes == 0 {
-            self.first_publish_saw_only_first_event = persisted == bytes;
+            self.first_publish_saw_committed_event = persisted.starts_with(bytes);
         }
         let published_through_event = [self.published.as_slice(), bytes].concat();
         if !persisted.starts_with(&published_through_event) {
@@ -35,21 +68,22 @@ impl Write for AppendBeforePublishProbe {
 #[test]
 fn run_streams_each_jsonl_event_only_after_it_is_appended() {
     let workspace = workspace_copy("smoke-loop");
-    let mut probe = AppendBeforePublishProbe {
+    let (probe, probe_state) = SharedObserver::new(AppendBeforePublishProbe {
         workspace: workspace.clone(),
         ..AppendBeforePublishProbe::default()
-    };
+    });
 
     let output = run_loop_to_writer(
         &workspace,
         "smoke-loop",
         EmitMode::Jsonl,
-        &mut probe,
+        probe,
     )
     .expect("streamed run completes");
     let persisted = fs::read(&output.session_path).expect("session log reads");
 
-    assert!(probe.first_publish_saw_only_first_event);
+    let probe = probe_state.lock().expect("probe lock");
+    assert!(probe.first_publish_saw_committed_event);
     assert!(probe.writes > 1);
     assert_eq!(probe.published, persisted);
     assert!(output.stdout.is_empty());
@@ -76,7 +110,7 @@ impl Write for ResumeAppendBeforePublishProbe {
         if self.published.is_empty() {
             self.first_event_was_durable_marker = event.event_type
                 == EventType::SessionResumed
-                && persisted == published_through_event;
+                && persisted.starts_with(&published_through_event);
         }
         if !persisted.starts_with(&published_through_event) {
             return Err(io::Error::other("resumed event published before append"));
@@ -109,18 +143,18 @@ fn resume_streams_marker_and_suffix_only_after_each_append() {
         "smoke-loop",
         prefix.lines().count(),
     );
-    let mut probe = ResumeAppendBeforePublishProbe {
+    let (probe, probe_state) = SharedObserver::new(ResumeAppendBeforePublishProbe {
         first_event_was_durable_marker: false,
         path: path.clone(),
         prefix: prefix.as_bytes().to_vec(),
         published: Vec::new(),
-    };
+    });
 
     let output = resume_session_to_writer(
         &workspace,
         "smoke001",
         EmitMode::Jsonl,
-        &mut probe,
+        probe,
     )
     .expect("streamed resume completes");
     let persisted = fs::read(&path).expect("resumed log reads");
@@ -129,6 +163,7 @@ fn resume_streams_marker_and_suffix_only_after_each_append() {
     )
     .expect("metadata reads");
 
+    let probe = probe_state.lock().expect("probe lock");
     assert!(probe.first_event_was_durable_marker);
     assert_eq!(
         probe.published,
@@ -152,6 +187,75 @@ impl Write for BrokenPipeObserver {
     }
 }
 
+struct BlockingObserver {
+    entered: Option<std::sync::mpsc::Sender<()>>,
+    release: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl Write for BlockingObserver {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if let Some(entered) = self.entered.take() {
+            let _ = entered.send(());
+        }
+        let (released, condition) = &*self.release;
+        let mut released = released.lock().expect("release lock");
+        while !*released {
+            released = condition.wait(released).expect("release wait");
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn persistently_blocked_observer_is_detached_without_blocking_the_session() {
+    let workspace = workspace_copy("smoke-loop");
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let observer_release = Arc::clone(&release);
+    let handle = thread::spawn(move || {
+        let observer = BlockingObserver {
+            entered: Some(entered_tx),
+            release: observer_release,
+        };
+        run_loop_to_writer(
+            &workspace,
+            "smoke-loop",
+            EmitMode::Jsonl,
+            observer,
+        )
+    });
+
+    entered_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("observer receives the first committed event");
+    thread::sleep(Duration::from_millis(150));
+    let completed_while_blocked = handle.is_finished();
+    let (released, condition) = &*release;
+    *released.lock().expect("release lock") = true;
+    condition.notify_all();
+
+    let output = handle
+        .join()
+        .expect("run thread joins")
+        .expect("observer backpressure does not fail the run");
+    assert!(
+        completed_while_blocked,
+        "a persistently blocked observer must be detached before it can block the session"
+    );
+    let persisted = fs::read_to_string(&output.session_path).expect("session log reads");
+    let events = validate_session_log_text(
+        &output.session_path,
+        &output.session_id,
+        &persisted,
+    )
+    .expect("committed stream validates");
+    assert_eq!(events.len(), output.event_count);
+}
+
 #[test]
 fn disconnected_observer_is_detached_without_rolling_back_committed_events() {
     let workspace = workspace_copy("smoke-loop");
@@ -159,7 +263,7 @@ fn disconnected_observer_is_detached_without_rolling_back_committed_events() {
         &workspace,
         "smoke-loop",
         EmitMode::Jsonl,
-        &mut BrokenPipeObserver,
+        BrokenPipeObserver,
     )
     .expect("observer disconnect does not fail the run");
     let persisted = fs::read_to_string(&output.session_path).expect("session log reads");
@@ -208,36 +312,39 @@ impl Write for RemoveLogAfterFirstPublish {
 #[test]
 fn append_failure_is_not_published_and_closes_the_serial_writer() {
     let workspace = workspace_copy("smoke-loop");
-    let mut observer = RemoveLogAfterFirstPublish {
+    let (observer, observer_state) = SharedObserver::new(RemoveLogAfterFirstPublish {
         published_events: 0,
         workspace: workspace.clone(),
-    };
+    });
 
     let err = run_loop_to_writer(
         &workspace,
         "smoke-loop",
         EmitMode::Jsonl,
-        &mut observer,
+        observer,
     )
     .expect_err("removed append target must stop the writer");
 
     assert!(matches!(
-        err,
+        &err,
         RuntimeError::EventWriter(source)
             if matches!(source.as_ref(), RuntimeError::Io { .. })
     ));
-    assert_eq!(observer.published_events, 1);
+    assert_eq!(
+        observer_state.lock().expect("observer lock").published_events,
+        1
+    );
 }
 
 #[test]
 fn validation_failure_is_not_published_and_closes_the_serial_writer() {
     let workspace = empty_workspace("event-writer-validation");
     let reservation = reserve_session_log(&workspace, "invalid001").expect("session reserved");
-    let mut observer = Vec::new();
+    let (observer, observer_state) = SharedObserver::new(Vec::new());
     let mut writer = SerialSessionWriter::start(
         &reservation,
         EmitMode::Jsonl,
-        &mut observer,
+        observer,
         None,
     )
     .expect("writer starts");
@@ -266,11 +373,163 @@ fn validation_failure_is_not_published_and_closes_the_serial_writer() {
             if matches!(source.as_ref(), RuntimeError::Protocol(message) if message.contains("first sequence"))
     ));
     assert!(matches!(second_error, RuntimeError::EventWriter(_)));
-    assert!(observer.is_empty());
+    assert!(observer_state.lock().expect("observer lock").is_empty());
     assert_eq!(
         fs::read(&reservation.session_path).expect("session log reads"),
         b""
     );
+    reservation.rollback();
+}
+
+struct SyncFailAppender {
+    bytes: Arc<Mutex<Vec<u8>>>,
+}
+
+impl EventLogAppender for SyncFailAppender {
+    fn append(&mut self, _path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        self.bytes
+            .lock()
+            .expect("appender bytes lock")
+            .extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
+        Err(RuntimeError::Io {
+            path: path.to_owned(),
+            source: io::Error::other("injected sync failure"),
+        })
+    }
+}
+
+#[test]
+fn appended_checkpoint_is_published_before_sync_failure_stops_the_writer() {
+    let workspace = empty_workspace("event-writer-sync-failure");
+    let reservation = reserve_session_log(&workspace, "syncfail001").expect("session reserved");
+    let (observer, observer_state) = SharedObserver::new(Vec::new());
+    let appended = Arc::new(Mutex::new(Vec::new()));
+    let mut writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(&reservation),
+            emit: EmitMode::Jsonl,
+            timings: None,
+        },
+        observer,
+        SyncFailAppender {
+            bytes: Arc::clone(&appended),
+        },
+    )
+    .expect("writer starts");
+    let started = EventEnvelope::new(
+        "evt-sync-started",
+        EventType::SessionStarted,
+        "syncfail001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"test"}),
+    );
+    let completed = EventEnvelope::new(
+        "evt-sync-completed",
+        EventType::SessionCompleted,
+        "syncfail001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    );
+    let started_jsonl = started.canonical_jsonl().expect("started serializes");
+    let completed_jsonl = completed.canonical_jsonl().expect("completed serializes");
+
+    writer
+        .commit(&started, &started_jsonl, Some(Instant::now()))
+        .expect("non-checkpoint append succeeds");
+    let err = writer
+        .commit(&completed, &completed_jsonl, Some(Instant::now()))
+        .expect_err("checkpoint sync failure is reported");
+    drop(writer);
+
+    assert!(matches!(
+        err,
+        RuntimeError::EventWriter(source)
+            if matches!(source.as_ref(), RuntimeError::Io { source, .. } if source.to_string().contains("injected sync failure"))
+    ));
+    let expected = format!("{started_jsonl}{completed_jsonl}").into_bytes();
+    assert_eq!(*appended.lock().expect("appended bytes lock"), expected);
+    assert_eq!(*observer_state.lock().expect("observer bytes lock"), expected);
+    reservation.rollback();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn partial_append_failure_rolls_back_to_the_last_complete_event() {
+    let workspace = empty_workspace("event-writer-partial-append");
+    let reservation =
+        reserve_session_log(&workspace, "partialappend001").expect("session reserved");
+    let started = EventEnvelope::new(
+        "evt-partial-started",
+        EventType::SessionStarted,
+        "partialappend001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"test"}),
+    );
+    let completed = EventEnvelope::new(
+        "evt-partial-completed",
+        EventType::SessionCompleted,
+        "partialappend001",
+        2,
+        "2026-01-01T00:00:01Z",
+        "loop-agent-cli",
+        serde_json::json!({}),
+    );
+    let started_jsonl = started.canonical_jsonl().expect("started serializes");
+    let completed_jsonl = completed.canonical_jsonl().expect("completed serializes");
+    let mut appender =
+        SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    appender
+        .append(&reservation.session_path, started_jsonl.as_bytes())
+        .expect("initial event appends");
+
+    let err = appender
+        .append_native_with(
+            &reservation.session_path,
+            completed_jsonl.as_bytes(),
+            |file, bytes| {
+                file.write_all(&bytes[..bytes.len() / 2])?;
+                Err(io::Error::other("injected partial append failure"))
+            },
+        )
+        .expect_err("partial append failure is reported");
+    assert!(
+        matches!(
+            &err,
+            RuntimeError::Io { source, .. }
+                if source.to_string().contains("injected partial append failure")
+        ),
+        "unexpected append error: {err:?}"
+    );
+    assert_eq!(
+        fs::read(&reservation.session_path).expect("rolled-back stream reads"),
+        started_jsonl.as_bytes()
+    );
+
+    appender
+        .append(&reservation.session_path, completed_jsonl.as_bytes())
+        .expect("retry appends after rollback");
+    let stream = fs::read_to_string(&reservation.session_path).expect("retried stream reads");
+    let events = validate_session_log_text(
+        &reservation.session_path,
+        &reservation.session_id,
+        &stream,
+    )
+    .expect("retried stream validates");
+    assert_eq!(events, vec![started, completed]);
+    drop(appender);
     reservation.rollback();
 }
 

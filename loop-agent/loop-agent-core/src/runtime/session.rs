@@ -1,11 +1,35 @@
+#[derive(Clone, Default)]
+struct CapturedOutput {
+    bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+impl Write for CapturedOutput {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.bytes
+            .lock()
+            .map_err(|_| io::Error::other("runtime output lock was poisoned"))?
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 /// Runs a loop from a workspace registry and captures its output.
 pub fn run_loop(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut stdout = Vec::new();
-    let mut output = run_loop_to_writer(workspace, loop_ref, emit, &mut stdout)?;
+    let stdout = CapturedOutput::default();
+    let captured = stdout.bytes.clone();
+    let mut output = run_loop_to_writer(workspace, loop_ref, emit, stdout)?;
+    let stdout = captured
+        .lock()
+        .map_err(|_| RuntimeError::Protocol("runtime output lock was poisoned".to_owned()))?
+        .clone();
     output.stdout = String::from_utf8(stdout).map_err(|source| {
         RuntimeError::Protocol(format!("runtime emitted non-UTF-8 output: {source}"))
     })?;
@@ -17,33 +41,42 @@ pub fn run_loop(
 /// JSONL events are written only after their identical canonical bytes have been appended to
 /// the session log. A failed observer is detached; callers can catch up through replay by
 /// `sequence` and `event_id`.
-pub fn run_loop_to_writer(
+pub fn run_loop_to_writer<W>(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
     emit: EmitMode,
-    writer: &mut dyn Write,
-) -> Result<RunOutput, RuntimeError> {
+    writer: W,
+) -> Result<RunOutput, RuntimeError>
+where
+    W: Write + Send + 'static,
+{
     run_loop_to_writer_internal(workspace, loop_ref, emit, writer, None)
 }
 
 #[cfg(test)]
-fn run_loop_to_writer_with_timings<'a>(
+fn run_loop_to_writer_with_timings<W>(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
     emit: EmitMode,
-    writer: &'a mut dyn Write,
-    timings: &'a mut EventWriterTimings,
-) -> Result<RunOutput, RuntimeError> {
+    writer: W,
+    timings: &mut EventWriterTimings,
+) -> Result<RunOutput, RuntimeError>
+where
+    W: Write + Send + 'static,
+{
     run_loop_to_writer_internal(workspace, loop_ref, emit, writer, Some(timings))
 }
 
-fn run_loop_to_writer_internal<'a>(
+fn run_loop_to_writer_internal<W>(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
     emit: EmitMode,
-    writer: &'a mut dyn Write,
-    timings: Option<&'a mut EventWriterTimings>,
-) -> Result<RunOutput, RuntimeError> {
+    writer: W,
+    timings: Option<&mut EventWriterTimings>,
+) -> Result<RunOutput, RuntimeError>
+where
+    W: Write + Send + 'static,
+{
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
     let registry_path = registry_root_path(workspace, &config.registry_root)?;

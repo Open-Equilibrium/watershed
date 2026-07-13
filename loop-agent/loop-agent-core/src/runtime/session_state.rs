@@ -39,8 +39,13 @@ pub fn resume_session(
     session_id: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut stdout = Vec::new();
-    let mut output = resume_session_to_writer(workspace, session_id, emit, &mut stdout)?;
+    let stdout = CapturedOutput::default();
+    let captured = stdout.bytes.clone();
+    let mut output = resume_session_to_writer(workspace, session_id, emit, stdout)?;
+    let stdout = captured
+        .lock()
+        .map_err(|_| RuntimeError::Protocol("runtime output lock was poisoned".to_owned()))?
+        .clone();
     output.stdout = String::from_utf8(stdout).map_err(|source| {
         RuntimeError::Protocol(format!("runtime emitted non-UTF-8 output: {source}"))
     })?;
@@ -52,33 +57,42 @@ pub fn resume_session(
 /// JSONL events are written only after their identical canonical bytes have been appended to
 /// the session log. A failed observer is detached; callers can catch up through replay by
 /// `sequence` and `event_id`.
-pub fn resume_session_to_writer(
+pub fn resume_session_to_writer<W>(
     workspace: impl AsRef<Path>,
     session_id: &str,
     emit: EmitMode,
-    writer: &mut dyn Write,
-) -> Result<RunOutput, RuntimeError> {
+    writer: W,
+) -> Result<RunOutput, RuntimeError>
+where
+    W: Write + Send + 'static,
+{
     resume_session_to_writer_internal(workspace, session_id, emit, writer, None)
 }
 
 #[cfg(test)]
-fn resume_session_to_writer_with_timings<'a>(
+fn resume_session_to_writer_with_timings<W>(
     workspace: impl AsRef<Path>,
     session_id: &str,
     emit: EmitMode,
-    writer: &'a mut dyn Write,
-    timings: &'a mut EventWriterTimings,
-) -> Result<RunOutput, RuntimeError> {
+    writer: W,
+    timings: &mut EventWriterTimings,
+) -> Result<RunOutput, RuntimeError>
+where
+    W: Write + Send + 'static,
+{
     resume_session_to_writer_internal(workspace, session_id, emit, writer, Some(timings))
 }
 
-fn resume_session_to_writer_internal<'a>(
+fn resume_session_to_writer_internal<W>(
     workspace: impl AsRef<Path>,
     session_id: &str,
     emit: EmitMode,
-    writer: &'a mut dyn Write,
-    timings: Option<&'a mut EventWriterTimings>,
-) -> Result<RunOutput, RuntimeError> {
+    writer: W,
+    timings: Option<&mut EventWriterTimings>,
+) -> Result<RunOutput, RuntimeError>
+where
+    W: Write + Send + 'static,
+{
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;

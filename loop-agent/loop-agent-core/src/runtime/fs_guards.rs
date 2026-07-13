@@ -181,6 +181,11 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
 #[cfg(unix)]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     let mut file = open_session_log_append_file(path)?;
+    file.seek(SeekFrom::End(0))
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
     file.write_all(contents).map_err(|source| RuntimeError::Io {
         path: path.to_owned(),
         source,
@@ -191,6 +196,7 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
 fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
     ensure_non_hardlinked_real_file(path)?;
     let file = fs::OpenOptions::new()
+        .write(true)
         .append(true)
         .open(path)
         .map_err(|source| RuntimeError::Io {
@@ -204,6 +210,11 @@ fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
 #[cfg(windows)]
 fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     let mut file = open_session_log_append_file(path)?;
+    file.seek(SeekFrom::End(0))
+        .map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
     file.write_all(contents).map_err(|source| RuntimeError::Io {
         path: path.to_owned(),
         source,
@@ -222,7 +233,7 @@ fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
     // rewriting the full log per event misses the M1 latency budget on Windows.
     let file = fs::OpenOptions::new()
         .read(true)
-        .append(true)
+        .write(true)
         .share_mode(FILE_SHARE_READ)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)

@@ -1,5 +1,7 @@
 const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
 const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
+const EVENT_OBSERVER_QUEUE_CAPACITY: usize = 1;
+const EVENT_OBSERVER_DELIVERY_TIMEOUT: Duration = Duration::from_millis(50);
 
 trait RuntimeEventSink {
     fn measurement_started_at(&self) -> Option<Instant> {
@@ -38,23 +40,159 @@ enum SessionWriterCommand {
     },
 }
 
+enum ObserverCommand {
+    Publish {
+        acknowledgement: std::sync::mpsc::SyncSender<bool>,
+        bytes: Vec<u8>,
+    },
+    Shutdown {
+        acknowledgement: std::sync::mpsc::SyncSender<()>,
+    },
+}
+
+struct ObserverDelivery {
+    sender: Option<std::sync::mpsc::SyncSender<ObserverCommand>>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl ObserverDelivery {
+    fn start<W>(writer: W) -> Result<Self, RuntimeError>
+    where
+        W: Write + Send + 'static,
+    {
+        let (sender, receiver) =
+            std::sync::mpsc::sync_channel(EVENT_OBSERVER_QUEUE_CAPACITY);
+        let worker = thread::Builder::new()
+            .name("loop-event-observer".to_owned())
+            .spawn(move || observer_delivery_worker(writer, &receiver))
+            .map_err(|source| RuntimeError::Io {
+                path: PathBuf::from("<event-observer-thread>"),
+                source,
+            })?;
+        Ok(Self {
+            sender: Some(sender),
+            worker: Some(worker),
+        })
+    }
+
+    fn publish(&mut self, bytes: &[u8]) -> bool {
+        let Some(sender) = self.sender.as_ref() else {
+            return false;
+        };
+        let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
+        if sender
+            .try_send(ObserverCommand::Publish {
+                acknowledgement,
+                bytes: bytes.to_vec(),
+            })
+            .is_err()
+        {
+            self.detach();
+            return false;
+        }
+        match response.recv_timeout(EVENT_OBSERVER_DELIVERY_TIMEOUT) {
+            Ok(true) => true,
+            Ok(false)
+            | Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                self.detach();
+                false
+            }
+        }
+    }
+
+    fn finish(&mut self) {
+        let Some(sender) = self.sender.take() else {
+            return;
+        };
+        let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
+        let sent = sender.try_send(ObserverCommand::Shutdown { acknowledgement });
+        drop(sender);
+        if sent.is_ok()
+            && response
+                .recv_timeout(EVENT_OBSERVER_DELIVERY_TIMEOUT)
+                .is_ok()
+        {
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        } else {
+            self.worker.take();
+        }
+    }
+
+    fn detach(&mut self) {
+        self.sender.take();
+        // WHY: a persistently blocked Write implementation cannot be cancelled. Dropping its
+        // join handle detaches that observer so authoritative session progress remains live.
+        self.worker.take();
+    }
+}
+
+impl Drop for ObserverDelivery {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn observer_delivery_worker<W>(
+    mut writer: W,
+    receiver: &std::sync::mpsc::Receiver<ObserverCommand>,
+) where
+    W: Write,
+{
+    while let Ok(command) = receiver.recv() {
+        match command {
+            ObserverCommand::Publish {
+                acknowledgement,
+                bytes,
+            } => {
+                let delivered = writer
+                    .write_all(&bytes)
+                    .and_then(|()| writer.flush())
+                    .is_ok();
+                let _ = acknowledgement.send(delivered);
+                if !delivered {
+                    break;
+                }
+            }
+            ObserverCommand::Shutdown { acknowledgement } => {
+                let _ = acknowledgement.send(());
+                break;
+            }
+        }
+    }
+}
+
 struct SerialSessionWriter<'a> {
     commit_reservation: Option<&'a SessionReservation>,
     emit: EmitMode,
     failed: bool,
-    observer: Option<&'a mut dyn Write>,
+    observer: Option<ObserverDelivery>,
     sender: Option<std::sync::mpsc::SyncSender<SessionWriterCommand>>,
     timings: Option<&'a mut EventWriterTimings>,
     worker: Option<thread::JoinHandle<()>>,
 }
 
+struct SerialWriterStart<'a> {
+    path: PathBuf,
+    session_id: String,
+    validation: SessionAppendValidationState,
+    commit_reservation: Option<&'a SessionReservation>,
+    emit: EmitMode,
+    timings: Option<&'a mut EventWriterTimings>,
+}
+
 impl<'a> SerialSessionWriter<'a> {
-    fn start(
+    fn start<W>(
         reservation: &'a SessionReservation,
         emit: EmitMode,
-        observer: &'a mut dyn Write,
+        observer: W,
         timings: Option<&'a mut EventWriterTimings>,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, RuntimeError>
+    where
+        W: Write + Send + 'static,
+    {
         Self::start_with_validation(
             &reservation.session_path,
             &reservation.session_id,
@@ -66,15 +204,18 @@ impl<'a> SerialSessionWriter<'a> {
         )
     }
 
-    fn start_existing(
+    fn start_existing<W>(
         path: &Path,
         session_id: &str,
         prior_events: &[EventEnvelope],
         prior_stream_bytes: usize,
         emit: EmitMode,
-        observer: &'a mut dyn Write,
+        observer: W,
         timings: Option<&'a mut EventWriterTimings>,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, RuntimeError>
+    where
+        W: Write + Send + 'static,
+    {
         let validation = SessionAppendValidationState::from_prior_events(
             path,
             session_id,
@@ -92,22 +233,55 @@ impl<'a> SerialSessionWriter<'a> {
         )
     }
 
-    fn start_with_validation(
+    fn start_with_validation<W>(
         path: &Path,
         session_id: &str,
         validation: SessionAppendValidationState,
         commit_reservation: Option<&'a SessionReservation>,
         emit: EmitMode,
-        observer: &'a mut dyn Write,
+        observer: W,
         timings: Option<&'a mut EventWriterTimings>,
-    ) -> Result<Self, RuntimeError> {
+    ) -> Result<Self, RuntimeError>
+    where
+        W: Write + Send + 'static,
+    {
+        let appender = SessionLogAppender::open(path)?;
+        Self::start_with_appender(
+            SerialWriterStart {
+                path: path.to_owned(),
+                session_id: session_id.to_owned(),
+                validation,
+                commit_reservation,
+                emit,
+                timings,
+            },
+            observer,
+            appender,
+        )
+    }
+
+    fn start_with_appender<W, A>(
+        start: SerialWriterStart<'a>,
+        observer: W,
+        appender: A,
+    ) -> Result<Self, RuntimeError>
+    where
+        W: Write + Send + 'static,
+        A: EventLogAppender + Send + 'static,
+    {
+        let SerialWriterStart {
+            path,
+            session_id,
+            validation,
+            commit_reservation,
+            emit,
+            timings,
+        } = start;
         let (sender, receiver) =
             std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
-        let path = path.to_owned();
-        let session_id = session_id.to_owned();
         let worker = thread::Builder::new()
             .name(format!("loop-event-writer-{session_id}"))
-            .spawn(move || session_writer_worker(&path, validation, &receiver))
+            .spawn(move || session_writer_worker(&path, validation, appender, &receiver))
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<event-writer-thread>"),
                 source,
@@ -116,7 +290,7 @@ impl<'a> SerialSessionWriter<'a> {
             commit_reservation,
             emit,
             failed: false,
-            observer: Some(observer),
+            observer: Some(ObserverDelivery::start(observer)?),
             sender: Some(sender),
             timings,
             worker: Some(worker),
@@ -155,14 +329,10 @@ impl<'a> SerialSessionWriter<'a> {
     }
 
     fn publish(&mut self, bytes: &[u8]) -> bool {
-        let Some(observer) = self.observer.as_deref_mut() else {
+        let Some(observer) = self.observer.as_mut() else {
             return false;
         };
-        if observer
-            .write_all(bytes)
-            .and_then(|()| observer.flush())
-            .is_err()
-        {
+        if !observer.publish(bytes) {
             // WHY: the append-only log is authoritative. A disconnected or failed observer
             // detaches and can catch up by sequence without rolling back committed events.
             self.observer = None;
@@ -213,11 +383,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
                 timings.append_nanos.push(append_latency);
             }
         }
-        if let Some(err) = outcome.error {
-            self.failed = true;
-            return Err(event_writer_failure(err));
-        }
-        if self.emit == EmitMode::Jsonl {
+        if outcome.appended && self.emit == EmitMode::Jsonl {
             let delivered = self.publish(canonical_jsonl.as_bytes());
             if delivered && !is_event_sync_checkpoint(&event.event_type) {
                 if let (Some(timings), Some(started_at)) =
@@ -226,6 +392,10 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
                     timings.delivery_nanos.push(started_at.elapsed().as_nanos());
                 }
             }
+        }
+        if let Some(err) = outcome.error {
+            self.failed = true;
+            return Err(event_writer_failure(err));
         }
         Ok(())
     }
@@ -317,24 +487,25 @@ impl DirtySyncState {
     }
 }
 
-fn session_writer_worker(
+trait EventLogAppender {
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError>;
+    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError>;
+}
+
+fn session_writer_worker<A>(
     path: &Path,
     mut validation: SessionAppendValidationState,
+    mut appender: A,
     receiver: &std::sync::mpsc::Receiver<SessionWriterCommand>,
-) {
+) where
+    A: EventLogAppender,
+{
     let mut dirty = DirtySyncState::default();
     let mut stopped = false;
-    let (mut appender, mut pending_error) = match SessionLogAppender::open(path) {
-        Ok(appender) => (Some(appender), None),
-        Err(err) => (None, Some(err)),
-    };
+    let mut pending_error = None;
     loop {
         if dirty.is_due(Instant::now()) && !stopped && pending_error.is_none() {
-            if let Err(err) = appender
-                .as_ref()
-                .expect("running event writer owns an appender")
-                .sync(path)
-            {
+            if let Err(err) = appender.sync(path) {
                 pending_error = Some(err);
             }
             dirty.mark_synced();
@@ -364,9 +535,7 @@ fn session_writer_worker(
                 } else {
                     commit_session_event(
                         path,
-                        appender
-                            .as_mut()
-                            .expect("running event writer owns an appender"),
+                        &mut appender,
                         &mut validation,
                         &event,
                         &canonical_jsonl,
@@ -382,11 +551,7 @@ fn session_writer_worker(
             Ok(SessionWriterCommand::Shutdown { acknowledgement }) => {
                 let error = pending_error.take().or_else(|| {
                     if dirty.is_dirty() && !stopped {
-                        appender
-                            .as_ref()
-                            .expect("running event writer owns an appender")
-                            .sync(path)
-                            .err()
+                        appender.sync(path).err()
                     } else {
                         None
                     }
@@ -399,11 +564,7 @@ fn session_writer_worker(
                 break;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) if dirty.is_dirty() && !stopped => {
-                if let Err(err) = appender
-                    .as_ref()
-                    .expect("running event writer owns an appender")
-                    .sync(path)
-                {
+                if let Err(err) = appender.sync(path) {
                     pending_error = Some(err);
                 } else {
                     dirty.mark_synced();
@@ -412,10 +573,7 @@ fn session_writer_worker(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 if dirty.is_dirty() && !stopped {
-                    let _ = appender
-                        .as_ref()
-                        .expect("running event writer owns an appender")
-                        .sync(path);
+                    let _ = appender.sync(path);
                 }
                 break;
             }
@@ -423,15 +581,18 @@ fn session_writer_worker(
     }
 }
 
-fn commit_session_event(
+fn commit_session_event<A>(
     path: &Path,
-    appender: &mut SessionLogAppender,
+    appender: &mut A,
     validation: &mut SessionAppendValidationState,
     event: &EventEnvelope,
     canonical_jsonl: &str,
     measurement_started_at: Option<Instant>,
     dirty: &mut DirtySyncState,
-) -> WriterOutcome {
+) -> WriterOutcome
+where
+    A: EventLogAppender,
+{
     if let Err(err) = validation.validate_constructed_event(
         path,
         event,
@@ -505,18 +666,32 @@ impl SessionLogAppender {
     }
 
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        #[cfg(any(unix, windows))]
+        {
+            self.append_native_with(path, bytes, |file, bytes| file.write_all(bytes))
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            append_session_log_bytes(path, bytes)
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    fn append_native_with<F>(
+        &mut self,
+        path: &Path,
+        bytes: &[u8],
+        write: F,
+    ) -> Result<(), RuntimeError>
+    where
+        F: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+    {
         #[cfg(unix)]
         {
             // WHY: retaining the checked handle avoids a reopen per event, while this
             // identity check still rejects replacement or removal between commits.
             ensure_opened_regular_leaf_matches_path(path, &self.file)?;
-            self
-                .file
-                .write_all(bytes)
-                .map_err(|source| RuntimeError::Io {
-                    path: path.to_owned(),
-                    source,
-                })
         }
 
         #[cfg(windows)]
@@ -534,19 +709,35 @@ impl SessionLogAppender {
                     path.display()
                 )));
             }
-            self
-                .file
-                .write_all(bytes)
-                .map_err(|source| RuntimeError::Io {
-                    path: path.to_owned(),
-                    source,
-                })
         }
 
-        #[cfg(not(any(unix, windows)))]
-        {
-            append_session_log_bytes(path, bytes)
+        let original_len = self.file.metadata().map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?.len();
+        self.file
+            .seek(SeekFrom::End(0))
+            .map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+        if let Err(source) = write(&mut self.file, bytes) {
+            let rollback = self
+                .file
+                .set_len(original_len)
+                .and_then(|()| self.file.sync_all());
+            if let Err(rollback) = rollback {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} append failed ({source}) and rollback failed ({rollback})",
+                    path.display()
+                )));
+            }
+            return Err(RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            });
         }
+        Ok(())
     }
 
     fn sync(&self, path: &Path) -> Result<(), RuntimeError> {
@@ -583,6 +774,16 @@ impl SessionLogAppender {
         {
             sync_session_log(path)
         }
+    }
+}
+
+impl EventLogAppender for SessionLogAppender {
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        SessionLogAppender::append(self, path, bytes)
+    }
+
+    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
+        SessionLogAppender::sync(self, path)
     }
 }
 

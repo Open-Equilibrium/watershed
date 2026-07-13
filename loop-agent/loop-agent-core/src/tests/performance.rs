@@ -26,13 +26,12 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
 
     for _ in 0..5 {
         let workspace = workspace_copy("hello-loop");
-        let mut observer = io::sink();
         let mut timings = EventWriterTimings::default();
         let output = run_loop_to_writer_with_timings(
             &workspace,
             "hello-loop",
             EmitMode::Jsonl,
-            &mut observer,
+            io::sink(),
             &mut timings,
         )
         .expect("measured runtime emit succeeds");
@@ -65,14 +64,13 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
         );
         fs::remove_file(workspace.join("out/summary.txt"))
             .expect("completed side effect removed");
-        let mut observer = io::sink();
         let mut timings = EventWriterTimings::default();
 
         let output = resume_session_to_writer_with_timings(
             &workspace,
             &completed.session_id,
             EmitMode::Jsonl,
-            &mut observer,
+            io::sink(),
             &mut timings,
         )
         .expect("measured resume succeeds");

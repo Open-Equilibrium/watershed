@@ -91,10 +91,17 @@ pub fn tail_session_to_writer_with_options(
         thread::sleep(tail_poll_interval(&options, started));
         let current_len = tail_session_log_len(&path)?;
         if current_len < observed_len {
-            return Err(RuntimeError::Protocol(format!(
-                "{} changed outside append-only tail semantics",
-                path.display()
-            )));
+            if current_len < stream.len() {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} changed outside append-only tail semantics",
+                    path.display()
+                )));
+            }
+            // WHY: a failed append may roll back only bytes that have never formed a complete
+            // event. The validated prefix remains immutable and authoritative.
+            pending.truncate(current_len - stream.len());
+            observed_len = current_len;
+            continue;
         }
         if current_len == observed_len {
             continue;
