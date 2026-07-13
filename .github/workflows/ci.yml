@@ -37,15 +37,10 @@ jobs:
           --component rustfmt
           --component llvm-tools-preview
 
-      - name: Install Rust gate tools
+      - name: Install gate tools
         uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907
         with:
-          tool: cargo-nextest,cargo-llvm-cov,cargo-audit,cargo-deny
-
-      - name: Install lychee
-        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907
-        with:
-          tool: lychee
+          tool: cargo-nextest,cargo-llvm-cov,cargo-audit,cargo-deny,lychee
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -90,14 +85,6 @@ jobs:
 
       - name: Install Node dev tools
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Chromium dependencies
-        if: runner.os == 'Linux'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Install Playwright Chromium
-        if: runner.os != 'Linux'
-        run: pnpm exec playwright install chromium
 
       - name: Render HTML docs
         run: pnpm run docs:render-check
