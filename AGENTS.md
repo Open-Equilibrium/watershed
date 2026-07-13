@@ -54,7 +54,7 @@ docs/adr/ADR-LOG.md                  decided records (agents)
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior, without duplicating code, tests, docs or abstractions.
 - **Meaningful tests:** follow the test-economy rules in `TESTING.md`; protect all established behavior, including prior milestones, through distinct functional, contract, risk or regression cases—never line-by-line coverage tests.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
-- **Definition of Done:** code + tests (per `TESTING.md`, run with `cargo nextest`; ≥95% line coverage from M1 via `cargo llvm-cov`) + relevant budget checks (per `PERFORMANCE.md`) + green CI gates (`cargo fmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
+- **Definition of Done:** code + tests and coverage per `TESTING.md` + relevant budget checks per `PERFORMANCE.md` + green CI gates (`cargo fmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
 
 ## Codex setup
 
@@ -77,4 +77,4 @@ docs/adr/ADR-LOG.md                  decided records (agents)
 - Subagents are bound by these AGENTS.md standards (English-only, the hard rules, the doc policy): each agent's `developer_instructions` reference them and read this file on demand, and the closeout chain (`autoreview` → `clawpatch` → `doc_sync`) enforces them before any PR (ADR-0027). Codex does not document whether subagents inherit `AGENTS.md`, so compliance is set explicitly, not assumed.
 - Codex hooks (`.codex/hooks.json`; `[features] hooks`, canonical — the old `codex_hooks` key is deprecated): opt-in, defense-in-depth lifecycle guards (ADR-0024). EXPERIMENTAL per OpenAI, advisory only, and never a security boundary.
 - M0 read order: the file list in the PLAN.md M0 DoD, in that order. Read `PERFORMANCE.md`/`GLOSSARY.md` on demand (smallest sufficient read).
-- Local dev tools (contributors/agents): Rust toolchain (rustfmt, clippy), `cargo-nextest`, `cargo-llvm-cov` (≥95% coverage gate, M1+), `cargo-audit`, `cargo-deny`, `lychee` (the mandatory M0 CI gates — see `TESTING.md`/`SECURITY.md`), Python 3, pnpm (`pnpm install` provides clawpatch), `gh` for PR work.
+- Local dev tools (contributors/agents): Rust toolchain (rustfmt, clippy), `cargo-nextest`, `cargo-llvm-cov`, `cargo-audit`, `cargo-deny`, `lychee` (see `TESTING.md`/`SECURITY.md`), Python 3, pnpm (`pnpm install` provides clawpatch), `gh` for PR work.

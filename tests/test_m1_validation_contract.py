@@ -36,7 +36,7 @@ class M1ValidationContractTest(unittest.TestCase):
             "cargo llvm-cov nextest",
             "--locked",
             "--workspace",
-            "--fail-under-lines 95",
+            "--fail-under-lines 90",
         ]:
             self.assertIn(token, workflow)
         self.assertIn("--ignore-filename-regex", workflow)

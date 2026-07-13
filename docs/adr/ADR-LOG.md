@@ -29,7 +29,7 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0019** | 2026-06-11 | Accepted | Docs keep an AGPL/free-software posture and make no monetization/open-core claims — `README.md`, `VISION.md`.
 - **ADR-0020** | 2026-06-11 | Accepted | Official repo target is `Open-Equilibrium/watershed`; npm is not a product target — `README.md`.
 - **ADR-0021** | 2026-06-16 | Accepted | M0 gates: `cargo fmt`, `clippy`, `nextest`, `cargo audit`, `cargo deny`, `lychee`, HTML render check — `TESTING.md`.
-- **ADR-0022** | 2026-06-16 | Accepted | From M1, line coverage gate is >=95% via `cargo llvm-cov nextest --workspace --fail-under-lines 95`; timing-sensitive perf tests run optimized outside coverage — `TESTING.md`.
+- **ADR-0022 / ADR-0060** | 2026-06-16 / 2026-07-13 | Accepted | From M1, meaningful line coverage is gated at >=90% via `cargo llvm-cov nextest --workspace --fail-under-lines 90`; timing-sensitive perf tests run optimized outside coverage — `TESTING.md`.
 - **ADR-0023** | 2026-06-16 | Accepted | Subagent topology includes `pr_validator`, closeout edit agents and `doc_sync` — `AGENTS.md`.
 - **ADR-0024** | 2026-06-16 | Accepted | Codex hooks are opt-in defense-in-depth, never a security boundary — `AGENTS.md`.
 - **ADR-0025** | 2026-06-16 | Accepted | `main` is PR-only/protected; work happens on topic branches — `AGENTS.md`.

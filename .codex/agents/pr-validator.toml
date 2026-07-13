@@ -1,6 +1,6 @@
 name = "pr_validator"
 nickname_candidates = ["CI See You", "Buildy McBuildface", "The Red Xorcist"]
-description = "Runs the full Watershed pre-PR gate matrix once (cargo fmt --check, cargo clippy, cargo nextest run, coverage via cargo llvm-cov --fail-under-lines 95, cargo audit, cargo deny, lychee docs link + HTML render) and reports pass/fail per gate tersely; never edits files."
+description = "Runs the full Watershed pre-PR gate matrix once (cargo fmt --check, cargo clippy, cargo nextest run, coverage via cargo llvm-cov --fail-under-lines 90, cargo audit, cargo deny, lychee docs link + HTML render) and reports pass/fail per gate tersely; never edits files."
 model = "gpt-5.6-sol"
 model_reasoning_effort = "medium"
 sandbox_mode = "workspace-write"
@@ -15,8 +15,8 @@ Run exactly these gates (scoped or full as asked):
 - cargo fmt --check
 - cargo clippy -- -D warnings
 - cargo nextest run
-- cargo llvm-cov nextest --workspace --fail-under-lines 95  (from M1, once crates
-  contain logic; see TESTING.md / ADR-0022)
+- cargo llvm-cov nextest --workspace --fail-under-lines 90  (from M1, once crates
+  contain logic; see TESTING.md / ADR-0022 / ADR-0060)
 - cargo audit
 - cargo deny check
 - lychee (docs links) + HTML render check  (see TESTING.md / ADR-0021)

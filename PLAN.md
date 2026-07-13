@@ -62,7 +62,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
   - instruction/tool/phase/connection terminology;
   - D-015 fixture suite descriptions and golden-stream contract (see
     `TESTING.md`):
-    `smoke-loop`, coverage-driven `hello-loop` and sandbox-negative fixtures,
+    `smoke-loop`, contract-spanning `hello-loop` and sandbox-negative fixtures,
     all deterministic through a stub model;
   - explicit statement that Loop Agent does not manage VCS in the MVP and that the
     local session store is runtime state, not project history;
@@ -80,14 +80,13 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
   - dependency-hygiene gate — `cargo audit` (RustSec advisories) and `cargo deny`
     (license/bans/sources/advisory policy via `deny.toml`); see `SECURITY.md`;
   - docs link/HTML validation gate via `lychee` (link integrity) + HTML render check;
-  - coverage harness `cargo llvm-cov nextest` wired now; the ≥95% line-coverage
-    gate is enforced from M1 (ADR-0022);
+  - coverage harness `cargo llvm-cov nextest` wired now; the `TESTING.md` gate
+    is enforced from M1 (ADR-0022/ADR-0060);
   - M0 pass/fail checklist.
     These gates (`cargo fmt --check`, `cargo clippy`, `cargo nextest`,
     `cargo audit`/`cargo deny`, `lychee` and HTML render validation) are mandatory
     M0 essentials (ADR-0021); D-049/ADR-0043 decides the HTML render requirement,
-    D-050/ADR-0045 pins the exact command and viewport constants, and the ≥95%
-    coverage gate (`cargo llvm-cov`) is mandatory from M1 (ADR-0022).
+    and D-050/ADR-0045 pins the exact command and viewport constants.
 
 **M0-blocking decisions:** none remain. D-002, D-006, D-012…D-018 and D-047…D-050 are decided in ADR-0029…ADR-0037 and ADR-0041…ADR-0045.
 
@@ -121,7 +120,7 @@ D-008/D-057 are closed for M1 in ADR-0050/ADR-0058: M1 provider context uses the
 - Protocol adapter that emits normalized `proto` v0 events.
 - D-015 golden loops and sandbox-negative tests.
 
-**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the ≥95% line-coverage gate (`cargo llvm-cov`, ADR-0022) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
+**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 

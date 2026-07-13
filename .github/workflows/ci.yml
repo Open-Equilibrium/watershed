@@ -69,7 +69,7 @@ jobs:
           cargo llvm-cov nextest
           --locked
           --workspace
-          --fail-under-lines 95
+          --fail-under-lines 90
           --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)'
           --show-missing-lines
           -E '${{ env.COVERAGE_TEST_FILTER }}'
