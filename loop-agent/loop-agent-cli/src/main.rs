@@ -53,8 +53,9 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
         "run" => {
             let loop_ref = positional(args, 1, "loop name")?;
             let emit = emit_mode(args)?;
-            let output = loop_agent_core::run_loop(workspace, loop_ref, emit)?;
-            write_stdout(&output.stdout)?;
+            let mut stdout = io::stdout().lock();
+            let output =
+                loop_agent_core::run_loop_to_writer(workspace, loop_ref, emit, &mut stdout)?;
             if output.failed {
                 process::exit(65);
             }
@@ -89,8 +90,13 @@ fn dispatch(args: &[String]) -> Result<(), RuntimeError> {
         "resume" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
-            let output = loop_agent_core::resume_session(workspace, session_id, emit)?;
-            write_stdout(&output.stdout)?;
+            let mut stdout = io::stdout().lock();
+            let output = loop_agent_core::resume_session_to_writer(
+                workspace,
+                session_id,
+                emit,
+                &mut stdout,
+            )?;
             if output.failed {
                 process::exit(65);
             }
@@ -122,8 +128,13 @@ fn chat(workspace: PathBuf) -> Result<(), RuntimeError> {
         })?;
         match line.trim() {
             "/hello-loop" | "hello" => {
-                let output = loop_agent_core::run_loop(&workspace, "hello-loop", EmitMode::Jsonl)?;
-                write_stdout(&output.stdout)?;
+                let mut stdout = io::stdout().lock();
+                let output = loop_agent_core::run_loop_to_writer(
+                    &workspace,
+                    "hello-loop",
+                    EmitMode::Jsonl,
+                    &mut stdout,
+                )?;
                 if output.failed {
                     process::exit(65);
                 }

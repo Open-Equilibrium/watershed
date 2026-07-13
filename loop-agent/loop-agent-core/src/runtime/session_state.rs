@@ -39,6 +39,25 @@ pub fn resume_session(
     session_id: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
+    let mut stdout = Vec::new();
+    let mut output = resume_session_to_writer(workspace, session_id, emit, &mut stdout)?;
+    output.stdout = String::from_utf8(stdout).map_err(|source| {
+        RuntimeError::Protocol(format!("runtime emitted non-UTF-8 output: {source}"))
+    })?;
+    Ok(output)
+}
+
+/// Resumes a session and publishes newly committed output incrementally to `writer`.
+///
+/// JSONL events are written only after their identical canonical bytes have been appended to
+/// the session log. A failed observer is detached; callers can catch up through replay by
+/// `sequence` and `event_id`.
+pub fn resume_session_to_writer(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    emit: EmitMode,
+    writer: &mut dyn Write,
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
@@ -59,6 +78,7 @@ pub fn resume_session(
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;
     verify_resume_definition_metadata(workspace, session_id, &registry, loop_block)?;
+    let definition_hashes = session_definition_hashes(&registry, loop_block)?;
     let artifacts =
         core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, &loop_id)?;
     let policy = runtime_policy_artifact(&artifacts)?;
@@ -124,25 +144,45 @@ pub fn resume_session(
         resume_event_clock(&config, &events)?,
     )?;
 
-    // WHY: resume side effects need a durable attempt marker before they run, while success
-    // events are only appended after the resumed side-effect replay matches the dry run.
-    append_session_log_text(&path, &append_plan.marker_stream)?;
-
-    let resumed_runtime = execute_loop(
-        workspace,
-        &registry,
-        policy,
-        loop_block,
+    let clock = resume_event_clock(&config, &events)?;
+    let mut serial_writer = SerialSessionWriter::start_existing(
+        &path,
         session_id,
-        LoopExecutionOptions::with_stub_model_fixture_profile(
-            resume_event_clock(&config, &events)?,
-            ToolSideEffectMode::Resume {
-                prefix_event_count: resume_prefix.planned_event_count as u64,
-            },
-            SideEffectRecorder::none(),
-            config.stub_model_fixture_profile,
-        ),
+        &events,
+        before.len(),
+        emit,
+        writer,
     )?;
+    let runtime_result = {
+        let mut resume_sink = ResumeEventSink {
+            clock,
+            marker_committed: false,
+            marker_event: append_plan.marker_event,
+            marker_stream: append_plan.marker_stream,
+            planned_event_count: resume_prefix.planned_event_count,
+            resume_marker_count: resume_prefix.resume_marker_count,
+            writer: &mut serial_writer,
+        };
+        execute_loop_with_sink(
+            workspace,
+            &registry,
+            policy,
+            loop_block,
+            session_id,
+            LoopExecutionOptions::with_stub_model_fixture_profile(
+                clock,
+                ToolSideEffectMode::Resume {
+                    prefix_event_count: resume_prefix.planned_event_count as u64,
+                },
+                SideEffectRecorder::none(),
+                config.stub_model_fixture_profile,
+            ),
+            Some(&mut resume_sink),
+        )
+    };
+    let finish_result = serial_writer.finish();
+    let resumed_runtime = runtime_result?;
+    finish_result?;
     let terminal_error = resumed_runtime.terminal_error;
     let resumed_failed = resumed_runtime.failed;
     if terminal_error.is_none() && resumed_runtime.events != planned_runtime.events {
@@ -152,35 +192,26 @@ pub fn resume_session(
         )));
     }
 
-    let (suffix_stream, combined_events) = if terminal_error.is_some() {
-        preflight_resume_runtime_suffix(
-            &path,
-            session_id,
-            &before,
-            &append_plan.marker_stream,
-            &resumed_runtime.events,
-            &resume_prefix,
-            resume_event_clock(&config, &events)?,
-        )?
-    } else {
-        (append_plan.suffix_stream, append_plan.combined_events)
-    };
-
-    append_session_log_text(&path, &suffix_stream)?;
-    let appended_stream = format!("{}{}", append_plan.marker_stream, suffix_stream);
+    let committed = read_session_log_to_string(&path)?;
+    let combined_events = validate_session_log_text(&path, session_id, &committed)?;
+    write_existing_session_metadata(
+        workspace,
+        session_id,
+        combined_events.len(),
+        &definition_hashes,
+    )?;
     if let Some(err) = terminal_error {
         return Err(err);
     }
+
+    serial_writer.publish_human_status(&format!("session {session_id} resumed\n"));
 
     Ok(RunOutput {
         event_count: combined_events.len(),
         failed: resumed_failed,
         session_id: session_id.to_owned(),
         session_path: path,
-        stdout: match emit {
-            EmitMode::Jsonl => appended_stream,
-            EmitMode::Human => format!("session {session_id} resumed\n"),
-        },
+        stdout: String::new(),
     })
 }
 
@@ -190,9 +221,8 @@ struct ResumeReplayPrefix {
 }
 
 struct ResumeAppendPlan {
+    marker_event: EventEnvelope,
     marker_stream: String,
-    suffix_stream: String,
-    combined_events: Vec<EventEnvelope>,
 }
 
 fn validate_resume_replay_prefix(
@@ -304,35 +334,12 @@ fn preflight_resume_append_plan(
     let marker_combined = format!("{before}{marker_stream}");
     validate_session_log_text(path, session_id, &marker_combined)?;
     let combined = format!("{before}{appended_stream}");
-    let combined_events = validate_session_log_text(path, session_id, &combined)?;
+    validate_session_log_text(path, session_id, &combined)?;
     prepare_session_log_append(path, &appended_stream)?;
     Ok(ResumeAppendPlan {
+        marker_event: resume_event,
         marker_stream,
-        suffix_stream,
-        combined_events,
     })
-}
-
-fn preflight_resume_runtime_suffix(
-    path: &Path,
-    session_id: &str,
-    before: &str,
-    marker_stream: &str,
-    runtime_events: &[EventEnvelope],
-    resume_prefix: &ResumeReplayPrefix,
-    clock: EventClock,
-) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
-    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
-    let suffix_events = runtime_events[resume_prefix.planned_event_count..]
-        .iter()
-        .cloned()
-        .map(|event| shift_resumed_event(event, resumed_suffix_offset, clock))
-        .collect::<Vec<_>>();
-    let suffix_stream = canonical_event_stream(&suffix_events)?;
-    let combined = format!("{before}{marker_stream}{suffix_stream}");
-    let combined_events = validate_session_log_text(path, session_id, &combined)?;
-    prepare_session_log_append(path, &suffix_stream)?;
-    Ok((suffix_stream, combined_events))
 }
 
 fn append_session_log_text(path: &Path, text: &str) -> Result<(), RuntimeError> {
@@ -877,6 +884,19 @@ fn write_reserved_session_metadata(
     )
 }
 
+fn write_existing_session_metadata(
+    workspace: &Path,
+    session_id: &str,
+    event_count: usize,
+    definition_hashes: &SessionDefinitionHashes,
+) -> Result<(), RuntimeError> {
+    let path = session_log_metadata_path(workspace, session_id)?;
+    replace_existing_file_atomically(
+        &path,
+        session_log_metadata_text(session_id, event_count, Some(definition_hashes)).as_bytes(),
+    )
+}
+
 fn session_log_metadata_text(
     session_id: &str,
     event_count: usize,
@@ -894,6 +914,7 @@ fn session_log_metadata_text(
     metadata
 }
 
+#[cfg(test)]
 fn write_initial_session_log_with_clock(
     reservation: &SessionReservation,
     session_id: &str,
@@ -918,7 +939,7 @@ fn preflight_session_completion_stream(
     expected_session_id: &str,
     events: &[EventEnvelope],
 ) -> Result<(String, Vec<EventEnvelope>), RuntimeError> {
-    preflight_session_completion_stream_from_prefix(reservation, expected_session_id, events, 1)
+    preflight_session_completion_stream_from_prefix(reservation, expected_session_id, events, 0)
 }
 
 fn preflight_session_completion_stream_from_prefix(
@@ -947,6 +968,7 @@ fn preflight_complete_reserved_session_log_from_prefix(
     ensure_session_log_growth_within_limit(&reservation.session_path, append_bytes.len())
 }
 
+#[cfg(test)]
 fn persist_reserved_session_prefix(
     reservation: &SessionReservation,
     session_id: &str,
@@ -969,6 +991,7 @@ fn persist_reserved_session_prefix(
     )
 }
 
+#[cfg(test)]
 fn durable_run_prefix_event_count(events: &[EventEnvelope]) -> usize {
     events
         .iter()
@@ -978,6 +1001,7 @@ fn durable_run_prefix_event_count(events: &[EventEnvelope]) -> usize {
         .map_or(1, |index| index + 1)
 }
 
+#[cfg(test)]
 fn commit_reserved_session_log_from_prefix(
     reservation: &SessionReservation,
     session_id: &str,

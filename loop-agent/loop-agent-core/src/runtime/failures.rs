@@ -2,7 +2,7 @@ fn emit_runtime_failure(
     loop_block: &core_script::LoopBlock,
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     if failure.emit_tool_failed {
         emit_runtime_tool_failure(invocation, failure, builder)?;
@@ -14,7 +14,7 @@ fn emit_runtime_failure(
 fn emit_runtime_error(
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     let mut error_payload = serde_json::json!({
         "code": failure.reason,
@@ -38,7 +38,7 @@ fn emit_runtime_loop_failure(
     loop_block: &core_script::LoopBlock,
     invocation: &LoopInvocation,
     reason: &str,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),
@@ -53,7 +53,7 @@ fn emit_runtime_loop_failure(
 fn emit_runtime_tool_failure(
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     if let Some(tool_id) = &failure.tool_id {
         builder.emit(
@@ -72,7 +72,7 @@ fn emit_propagated_runtime_failure(
     loop_block: &core_script::LoopBlock,
     invocation: &LoopInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
 }
@@ -81,7 +81,7 @@ fn emit_runtime_error_failure(
     loop_block: &core_script::LoopBlock,
     invocation: &LoopInvocation,
     err: &RuntimeError,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     let failure = runtime_failure_for_unhandled_error(err);
     emit_runtime_error(invocation, &failure, builder)?;
@@ -91,7 +91,7 @@ fn emit_runtime_error_failure(
 fn emit_propagated_runtime_error_failure(
     loop_block: &core_script::LoopBlock,
     invocation: &LoopInvocation,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     emit_runtime_loop_failure(loop_block, invocation, RUNTIME_ERROR_REASON, builder)
 }
@@ -270,6 +270,7 @@ fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<R
         | RuntimeError::Registry(_)
         | RuntimeError::Protocol(_)
         | RuntimeError::ContextBudgetExceeded { .. }
+        | RuntimeError::EventWriter(_)
         | RuntimeError::ActiveSession { .. }
         | RuntimeError::SessionLogExists(_)
         | RuntimeError::TerminalSession(_)

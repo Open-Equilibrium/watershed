@@ -164,7 +164,7 @@ fn policy_target_name(target: &core_policy::PolicyTarget) -> &'static str {
     }
 }
 
-struct RuntimeEventBuilder {
+struct RuntimeEventBuilder<'a> {
     clock: EventClock,
     context_manifests: Vec<ContextManifest>,
     events: Vec<EventEnvelope>,
@@ -172,10 +172,11 @@ struct RuntimeEventBuilder {
     message_counter: u64,
     sequence: u64,
     session_id: String,
+    sink: Option<&'a mut dyn RuntimeEventSink>,
     stream_bytes: usize,
 }
 
-impl RuntimeEventBuilder {
+impl<'a> RuntimeEventBuilder<'a> {
     fn with_clock(session_id: String, clock: EventClock) -> Self {
         Self {
             clock,
@@ -185,8 +186,19 @@ impl RuntimeEventBuilder {
             message_counter: 0,
             sequence: 0,
             session_id,
+            sink: None,
             stream_bytes: 0,
         }
+    }
+
+    fn with_sink(
+        session_id: String,
+        clock: EventClock,
+        sink: &'a mut dyn RuntimeEventSink,
+    ) -> Self {
+        let mut builder = Self::with_clock(session_id, clock);
+        builder.sink = Some(sink);
+        builder
     }
 
     fn next_loop_invocation(
@@ -253,6 +265,9 @@ impl RuntimeEventBuilder {
                 "event stream budget exceeded: next event would use {next_stream_bytes} bytes, max {MAX_LOOP_EVENT_STREAM_BYTES}"
             )));
         }
+        if let Some(sink) = self.sink.as_deref_mut() {
+            sink.commit(&event, &event_bytes)?;
+        }
         self.sequence = sequence;
         self.stream_bytes = next_stream_bytes;
         self.events.push(event);
@@ -268,7 +283,30 @@ fn execute_loop(
     session_id: &str,
     options: LoopExecutionOptions<'_>,
 ) -> Result<RuntimeExecution, RuntimeError> {
-    let mut builder = RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock);
+    execute_loop_with_sink(
+        workspace,
+        registry,
+        policy,
+        root_loop,
+        session_id,
+        options,
+        None,
+    )
+}
+
+fn execute_loop_with_sink(
+    workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    root_loop: &core_script::LoopBlock,
+    session_id: &str,
+    options: LoopExecutionOptions<'_>,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<RuntimeExecution, RuntimeError> {
+    let mut builder = match sink {
+        Some(sink) => RuntimeEventBuilder::with_sink(session_id.to_owned(), options.clock, sink),
+        None => RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock),
+    };
     builder.emit(
         None,
         EventType::SessionStarted,
@@ -331,8 +369,9 @@ fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> boo
 }
 
 fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &RuntimeError) -> bool {
-    should_terminalize_runtime_error(side_effect_mode)
-        || matches!(err, RuntimeError::ContextBudgetExceeded { .. })
+    !matches!(err, RuntimeError::EventWriter(_))
+        && (should_terminalize_runtime_error(side_effect_mode)
+            || matches!(err, RuntimeError::ContextBudgetExceeded { .. }))
 }
 
 fn preflight_loop_tools(
@@ -426,7 +465,7 @@ fn emit_loop_block(
     context: &LoopEmitContext<'_>,
     loop_block: &core_script::LoopBlock,
     parent_loop_id: Option<String>,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     emit_loop_block_at_depth(context, loop_block, parent_loop_id, builder, 1)
 }
@@ -444,7 +483,7 @@ fn emit_loop_block_at_depth(
     context: &LoopEmitContext<'_>,
     loop_block: &core_script::LoopBlock,
     parent_loop_id: Option<String>,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
     depth: usize,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     if depth > core_script::MAX_LOOP_NESTING_DEPTH {
@@ -523,7 +562,7 @@ fn emit_phase(
     loop_block: &core_script::LoopBlock,
     phase: &core_script::PhaseBlock,
     invocation: &LoopInvocation,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     let instruction_ids = phase
         .instruction_refs

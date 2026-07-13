@@ -5,7 +5,7 @@ fn emit_tool(
     invocation: &LoopInvocation,
     side_effect_mode: ToolSideEffectMode,
     side_effect_recorder: SideEffectRecorder<'_>,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     ensure_tool_matches_policy(tool, policy.target, policy.command)?;
     let planned_progress = tool_dispatch_progress(

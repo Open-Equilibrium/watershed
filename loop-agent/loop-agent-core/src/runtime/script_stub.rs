@@ -801,7 +801,7 @@ fn emit_tool_progress(
     message: &'static str,
     tool: &core_script::ToolBlock,
     invocation: &LoopInvocation,
-    builder: &mut RuntimeEventBuilder,
+    builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),

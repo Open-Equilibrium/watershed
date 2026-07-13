@@ -203,6 +203,8 @@ pub enum RuntimeError {
         /// Canonical mandatory context bytes required by the turn.
         required_bytes: usize,
     },
+    /// The per-session event writer failed after event construction.
+    EventWriter(Box<RuntimeError>),
     /// A session lock already exists for the requested session.
     ActiveSession {
         /// Requested session id.
@@ -225,6 +227,7 @@ impl RuntimeError {
             Self::Denied { .. }
             | Self::Protocol(_)
             | Self::ContextBudgetExceeded { .. }
+            | Self::EventWriter(_)
             | Self::ActiveSession { .. }
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_) => 65,
@@ -250,6 +253,7 @@ impl fmt::Display for RuntimeError {
                 f,
                 "context_budget_exceeded: mandatory context requires {required_bytes} estimated tokens, input budget is {input_budget}"
             ),
+            Self::EventWriter(source) => write!(f, "event writer: {source}"),
             Self::ActiveSession {
                 session_id,
                 lock_path,
@@ -278,6 +282,7 @@ impl std::error::Error for RuntimeError {
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
+            Self::EventWriter(source) => Some(source.as_ref()),
         }
     }
 }

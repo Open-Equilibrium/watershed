@@ -56,6 +56,11 @@ mod context {
     include!("tests/context.rs");
 }
 
+mod event_writer {
+    use super::*;
+    include!("tests/event_writer.rs");
+}
+
 mod workspace_fixtures {
     use super::*;
     include!("tests/workspace_fixtures.rs");

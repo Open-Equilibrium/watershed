@@ -673,6 +673,19 @@ struct SessionAppendValidationState {
 }
 
 impl SessionAppendValidationState {
+    fn empty(expected_session_id: &str) -> Self {
+        Self {
+            expected_session_id: expected_session_id.to_owned(),
+            previous_sequence: 0,
+            event_ids: BTreeSet::new(),
+            loop_started_ids: BTreeSet::new(),
+            terminal_line: None,
+            stream_bytes: 0,
+            line_count: 0,
+            lifecycle: SessionLifecycleState::default(),
+        }
+    }
+
     fn from_prior_events(
         path: &Path,
         expected_session_id: &str,
@@ -757,25 +770,6 @@ impl SessionAppendValidationState {
         let mut appended_events = Vec::new();
         for line in text.split_terminator('\n') {
             let line_number = self.line_count + 1;
-            // WHY: incremental tail validation must preserve the same cumulative
-            // public stream budgets as full replay validation.
-            if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
-                    path.display()
-                )));
-            }
-            self.stream_bytes = self
-                .stream_bytes
-                .checked_add(line.len().saturating_add(1))
-                .unwrap_or(usize::MAX);
-            if self.stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} event stream budget exceeded at line {line_number}: {} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
-                    path.display(),
-                    self.stream_bytes
-                )));
-            }
             if line.ends_with('\r') {
                 return Err(RuntimeError::Protocol(format!(
                     "{} line {line_number} must use LF-only line endings",
@@ -792,119 +786,161 @@ impl SessionAppendValidationState {
                     path.display()
                 )));
             }
-            if event.session_id != self.expected_session_id {
+            self.validate_constructed_event(path, &event, line.len().saturating_add(1))?;
+            appended_events.push(event);
+        }
+        Ok(appended_events)
+    }
+
+    fn validate_constructed_event(
+        &mut self,
+        path: &Path,
+        event: &EventEnvelope,
+        canonical_bytes: usize,
+    ) -> Result<(), RuntimeError> {
+        let line_number = self.line_count + 1;
+        // WHY: incremental tail validation and live commits preserve the same cumulative
+        // public stream budgets as full replay validation.
+        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
+                path.display()
+            )));
+        }
+        self.stream_bytes = self
+            .stream_bytes
+            .checked_add(canonical_bytes)
+            .unwrap_or(usize::MAX);
+        if self.stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} event stream budget exceeded at line {line_number}: {} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
+                path.display(),
+                self.stream_bytes
+            )));
+        }
+        if event.session_id != self.expected_session_id {
+            return Err(RuntimeError::Protocol(format!(
+                "{} must use one session_id",
+                path.display()
+            )));
+        }
+        if !validate_session_id(&event.session_id) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a valid session_id",
+                path.display()
+            )));
+        }
+        if event.event_id.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty event_id",
+                path.display()
+            )));
+        }
+        if event.source.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty source",
+                path.display()
+            )));
+        }
+        if !is_rfc3339_utc_timestamp(&event.timestamp) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use an RFC3339 UTC timestamp",
+                path.display()
+            )));
+        }
+        if event
+            .correlation_id
+            .as_ref()
+            .is_some_and(|correlation_id| correlation_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty correlation_id",
+                path.display()
+            )));
+        }
+        if event
+            .loop_id
+            .as_ref()
+            .is_some_and(|loop_id| loop_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty loop_id",
+                path.display()
+            )));
+        }
+        if event
+            .parent_loop_id
+            .as_ref()
+            .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a non-empty parent_loop_id",
+                path.display()
+            )));
+        }
+        if line_number == 1 {
+            if event.event_type != EventType::SessionStarted {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} must use one session_id",
+                    "{} line 1 must start with session.started",
                     path.display()
                 )));
             }
-            if !validate_session_id(&event.session_id) {
+            if event.sequence != 1 {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a valid session_id",
+                    "{} first sequence must be 1",
                     path.display()
                 )));
             }
-            if event.event_id.is_empty() {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a non-empty event_id",
-                    path.display()
-                )));
-            }
-            if event.source.is_empty() {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a non-empty source",
-                    path.display()
-                )));
-            }
-            if !is_rfc3339_utc_timestamp(&event.timestamp) {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use an RFC3339 UTC timestamp",
-                    path.display()
-                )));
-            }
-            if event
-                .correlation_id
-                .as_ref()
-                .is_some_and(|correlation_id| correlation_id.is_empty())
-            {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a non-empty correlation_id",
-                    path.display()
-                )));
-            }
-            if event
-                .loop_id
-                .as_ref()
-                .is_some_and(|loop_id| loop_id.is_empty())
-            {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a non-empty loop_id",
-                    path.display()
-                )));
-            }
-            if event
-                .parent_loop_id
-                .as_ref()
-                .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
-            {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a non-empty parent_loop_id",
-                    path.display()
-                )));
-            }
-            if event.sequence <= self.previous_sequence {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} sequence must increase",
-                    path.display()
-                )));
-            }
-            self.previous_sequence = event.sequence;
-            if !self.event_ids.insert(event.event_id.clone()) {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a unique event_id",
-                    path.display()
-                )));
-            }
-            if let Some(terminal_line) = self.terminal_line {
-                return Err(RuntimeError::Protocol(format!(
+        }
+        if event.sequence <= self.previous_sequence {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} sequence must increase",
+                path.display()
+            )));
+        }
+        self.previous_sequence = event.sequence;
+        if !self.event_ids.insert(event.event_id.clone()) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line {line_number} must use a unique event_id",
+                path.display()
+            )));
+        }
+        if let Some(terminal_line) = self.terminal_line {
+            return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} appears after terminal session event on line {terminal_line}",
                 path.display()
             )));
-            }
-            validate_event_payload(path, line_number, &event)?;
-            if event.event_type == EventType::LoopStarted {
-                let loop_id = event.loop_id.as_deref().ok_or_else(|| {
-                    RuntimeError::Protocol(format!(
-                        "{} line {line_number} loop.started must include loop_id",
-                        path.display()
-                    ))
-                })?;
-                if !self.loop_started_ids.insert(loop_id.to_owned()) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} must use a unique loop_id for loop.started",
-                        path.display()
-                    )));
-                }
-            }
-            self.lifecycle.validate_event(path, line_number, &event)?;
-            if matches!(
-                event.event_type,
-                EventType::SessionCompleted | EventType::SessionFailed
-            ) {
-                self.terminal_line = Some(line_number);
-            }
-            self.line_count = line_number;
-            let is_terminal = matches!(
-                event.event_type,
-                EventType::SessionCompleted | EventType::SessionFailed
-            );
-            appended_events.push(event);
-            if is_terminal {
-                self.lifecycle
-                    .validate_terminal_session(path, appended_events.last())?;
+        }
+        validate_event_payload(path, line_number, event)?;
+        if event.event_type == EventType::LoopStarted {
+            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
+                RuntimeError::Protocol(format!(
+                    "{} line {line_number} loop.started must include loop_id",
+                    path.display()
+                ))
+            })?;
+            if !self.loop_started_ids.insert(loop_id.to_owned()) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} must use a unique loop_id for loop.started",
+                    path.display()
+                )));
             }
         }
-        Ok(appended_events)
+        self.lifecycle.validate_event(path, line_number, event)?;
+        if matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        ) {
+            self.terminal_line = Some(line_number);
+        }
+        self.line_count = line_number;
+        if matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        ) {
+            self.lifecycle.validate_terminal_session(path, Some(event))?;
+        }
+        Ok(())
     }
 }
 
