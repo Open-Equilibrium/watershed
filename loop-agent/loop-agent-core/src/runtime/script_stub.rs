@@ -482,9 +482,12 @@ fn resolved_workspace_scoped_target(
                     source,
                 })?;
                 if !resolved.starts_with(&canonical_workspace) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "own-script write target {target:?} resolves outside the workspace"
-                    )));
+                    return Err(runtime_denied(
+                        core_policy::DenyReasonCode::SymlinkEscapeDenied,
+                        format!(
+                            "own-script write target {target:?} follows a symlink or reparse point outside the workspace"
+                        ),
+                    ));
                 }
                 if components.peek().is_some() {
                     let metadata = fs::metadata(&resolved).map_err(|source| RuntimeError::Io {
