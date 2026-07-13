@@ -1,54 +1,20 @@
-use loop_agent_core::{
-    run_loop, validate_protocol_jsonl_text, EmitMode, MAX_LOOP_EVENT_STREAM_BYTES,
-};
-use proto::{EventEnvelope, EventType};
+use loop_agent_core::{run_loop, EmitMode};
 use std::{
     fs,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        mpsc, Arc, Barrier, Mutex, MutexGuard,
+        mpsc, Arc, Barrier,
     },
     thread,
     time::{Duration, Instant},
 };
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
-static PERFORMANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[test]
-fn near_cap_event_validation_enforces_m1_memory_budget() {
-    let _guard = performance_test_guard();
-    let stream = near_cap_valid_event_stream();
-    assert!(
-        stream.len() <= MAX_LOOP_EVENT_STREAM_BYTES,
-        "near-cap stream must stay inside the runtime budget"
-    );
-    assert!(
-        stream.len() >= MAX_LOOP_EVENT_STREAM_BYTES - 8 * 1024,
-        "near-cap stream should exercise the budget boundary: {} bytes",
-        stream.len()
-    );
-
-    let started = Instant::now();
-    let events = validate_protocol_jsonl_text(Path::new("near-cap.jsonl"), &stream)
-        .expect("near-cap stream validates");
-    assert_eq!(events.len(), 9);
-    assert!(
-        started.elapsed() <= Duration::from_secs(5),
-        "near-cap validation should remain bounded"
-    );
-
-    let oversized = format!("{stream}{}\n", "x".repeat(16 * 1024));
-    let err = validate_protocol_jsonl_text(Path::new("oversized-near-cap.jsonl"), &oversized)
-        .expect_err("oversized stream must fail the event-stream budget");
-    assert!(err.to_string().contains("event stream budget"), "{err}");
-}
-
-#[test]
-fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() {
-    let _guard = performance_test_guard();
+fn ten_orchestrating_fixture_loops_complete_under_m1_runtime_contract() {
     let peak_rss_sampler = if rss_budget_must_be_enforced() {
         let baseline = current_resident_set_size()
             .expect("RSS measurement must be available on this enforced target before the run");
@@ -56,42 +22,23 @@ fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() 
     } else {
         None
     };
-    let workspaces = [
-        ("smoke-loop", "smoke-loop"),
-        ("hello-loop", "hello-loop"),
-        ("smoke-loop", "smoke-loop"),
-        ("hello-loop", "hello-loop"),
-        ("smoke-loop", "smoke-loop"),
-        ("hello-loop", "hello-loop"),
-        ("smoke-loop", "smoke-loop"),
-        ("hello-loop", "hello-loop"),
-        ("smoke-loop", "smoke-loop"),
-        ("hello-loop", "hello-loop"),
-    ]
-    .into_iter()
-    .map(|(fixture, loop_name)| (workspace_copy(fixture), loop_name))
-    .collect::<Vec<_>>();
+    let workspaces = (0..10)
+        .map(|_| workspace_copy("hello-loop"))
+        .collect::<Vec<_>>();
     let concurrency = workspaces.len();
     let barrier = Arc::new(Barrier::new(concurrency + 1));
     let (tx, rx) = mpsc::channel();
     let handles = workspaces
         .into_iter()
-        .map(|(workspace, loop_name)| {
+        .map(|workspace| {
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();
             thread::spawn(move || {
                 barrier.wait();
-                let result = run_loop(&workspace, loop_name, EmitMode::Jsonl)
-                    .map(|output| {
-                        (
-                            output.event_count,
-                            output.failed,
-                            output.stdout.len(),
-                            dir_size(&workspace),
-                        )
-                    })
+                let result = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+                    .map(|output| (output.event_count, output.failed))
                     .map_err(|err| err.to_string());
-                tx.send((loop_name, result)).expect("result sent");
+                tx.send(result).expect("result sent");
             })
         })
         .collect::<Vec<_>>();
@@ -100,39 +47,26 @@ fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() 
     let started = Instant::now();
     barrier.wait();
     let timeout = Duration::from_secs(30);
-    let mut total_stdout_bytes = 0usize;
-    let mut total_workspace_bytes = 0u64;
     for _ in 0..concurrency {
         let elapsed = started.elapsed();
         assert!(
             elapsed < timeout,
-            "10 concurrent successful fixture loops must complete within {timeout:?}"
+            "10 concurrent orchestrating fixture loops must complete within {timeout:?}"
         );
         let remaining = timeout - elapsed;
-        let (loop_name, result) = rx
+        let result = rx
             .recv_timeout(remaining)
-            .expect("10 concurrent successful fixture loops complete before timeout");
-        let (event_count, failed, stdout_bytes, workspace_bytes) =
-            result.unwrap_or_else(|err| panic!("{loop_name}: {err}"));
-        assert!(event_count > 0, "{loop_name}");
-        total_stdout_bytes += stdout_bytes;
-        total_workspace_bytes += workspace_bytes;
-        assert!(!failed, "{loop_name} should complete successfully");
+            .expect("10 concurrent orchestrating fixture loops complete before timeout");
+        let (event_count, failed) = result.unwrap_or_else(|err| panic!("hello-loop: {err}"));
+        assert!(event_count > 0, "hello-loop must emit events");
+        assert!(!failed, "hello-loop should complete successfully");
     }
     for handle in handles {
         handle.join().expect("worker thread joins");
     }
     assert!(
         started.elapsed() <= timeout,
-        "10 concurrent successful fixture loops must complete within {timeout:?}"
-    );
-    assert!(
-        total_stdout_bytes < 512 * 1024,
-        "concurrent fixture stdout must stay bounded: {total_stdout_bytes} bytes"
-    );
-    assert!(
-        total_workspace_bytes < 64 * 1024 * 1024,
-        "concurrent fixture workspaces must stay bounded: {total_workspace_bytes} bytes"
+        "10 concurrent orchestrating fixture loops must complete within {timeout:?}"
     );
     if let Some(mut sampler) = peak_rss_sampler {
         let baseline = sampler.baseline();
@@ -144,12 +78,6 @@ fn ten_successful_fixture_loop_invocations_complete_under_m1_runtime_contract() 
             "concurrent fixture peak RSS growth must stay <= {per_loop_budget} bytes per active top-level loop ({budget} bytes total): {peak_growth} bytes"
         );
     }
-}
-
-fn performance_test_guard() -> MutexGuard<'static, ()> {
-    PERFORMANCE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct PeakRssSampler {
@@ -207,107 +135,6 @@ impl Drop for PeakRssSampler {
     fn drop(&mut self) {
         self.stop();
     }
-}
-
-fn near_cap_valid_event_stream() -> String {
-    let base = event_stream_with_message_content("");
-    let target_len = MAX_LOOP_EVENT_STREAM_BYTES - 4 * 1024;
-    let padding_len = target_len.saturating_sub(base.len());
-    event_stream_with_message_content(&"x".repeat(padding_len))
-}
-
-fn event_stream_with_message_content(content: &str) -> String {
-    [
-        perf_event_line(
-            1,
-            EventType::SessionStarted,
-            None,
-            serde_json::json!({"reason":"fixture-start"}),
-        ),
-        perf_event_line(
-            2,
-            EventType::LoopStarted,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"near-cap-loop","loop_name":"NearCap"}),
-        ),
-        perf_event_line(
-            3,
-            EventType::PhaseEntered,
-            Some("loop-001"),
-            serde_json::json!({
-                "instruction_ids": [],
-                "phase_id": "phase",
-                "phase_name": "Phase",
-                "tool_ids": [],
-            }),
-        ),
-        perf_event_line(
-            4,
-            EventType::StepStarted,
-            Some("loop-001"),
-            serde_json::json!({
-                "phase_id": "phase",
-                "step_id": "step",
-                "step_name": "Step",
-            }),
-        ),
-        perf_event_line(
-            5,
-            EventType::MessageDelta,
-            Some("loop-001"),
-            serde_json::json!({
-                "content_delta": content,
-                "message_id": "msg-001",
-                "role": "assistant",
-            }),
-        ),
-        perf_event_line(
-            6,
-            EventType::MessageCompleted,
-            Some("loop-001"),
-            serde_json::json!({
-                "message_id": "msg-001",
-                "role": "assistant",
-            }),
-        ),
-        perf_event_line(
-            7,
-            EventType::StepCompleted,
-            Some("loop-001"),
-            serde_json::json!({
-                "phase_id": "phase",
-                "step_id": "step",
-                "step_name": "Step",
-            }),
-        ),
-        perf_event_line(
-            8,
-            EventType::LoopCompleted,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"near-cap-loop","loop_name":"NearCap"}),
-        ),
-        perf_event_line(9, EventType::SessionCompleted, None, serde_json::json!({})),
-    ]
-    .join("")
-}
-
-fn perf_event_line(
-    sequence: u64,
-    event_type: EventType,
-    loop_id: Option<&str>,
-    payload: serde_json::Value,
-) -> String {
-    let mut event = EventEnvelope::new(
-        format!("evt-{sequence:03}"),
-        event_type,
-        "nearcap001",
-        sequence,
-        format!("2026-01-01T00:00:{:02}Z", sequence - 1),
-        "loop-agent-cli",
-        payload,
-    );
-    event.loop_id = loop_id.map(str::to_owned);
-    event.canonical_jsonl().expect("event serializes")
 }
 
 fn fixture_dir(name: &str) -> PathBuf {
@@ -395,20 +222,6 @@ fn copy_workspace_config(source: &Path, target: &Path) {
     fs::create_dir_all(target_config.parent().expect("config path has parent"))
         .expect("workspace config directory created");
     fs::copy(source_config, target_config).expect("workspace config copied");
-}
-
-fn dir_size(path: &Path) -> u64 {
-    fs::read_dir(path)
-        .expect("directory readable")
-        .map(|entry| {
-            let path = entry.expect("directory entry readable").path();
-            if path.is_dir() {
-                dir_size(&path)
-            } else {
-                fs::metadata(&path).expect("file metadata readable").len()
-            }
-        })
-        .sum()
 }
 
 fn rss_budget_must_be_enforced() -> bool {

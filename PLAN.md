@@ -74,7 +74,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
   - declared read/write roots model;
   - headless in-process M1 boundary and post-M1 subprocess-timeout model.
 - CI packet:
-  - Linux + macOS workflow plan;
+  - Linux + macOS + Windows workflow plan;
   - `cargo fmt --check`, `cargo clippy` and `cargo nextest run` (deterministic,
     process-isolated test runs) as the M0 lint/test gates;
   - dependency-hygiene gate — `cargo audit` (RustSec advisories) and `cargo deny`
@@ -95,7 +95,7 @@ D-008/D-057 are closed for M1 in ADR-0050/ADR-0058: M1 provider context uses the
 **DoD / pass-fail definition:**
 
 - Pass if a fresh Codex session can read `README.md`, `AGENTS.md`, `PLAN.md`, `PROTOCOL.md`, `SECURITY.md`, `TESTING.md`, the Loop Agent V-Spec and the M0 ADR entries in `docs/adr/ADR-LOG.md`, then create the M1 implementation PR without stopping for architecture questions.
-- Pass if the repo contains the M0 scaffold, placeholder crates compile, CI runs green on Linux + macOS across the mandatory M0 gates (`cargo fmt --check`, `cargo clippy`, `cargo nextest run`, `cargo audit`/`cargo deny`, `lychee` docs link-check + `pnpm run docs:render-check`), and the D-015 fixture suite follows the contract in `TESTING.md` and the M0 scaffold includes checked-in expected event streams.
+- Pass if the repo contains the M0 scaffold, placeholder crates compile, CI runs green on Linux + macOS + Windows across the mandatory M0 gates (`cargo fmt --check`, `cargo clippy`, `cargo nextest run`, `cargo audit`/`cargo deny`, `lychee` docs link-check + `pnpm run docs:render-check`), and the D-015 fixture suite follows the contract in `TESTING.md` and the M0 scaffold includes checked-in expected event streams.
 - Fail if Codex must choose protocol transport, script schema, CLI shape, sandbox depth, crate layout, D-015 fixture strategy, fixture discovery/stub-model activation, predefined-command registry trust boundary, coverage or invocation contract.
 
 ### M1 — Loop Agent MVP (standalone CLI)

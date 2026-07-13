@@ -87,7 +87,7 @@ impl ResolvedRegistry {
         }
 
         registry.validate_references()?;
-        Ok(registry)
+        registry.with_canonical_references()
     }
 
     /// Serializes the resolved registry as canonical JSON without a trailing newline.
@@ -96,6 +96,100 @@ impl ResolvedRegistry {
         materialize_registry_defaults(&mut value);
         sort_allowed_parameters(&mut value);
         proto::canonical_json(&value).map_err(RegistryError::CanonicalJson)
+    }
+
+    fn with_canonical_references(&self) -> Result<Self, RegistryError> {
+        let mut canonical = self.clone();
+        for phase in canonical.phases.values_mut() {
+            for reference in &mut phase.instruction_refs {
+                *reference = self
+                    .require_instruction(reference, "phase", &phase.identity.id)?
+                    .identity
+                    .id
+                    .clone();
+            }
+            for reference in &mut phase.tool_refs {
+                *reference = self
+                    .require_tool(reference, "phase", &phase.identity.id)?
+                    .identity
+                    .id
+                    .clone();
+            }
+            for step in &mut phase.steps {
+                for reference in &mut step.connection_refs {
+                    *reference = self
+                        .require_connection(reference, "step", &step.id)?
+                        .identity
+                        .id
+                        .clone();
+                }
+            }
+        }
+        for connection in canonical.connections.values_mut() {
+            connection.from_ref =
+                self.canonical_endpoint_reference(&connection.from_ref, &connection.identity.id)?;
+            connection.to_ref =
+                self.canonical_endpoint_reference(&connection.to_ref, &connection.identity.id)?;
+        }
+        for loop_block in canonical.loops.values_mut() {
+            for reference in &mut loop_block.phase_refs {
+                *reference = self
+                    .require_phase(reference, "loop", &loop_block.identity.id)?
+                    .identity
+                    .id
+                    .clone();
+            }
+            for reference in &mut loop_block.subloop_refs {
+                *reference = self
+                    .require_loop(reference, "loop", &loop_block.identity.id)?
+                    .identity
+                    .id
+                    .clone();
+            }
+            for reference in &mut loop_block.connection_refs {
+                *reference = self
+                    .require_connection(reference, "loop", &loop_block.identity.id)?
+                    .identity
+                    .id
+                    .clone();
+            }
+        }
+        Ok(canonical)
+    }
+
+    fn canonical_endpoint_reference(
+        &self,
+        reference: &str,
+        connection_id: &str,
+    ) -> Result<String, RegistryError> {
+        self.require_endpoint(reference, connection_id)?;
+        let direct_target = self
+            .tool_block(reference)
+            .map(|block| &block.identity)
+            .or_else(|| {
+                self.instruction_block(reference)
+                    .map(|block| &block.identity)
+            })
+            .or_else(|| self.phase_block(reference).map(|block| &block.identity))
+            .or_else(|| self.loop_block(reference).map(|block| &block.identity));
+        if let Some(identity) = direct_target {
+            return Ok(if self.direct_endpoint_match_count(&identity.id) == 1 {
+                identity.id.clone()
+            } else {
+                normalize_string(&identity.name)
+            });
+        }
+
+        let (phase_ref, step_id) = reference
+            .split_once('.')
+            .expect("validated step endpoint contains a phase and step");
+        let phase = self.require_phase(phase_ref, "connection", connection_id)?;
+        let by_id = format!("{}.{step_id}", phase.identity.id);
+        Ok(if self.direct_endpoint_match_count(&by_id) == 0 {
+            by_id
+        } else {
+            format!("{}.{step_id}", normalize_string(&phase.identity.name))
+        })
     }
 
     /// Resolves a loop by id or unambiguous name.
@@ -336,15 +430,7 @@ impl ResolvedRegistry {
     }
 
     fn require_endpoint(&self, reference: &str, connection_id: &str) -> Result<(), RegistryError> {
-        let matches = [
-            self.tool_block(reference).is_some(),
-            self.instruction_block(reference).is_some(),
-            self.phase_block(reference).is_some(),
-            self.loop_block(reference).is_some(),
-        ]
-        .into_iter()
-        .filter(|matched| *matched)
-        .count();
+        let matches = self.direct_endpoint_match_count(reference);
         match matches {
             1 => Ok(()),
             0 => Err(RegistryError::MissingReference {
@@ -376,6 +462,18 @@ impl ResolvedRegistry {
                 reference: reference.to_owned(),
             })
         })
+    }
+
+    fn direct_endpoint_match_count(&self, reference: &str) -> usize {
+        [
+            self.tool_block(reference).is_some(),
+            self.instruction_block(reference).is_some(),
+            self.phase_block(reference).is_some(),
+            self.loop_block(reference).is_some(),
+        ]
+        .into_iter()
+        .filter(|matched| *matched)
+        .count()
     }
 
     fn validate_loop_cycles(&self) -> Result<(), RegistryError> {

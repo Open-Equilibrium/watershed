@@ -1055,16 +1055,16 @@ impl FilesystemPolicy {
         let declared_scopes = self.validate_roots(tool_id)?;
 
         for grant in &self.protected_path_grants {
+            if protected_path_grant_has_wildcard(grant) {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} protected_path_grant {grant:?} must be an exact safe relative path"
+                )));
+            }
             let Some(normalized_grant) = core_script::normalize_safe_relative_path(grant) else {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path"
                 )));
             };
-            if protected_path_grant_has_wildcard(&normalized_grant) {
-                return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must be an exact safe relative path"
-                )));
-            }
 
             if !declared_scopes
                 .iter()

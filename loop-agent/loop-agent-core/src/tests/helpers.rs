@@ -18,7 +18,6 @@ fn workspace_copy(fixture: &str) -> PathBuf {
     target
 }
 
-
 fn empty_workspace(label: &str) -> PathBuf {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
@@ -747,51 +746,6 @@ fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
                         .then(|| format!("loop-{:03}", index + 1))
                         .into_iter()
                         .collect(),
-                    connection_refs: Vec::new(),
-                },
-            )
-        })
-        .collect();
-    core_script::ResolvedRegistry {
-        connections: std::collections::BTreeMap::new(),
-        instructions: std::collections::BTreeMap::new(),
-        loops,
-        phases: [(
-            "phase".to_owned(),
-            core_script::PhaseBlock {
-                identity: core_script::BlockIdentity {
-                    id: "phase".to_owned(),
-                    name: "Phase".to_owned(),
-                },
-                instruction_refs: Vec::new(),
-                steps: Vec::new(),
-                tool_refs: Vec::new(),
-            },
-        )]
-        .into_iter()
-        .collect(),
-        tools: std::collections::BTreeMap::new(),
-    }
-}
-
-fn duplicated_subloop_registry(depth: usize) -> core_script::ResolvedRegistry {
-    let loops = (0..depth)
-        .map(|index| {
-            let id = format!("loop-{index:03}");
-            let next = format!("loop-{:03}", index + 1);
-            (
-                id.clone(),
-                core_script::LoopBlock {
-                    identity: core_script::BlockIdentity {
-                        id,
-                        name: format!("Loop {index:03}"),
-                    },
-                    phase_refs: vec!["phase".to_owned()],
-                    subloop_refs: if index + 1 < depth {
-                        vec![next.clone(), next]
-                    } else {
-                        Vec::new()
-                    },
                     connection_refs: Vec::new(),
                 },
             )

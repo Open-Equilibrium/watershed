@@ -34,9 +34,9 @@ fn insert_named_block<T>(
         });
     }
     if !names_for_kind.insert(normalize_string(&identity.name)) {
-        return Err(RegistryError::DuplicateId {
+        return Err(RegistryError::DuplicateName {
             kind,
-            id: identity.name,
+            name: identity.name,
         });
     }
     blocks.insert(identity.id, block);
@@ -106,12 +106,19 @@ pub enum RegistryError {
         /// Parse diagnostic.
         message: String,
     },
-    /// A block id or normalized name was duplicated.
+    /// A block id was duplicated.
     DuplicateId {
         /// Block kind.
         kind: &'static str,
-        /// Duplicated id or name.
+        /// Duplicated id.
         id: String,
+    },
+    /// A normalized block name was duplicated.
+    DuplicateName {
+        /// Block kind.
+        kind: &'static str,
+        /// Duplicated authored name.
+        name: String,
     },
     /// A reference matched both an id and a normalized name.
     AmbiguousReference {
@@ -183,6 +190,7 @@ impl fmt::Display for RegistryError {
                 message,
             } => write!(f, "{source_name}: {message}"),
             Self::DuplicateId { kind, id } => write!(f, "duplicate {kind} id: {id}"),
+            Self::DuplicateName { kind, name } => write!(f, "duplicate {kind} name: {name}"),
             Self::AmbiguousReference { kind, reference } => write!(
                 f,
                 "ambiguous {kind} reference {reference} matches both an id and a name"
@@ -229,6 +237,7 @@ impl std::error::Error for RegistryError {
             | Self::InvalidCommandId(_)
             | Self::Parse { .. }
             | Self::DuplicateId { .. }
+            | Self::DuplicateName { .. }
             | Self::AmbiguousReference { .. }
             | Self::MissingReference { .. }
             | Self::LoopCycle { .. }

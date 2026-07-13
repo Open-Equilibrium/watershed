@@ -868,7 +868,6 @@ fn appended_session_log_validator_accepts_empty_and_rejects_framing_edges() {
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("canonical JSONL")
     ));
-
 }
 
 #[test]
@@ -975,7 +974,6 @@ fn appended_session_log_validator_rejects_identity_and_metadata_edges() {
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("correlation_id")
     ));
-
 }
 
 #[test]
@@ -1395,7 +1393,6 @@ fn session_lifecycle_rejects_tool_edges() {
         ),
         "must follow tool.started after phase.entered",
     );
-
 }
 
 #[test]
@@ -1487,7 +1484,6 @@ fn session_lifecycle_rejects_message_edges() {
         &format!("{active_step_prefix}{message_delta}{message_completed}{late_completed}"),
         "after terminal message",
     );
-
 }
 
 #[test]
@@ -1775,7 +1771,7 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
 }
 
 #[test]
-fn resume_accepts_nfc_disk_prefix_for_decomposed_registry_names() {
+fn resume_accepts_canonical_names_and_equivalent_references() {
     let workspace = workspace_copy("hello-loop");
     fs::remove_dir_all(workspace.join("expected")).expect("expected fixtures removed");
     let loop_path = workspace.join("registry/loops/hello-loop.yaml");
@@ -1793,9 +1789,18 @@ fn resume_accepts_nfc_disk_prefix_for_decomposed_registry_names() {
     fs::write(&completed.session_path, &prefix).expect("partial canonical prefix written");
     write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop", event_count);
     fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
+    let source = fs::read_to_string(&loop_path).expect("loop fixture remains readable");
+    fs::write(
+        &loop_path,
+        source.replace(
+            "phase_refs: [inspect, summarize]",
+            "phase_refs: [Inspect, Summarize]",
+        ),
+    )
+    .expect("equivalent phase references written");
 
     let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
-        .expect("canonical disk prefix resumes against decomposed registry name");
+        .expect("canonical names and equivalent references preserve resume hashes");
 
     assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
     assert_eq!(

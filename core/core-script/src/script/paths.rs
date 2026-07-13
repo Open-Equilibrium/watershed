@@ -67,7 +67,9 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
         if component.is_empty() || component == "." || component == ".." {
             return None;
         }
-        if path_component_has_windows_alias(component) {
+        if path_component_has_windows_alias(component)
+            || path_component_has_windows_invalid_character(component)
+        {
             return None;
         }
         components.push(component);
@@ -124,6 +126,12 @@ fn path_component_has_windows_alias(component: &str) -> bool {
                 && *digit >= b'1'
                 && *digit <= b'9'
     )
+}
+
+fn path_component_has_windows_invalid_character(component: &str) -> bool {
+    component
+        .bytes()
+        .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|' | b'?' | b'*'))
 }
 
 fn matches_lower_token(value: &str, min_len: usize, max_len: usize) -> bool {
