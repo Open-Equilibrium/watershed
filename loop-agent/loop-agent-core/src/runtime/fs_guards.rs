@@ -196,7 +196,6 @@ fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError
 fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
     ensure_non_hardlinked_real_file(path)?;
     let file = fs::OpenOptions::new()
-        .write(true)
         .append(true)
         .open(path)
         .map_err(|source| RuntimeError::Io {

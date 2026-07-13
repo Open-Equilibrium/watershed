@@ -2,6 +2,7 @@ const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
 const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 const EVENT_OBSERVER_QUEUE_CAPACITY: usize = 1;
 const EVENT_OBSERVER_DELIVERY_TIMEOUT: Duration = Duration::from_millis(50);
+const EVENT_OBSERVER_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 trait RuntimeEventSink {
     fn measurement_started_at(&self) -> Option<Instant> {
@@ -62,13 +63,29 @@ impl ObserverDelivery {
     {
         let (sender, receiver) =
             std::sync::mpsc::sync_channel(EVENT_OBSERVER_QUEUE_CAPACITY);
+        let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("loop-event-observer".to_owned())
-            .spawn(move || observer_delivery_worker(writer, &receiver))
+            .spawn(move || {
+                let _ = ready_sender.send(());
+                observer_delivery_worker(writer, &receiver);
+            })
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<event-observer-thread>"),
                 source,
             })?;
+        if ready_receiver
+            .recv_timeout(EVENT_OBSERVER_START_TIMEOUT)
+            .is_err()
+        {
+            return Err(RuntimeError::Io {
+                path: PathBuf::from("<event-observer-thread>"),
+                source: io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "event observer worker did not start within one second",
+                ),
+            });
+        }
         Ok(Self {
             sender: Some(sender),
             worker: Some(worker),

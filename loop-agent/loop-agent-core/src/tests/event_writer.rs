@@ -232,7 +232,10 @@ fn persistently_blocked_observer_is_detached_without_blocking_the_session() {
     entered_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("observer receives the first committed event");
-    thread::sleep(Duration::from_millis(150));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !handle.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
     let completed_while_blocked = handle.is_finished();
     let (released, condition) = &*release;
     *released.lock().expect("release lock") = true;
