@@ -95,24 +95,28 @@ fn assert_event_writer_p95(
 
 #[test]
 fn fsm_transition_p95_stays_under_m1_budget() {
-    let event_count = emit_runtime_events_for_budget().expect("warm runtime emit succeeds") as u128;
-    let mut nanos_per_event = Vec::new();
+    let event_count = emit_runtime_events_for_budget()
+        .expect("warm runtime emit succeeds")
+        .len();
+    let mut transition_nanos = Vec::with_capacity(200 * event_count);
 
     for _ in 0..30 {
         assert_eq!(
-            emit_runtime_events_for_budget().expect("warm runtime emit succeeds") as u128,
+            emit_runtime_events_for_budget()
+                .expect("warm runtime emit succeeds")
+                .len(),
             event_count
         );
     }
     for _ in 0..200 {
-        let started = Instant::now();
+        let samples = emit_runtime_events_for_budget().expect("runtime emit succeeds");
         assert_eq!(
-            emit_runtime_events_for_budget().expect("runtime emit succeeds") as u128,
+            samples.len(),
             event_count
         );
-        nanos_per_event.push(started.elapsed().as_nanos() / event_count);
+        transition_nanos.extend(samples);
     }
-    let p95_nanos = p95_nanos(nanos_per_event);
+    let p95_nanos = p95_nanos(transition_nanos);
 
     assert!(
         p95_nanos <= 1_000_000,

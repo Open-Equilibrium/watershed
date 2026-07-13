@@ -579,25 +579,32 @@ fn sandbox_expected_decision_texts(
     ])
 }
 
-fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
+fn emit_runtime_events_for_budget() -> Result<Vec<u128>, RuntimeError> {
     let mut builder =
         RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture());
     let invocation = LoopInvocation {
         loop_id: "loop-001".to_owned(),
         parent_loop_id: None,
     };
+    let mut transition_nanos = Vec::with_capacity(11);
+    let mut emit = |invocation: Option<&LoopInvocation>, event_type, payload| {
+        let started = Instant::now();
+        let result = builder.emit(invocation, event_type, payload);
+        transition_nanos.push(started.elapsed().as_nanos());
+        result
+    };
 
-    builder.emit(
+    emit(
         None,
         EventType::SessionStarted,
         serde_json::json!({"reason":"fixture-start"}),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::LoopStarted,
         serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::PhaseEntered,
         serde_json::json!({
@@ -607,7 +614,7 @@ fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
             "tool_ids": ["echo"],
         }),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::StepStarted,
         serde_json::json!({
@@ -616,7 +623,7 @@ fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
             "step_name": "Say",
         }),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::MessageDelta,
         serde_json::json!({
@@ -625,12 +632,12 @@ fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
             "role": "assistant",
         }),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::MessageCompleted,
         serde_json::json!({"message_id":"msg-001","role":"assistant"}),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::ToolStarted,
         serde_json::json!({
@@ -643,12 +650,12 @@ fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
             "write_scope": [],
         }),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::ToolCompleted,
         serde_json::json!({"exit_code":0,"tool_id":"echo"}),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::StepCompleted,
         serde_json::json!({
@@ -657,14 +664,14 @@ fn emit_runtime_events_for_budget() -> Result<usize, RuntimeError> {
             "step_name": "Say",
         }),
     )?;
-    builder.emit(
+    emit(
         Some(&invocation),
         EventType::LoopCompleted,
         serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
     )?;
-    builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
+    emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
 
-    Ok(builder.events.len())
+    Ok(transition_nanos)
 }
 
 fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
