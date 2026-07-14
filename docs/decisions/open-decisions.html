@@ -15,11 +15,25 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1">
+    <h2>M1 - Loop Agent</h2>
+    <div class="grid">
+      <article id="d-061" class="decision">
+        <h3>D-061 - YAML Parser Dependency</h3>
+        <p><strong>Status:</strong> Open, M1 blocker.</p>
+        <p><strong>Question:</strong> M1 promises standard YAML 1.2 registry files, but the handwritten parser rejects some valid YAML and requires substantial custom code. Should M1 use a maintained YAML parser library or change the promise to a smaller YAML-like format?</p>
+        <ul><li><strong>A:</strong> Authorize a vetted, maintained YAML 1.2 library. Pro: keeps the existing compatibility promise and removes custom parser code. Con: adds third-party code that must pass license, Rust-version and security checks.</li><li><strong>B:</strong> Keep the handwritten parser and formally limit the supported format. Pro: adds no dependency. Con: breaks the accepted YAML 1.2 promise and retains custom parser/security maintenance.</li></ul>
+        <p><strong>Recommendation:</strong> A; select and pin the smallest compatible library only after its license, maintenance, duplicate-key handling and resource limits pass the project checks.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>
@@ -48,9 +62,9 @@
       <article id="d-023" class="decision">
         <h3>D-023 - Meta-Harness Service/API Transport</h3>
         <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> Which local service transport should clients use?</p>
-        <ul><li><strong>A:</strong> JSON-RPC over local socket/named pipe with event streaming. Pro: small and local-first. Con: browser clients need a bridge.</li><li><strong>B:</strong> HTTP plus server-sent events/WebSocket. Pro: easy for Liquid and tooling. Con: more exposed surface.</li><li><strong>C:</strong> Hybrid: HTTP streaming for Liquid live sync, with JSON-RPC/local commands for CLI and BYOA where useful. Pro: matches both client types. Con: two transport paths need clear ownership.</li></ul>
-        <p><strong>Recommendation:</strong> C for the design direction; keep protocol payloads transport-neutral and pick the smallest M2 subset that serves Liquid live sync plus CLI/BYOA control.</p>
+        <p><strong>Question:</strong> How should local apps send commands to Meta-Harness and receive live updates?</p>
+        <ul><li><strong>A:</strong> Use a private app-to-app channel (JSON-RPC over a local socket or named pipe). Pro: small and not exposed to the network. Con: browser-based clients need an adapter.</li><li><strong>B:</strong> Use a local web interface (HTTP with a live update connection). Pro: easy for Liquid and other tools to use. Con: creates a larger security surface.</li><li><strong>C:</strong> Use the web interface for Liquid and the private channel for command-line and external agents. Pro: fits both client types. Con: two paths must stay consistent.</li></ul>
+        <p><strong>Recommendation:</strong> C as the direction, starting with only the parts M2 needs.</p>
       </article>
       <article id="d-024" class="decision">
         <h3>D-024 - Meta-Harness State Storage</h3>
@@ -166,15 +180,15 @@
         <h3>D-020 - Loop Agent Embedded Core API</h3>
         <p><strong>Status:</strong> Open, not an M1 blocker.</p>
         <p><strong>Question:</strong> Which Rust API becomes stable for embedding Loop Agent?</p>
-        <ul><li><strong>A:</strong> Keep internals private through M1, then stabilize a small `loop-agent-core` API. Pro: avoids freezing early mistakes. Con: embedding waits.</li><li><strong>B:</strong> Stabilize the API during M1. Pro: earlier integration. Con: high churn risk.</li></ul>
+        <ul><li><strong>A:</strong> Keep internals private through M1, then stabilize a small <code>loop-agent-core</code> API. Pro: avoids freezing early mistakes. Con: embedding waits.</li><li><strong>B:</strong> Stabilize the API during M1. Pro: earlier integration. Con: high churn risk.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-046" class="decision">
         <h3>D-046 - Positive CIDR Egress Enforcement</h3>
         <p><strong>Status:</strong> Open, post-M1.</p>
-        <p><strong>Question:</strong> Which Linux backend enforces positive CIDR/port network allow entries after ADR-0051's M1 deny-all behavior?</p>
-        <ul><li><strong>A:</strong> Network namespace plus firewall rules. Pro: common Linux primitives. Con: needs privilege and CI setup.</li><li><strong>B:</strong> Broker or seccomp user notification. Pro: fine-grained decisions. Con: more moving parts to prove.</li><li><strong>C:</strong> eBPF/cgroup networking. Pro: kernel-level filtering. Con: higher operational complexity and privileges.</li></ul>
-        <p><strong>Recommendation:</strong> Keep M1 fail-closed per ADR-0051; choose the post-M1 backend before allowing non-empty network allowlists in OS-enforced runs.</p>
+        <p><strong>Question:</strong> After M1's block-all policy, how should Linux allow connections only to approved network addresses and ports?</p>
+        <ul><li><strong>A:</strong> Put the process in an isolated network area with firewall rules. Pro: uses common Linux features. Con: needs extra privileges and CI setup.</li><li><strong>B:</strong> Route connection requests through a checker that approves each one. Pro: precise decisions. Con: more components must work correctly.</li><li><strong>C:</strong> Filter connections inside the Linux kernel (eBPF/cgroups). Pro: strong low-level enforcement. Con: harder to operate and also needs privileges.</li></ul>
+        <p><strong>Recommendation:</strong> Keep M1 block-all; choose and prove one approach before allowing any network destinations.</p>
       </article>
     </div>
   </section>
