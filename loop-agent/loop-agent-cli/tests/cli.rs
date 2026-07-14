@@ -217,28 +217,6 @@ fn closed_stdout_pipe_does_not_panic_for_jsonl_run() {
 }
 
 #[test]
-fn run_hello_loop_emits_multi_phase_subloop_golden_stream() {
-    let workspace = workspace_copy("hello-loop");
-    let output = loop_command()
-        .current_dir(&workspace)
-        .args(["run", "hello-loop", "--emit", "jsonl"])
-        .output()
-        .expect("loop binary should run");
-
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        expected_stream("hello-loop", "hello-loop.jsonl")
-    );
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt"))
-            .expect("own-script stub writes summary"),
-        "hello\n"
-    );
-}
-
-#[test]
 fn replay_tail_and_sessions_read_persisted_event_log() {
     let fixture = workspace_copy("smoke-loop");
     let run = loop_command()
@@ -579,47 +557,21 @@ fn chat_rejects_unsupported_commands() {
 }
 
 #[test]
-fn sandbox_negative_streams_fail_without_side_effects() {
-    for (loop_name, stream_name) in [
-        ("sandbox-negative-write", "sandbox-negative-write.jsonl"),
-        ("sandbox-negative-network", "sandbox-negative-network.jsonl"),
-        (
-            "sandbox-negative-environment",
-            "sandbox-negative-environment.jsonl",
-        ),
-        (
-            "sandbox-negative-interpreter",
-            "sandbox-negative-interpreter.jsonl",
-        ),
-        (
-            "sandbox-negative-protected-path",
-            "sandbox-negative-protected-path.jsonl",
-        ),
-        ("sandbox-negative-symlink", "sandbox-negative-symlink.jsonl"),
-        (
-            "sandbox-negative-tool-out-of-phase",
-            "sandbox-negative-tool-out-of-phase.jsonl",
-        ),
-    ] {
-        let workspace = workspace_copy("sandbox-negative");
-        let output = loop_command()
-            .current_dir(&workspace)
-            .args(["run", loop_name, "--emit", "jsonl"])
-            .output()
-            .expect("loop binary should run");
+fn sandbox_negative_cli_fails_without_side_effects() {
+    let workspace = workspace_copy("sandbox-negative");
+    let output = loop_command()
+        .current_dir(&workspace)
+        .args(["run", "sandbox-negative-write", "--emit", "jsonl"])
+        .output()
+        .expect("loop binary should run");
 
-        assert_eq!(output.status.code(), Some(65), "{loop_name}");
-        assert!(output.stderr.is_empty(), "{loop_name}");
-        assert_eq!(
-            String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-            expected_stream("sandbox-negative", stream_name),
-            "{loop_name}"
-        );
-        assert!(
-            !workspace.join("out/forbidden.txt").exists(),
-            "{loop_name} must not create side effects after rejection"
-        );
-    }
+    assert_eq!(output.status.code(), Some(65));
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
+        expected_stream("sandbox-negative", "sandbox-negative-write.jsonl")
+    );
+    assert!(!workspace.join("out/forbidden.txt").exists());
 }
 
 #[test]

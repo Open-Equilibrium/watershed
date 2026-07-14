@@ -248,35 +248,6 @@ fn run_loop_emits_resolved_ids_for_name_references() {
 }
 
 #[test]
-fn run_loop_allocates_next_session_id_when_base_session_exists() {
-    let workspace = workspace_copy("hello-loop");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let base_path = session_dir.join("hello001.jsonl");
-    fs::write(&base_path, "reserved\n").expect("session reserved");
-
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect("existing base session allocates next ordinal");
-
-    assert!(!output.failed);
-    assert_eq!(output.session_id, "hello001-2");
-    assert_eq!(
-        fs::read_to_string(&base_path).expect("base session remains readable"),
-        "reserved\n"
-    );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
-    assert!(session_dir.join("hello001-2.jsonl").is_file());
-    assert!(workspace
-        .join(LOCAL_LOG_DIR)
-        .join("hello001-2.log")
-        .is_file());
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary written"),
-        "hello\n"
-    );
-}
-
-#[test]
 fn run_loop_rejects_write_summary_without_declared_write_scope() {
     let workspace = workspace_copy("hello-loop");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");

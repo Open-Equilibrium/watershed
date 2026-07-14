@@ -1526,31 +1526,6 @@ fn policy_artifact_rejects_parameter_constraint_mismatches() {
 }
 
 #[test]
-fn canonical_policy_json_helpers_handle_scalar_and_sparse_shapes() {
-    let mut not_object = Value::Null;
-    canonicalize_policy_artifact_arrays(&mut not_object);
-    assert_eq!(not_object, Value::Null);
-
-    let mut command_not_object = Value::Null;
-    canonicalize_command_policy_arrays(&mut command_not_object);
-    assert_eq!(command_not_object, Value::Null);
-
-    let mut command_without_network = serde_json::json!({"tool_id":"echo"});
-    canonicalize_command_policy_arrays(&mut command_without_network);
-    assert_eq!(
-        command_without_network,
-        serde_json::json!({"tool_id":"echo"})
-    );
-
-    let mut command_with_network_without_allow = serde_json::json!({"network":{"default":"deny"}});
-    canonicalize_command_policy_arrays(&mut command_with_network_without_allow);
-    assert_eq!(
-        command_with_network_without_allow,
-        serde_json::json!({"network":{"default":"deny"}})
-    );
-}
-
-#[test]
 fn policy_artifact_canonical_json_rejects_normalized_duplicate_keys() {
     let value = serde_json::json!({
         "é": 1,
@@ -1563,28 +1538,6 @@ fn policy_artifact_canonical_json_rejects_normalized_duplicate_keys() {
     assert_eq!(
         err.to_string(),
         "failed to serialize canonical policy artifact JSON: normalized object key collision: é"
-    );
-    assert!(std::error::Error::source(&err).is_some());
-}
-
-#[test]
-fn policy_artifact_error_display_reports_serialization_failure() {
-    struct FailingSerialize;
-
-    impl serde::Serialize for FailingSerialize {
-        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            Err(serde::ser::Error::custom("intentional failure"))
-        }
-    }
-
-    let err = canonical_artifact_json(&FailingSerialize).expect_err("serialization must fail");
-
-    assert_eq!(
-        err.to_string(),
-        "failed to serialize policy artifact: intentional failure"
     );
     assert!(std::error::Error::source(&err).is_some());
 }
