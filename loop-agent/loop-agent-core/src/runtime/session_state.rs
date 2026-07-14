@@ -99,14 +99,17 @@ where
     })?;
     verify_resume_definition_metadata(workspace, session_id, &registry, loop_block)?;
     let definition_hashes = session_definition_hashes(&registry, loop_block)?;
-    let artifacts =
-        core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, &loop_id)?;
-    let policy = runtime_policy_artifact(&artifacts)?;
+    let policy = core_policy::compile_policy_artifact(
+        &loop_block.identity.id,
+        &registry,
+        &loop_id,
+        runtime_policy_target(),
+    )?;
     let clock = resume_event_clock(&config, &events)?;
     let planned_runtime = execute_loop(
         workspace,
         &registry,
-        policy,
+        &policy,
         loop_block,
         session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(
@@ -137,7 +140,7 @@ where
     let preflight_runtime = execute_loop(
         workspace,
         &registry,
-        policy,
+        &policy,
         loop_block,
         session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(
@@ -194,7 +197,7 @@ where
         execute_loop_with_sink(
             workspace,
             &registry,
-            policy,
+            &policy,
             loop_block,
             session_id,
             LoopExecutionOptions::with_stub_model_fixture_profile(

@@ -77,6 +77,26 @@ fn run_loop_executes_registry_without_expected_streams() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn run_loop_accepts_reviewed_macos_network_allowlist() {
+    let workspace = workspace_copy("smoke-loop");
+    let tool_path = workspace.join("registry/tools/echo.yaml");
+    let source = fs::read_to_string(&tool_path)
+        .expect("tool reads")
+        .replace(
+            "  network: deny\n",
+            "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
+        );
+    assert!(source.contains("cidr: 192.0.2.0/24"));
+    fs::write(tool_path, source).expect("reviewed allowlist writes");
+
+    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+        .expect("macOS runtime compiles its target policy");
+
+    assert!(!output.failed);
+}
+
 #[test]
 fn runtime_executes_subloops_after_all_parent_phases() {
     let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
@@ -766,7 +786,7 @@ fn run_loop_rejects_windows_short_alias_of_protected_directory() {
 }
 
 #[test]
-fn runtime_policy_target_helpers_report_missing_artifacts() {
+fn protected_path_modes_follow_policy_target() {
     assert_eq!(
         protected_path_match_mode_for_policy_target(
             &core_policy::PolicyTarget::LinuxLandlockSeccomp
@@ -777,20 +797,4 @@ fn runtime_policy_target_helpers_report_missing_artifacts() {
         protected_path_match_mode_for_policy_target(&core_policy::PolicyTarget::MacosSeatbelt),
         ProtectedPathMatchMode::CaseInsensitive
     );
-
-    for (target, expected_name) in [
-        (core_policy::PolicyTarget::LinuxLandlockSeccomp, "linux"),
-        (core_policy::PolicyTarget::MacosSeatbelt, "macos"),
-    ] {
-        let err = runtime_policy_artifact_for_target(&[], &target)
-            .expect_err("missing runtime policy artifact must fail");
-
-        assert!(matches!(
-            err,
-            RuntimeError::Protocol(message)
-                if message.contains("missing")
-                    && message.contains(expected_name)
-                    && message.contains("runtime policy artifact")
-        ));
-    }
 }

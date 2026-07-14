@@ -71,10 +71,13 @@ where
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
     let definition_hashes = session_definition_hashes(&registry, loop_block)?;
-    let artifacts =
-        core_policy::compile_policy_artifacts(&loop_block.identity.id, &registry, loop_ref)?;
-    let policy = runtime_policy_artifact(&artifacts)?;
-    preflight_loop_tools(workspace, &registry, policy, loop_block)?;
+    let policy = core_policy::compile_policy_artifact(
+        &loop_block.identity.id,
+        &registry,
+        loop_ref,
+        runtime_policy_target(),
+    )?;
+    preflight_loop_tools(workspace, &registry, &policy, loop_block)?;
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
@@ -87,7 +90,7 @@ where
     let planned_runtime = execute_loop(
         workspace,
         &registry,
-        policy,
+        &policy,
         loop_block,
         &expected_session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(
@@ -106,7 +109,7 @@ where
     let runtime_result = execute_loop_with_sink(
         workspace,
         &registry,
-        policy,
+        &policy,
         loop_block,
         &expected_session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(

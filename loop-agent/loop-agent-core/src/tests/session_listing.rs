@@ -714,23 +714,6 @@ fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
 }
 
 #[test]
-fn runtime_policy_artifact_can_select_macos_target() {
-    let workspace = workspace_copy("hello-loop");
-    let config = load_workspace_config(&workspace).expect("workspace config loads");
-    let registry_path =
-        registry_root_path(&workspace, &config.registry_root).expect("registry root resolves");
-    let registry = core_script::load_registry_root(registry_path).expect("registry loads");
-    let artifacts = core_policy::compile_policy_artifacts("hello-loop", &registry, "hello-loop")
-        .expect("policy artifacts compile");
-
-    let policy =
-        runtime_policy_artifact_for_target(&artifacts, &core_policy::PolicyTarget::MacosSeatbelt)
-            .expect("macos runtime policy exists");
-
-    assert_eq!(policy.target, core_policy::PolicyTarget::MacosSeatbelt);
-}
-
-#[test]
 fn protected_path_matching_is_case_sensitive_for_linux_runtime() {
     assert!(protected_path_pattern_matches(
         ProtectedPathMatchMode::CaseSensitive,

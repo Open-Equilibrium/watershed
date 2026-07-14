@@ -99,13 +99,6 @@ impl<'a> LoopExecutionOptions<'a> {
     }
 }
 
-fn runtime_policy_artifact(
-    artifacts: &[core_policy::PolicyArtifact],
-) -> Result<&core_policy::PolicyArtifact, RuntimeError> {
-    let target = runtime_policy_target();
-    runtime_policy_artifact_for_target(artifacts, &target)
-}
-
 #[cfg(target_os = "macos")]
 fn runtime_policy_target() -> core_policy::PolicyTarget {
     core_policy::PolicyTarget::MacosSeatbelt
@@ -125,28 +118,6 @@ fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> Prot
 #[cfg(not(windows))]
 fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
     protected_path_match_mode_for_policy_target(target)
-}
-
-fn runtime_policy_artifact_for_target<'a>(
-    artifacts: &'a [core_policy::PolicyArtifact],
-    target: &core_policy::PolicyTarget,
-) -> Result<&'a core_policy::PolicyArtifact, RuntimeError> {
-    artifacts
-        .iter()
-        .find(|artifact| &artifact.target == target)
-        .ok_or_else(|| {
-            RuntimeError::Protocol(format!(
-                "missing {} runtime policy artifact",
-                policy_target_name(target)
-            ))
-        })
-}
-
-fn policy_target_name(target: &core_policy::PolicyTarget) -> &'static str {
-    match target {
-        core_policy::PolicyTarget::LinuxLandlockSeccomp => "linux",
-        core_policy::PolicyTarget::MacosSeatbelt => "macos",
-    }
 }
 
 struct RuntimeEventBuilder<'a> {

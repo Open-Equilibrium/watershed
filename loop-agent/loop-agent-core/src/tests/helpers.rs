@@ -125,13 +125,17 @@ fn write_definition_hash_metadata(
         .filter(|line| line.contains("\"event_type\":\"message.completed\""))
         .count();
     let config = load_workspace_config(workspace).expect("workspace config loads");
-    let artifacts = core_policy::compile_policy_artifacts(loop_ref, &registry, loop_ref)
-        .expect("runtime policy compiles");
-    let policy = runtime_policy_artifact(&artifacts).expect("runtime policy resolves");
+    let policy = core_policy::compile_policy_artifact(
+        loop_ref,
+        &registry,
+        loop_ref,
+        runtime_policy_target(),
+    )
+    .expect("runtime policy compiles");
     let planned = execute_loop(
         workspace,
         &registry,
-        policy,
+        &policy,
         loop_block,
         session_id,
         LoopExecutionOptions::with_stub_model_fixture_profile(
@@ -454,11 +458,13 @@ fn fixture_runtime_policy(
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
     let registry = core_script::load_registry_root(fixture_dir(fixture).join("registry"))
         .expect("fixture registry loads");
-    let artifacts = core_policy::compile_policy_artifacts(loop_id, &registry, loop_id)
-        .expect("fixture policy compiles");
-    let policy = runtime_policy_artifact(&artifacts)
-        .expect("linux runtime policy exists")
-        .clone();
+    let policy = core_policy::compile_policy_artifact(
+        loop_id,
+        &registry,
+        loop_id,
+        runtime_policy_target(),
+    )
+    .expect("fixture policy compiles");
     (registry, policy)
 }
 
