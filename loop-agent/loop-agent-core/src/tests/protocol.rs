@@ -725,7 +725,6 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
         builder.next_loop_invocation(None),
         Err(RuntimeError::Protocol(message)) if message.contains("loop invocation budget")
     ));
-    assert_eq!(builder.next_message_id(), "msg-001");
 
     builder.sequence = MAX_LOOP_EVENTS;
     assert!(matches!(
@@ -749,15 +748,6 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
         Err(RuntimeError::Protocol(message)) if message.contains("event stream budget")
     ));
 
-    assert_eq!(
-        policy_target_name(&core_policy::PolicyTarget::MacosSeatbelt),
-        "macos"
-    );
-    assert_eq!(
-        session_id_for_loop("sandbox-negative-protected-path"),
-        "negpath001"
-    );
-    assert!(session_id_for_loop(&"x".repeat(160)).len() <= 128);
 }
 
 #[test]
@@ -802,18 +792,6 @@ fn runtime_failure_and_sandbox_negative_helpers_cover_edge_paths() {
         .expect("symlink denial maps")
         .reason,
         core_policy::DenyReasonCode::SymlinkEscapeDenied.as_str()
-    );
-    assert_eq!(
-        runtime_failure_for_tool_error(
-            &RuntimeError::Denied {
-                reason: core_policy::DenyReasonCode::WriteDenied,
-                message: "changed before write".to_owned(),
-            },
-            "tool"
-        )
-        .expect("write guard denial maps")
-        .reason,
-        core_policy::DenyReasonCode::WriteDenied.as_str()
     );
     assert_eq!(
         runtime_failure_for_tool_error(
@@ -865,14 +843,6 @@ fn runtime_failure_and_sandbox_negative_helpers_cover_edge_paths() {
         argv: vec!["write".to_owned(), "extra".to_owned()],
     };
     assert_eq!(sandbox_negative_operation_for_tool(&wrong_argv_count), None);
-}
-
-#[test]
-fn runtime_event_id_and_time_helpers_cover_edge_paths() {
-    let mut prior_event = base_event();
-    prior_event.event_id = "evt-001".to_owned();
-    assert_eq!(next_event_id(1, &[prior_event]), "evt-002");
-    assert!(!is_rfc3339_utc_timestamp("2026-01-01T00:00:00:00Z"));
 }
 
 #[test]

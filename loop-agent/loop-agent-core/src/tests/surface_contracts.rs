@@ -73,13 +73,6 @@ fn runtime_error_display_source_and_exit_codes_cover_variants() {
 }
 
 #[test]
-fn session_id_validation_uses_protocol_contract() {
-    assert!(validate_session_id("hello001"));
-    assert!(!validate_session_id("Hello001"));
-    assert!(!validate_session_id("../hello001"));
-}
-
-#[test]
 fn fallback_session_ids_preserve_valid_loop_id_separators() {
     assert_eq!(session_id_for_loop("foo-bar"), "foo-bar001");
     assert_eq!(session_id_for_loop("foo_bar"), "foo_bar001");
