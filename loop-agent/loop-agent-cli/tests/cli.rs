@@ -95,9 +95,11 @@ fn no_arguments_and_unknown_commands_print_usage_errors() {
             .expect("loop binary should run");
 
         assert_eq!(output.status.code(), Some(64));
-        assert!(String::from_utf8(output.stderr)
-            .expect("stderr should be UTF-8")
-            .contains("usage: loop run <loop>"));
+        assert!(
+            String::from_utf8(output.stderr)
+                .expect("stderr should be UTF-8")
+                .contains("usage: loop run <loop>")
+        );
         assert!(output.stdout.is_empty());
     }
 }
@@ -384,9 +386,11 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
         .expect("loop binary should run");
 
     assert_eq!(output.status.code(), Some(65));
-    assert!(String::from_utf8(output.stderr)
-        .expect("stderr should be UTF-8")
-        .contains("terminal session"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("stderr should be UTF-8")
+            .contains("terminal session")
+    );
     assert!(output.stdout.is_empty());
     assert_eq!(
         fs::read_to_string(fixture.join(".loop/sessions/smoke001.jsonl"))
@@ -428,9 +432,11 @@ fn resume_partial_session_prints_human_status() {
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         "session smoke001 resumed\n"
     );
-    assert!(fs::read_to_string(session_dir.join("smoke001.jsonl"))
-        .expect("resumed log readable")
-        .contains("\"event_type\":\"session.completed\""));
+    assert!(
+        fs::read_to_string(session_dir.join("smoke001.jsonl"))
+            .expect("resumed log readable")
+            .contains("\"event_type\":\"session.completed\"")
+    );
 }
 
 #[test]
@@ -478,9 +484,11 @@ fn unsafe_session_id_is_rejected_before_filesystem_access() {
         .expect("loop binary should run");
 
     assert_eq!(output.status.code(), Some(64));
-    assert!(String::from_utf8(output.stderr)
-        .expect("stderr should be UTF-8")
-        .contains("invalid session_id"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("stderr should be UTF-8")
+            .contains("invalid session_id")
+    );
     assert!(output.stdout.is_empty());
 }
 
@@ -590,9 +598,11 @@ fn chat_rejects_unsupported_commands() {
     let output = child.wait_with_output().expect("loop binary should exit");
 
     assert_eq!(output.status.code(), Some(64));
-    assert!(String::from_utf8(output.stderr)
-        .expect("stderr should be UTF-8")
-        .contains("unsupported chat command"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("stderr should be UTF-8")
+            .contains("unsupported chat command")
+    );
     assert!(output.stdout.is_empty());
 }
 
@@ -660,9 +670,11 @@ fn replay_and_tail_failed_sessions_exit_with_failed_status() {
 
         assert_eq!(output.status.code(), Some(65), "{command}");
         assert!(output.stderr.is_empty(), "{command}");
-        assert!(String::from_utf8(output.stdout)
-            .expect("stdout should be UTF-8")
-            .contains("\"event_type\":\"session.failed\""));
+        assert!(
+            String::from_utf8(output.stdout)
+                .expect("stdout should be UTF-8")
+                .contains("\"event_type\":\"session.failed\"")
+        );
     }
 }
 
@@ -722,9 +734,11 @@ fn non_unicode_argument_exits_with_usage_error() {
         .expect("loop binary should run");
 
     assert_eq!(output.status.code(), Some(64));
-    assert!(String::from_utf8(output.stderr)
-        .expect("stderr should be UTF-8")
-        .contains("arguments must be valid UTF-8"));
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("stderr should be UTF-8")
+            .contains("arguments must be valid UTF-8")
+    );
     assert!(output.stdout.is_empty());
 }
 

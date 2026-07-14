@@ -649,7 +649,7 @@ fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, Ru
     }
 
     #[link(name = "kernel32")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetFileInformationByHandle(
             file: *mut c_void,
             file_information: *mut ByHandleFileInformation,

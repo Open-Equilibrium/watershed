@@ -408,10 +408,10 @@ fn network_policy(source_name: &str, source: &str) -> Result<NetworkPolicy, Regi
 fn reject_unsupported_yaml(source_name: &str, source: &str) -> Result<(), RegistryError> {
     let mut block_scalar_indent = None::<usize>;
     for (index, line) in source.lines().enumerate() {
-        if let Some(indent) = block_scalar_indent {
-            if line.trim().is_empty() || leading_spaces(line) > indent {
-                continue;
-            }
+        if let Some(indent) = block_scalar_indent
+            && (line.trim().is_empty() || leading_spaces(line) > indent)
+        {
+            continue;
         }
         if line.contains('\t') {
             return Err(parse_error(
@@ -440,12 +440,12 @@ fn strip_yaml_comments(source: &str) -> String {
     let mut out = String::new();
     let mut block_scalar_indent = None::<usize>;
     for line in source.lines() {
-        if let Some(indent) = block_scalar_indent {
-            if line.trim().is_empty() || leading_spaces(line) > indent {
-                out.push_str(line.trim_end());
-                out.push('\n');
-                continue;
-            }
+        if let Some(indent) = block_scalar_indent
+            && (line.trim().is_empty() || leading_spaces(line) > indent)
+        {
+            out.push_str(line.trim_end());
+            out.push('\n');
+            continue;
         }
         let line = strip_yaml_comment(line);
         block_scalar_indent = block_scalar_parent_indent(&line);
@@ -1056,13 +1056,13 @@ fn raw_section_field_value(
             continue;
         }
         let trimmed = line.trim();
-        if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-            if found.replace(value.trim().to_owned()).is_some() {
-                return Err(parse_error(
-                    source_name,
-                    format!("duplicate {section}.{field}"),
-                ));
-            }
+        if let Some(value) = trimmed.strip_prefix(&field_prefix)
+            && found.replace(value.trim().to_owned()).is_some()
+        {
+            return Err(parse_error(
+                source_name,
+                format!("duplicate {section}.{field}"),
+            ));
         }
         if let Some(parent_indent) = block_scalar_parent_indent(line) {
             block_scalar_indent = Some(parent_indent);
@@ -1117,13 +1117,13 @@ fn raw_nested_field_value(
             continue;
         }
         let trimmed = line.trim();
-        if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-            if found.replace(value.trim().to_owned()).is_some() {
-                return Err(parse_error(
-                    source_name,
-                    format!("duplicate {section}.{parent}.{field}"),
-                ));
-            }
+        if let Some(value) = trimmed.strip_prefix(&field_prefix)
+            && found.replace(value.trim().to_owned()).is_some()
+        {
+            return Err(parse_error(
+                source_name,
+                format!("duplicate {section}.{parent}.{field}"),
+            ));
         }
         if let Some(parent_indent) = block_scalar_parent_indent(line) {
             block_scalar_indent = Some(parent_indent);
@@ -1250,19 +1250,20 @@ fn block_string_list(
             }
         }
 
-        if !in_list && indent == shape.field_indent {
-            if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-                found = true;
-                let value = value.trim();
-                if value == "[]" {
-                    return Ok(Vec::new());
-                }
-                if !value.is_empty() {
-                    return parse_inline_yaml_list(source_name, shape.field, value);
-                }
-                in_list = true;
-                continue;
+        if !in_list
+            && indent == shape.field_indent
+            && let Some(value) = trimmed.strip_prefix(&field_prefix)
+        {
+            found = true;
+            let value = value.trim();
+            if value == "[]" {
+                return Ok(Vec::new());
             }
+            if !value.is_empty() {
+                return parse_inline_yaml_list(source_name, shape.field, value);
+            }
+            in_list = true;
+            continue;
         }
 
         if !in_list {
@@ -1350,22 +1351,23 @@ fn list_objects(
             }
         }
 
-        if !in_list && indent == shape.field_indent {
-            if let Some(value) = trimmed.strip_prefix(&field_prefix) {
-                found = true;
-                let value = value.trim();
-                if value == "[]" {
-                    return Ok(Vec::new());
-                }
-                if !value.is_empty() {
-                    return Err(parse_error(
-                        source_name,
-                        format!("{}.{} must be a list", shape.section, shape.field),
-                    ));
-                }
-                in_list = true;
-                continue;
+        if !in_list
+            && indent == shape.field_indent
+            && let Some(value) = trimmed.strip_prefix(&field_prefix)
+        {
+            found = true;
+            let value = value.trim();
+            if value == "[]" {
+                return Ok(Vec::new());
             }
+            if !value.is_empty() {
+                return Err(parse_error(
+                    source_name,
+                    format!("{}.{} must be a list", shape.section, shape.field),
+                ));
+            }
+            in_list = true;
+            continue;
         }
 
         if !in_list {
@@ -1382,13 +1384,13 @@ fn list_objects(
             }
             let mut item = BTreeMap::new();
             let rest = trimmed.trim_start_matches("- ").trim();
-            if !rest.is_empty() {
-                if let Some(field) = parse_object_property(source_name, rest, &mut item)? {
-                    pending_list_property = Some(PendingListProperty {
-                        field,
-                        items: Vec::new(),
-                    });
-                }
+            if !rest.is_empty()
+                && let Some(field) = parse_object_property(source_name, rest, &mut item)?
+            {
+                pending_list_property = Some(PendingListProperty {
+                    field,
+                    items: Vec::new(),
+                });
             }
             current = Some(item);
         } else if indent == shape.property_indent {

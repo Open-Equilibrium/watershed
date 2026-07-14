@@ -664,25 +664,25 @@ impl SessionLifecycleState {
             )));
         }
 
-        if event.event_type != EventType::LoopStarted {
-            if let Some(loop_id) = &event.loop_id {
-                if !self.loops.is_started(loop_id) {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
-                        path.display(),
-                        event.event_type.as_str()
-                    )));
-                }
-                if let Some(terminal_line) = self.loops.terminal_line(loop_id) {
-                    return Err(terminal_lifecycle_error(
-                        path,
-                        line_number,
-                        event,
-                        "loop",
-                        loop_id,
-                        terminal_line,
-                    ));
-                }
+        if event.event_type != EventType::LoopStarted
+            && let Some(loop_id) = &event.loop_id
+        {
+            if !self.loops.is_started(loop_id) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
+                    path.display(),
+                    event.event_type.as_str()
+                )));
+            }
+            if let Some(terminal_line) = self.loops.terminal_line(loop_id) {
+                return Err(terminal_lifecycle_error(
+                    path,
+                    line_number,
+                    event,
+                    "loop",
+                    loop_id,
+                    terminal_line,
+                ));
             }
         }
         validate_lifecycle_parent(path, line_number, event, &self.loops, &self.loop_parents)?;
@@ -1141,13 +1141,13 @@ fn validate_lifecycle_parent(
         }
     }
 
-    if let Some(expected_parent) = loop_parents.get(loop_id) {
-        if expected_parent != &event.parent_loop_id {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} parent_loop_id for loop_id {loop_id:?} must match loop.started",
-                path.display()
-            )));
-        }
+    if let Some(expected_parent) = loop_parents.get(loop_id)
+        && expected_parent != &event.parent_loop_id
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "{} line {line_number} parent_loop_id for loop_id {loop_id:?} must match loop.started",
+            path.display()
+        )));
     }
 
     Ok(())

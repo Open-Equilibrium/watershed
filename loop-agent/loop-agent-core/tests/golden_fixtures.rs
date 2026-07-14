@@ -1,6 +1,6 @@
 use core_script::{
-    parse_registry_block, AllowedParameter, LoopBlock, ParameterValueType, PhaseBlock,
-    RegistryBlock, ScriptRuntime, StepBlock, ToolBlock, ToolCommand, ToolKind,
+    AllowedParameter, LoopBlock, ParameterValueType, PhaseBlock, RegistryBlock, ScriptRuntime,
+    StepBlock, ToolBlock, ToolCommand, ToolKind, parse_registry_block,
 };
 use proto::{EventEnvelope, EventType};
 use std::{collections::HashSet, fs, path::Path};

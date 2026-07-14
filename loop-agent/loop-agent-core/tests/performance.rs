@@ -1,11 +1,12 @@
-use loop_agent_core::{run_loop, EmitMode};
+use loop_agent_core::{EmitMode, run_loop};
 use std::{
     fs,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{
+        Arc, Barrier,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        mpsc, Arc, Barrier,
+        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -226,7 +227,7 @@ fn current_resident_set_size() -> Option<u64> {
     }
 
     #[link(name = "psapi")]
-    extern "system" {
+    unsafe extern "system" {
         fn GetCurrentProcess() -> *mut c_void;
         fn GetProcessMemoryInfo(
             process: *mut c_void,
@@ -284,7 +285,7 @@ fn current_resident_set_size() -> Option<u64> {
     const KERN_SUCCESS: i32 = 0;
     const MACH_TASK_BASIC_INFO: i32 = 20;
 
-    extern "C" {
+    unsafe extern "C" {
         fn mach_task_self() -> MachPort;
         fn task_info(
             target_task: MachPort,

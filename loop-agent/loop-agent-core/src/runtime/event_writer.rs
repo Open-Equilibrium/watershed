@@ -138,7 +138,11 @@ fn observer_delivery_worker<W>(mut writer: W, receiver: &std::sync::mpsc::Receiv
 where
     W: Write,
 {
-    while let Ok((bytes, acknowledgement)) = receiver.recv() {
+    loop {
+        let received = receiver.recv();
+        let Ok((bytes, acknowledgement)) = received else {
+            break;
+        };
         let delivered = writer
             .write_all(&bytes)
             .and_then(|()| writer.flush())
@@ -327,12 +331,12 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
         }
         if outcome.appended && self.emit == EmitMode::Jsonl {
             let delivered = self.publish(canonical_jsonl.as_bytes());
-            if delivered && !is_event_sync_checkpoint(&event.event_type) {
-                if let (Some(timings), Some(started_at)) =
+            if delivered
+                && !is_event_sync_checkpoint(&event.event_type)
+                && let (Some(timings), Some(started_at)) =
                     (self.timings.as_deref_mut(), measurement_started_at)
-                {
-                    timings.delivery_nanos.push(started_at.elapsed().as_nanos());
-                }
+            {
+                timings.delivery_nanos.push(started_at.elapsed().as_nanos());
             }
         }
         if let Some(err) = outcome.error {
@@ -468,7 +472,8 @@ fn session_writer_worker<A>(
             }
             dirty.mark_synced();
         }
-        match receiver.recv_timeout(dirty.wait_timeout(Instant::now())) {
+        let command = receiver.recv_timeout(dirty.wait_timeout(Instant::now()));
+        match command {
             Ok(SessionWriterCommand::Commit {
                 acknowledgement,
                 canonical_jsonl,

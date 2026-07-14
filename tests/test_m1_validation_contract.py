@@ -100,6 +100,20 @@ class M1ValidationContractTest(unittest.TestCase):
         self.assertEqual(manifest["workspace"]["package"]["rust-version"], "1.97")
         self.assertRegex(workflow, r"rustup toolchain install 1\.97\.0(?:\s|$)")
 
+    def test_workspace_uses_rust_2024_contract(self) -> None:
+        manifest = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+        rustfmt = tomllib.loads((ROOT / "rustfmt.toml").read_text(encoding="utf-8"))
+
+        self.assertEqual(manifest["workspace"]["resolver"], "3")
+        self.assertEqual(manifest["workspace"]["package"]["edition"], "2024")
+        self.assertEqual(rustfmt["edition"], "2024")
+        for member in manifest["workspace"]["members"]:
+            package = tomllib.loads(
+                (ROOT / member / "Cargo.toml").read_text(encoding="utf-8")
+            )["package"]
+            self.assertEqual(package["edition"], {"workspace": True}, member)
+            self.assertEqual(package["rust-version"], {"workspace": True}, member)
+
 
 if __name__ == "__main__":
     unittest.main()

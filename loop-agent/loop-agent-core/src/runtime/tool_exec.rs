@@ -52,10 +52,10 @@ fn emit_tool(
         ) {
             Ok(progress) => progress,
             Err(err) => {
-                if matches!(side_effect_mode, ToolSideEffectMode::ApplyAll) {
-                    if let Some(failure) = runtime_failure_for_tool_error(&err, &tool.identity.id) {
-                        return Ok(Some(failure));
-                    }
+                if matches!(side_effect_mode, ToolSideEffectMode::ApplyAll)
+                    && let Some(failure) = runtime_failure_for_tool_error(&err, &tool.identity.id)
+                {
+                    return Ok(Some(failure));
                 }
                 return Err(err);
             }

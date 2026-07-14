@@ -593,11 +593,12 @@ struct ClosingAfterFirstWrite {
 
 impl Write for ClosingAfterFirstWrite {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if let Some(sender) = self.first_write.take() {
-            let _ = sender.send(());
-            Ok(buf.len())
-        } else {
-            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+        match self.first_write.take() {
+            Some(sender) => {
+                let _ = sender.send(());
+                Ok(buf.len())
+            }
+            None => Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed")),
         }
     }
 

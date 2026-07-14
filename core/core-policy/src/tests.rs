@@ -463,11 +463,11 @@ fn policy_artifact_rejects_wildcard_protected_path_grants() {
             .expect_err("protected path grants must be exact paths");
 
         assert_eq!(
-                err.to_string(),
-                format!(
-                    "tool filesystem-tool protected_path_grant {grant:?} must be an exact safe relative path"
-                )
-            );
+            err.to_string(),
+            format!(
+                "tool filesystem-tool protected_path_grant {grant:?} must be an exact safe relative path"
+            )
+        );
     }
 }
 
@@ -1167,74 +1167,74 @@ fn expected_decision_rejects_invalid_operation_shapes() {
 #[test]
 fn expected_decision_rejects_reason_code_mismatches() {
     let cases = vec![
-            (
-                DeniedAttempt::Write {
-                    from_path: None,
-                    operation: "create".to_owned(),
-                    path: Some("../outside.txt".to_owned()),
-                    to_path: None,
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::NetworkDenied,
-                "write attempts must use reason_code write_denied, got network_denied",
-            ),
-            (
-                DeniedAttempt::Network {
-                    destination: "example.com".to_owned(),
-                    port: 443,
-                    tool_id: "negative".to_owned(),
-                    transport: NetworkTransport::Tcp,
-                },
-                DenyReasonCode::WriteDenied,
-                "network attempts must use reason_code network_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::Environment {
-                    name: "OPENAI_API_KEY".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "environment attempts must use reason_code environment_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::ToolOutOfPhase {
-                    phase_id: "negative-no-tools".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "tool_out_of_phase attempts must use reason_code tool_out_of_phase, got write_denied",
-            ),
-            (
-                DeniedAttempt::ProtectedPath {
-                    from_path: None,
-                    operation: "read".to_owned(),
-                    path: Some(".env".to_owned()),
-                    to_path: None,
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "protected_path attempts must use reason_code protected_path_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::SymlinkEscape {
-                    operation: "create".to_owned(),
-                    path: "links/outside.txt".to_owned(),
-                    symlink_path: "links".to_owned(),
-                    symlink_target: "../outside".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "symlink_escape attempts must use reason_code symlink_escape_denied, got write_denied",
-            ),
-            (
-                DeniedAttempt::InterpreterEscape {
-                    argv: vec!["-c".to_owned(), "cat .env".to_owned()],
-                    executable: "python".to_owned(),
-                    tool_id: "negative".to_owned(),
-                },
-                DenyReasonCode::WriteDenied,
-                "interpreter_escape attempts must use reason_code interpreter_escape_denied, got write_denied",
-            ),
+        (
+            DeniedAttempt::Write {
+                from_path: None,
+                operation: "create".to_owned(),
+                path: Some("../outside.txt".to_owned()),
+                to_path: None,
+                tool_id: "negative".to_owned(),
+            },
+            DenyReasonCode::NetworkDenied,
+            "write attempts must use reason_code write_denied, got network_denied",
+        ),
+        (
+            DeniedAttempt::Network {
+                destination: "example.com".to_owned(),
+                port: 443,
+                tool_id: "negative".to_owned(),
+                transport: NetworkTransport::Tcp,
+            },
+            DenyReasonCode::WriteDenied,
+            "network attempts must use reason_code network_denied, got write_denied",
+        ),
+        (
+            DeniedAttempt::Environment {
+                name: "OPENAI_API_KEY".to_owned(),
+                tool_id: "negative".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "environment attempts must use reason_code environment_denied, got write_denied",
+        ),
+        (
+            DeniedAttempt::ToolOutOfPhase {
+                phase_id: "negative-no-tools".to_owned(),
+                tool_id: "negative".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "tool_out_of_phase attempts must use reason_code tool_out_of_phase, got write_denied",
+        ),
+        (
+            DeniedAttempt::ProtectedPath {
+                from_path: None,
+                operation: "read".to_owned(),
+                path: Some(".env".to_owned()),
+                to_path: None,
+                tool_id: "negative".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "protected_path attempts must use reason_code protected_path_denied, got write_denied",
+        ),
+        (
+            DeniedAttempt::SymlinkEscape {
+                operation: "create".to_owned(),
+                path: "links/outside.txt".to_owned(),
+                symlink_path: "links".to_owned(),
+                symlink_target: "../outside".to_owned(),
+                tool_id: "negative".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "symlink_escape attempts must use reason_code symlink_escape_denied, got write_denied",
+        ),
+        (
+            DeniedAttempt::InterpreterEscape {
+                argv: vec!["-c".to_owned(), "cat .env".to_owned()],
+                executable: "python".to_owned(),
+                tool_id: "negative".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "interpreter_escape attempts must use reason_code interpreter_escape_denied, got write_denied",
+        ),
     ];
 
     for (attempt, reason_code, expected_message) in cases {
