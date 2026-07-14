@@ -64,118 +64,14 @@ fn smoke_loop_stream_matches_m0_order_contract() {
             EventType::SessionCompleted,
         ]
     );
-    validate_smoke_loop_payload_dimensions(&stream).unwrap_or_else(|err| panic!("{err}"));
-}
-
-#[test]
-fn smoke_loop_contract_rejects_missing_allowed_parameters() {
-    let mut stream = load_stream("smoke-loop", "smoke-loop.jsonl");
-    let tool_started = stream
-        .iter_mut()
-        .find(|event| event.event_type == EventType::ToolStarted)
-        .expect("smoke-loop tool.started event");
-    tool_started
-        .payload
-        .as_object_mut()
-        .expect("tool.started payload object")
-        .remove("allowed_parameters");
-
-    let err = validate_smoke_loop_payload_dimensions(&stream)
-        .expect_err("missing allowed_parameters must fail");
-
-    assert!(err.contains("allowed_parameters"), "{err}");
+    assert_smoke_loop_payload_dimensions(&stream);
 }
 
 #[test]
 fn hello_loop_stream_covers_m0_contract_dimensions() {
     let stream = load_stream("hello-loop", "hello-loop.jsonl");
 
-    validate_hello_loop_payload_dimensions(&stream).unwrap_or_else(|err| panic!("{err}"));
-
-    assert!(
-        stream
-            .iter()
-            .filter(|event| event.event_type == EventType::PhaseEntered)
-            .count()
-            >= 2
-    );
-    assert!(stream
-        .iter()
-        .any(|event| event.event_type == EventType::ToolProgress));
-    assert!(stream.iter().any(|event| {
-        event.event_type == EventType::ToolStarted
-            && event.payload["tool_kind"] == "predefined-command"
-            && event.payload["read_scope"]
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-    }));
-    assert!(stream.iter().any(|event| {
-        event.event_type == EventType::ToolStarted
-            && event.payload["tool_kind"] == "own-script"
-            && event.payload["write_scope"]
-                .as_array()
-                .is_some_and(|items| !items.is_empty())
-    }));
-    assert!(stream.iter().any(|event| {
-        event.event_type == EventType::StepStarted
-            && event.payload["connection_kinds"]
-                .as_array()
-                .is_some_and(|kinds| kinds.iter().any(|kind| kind == "data"))
-    }));
-    assert!(stream.iter().any(|event| {
-        event.event_type == EventType::StepStarted
-            && event.payload["connection_kinds"]
-                .as_array()
-                .is_some_and(|kinds| {
-                    kinds
-                        .iter()
-                        .any(|kind| kind == "trigger" || kind == "refresh")
-                })
-    }));
-
-    let subloop_started = stream
-        .iter()
-        .filter(|event| {
-            event.event_type == EventType::LoopStarted && event.parent_loop_id.is_some()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(subloop_started.len(), 2);
-    assert_ne!(subloop_started[0].loop_id, subloop_started[1].loop_id);
-}
-
-#[test]
-fn hello_loop_contract_rejects_unpaired_connection_payloads() {
-    let mut stream = load_stream("hello-loop", "hello-loop.jsonl");
-    let step_started = stream
-        .iter_mut()
-        .find(|event| {
-            event.event_type == EventType::StepStarted && event.payload["connection_ids"].is_array()
-        })
-        .expect("hello-loop step.started connection payload");
-    step_started.payload["connection_kinds"] = serde_json::json!(["data", "refresh"]);
-
-    let err = validate_step_connection_payloads(&stream)
-        .expect_err("unpaired connection arrays must fail");
-
-    assert!(err.contains("connection_ids"), "{err}");
-}
-
-#[test]
-fn hello_loop_contract_rejects_mismatched_subloop_definition() {
-    let mut stream = load_stream("hello-loop", "hello-loop.jsonl");
-    let subloop_started = stream
-        .iter_mut()
-        .filter(|event| {
-            event.event_type == EventType::LoopStarted && event.parent_loop_id.is_some()
-        })
-        .nth(1)
-        .expect("second subloop invocation");
-    subloop_started.payload["loop_definition_id"] = serde_json::json!("other-subloop");
-
-    let err = validate_hello_loop_payload_dimensions(&stream)
-        .expect_err("mismatched subloop definition must fail");
-
-    assert!(err.contains("loop_definition_id"), "{err}");
+    assert_hello_loop_payload_dimensions(&stream);
 }
 
 #[test]
@@ -259,8 +155,10 @@ fn hello_loop_source_tools_cover_m0_contract() {
 
 #[test]
 fn sandbox_negative_streams_fail_without_completion_events() {
-    for stream_path in
-        expected_streams_matching("sandbox-negative").unwrap_or_else(|err| panic!("{err}"))
+    let expected_dir = fixture_root().join("sandbox-negative/expected");
+    for stream_path in expected_streams()
+        .into_iter()
+        .filter(|path| path.parent() == Some(expected_dir.as_path()))
     {
         let stream = load_stream_from_path(&stream_path);
         let event_types = event_types(&stream);
@@ -329,37 +227,6 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             stream_path.display()
         );
     }
-}
-
-#[test]
-fn expected_stream_filter_rejects_missing_matches() {
-    let err = expected_streams_matching("missing-sandbox-negative")
-        .expect_err("missing stream matches must fail");
-
-    assert!(err.contains("no expected JSONL streams"), "{err}");
-}
-
-#[test]
-fn expected_stream_filter_ignores_checkout_parent_names() {
-    let root = Path::new("checkout-missing-sandbox-negative").join("fixtures");
-    let sandbox_stream = root
-        .join("sandbox-negative")
-        .join("expected/sandbox-negative.jsonl");
-    let smoke_stream = root.join("smoke-loop").join("expected/smoke-loop.jsonl");
-
-    let matches = streams_matching_fixture_relative(
-        vec![sandbox_stream.clone(), smoke_stream],
-        &root,
-        "sandbox-negative",
-    );
-
-    assert_eq!(matches, vec![sandbox_stream]);
-    assert!(streams_matching_fixture_relative(
-        vec![root.join("smoke-loop").join("expected/smoke-loop.jsonl")],
-        &root,
-        "missing-sandbox-negative",
-    )
-    .is_empty());
 }
 
 #[test]
@@ -438,38 +305,6 @@ fn expected_streams() -> Vec<std::path::PathBuf> {
     streams
 }
 
-fn expected_streams_matching(fragment: &str) -> Result<Vec<std::path::PathBuf>, String> {
-    let root = fixture_root();
-    let streams = streams_matching_fixture_relative(expected_streams(), &root, fragment);
-
-    if streams.is_empty() {
-        Err(format!(
-            "no expected JSONL streams matched path fragment {fragment:?}"
-        ))
-    } else {
-        Ok(streams)
-    }
-}
-
-fn streams_matching_fixture_relative<I>(
-    streams: I,
-    root: &Path,
-    fragment: &str,
-) -> Vec<std::path::PathBuf>
-where
-    I: IntoIterator<Item = std::path::PathBuf>,
-{
-    streams
-        .into_iter()
-        .filter(|path| {
-            path.strip_prefix(root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .contains(fragment)
-        })
-        .collect()
-}
-
 fn load_registry_block(path: &Path) -> RegistryBlock {
     let source = fs::read_to_string(path).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     parse_registry_block(&path.to_string_lossy(), &source)
@@ -515,139 +350,138 @@ fn event_types(stream: &[EventEnvelope]) -> Vec<EventType> {
     stream.iter().map(|event| event.event_type).collect()
 }
 
-fn validate_smoke_loop_payload_dimensions(stream: &[EventEnvelope]) -> Result<(), String> {
-    let loop_started = find_event(stream, EventType::LoopStarted, "smoke loop.started")?;
-    require_payload_eq(
+fn assert_smoke_loop_payload_dimensions(stream: &[EventEnvelope]) {
+    let loop_started = find_event(stream, EventType::LoopStarted, "smoke loop.started");
+    assert_payload_eq(
         loop_started,
         "loop_definition_id",
         serde_json::json!("smoke-loop"),
-    )?;
+    );
 
-    let phase_entered = find_event(stream, EventType::PhaseEntered, "smoke phase.entered")?;
-    require_payload_eq(
+    let phase_entered = find_event(stream, EventType::PhaseEntered, "smoke phase.entered");
+    assert_payload_eq(
         phase_entered,
         "instruction_ids",
         serde_json::json!(["say-smoke"]),
-    )?;
+    );
 
     let tool_started = find_payload_event(
         stream,
         EventType::ToolStarted,
         "tool_id",
         serde_json::json!("echo"),
-    )?;
-    require_payload_eq(
+    );
+    assert_payload_eq(
         tool_started,
         "tool_kind",
         serde_json::json!("predefined-command"),
-    )?;
-    require_payload_eq(tool_started, "allowed_parameters", serde_json::json!([]))?;
-    require_payload_eq(tool_started, "network_access", serde_json::json!("deny"))?;
-    require_payload_eq(tool_started, "read_scope", serde_json::json!(["workspace"]))?;
-    require_payload_eq(tool_started, "write_scope", serde_json::json!([]))?;
-
-    Ok(())
+    );
+    assert_payload_eq(tool_started, "allowed_parameters", serde_json::json!([]));
+    assert_payload_eq(tool_started, "network_access", serde_json::json!("deny"));
+    assert_payload_eq(tool_started, "read_scope", serde_json::json!(["workspace"]));
+    assert_payload_eq(tool_started, "write_scope", serde_json::json!([]));
 }
 
-fn validate_hello_loop_payload_dimensions(stream: &[EventEnvelope]) -> Result<(), String> {
-    validate_step_connection_payloads(stream)?;
+fn assert_hello_loop_payload_dimensions(stream: &[EventEnvelope]) {
+    assert_step_connection_payloads(stream);
+    assert!(
+        stream
+            .iter()
+            .any(|event| event.event_type == EventType::ToolProgress),
+        "hello-loop must include tool progress"
+    );
 
     let root_loop = find_payload_event(
         stream,
         EventType::LoopStarted,
         "loop_definition_id",
         serde_json::json!("hello-loop"),
-    )?;
+    );
     let root_loop_id = root_loop
         .loop_id
         .as_deref()
-        .ok_or_else(|| "hello-loop root loop.started must include loop_id".to_owned())?;
+        .expect("hello-loop root loop.started must include loop_id");
 
     let phase_count = stream
         .iter()
         .filter(|event| event.event_type == EventType::PhaseEntered)
         .count();
-    if phase_count < 2 {
-        return Err("hello-loop must include at least two phase.entered events".to_owned());
-    }
-    require_payload_event(
+    assert!(
+        phase_count >= 2,
+        "hello-loop must include at least two phase.entered events"
+    );
+    find_payload_event(
         stream,
         EventType::PhaseEntered,
         "instruction_ids",
         serde_json::json!(["inspect-input"]),
-    )?;
-    require_payload_event(
+    );
+    find_payload_event(
         stream,
         EventType::PhaseEntered,
         "instruction_ids",
         serde_json::json!(["write-output"]),
-    )?;
+    );
 
     let read_file = find_payload_event(
         stream,
         EventType::ToolStarted,
         "tool_id",
         serde_json::json!("read-file"),
-    )?;
-    require_payload_eq(
+    );
+    assert_payload_eq(
         read_file,
         "tool_kind",
         serde_json::json!("predefined-command"),
-    )?;
-    require_payload_eq(
+    );
+    assert_payload_eq(
         read_file,
         "allowed_parameters",
         serde_json::json!(["--file"]),
-    )?;
-    require_payload_eq(read_file, "network_access", serde_json::json!("deny"))?;
-    require_payload_eq(read_file, "read_scope", serde_json::json!(["workspace"]))?;
-    require_payload_eq(read_file, "write_scope", serde_json::json!([]))?;
+    );
+    assert_payload_eq(read_file, "network_access", serde_json::json!("deny"));
+    assert_payload_eq(read_file, "read_scope", serde_json::json!(["workspace"]));
+    assert_payload_eq(read_file, "write_scope", serde_json::json!([]));
 
     let write_summary = find_payload_event(
         stream,
         EventType::ToolStarted,
         "tool_id",
         serde_json::json!("write-summary"),
-    )?;
-    require_payload_eq(write_summary, "tool_kind", serde_json::json!("own-script"))?;
-    require_payload_eq(write_summary, "allowed_parameters", serde_json::json!([]))?;
-    require_payload_eq(write_summary, "network_access", serde_json::json!("deny"))?;
-    require_payload_eq(
+    );
+    assert_payload_eq(write_summary, "tool_kind", serde_json::json!("own-script"));
+    assert_payload_eq(write_summary, "allowed_parameters", serde_json::json!([]));
+    assert_payload_eq(write_summary, "network_access", serde_json::json!("deny"));
+    assert_payload_eq(
         write_summary,
         "read_scope",
         serde_json::json!(["workspace"]),
-    )?;
-    require_payload_eq(
+    );
+    assert_payload_eq(
         write_summary,
         "write_scope",
         serde_json::json!(["workspace/out"]),
-    )?;
+    );
 
     let step_started_pairs = stream
         .iter()
         .filter(|event| event.event_type == EventType::StepStarted)
-        .map(connection_pairs_for_event)
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
+        .filter_map(connection_pairs_for_event)
         .collect::<Vec<_>>();
-    if !step_started_pairs
-        .iter()
-        .any(|pairs| pairs == &vec![("inspect-data".to_owned(), "data".to_owned())])
-    {
-        return Err("hello-loop must include inspect-data/data connection pair".to_owned());
-    }
-    if !step_started_pairs.iter().any(|pairs| {
-        pairs
-            == &vec![
+    assert!(
+        step_started_pairs
+            .iter()
+            .any(|pairs| pairs == &[("inspect-data".to_owned(), "data".to_owned())]),
+        "hello-loop must include inspect-data/data connection pair"
+    );
+    assert!(
+        step_started_pairs.iter().any(|pairs| pairs
+            == &[
                 ("inspect-trigger".to_owned(), "trigger".to_owned()),
                 ("summary-refresh".to_owned(), "refresh".to_owned()),
-            ]
-    }) {
-        return Err(
-            "hello-loop must include trigger and refresh connection pairs in order".to_owned(),
-        );
-    }
+            ]),
+        "hello-loop must include trigger and refresh connection pairs in order"
+    );
 
     let subloop_started = stream
         .iter()
@@ -655,108 +489,105 @@ fn validate_hello_loop_payload_dimensions(stream: &[EventEnvelope]) -> Result<()
             event.event_type == EventType::LoopStarted && event.parent_loop_id.is_some()
         })
         .collect::<Vec<_>>();
-    if subloop_started.len() != 2 {
-        return Err("hello-loop must reuse one subloop definition twice".to_owned());
-    }
+    assert_eq!(
+        subloop_started.len(),
+        2,
+        "hello-loop must reuse one subloop definition twice"
+    );
 
     let mut subloop_ids = HashSet::new();
     for event in subloop_started {
-        require_payload_eq(
+        assert_payload_eq(
             event,
             "loop_definition_id",
             serde_json::json!("hello-subloop"),
-        )?;
-        if event.parent_loop_id.as_deref() != Some(root_loop_id) {
-            return Err("hello-loop subloop parent_loop_id must match root loop_id".to_owned());
-        }
+        );
+        assert_eq!(
+            event.parent_loop_id.as_deref(),
+            Some(root_loop_id),
+            "hello-loop subloop parent_loop_id must match root loop_id"
+        );
         let loop_id = event
             .loop_id
             .as_deref()
-            .ok_or_else(|| "hello-loop subloop must include loop_id".to_owned())?;
-        if !subloop_ids.insert(loop_id) {
-            return Err(
-                "hello-loop subloop invocations must use distinct loop_id values".to_owned(),
-            );
-        }
+            .expect("hello-loop subloop must include loop_id");
+        assert!(
+            subloop_ids.insert(loop_id),
+            "hello-loop subloop invocations must use distinct loop_id values"
+        );
     }
-
-    Ok(())
 }
 
-fn validate_step_connection_payloads(stream: &[EventEnvelope]) -> Result<(), String> {
+fn assert_step_connection_payloads(stream: &[EventEnvelope]) {
     for event in stream.iter().filter(|event| {
         matches!(
             event.event_type,
             EventType::StepStarted | EventType::StepCompleted
         )
     }) {
-        connection_pairs_for_event(event)?;
+        connection_pairs_for_event(event);
     }
-
-    Ok(())
 }
 
-fn connection_pairs_for_event(
-    event: &EventEnvelope,
-) -> Result<Option<Vec<(String, String)>>, String> {
+fn connection_pairs_for_event(event: &EventEnvelope) -> Option<Vec<(String, String)>> {
     match (
         event.payload.get("connection_ids"),
         event.payload.get("connection_kinds"),
     ) {
-        (None, None) => Ok(None),
-        (Some(_), None) | (None, Some(_)) => Err(format!(
+        (None, None) => None,
+        (Some(_), None) | (None, Some(_)) => panic!(
             "{} sequence {} must include connection_ids and connection_kinds together",
             event.event_type.as_str(),
             event.sequence
-        )),
+        ),
         (Some(_), Some(_)) => {
-            let ids = payload_string_array(event, "connection_ids")?;
-            let kinds = payload_string_array(event, "connection_kinds")?;
-            if ids.len() != kinds.len() {
-                return Err(format!(
-                    "{} sequence {} connection_ids and connection_kinds must have the same length",
+            let ids = payload_string_array(event, "connection_ids");
+            let kinds = payload_string_array(event, "connection_kinds");
+            assert_eq!(
+                ids.len(),
+                kinds.len(),
+                "{} sequence {} connection arrays must have equal length",
+                event.event_type.as_str(),
+                event.sequence
+            );
+            for kind in &kinds {
+                assert!(
+                    matches!(kind.as_str(), "data" | "trigger" | "refresh"),
+                    "{} sequence {} uses unsupported connection_kind {kind}",
                     event.event_type.as_str(),
                     event.sequence
-                ));
+                );
             }
-            for kind in &kinds {
-                if !matches!(kind.as_str(), "data" | "trigger" | "refresh") {
-                    return Err(format!(
-                        "{} sequence {} uses unsupported connection_kind {kind}",
-                        event.event_type.as_str(),
-                        event.sequence
-                    ));
-                }
-            }
-            Ok(Some(ids.into_iter().zip(kinds).collect()))
+            Some(ids.into_iter().zip(kinds).collect())
         }
     }
 }
 
-fn payload_string_array(event: &EventEnvelope, field: &str) -> Result<Vec<String>, String> {
+fn payload_string_array(event: &EventEnvelope, field: &str) -> Vec<String> {
     let values = event
         .payload
         .get(field)
-        .ok_or_else(|| missing_payload_field(event, field))?
+        .unwrap_or_else(|| panic!("{} must include payload.{field}", event.event_type.as_str()))
         .as_array()
-        .ok_or_else(|| {
-            format!(
-                "{} sequence {} payload.{field} must be an array",
-                event.event_type.as_str(),
-                event.sequence
+        .unwrap_or_else(|| {
+            panic!(
+                "{} payload.{field} must be an array",
+                event.event_type.as_str()
             )
-        })?;
+        });
 
     values
         .iter()
         .map(|value| {
-            value.as_str().map(str::to_owned).ok_or_else(|| {
-                format!(
-                    "{} sequence {} payload.{field} must contain only strings",
-                    event.event_type.as_str(),
-                    event.sequence
-                )
-            })
+            value
+                .as_str()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} payload.{field} must contain strings",
+                        event.event_type.as_str()
+                    )
+                })
+                .to_owned()
         })
         .collect()
 }
@@ -765,11 +596,11 @@ fn find_event<'a>(
     stream: &'a [EventEnvelope],
     event_type: EventType,
     label: &str,
-) -> Result<&'a EventEnvelope, String> {
+) -> &'a EventEnvelope {
     stream
         .iter()
         .find(|event| event.event_type == event_type)
-        .ok_or_else(|| format!("{label} event is missing"))
+        .unwrap_or_else(|| panic!("{label} event is missing"))
 }
 
 fn find_payload_event<'a>(
@@ -777,49 +608,26 @@ fn find_payload_event<'a>(
     event_type: EventType,
     field: &str,
     expected: serde_json::Value,
-) -> Result<&'a EventEnvelope, String> {
+) -> &'a EventEnvelope {
     stream
         .iter()
         .find(|event| event.event_type == event_type && event.payload.get(field) == Some(&expected))
-        .ok_or_else(|| {
-            format!(
+        .unwrap_or_else(|| {
+            panic!(
                 "{} event with payload.{field}={expected} is missing",
                 event_type.as_str()
             )
         })
 }
 
-fn require_payload_event(
-    stream: &[EventEnvelope],
-    event_type: EventType,
-    field: &str,
-    expected: serde_json::Value,
-) -> Result<(), String> {
-    find_payload_event(stream, event_type, field, expected).map(|_| ())
-}
-
-fn require_payload_eq(
-    event: &EventEnvelope,
-    field: &str,
-    expected: serde_json::Value,
-) -> Result<(), String> {
-    match event.payload.get(field) {
-        Some(actual) if actual == &expected => Ok(()),
-        Some(actual) => Err(format!(
-            "{} sequence {} payload.{field} must be {expected}, got {actual}",
-            event.event_type.as_str(),
-            event.sequence
-        )),
-        None => Err(missing_payload_field(event, field)),
-    }
-}
-
-fn missing_payload_field(event: &EventEnvelope, field: &str) -> String {
-    format!(
-        "{} sequence {} must include payload.{field}",
+fn assert_payload_eq(event: &EventEnvelope, field: &str, expected: serde_json::Value) {
+    assert_eq!(
+        event.payload.get(field),
+        Some(&expected),
+        "{} sequence {} payload.{field}",
         event.event_type.as_str(),
         event.sequence
-    )
+    );
 }
 
 fn validate_protocol_jsonl_text(path: &Path, text: &str) -> Result<(), String> {

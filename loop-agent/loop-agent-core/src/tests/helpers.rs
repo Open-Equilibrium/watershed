@@ -424,16 +424,6 @@ fn validate_failed_sandbox_decisions(
     Ok(())
 }
 
-fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
-    events
-        .iter()
-        .rev()
-        .find(|event| event.event_type == EventType::SessionFailed)?
-        .payload
-        .get("reason")?
-        .as_str()
-}
-
 fn sandbox_expected_decision_texts(
     loop_id: &str,
 ) -> Option<[(core_policy::PolicyTarget, &'static str); 2]> {
@@ -503,99 +493,64 @@ fn sandbox_expected_decision_texts(
     ])
 }
 
-fn emit_runtime_events_for_budget() -> Result<Vec<u128>, RuntimeError> {
-    let mut builder =
-        RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture());
-    let invocation = LoopInvocation {
-        loop_id: "loop-001".to_owned(),
-        parent_loop_id: None,
-    };
-    let mut transition_nanos = Vec::with_capacity(11);
-    let mut emit = |invocation: Option<&LoopInvocation>, event_type, payload| {
-        let started = Instant::now();
-        let result = builder.emit(invocation, event_type, payload);
-        transition_nanos.push(started.elapsed().as_nanos());
-        result
-    };
+struct FsmTransitionTimings {
+    completed_at: Instant,
+    nanos: Vec<u128>,
+}
 
-    emit(
-        None,
-        EventType::SessionStarted,
-        serde_json::json!({"reason":"fixture-start"}),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::LoopStarted,
-        serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::PhaseEntered,
-        serde_json::json!({
-            "instruction_ids": ["say-hello"],
-            "phase_id": "smoke",
-            "phase_name": "Smoke",
-            "tool_ids": ["echo"],
-        }),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::StepStarted,
-        serde_json::json!({
-            "phase_id": "smoke",
-            "step_id": "say",
-            "step_name": "Say",
-        }),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::MessageDelta,
-        serde_json::json!({
-            "content_delta": "hello",
-            "message_id": "msg-001",
-            "role": "assistant",
-        }),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::MessageCompleted,
-        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::ToolStarted,
-        serde_json::json!({
-            "allowed_parameters": [],
-            "network_access": "deny",
-            "read_scope": ["workspace"],
-            "tool_id": "echo",
-            "tool_kind": "predefined-command",
-            "tool_name": "Echo",
-            "write_scope": [],
-        }),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::ToolCompleted,
-        serde_json::json!({"exit_code":0,"tool_id":"echo"}),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::StepCompleted,
-        serde_json::json!({
-            "phase_id": "smoke",
-            "step_id": "say",
-            "step_name": "Say",
-        }),
-    )?;
-    emit(
-        Some(&invocation),
-        EventType::LoopCompleted,
-        serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"SmokeLoop"}),
-    )?;
-    emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
+impl FsmTransitionTimings {
+    fn new() -> Self {
+        Self {
+            completed_at: Instant::now(),
+            nanos: Vec::new(),
+        }
+    }
+}
 
-    Ok(transition_nanos)
+impl RuntimeEventSink for FsmTransitionTimings {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        None
+    }
+
+    fn commit(
+        &mut self,
+        _event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        _context_manifests: Option<&[ContextManifest]>,
+        _measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        self.nanos.push(self.completed_at.elapsed().as_nanos());
+        self.completed_at = Instant::now();
+        Ok(())
+    }
+}
+
+fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
+    let workspace = fixture_dir("smoke-loop");
+    let (registry, policy) = fixture_runtime_policy("smoke-loop", "smoke-loop");
+    let root_loop = registry
+        .loop_block("smoke-loop")
+        .ok_or_else(|| RuntimeError::Protocol("smoke-loop fixture is missing".to_owned()))?;
+    let mut timings = FsmTransitionTimings::new();
+    let runtime = execute_loop_with_sink(
+        &workspace,
+        &registry,
+        &policy,
+        root_loop,
+        "budget001",
+        LoopExecutionOptions::new(
+            EventClock::fixed_fixture(),
+            ToolSideEffectMode::DryRun,
+            SideEffectRecorder::none(),
+        ),
+        Some(&mut timings),
+    )?;
+    if runtime.failed || timings.nanos.len() != runtime.events.len() {
+        return Err(RuntimeError::Protocol(
+            "smoke-loop transition timing did not cover a successful runtime".to_owned(),
+        ));
+    }
+    Ok(timings.nanos)
 }
 
 fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {

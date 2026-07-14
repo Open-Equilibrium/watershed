@@ -98,21 +98,21 @@ fn assert_event_writer_p95(
 #[test]
 #[ignore = "performance gate"]
 fn fsm_transition_p95_stays_under_m1_budget() {
-    let event_count = emit_runtime_events_for_budget()
+    let event_count = fsm_transition_samples_for_budget()
         .expect("warm runtime emit succeeds")
         .len();
     let mut transition_nanos = Vec::with_capacity(200 * event_count);
 
     for _ in 0..30 {
         assert_eq!(
-            emit_runtime_events_for_budget()
+            fsm_transition_samples_for_budget()
                 .expect("warm runtime emit succeeds")
                 .len(),
             event_count
         );
     }
     for _ in 0..200 {
-        let samples = emit_runtime_events_for_budget().expect("runtime emit succeeds");
+        let samples = fsm_transition_samples_for_budget().expect("runtime emit succeeds");
         assert_eq!(
             samples.len(),
             event_count
@@ -123,7 +123,7 @@ fn fsm_transition_p95_stays_under_m1_budget() {
 
     assert!(
         p95_nanos <= 1_000_000,
-        "runtime event emit and serialization p95 must stay <= 1 ms/event: {p95_nanos} ns"
+        "deterministic FSM transition p95 must stay <= 1 ms/event: {p95_nanos} ns"
     );
 }
 

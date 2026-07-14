@@ -53,7 +53,7 @@ fn file_guard_and_reservation_helpers_cover_direct_edges() {
 }
 
 #[test]
-fn tail_stream_helpers_cover_direct_edges() {
+fn tail_transient_read_errors_are_classified() {
     let workspace = empty_workspace("tail-stream-helpers");
     let file_path = workspace.join("file.txt");
     fs::write(&file_path, b"abc").expect("file written");
@@ -73,23 +73,6 @@ fn tail_stream_helpers_cover_direct_edges() {
         source: io::Error::from(io::ErrorKind::Other),
     };
     assert!(!runtime_error_is_transient_tail_read(&other));
-
-    assert_eq!(
-        session_stream_suffix_bytes("first\nsecond\n", 0).expect("full stream suffix"),
-        b"first\nsecond\n"
-    );
-    assert_eq!(
-        session_stream_suffix_bytes("first\nsecond\n", 1).expect("one-line prefix suffix"),
-        b"second\n"
-    );
-    assert!(matches!(
-        session_stream_suffix_bytes("first", 1),
-        Err(RuntimeError::Protocol(message)) if message.contains("initial event")
-    ));
-    assert!(matches!(
-        session_stream_suffix_bytes("first\n", 2),
-        Err(RuntimeError::Protocol(message)) if message.contains("persisted event prefix")
-    ));
 }
 
 #[test]

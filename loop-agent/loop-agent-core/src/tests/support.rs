@@ -59,20 +59,6 @@ fn write_initial_session_log_with_clock(
     write_existing_file(&reservation.session_path, stream.as_bytes())
 }
 
-fn commit_reserved_session_log_from_prefix(
-    reservation: &SessionReservation,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-    definition_hashes: Option<&SessionDefinitionHashes>,
-    persisted_event_count: usize,
-) -> Result<(), RuntimeError> {
-    let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
-    append_session_log_bytes(&reservation.session_path, append_bytes)?;
-    reservation.mark_committed();
-    write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
-}
-
 fn validate_appended_session_log_text(
     path: &Path,
     expected_session_id: &str,
@@ -126,14 +112,12 @@ fn commit_reserved_session_log(
     event_count: usize,
     definition_hashes: Option<&SessionDefinitionHashes>,
 ) -> Result<(), RuntimeError> {
-    commit_reserved_session_log_from_prefix(
-        reservation,
-        session_id,
-        stream,
-        event_count,
-        definition_hashes,
-        1,
-    )
+    let (_, append) = stream.split_once('\n').ok_or_else(|| {
+        RuntimeError::Protocol("fixture stream must contain its initial event".to_owned())
+    })?;
+    append_session_log_bytes(&reservation.session_path, append.as_bytes())?;
+    reservation.mark_committed();
+    write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
 }
 
 fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {

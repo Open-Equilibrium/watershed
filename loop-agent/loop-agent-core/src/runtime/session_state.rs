@@ -904,39 +904,6 @@ fn preflight_session_completion_stream(
     let stream = canonical_event_stream(events)?;
     let validated_events =
         validate_session_log_text(Path::new("runtime.jsonl"), expected_session_id, &stream)?;
-    preflight_complete_reserved_session_log_from_prefix(reservation, &stream, 0)?;
+    ensure_session_log_growth_within_limit(&reservation.session_path, stream.len())?;
     Ok(validated_events)
-}
-
-fn preflight_complete_reserved_session_log_from_prefix(
-    reservation: &SessionReservation,
-    stream: &str,
-    persisted_event_count: usize,
-) -> Result<(), RuntimeError> {
-    let append_bytes = session_stream_suffix_bytes(stream, persisted_event_count)?;
-    ensure_session_log_growth_within_limit(&reservation.session_path, append_bytes.len())
-}
-
-fn session_stream_suffix_bytes(
-    stream: &str,
-    persisted_event_count: usize,
-) -> Result<&[u8], RuntimeError> {
-    if persisted_event_count == 0 {
-        return Ok(stream.as_bytes());
-    }
-    let first_line_end = stream.find('\n').ok_or_else(|| {
-        RuntimeError::Protocol("validated runtime stream must contain an initial event".to_owned())
-    })?;
-    let mut line_count = 1usize;
-    let mut offset = first_line_end + 1;
-    while line_count < persisted_event_count {
-        let Some(relative_line_end) = stream[offset..].find('\n') else {
-            return Err(RuntimeError::Protocol(format!(
-                "validated runtime stream must contain persisted event prefix of {persisted_event_count}"
-            )));
-        };
-        offset += relative_line_end + 1;
-        line_count += 1;
-    }
-    Ok(&stream.as_bytes()[offset..])
 }
