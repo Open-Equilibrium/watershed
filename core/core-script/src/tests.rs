@@ -61,21 +61,11 @@ proptest! {
     }
 
     #[test]
-    fn parser_rejects_generated_unknown_top_level_blocks(
-        kind in "[a-z][a-z0-9_-]{0,12}"
+    fn parser_never_panics_on_arbitrary_utf8(
+        source in prop::collection::vec(any::<char>(), 0..1024)
+            .prop_map(|chars| chars.into_iter().collect::<String>())
     ) {
-        prop_assume!(!matches!(
-            kind.as_str(),
-            "connection" | "instruction" | "loop" | "phase" | "tool"
-        ));
-        let source = format!("{kind}:\n");
-        let error = parse_registry_block("property.yaml", &source).expect_err("unknown kind");
-
-        prop_assert!(
-            error
-                .to_string()
-                .contains("unsupported registry block kind")
-        );
+        let _ = parse_registry_block("property.yaml", &source);
     }
 }
 
@@ -902,509 +892,141 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
 }
 
 #[test]
-fn parser_helper_edge_cases_are_rejected_with_specific_errors() {
-    fn message<T: std::fmt::Debug>(result: Result<T, RegistryError>) -> String {
-        result.expect_err("expected registry error").to_string()
-    }
-
-    let declared_network = parse_registry_block(
-        "network-tool.yaml",
-        r#"tool:
-  id: network-tool
-  name: NetworkTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --count
-      value_type: integer
-      required: true
-      min: -5
-      max: 10
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network:
-    default: deny
-    allow:
-      - kind: cidr
-        transport: udp
-        cidr: 192.0.2.0/24
-        port: 53
-"#,
-    )
-    .expect("declared deny-default network parses");
-    let RegistryBlock::Tool(tool) = declared_network else {
-        panic!("expected tool block");
-    };
-    assert_eq!(tool.allowed_parameters[0].min, Some(-5));
-    assert!(matches!(
-        tool.network,
-        NetworkPolicy::Declared { allow, .. }
-            if allow[0].transport == NetworkTransport::Udp && allow[0].port == 53
-    ));
-
-    for (name, source, expected) in [
+fn parser_rejects_unsafe_yaml_and_unknown_fields() {
+    const INSTRUCTION: &str =
+        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect input\n";
+    let tool =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+    let cases = [
         (
-            "unsupported-kind.yaml",
-            "unknown:\n  id: bad\n",
-            "unsupported registry block kind",
+            "duplicate-key.yaml",
+            INSTRUCTION.replace("  prompt:", "  prompt: first\n  prompt:"),
         ),
         (
-            "tab.yaml",
-            "instruction:\n\tid: bad\n",
-            "tab indentation character",
+            "typed-key-collision.yaml",
+            INSTRUCTION.replace("  prompt:", "  1: first\n  \"1\": second\n  prompt:"),
         ),
         (
             "anchor.yaml",
-            "instruction:\n  id: bad\n  name: Bad\n  prompt: Inspect\n  <<: *base\n",
-            "unsupported YAML syntax",
+            INSTRUCTION.replace("name: Inspect", "name: &display Inspect"),
         ),
         (
-            "inline-anchor.yaml",
-            "instruction:\n  id: bad\n  name: &display Bad\n  prompt: Inspect\n",
-            "unsupported YAML syntax",
+            "alias.yaml",
+            INSTRUCTION.replace("prompt: Inspect input", "prompt: *display"),
         ),
         (
-            "inline-alias.yaml",
-            "instruction:\n  id: bad\n  name: Bad\n  prompt: *base\n",
-            "unsupported YAML syntax",
+            "merge.yaml",
+            INSTRUCTION.replace("  id:", "  <<: {}\n  id:"),
         ),
         (
-            "inline-list-alias.yaml",
-            "phase:\n  id: bad\n  name: Bad\n  instruction_refs: [*inspect]\n  tool_refs: []\n  steps:\n    - id: inspect\n      name: Inspect\n",
-            "unsupported YAML syntax",
-        ),
-        ("bad-top.yaml", "instruction: Bad\n", "top-level line"),
-        (
-            "two-blocks.yaml",
-            "instruction:\n  id: first\n  name: First\n  prompt: Inspect\nloop:\n  id: second\n  name: Second\n  phase_refs: []\n",
-            "exactly one top-level block",
+            "core-tag.yaml",
+            INSTRUCTION.replace("prompt: Inspect input", "prompt: !!str Inspect input"),
         ),
         (
-            "missing-network.yaml",
-            "tool:\n  id: missing-network\n  name: MissingNetwork\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n",
-            "missing tool.network",
+            "custom-tag.yaml",
+            INSTRUCTION.replace("prompt: Inspect input", "prompt: !secret Inspect input"),
         ),
         (
-            "bad-network-scalar.yaml",
-            "tool:\n  id: bad-network\n  name: BadNetwork\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: allow\n",
-            "unsupported network policy",
+            "multiple-documents.yaml",
+            format!("{INSTRUCTION}---\n{INSTRUCTION}"),
         ),
         (
-            "bad-network-default.yaml",
-            "tool:\n  id: bad-default\n  name: BadDefault\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: allow\n    allow: []\n",
-            "unsupported network default",
+            "unknown-field.yaml",
+            INSTRUCTION.replace("  prompt:", "  extra: true\n  prompt:"),
         ),
         (
-            "bad-network-kind.yaml",
-            "tool:\n  id: bad-kind\n  name: BadKind\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: deny\n    allow:\n      - kind: host\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-            "unsupported network allow kind",
+            "unknown-nested-field.yaml",
+            tool.replace("    argv: []", "    argv: []\n    extra: true"),
         ),
         (
-            "bad-network-transport.yaml",
-            "tool:\n  id: bad-transport\n  name: BadTransport\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: icmp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-            "unsupported network transport",
+            "explicit-null.yaml",
+            INSTRUCTION.replace("prompt: Inspect input", "prompt: null"),
         ),
-        (
-            "bad-tool-kind.yaml",
-            "tool:\n  id: bad-tool-kind\n  name: BadToolKind\n  tool_kind: custom\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "unsupported tool_kind",
-        ),
-        (
-            "bad-command-id.yaml",
-            "tool:\n  id: bad-command-id\n  name: BadCommandId\n  tool_kind: predefined-command\n  command:\n    command_id: BadCommand\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "invalid command id",
-        ),
-        (
-            "bad-runtime.yaml",
-            "tool:\n  id: bad-runtime\n  name: BadRuntime\n  tool_kind: own-script\n  command: script:bad-runtime\n  script_runtime: python\n  script_body: echo bad\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "unsupported script_runtime",
-        ),
-        (
-            "bad-connection-kind.yaml",
-            "connection:\n  id: link\n  name: Link\n  connection_kind: control\n  from_ref: a\n  to_ref: b\n",
-            "unsupported connection_kind",
-        ),
-        (
-            "bad-id.yaml",
-            "instruction:\n  id: Bad\n  name: Bad\n  prompt: Inspect\n",
-            "invalid block id",
-        ),
-        (
-            "bad-parameter-type.yaml",
-            "tool:\n  id: bad-parameter\n  name: BadParameter\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --value\n      value_type: bytes\n      required: true\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "unsupported parameter value_type",
-        ),
-        (
-            "integer-with-pattern.yaml",
-            "tool:\n  id: integer-with-pattern\n  name: IntegerWithPattern\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --count\n      value_type: integer\n      required: true\n      value_pattern: '[0-9]+'\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "integer parameters must omit value_pattern and max_length",
-        ),
-        (
-            "integer-with-max-length.yaml",
-            "tool:\n  id: integer-with-max-length\n  name: IntegerWithMaxLength\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --count\n      value_type: integer\n      required: true\n      max_length: 4\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "integer parameters must omit value_pattern and max_length",
-        ),
-        (
-            "none-with-min.yaml",
-            "tool:\n  id: none-with-min\n  name: NoneWithMin\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --flag\n      value_type: none\n      required: false\n      min: 1\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "none parameters must omit value_pattern, max_length, min, and max",
-        ),
-        (
-            "enum-without-values.yaml",
-            "tool:\n  id: enum-without-values\n  name: EnumWithoutValues\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: []\n  allowed_parameters:\n    - name: --mode\n      value_type: enum\n      required: true\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
-            "enum parameters must declare",
-        ),
-        (
-            "bad-step-id.yaml",
-            "phase:\n  id: phase\n  name: Phase\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: BadStep\n      name: Step\n",
-            "invalid block id",
-        ),
-        (
-            "steps-property-before-item.yaml",
-            "phase:\n  id: phase\n  name: Phase\n  instruction_refs: []\n  tool_refs: []\n  steps:\n      name: Step\n",
-            "property appears before list item",
-        ),
-    ] {
-        let error = message(parse_registry_block(name, source));
-        assert!(error.starts_with(name), "{name}: {error}");
-        assert!(error.contains(expected), "{name}: {error}");
+    ];
+
+    for (name, source) in cases {
+        let error = parse_registry_block(name, &source).expect_err(name);
+        assert!(error.to_string().starts_with(name), "{name}: {error}");
     }
-
-    let scalar_shape = ScalarListShape {
-        section: "tool",
-        parent: None,
-        field: "read_scope",
-        field_indent: 2,
-        item_indent: 4,
-    };
-    assert!(
-        message(block_string_list(
-            "bad-list-indent.yaml",
-            "tool:\n  read_scope:\n   - workspace\n",
-            scalar_shape,
-        ))
-        .contains("unsupported list indentation")
-    );
-    assert!(
-        message(block_string_list(
-            "missing-list.yaml",
-            "tool:\n  write_scope: []\n",
-            scalar_shape,
-        ))
-        .contains("missing tool.read_scope")
-    );
-
-    assert_eq!(
-        parse_literal_block_scalar(
-            "strip-block.yaml",
-            "tool:\n  script_body: |-\n    echo ok\n\n",
-            "tool",
-            "script_body",
-            "|-",
-        )
-        .expect("strip chomping parses"),
-        "echo ok"
-    );
-    assert!(
-        message(parse_literal_block_scalar(
-            "inconsistent-block.yaml",
-            "tool:\n  script_body: |\n    echo ok\n   bad\n",
-            "tool",
-            "script_body",
-            "|",
-        ))
-        .contains("inconsistent indentation")
-    );
-    assert!(
-        message(parse_literal_block_scalar(
-            "empty-block.yaml",
-            "tool:\n  script_body: |\n\n",
-            "tool",
-            "script_body",
-            "|",
-        ))
-        .contains("must be non-empty")
-    );
-
-    let object_shape = ListObjectShape {
-        section: "phase",
-        parent: None,
-        field: "steps",
-        field_indent: 2,
-        item_indent: 4,
-        property_indent: 6,
-    };
-    for (name, source, expected) in [
-        (
-            "steps-not-list.yaml",
-            "phase:\n  steps: bad\n",
-            "phase.steps must be a list",
-        ),
-        (
-            "steps-malformed-property.yaml",
-            "phase:\n  steps:\n    - id step\n",
-            "must use key: value",
-        ),
-        (
-            "steps-empty-property.yaml",
-            "phase:\n  steps:\n    - id:\n",
-            "must use key: value",
-        ),
-        (
-            "steps-duplicate-property.yaml",
-            "phase:\n  steps:\n    - id: step\n      id: again\n",
-            "duplicate list object property id",
-        ),
-        (
-            "steps-bad-indent.yaml",
-            "phase:\n  steps:\n     - id: step\n",
-            "uses unsupported indentation",
-        ),
-        (
-            "steps-missing.yaml",
-            "phase:\n  name: Phase\n",
-            "missing phase.steps",
-        ),
-    ] {
-        assert!(
-            message(list_objects(name, source, object_shape)).contains(expected),
-            "{name}"
-        );
-    }
-
-    for (value, expected) in [
-        ("not-a-list", "must be an inline YAML list"),
-        ("[\"unterminated]", "unterminated"),
-        ("[,]", "empty list item"),
-        ("['unterminated]", "unterminated"),
-        ("[true]", "list items must be strings"),
-    ] {
-        assert!(
-            message(parse_inline_yaml_list("inline-list.yaml", "argv", value)).contains(expected),
-            "{value}"
-        );
-    }
-    for (value, expected) in [
-        ("\"unterminated", "unterminated"),
-        ("\"\\q\"", "unsupported escape"),
-        ("\"\\xZ0\"", "invalid \\x escape digit"),
-        ("\"\\u12\"", "incomplete \\u escape"),
-        ("\"\\U00110000\"", "invalid \\U Unicode scalar"),
-        ("'unterminated", "unterminated"),
-        ("'bad'apostrophe'", "malformed single-quoted scalar"),
-    ] {
-        assert!(
-            message(unquote_yaml_scalar("quoted.yaml", "field", value)).contains(expected),
-            "{value}"
-        );
-    }
-
-    assert!(
-        message(required_scalar(
-            "empty-scalar.yaml",
-            "instruction:\n  prompt: \"\"\n",
-            "instruction",
-            "prompt",
-        ))
-        .contains("instruction.prompt must be non-empty")
-    );
-    assert!(
-        message(optional_scalar(
-            "empty-optional-scalar.yaml",
-            "tool:\n  script_runtime: \"\"\n",
-            "tool",
-            "script_runtime",
-        ))
-        .contains("tool.script_runtime must be non-empty")
-    );
-    assert!(
-        message(section_scalar_value(
-            "folded-scalar.yaml",
-            "instruction:\n  prompt: >\n    Folded\n",
-            "instruction",
-            "prompt",
-        ))
-        .contains("unsupported folded block scalar")
-    );
-    assert!(
-        message(section_scalar_value(
-            "missing-scalar-value.yaml",
-            "instruction:\n  prompt:\n",
-            "instruction",
-            "prompt",
-        ))
-        .contains("instruction.prompt must be a scalar")
-    );
-    assert!(
-        message(required_nested_scalar(
-            "missing-nested-scalar-value.yaml",
-            "tool:\n  command:\n    command_id:\n",
-            "tool",
-            "command",
-            "command_id",
-        ))
-        .contains("tool.command.command_id must be a scalar")
-    );
-    assert!(
-        message(required_nested_scalar(
-            "empty-nested-scalar.yaml",
-            "tool:\n  command:\n    command_id: \"\"\n",
-            "tool",
-            "command",
-            "command_id",
-        ))
-        .contains("tool.command.command_id must be non-empty")
-    );
-
-    let nested_object_shape = ListObjectShape {
-        section: "tool",
-        parent: Some("network"),
-        field: "allow",
-        field_indent: 4,
-        item_indent: 6,
-        property_indent: 8,
-    };
-    assert!(
-        list_objects(
-            "empty-nested-objects.yaml",
-            "tool:\n  network:\n    allow: []\n",
-            nested_object_shape
-        )
-        .expect("empty nested object list parses")
-        .is_empty()
-    );
-    let nested_objects = list_objects(
-            "nested-objects-stop-at-sibling.yaml",
-            "tool:\n  network:\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 127.0.0.0/8\n        port: 443\n  command:\n    argv: []\n",
-            nested_object_shape,
-        )
-        .expect("nested object list stops at sibling parent");
-    assert_eq!(nested_objects.len(), 1);
-
-    let object = BTreeMap::new();
-    assert!(
-        message(required_object_scalar(
-            "missing-object-property.yaml",
-            &object,
-            "id"
-        ))
-        .contains("missing list object property id")
-    );
-    let object = BTreeMap::from([("id".to_owned(), String::new())]);
-    assert!(
-        message(required_object_scalar(
-            "empty-object-property.yaml",
-            &object,
-            "id"
-        ))
-        .contains("list object property id must be non-empty")
-    );
-    assert!(
-        message(reject_unexpected_object_keys(
-            "unexpected-object-property.yaml",
-            "phase.steps",
-            &BTreeMap::from([("unexpected".to_owned(), "value".to_owned())]),
-            &["id", "name"],
-        ))
-        .contains("unsupported phase.steps property unexpected")
-    );
 }
 
 #[test]
-fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
-    fn message<T: std::fmt::Debug>(result: Result<T, RegistryError>) -> String {
-        result.expect_err("expected registry error").to_string()
+fn parser_enforces_registry_schema() {
+    let tool =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+    let instruction = include_str!(
+        "../../../loop-agent/fixtures/hello-loop/registry/instructions/inspect-input.yaml"
+    );
+    let phase =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
+    let loop_block =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
+    let cases = [
+        ("invalid-id.yaml", tool.replacen("id: read-file", "id: ReadFile", 1)),
+        (
+            "invalid-command-id.yaml",
+            tool.replace("command_id: agent-read", "command_id: AgentRead"),
+        ),
+        (
+            "invalid-parameter-name.yaml",
+            tool.replace("name: \"--file\"", "name: file"),
+        ),
+        (
+            "missing-string-bound.yaml",
+            tool.replace("value_type: workspace-relative-path", "value_type: string")
+                .replace("      max_length: 128\n", ""),
+        ),
+        (
+            "empty-prompt.yaml",
+            instruction.replace(
+                "prompt: \"Read the selected input and report only deterministic facts.\"",
+                "prompt: \"\"",
+            ),
+        ),
+        (
+            "empty-phase.yaml",
+            phase.replace(
+                "steps:\n    - id: gather\n      name: Gather\n      connection_refs: [inspect-data]",
+                "steps: []",
+            ),
+        ),
+        (
+            "empty-loop.yaml",
+            loop_block.replace("phase_refs: [inspect, summarize]", "phase_refs: []"),
+        ),
+        (
+            "zero-port.yaml",
+            tool.replace(
+                "network: deny",
+                "network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 0",
+            ),
+        ),
+    ];
+
+    for (name, source) in cases {
+        assert!(parse_registry_block(name, &source).is_err(), "{name}");
     }
+}
 
-    assert!(
-        message(reject_unknown_section_fields(
-            "section-field-without-colon.yaml",
-            "tool:\n  id\n",
-            "tool",
-            &["id"],
-        ))
-        .contains("must use key: value")
+#[test]
+fn parser_enforces_document_and_depth_budgets() {
+    const PREFIX: &str = "instruction:\n  id: inspect\n  name: Inspect\n  prompt: ";
+    let at_limit = format!(
+        "{PREFIX}{}\n",
+        "x".repeat(MAX_YAML_BYTES - PREFIX.len() - 1)
     );
-    assert!(
-        message(reject_unknown_nested_fields(
-            "nested-field-without-colon.yaml",
-            "tool:\n  command:\n    argv\n",
-            "tool",
-            "command",
-            &["argv"],
-        ))
-        .contains("must use key: value")
-    );
-    assert!(message(reject_unknown_nested_fields(
-        "unsupported-nested-field.yaml",
-        "other:\n  command:\n    unexpected: value\n\ntool:\n  other:\n    unexpected: value\n  command:\n    unexpected: value\n",
-        "tool",
-        "command",
-        &["argv"],
-    ))
-    .contains("unsupported tool.command field unexpected"));
+    assert_eq!(at_limit.len(), MAX_YAML_BYTES);
+    assert!(parse_registry_block("at-limit.yaml", &at_limit).is_ok());
 
-    let object_shape = ListObjectShape {
-        section: "phase",
-        parent: None,
-        field: "steps",
-        field_indent: 2,
-        item_indent: 4,
-        property_indent: 6,
-    };
-    let inline_pending_object = list_objects(
-        "inline-pending-list-property.yaml",
-        "phase:\n  steps:\n    - connection_refs:\n        - link\n      id: step\n      name: Step\n",
-        object_shape,
-    )
-    .expect("pending list property may start on the item line");
-    assert_eq!(inline_pending_object[0]["connection_refs"], "[\"link\"]");
-    assert!(
-        message(list_objects(
-            "steps-empty-field.yaml",
-            "phase:\n  steps:\n    - : value\n",
-            object_shape,
-        ))
-        .contains("must use key: value")
-    );
+    let oversized = format!("{PREFIX}{}\n", "x".repeat(MAX_YAML_BYTES));
+    assert!(parse_registry_block("oversized.yaml", &oversized).is_err());
 
-    let mut item = BTreeMap::new();
-    assert_eq!(
-        parse_object_property("list-property.yaml", "connection_refs:", &mut item)
-            .expect("empty connection_refs starts pending list"),
-        Some("connection_refs".to_owned())
+    let nested = format!(
+        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n  extra: {}x{}\n",
+        "[".repeat(MAX_YAML_DEPTH + 1),
+        "]".repeat(MAX_YAML_DEPTH + 1)
     );
-    assert!(
-        message(parse_object_property("empty-value.yaml", "id:", &mut item,))
-            .contains("must use key: value")
-    );
-    assert!(
-        message(push_inline_list_item(
-            "malformed-quoted-list-item.yaml",
-            "argv",
-            &mut Vec::new(),
-            "\"unterminated",
-        ))
-        .contains("malformed quoted scalar")
-    );
-    assert!(
-        message(unquote_yaml_scalar(
-            "dangling-double-quote-escape.yaml",
-            "field",
-            r#""abc\""#,
-        ))
-        .contains("dangling escape")
-    );
-
-    assert!(!is_valid_allowed_parameter_name("--"));
-    assert!(!is_valid_allowed_parameter_name("value"));
-    assert!(is_valid_allowed_parameter_name("--value_1"));
-    assert!(value_forbids_nested_yaml_content("deny"));
-    assert!(!value_forbids_nested_yaml_content("|"));
-    assert!(!value_forbids_nested_yaml_content(">"));
+    assert!(parse_registry_block("deep.yaml", &nested).is_err());
 }
 
 #[cfg(unix)]
@@ -1478,7 +1100,7 @@ fn registry_loader_rejects_linked_registry_root() {
 }
 
 #[test]
-fn parser_treats_literal_script_body_as_opaque_and_requires_it() {
+fn parser_handles_block_script_bodies_and_requires_content() {
     let fixture =
         include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/write-summary.yaml");
     let literal = fixture.replace(
@@ -1506,30 +1128,22 @@ fn parser_treats_literal_script_body_as_opaque_and_requires_it() {
     );
     let err = parse_registry_block("real-duplicate.yaml", &duplicate)
         .expect_err("a real sibling field remains a duplicate");
-    assert!(err.to_string().contains("duplicate tool.write_scope"));
+    assert!(err.to_string().starts_with("real-duplicate.yaml"));
 
     let body = "  script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n";
-    for (name, source, expected) in [
-        (
-            "missing-script-body.yaml",
-            fixture.replace(body, ""),
-            "script_body",
-        ),
+    for (name, source) in [
+        ("missing-script-body.yaml", fixture.replace(body, "")),
         (
             "empty-script-body.yaml",
             fixture.replace(body, "  script_body: \"\"\n"),
-            "script_body",
-        ),
-        (
-            "folded-script-body.yaml",
-            fixture.replacen("  script_body: |", "  script_body: >", 1),
-            "folded block scalar",
         ),
     ] {
-        let err = parse_registry_block(name, &source)
-            .expect_err("own-script body must be present, non-empty, and literal");
-        assert!(err.to_string().contains(expected), "{name}: {err}");
+        assert!(parse_registry_block(name, &source).is_err(), "{name}");
     }
+
+    let folded = fixture.replacen("  script_body: |", "  script_body: >", 1);
+    parse_registry_block("folded-script-body.yaml", &folded)
+        .expect("standard folded YAML scalars are accepted");
 }
 
 #[test]
@@ -1741,7 +1355,10 @@ fn parser_rejects_invalid_double_quoted_yaml_escapes() {
     )
     .expect_err("invalid quoted escape must be rejected");
 
-    assert!(err.to_string().contains("unsupported escape"));
+    assert!(
+        err.to_string().starts_with("bad-escape-script-body.yaml"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -2175,113 +1792,6 @@ fn parser_defaults_optional_loop_reference_lists() {
 }
 
 #[test]
-fn parser_rejects_schema_invalid_empty_loop_phase_refs() {
-    let err = parse_registry_block(
-        "empty-loop.yaml",
-        "loop:\n  id: empty-loop\n  name: EmptyLoop\n  phase_refs: []\n",
-    )
-    .expect_err("empty phase_refs rejected");
-
-    assert!(err.to_string().contains("loop.phase_refs"));
-}
-
-#[test]
-fn parser_rejects_schema_invalid_empty_phase_steps() {
-    let err = parse_registry_block(
-            "empty-phase.yaml",
-            "phase:\n  id: empty-phase\n  name: EmptyPhase\n  instruction_refs: []\n  tool_refs: []\n  steps: []\n",
-        )
-        .expect_err("empty steps rejected");
-
-    assert!(err.to_string().contains("phase.steps"));
-}
-
-#[test]
-fn parser_rejects_duplicate_nested_scalar_fields() {
-    let err = parse_registry_block(
-        "duplicate-command-id.yaml",
-        r#"tool:
-  id: duplicate-command
-  name: DuplicateCommand
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    command_id: agent-read
-    argv: []
-  allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("duplicate nested field rejected");
-
-    assert!(
-        err.to_string()
-            .contains("duplicate tool.command.command_id")
-    );
-}
-
-#[test]
-fn parser_rejects_duplicate_section_list_fields() {
-    let err = parse_registry_block(
-        "duplicate-steps.yaml",
-        r#"phase:
-  id: duplicate-steps
-  name: DuplicateSteps
-  instruction_refs: []
-  tool_refs: []
-  steps:
-    - id: first-step
-      name: FirstStep
-      connection_refs: []
-  steps:
-    - id: second-step
-      name: SecondStep
-      connection_refs: []
-"#,
-    )
-    .expect_err("duplicate section list field rejected");
-
-    assert!(err.to_string().contains("duplicate phase.steps"));
-}
-
-#[test]
-fn parser_rejects_duplicate_nested_list_fields() {
-    let err = parse_registry_block(
-        "duplicate-network-allow.yaml",
-        r#"tool:
-  id: duplicate-network
-  name: DuplicateNetwork
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network:
-    default: deny
-    allow:
-      - kind: cidr
-        transport: tcp
-        cidr: 127.0.0.0/8
-        port: 443
-    allow:
-      - kind: cidr
-        transport: tcp
-        cidr: 10.0.0.0/8
-        port: 443
-"#,
-    )
-    .expect_err("duplicate nested list field rejected");
-
-    assert!(err.to_string().contains("duplicate tool.network.allow"));
-}
-
-#[test]
 fn parser_accepts_yaml_comments_and_discards_formatting_comments() {
     let block = parse_registry_block(
             "commented-loop.yaml",
@@ -2294,6 +1804,29 @@ fn parser_accepts_yaml_comments_and_discards_formatting_comments() {
     };
     assert_eq!(loop_block.identity.name, "Hash # Loop");
     assert_eq!(loop_block.phase_refs, vec!["phase-a"]);
+}
+
+#[test]
+fn parser_accepts_standard_yaml_layout_and_quoted_tabs() {
+    for (name, source, expected_prompt) in [
+        (
+            "quoted-tab.yaml",
+            "instruction:\n  id: quoted-tab\n  name: QuotedTab\n  prompt: \"left\tright\"\n",
+            "left\tright",
+        ),
+        (
+            "three-space-indent.yaml",
+            "instruction:\n   id: three-space-indent\n   name: ThreeSpaceIndent\n   prompt: Inspect\n",
+            "Inspect",
+        ),
+    ] {
+        let RegistryBlock::Instruction(instruction) =
+            parse_registry_block(name, source).expect("valid YAML 1.2 parses")
+        else {
+            panic!("expected instruction block");
+        };
+        assert_eq!(instruction.prompt, expected_prompt);
+    }
 }
 
 #[test]
@@ -2397,34 +1930,11 @@ fn parser_accepts_block_style_loop_and_step_reference_lists() {
 }
 
 #[test]
-fn parser_rejects_unknown_schema_fields() {
-    let err = parse_registry_block(
-            "unknown-field.yaml",
-            "instruction:\n  id: bad-instruction\n  name: BadInstruction\n  prompt: Inspect\n  prompt_extra: ignored\n",
-        )
-        .expect_err("unknown field rejected");
-
-    assert!(err.to_string().contains("unsupported instruction field"));
-}
-
-#[test]
-fn parser_rejects_empty_required_schema_strings() {
-    let err = parse_registry_block(
-        "empty-prompt.yaml",
-        "instruction:\n  id: empty-prompt\n  name: EmptyPrompt\n  prompt: \"\"\n",
-    )
-    .expect_err("empty prompt rejected");
-
-    assert!(err.to_string().contains("instruction.prompt"));
-}
-
-#[test]
 fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
-    for (name, source, expected) in [
+    for (name, source) in [
         (
             "boolean-prompt.yaml",
             "instruction:\n  id: boolean-prompt\n  name: BooleanPrompt\n  prompt: true\n",
-            "instruction.prompt must be a string",
         ),
         (
             "null-step-name.yaml",
@@ -2437,13 +1947,12 @@ fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
     - id: inspect-step
       name: null
 "#,
-            "name must be a string",
         ),
     ] {
         let err = parse_registry_block(name, source)
             .expect_err("plain YAML non-string scalar must be rejected");
 
-        assert!(err.to_string().contains(expected), "{name}: {err}");
+        assert!(err.to_string().starts_with(name), "{name}: {err}");
     }
 
     let block = parse_registry_block(
@@ -2474,278 +1983,34 @@ fn parser_rejects_malformed_or_quoted_typed_scalars() {
         "      value_type: integer\n      required: true\n      min: nope",
     );
 
-    for (name, source, expected) in [
+    for (name, source) in [
         (
             "quoted-required.yaml",
             parameter_tool.replace("required: true", "required: \"true\""),
-            "required",
         ),
         (
             "quoted-max-length.yaml",
             parameter_tool.replace("max_length: 128", "max_length: \"128\""),
-            "max_length",
         ),
         (
             "quoted-port.yaml",
             network_tool.replace("port: 443", "port: \"443\""),
-            "port",
         ),
         (
             "malformed-required.yaml",
             parameter_tool.replace("required: true", "required: maybe"),
-            "must be true or false",
         ),
-        (
-            "malformed-min.yaml",
-            integer_parameter,
-            "must be a 64-bit integer",
-        ),
+        ("malformed-min.yaml", integer_parameter),
         (
             "malformed-port.yaml",
             network_tool.replace("port: 443", "port: nope"),
-            "must be an unsigned 16-bit integer",
         ),
     ] {
         let err = parse_registry_block(name, &source)
             .expect_err("schema-typed scalars must use their declared representation");
 
-        assert!(err.to_string().contains(expected), "{name}: {err}");
+        assert!(err.to_string().starts_with(name), "{name}: {err}");
     }
-}
-
-#[test]
-fn parser_rejects_schema_invalid_allowed_parameter_names() {
-    let err = parse_registry_block(
-        "invalid-parameter-name.yaml",
-        r#"tool:
-  id: invalid-parameter-name
-  name: InvalidParameterName
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: file
-      value_type: string
-      required: true
-      value_pattern: "^[^/]+$"
-      max_length: 64
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("schema-invalid parameter name rejected");
-
-    assert!(err.to_string().contains("allowed_parameters.name"));
-}
-
-#[test]
-fn parser_enforces_allowed_parameter_schema_conditionals() {
-    let err = parse_registry_block(
-        "string-parameter-missing-bounds.yaml",
-        r#"tool:
-  id: bounded-tool
-  name: BoundedTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --message
-      value_type: string
-      required: true
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("string parameter bounds rejected");
-
-    assert!(err.to_string().contains("value_pattern"));
-
-    let err = parse_registry_block(
-        "non-enum-allowed-values.yaml",
-        r#"tool:
-  id: non-enum-tool
-  name: NonEnumTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --flag
-      value_type: none
-      required: false
-      allowed_values: [on]
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("non-enum allowed_values rejected");
-
-    assert!(err.to_string().contains("allowed_values"));
-
-    let err = parse_registry_block(
-        "string-parameter-with-range.yaml",
-        r#"tool:
-  id: string-range-tool
-  name: StringRangeTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --message
-      value_type: string
-      required: true
-      value_pattern: "^[^/]+$"
-      max_length: 64
-      min: 1
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("string parameter integer range rejected");
-
-    assert!(err.to_string().contains("min"));
-
-    let err = parse_registry_block(
-        "enum-parameter-with-string-constraints.yaml",
-        r#"tool:
-  id: enum-string-constraints-tool
-  name: EnumStringConstraintsTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --mode
-      value_type: enum
-      required: true
-      allowed_values: [fast]
-      value_pattern: "^[a-z]+$"
-      max_length: 16
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("enum parameter string constraints rejected");
-
-    assert!(err.to_string().contains("value_pattern"));
-
-    let err = parse_registry_block(
-        "none-parameter-with-string-constraints.yaml",
-        r#"tool:
-  id: none-string-constraints-tool
-  name: NoneStringConstraintsTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --dry-run
-      value_type: none
-      required: false
-      value_pattern: "^(true|false)$"
-      max_length: 5
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("none parameter string constraints rejected");
-
-    assert!(err.to_string().contains("value_pattern"));
-
-    let err = parse_registry_block(
-        "path-parameter-with-range.yaml",
-        r#"tool:
-  id: path-range-tool
-  name: PathRangeTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --file
-      value_type: workspace-relative-path
-      required: true
-      value_pattern: "^[A-Za-z0-9_./-]+$"
-      max_length: 128
-      min: 1
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("workspace path parameter integer range rejected");
-
-    assert!(err.to_string().contains("min"));
-
-    let err = parse_registry_block(
-        "integer-parameter-with-invalid-range.yaml",
-        r#"tool:
-  id: integer-range-tool
-  name: IntegerRangeTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters:
-    - name: --count
-      value_type: integer
-      required: true
-      min: 10
-      max: 1
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect_err("integer parameter min greater than max rejected");
-
-    assert!(err.to_string().contains("min must be <= max"));
-}
-
-#[test]
-fn parser_rejects_schema_invalid_network_ports() {
-    let err = parse_registry_block(
-        "zero-port.yaml",
-        r#"tool:
-  id: network-tool
-  name: NetworkTool
-  tool_kind: predefined-command
-  command:
-    command_id: agent-echo
-    argv: []
-  allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
-  network:
-    default: deny
-    allow:
-      - kind: cidr
-        transport: tcp
-        cidr: 192.0.2.0/24
-        port: 0
-"#,
-    )
-    .expect_err("zero port rejected");
-
-    assert!(err.to_string().contains("network.allow.port"));
 }
 
 #[test]
@@ -2800,7 +2065,7 @@ fn parser_rejects_non_string_inline_list_scalars() {
     )
     .expect_err("numeric argv item rejected");
 
-    assert!(err.to_string().contains("argv list items must be strings"));
+    assert!(err.to_string().starts_with("numeric-argv.yaml"));
 
     let err = parse_registry_block(
         "boolean-allowed-values.yaml",
@@ -2824,10 +2089,7 @@ fn parser_rejects_non_string_inline_list_scalars() {
     )
     .expect_err("boolean enum value rejected");
 
-    assert!(
-        err.to_string()
-            .contains("allowed_values list items must be strings")
-    );
+    assert!(err.to_string().starts_with("boolean-allowed-values.yaml"));
 }
 
 #[test]

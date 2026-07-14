@@ -15,25 +15,11 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1">
-    <h2>M1 - Loop Agent</h2>
-    <div class="grid">
-      <article id="d-061" class="decision">
-        <h3>D-061 - YAML Parser Dependency</h3>
-        <p><strong>Status:</strong> Open, M1 blocker.</p>
-        <p><strong>Question:</strong> M1 promises standard YAML 1.2 registry files, but the handwritten parser rejects some valid YAML and requires substantial custom code. Should M1 use a maintained YAML parser library or change the promise to a smaller YAML-like format?</p>
-        <ul><li><strong>A:</strong> Authorize a vetted, maintained YAML 1.2 library. Pro: keeps the existing compatibility promise and removes custom parser code. Con: adds third-party code that must pass license, Rust-version and security checks.</li><li><strong>B:</strong> Keep the handwritten parser and formally limit the supported format. Pro: adds no dependency. Con: breaks the accepted YAML 1.2 promise and retains custom parser/security maintenance.</li></ul>
-        <p><strong>Recommendation:</strong> A; select and pin the smallest compatible library only after its license, maintenance, duplicate-key handling and resource limits pass the project checks.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>

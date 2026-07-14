@@ -55,10 +55,18 @@ pub struct ToolBlock {
     /// Command declaration for this tool.
     pub command: ToolCommand,
     /// Script runtime for `own-script` tools.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub script_runtime: Option<ScriptRuntime>,
     /// Inline script source for `own-script` tools.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub script_body: Option<String>,
     /// Parameters accepted by the tool.
     pub allowed_parameters: Vec<AllowedParameter>,
@@ -118,17 +126,41 @@ pub struct AllowedParameter {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_values: Vec<String>,
     /// Optional string value pattern.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub value_pattern: Option<String>,
     /// Optional maximum string length.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_length: Option<u16>,
     /// Optional minimum integer value.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub min: Option<i64>,
     /// Optional maximum integer value.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max: Option<i64>,
+}
+
+fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 /// Parameter value type.

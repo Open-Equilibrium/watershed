@@ -8,24 +8,8 @@ pub fn parse_registry_block(
     source_name: &str,
     source: &str,
 ) -> Result<RegistryBlock, RegistryError> {
-    let source = strip_yaml_comments(source);
-    let source = source.as_str();
-    reject_unsupported_yaml(source_name, source)?;
-    let section = top_section(source_name, source)?;
-    reject_unknown_yaml_fields(source_name, source, section)?;
-    let block = match section {
-        "tool" => RegistryBlock::Tool(parse_tool_block(source_name, source)?),
-        "instruction" => RegistryBlock::Instruction(parse_instruction_block(source_name, source)?),
-        "phase" => RegistryBlock::Phase(parse_phase_block(source_name, source)?),
-        "connection" => RegistryBlock::Connection(parse_connection_block(source_name, source)?),
-        "loop" => RegistryBlock::Loop(parse_loop_block(source_name, source)?),
-        other => {
-            return Err(parse_error(
-                source_name,
-                format!("unsupported registry block kind {other:?}"),
-            ));
-        }
-    };
+    let block = deserialize_registry_block(source_name, source)?;
+    validate_registry_block_shape(&block).map_err(|message| parse_error(source_name, message))?;
     validate_registry_block_semantics(&block)
         .map_err(|error| registry_source_error(source_name, error.into()))?;
     Ok(block)

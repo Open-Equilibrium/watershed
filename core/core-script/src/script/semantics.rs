@@ -11,6 +11,49 @@ pub fn validate_registry_block_semantics(
     }
 }
 
+fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
+    let (kind, identity) = match block {
+        RegistryBlock::Tool(block) => ("tool", &block.identity),
+        RegistryBlock::Instruction(block) => ("instruction", &block.identity),
+        RegistryBlock::Phase(block) => ("phase", &block.identity),
+        RegistryBlock::Connection(block) => ("connection", &block.identity),
+        RegistryBlock::Loop(block) => ("loop", &block.identity),
+    };
+    if !is_valid_block_id(&identity.id) {
+        return Err(format!("{kind}.id must be a valid block id"));
+    }
+    if identity.name.is_empty() {
+        return Err(format!("{kind}.name must be non-empty"));
+    }
+
+    match block {
+        RegistryBlock::Instruction(block) if block.prompt.is_empty() => {
+            Err("instruction.prompt must be non-empty".to_owned())
+        }
+        RegistryBlock::Phase(block) if block.steps.is_empty() => {
+            Err("phase.steps must contain at least one item".to_owned())
+        }
+        RegistryBlock::Phase(block) => {
+            for step in &block.steps {
+                if !is_valid_block_id(&step.id) {
+                    return Err("phase.steps.id must be a valid block id".to_owned());
+                }
+                if step.name.is_empty() {
+                    return Err("phase.steps.name must be non-empty".to_owned());
+                }
+            }
+            Ok(())
+        }
+        RegistryBlock::Connection(block) if block.from_ref.is_empty() => {
+            Err("connection.from_ref must be non-empty".to_owned())
+        }
+        RegistryBlock::Connection(block) if block.to_ref.is_empty() => {
+            Err("connection.to_ref must be non-empty".to_owned())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn validate_loop_semantics(loop_block: &LoopBlock) -> Result<(), SemanticValidationError> {
     if loop_block.phase_refs.is_empty() {
         return Err(SemanticValidationError::LoopSchemaViolation {
@@ -55,7 +98,13 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
                 });
             }
         }
-        (ToolKind::PredefinedCommand, ToolCommand::Predefined { .. }) => {
+        (
+            ToolKind::PredefinedCommand,
+            ToolCommand::Predefined { command_id, .. },
+        ) => {
+            if !is_valid_command_id(command_id) {
+                return Err(tool_schema_error(tool, "command_id must be a valid command id"));
+            }
             if tool.script_runtime.is_some() || tool.script_body.is_some() {
                 return Err(SemanticValidationError::ToolSchemaViolation {
                     tool_id: tool.identity.id.clone(),
@@ -73,6 +122,36 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
     }
 
     for parameter in &tool.allowed_parameters {
+        if !is_valid_allowed_parameter_name(&parameter.name) {
+            return Err(tool_schema_error(
+                tool,
+                "allowed_parameters.name must start with -- and contain only letters, digits, _ or -",
+            ));
+        }
+        let has_values = !parameter.allowed_values.is_empty();
+        let has_string_bounds = parameter.value_pattern.is_some() || parameter.max_length.is_some();
+        let has_integer_bounds = parameter.min.is_some() || parameter.max.is_some();
+        let valid_shape = match parameter.value_type {
+            ParameterValueType::String => {
+                !has_values
+                    && parameter.value_pattern.is_some()
+                    && parameter.max_length.is_some()
+                    && !has_integer_bounds
+            }
+            ParameterValueType::Enum => has_values && !has_string_bounds && !has_integer_bounds,
+            ParameterValueType::Integer => !has_values && !has_string_bounds,
+            ParameterValueType::None => !has_values && !has_string_bounds && !has_integer_bounds,
+            ParameterValueType::WorkspaceRelativePath => !has_values && !has_integer_bounds,
+        };
+        if !valid_shape {
+            return Err(tool_schema_error(
+                tool,
+                &format!(
+                    "allowed parameter {} has fields incompatible with {:?}; string requires value_pattern and max_length, enum requires allowed_values",
+                    parameter.name, parameter.value_type
+                ),
+            ));
+        }
         if matches!(parameter.value_type, ParameterValueType::Integer)
             && matches!((parameter.min, parameter.max), (Some(min), Some(max)) if min > max)
         {
@@ -85,6 +164,9 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
 
     if let NetworkPolicy::Declared { allow, .. } = &tool.network {
         for entry in allow {
+            if entry.port == 0 {
+                return Err(tool_schema_error(tool, "network allow port must be at least 1"));
+            }
             if !is_valid_canonical_cidr(&entry.cidr) {
                 return Err(SemanticValidationError::InvalidCanonicalCidr {
                     cidr: entry.cidr.clone(),
@@ -95,4 +177,11 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
     }
 
     Ok(())
+}
+
+fn tool_schema_error(tool: &ToolBlock, message: &str) -> SemanticValidationError {
+    SemanticValidationError::ToolSchemaViolation {
+        tool_id: tool.identity.id.clone(),
+        message: message.to_owned(),
+    }
 }
