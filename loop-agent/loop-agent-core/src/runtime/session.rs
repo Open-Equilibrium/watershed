@@ -154,9 +154,8 @@ where
     if let Some(err) = runtime.terminal_error {
         return Err(err);
     }
-    let status = if let Some(reason) = terminal_failure_reason(&runtime.events) {
-        let reason = escape_human_failure_reason(reason);
-        format!("loop {} failed: {reason}\n", loop_block.identity.id)
+    let status = if let Some(failure) = human_failure_status(&runtime.events) {
+        format!("loop {} {failure}\n", loop_block.identity.id)
     } else {
         format!("loop {} completed\n", loop_block.identity.id)
     };

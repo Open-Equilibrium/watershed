@@ -705,7 +705,10 @@ fn failed_human_commands_report_the_terminal_reason() {
     assert_eq!(output.status.code(), Some(65));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
-    assert_eq!(stdout, "loop sandbox-negative-write failed: write_denied\n");
+    assert_eq!(
+        stdout,
+        "loop sandbox-negative-write failed (write_denied): write outside declared roots denied\n"
+    );
     assert!(!stdout.contains("completed"));
     assert!(
         !workspace.join("out/forbidden.txt").exists(),
@@ -715,11 +718,11 @@ fn failed_human_commands_report_the_terminal_reason() {
     for (command, expected) in [
         (
             "replay",
-            "session negwrite001 replayed: failed (write_denied)\n",
+            "session negwrite001 replayed: failed (write_denied): write outside declared roots denied\n",
         ),
         (
             "tail",
-            "session negwrite001 tailed: failed (write_denied)\n",
+            "session negwrite001 tailed: failed (write_denied): write outside declared roots denied\n",
         ),
     ] {
         let output = loop_command()

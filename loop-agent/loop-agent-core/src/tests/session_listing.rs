@@ -123,7 +123,7 @@ fn human_run_replay_tail_and_session_listing_report_status() {
     assert!(failed.failed);
     assert_eq!(
         failed.stdout,
-        "loop sandbox-negative-write failed: write_denied\n"
+        "loop sandbox-negative-write failed (write_denied): write outside declared roots denied\n"
     );
 }
 

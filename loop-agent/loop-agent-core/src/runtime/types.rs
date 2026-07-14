@@ -98,17 +98,36 @@ fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
         .as_str()
 }
 
-fn escape_human_failure_reason(reason: &str) -> String {
-    reason.chars().flat_map(char::escape_debug).collect()
+fn escape_human_failure_text(text: &str) -> String {
+    text.chars().flat_map(char::escape_debug).collect()
+}
+
+fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
+    let reason = terminal_failure_reason(events)?;
+    let message = events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.event_type == EventType::Error
+                && event.payload.get("code").and_then(serde_json::Value::as_str) == Some(reason)
+        })
+        .and_then(|event| {
+            event
+                .payload
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+        });
+    let reason = escape_human_failure_text(reason);
+    Some(message.map_or_else(
+        || format!("failed ({reason})"),
+        |message| format!("failed ({reason}): {}", escape_human_failure_text(message)),
+    ))
 }
 
 fn human_session_status(session_id: &str, action: &str, events: &[EventEnvelope]) -> String {
-    terminal_failure_reason(events).map_or_else(
+    human_failure_status(events).map_or_else(
         || format!("session {session_id} {action}\n"),
-        |reason| {
-            let reason = escape_human_failure_reason(reason);
-            format!("session {session_id} {action}: failed ({reason})\n")
-        },
+        |failure| format!("session {session_id} {action}: {failure}\n"),
     )
 }
 

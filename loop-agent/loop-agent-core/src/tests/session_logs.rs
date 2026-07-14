@@ -1847,7 +1847,7 @@ fn resume_human_mode_reports_the_terminal_failure_reason() {
     assert!(output.failed);
     assert_eq!(
         output.stdout,
-        "session negwrite001 resumed: failed (write_denied)\n"
+        "session negwrite001 resumed: failed (write_denied): write outside declared roots denied\n"
     );
     assert!(fs::read_to_string(&path)
         .expect("resumed log readable")
