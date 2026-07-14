@@ -82,7 +82,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
   PowerBar, Liquid AI
   internal action history
   workspace CLI/API</code></pre>
-          <p class="muted">Notes/documents, custom dashboards, tables and charts, local script components, data analysis, personal productivity, workspace/app building, LLM-assisted dashboard/component creation, and external agents reading/editing workspace data through the Liquid CLI/API.</p>
+          <p class="muted">Recommended standalone scope pending <a href="../decisions/open-decisions.html#d-026">D-026</a>: notes/documents, custom dashboards, tables and charts, local script components, data analysis, personal productivity, workspace/app building, LLM-assisted dashboard/component creation, and external agents reading/editing workspace data through the Liquid CLI/API.</p>
         </div>
         <div class="card"><h3>Mode B — Liquid + Loop Agent direct</h3>
           <pre><code>Liquid
@@ -150,8 +150,8 @@ integrations
       <ul>
         <li><strong>Core:</strong> Rust for the workspace/component/history models, permissions, mutation pipeline and protocol clients.</li>
         <li><strong>UI:</strong> Dart-based native cross-platform target; exact framework is open in <a href="../decisions/open-decisions.html#d-009">D-009</a>.</li>
-        <li><strong>Storage/history:</strong> local-first store + append-only action log + snapshots/checkpoints (<a href="../decisions/open-decisions.html#d-029">D-029</a>, <a href="../decisions/open-decisions.html#d-028">D-028</a>).</li>
-        <li><strong>Components:</strong> built-in components plus SDK/extensions; sandboxed script components (<a href="../decisions/open-decisions.html#d-034">D-034</a>).</li>
+        <li><strong>Storage/history:</strong> recommended local-first store + append-only action log + snapshots/checkpoints (<a href="../decisions/open-decisions.html#d-029">D-029</a>, <a href="../decisions/open-decisions.html#d-028">D-028</a>).</li>
+        <li><strong>Components:</strong> built-in components plus SDK/extensions; script-component isolation remains open in <a href="../decisions/open-decisions.html#d-034">D-034</a>.</li>
         <li><strong>Integration:</strong> Loop Agent and Meta-Harness through <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</li>
       </ul>
     </div></section>
@@ -174,7 +174,7 @@ integrations
       <p><strong>Scope (in):</strong> Liquid workspace data — workspace metadata, dashboards, views, components, component state, documents/notes, tables/databases, script components, data-source definitions, connections, automations defined in Liquid, user-defined PowerBar commands, and permissions/settings where applicable.</p>
       <p><strong>Scope (out):</strong> managing arbitrary external code repositories; replacing Git in software projects; Loop Agent project-history behavior; Meta-Harness/provider session logs except where represented as Liquid components/views.</p>
       <p class="warn">Liquid's internal action history is a workspace VCS, <strong>not</strong> a project-code VCS.</p>
-      <h3>Conceptual model (<a href="../decisions/open-decisions.html#d-028">D-028</a>)</h3>
+      <h3>Provisional conceptual model (<a href="../decisions/open-decisions.html#d-028">D-028</a>)</h3>
       <pre><code>Action
   id
   timestamp
@@ -193,7 +193,7 @@ diff actions/states      undo recent action       revert selected action
 revert action range      create checkpoint/snapshot   restore checkpoint
 attribute action to actor/origin       mark external-agent changes
 review proposed changes before apply</code></pre>
-      <p>Recommended MVP model: append-only action log + snapshots/checkpoints (<a href="../decisions/open-decisions.html#d-028">D-028</a>); revert uses compensating actions, falling back to user prompt or checkpoint restore on conflict (<a href="../decisions/open-decisions.html#d-031">D-031</a>).</p>
+      <p>Recommended MVP models: append-only action log + snapshots/checkpoints (<a href="../decisions/open-decisions.html#d-028">D-028</a>); compensating revert actions, falling back to user prompt or checkpoint restore on conflict (<a href="../decisions/open-decisions.html#d-031">D-031</a>).</p>
     </div></section>
 
     <section id="cliapi" class="section"><h2>7. Workspace CLI/API for external agents</h2><div class="body">
@@ -276,7 +276,7 @@ Liquid AI (via the mutation pipeline):
     </div></section>
 
     <section id="m3" class="section"><h2>13. M3 implementation packet</h2><div class="body">
-      <p>M3 delivers Liquid as a <strong>self-contained product</strong> (see <a href="../../PLAN.md">PLAN.md</a> M3). It should define or implement:</p>
+      <p>M3 delivers Liquid as a <strong>self-contained product</strong> (see <a href="../../PLAN.md">PLAN.md</a> M3). The following is the recommended working scope pending the cited open decisions:</p>
       <ul>
         <li>native Rust + Dart app shell (after <a href="../decisions/open-decisions.html#d-009">D-009</a> closes);</li>
         <li>local workspace store;</li>
@@ -289,11 +289,11 @@ Liquid AI (via the mutation pipeline):
         <li>local API/service for external agents/tools;</li>
         <li>action-history UI and CLI commands;</li>
         <li>Liquid AI assistant skeleton;</li>
-        <li>local script component sandbox;</li>
+        <li>script component runtime (local sandbox recommended; <a href="../decisions/open-decisions.html#d-034">D-034</a>);</li>
         <li>optional Meta-Harness client component;</li>
         <li>optional Loop Agent transcript/session component.</li>
       </ul>
-      <p><strong>M3 pass/fail</strong> includes: a user can create a useful dashboard without agents; add/edit/connect components; run a script component over local data; use PowerBar for workspace actions; Liquid AI can propose or modify a dashboard/component through the same mutation pipeline; an external agent can read permitted workspace info through the CLI/API; an external agent can propose/apply a permitted workspace mutation; every mutation is recorded in the action history; a faulty external-agent mutation can be reverted; and, optionally, a user can add a Meta-Harness session/AgentPulse widget.</p>
+      <p><strong>Provisional M3 pass/fail (pending D-026, D-028, D-031 and D-034)</strong> includes: a user can create a useful dashboard without agents; add/edit/connect components; run a script component over local data; use PowerBar for workspace actions; Liquid AI can propose or modify a dashboard/component through the same mutation pipeline; an external agent can read permitted workspace info through the CLI/API; an external agent can propose/apply a permitted workspace mutation; every mutation is recorded in the action history; a faulty external-agent mutation can be reverted; and, optionally, a user can add a Meta-Harness session/AgentPulse widget.</p>
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">

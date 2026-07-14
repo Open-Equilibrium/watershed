@@ -86,17 +86,17 @@ M2 delivers Meta-Harness as a **self-contained headless control plane** with CLI
 
 M3 delivers Liquid as a **self-contained native workspace/app-building product** that is useful with neither Loop Agent nor Meta-Harness installed; agent integrations are optional. Full product/runtime detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
 
-**Deliverables:**
+**Provisional deliverables:** The cited open M3 decisions must close before this working scope is frozen.
 
 - Native Rust + Dart app shell (after the UI framework decision D-009 closes).
 - Local workspace store (D-029).
-- Internal action-history / workspace-VCS model (D-028): append-only action log + snapshots/checkpoints; actor/origin attribution; diff; revert (D-031). This is a workspace VCS over Liquid's own data, **not** a project-code VCS.
+- Recommended internal action-history / workspace-VCS model pending D-028: append-only action log + snapshots/checkpoints; actor/origin attribution; diff; revert semantics remain open in D-031. This is a workspace VCS over Liquid's own data, **not** a project-code VCS.
 - Workspace → dashboards → views → components model and connection model (D-033).
 - PowerBar (incl. commands that start/steer sessions via Meta-Harness).
 - Built-in components: note/document, table, chart, script, file/link/source.
 - Liquid CLI for workspace read/edit and action-history commands; local API/service for external agents/tools (D-027). Every UI/CLI/API mutation goes through one permissioned pipeline and records an action; no hidden writes (D-032).
-- Local script component sandbox (D-034).
+- Script component runtime (D-034); a local sandbox is the current recommendation.
 - Liquid AI assistant skeleton, using the same mutation/action-history pipeline.
 - Optional Meta-Harness client component and optional Loop Agent transcript/session component. When integrated, Liquid **consumes** Meta-Harness (session dashboard, transcript component, AgentPulse dashboard, config editor, approvals inbox, schedule builder, automation views); it does **not** implement its own session backend, config resolver, scheduler, AgentPulse engine or adapter layer, and Loop Agent/Meta-Harness never mutate Liquid storage directly (boundaries: D-025, D-027).
 
-**DoD:** a user can, **without any agents installed**, create a useful dashboard, add/edit/connect components, run a script component over local data, and use PowerBar for workspace actions; Liquid AI can propose or modify a dashboard/component through the same mutation pipeline; an external agent can read permitted workspace info and propose/apply a permitted mutation through the CLI/API; every mutation is recorded in the action history; a faulty external-agent mutation can be reverted; the workspace can be restored to a previous checkpoint/snapshot. Optional: render Meta-Harness + AgentPulse views in a dashboard and start a loop from the PowerBar.
+**Provisional DoD (pending D-026, D-028, D-031 and D-034):** a user can, **without any agents installed**, create a useful dashboard, add/edit/connect components, run a script component over local data, and use PowerBar for workspace actions; Liquid AI can propose or modify a dashboard/component through the same mutation pipeline; an external agent can read permitted workspace info and propose/apply a permitted mutation through the CLI/API; every mutation is recorded in the action history; a faulty external-agent mutation can be reverted; the workspace can be restored to a previous checkpoint/snapshot. Optional: render Meta-Harness + AgentPulse views in a dashboard and start a loop from the PowerBar.

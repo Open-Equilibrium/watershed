@@ -7,7 +7,7 @@ pub fn replay_session(
     read_existing_session(workspace.as_ref(), session_id, emit)
 }
 
-/// Waits for a session log and captures its validated output.
+/// Follows an existing session log and captures its validated output.
 pub fn tail_session(
     workspace: impl AsRef<Path>,
     session_id: &str,
@@ -16,7 +16,7 @@ pub fn tail_session(
     tail_session_with_options(workspace, session_id, emit, TailOptions::follow())
 }
 
-/// Waits for a session log with explicit follow behavior and captures its validated output.
+/// Reads an existing session log with explicit follow behavior and captures its validated output.
 pub fn tail_session_with_options(
     workspace: impl AsRef<Path>,
     session_id: &str,

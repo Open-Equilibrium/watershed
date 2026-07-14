@@ -14,8 +14,8 @@ core/         core-script (building-block model/parser) and core-policy
 proto/        proto: event schema and serialization (the integration seam)
 loop-agent/   loop-agent-core (engine/runtime/session) and loop-agent-cli
               (human CLI, machine-readable run mode, tail/replay/resume)
-meta-harness/ control + analytics service
-liquid/       the UI surface that composes everything
+meta-harness/ self-contained headless many-agent control plane
+liquid/       standalone native workspace/app-building product
 docs/         governance, specs, decisions
 ```
 

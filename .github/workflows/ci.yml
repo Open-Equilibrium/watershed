@@ -98,5 +98,8 @@ jobs:
           PERFORMANCE.md
           GLOSSARY.md
           CONTRIBUTING.md
+          CODE_OF_CONDUCT.md
           CHANGELOG.md
+          meta-harness/README.md
+          liquid/README.md
           docs/**/*.html
