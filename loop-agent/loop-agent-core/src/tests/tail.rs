@@ -1,230 +1,149 @@
+struct LiveJsonlTail {
+    path: PathBuf,
+    bytes: Arc<Mutex<Vec<u8>>>,
+    worker: Option<thread::JoinHandle<Result<RunOutput, RuntimeError>>>,
+}
+
+impl LiveJsonlTail {
+    fn start(session_id: &'static str, initial: &str) -> Self {
+        let workspace = empty_workspace(session_id);
+        let session_dir = workspace.join(LOCAL_SESSION_DIR);
+        fs::create_dir_all(&session_dir).expect("session dir");
+        let path = session_dir.join(format!("{session_id}.jsonl"));
+        fs::write(&path, initial).expect("initial session log written");
+
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let (tx, rx) = mpsc::channel();
+        let mut writer = NotifyingWriter {
+            bytes: Arc::clone(&bytes),
+            first_write: Some(tx),
+        };
+        let worker = thread::spawn(move || {
+            tail_session_to_writer(&workspace, session_id, EmitMode::Jsonl, &mut writer)
+        });
+        rx.recv_timeout(Duration::from_secs(1))
+            .expect("tail processes the initial session log");
+
+        Self {
+            path,
+            bytes,
+            worker: Some(worker),
+        }
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8(self.bytes.lock().expect("tail bytes lock").clone())
+            .expect("tail stream is utf8")
+    }
+
+    fn is_finished(&self) -> bool {
+        self.worker
+            .as_ref()
+            .expect("tail worker has not joined")
+            .is_finished()
+    }
+
+    fn join(&mut self) -> Result<RunOutput, RuntimeError> {
+        self.worker
+            .take()
+            .expect("tail worker joins once")
+            .join()
+            .expect("tail thread joins")
+    }
+}
+
 #[test]
 fn tail_session_streams_current_prefix_then_appended_events() {
-    let workspace = empty_workspace("tail-follow");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tail001.jsonl");
-    let started = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "tail001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionCompleted,
-        "tail001",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    let started = session_event_line("tail001", "evt-001", EventType::SessionStarted, 1);
+    let completed = session_event_line("tail001", "evt-002", EventType::SessionCompleted, 2);
+    let mut tail = LiveJsonlTail::start("tail001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(&tail_workspace, "tail001", EmitMode::Jsonl, &mut writer)
-    });
+    assert_eq!(tail.text(), started);
+    append_session_log_line(&tail.path, &completed).expect("terminal event appended");
 
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before append");
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail prefix is utf8"),
-        started
-    );
-    append_session_log_line(&path, &completed).expect("terminal event appended");
-
-    let output = handle
-        .join()
-        .expect("tail thread joins")
-        .expect("tail succeeds");
+    let output = tail.join().expect("tail succeeds");
     assert_eq!(output.event_count, 2);
     assert!(!output.failed);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{completed}"));
 }
 
 #[test]
 fn tail_session_buffers_partial_appended_line_until_lf() {
-    let workspace = empty_workspace("tail-partial-line");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailpartial001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailpartial001",
         "evt-001",
         EventType::SessionStarted,
-        "tailpartial001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
+    );
+    let completed = session_event_line(
+        "tailpartial001",
         "evt-002",
         EventType::SessionCompleted,
-        "tailpartial001",
         2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    );
+    let mut tail = LiveJsonlTail::start("tailpartial001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailpartial001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before append");
     let split = completed.len() - 1;
-    append_session_log_line(&path, &completed[..split]).expect("partial event appended");
+    append_session_log_line(&tail.path, &completed[..split]).expect("partial event appended");
     thread::sleep(Duration::from_millis(100));
     assert!(
-        !handle.is_finished(),
+        !tail.is_finished(),
         "tail must wait for a complete appended line"
     );
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail prefix is utf8"),
-        started
-    );
+    assert_eq!(tail.text(), started);
 
-    append_session_log_line(&path, &completed[split..]).expect("event newline appended");
-    let output = handle
+    append_session_log_line(&tail.path, &completed[split..]).expect("event newline appended");
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail succeeds after complete line");
     assert_eq!(output.event_count, 2);
     assert!(!output.failed);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{completed}"));
 }
 
 #[test]
 fn tail_session_tolerates_rollback_within_an_incomplete_suffix() {
-    let workspace = empty_workspace("tail-partial-rollback");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailrollback001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailrollback001",
         "evt-001",
         EventType::SessionStarted,
-        "tailrollback001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
+    );
+    let completed = session_event_line(
+        "tailrollback001",
         "evt-002",
         EventType::SessionCompleted,
-        "tailrollback001",
         2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    );
+    let mut tail = LiveJsonlTail::start("tailrollback001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailrollback001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before append");
-    append_session_log_line(&path, &completed[..completed.len() / 2])
+    append_session_log_line(&tail.path, &completed[..completed.len() / 2])
         .expect("partial event appended");
     thread::sleep(Duration::from_millis(100));
     fs::OpenOptions::new()
         .write(true)
-        .open(&path)
+        .open(&tail.path)
         .expect("session opens for rollback")
         .set_len(started.len() as u64)
         .expect("incomplete suffix rolls back");
     thread::sleep(Duration::from_millis(100));
-    append_session_log_line(&path, &completed).expect("complete retry appended");
+    append_session_log_line(&tail.path, &completed).expect("complete retry appended");
 
-    let output = handle
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail tolerates rollback within its incomplete suffix");
     assert_eq!(output.event_count, 2);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{completed}"));
 }
 
 #[test]
 fn tail_session_emits_complete_line_before_following_partial_line() {
-    let workspace = empty_workspace("tail-complete-before-partial");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailcompletepartial001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailcompletepartial001",
         "evt-001",
         EventType::SessionStarted,
-        "tailcompletepartial001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
+    );
     let error = EventEnvelope::new(
         "evt-002",
         EventType::Error,
@@ -236,85 +155,48 @@ fn tail_session_emits_complete_line_before_following_partial_line() {
     )
     .canonical_jsonl()
     .expect("error event serializes");
-    let completed = EventEnvelope::new(
+    let completed = session_event_line(
+        "tailcompletepartial001",
         "evt-003",
         EventType::SessionCompleted,
-        "tailcompletepartial001",
         3,
-        "2026-01-01T00:00:02Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    );
+    let mut tail = LiveJsonlTail::start("tailcompletepartial001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailcompletepartial001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before append");
     let split = completed.len() - 1;
-    append_session_log_line(&path, &format!("{error}{}", &completed[..split]))
+    append_session_log_line(&tail.path, &format!("{error}{}", &completed[..split]))
         .expect("complete and partial events appended");
     let expected_prefix = format!("{started}{error}");
     let deadline = Instant::now() + Duration::from_secs(1);
-    while bytes.lock().expect("tail bytes lock").len() < expected_prefix.len()
-        && Instant::now() < deadline
-    {
+    while tail.text().len() < expected_prefix.len() && Instant::now() < deadline {
         thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail prefix is utf8"),
+        tail.text(),
         expected_prefix,
         "a complete line must not wait for the following partial line"
     );
-    assert!(!handle.is_finished(), "tail must wait for the partial event");
+    assert!(
+        !tail.is_finished(),
+        "tail must wait for the partial event"
+    );
 
-    append_session_log_line(&path, &completed[split..]).expect("event newline appended");
-    let output = handle
+    append_session_log_line(&tail.path, &completed[split..]).expect("event newline appended");
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail succeeds after partial line completes");
     assert_eq!(output.event_count, 3);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{error}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{error}{completed}"));
 }
 
 #[test]
 fn tail_session_buffers_split_utf8_code_point_until_line_is_complete() {
-    let workspace = empty_workspace("tail-split-utf8");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailsplitutf8001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailsplitutf8001",
         "evt-001",
         EventType::SessionStarted,
-        "tailsplitutf8001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
+    );
     let error = EventEnvelope::new(
         "evt-002",
         EventType::Error,
@@ -326,330 +208,150 @@ fn tail_session_buffers_split_utf8_code_point_until_line_is_complete() {
     )
     .canonical_jsonl()
     .expect("error event serializes");
-    let completed = EventEnvelope::new(
+    let completed = session_event_line(
+        "tailsplitutf8001",
         "evt-003",
         EventType::SessionCompleted,
-        "tailsplitutf8001",
         3,
-        "2026-01-01T00:00:02Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    );
+    let mut tail = LiveJsonlTail::start("tailsplitutf8001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailsplitutf8001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before append");
     let split = error
         .as_bytes()
         .windows(2)
         .position(|window| window == [0xc3, 0xa9])
         .expect("fixture contains a two-byte UTF-8 code point")
         + 1;
-    append_session_log_bytes(&path, &error.as_bytes()[..split])
+    append_session_log_bytes(&tail.path, &error.as_bytes()[..split])
         .expect("first UTF-8 byte appended");
     thread::sleep(Duration::from_millis(100));
     assert!(
-        !handle.is_finished(),
+        !tail.is_finished(),
         "tail must buffer an incomplete UTF-8 code point"
     );
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail prefix is utf8"),
-        started
-    );
+    assert_eq!(tail.text(), started);
 
     let mut remainder = error.as_bytes()[split..].to_vec();
     remainder.extend_from_slice(completed.as_bytes());
-    append_session_log_bytes(&path, &remainder).expect("remaining events appended");
-    let output = handle
+    append_session_log_bytes(&tail.path, &remainder).expect("remaining events appended");
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail succeeds after UTF-8 code point completes");
     assert_eq!(output.event_count, 3);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{error}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{error}{completed}"));
 }
 
 #[test]
 fn tail_session_tolerates_transient_append_replacement_gap() {
-    let workspace = empty_workspace("tail-transient-replacement");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailreplace001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailreplace001",
         "evt-001",
         EventType::SessionStarted,
-        "tailreplace001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
+    );
+    let completed = session_event_line(
+        "tailreplace001",
         "evt-002",
         EventType::SessionCompleted,
-        "tailreplace001",
         2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    );
+    let mut tail = LiveJsonlTail::start("tailreplace001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailreplace001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before append");
-    let temp_path = session_dir.join("tailreplace001.tmp");
-    let replacement_path = path.clone();
+    let temp_path = tail.path.with_extension("tmp");
+    let replacement_path = tail.path.clone();
     let replacement = format!("{started}{completed}");
     fs::write(&temp_path, replacement).expect("replacement temp written");
-    fs::remove_file(&path).expect("session log temporarily removed");
+    fs::remove_file(&tail.path).expect("session log temporarily removed");
     let replacer = thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
         fs::rename(&temp_path, &replacement_path).expect("session log restored with append");
     });
 
-    let output = handle
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail succeeds after transient replacement gap");
     replacer.join().expect("replacement thread joins");
     assert_eq!(output.event_count, 2);
     assert!(!output.failed);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{completed}"));
 }
 
 #[test]
 fn tail_session_buffers_initial_partial_line_until_lf() {
-    let workspace = empty_workspace("tail-initial-partial-line");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailinitialpartial001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailinitialpartial001",
         "evt-001",
         EventType::SessionStarted,
-        "tailinitialpartial001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
+    );
+    let completed = session_event_line(
+        "tailinitialpartial001",
         "evt-002",
         EventType::SessionCompleted,
-        "tailinitialpartial001",
         2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    let split = completed.len() - 1;
-    fs::write(&path, format!("{started}{}", &completed[..split]))
-        .expect("initial session log with partial event written");
-
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailinitialpartial001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before initial partial completes");
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail prefix is utf8"),
-        started
     );
-    append_session_log_line(&path, &completed[split..]).expect("event newline appended");
+    let split = completed.len() - 1;
+    let mut tail = LiveJsonlTail::start(
+        "tailinitialpartial001",
+        &format!("{started}{}", &completed[..split]),
+    );
 
-    let output = handle
+    assert_eq!(tail.text(), started);
+    append_session_log_line(&tail.path, &completed[split..]).expect("event newline appended");
+
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail succeeds after initial partial line completes");
     assert_eq!(output.event_count, 2);
     assert!(!output.failed);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{completed}"));
 }
 
 #[test]
 fn tail_session_buffers_initial_file_without_complete_line_until_lf() {
-    let workspace = empty_workspace("tail-initial-first-partial-line");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailinitialfirstpartial001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailinitialfirstpartial001",
         "evt-001",
         EventType::SessionStarted,
-        "tailinitialfirstpartial001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
+    );
+    let completed = session_event_line(
+        "tailinitialfirstpartial001",
         "evt-002",
         EventType::SessionCompleted,
-        "tailinitialfirstpartial001",
         2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
+    );
     let split = started.len() - 1;
-    fs::write(&path, &started[..split]).expect("initial partial session log written");
+    let mut tail = LiveJsonlTail::start("tailinitialfirstpartial001", &started[..split]);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(
-            &tail_workspace,
-            "tailinitialfirstpartial001",
-            EmitMode::Jsonl,
-            &mut writer,
-        )
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail waits after empty initial prefix");
     assert!(
-        bytes.lock().expect("tail bytes lock").is_empty(),
+        tail.text().is_empty(),
         "tail must not emit an incomplete first line"
     );
-    append_session_log_line(&path, &format!("{}{}", &started[split..], completed))
+    append_session_log_line(
+        &tail.path,
+        &format!("{}{}", &started[split..], completed),
+    )
         .expect("first event newline and terminal event appended");
 
-    let output = handle
+    let output = tail
         .join()
-        .expect("tail thread joins")
         .expect("tail succeeds after first partial line completes");
     assert_eq!(output.event_count, 2);
     assert!(!output.failed);
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail stream is utf8"),
-        format!("{started}{completed}")
-    );
+    assert_eq!(tail.text(), format!("{started}{completed}"));
 }
 
 #[test]
 fn tail_session_rejects_non_append_only_log_changes() {
-    let workspace = empty_workspace("tail-mutated-log");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailmut001.jsonl");
-    let started = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "tailmut001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionCompleted,
-        "tailmut001",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    fs::write(&path, &started).expect("initial session log written");
+    let started = session_event_line("tailmut001", "evt-001", EventType::SessionStarted, 1);
+    let completed = session_event_line("tailmut001", "evt-002", EventType::SessionCompleted, 2);
+    let mut tail = LiveJsonlTail::start("tailmut001", &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(&tail_workspace, "tailmut001", EmitMode::Jsonl, &mut writer)
-    });
+    fs::write(&tail.path, completed).expect("session log mutated");
 
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before mutation");
-    fs::write(&path, completed).expect("session log mutated");
-
-    let err = handle
+    let err = tail
         .join()
-        .expect("tail thread joins")
         .expect_err("tail must reject non-append mutation");
     assert!(
         matches!(err, RuntimeError::Protocol(ref message) if message.contains("append-only")),
@@ -683,30 +385,9 @@ fn tail_suffix_reader_uses_observed_range_when_log_grows() {
 }
 
 #[test]
-fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
+fn tail_file_readers_enforce_size_utf8_and_retry_guards() {
     let workspace = empty_workspace("tail-reader-edges");
     let path = workspace.join("tailreader001.jsonl");
-    fs::write(&path, "abc").expect("session log written");
-
-    assert_eq!(session_log_len(&path).expect("log length is readable"), 3);
-    assert!(matches!(
-        read_tail_file_suffix(&path, 3, 2),
-        Err(RuntimeError::Protocol(message)) if message.contains("append-only")
-    ));
-    assert_eq!(
-        read_tail_file_suffix(&path, 0, 4)
-            .expect("tail-specific read classifies a rollback after length sampling"),
-        TailSuffixRead::RolledBack(3)
-    );
-    assert!(matches!(
-        read_file_range(&path, 4, 1),
-        Err(RuntimeError::Protocol(message)) if message.contains("append-only")
-    ));
-    assert!(matches!(
-        read_file_range(&path, 0, 2),
-        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max 2")
-    ));
-
     fs::write(&path, [0xff]).expect("invalid utf8 log written");
     assert!(matches!(
         read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES),
@@ -811,36 +492,14 @@ fn tail_session_rejects_empty_ids_in_appended_envelopes() {
 }
 
 fn tail_protocol_error_after_append(session_id: &'static str, appended: &str) -> RuntimeError {
-    let workspace = empty_workspace(session_id);
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join(format!("{session_id}.jsonl"));
     let started = session_event_line(session_id, "evt-001", EventType::SessionStarted, 1);
-    fs::write(&path, &started).expect("initial session log written");
+    let mut tail = LiveJsonlTail::start(session_id, &started);
 
-    let bytes = Arc::new(Mutex::new(Vec::new()));
-    let (tx, rx) = mpsc::channel();
-    let mut writer = NotifyingWriter {
-        bytes: Arc::clone(&bytes),
-        first_write: Some(tx),
-    };
-    let tail_workspace = workspace.clone();
-    let handle = thread::spawn(move || {
-        tail_session_to_writer(&tail_workspace, session_id, EmitMode::Jsonl, &mut writer)
-    });
-
-    rx.recv_timeout(Duration::from_secs(1))
-        .expect("tail writes current prefix before invalid append");
-    append_session_log_line(&path, appended).expect("invalid event appended");
-    let err = handle
+    append_session_log_line(&tail.path, appended).expect("invalid event appended");
+    let err = tail
         .join()
-        .expect("tail thread joins")
         .expect_err("tail must reject the invalid appended event");
-    assert_eq!(
-        String::from_utf8(bytes.lock().expect("tail bytes lock").clone())
-            .expect("tail prefix is utf8"),
-        started
-    );
+    assert_eq!(tail.text(), started);
     err
 }
 
@@ -850,28 +509,18 @@ fn tail_session_stops_when_writer_closes_after_appended_event() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("tailappenddrop001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "tailappenddrop001",
         "evt-001",
         EventType::SessionStarted,
-        "tailappenddrop001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
-    let completed = EventEnvelope::new(
+    );
+    let completed = session_event_line(
+        "tailappenddrop001",
         "evt-002",
         EventType::SessionCompleted,
-        "tailappenddrop001",
         2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
+    );
     fs::write(&path, &started).expect("initial session log written");
 
     let (tx, rx) = mpsc::channel();
@@ -906,17 +555,12 @@ fn tail_session_stops_when_writer_closes_before_terminal_event() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("taildrop001.jsonl");
-    let started = EventEnvelope::new(
+    let started = session_event_line(
+        "taildrop001",
         "evt-001",
         EventType::SessionStarted,
-        "taildrop001",
         1,
-        "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("started event serializes");
+    );
     fs::write(&path, &started).expect("initial session log written");
 
     let tail_workspace = workspace.clone();
@@ -931,17 +575,12 @@ fn tail_session_stops_when_writer_closes_before_terminal_event() {
     let output = match rx.recv_timeout(Duration::from_secs(1)) {
         Ok(result) => result.expect("broken pipe stops tail without error"),
         Err(err) => {
-            let completed = EventEnvelope::new(
+            let completed = session_event_line(
+                "taildrop001",
                 "evt-002",
                 EventType::SessionCompleted,
-                "taildrop001",
                 2,
-                "2026-01-01T00:00:01Z",
-                "loop-agent-cli",
-                serde_json::json!({}),
-            )
-            .canonical_jsonl()
-            .expect("completed event serializes");
+            );
             append_session_log_line(&path, &completed).expect("terminal event appended");
             panic!("tail did not stop after writer closed: {err}");
         }

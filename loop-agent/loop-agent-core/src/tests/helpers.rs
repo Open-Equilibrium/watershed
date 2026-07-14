@@ -536,7 +536,7 @@ fn session_event_line(
         event_type,
         session_id,
         sequence,
-        "2026-01-01T00:00:00Z",
+        event_timestamp(sequence),
         "loop-agent-cli",
         payload,
     )
