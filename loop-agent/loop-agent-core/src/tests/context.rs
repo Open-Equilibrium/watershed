@@ -23,6 +23,7 @@ fn tier_zero(turn_value: &str) -> [ContextSource; 9] {
 
 fn compile_summarize_turn_context(
     registry: &core_script::ResolvedRegistry,
+    loop_id: &str,
 ) -> CompiledContext {
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
     let phase = registry.phase_block("summarize").expect("phase exists");
@@ -37,7 +38,7 @@ fn compile_summarize_turn_context(
         phase,
         step,
         &LoopInvocation {
-            loop_id: "hello-loop#1".to_owned(),
+            loop_id: loop_id.to_owned(),
             parent_loop_id: None,
         },
         "contextdirection001",
@@ -69,40 +70,87 @@ fn prefix_before_message_completed(stream: &str) -> String {
 }
 
 #[test]
-fn context_compiler_is_deterministic_and_preserves_the_cache_prefix() {
-    let first = compile_context(
-        &test_profile(16 * 1024),
-        &tier_zero("first"),
-        None,
-        ContextOmissionCounts::default(),
-    )
-    .expect("first context compiles");
-    let second = compile_context(
-        &test_profile(16 * 1024),
-        &tier_zero("second"),
-        None,
-        ContextOmissionCounts::default(),
-    )
-    .expect("second context compiles");
+fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
+    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let first = compile_summarize_turn_context(&registry, "hello-loop#1");
+    let second = compile_summarize_turn_context(&registry, "hello-loop#2");
+    let source_lines = std::str::from_utf8(&first.provider_bytes)
+        .expect("provider context is UTF-8")
+        .lines()
+        .collect::<Vec<_>>();
+    let sources = source_lines
+        .iter()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("source parses"))
+        .collect::<Vec<_>>();
+    let source_ids = sources
+        .iter()
+        .map(|source| source["source_id"].as_str().expect("source id"))
+        .collect::<Vec<_>>();
+    let expected_ids = [
+        "base-runtime-security",
+        "active-loop-instructions",
+        "active-phase-instructions",
+        "active-step-instructions",
+        "active-available-tools",
+        "fsm-loop-state",
+        "typed-connection-inputs",
+        "current-user-input",
+        "unresolved-call-result",
+    ];
+    assert_eq!(source_ids, expected_ids);
+    let content_ids = |index: usize| {
+        sources[index]["content"]
+            .as_array()
+            .expect("source content array")
+            .iter()
+            .map(|item| item["id"].as_str().expect("content id"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sources[1]["content"], serde_json::json!([]));
+    assert_eq!(content_ids(2), ["write-output"]);
+    assert_eq!(sources[3]["content"], serde_json::json!([]));
+    assert_eq!(content_ids(4), ["write-summary"]);
+    assert_eq!(sources[7]["content"], serde_json::json!({"present": false}));
+    assert_eq!(sources[8]["content"], serde_json::json!([]));
+    let provider_text = source_lines.join("\n");
+    assert!(!provider_text.contains("inspect-input"));
+    assert!(!provider_text.contains("read-file"));
 
+    let expected_prefix: usize = source_lines[..CACHE_STABLE_TIER_ZERO_SOURCES]
+        .iter()
+        .map(|line| line.len() + 1)
+        .sum();
+    assert_eq!(first.cache_prefix_bytes, expected_prefix);
     assert_eq!(
         &first.provider_bytes[..first.cache_prefix_bytes],
         &second.provider_bytes[..second.cache_prefix_bytes]
     );
     assert_eq!(first.cache_prefix_bytes, second.cache_prefix_bytes);
     assert_ne!(first.context_hash, second.context_hash);
-    assert!(std::str::from_utf8(&first.provider_bytes)
-        .expect("provider context is UTF-8")
-        .starts_with("{\"content\":{\"policy\":\"deny\"},\"source_id\":\"base-runtime-security\"}\n"));
-    assert!(std::str::from_utf8(&first.provider_bytes)
-        .expect("provider context is UTF-8")
-        .contains("\"active-available-tools\""));
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(first.manifest.line.trim()).expect("manifest parses");
+    assert_eq!(manifest["cache_boundaries"][0]["after_source_id"], expected_ids[4]);
+    assert_eq!(
+        manifest["cache_boundaries"][0]["byte_offset"],
+        serde_json::json!(expected_prefix)
+    );
+    assert_eq!(manifest["context_hash"], sha256_hex(&first.provider_bytes));
+    let expected_sources = source_lines
+        .iter()
+        .zip(expected_ids)
+        .map(|(line, source_id)| serde_json::json!({
+            "projection_hash": sha256_hex(format!("{line}\n").as_bytes()),
+            "source_id": source_id,
+        }))
+        .collect::<Vec<_>>();
+    assert_eq!(manifest["ordered_sources"], serde_json::json!(expected_sources));
 }
 
 #[test]
 fn typed_connection_inputs_exclude_outbound_step_connections() {
     let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let with_outbound_reference = compile_summarize_turn_context(&registry);
+    let with_outbound_reference = compile_summarize_turn_context(&registry, "hello-loop#1");
     let mut inbound_reference_only = registry.clone();
     inbound_reference_only
         .phases
@@ -110,7 +158,8 @@ fn typed_connection_inputs_exclude_outbound_step_connections() {
         .expect("phase exists")
         .steps[0]
         .connection_refs = vec!["inspect-trigger".to_owned()];
-    let without_outbound_reference = compile_summarize_turn_context(&inbound_reference_only);
+    let without_outbound_reference =
+        compile_summarize_turn_context(&inbound_reference_only, "hello-loop#1");
 
     let inputs = context_source_content(&with_outbound_reference, "typed-connection-inputs");
     assert_eq!(inputs.as_array().map(Vec::len), Some(1));
@@ -152,7 +201,7 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
             "inspect-data".to_owned(),
             "SummaryRefresh".to_owned(),
         ];
-    let declared = compile_summarize_turn_context(&registry);
+    let declared = compile_summarize_turn_context(&registry, "hello-loop#1");
 
     let inputs = context_source_content(&declared, "typed-connection-inputs");
     assert_eq!(inputs.as_array().map(Vec::len), Some(2));
@@ -166,7 +215,7 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
         .steps[0]
         .connection_refs
         .swap(0, 1);
-    let reordered = compile_summarize_turn_context(&registry);
+    let reordered = compile_summarize_turn_context(&registry, "hello-loop#1");
     let reordered_inputs = context_source_content(&reordered, "typed-connection-inputs");
     assert_eq!(reordered_inputs[0]["connection"]["id"], "inspect-data");
     assert_eq!(reordered_inputs[1]["connection"]["id"], "inspect-trigger");
