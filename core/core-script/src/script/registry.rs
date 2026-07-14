@@ -74,12 +74,14 @@ impl ResolvedRegistry {
             loops: BTreeMap::new(),
             phases: BTreeMap::new(),
             tools: BTreeMap::new(),
+            name_ids: BTreeMap::new(),
         };
-        let mut names: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
+        let mut name_ids: BTreeMap<&'static str, BTreeMap<String, String>> = BTreeMap::new();
 
         for block in blocks {
-            registry.insert(block, &mut names)?;
+            registry.insert(block, &mut name_ids)?;
         }
+        registry.name_ids = name_ids;
 
         registry.validate_references()?;
         registry.with_canonical_references()
@@ -188,53 +190,58 @@ impl ResolvedRegistry {
 
     /// Resolves a loop by id or unambiguous name.
     pub fn loop_block(&self, reference: &str) -> Option<&LoopBlock> {
-        self.loops.get(reference).or_else(|| {
-            self.loops
-                .values()
-                .find(|block| normalized_eq(&block.identity.name, reference))
-        })
+        self.named_block("loop", reference, &self.loops, |block| &block.identity.name)
     }
 
     /// Resolves a phase by id or unambiguous name.
     pub fn phase_block(&self, reference: &str) -> Option<&PhaseBlock> {
-        self.phases.get(reference).or_else(|| {
-            self.phases
-                .values()
-                .find(|block| normalized_eq(&block.identity.name, reference))
-        })
+        self.named_block("phase", reference, &self.phases, |block| &block.identity.name)
     }
 
     /// Resolves a tool by id or unambiguous name.
     pub fn tool_block(&self, reference: &str) -> Option<&ToolBlock> {
-        self.tools.get(reference).or_else(|| {
-            self.tools
-                .values()
-                .find(|block| normalized_eq(&block.identity.name, reference))
-        })
+        self.named_block("tool", reference, &self.tools, |block| &block.identity.name)
     }
 
     /// Resolves an instruction by id or unambiguous name.
     pub fn instruction_block(&self, reference: &str) -> Option<&InstructionBlock> {
-        self.instructions.get(reference).or_else(|| {
-            self.instructions
-                .values()
-                .find(|block| normalized_eq(&block.identity.name, reference))
+        self.named_block("instruction", reference, &self.instructions, |block| {
+            &block.identity.name
         })
     }
 
     /// Resolves a connection by id or unambiguous name.
     pub fn connection_block(&self, reference: &str) -> Option<&ConnectionBlock> {
-        self.connections.get(reference).or_else(|| {
-            self.connections
-                .values()
-                .find(|block| normalized_eq(&block.identity.name, reference))
+        self.named_block("connection", reference, &self.connections, |block| {
+            &block.identity.name
+        })
+    }
+
+    fn named_block<'a, T>(
+        &'a self,
+        kind: &'static str,
+        reference: &str,
+        blocks: &'a BTreeMap<String, T>,
+        name: impl Fn(&T) -> &str,
+    ) -> Option<&'a T> {
+        blocks.get(reference).or_else(|| {
+            self.name_ids
+                .get(kind)
+                .and_then(|names| names.get(&normalize_string(reference)))
+                .and_then(|id| blocks.get(id))
+                .filter(|block| normalized_eq(name(block), reference))
+                .or_else(|| {
+                    blocks
+                        .values()
+                        .find(|block| normalized_eq(name(block), reference))
+                })
         })
     }
 
     fn insert(
         &mut self,
         block: RegistryBlock,
-        names: &mut BTreeMap<&'static str, BTreeSet<String>>,
+        name_ids: &mut BTreeMap<&'static str, BTreeMap<String, String>>,
     ) -> Result<(), RegistryError> {
         validate_registry_block_semantics(&block)?;
         match block {
@@ -242,35 +249,35 @@ impl ResolvedRegistry {
                 "tool",
                 block.identity.clone(),
                 &mut self.tools,
-                names,
+                name_ids,
                 block,
             ),
             RegistryBlock::Instruction(block) => insert_named_block(
                 "instruction",
                 block.identity.clone(),
                 &mut self.instructions,
-                names,
+                name_ids,
                 block,
             ),
             RegistryBlock::Phase(block) => insert_named_block(
                 "phase",
                 block.identity.clone(),
                 &mut self.phases,
-                names,
+                name_ids,
                 block,
             ),
             RegistryBlock::Connection(block) => insert_named_block(
                 "connection",
                 block.identity.clone(),
                 &mut self.connections,
-                names,
+                name_ids,
                 block,
             ),
             RegistryBlock::Loop(block) => insert_named_block(
                 "loop",
                 block.identity.clone(),
                 &mut self.loops,
-                names,
+                name_ids,
                 block,
             ),
         }

@@ -440,46 +440,42 @@ fn fixture_runtime_policy(
 }
 
 fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
-    let loops = (0..depth)
+    let mut blocks = (0..depth)
         .map(|index| {
             let id = format!("loop-{index:03}");
-            (
-                id.clone(),
-                core_script::LoopBlock {
-                    identity: core_script::BlockIdentity {
-                        id,
-                        name: format!("Loop {index:03}"),
-                    },
-                    phase_refs: vec!["phase".to_owned()],
-                    subloop_refs: (index + 1 < depth)
-                        .then(|| format!("loop-{:03}", index + 1))
-                        .into_iter()
-                        .collect(),
-                    connection_refs: Vec::new(),
-                },
-            )
-        })
-        .collect();
-    core_script::ResolvedRegistry {
-        connections: std::collections::BTreeMap::new(),
-        instructions: std::collections::BTreeMap::new(),
-        loops,
-        phases: [(
-            "phase".to_owned(),
-            core_script::PhaseBlock {
+            core_script::RegistryBlock::Loop(core_script::LoopBlock {
                 identity: core_script::BlockIdentity {
-                    id: "phase".to_owned(),
-                    name: "Phase".to_owned(),
+                    id,
+                    name: format!("Loop {index:03}"),
                 },
-                instruction_refs: Vec::new(),
-                steps: Vec::new(),
-                tool_refs: Vec::new(),
+                phase_refs: vec!["phase".to_owned()],
+                subloop_refs: Vec::new(),
+                connection_refs: Vec::new(),
+            })
+        })
+        .collect::<Vec<_>>();
+    blocks.push(core_script::RegistryBlock::Phase(
+        core_script::PhaseBlock {
+            identity: core_script::BlockIdentity {
+                id: "phase".to_owned(),
+                name: "Phase".to_owned(),
             },
-        )]
-        .into_iter()
-        .collect(),
-        tools: std::collections::BTreeMap::new(),
+            instruction_refs: Vec::new(),
+            steps: Vec::new(),
+            tool_refs: Vec::new(),
+        },
+    ));
+    let mut registry =
+        core_script::ResolvedRegistry::from_blocks(blocks).expect("loop-chain registry resolves");
+    for index in 1..depth {
+        registry
+            .loops
+            .get_mut(&format!("loop-{:03}", index - 1))
+            .expect("prior loop exists")
+            .subloop_refs
+            .push(format!("loop-{index:03}"));
     }
+    registry
 }
 
 fn empty_policy_artifact(loop_id: &str) -> core_policy::PolicyArtifact {

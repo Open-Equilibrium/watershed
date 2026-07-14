@@ -1175,33 +1175,31 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
 }
 
 fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
-    let loops = (0..depth)
+    let blocks = (0..depth)
         .map(|index| {
             let id = format!("loop-{index:03}");
-            (
-                id.clone(),
-                core_script::LoopBlock {
-                    identity: core_script::BlockIdentity {
-                        id,
-                        name: format!("Loop {index:03}"),
-                    },
-                    phase_refs: Vec::new(),
-                    subloop_refs: (index + 1 < depth)
-                        .then(|| format!("loop-{:03}", index + 1))
-                        .into_iter()
-                        .collect(),
-                    connection_refs: Vec::new(),
+            core_script::RegistryBlock::Loop(core_script::LoopBlock {
+                identity: core_script::BlockIdentity {
+                    id,
+                    name: format!("Loop {index:03}"),
                 },
-            )
+                phase_refs: Vec::new(),
+                subloop_refs: Vec::new(),
+                connection_refs: Vec::new(),
+            })
         })
-        .collect();
-    core_script::ResolvedRegistry {
-        connections: BTreeMap::new(),
-        instructions: BTreeMap::new(),
-        loops,
-        phases: BTreeMap::new(),
-        tools: BTreeMap::new(),
+        .collect::<Vec<_>>();
+    let mut registry =
+        core_script::ResolvedRegistry::from_blocks(blocks).expect("loop-chain registry resolves");
+    for index in 1..depth {
+        registry
+            .loops
+            .get_mut(&format!("loop-{:03}", index - 1))
+            .expect("prior loop exists")
+            .subloop_refs
+            .push(format!("loop-{index:03}"));
     }
+    registry
 }
 
 fn valid_command_policy(tool_id: &str) -> CommandPolicy {

@@ -2,10 +2,10 @@ fn insert_named_block<T>(
     kind: &'static str,
     identity: BlockIdentity,
     blocks: &mut BTreeMap<String, T>,
-    names: &mut BTreeMap<&'static str, BTreeSet<String>>,
+    name_ids: &mut BTreeMap<&'static str, BTreeMap<String, String>>,
     block: T,
 ) -> Result<(), RegistryError> {
-    let names_for_kind = names.entry(kind).or_default();
+    let names_for_kind = name_ids.entry(kind).or_default();
     if !is_valid_block_id(&identity.id) {
         return Err(RegistryError::InvalidBlockId(identity.id));
     }
@@ -21,7 +21,7 @@ fn insert_named_block<T>(
             id: identity.id,
         });
     }
-    if names_for_kind.contains(&identity.id) {
+    if names_for_kind.contains_key(&identity.id) {
         return Err(RegistryError::AmbiguousReference {
             kind,
             reference: identity.id,
@@ -33,12 +33,14 @@ fn insert_named_block<T>(
             reference: identity.name,
         });
     }
-    if !names_for_kind.insert(normalize_string(&identity.name)) {
+    let normalized_name = normalize_string(&identity.name);
+    if names_for_kind.contains_key(&normalized_name) {
         return Err(RegistryError::DuplicateName {
             kind,
             name: identity.name,
         });
     }
+    names_for_kind.insert(normalized_name, identity.id.clone());
     blocks.insert(identity.id, block);
     Ok(())
 }

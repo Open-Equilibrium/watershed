@@ -351,4 +351,6 @@ pub struct ResolvedRegistry {
     pub phases: BTreeMap<String, PhaseBlock>,
     /// Tool blocks keyed by id.
     pub tools: BTreeMap<String, ToolBlock>,
+    #[serde(skip)]
+    name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
 }
