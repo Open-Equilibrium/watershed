@@ -61,7 +61,9 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let mut reader = SessionEventReader::open(&workspace, "tailpartial001")
         .expect("reader opens");
 
-    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+    let prefix = reader.read_after(0).expect("prefix reads");
+    assert_eq!(prefix.len(), 1);
+    assert_eq!(reader.read_after(0).expect("prefix retries"), prefix);
     append_session_log_bytes(&path, &completed.as_bytes()[split..])
         .expect("remaining bytes append");
     let appended = reader.read_after(1).expect("completed line reads");

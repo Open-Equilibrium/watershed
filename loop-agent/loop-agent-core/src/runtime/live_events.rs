@@ -128,8 +128,9 @@ pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
 /// and leaves cursor advancement to the caller.
 pub struct SessionEventReader {
     observed: Vec<EventEnvelope>,
+    observed_bytes: Vec<u8>,
     path: PathBuf,
-    session_id: String,
+    validation: SessionAppendValidationState,
 }
 
 impl SessionEventReader {
@@ -143,8 +144,9 @@ impl SessionEventReader {
         ensure_existing_session_log_path(workspace, &path)?;
         Ok(Self {
             observed: Vec::new(),
+            observed_bytes: Vec::new(),
             path,
-            session_id: session_id.to_owned(),
+            validation: SessionAppendValidationState::empty(session_id),
         })
     }
 
@@ -156,37 +158,49 @@ impl SessionEventReader {
         let bytes = read_file_with_limit(&self.path, MAX_SESSION_LOG_BYTES)?;
         let complete_len = complete_jsonl_prefix_len(&bytes);
         let has_partial_line = complete_len != bytes.len();
-        let stream = String::from_utf8(bytes[..complete_len].to_vec()).map_err(|source| {
-            RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", self.path.display()))
-        })?;
-        let events = if stream.is_empty() {
-            Vec::new()
-        } else {
-            validate_session_log_text(&self.path, &self.session_id, &stream)?
-        };
-        if has_partial_line && (stream_is_failed(&events) || stream_is_completed(&events)) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} contains a partial line after a terminal event",
-                self.path.display()
-            )));
-        }
-        if !events.starts_with(&self.observed) {
+        if complete_len < self.observed_bytes.len()
+            || bytes[..self.observed_bytes.len()] != self.observed_bytes
+        {
             return Err(RuntimeError::Protocol(format!(
                 "{} changed outside append-only session semantics",
                 self.path.display()
             )));
         }
-        let latest_sequence = events.last().map_or(0, |event| event.sequence);
+        let appended_bytes = &bytes[self.observed_bytes.len()..complete_len];
+        let appended_text = std::str::from_utf8(appended_bytes).map_err(|source| {
+            RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", self.path.display()))
+        })?;
+        let (appended, next_validation) = if appended_text.is_empty() {
+            (Vec::new(), None)
+        } else {
+            let mut validation = self.validation.clone();
+            let appended = validation.validate_appended(&self.path, appended_text)?;
+            (appended, Some(validation))
+        };
+        let validation = next_validation.as_ref().unwrap_or(&self.validation);
+        if has_partial_line && validation.terminal_line.is_some() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} contains a partial line after a terminal event",
+                self.path.display()
+            )));
+        }
+        let latest_sequence = validation.previous_sequence;
         if cursor > latest_sequence {
             return Err(RuntimeError::Protocol(format!(
                 "{} no longer contains processed sequence {cursor}",
                 self.path.display()
             )));
         }
-        self.observed.clone_from(&events);
-        Ok(events
-            .into_iter()
+        if let Some(validation) = next_validation {
+            self.observed_bytes.extend_from_slice(appended_bytes);
+            self.observed.extend(appended);
+            self.validation = validation;
+        }
+        Ok(self
+            .observed
+            .iter()
             .filter(|event| event.sequence > cursor)
+            .cloned()
             .collect())
     }
 }
