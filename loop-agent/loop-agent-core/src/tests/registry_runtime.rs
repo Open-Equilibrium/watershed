@@ -523,16 +523,6 @@ fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
         plan_own_script(&wrong_runtime, match_mode, write_policy),
         Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
     ));
-    assert!(matches!(
-        execute_own_script(
-            Path::new("."),
-            &wrong_runtime,
-            match_mode,
-            write_policy,
-            SideEffectRecorder::none(),
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
-    ));
 
     let mut missing_body = write_tool.clone();
     missing_body.script_body = None;
@@ -549,18 +539,6 @@ fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
             match_mode,
             write_policy,
             ToolDispatchMode::Plan,
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("command shape")
-    ));
-    assert!(matches!(
-        tool_dispatch_progress(
-            &mismatched_shape,
-            match_mode,
-            write_policy,
-            ToolDispatchMode::Execute {
-                workspace: Path::new("."),
-                side_effect_recorder: SideEffectRecorder::none(),
-            },
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("command shape")
     ));

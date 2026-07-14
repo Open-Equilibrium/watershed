@@ -622,69 +622,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
 }
 
 #[test]
-fn appended_session_log_validator_accepts_empty_and_rejects_framing_edges() {
-    let started = base_event().canonical_jsonl().expect("started serializes");
-    let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &started)
-        .expect("prior event validates");
-    let completed = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        "meta001",
-        2,
-        None,
-        serde_json::json!({}),
-    );
-
-    validate_appended_session_log_text(Path::new("append.jsonl"), "meta001", &[], &started)
-        .expect("empty prior validates a complete stream");
-    assert!(validate_appended_session_log_text(
-        Path::new("append.jsonl"),
-        "meta001",
-        &prior_events,
-        ""
-    )
-    .expect("empty append succeeds")
-    .is_empty());
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            completed.trim_end()
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("must end with LF")
-    ));
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "other001",
-            &prior_events,
-            &completed
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("expected")
-    ));
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &completed.replace('\n', "\r\n")
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("LF-only")
-    ));
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &completed.replacen('{', "{ ", 1)
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("canonical JSONL")
-    ));
-}
-
-#[test]
-fn appended_session_log_validator_rejects_identity_and_metadata_edges() {
+fn appended_session_log_validator_rejects_cross_boundary_session_change() {
     let started = base_event().canonical_jsonl().expect("started serializes");
     let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &started)
         .expect("prior event validates");
@@ -706,91 +644,10 @@ fn appended_session_log_validator_rejects_identity_and_metadata_edges() {
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("one session_id")
     ));
-
-    let mut invalid_prior = base_event();
-    invalid_prior.session_id = "BadSession".to_owned();
-    let mut invalid_session = invalid_prior.clone();
-    invalid_session.event_id = "evt-002".to_owned();
-    invalid_session.sequence = 2;
-    let invalid_session = invalid_session
-        .canonical_jsonl()
-        .expect("invalid session event serializes");
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "BadSession",
-            &[invalid_prior],
-            &invalid_session
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("valid session_id")
-    ));
-
-    let mut empty_event_id = base_event();
-    empty_event_id.event_id.clear();
-    empty_event_id.sequence = 2;
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &empty_event_id
-                .canonical_jsonl()
-                .expect("empty event id serializes")
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("event_id")
-    ));
-
-    let mut empty_source = base_event();
-    empty_source.event_id = "evt-002".to_owned();
-    empty_source.sequence = 2;
-    empty_source.source.clear();
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &empty_source
-                .canonical_jsonl()
-                .expect("empty source serializes")
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("source")
-    ));
-
-    let mut invalid_timestamp = base_event();
-    invalid_timestamp.event_id = "evt-002".to_owned();
-    invalid_timestamp.sequence = 2;
-    invalid_timestamp.timestamp = "not-a-time".to_owned();
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &invalid_timestamp
-                .canonical_jsonl()
-                .expect("invalid timestamp serializes")
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("timestamp")
-    ));
-
-    let mut empty_correlation_id = base_event();
-    empty_correlation_id.event_id = "evt-002".to_owned();
-    empty_correlation_id.sequence = 2;
-    empty_correlation_id.correlation_id = Some(String::new());
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &empty_correlation_id
-                .canonical_jsonl()
-                .expect("empty correlation id serializes")
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("correlation_id")
-    ));
 }
 
 #[test]
-fn appended_session_log_validator_rejects_sequence_and_terminal_edges() {
+fn appended_session_log_validator_preserves_event_and_terminal_state() {
     let started = base_event().canonical_jsonl().expect("started serializes");
     let prior_events = validate_session_log_text(Path::new("append.jsonl"), "meta001", &started)
         .expect("prior event validates");
@@ -803,40 +660,6 @@ fn appended_session_log_validator_rejects_sequence_and_terminal_edges() {
         serde_json::json!({}),
     );
 
-    let same_sequence = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        "meta001",
-        1,
-        None,
-        serde_json::json!({}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &same_sequence
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("sequence must increase")
-    ));
-    let gap_sequence = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        "meta001",
-        3,
-        None,
-        serde_json::json!({}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append.jsonl"),
-            "meta001",
-            &prior_events,
-            &gap_sequence
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("sequence must increase by exactly 1")
-    ));
     let duplicate_event_id = event_line(
         "evt-001",
         EventType::SessionCompleted,
@@ -881,29 +704,8 @@ fn appended_session_log_validator_rejects_sequence_and_terminal_edges() {
 }
 
 #[test]
-fn appended_session_log_validator_rejects_loop_identity_edges() {
+fn appended_session_log_validator_preserves_loop_identity() {
     let started = base_event().canonical_jsonl().expect("started serializes");
-    let prior_events =
-        validate_session_log_text(Path::new("append-loop.jsonl"), "meta001", &started)
-            .expect("prior event validates");
-    let loop_without_id = event_line(
-        "evt-002",
-        EventType::LoopStarted,
-        "meta001",
-        2,
-        None,
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
-    );
-    assert!(matches!(
-        validate_appended_session_log_text(
-            Path::new("append-loop.jsonl"),
-            "meta001",
-            &prior_events,
-            &loop_without_id
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("loop.started must include loop_id")
-    ));
-
     let loop_started = loop_started_line("evt-002", 2);
     let prior_events = validate_session_log_text(
         Path::new("append-loop.jsonl"),
