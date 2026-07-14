@@ -1,8 +1,9 @@
 use std::{
     ffi::OsString,
     fs,
+    io::Write,
     path::Path,
-    process::{Command, Stdio},
+    process::{Command, Output, Stdio},
 };
 
 #[path = "../../tests/support.rs"]
@@ -11,6 +12,24 @@ use test_support::{expected_stream, workspace_copy};
 
 fn loop_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_loop"))
+}
+
+fn run_chat(workspace: &Path, input: &[u8]) -> Output {
+    let mut child = loop_command()
+        .current_dir(workspace)
+        .arg("chat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(input)
+        .expect("stdin write");
+    child.wait_with_output().expect("loop binary should exit")
 }
 
 fn replace_seeded_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {
@@ -445,22 +464,7 @@ fn unsafe_session_id_is_rejected_before_filesystem_access() {
 #[test]
 fn chat_hello_command_runs_hello_loop() {
     let workspace = workspace_copy("hello-loop");
-    let mut child = loop_command()
-        .current_dir(workspace)
-        .arg("chat")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("loop binary should spawn");
-
-    {
-        use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("stdin is piped");
-        stdin.write_all(b"/hello-loop\n").expect("stdin write");
-    }
-
-    let output = child.wait_with_output().expect("loop binary should exit");
+    let output = run_chat(&workspace, b"/hello-loop\n");
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert_eq!(
@@ -477,22 +481,7 @@ fn chat_failed_loop_exits_with_failed_status() {
         "loop:\n  id: hello-loop\n  name: HelloLoop\n  phase_refs: [negative-write]\n  subloop_refs: []\n  connection_refs: []\n",
     )
     .expect("chat loop fixture written");
-    let mut child = loop_command()
-        .current_dir(&workspace)
-        .arg("chat")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("loop binary should spawn");
-
-    {
-        use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("stdin is piped");
-        stdin.write_all(b"/hello-loop\n").expect("stdin write");
-    }
-
-    let output = child.wait_with_output().expect("loop binary should exit");
+    let output = run_chat(&workspace, b"/hello-loop\n");
 
     assert_eq!(output.status.code(), Some(65));
     assert!(output.stderr.is_empty());
@@ -505,22 +494,7 @@ fn chat_failed_loop_exits_with_failed_status() {
 #[test]
 fn chat_ignores_blank_input_until_eof() {
     let workspace = workspace_copy("hello-loop");
-    let mut child = loop_command()
-        .current_dir(workspace)
-        .arg("chat")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("loop binary should spawn");
-
-    {
-        use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("stdin is piped");
-        stdin.write_all(b"\n   \n").expect("stdin write");
-    }
-
-    let output = child.wait_with_output().expect("loop binary should exit");
+    let output = run_chat(&workspace, b"\n   \n");
 
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
@@ -530,22 +504,7 @@ fn chat_ignores_blank_input_until_eof() {
 #[test]
 fn chat_rejects_unsupported_commands() {
     let workspace = workspace_copy("hello-loop");
-    let mut child = loop_command()
-        .current_dir(workspace)
-        .arg("chat")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("loop binary should spawn");
-
-    {
-        use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("stdin is piped");
-        stdin.write_all(b"/unknown\n").expect("stdin write");
-    }
-
-    let output = child.wait_with_output().expect("loop binary should exit");
+    let output = run_chat(&workspace, b"/unknown\n");
 
     assert_eq!(output.status.code(), Some(64));
     assert!(
