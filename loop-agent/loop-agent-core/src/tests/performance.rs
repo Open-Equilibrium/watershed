@@ -2,34 +2,34 @@
 #[ignore = "performance gate"]
 fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
-    let mut delivery_nanos = Vec::new();
+    let mut notification_nanos = Vec::new();
 
     for _ in 0..5 {
         let workspace = workspace_copy("hello-loop");
         let mut timings = EventWriterTimings::default();
-        let output = run_loop_to_writer_internal(
+        let (notifier, _receiver) = live_event_channel();
+        let output = run_loop_internal(
             &workspace,
             "hello-loop",
-            EmitMode::Jsonl,
-            io::sink(),
+            Some(notifier),
             Some(&mut timings),
         )
         .expect("measured runtime emit succeeds");
         assert!(!output.failed);
         assert_eq!(timings.append_nanos.len(), output.event_count);
-        assert_eq!(timings.delivery_nanos.len(), output.event_count);
+        assert_eq!(timings.notification_nanos.len(), output.event_count);
         append_nanos.extend(timings.append_nanos);
-        delivery_nanos.extend(timings.delivery_nanos);
+        notification_nanos.extend(timings.notification_nanos);
     }
 
-    assert_event_writer_p95(append_nanos, delivery_nanos, "hello-loop run");
+    assert_event_writer_p95(append_nanos, notification_nanos, "hello-loop run");
 }
 
 #[test]
 #[ignore = "performance gate"]
 fn hello_loop_resume_append_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
-    let mut delivery_nanos = Vec::new();
+    let mut notification_nanos = Vec::new();
 
     for _ in 0..5 {
         let workspace = workspace_copy("hello-loop");
@@ -47,39 +47,39 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
         fs::remove_file(workspace.join("out/summary.txt"))
             .expect("completed side effect removed");
         let mut timings = EventWriterTimings::default();
+        let (notifier, _receiver) = live_event_channel();
 
-        let output = resume_session_to_writer_internal(
+        let (output, _) = resume_session_internal(
             &workspace,
             &completed.session_id,
-            EmitMode::Jsonl,
-            io::sink(),
+            Some(notifier),
             Some(&mut timings),
         )
         .expect("measured resume succeeds");
         let appended_events = output.event_count - prefix_events;
         assert_eq!(timings.append_nanos.len(), appended_events);
-        assert_eq!(timings.delivery_nanos.len(), appended_events);
+        assert_eq!(timings.notification_nanos.len(), appended_events);
         append_nanos.extend(timings.append_nanos);
-        delivery_nanos.extend(timings.delivery_nanos);
+        notification_nanos.extend(timings.notification_nanos);
     }
 
-    assert_event_writer_p95(append_nanos, delivery_nanos, "hello-loop resume");
+    assert_event_writer_p95(append_nanos, notification_nanos, "hello-loop resume");
 }
 
 fn assert_event_writer_p95(
     append_nanos: Vec<u128>,
-    delivery_nanos: Vec<u128>,
+    notification_nanos: Vec<u128>,
     path: &str,
 ) {
-    assert!(!delivery_nanos.is_empty(), "{path} must publish events");
+    assert!(!notification_nanos.is_empty(), "{path} must notify events");
     let append_p95 = p95_nanos(append_nanos);
-    let delivery_p95 = p95_nanos(delivery_nanos);
+    let notification_p95 = p95_nanos(notification_nanos);
     let append_budget = if cfg!(debug_assertions) {
         100_000_000
     } else {
         5_000_000
     };
-    let delivery_budget = if cfg!(debug_assertions) {
+    let notification_budget = if cfg!(debug_assertions) {
         150_000_000
     } else {
         50_000_000
@@ -90,8 +90,8 @@ fn assert_event_writer_p95(
         "{path} individual-event append p95 must stay <= {append_budget} ns: {append_p95} ns"
     );
     assert!(
-        delivery_p95 <= delivery_budget,
-        "{path} individual-event observer delivery p95 must stay <= {delivery_budget} ns: {delivery_p95} ns"
+        notification_p95 <= notification_budget,
+        "{path} individual-event notification p95 must stay <= {notification_budget} ns: {notification_p95} ns"
     );
 }
 

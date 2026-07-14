@@ -15,25 +15,11 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1">
-    <h2>M1 - Loop Agent Closeout</h2>
-    <div class="grid">
-      <article id="d-062" class="decision">
-        <h3>D-062 - Live Output Delivery Boundary</h3>
-        <p><strong>Status:</strong> Open, M1 closeout blocker.</p>
-        <p><strong>Question:</strong> How should Loop Agent keep running when a live-output receiver stops responding, without leaving one stuck worker behind after every run?</p>
-        <ul><li><strong>A:</strong> Keep the current output interface, but set a process-wide worker limit and define what happens when it is full. Pro: smaller interface change. Con: stuck workers remain until the receiver recovers, and the limit and failure behavior become permanent policy.</li><li><strong>B:</strong> Give each caller a small, bounded output mailbox that never blocks Loop Agent; the caller owns delivery from that mailbox to its screen or service. Pro: prevents stuck output code from consuming Loop Agent workers and makes ownership clear. Con: callers must adapt to the new interface.</li><li><strong>C:</strong> Wait until every output write finishes. Pro: simplest implementation. Con: one frozen screen or receiver can freeze the run, contrary to the approved live-delivery behavior.</li></ul>
-        <p><strong>Recommendation:</strong> B; change the boundary now, before the embedded API is stabilized.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>

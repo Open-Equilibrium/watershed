@@ -45,7 +45,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Standalone CLI Loop Agent (human CLI run path).
 - Headless JSONL event stream over stdout.
 - Local append-only session/transcript log (ADR-0037); initial resume/tail/replay behavior over the log.
-- Public runtime event emission as a stable append-before-publish contract with bounded near-real-time delivery and sequence replay (ADR-0036, ADR-0059).
+- Public runtime events persisted before bounded non-blocking live notification, with caller-owned sequence replay from the authoritative log (ADR-0036, ADR-0059, ADR-0062).
 - Building-block registry for Tools, Instructions, Phases, Loops and Connections using explicit by-name/id references, canonical serialization and cycle detection (ADR-0031).
 - Deterministic FSM phase/step engine: phase order, available tools, instruction loading and state transitions are deterministic; LLM/tool outputs are inputs to deterministic transitions.
 - Deterministic, cache-stable `loop-context-v0` compilation over mandatory active scope plus narrowly bounded continuity, with reproducible per-turn manifests; persisted compaction and retrieval are post-M1 (ADR-0050, ADR-0058).
@@ -56,7 +56,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Protocol adapter that emits normalized `proto` v0 events.
 - Golden loops and sandbox-negative tests per `TESTING.md` (ADR-0034).
 
-**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
+**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; persists every canonical event before any live notification; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 

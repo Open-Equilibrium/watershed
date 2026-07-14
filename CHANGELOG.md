@@ -13,7 +13,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 ### Changed
 
 - M1 provider context fixed as deterministic, cache-stable `loop-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved (ADR-0058).
-- M1 local events fixed as serial append-before-publish with bounded near-real-time delivery, sequence replay and checkpoint durability without per-delta `fsync` (ADR-0059).
+- M1 local events use serial authoritative append before a capacity-one, caller-owned, non-blocking high-watermark notification; receivers replay by sequence, the core owns no arbitrary output transport and the unreleased writer APIs are removed (ADR-0059, ADR-0062).
 - Loop Agent M1 sandboxing uses deterministic in-process policy enforcement; OS isolation remains post-M1.
 - Runtime and documentation use Loop Agent/Loop terminology and the `loop`, `meta` and `liq` CLI names.
 - Canonical registry serialization is deterministic UTF-8 JSON of the validated, resolved building-block model.

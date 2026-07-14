@@ -58,7 +58,7 @@
     </div></section>
 
     <section id="surfaces" class="section"><h2>3. Standalone runtime surfaces</h2><div class="body">
-      <p>Loop Agent must expose the M1 surfaces below and preserve the designed-for seams. The terminal renderer consumes the <em>same</em> internal event stream as automation modes — rendering is a view over events, not a separate path. CLI/fixture behavior is decided by ADR-0034; surface scope by ADR-0035.</p>
+      <p>Loop Agent must expose the M1 surfaces below and preserve the designed-for seams. The CLI renders the same authoritative persisted events as automation modes and owns its output transport. CLI/fixture behavior is decided by ADR-0034; surface scope by ADR-0035.</p>
       <div class="grid">
         <div class="card"><h3>A. Human CLI</h3><pre><code>loop run hello-loop
 loop run "hello-loop"
@@ -68,7 +68,7 @@ loop resume &lt;session-id&gt;
 loop sessions
 loop tail &lt;session-id&gt;</code></pre><p>Direct human use; nice terminal rendering is allowed. <code>/hello-loop</code> is entered inside the interactive <code>loop chat</code> terminal, not in the OS shell.</p></div>
         <div class="card"><h3>B. Headless JSONL event stream</h3><pre><code>loop run smoke-loop --emit jsonl
-loop run hello-loop --emit jsonl</code></pre><p>Streams newline-delimited JSON events to stdout for automation, CI, external dashboards, custom terminal UIs and Meta-Harness later. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
+loop run hello-loop --emit jsonl</code></pre><p>The CLI owns stdout and streams newline-delimited committed events for automation, CI, external dashboards, custom terminal UIs and Meta-Harness later. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
         <div class="card"><h3>C. Remote-control surface (designed-for)</h3><pre><code>loop --mode rpc
 # or: loop rpc</code></pre><p>Bidirectional external control is a post-M1 seam. ADR-0055 selects local JSON-RPC over stdio (ADR-0029) with a minimal <code>loop.start</code>, <code>loop.status</code>, <code>loop.cancel</code>, <code>loop.tail</code> and <code>loop.export</code> command set; it carries the same runtime events instead of adding <code>cmd.*</code> event types.</p></div>
         <div class="card"><h3>D. Embedded core API (future)</h3><pre><code>let session = create_agent_session(config).await?;
@@ -77,19 +77,19 @@ let mut events = session.subscribe();
 session.start(loop_def).await?;
 while let Some(event) = events.next().await {
     handle_event(event);
-}</code></pre><p>A future Rust-first embedding surface, analogous in concept to <code>pi-agent-core</code>. Scope is <a href="../decisions/open-decisions.html#d-020">D-020</a>; not implemented in M1.</p></div>
+}</code></pre><p>A future Rust-first embedding surface, analogous in concept to <code>pi-agent-core</code>. M1 implements only the bounded notification and sequence-replay boundary in <a href="../../PROTOCOL.md">PROTOCOL.md</a>; the stabilized session API remains <a href="../decisions/open-decisions.html#d-020">D-020</a>.</p></div>
       </div>
       <h3>E. Local session/transcript persistence</h3>
       <p>Loop Agent owns its own local session store, independent of Meta-Harness, mirroring the public event stream:</p>
       <pre><code>.loop/sessions/&lt;session_id&gt;.jsonl
 .loop/logs/&lt;session_id&gt;.log
 .loop/logs/&lt;session_id&gt;.contexts.jsonl</code></pre>
-      <p>This append-only JSONL log is kept by default in M1 and defers rotation/pruning (ADR-0037). Each event is appended here before the same committed event is published (ADR-0059). The log enables <strong>resume, replay, tail, export, debugging</strong> and later Meta-Harness ingestion through public event-stream/tail/export surfaces. <span class="warn">This is not project VCS/history handling</span> — it is Loop Agent's local runtime/session transcript store; <code>.loop</code> stays a protected path per <a href="../../SECURITY.md">SECURITY.md</a>.</p>
+      <p>This append-only JSONL log is kept by default in M1 and defers rotation/pruning (ADR-0037). Each event is appended here before a bounded live notification is attempted (ADR-0059, ADR-0062). The log enables <strong>resume, replay, tail, export, debugging</strong> and later Meta-Harness ingestion through public event-stream/tail/export surfaces. <span class="warn">This is not project VCS/history handling</span> — it is Loop Agent's local runtime/session transcript store; <code>.loop</code> stays a protected path per <a href="../../SECURITY.md">SECURITY.md</a>.</p>
       <p>The <code>.log</code> resume-metadata sidecar records definition identity; the context-manifest sidecar stores the per-provider-turn records defined in §6. Neither is a runtime event stream.</p>
       <p>The <code>&lt;session_id&gt;</code> filename segment is the lowercase path-safe v0 <code>session_id</code> token defined in <a href="../../PROTOCOL.md">PROTOCOL.md</a>. Replay, tail and resume reject invalid, uppercase or path-like IDs before touching <code>.loop/sessions</code>.</p>
       <p>Minimum local M1 semantics: <code>loop replay &lt;session-id&gt;</code> emits stored event objects unchanged in original <code>sequence</code> order; <code>loop tail &lt;session-id&gt;</code> emits the current valid prefix in order and then newly appended events; <code>loop resume &lt;session-id&gt;</code> is local-only, valid only for a non-terminal session owned by this Loop Agent instance, rejects registry or loop-definition drift before side effects, reconstructs state from the valid log prefix, then appends a new <code>session.resumed</code> event with the next sequence. None of these commands rewrites prior events. Corrupt or partial logs surface an <code>error</code> and do not perform tool side effects. Active sessions create <code>.loop/sessions/&lt;session_id&gt;.lock</code>; run/resume refuses a locked session and never auto-steals stale locks, while replay/tail remains read-only. Manual recovery requires verifying no Loop Agent process owns the session, preserving or inspecting the log if needed, removing the lock, then resuming.</p>
-      <p>M1 session-log reads are capped at 16 MiB (ADR-0054). Tail validates the existing prefix once, tracks its byte offset, reads only newly appended bytes, validates complete appended JSONL lines against accumulated state before emission and keeps an incomplete trailing line buffered until the next poll.</p>
-      <p>Ownership is authorship, not durability: local M1 publication follows the append/flush/sync boundaries in <a href="../../PROTOCOL.md">PROTOCOL.md</a>, so machine or power loss may lose only the tail after the last durability boundary, never expose an event that was not first appended. In ephemeral/cloud runs, replication plus durable storage—not container lifetime—provides survival; a persistent <code>.loop</code> volume covers standalone use. Remote replication cadence, crash recovery and a durable session-ownership lease remain post-M1 under ADR-0039.</p>
+      <p>M1 session-log reads are capped at 16 MiB (ADR-0054). Replay and tail validate complete JSONL prefixes against previously observed events, use sequence cursors and buffer an incomplete trailing line until the next read.</p>
+      <p>Ownership is authorship, not durability: local M1 append and notification follow the flush/sync boundaries in <a href="../../PROTOCOL.md">PROTOCOL.md</a>, so machine or power loss may lose only the tail after the last durability boundary, never expose an event that was not first appended. In ephemeral/cloud runs, replication plus durable storage—not container lifetime—provides survival; a persistent <code>.loop</code> volume covers standalone use. Remote replication cadence, crash recovery and a durable session-ownership lease remain post-M1 under ADR-0039.</p>
     </div></section>
 
     <section id="principles" class="section"><h2>4. Differentiators / core principles</h2><div class="body grid">
@@ -111,7 +111,7 @@ while let Some(event) = events.next().await {
     <section id="architecture" class="section"><h2>6. Architecture</h2><div class="body">
       <div class="loop" aria-label="Loop Agent architecture pipeline">
         <div class="node">CLI</div><div class="arrow">→</div><div class="node">Script parser / registry</div><div class="arrow">→</div><div class="node">FSM engine</div><div class="arrow">→</div>
-        <div class="node">Instruction loader</div><div class="arrow">→</div><div class="node">Runtime kernel + sandbox</div><div class="arrow">→</div><div class="node">Event bus → events + session log</div>
+        <div class="node">Instruction loader</div><div class="arrow">→</div><div class="node">Runtime kernel + sandbox</div><div class="arrow">→</div><div class="node">Serial writer → session log + wake-up</div>
       </div>
       <ul>
         <li><strong>CLI:</strong> accepts a loop script, inputs and implemented output/event mode (human or JSONL); future RPC/control mode follows ADR-0055 after M1.</li>
@@ -120,7 +120,7 @@ while let Some(event) = events.next().await {
         <li><strong>Instruction loader:</strong> resolves active loop/phase/step instructions; the agent does not self-load them.</li>
         <li><strong>Context compiler:</strong> produces the bounded, reproducible provider context and manifest defined below.</li>
         <li><strong>Runtime kernel:</strong> interprets declared fixture tools deterministically in process with bounded inputs and policy checks. External subprocess timeouts, bounded stdout/stderr and per-tool run logs are post-M1.</li>
-        <li><strong>Event bus + session manager:</strong> uses one serial session writer to append each canonical event before publishing the committed value (§3E; <a href="../../PROTOCOL.md">PROTOCOL.md</a>).</li>
+        <li><strong>Session manager:</strong> uses one serial writer to append each canonical event before a bounded non-blocking notification; callers replay committed events by sequence and own delivery (§3E; <a href="../../PROTOCOL.md">PROTOCOL.md</a>).</li>
         <li><strong>Protocol adapter:</strong> emits normalized events per <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</li>
       </ul>
       <h3>Crate boundaries (ADR-0033)</h3>
@@ -129,7 +129,7 @@ while let Some(event) = events.next().await {
         <li><code>core/core-script</code> — building-block model, parser, registry and composition rules.</li>
         <li><code>core/core-policy</code> — capability model and policy→sandbox compiler.</li>
         <li><code>proto/</code> — <code>proto</code>: event schema and serialization.</li>
-        <li><code>loop-agent/loop-agent-core</code> — FSM engine, runtime kernel, session manager, local log, event bus and embeddable entry.</li>
+        <li><code>loop-agent/loop-agent-core</code> — FSM engine, runtime kernel, session manager, local log, bounded live notification and embeddable entry.</li>
         <li><code>loop-agent/loop-agent-cli</code> — interactive terminal, slash commands, machine-readable mode, <code>loop run</code>, tail/replay/resume.</li>
       </ul>
       <p>The building-block model lives in <code>core-script</code> and is serializable over <code>proto</code>. Meta-Harness consumes it through <code>core-script</code> as a config resolver; Liquid consumes it through <code>proto</code>/API for render/edit loops. Neither consumes Loop Agent internals.</p>
@@ -240,7 +240,7 @@ while let Some(event) = events.next().await {
     </div></section>
 
     <section id="events" class="section"><h2>9. Events &amp; measurement</h2><div class="body">
-      <p>Loop Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition emits one normalized event; JSONL mode (§3B), future RPC mode (§3C) and the local session log (§3E) all carry the same events. Golden loops compare expected event streams, which makes individual loops measurable and optimizable.</p>
+      <p>Loop Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition appends one normalized event; JSONL mode (§3B), future RPC mode (§3C) and replay from the local session log (§3E) expose the same events. Live notifications carry only the latest committed sequence, never a second event copy. Golden loops compare expected event streams, which makes individual loops measurable and optimizable.</p>
       <p>These are the same normalized events defined in <a href="../../PROTOCOL.md">PROTOCOL.md</a> (single source of truth for the event-envelope fields and runtime event families). Exact v0 names are decided by ADR-0036; do not introduce a competing naming convention. Command/request shape is a separate post-M1 surface selected by ADR-0055.</p>
       <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted ADR-0034 test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines delivery budgets.</p>
     </div></section>

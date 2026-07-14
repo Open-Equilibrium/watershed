@@ -39,46 +39,38 @@ pub fn resume_session(
     session_id: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let stdout = CapturedOutput::default();
-    let captured = stdout.bytes.clone();
-    let mut output = resume_session_to_writer(workspace, session_id, emit, stdout)?;
-    let stdout = captured
-        .lock()
-        .map_err(|_| RuntimeError::Protocol("runtime output lock was poisoned".to_owned()))?
-        .clone();
-    output.stdout = String::from_utf8(stdout).map_err(|source| {
-        RuntimeError::Protocol(format!("runtime emitted non-UTF-8 output: {source}"))
-    })?;
+    let workspace = workspace.as_ref();
+    let (mut output, prior_event_count) =
+        resume_session_internal(workspace, session_id, None, None)?;
+    if emit == EmitMode::Jsonl {
+        let stream = read_session_log_to_string(&output.session_path)?;
+        let events = validate_session_log_text(&output.session_path, session_id, &stream)?;
+        output.stdout = canonical_event_stream(&events[prior_event_count..])?;
+    }
     Ok(output)
 }
 
-/// Resumes a session and publishes newly committed output incrementally to `writer`.
+/// Resumes a session with bounded, non-blocking committed-event notifications.
 ///
-/// JSONL events are written only after their identical canonical bytes have been appended to
-/// the session log. A failed observer is detached; callers can catch up through replay by
-/// `sequence` and `event_id`.
-pub fn resume_session_to_writer<W>(
+/// The caller owns the receiver and any blocking transport. Notifications cover only newly
+/// committed events; read their payloads from [`SessionEventReader`] by sequence.
+pub fn resume_session_with_live_events(
     workspace: impl AsRef<Path>,
     session_id: &str,
-    emit: EmitMode,
-    writer: W,
-) -> Result<RunOutput, RuntimeError>
-where
-    W: Write + Send + 'static,
-{
-    resume_session_to_writer_internal(workspace, session_id, emit, writer, None)
+    notifier: LiveEventNotifier,
+) -> Result<RunOutput, RuntimeError> {
+    let (mut output, _) =
+        resume_session_internal(workspace, session_id, Some(notifier), None)?;
+    output.stdout.clear();
+    Ok(output)
 }
 
-fn resume_session_to_writer_internal<W>(
+fn resume_session_internal(
     workspace: impl AsRef<Path>,
     session_id: &str,
-    emit: EmitMode,
-    writer: W,
+    notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
-) -> Result<RunOutput, RuntimeError>
-where
-    W: Write + Send + 'static,
-{
+) -> Result<(RunOutput, usize), RuntimeError> {
     let workspace = workspace.as_ref();
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
@@ -86,6 +78,7 @@ where
     let _lock = acquire_session_lock(workspace, session_id)?;
     let before = read_session_log_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &before)?;
+    let prior_event_count = events.len();
     if stream_is_failed(&events) || stream_is_completed(&events) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
@@ -179,10 +172,9 @@ where
             session_id: session_id.to_owned(),
             validation,
             commit_reservation: None,
-            emit,
+            notifier,
             timings,
-        },
-        writer,
+        }
     )?;
     let runtime_result = {
         let mut resume_sink = ResumeEventSink {
@@ -234,19 +226,16 @@ where
         return Err(err);
     }
 
-    serial_writer.publish_human_status(&human_session_status(
-        session_id,
-        "resumed",
-        &combined_events,
-    ));
-
-    Ok(RunOutput {
-        event_count: combined_events.len(),
-        failed: resumed_failed,
-        session_id: session_id.to_owned(),
-        session_path: path,
-        stdout: String::new(),
-    })
+    Ok((
+        RunOutput {
+            event_count: combined_events.len(),
+            failed: resumed_failed,
+            session_id: session_id.to_owned(),
+            session_path: path,
+            stdout: human_session_status(session_id, "resumed", &combined_events),
+        },
+        prior_event_count,
+    ))
 }
 
 struct ResumeReplayPrefix {
@@ -433,37 +422,6 @@ fn read_existing_session(
             EmitMode::Human => human_session_status(session_id, "replayed", &events),
         },
     })
-}
-
-fn write_tail_chunk(
-    writer: &mut impl Write,
-    emit: EmitMode,
-    session_id: &str,
-    jsonl: &str,
-) -> Result<bool, RuntimeError> {
-    match emit {
-        EmitMode::Jsonl => write_tail_bytes(writer, jsonl.as_bytes()),
-        EmitMode::Human => {
-            if jsonl.is_empty() {
-                return write_tail_bytes(
-                    writer,
-                    format!("session {session_id} tailed\n").as_bytes(),
-                );
-            }
-            Ok(true)
-        }
-    }
-}
-
-fn write_tail_bytes(writer: &mut impl Write, bytes: &[u8]) -> Result<bool, RuntimeError> {
-    match writer.write_all(bytes).and_then(|_| writer.flush()) {
-        Ok(()) => Ok(true),
-        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(false),
-        Err(source) => Err(RuntimeError::Io {
-            path: PathBuf::from("<tail>"),
-            source,
-        }),
-    }
 }
 
 fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {

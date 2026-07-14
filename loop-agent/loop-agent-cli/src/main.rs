@@ -1,12 +1,16 @@
 //! Loop Agent command-line entry point.
 
-use loop_agent_core::{EmitMode, RuntimeError, TailOptions};
+use loop_agent_core::{
+    EmitMode, LiveEventNotifier, LiveEventReceiveError, RunOutput, RuntimeError,
+    SessionEventReader, TailOptions,
+};
 use std::{
     env,
     ffi::{OsStr, OsString},
     io::{self, BufRead, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::ExitCode,
+    thread,
     time::Duration,
 };
 
@@ -58,8 +62,7 @@ fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
         "run" => {
             let loop_ref = positional(args, 1, "loop name")?;
             let emit = emit_mode(args)?;
-            let output =
-                loop_agent_core::run_loop_to_writer(workspace, loop_ref, emit, io::stdout())?;
+            let output = run_command(&workspace, loop_ref, emit)?;
             Ok(command_exit_code(output.failed))
         }
         "replay" => {
@@ -72,25 +75,17 @@ fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
         "tail" => {
             let session_id = positional(args, 1, "session_id")?;
             let (emit, tail_options) = tail_args(args)?;
-            let mut stdout = io::stdout().lock();
-            let output = loop_agent_core::tail_session_to_writer_with_options(
-                workspace,
+            Ok(command_exit_code(tail_command(
+                &workspace,
                 session_id,
                 emit,
                 tail_options,
-                &mut stdout,
-            )?;
-            Ok(command_exit_code(output.failed))
+            )?))
         }
         "resume" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
-            let output = loop_agent_core::resume_session_to_writer(
-                workspace,
-                session_id,
-                emit,
-                io::stdout(),
-            )?;
+            let output = resume_command(&workspace, session_id, emit)?;
             Ok(command_exit_code(output.failed))
         }
         "sessions" => {
@@ -120,12 +115,7 @@ fn chat(workspace: PathBuf) -> Result<ExitCode, RuntimeError> {
         })?;
         match line.trim() {
             "/hello-loop" | "hello" => {
-                let output = loop_agent_core::run_loop_to_writer(
-                    &workspace,
-                    "hello-loop",
-                    EmitMode::Jsonl,
-                    io::stdout(),
-                )?;
+                let output = run_command(&workspace, "hello-loop", EmitMode::Jsonl)?;
                 return Ok(command_exit_code(output.failed));
             }
             "" => {}
@@ -143,14 +133,177 @@ fn command_exit_code(failed: bool) -> ExitCode {
     ExitCode::from(if failed { 65 } else { 0 })
 }
 
+fn run_command(
+    workspace: &Path,
+    loop_ref: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    if emit == EmitMode::Human {
+        let output = loop_agent_core::run_loop(workspace, loop_ref, emit)?;
+        write_stdout(&output.stdout)?;
+        return Ok(output);
+    }
+    let workspace = workspace.to_owned();
+    let operation_workspace = workspace.clone();
+    let loop_ref = loop_ref.to_owned();
+    stream_live_operation(workspace, None, move |notifier| {
+        loop_agent_core::run_loop_with_live_events(operation_workspace, &loop_ref, notifier)
+    })
+}
+
+fn resume_command(
+    workspace: &Path,
+    session_id: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    if emit == EmitMode::Human {
+        let output = loop_agent_core::resume_session(workspace, session_id, emit)?;
+        write_stdout(&output.stdout)?;
+        return Ok(output);
+    }
+    let reader = SessionEventReader::open(workspace, session_id)?;
+    let workspace = workspace.to_owned();
+    let operation_workspace = workspace.clone();
+    let session_id = session_id.to_owned();
+    stream_live_operation(workspace, Some(reader), move |notifier| {
+        loop_agent_core::resume_session_with_live_events(operation_workspace, &session_id, notifier)
+    })
+}
+
+fn stream_live_operation<F>(
+    workspace: PathBuf,
+    mut reader: Option<SessionEventReader>,
+    operation: F,
+) -> Result<RunOutput, RuntimeError>
+where
+    F: FnOnce(LiveEventNotifier) -> Result<RunOutput, RuntimeError> + Send + 'static,
+{
+    let (notifier, receiver) = loop_agent_core::live_event_channel();
+    let mut cursor = if let Some(reader) = &mut reader {
+        reader
+            .read_after(0)?
+            .last()
+            .map_or(0, |event| event.sequence)
+    } else {
+        0
+    };
+    let worker = thread::Builder::new()
+        .name("loop-cli-run".to_owned())
+        .spawn(move || operation(notifier))
+        .map_err(|source| RuntimeError::Io {
+            path: PathBuf::from("<cli-run-thread>"),
+            source,
+        })?;
+    let mut stdout = io::stdout().lock();
+    let mut output_error = None;
+
+    loop {
+        match receiver.recv_timeout(Duration::from_millis(25)) {
+            Ok(notification) => {
+                let reader = match &mut reader {
+                    Some(reader) => reader,
+                    slot @ None => {
+                        match SessionEventReader::open(&workspace, &notification.session_id) {
+                            Ok(reader) => slot.insert(reader),
+                            Err(err) => {
+                                output_error = Some(err);
+                                break;
+                            }
+                        }
+                    }
+                };
+                match write_new_events(reader, &mut cursor, &mut stdout) {
+                    Ok(true) => {}
+                    Ok(false) => break,
+                    Err(err) => {
+                        output_error = Some(err);
+                        break;
+                    }
+                }
+            }
+            Err(LiveEventReceiveError::Timeout) => {}
+            Err(LiveEventReceiveError::Closed) => break,
+        }
+    }
+    drop(receiver);
+    let result = worker
+        .join()
+        .map_err(|_| RuntimeError::Protocol("CLI run worker panicked".to_owned()))?;
+    if let Some(err) = output_error {
+        return Err(err);
+    }
+    result
+}
+
+fn write_new_events(
+    reader: &mut SessionEventReader,
+    cursor: &mut u64,
+    writer: &mut impl Write,
+) -> Result<bool, RuntimeError> {
+    for event in reader.read_after(*cursor)? {
+        let jsonl = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
+        })?;
+        if !write_output(writer, jsonl.as_bytes())? {
+            return Ok(false);
+        }
+        *cursor = event.sequence;
+    }
+    Ok(true)
+}
+
+fn tail_command(
+    workspace: &Path,
+    session_id: &str,
+    emit: EmitMode,
+    options: TailOptions,
+) -> Result<bool, RuntimeError> {
+    if emit == EmitMode::Human {
+        let output =
+            loop_agent_core::tail_session_with_options(workspace, session_id, emit, options)?;
+        write_stdout(&output.stdout)?;
+        return Ok(output.failed);
+    }
+    let mut reader = SessionEventReader::open(workspace, session_id)?;
+    let mut cursor = 0;
+    let mut failed = false;
+    let mut terminal = false;
+    let started = std::time::Instant::now();
+    let mut stdout = io::stdout().lock();
+    loop {
+        for event in reader.read_after(cursor)? {
+            let event_type = event.event_type.as_str();
+            let jsonl = event.canonical_jsonl().map_err(|err| {
+                RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
+            })?;
+            if !write_output(&mut stdout, jsonl.as_bytes())? {
+                return Ok(failed);
+            }
+            cursor = event.sequence;
+            failed = event_type == "session.failed";
+            terminal = failed || event_type == "session.completed";
+        }
+        if terminal
+            || !options.follow
+            || options
+                .timeout
+                .is_some_and(|timeout| started.elapsed() >= timeout)
+        {
+            return Ok(failed);
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
 fn write_stdout(contents: &str) -> Result<(), RuntimeError> {
     let mut stdout = io::stdout().lock();
-    match stdout
-        .write_all(contents.as_bytes())
-        .and_then(|()| stdout.flush())
-    {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+    write_output(&mut stdout, contents.as_bytes()).map(|_| ())
+}
+
+fn write_output(writer: &mut impl Write, contents: &[u8]) -> Result<bool, RuntimeError> {
+    match writer.write_all(contents).and_then(|()| writer.flush()) {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(false),
         Err(source) => Err(RuntimeError::Io {
             path: PathBuf::from("<stdout>"),
             source,

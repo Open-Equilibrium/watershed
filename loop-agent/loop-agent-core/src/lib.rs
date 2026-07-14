@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 include!("runtime/types.rs");
+include!("runtime/live_events.rs");
 include!("runtime/session.rs");
 include!("runtime/tail.rs");
 include!("runtime/session_state.rs");

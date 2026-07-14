@@ -46,29 +46,6 @@ fn file_guard_and_reservation_helpers_cover_direct_edges() {
 }
 
 #[test]
-fn tail_transient_read_errors_are_classified() {
-    let workspace = empty_workspace("tail-stream-helpers");
-    let file_path = workspace.join("file.txt");
-    fs::write(&file_path, b"abc").expect("file written");
-
-    let transient = RuntimeError::Io {
-        path: file_path.clone(),
-        source: io::Error::from(io::ErrorKind::PermissionDenied),
-    };
-    assert!(runtime_error_is_transient_tail_read(&transient));
-    let not_found = RuntimeError::Io {
-        path: file_path.clone(),
-        source: io::Error::from(io::ErrorKind::NotFound),
-    };
-    assert!(runtime_error_is_transient_tail_read(&not_found));
-    let other = RuntimeError::Io {
-        path: file_path.clone(),
-        source: io::Error::from(io::ErrorKind::Other),
-    };
-    assert!(!runtime_error_is_transient_tail_read(&other));
-}
-
-#[test]
 fn workspace_config_helpers_reject_unsafe_registry_roots() {
     let workspace = empty_workspace("workspace-config-helpers");
     fs::create_dir_all(workspace.join(".loop")).expect("loop config dir");

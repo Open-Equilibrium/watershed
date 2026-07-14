@@ -1,8 +1,5 @@
 const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
 const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
-const EVENT_OBSERVER_QUEUE_CAPACITY: usize = 1;
-const EVENT_OBSERVER_DELIVERY_TIMEOUT: Duration = Duration::from_millis(250);
-const EVENT_OBSERVER_START_TIMEOUT: Duration = Duration::from_secs(1);
 
 trait RuntimeEventSink {
     fn measurement_started_at(&self) -> Option<Instant>;
@@ -19,13 +16,12 @@ trait RuntimeEventSink {
 #[derive(Default)]
 struct EventWriterTimings {
     append_nanos: Vec<u128>,
-    delivery_nanos: Vec<u128>,
+    notification_nanos: Vec<u128>,
 }
 
 struct WriterOutcome {
     append_latency_nanos: Option<u128>,
     appended: bool,
-    checkpoint_sync_duration: Duration,
     error: Option<RuntimeError>,
 }
 
@@ -34,7 +30,6 @@ impl WriterOutcome {
         Self {
             append_latency_nanos: None,
             appended: false,
-            checkpoint_sync_duration: Duration::ZERO,
             error: Some(error),
         }
     }
@@ -53,114 +48,10 @@ enum SessionWriterCommand {
     },
 }
 
-type ObserverMessage = (Vec<u8>, std::sync::mpsc::SyncSender<bool>);
-
-struct ObserverDelivery {
-    sender: Option<std::sync::mpsc::SyncSender<ObserverMessage>>,
-    worker: Option<thread::JoinHandle<()>>,
-}
-
-impl ObserverDelivery {
-    fn start<W>(writer: W) -> Result<Self, RuntimeError>
-    where
-        W: Write + Send + 'static,
-    {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_OBSERVER_QUEUE_CAPACITY);
-        let (ready_sender, ready_receiver) = std::sync::mpsc::sync_channel(1);
-        let worker = thread::Builder::new()
-            .name("loop-event-observer".to_owned())
-            .spawn(move || {
-                let _ = ready_sender.send(());
-                observer_delivery_worker(writer, &receiver);
-            })
-            .map_err(|source| RuntimeError::Io {
-                path: PathBuf::from("<event-observer-thread>"),
-                source,
-            })?;
-        if ready_receiver
-            .recv_timeout(EVENT_OBSERVER_START_TIMEOUT)
-            .is_err()
-        {
-            return Err(RuntimeError::Io {
-                path: PathBuf::from("<event-observer-thread>"),
-                source: io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "event observer worker did not start within one second",
-                ),
-            });
-        }
-        Ok(Self {
-            sender: Some(sender),
-            worker: Some(worker),
-        })
-    }
-
-    fn publish(&mut self, bytes: &[u8]) -> bool {
-        let Some(sender) = self.sender.as_ref() else {
-            return false;
-        };
-        let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
-        if sender.try_send((bytes.to_vec(), acknowledgement)).is_err() {
-            self.detach();
-            return false;
-        }
-        match response.recv_timeout(EVENT_OBSERVER_DELIVERY_TIMEOUT) {
-            Ok(true) => true,
-            Ok(false)
-            | Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-            | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                self.detach();
-                false
-            }
-        }
-    }
-
-    fn finish(&mut self) {
-        self.sender.take();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-
-    fn detach(&mut self) {
-        self.sender.take();
-        // WHY: a persistently blocked Write implementation cannot be cancelled. Dropping its
-        // join handle detaches that observer so authoritative session progress remains live.
-        self.worker.take();
-    }
-}
-
-impl Drop for ObserverDelivery {
-    fn drop(&mut self) {
-        self.finish();
-    }
-}
-
-fn observer_delivery_worker<W>(mut writer: W, receiver: &std::sync::mpsc::Receiver<ObserverMessage>)
-where
-    W: Write,
-{
-    loop {
-        let received = receiver.recv();
-        let Ok((bytes, acknowledgement)) = received else {
-            break;
-        };
-        let delivered = writer
-            .write_all(&bytes)
-            .and_then(|()| writer.flush())
-            .is_ok();
-        let _ = acknowledgement.send(delivered);
-        if !delivered {
-            break;
-        }
-    }
-}
-
 struct SerialSessionWriter<'a> {
     commit_reservation: Option<&'a SessionReservation>,
-    emit: EmitMode,
     failed: bool,
-    observer: ObserverDelivery,
+    notifier: Option<LiveEventNotifier>,
     sender: Option<std::sync::mpsc::SyncSender<SessionWriterCommand>>,
     timings: Option<&'a mut EventWriterTimings>,
     worker: Option<thread::JoinHandle<()>>,
@@ -172,20 +63,16 @@ struct SerialWriterStart<'a> {
     session_id: String,
     validation: SessionAppendValidationState,
     commit_reservation: Option<&'a SessionReservation>,
-    emit: EmitMode,
+    notifier: Option<LiveEventNotifier>,
     timings: Option<&'a mut EventWriterTimings>,
 }
 
 impl<'a> SerialSessionWriter<'a> {
-    fn start<W>(
+    fn start(
         reservation: &'a SessionReservation,
-        emit: EmitMode,
-        observer: W,
+        notifier: Option<LiveEventNotifier>,
         timings: Option<&'a mut EventWriterTimings>,
-    ) -> Result<Self, RuntimeError>
-    where
-        W: Write + Send + 'static,
-    {
+    ) -> Result<Self, RuntimeError> {
         Self::start_prevalidated(
             SerialWriterStart {
                 context_path: reservation.context_path.clone(),
@@ -193,31 +80,19 @@ impl<'a> SerialSessionWriter<'a> {
                 session_id: reservation.session_id.clone(),
                 validation: SessionAppendValidationState::empty(&reservation.session_id),
                 commit_reservation: Some(reservation),
-                emit,
+                notifier,
                 timings,
             },
-            observer,
         )
     }
 
-    fn start_prevalidated<W>(
-        start: SerialWriterStart<'a>,
-        observer: W,
-    ) -> Result<Self, RuntimeError>
-    where
-        W: Write + Send + 'static,
-    {
+    fn start_prevalidated(start: SerialWriterStart<'a>) -> Result<Self, RuntimeError> {
         let appender = SessionLogAppender::open(&start.path)?;
-        Self::start_with_appender(start, observer, appender)
+        Self::start_with_appender(start, appender)
     }
 
-    fn start_with_appender<W, A>(
-        start: SerialWriterStart<'a>,
-        observer: W,
-        appender: A,
-    ) -> Result<Self, RuntimeError>
+    fn start_with_appender<A>(start: SerialWriterStart<'a>, appender: A) -> Result<Self, RuntimeError>
     where
-        W: Write + Send + 'static,
         A: EventLogAppender + Send + 'static,
     {
         let SerialWriterStart {
@@ -226,7 +101,7 @@ impl<'a> SerialSessionWriter<'a> {
             session_id,
             validation,
             commit_reservation,
-            emit,
+            notifier,
             timings,
         } = start;
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
@@ -241,9 +116,8 @@ impl<'a> SerialSessionWriter<'a> {
             })?;
         Ok(Self {
             commit_reservation,
-            emit,
             failed: false,
-            observer: ObserverDelivery::start(observer)?,
+            notifier,
             sender: Some(sender),
             timings,
             worker: Some(worker),
@@ -275,17 +149,6 @@ impl<'a> SerialSessionWriter<'a> {
         Ok(())
     }
 
-    fn publish_human_status(&mut self, status: &str) {
-        if self.emit == EmitMode::Human {
-            let _ = self.publish(status.as_bytes());
-        }
-    }
-
-    fn publish(&mut self, bytes: &[u8]) -> bool {
-        // WHY: the append-only log is authoritative. A disconnected or failed observer
-        // detaches and can catch up by sequence without rolling back committed events.
-        self.observer.publish(bytes)
-    }
 }
 
 impl RuntimeEventSink for SerialSessionWriter<'_> {
@@ -331,18 +194,15 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
                 timings.append_nanos.push(append_latency);
             }
         }
-        if outcome.appended && self.emit == EmitMode::Jsonl {
-            let delivered = self.publish(canonical_jsonl.as_bytes());
-            if delivered
-                && let (Some(timings), Some(started_at)) =
-                    (self.timings.as_deref_mut(), measurement_started_at)
-            {
-                timings.delivery_nanos.push(
-                    started_at
-                        .elapsed()
-                        .saturating_sub(outcome.checkpoint_sync_duration)
-                        .as_nanos(),
-                );
+        if outcome.appended
+            && let Some(notifier) = &self.notifier
+        {
+            let notification_started_at = Instant::now();
+            let _ = notifier.try_notify(&event.session_id, event.sequence);
+            if let Some(timings) = self.timings.as_deref_mut() {
+                timings
+                    .notification_nanos
+                    .push(notification_started_at.elapsed().as_nanos());
             }
         }
         if let Some(err) = outcome.error {
@@ -353,14 +213,14 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
     }
 }
 
-struct ResumeEventSink<'writer, 'observer> {
+struct ResumeEventSink<'writer, 'session> {
     clock: EventClock,
     marker_committed: bool,
     marker_event: EventEnvelope,
     marker_stream: String,
     planned_event_count: usize,
     resume_marker_count: usize,
-    writer: &'writer mut SerialSessionWriter<'observer>,
+    writer: &'writer mut SerialSessionWriter<'session>,
 }
 
 impl RuntimeEventSink for ResumeEventSink<'_, '_> {
@@ -521,7 +381,6 @@ fn session_writer_worker<A>(
                 let _ = acknowledgement.send(WriterOutcome {
                     append_latency_nanos: None,
                     appended: false,
-                    checkpoint_sync_duration: Duration::ZERO,
                     error,
                 });
                 break;
@@ -598,23 +457,18 @@ where
     });
     dirty.mark_dirty(Instant::now());
     if is_event_sync_checkpoint(&event.event_type) {
-        let sync_started_at = Instant::now();
         if let Err(err) = appender.sync(path) {
             return WriterOutcome {
                 append_latency_nanos,
                 appended: true,
-                checkpoint_sync_duration: checkpoint_sync_duration
-                    .saturating_add(sync_started_at.elapsed()),
                 error: Some(err),
             };
         }
-        checkpoint_sync_duration = checkpoint_sync_duration.saturating_add(sync_started_at.elapsed());
         dirty.mark_synced();
     }
     WriterOutcome {
         append_latency_nanos,
         appended: true,
-        checkpoint_sync_duration,
         error: None,
     }
 }

@@ -150,10 +150,6 @@ fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
     })
 }
 
-fn tail_session_log_len(path: &Path) -> Result<usize, RuntimeError> {
-    retry_tail_transient_read_error(|| session_log_len(path))
-}
-
 fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
     let bytes = read_file_range(path, 0, max_bytes)?;
     String::from_utf8(bytes).map_err(|source| {
@@ -226,116 +222,6 @@ fn ensure_opened_real_file_for_read_matches_path(
     Ok(file_metadata)
 }
 
-#[derive(Debug, Eq, PartialEq)]
-enum TailSuffixRead {
-    Appended(Vec<u8>),
-    RolledBack(usize),
-}
-
-fn read_file_suffix_state(
-    path: &Path,
-    offset: usize,
-    expected_len: usize,
-) -> Result<TailSuffixRead, RuntimeError> {
-    if expected_len < offset {
-        return Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only tail semantics",
-            path.display()
-        )));
-    }
-    let suffix_len = expected_len - offset;
-    let (mut file, metadata) = open_real_file_for_read(path)?;
-    let total_len = metadata.len();
-    if total_len > MAX_SESSION_LOG_BYTES {
-        return Err(RuntimeError::Protocol(format!(
-            "{} read size {total_len} bytes exceeds max {}",
-            path.display(),
-            MAX_SESSION_LOG_BYTES
-        )));
-    }
-    let expected_len = u64::try_from(expected_len).map_err(|_| {
-        RuntimeError::Protocol(format!(
-            "{} read size {expected_len} bytes exceeds addressable memory",
-            path.display()
-        ))
-    })?;
-    if total_len < expected_len {
-        return Ok(TailSuffixRead::RolledBack(
-            usize::try_from(total_len).unwrap_or(usize::MAX),
-        ));
-    }
-    let offset = u64::try_from(offset).unwrap_or(u64::MAX);
-    let suffix_len = u64::try_from(suffix_len).unwrap_or(u64::MAX);
-    file.seek(SeekFrom::Start(offset))
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    let mut bytes = Vec::new();
-    (&mut file)
-        .take(suffix_len)
-        .read_to_end(&mut bytes)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != suffix_len {
-        let current_len = file
-            .metadata()
-            .map_err(|source| RuntimeError::Io {
-                path: path.to_path_buf(),
-                source,
-            })?
-            .len();
-        if current_len < expected_len {
-            return Ok(TailSuffixRead::RolledBack(
-                usize::try_from(current_len).unwrap_or(usize::MAX),
-            ));
-        }
-        return Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only tail semantics",
-            path.display()
-        )));
-    }
-    Ok(TailSuffixRead::Appended(bytes))
-}
-
-fn read_tail_file_suffix(
-    path: &Path,
-    offset: usize,
-    expected_len: usize,
-) -> Result<TailSuffixRead, RuntimeError> {
-    retry_tail_transient_read_error(|| read_file_suffix_state(path, offset, expected_len))
-}
-
-fn retry_tail_transient_read_error<T>(
-    mut operation: impl FnMut() -> Result<T, RuntimeError>,
-) -> Result<T, RuntimeError> {
-    for attempt in 0..=TAIL_TRANSIENT_READ_RETRY_ATTEMPTS {
-        match operation() {
-            Err(err)
-                if runtime_error_is_transient_tail_read(&err)
-                    && attempt < TAIL_TRANSIENT_READ_RETRY_ATTEMPTS =>
-            {
-                thread::sleep(Duration::from_millis(TAIL_TRANSIENT_READ_RETRY_MS));
-            }
-            result => return result,
-        }
-    }
-    unreachable!("tail transient retry loop always returns")
-}
-
-fn runtime_error_is_transient_tail_read(err: &RuntimeError) -> bool {
-    matches!(
-        err,
-        RuntimeError::Io { source, .. }
-            if matches!(
-                source.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-            )
-    )
-}
-
 fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
     let (mut file, metadata) = open_real_file_for_read(path)?;
     let total_len = metadata.len();
@@ -348,7 +234,7 @@ fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, 
     }
     if offset > total_len {
         return Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only tail semantics",
+            "{} changed outside append-only session semantics",
             path.display()
         )));
     }

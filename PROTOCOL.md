@@ -62,7 +62,7 @@ M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequ
 
 The append-only session event log is authoritative for replay and catch-up. Local paths, locks, recovery and replay/resume behavior are defined in the [Loop Agent V-Spec](docs/concept/V-Spec_LoopAgent.html#surfaces); other tools consume public surfaces, never this store directly (see "No co-location assumption" below).
 
-## M1 local append and live delivery (ADR-0059)
+## M1 local append and live delivery (ADR-0059, ADR-0062)
 
 One asynchronous serial writer owns each session's event order. For every event or ordered micro-batch it:
 
@@ -70,13 +70,17 @@ One asynchronous serial writer owns each session's event order. For every event 
 2. assigns or validates the stable `event_id`, then assigns the next per-session `sequence`;
 3. canonically serializes the event once;
 4. appends the canonical bytes to the session's append-only log and confirms the process-level write;
-5. publishes the same committed event, in sequence, to the internal bus and live observers.
+5. updates the session's highest committed sequence and attempts a non-blocking live notification.
 
-Publication never overtakes persistence. Publication order equals log sequence order; an append failure is not visible to observers, stops the session writer, and prevents every later event from passing it. A retry preserves the logical `event_id` and `sequence`. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status while leaving the prior log as a valid prefix.
+Notification never overtakes persistence. An append failure sends no notification, stops the session writer and prevents every later event from passing it. A retry preserves the logical `event_id` and `sequence`. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status while leaving the prior log as a valid prefix.
 
-The writer uses bounded queues and backpressure. `message.delta` and `tool.progress` may share an ordered micro-batch for at most 25 ms; the complete batch is appended first and then published in sequence. A semantic/terminal event closes any pending batch immediately. Normal delivery is event-driven, not polling, and buffering is never unbounded. A disconnected or persistently lagging observer is detached rather than rolling back an appended event or blocking the session indefinitely; it catches up from its highest contiguous `sequence`. Live delivery is therefore at least once: consumers ignore duplicate `event_id` values, detect gaps through `sequence`, and use replay/catch-up after a gap or reconnect. Do not claim exactly-once network delivery.
+Each caller-owned subscription has one pending wake-up slot and shared state containing the highest committed `sequence`; notifications carry no event payload. The producer updates that high-watermark after append and uses a non-blocking send. A full slot coalesces the wake-up, and a closed receiver is ignored, so a slow or disconnected consumer cannot block a run or another session. The core owns no caller transport, output task or arbitrary blocking writer. The CLI owns stdout; future adapters own their socket or IPC transport.
 
-Append-before-publish is distinct from machine/power-loss durability. A successful append means the ordered bytes have crossed Loop Agent's userspace buffering boundary into the local log; it does not mean one `fsync` per event. The writer flushes and synchronizes at `message.completed`, `tool.completed`, `tool.failed`, `tool.timed_out`, `session.paused`, `session.completed` and `session.failed`, and at least once per second while an active stream has unsynchronized events. High-frequency deltas may share these boundaries. Remote replication cadence, crash recovery on a new host and the durable ownership lease remain post-M1 under ADR-0039.
+A receiver owns its last fully processed sequence cursor. It subscribes before replay, reads validated events where `sequence > cursor` from the authoritative log, advances the cursor only after processing each event, then drains/rechecks notifications until its cursor reaches the observed high-watermark before waiting again. This closes the replay/live race: dropped and coalesced wake-ups lose no committed event. Session-log reads and notification state remain explicitly bounded. Network transports still must not claim exactly-once delivery.
+
+`message.delta` and `tool.progress` may share an ordered micro-batch for at most 25 ms; the complete batch is appended first. A semantic or terminal event closes any pending batch immediately. Append and notification are event-driven; only replay/tail clients poll the authoritative store when no live subscription is available.
+
+Append-before-notification is distinct from machine/power-loss durability. A successful append means the ordered bytes have crossed Loop Agent's userspace buffering boundary into the local log; it does not mean one `fsync` per event. The writer flushes and synchronizes at `message.completed`, `tool.completed`, `tool.failed`, `tool.timed_out`, `session.paused`, `session.completed` and `session.failed`, and at least once per second while an active stream has unsynchronized events. High-frequency deltas may share these boundaries. Remote replication cadence, crash recovery on a new host and the durable ownership lease remain post-M1 under ADR-0039.
 
 Minimum v0 payload fields:
 

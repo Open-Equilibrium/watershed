@@ -108,10 +108,6 @@ fn filesystem_guards_reject_unexpected_leaf_shapes() {
         read_to_string_with_limit(&file_path, 3),
         Err(RuntimeError::Protocol(message)) if message.contains("read size 8 bytes exceeds max 3")
     ));
-    assert_eq!(
-        read_tail_file_suffix(&file_path, 4, 8).expect("file suffix is readable"),
-        TailSuffixRead::Appended(b"long".to_vec())
-    );
     fs::write(&file_path, "abcd").expect("range file written");
     assert_eq!(
         read_file_range(&file_path, 1, 3).expect("range is readable"),
@@ -124,18 +120,8 @@ fn filesystem_guards_reject_unexpected_leaf_shapes() {
     assert!(matches!(
         read_file_range(&file_path, 10, 1),
         Err(RuntimeError::Protocol(message))
-            if message.contains("changed outside append-only tail semantics")
+            if message.contains("changed outside append-only session semantics")
     ));
-    assert!(matches!(
-        read_tail_file_suffix(&file_path, 3, 2),
-        Err(RuntimeError::Protocol(message))
-            if message.contains("changed outside append-only tail semantics")
-    ));
-    assert_eq!(
-        read_tail_file_suffix(&file_path, 0, 8)
-            .expect("shorter file is classified as a rollback"),
-        TailSuffixRead::RolledBack(4)
-    );
 }
 
 #[cfg(unix)]
@@ -187,10 +173,6 @@ fn file_readers_reject_symlink_leaves_directly() {
     ));
     assert!(matches!(
         session_log_len(&link),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
-    ));
-    assert!(matches!(
-        read_tail_file_suffix(&link, 0, 1),
         Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
     ));
     assert!(matches!(

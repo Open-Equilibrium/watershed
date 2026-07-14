@@ -1,9 +1,9 @@
 use super::*;
 use std::{
-    io::{self, Write},
+    io,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        mpsc, Arc, Barrier, Mutex,
+        Arc, Barrier, Mutex,
     },
     thread,
     time::{Duration, Instant},

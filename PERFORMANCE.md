@@ -14,7 +14,7 @@ M1 implementation budgets (ADR-0049):
 - Local no-op tool dispatch overhead p95 <= 50 ms per run, excluding the tool's own runtime.
 - Memory overhead <= 10 MiB per active top-level loop before LLM/tool payloads.
 - Log/event append latency p95 <= 5 ms per event for the `hello-loop` canonical serialization and local append path.
-- Live-observer delivery p95 <= 50 ms from Loop Agent constructing or receiving an event to publication by the local event writer, excluding provider/model latency, tool runtime, checkpoint synchronization and a blocked external consumer (ADR-0059).
+- Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
 - `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
 - Concurrency smoke: 10 fixture top-level loops complete without harness-level deadlock or unbounded memory growth.
 

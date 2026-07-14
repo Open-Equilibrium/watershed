@@ -1,68 +1,36 @@
-#[derive(Clone, Default)]
-struct CapturedOutput {
-    bytes: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
-}
-
-impl Write for CapturedOutput {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.bytes
-            .lock()
-            .map_err(|_| io::Error::other("runtime output lock was poisoned"))?
-            .extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 /// Runs a loop from a workspace registry and captures its output.
 pub fn run_loop(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let stdout = CapturedOutput::default();
-    let captured = stdout.bytes.clone();
-    let mut output = run_loop_to_writer(workspace, loop_ref, emit, stdout)?;
-    let stdout = captured
-        .lock()
-        .map_err(|_| RuntimeError::Protocol("runtime output lock was poisoned".to_owned()))?
-        .clone();
-    output.stdout = String::from_utf8(stdout).map_err(|source| {
-        RuntimeError::Protocol(format!("runtime emitted non-UTF-8 output: {source}"))
-    })?;
+    let mut output = run_loop_internal(workspace, loop_ref, None, None)?;
+    if emit == EmitMode::Jsonl {
+        output.stdout = read_session_log_to_string(&output.session_path)?;
+    }
     Ok(output)
 }
 
-/// Runs a loop and publishes committed output incrementally to `writer`.
+/// Runs a loop with bounded, non-blocking committed-event notifications.
 ///
-/// JSONL events are written only after their identical canonical bytes have been appended to
-/// the session log. A failed observer is detached; callers can catch up through replay by
-/// `sequence` and `event_id`.
-pub fn run_loop_to_writer<W>(
+/// The caller owns the receiver and any blocking transport. Notifications carry only a
+/// high-watermark wake-up; read event payloads from [`SessionEventReader`] by sequence.
+pub fn run_loop_with_live_events(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
-    emit: EmitMode,
-    writer: W,
-) -> Result<RunOutput, RuntimeError>
-where
-    W: Write + Send + 'static,
-{
-    run_loop_to_writer_internal(workspace, loop_ref, emit, writer, None)
+    notifier: LiveEventNotifier,
+) -> Result<RunOutput, RuntimeError> {
+    let mut output = run_loop_internal(workspace, loop_ref, Some(notifier), None)?;
+    output.stdout.clear();
+    Ok(output)
 }
 
-fn run_loop_to_writer_internal<W>(
+fn run_loop_internal(
     workspace: impl AsRef<Path>,
     loop_ref: &str,
-    emit: EmitMode,
-    writer: W,
+    notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
-) -> Result<RunOutput, RuntimeError>
-where
-    W: Write + Send + 'static,
-{
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
     let registry_path = registry_root_path(workspace, &config.registry_root)?;
@@ -105,7 +73,7 @@ where
         &expected_session_id,
         &planned_runtime.events,
     )?;
-    let mut serial_writer = SerialSessionWriter::start(&reservation, emit, writer, timings)?;
+    let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
     let runtime_result = execute_loop_with_sink(
         workspace,
         &registry,
@@ -162,12 +130,11 @@ where
     } else {
         format!("loop {} completed\n", loop_block.identity.id)
     };
-    serial_writer.publish_human_status(&status);
     Ok(RunOutput {
         event_count: runtime.events.len(),
         failed: runtime_failed,
         session_id: expected_session_id,
         session_path: reservation.session_path.clone(),
-        stdout: String::new(),
+        stdout: status,
     })
 }

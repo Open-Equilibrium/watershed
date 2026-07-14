@@ -26,8 +26,6 @@ pub const MAX_LOOP_EVENTS: u64 = 64 * 1024;
 /// Maximum loop invocations executed by one loop run.
 pub const MAX_LOOP_INVOCATIONS: u64 = 8 * 1024;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = core_script::MAX_REGISTRY_FILE_BYTES;
-const TAIL_TRANSIENT_READ_RETRY_ATTEMPTS: usize = 200;
-const TAIL_TRANSIENT_READ_RETRY_MS: u64 = 5;
 const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 const RUNTIME_ERROR_REASON: &str = "runtime_error";
 
