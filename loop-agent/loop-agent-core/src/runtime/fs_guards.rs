@@ -300,7 +300,7 @@ fn read_existing_file_for_session_log_append(
         )));
     }
 
-    let bytes = read_file_range(path, 0, existing_bytes)?;
+    let bytes = read_file_with_limit(path, existing_bytes)?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != existing_bytes {
         return Err(RuntimeError::Protocol(format!(
             "{} changed outside append-only tail semantics",

@@ -7,7 +7,6 @@ pub use core_script::{
     ToolKind,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
@@ -1169,104 +1168,45 @@ impl std::error::Error for PolicyArtifactError {
 }
 
 /// Serializes a policy artifact with canonical ordering and a trailing newline.
-pub fn canonical_artifact_json<T: Serialize>(artifact: &T) -> Result<String, PolicyArtifactError> {
-    let mut value = serde_json::to_value(artifact).map_err(PolicyArtifactError::Serialize)?;
-    canonicalize_policy_artifact_arrays(&mut value);
+pub fn canonical_artifact_json(artifact: &PolicyArtifact) -> Result<String, PolicyArtifactError> {
+    let mut artifact = artifact.clone();
+    artifact.commands.sort_by(|a, b| a.tool_id.cmp(&b.tool_id));
+    for command in &mut artifact.commands {
+        command
+            .allowed_parameters
+            .sort_by(|a, b| a.name.cmp(&b.name));
+        for parameter in &mut command.allowed_parameters {
+            parameter.allowed_values.sort();
+        }
+        command.environment.allow.sort();
+        command.filesystem.protected_path_grants.sort();
+        command.filesystem.protected_paths.sort();
+        command.filesystem.read_roots.sort();
+        command.filesystem.write_roots.sort();
+        command.network.allow.sort_by(|a, b| {
+            network_transport_key(&a.transport)
+                .cmp(network_transport_key(&b.transport))
+                .then_with(|| a.cidr.cmp(&b.cidr))
+                .then_with(|| a.port.cmp(&b.port))
+        });
+    }
+    artifact
+        .phase_scope
+        .sort_by(|a, b| a.phase_id.cmp(&b.phase_id));
+    for phase in &mut artifact.phase_scope {
+        phase.tool_ids.sort();
+    }
+    let value = serde_json::to_value(artifact).map_err(PolicyArtifactError::Serialize)?;
     let mut out = proto::canonical_json(&value).map_err(PolicyArtifactError::CanonicalJson)?;
     out.push('\n');
     Ok(out)
 }
 
-fn canonicalize_policy_artifact_arrays(value: &mut Value) {
-    let Value::Object(map) = value else {
-        return;
-    };
-
-    if let Some(Value::Array(commands)) = map.get_mut("commands") {
-        for command in commands.iter_mut() {
-            canonicalize_command_policy_arrays(command);
-        }
-        commands.sort_by_key(|command| object_string_field(command, "tool_id"));
+fn network_transport_key(transport: &NetworkTransport) -> &'static str {
+    match transport {
+        NetworkTransport::Tcp => "tcp",
+        NetworkTransport::Udp => "udp",
     }
-
-    if let Some(Value::Array(phase_scope)) = map.get_mut("phase_scope") {
-        for phase in phase_scope.iter_mut() {
-            if let Value::Object(phase) = phase {
-                sort_string_array(phase.get_mut("tool_ids"));
-            }
-        }
-        phase_scope.sort_by_key(|phase| object_string_field(phase, "phase_id"));
-    }
-}
-
-fn canonicalize_command_policy_arrays(value: &mut Value) {
-    let Value::Object(command) = value else {
-        return;
-    };
-
-    if let Some(Value::Array(parameters)) = command.get_mut("allowed_parameters") {
-        for parameter in parameters.iter_mut() {
-            if let Value::Object(parameter) = parameter {
-                sort_string_array(parameter.get_mut("allowed_values"));
-            }
-        }
-        parameters.sort_by_key(|parameter| object_string_field(parameter, "name"));
-    }
-
-    if let Some(Value::Object(environment)) = command.get_mut("environment") {
-        sort_string_array(environment.get_mut("allow"));
-    }
-
-    if let Some(Value::Object(filesystem)) = command.get_mut("filesystem") {
-        sort_string_array(filesystem.get_mut("protected_path_grants"));
-        sort_string_array(filesystem.get_mut("protected_paths"));
-        sort_string_array(filesystem.get_mut("read_roots"));
-        sort_string_array(filesystem.get_mut("write_roots"));
-    }
-
-    sort_network_allow(command.get_mut("network"));
-}
-
-fn sort_string_array(value: Option<&mut Value>) {
-    if let Some(Value::Array(values)) = value {
-        values.sort_by_key(value_string);
-    }
-}
-
-fn sort_network_allow(value: Option<&mut Value>) {
-    let Some(Value::Object(network)) = value else {
-        return;
-    };
-    let Some(Value::Array(allow)) = network.get_mut("allow") else {
-        return;
-    };
-
-    allow.sort_by_key(network_allow_key);
-}
-
-fn object_string_field(value: &Value, field: &str) -> String {
-    value
-        .as_object()
-        .and_then(|object| object.get(field))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
-}
-
-fn value_string(value: &Value) -> String {
-    value.as_str().unwrap_or_default().to_owned()
-}
-
-fn network_allow_key(value: &Value) -> (String, String, u64) {
-    (
-        object_string_field(value, "transport"),
-        object_string_field(value, "cidr"),
-        value
-            .as_object()
-            .and_then(|object| object.get("port"))
-            .and_then(Value::as_u64)
-            .unwrap_or_default(),
-    )
 }
 
 #[cfg(test)]

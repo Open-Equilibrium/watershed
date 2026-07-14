@@ -151,7 +151,7 @@ fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
 }
 
 fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
-    let bytes = read_file_range(path, 0, max_bytes)?;
+    let bytes = read_file_with_limit(path, max_bytes)?;
     String::from_utf8(bytes).map_err(|source| {
         RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
     })
@@ -222,8 +222,8 @@ fn ensure_opened_real_file_for_read_matches_path(
     Ok(file_metadata)
 }
 
-fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
-    let (mut file, metadata) = open_real_file_for_read(path)?;
+fn read_file_with_limit(path: &Path, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
+    let (file, metadata) = open_real_file_for_read(path)?;
     let total_len = metadata.len();
     if total_len > MAX_SESSION_LOG_BYTES {
         return Err(RuntimeError::Protocol(format!(
@@ -232,24 +232,12 @@ fn read_file_range(path: &Path, offset: u64, max_bytes: u64) -> Result<Vec<u8>, 
             MAX_SESSION_LOG_BYTES
         )));
     }
-    if offset > total_len {
+    if total_len > max_bytes {
         return Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only session semantics",
+            "{} read size {total_len} bytes exceeds max {max_bytes}",
             path.display()
         )));
     }
-    let available = total_len - offset;
-    if available > max_bytes {
-        return Err(RuntimeError::Protocol(format!(
-            "{} read size {available} bytes exceeds max {max_bytes}",
-            path.display()
-        )));
-    }
-    file.seek(SeekFrom::Start(offset))
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
     let mut bytes = Vec::new();
     file.take(max_bytes.saturating_add(1))
         .read_to_end(&mut bytes)

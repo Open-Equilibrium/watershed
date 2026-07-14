@@ -84,7 +84,7 @@ fn fallback_session_ids_preserve_valid_loop_id_separators() {
 
     let long = "a".repeat(128);
     let session_id = session_id_for_loop(&long);
-    assert!(validate_session_id(&session_id));
+    assert!(proto::is_valid_session_id(&session_id));
     assert!(session_id.len() <= 128);
     assert_ne!(session_id, session_id_for_loop(&format!("{long}b")));
 }

@@ -108,20 +108,6 @@ fn filesystem_guards_reject_unexpected_leaf_shapes() {
         read_to_string_with_limit(&file_path, 3),
         Err(RuntimeError::Protocol(message)) if message.contains("read size 8 bytes exceeds max 3")
     ));
-    fs::write(&file_path, "abcd").expect("range file written");
-    assert_eq!(
-        read_file_range(&file_path, 1, 3).expect("range is readable"),
-        b"bcd"
-    );
-    assert!(matches!(
-        read_file_range(&file_path, 1, 2),
-        Err(RuntimeError::Protocol(message)) if message.contains("read size 3 bytes exceeds max 2")
-    ));
-    assert!(matches!(
-        read_file_range(&file_path, 10, 1),
-        Err(RuntimeError::Protocol(message))
-            if message.contains("changed outside append-only session semantics")
-    ));
 }
 
 #[cfg(unix)]
@@ -176,7 +162,7 @@ fn file_readers_reject_symlink_leaves_directly() {
         Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
     ));
     assert!(matches!(
-        read_file_range(&link, 0, MAX_SESSION_LOG_BYTES),
+        read_file_with_limit(&link, MAX_SESSION_LOG_BYTES),
         Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
     ));
 }

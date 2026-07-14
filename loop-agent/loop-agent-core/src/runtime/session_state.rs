@@ -25,7 +25,7 @@ pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, Runtime
         let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
         };
-        if validate_session_id(stem) {
+        if proto::is_valid_session_id(stem) {
             sessions.push(stem.to_owned());
         }
     }
@@ -422,7 +422,7 @@ fn read_existing_session(
 }
 
 fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
-    if !validate_session_id(session_id) {
+    if !proto::is_valid_session_id(session_id) {
         return Err(RuntimeError::Usage(format!(
             "invalid session_id {session_id:?}"
         )));
@@ -592,7 +592,7 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
 }
 
 fn session_log_metadata_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
-    if !validate_session_id(session_id) {
+    if !proto::is_valid_session_id(session_id) {
         return Err(RuntimeError::Usage(format!(
             "invalid session_id {session_id:?}"
         )));
@@ -690,7 +690,7 @@ fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
         base_session_id
     };
     let candidate = format!("{prefix}{suffix}");
-    debug_assert!(validate_session_id(&candidate));
+    debug_assert!(proto::is_valid_session_id(&candidate));
     candidate
 }
 
@@ -738,7 +738,7 @@ fn reserve_new_file(path: &Path) -> Result<(), RuntimeError> {
 }
 
 fn session_lock_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
-    if !validate_session_id(session_id) {
+    if !proto::is_valid_session_id(session_id) {
         return Err(RuntimeError::Usage(format!(
             "invalid session_id {session_id:?}"
         )));

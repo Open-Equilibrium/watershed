@@ -145,7 +145,10 @@ fn no_follow_and_timeout_return_the_current_valid_prefix() {
         &workspace,
         "tailoptions001",
         EmitMode::Jsonl,
-        TailOptions::no_follow(),
+        TailOptions {
+            follow: false,
+            timeout: None,
+        },
     )
     .expect("no-follow returns");
     assert_eq!(no_follow.stdout, started);

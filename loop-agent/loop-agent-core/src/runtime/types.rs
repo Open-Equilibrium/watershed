@@ -147,13 +147,6 @@ impl TailOptions {
         }
     }
 
-    /// Reads the current complete prefix and exits immediately.
-    pub fn no_follow() -> Self {
-        Self {
-            follow: false,
-            timeout: None,
-        }
-    }
 }
 
 /// Error returned by Loop Agent runtime operations.
@@ -278,9 +271,4 @@ impl From<serde_json::Error> for RuntimeError {
     fn from(err: serde_json::Error) -> Self {
         Self::Json(err)
     }
-}
-
-/// Returns whether `session_id` is a valid path-safe v0 session id.
-pub fn validate_session_id(session_id: &str) -> bool {
-    proto::is_valid_session_id(session_id)
 }

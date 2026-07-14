@@ -1,5 +1,6 @@
 use super::*;
 use proptest::prelude::*;
+use serde_json::Value;
 use std::{fs, path::Path};
 
 #[test]
@@ -538,12 +539,12 @@ fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
             serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
         assert_eq!(expected.expected, "deny");
         assert!(!expected.side_effects_allowed);
-        assert_eq!(
-            canonical_artifact_json(&expected).expect("canonical JSON"),
-            text,
-            "{} must be canonical",
-            path.display()
+        let value = serde_json::to_value(&expected).expect("fixture serializes");
+        let canonical = format!(
+            "{}\n",
+            proto::canonical_json(&value).expect("fixture canonicalizes")
         );
+        assert_eq!(canonical, text, "{} must be canonical", path.display());
 
         let attempt = expected.attempt.as_object().expect("attempt is an object");
         let kind = json_string(attempt, "kind");
@@ -970,23 +971,6 @@ fn policy_artifact_rejects_parameter_constraint_mismatches() {
 
         assert_eq!(err.to_string(), expected);
     }
-}
-
-#[test]
-fn policy_artifact_canonical_json_rejects_normalized_duplicate_keys() {
-    let value = serde_json::json!({
-        "é": 1,
-        "e\u{301}": 2,
-    });
-
-    let err =
-        canonical_artifact_json(&value).expect_err("normalized duplicate object keys must fail");
-
-    assert_eq!(
-        err.to_string(),
-        "failed to serialize canonical policy artifact JSON: normalized object key collision: é"
-    );
-    assert!(std::error::Error::source(&err).is_some());
 }
 
 #[test]

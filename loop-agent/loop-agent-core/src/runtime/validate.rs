@@ -26,7 +26,7 @@ fn validate_event_metadata(
     line_number: usize,
     event: &EventEnvelope,
 ) -> Result<(), RuntimeError> {
-    if !validate_session_id(&event.session_id) {
+    if !proto::is_valid_session_id(&event.session_id) {
         return Err(RuntimeError::Protocol(format!(
             "{} line {line_number} must use a valid session_id",
             path.display()

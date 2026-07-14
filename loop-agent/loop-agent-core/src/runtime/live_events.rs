@@ -153,7 +153,7 @@ impl SessionEventReader {
     /// The caller must advance `cursor` only after successfully processing each returned
     /// event. Repeating this call is safe after a processing failure.
     pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
-        let bytes = read_file_range(&self.path, 0, MAX_SESSION_LOG_BYTES)?;
+        let bytes = read_file_with_limit(&self.path, MAX_SESSION_LOG_BYTES)?;
         let complete_len = complete_jsonl_prefix_len(&bytes);
         let has_partial_line = complete_len != bytes.len();
         let stream = String::from_utf8(bytes[..complete_len].to_vec()).map_err(|source| {
