@@ -10,7 +10,7 @@ trait RuntimeEventSink {
         &mut self,
         event: &EventEnvelope,
         canonical_jsonl: &str,
-        context_manifests: Option<&[ContextManifest]>,
+        context_manifest: Option<ContextManifestCheckpoint>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError>;
 }
@@ -42,7 +42,7 @@ impl WriterOutcome {
 struct QueuedEvent {
     acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
     canonical_jsonl: String,
-    context_manifests: Option<Vec<ContextManifest>>,
+    context_manifest: Option<ContextManifestCheckpoint>,
     event: Box<EventEnvelope>,
     measurement_started_at: Option<Instant>,
     pre_batch_latency_nanos: Option<u128>,
@@ -109,6 +109,7 @@ impl<'a> SerialSessionWriter<'a> {
             notifier,
             timings,
         } = start;
+        let context_writer = ContextManifestWriter::open(&context_path)?;
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()
             .name(format!("loop-event-writer-{session_id}"))
@@ -118,6 +119,7 @@ impl<'a> SerialSessionWriter<'a> {
                     &context_path,
                     validation,
                     appender,
+                    context_writer,
                     notifier,
                     &receiver,
                 )
@@ -204,7 +206,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
         &mut self,
         event: &EventEnvelope,
         canonical_jsonl: &str,
-        context_manifests: Option<&[ContextManifest]>,
+        context_manifest: Option<ContextManifestCheckpoint>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if self.failed {
@@ -224,7 +226,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
             .send(SessionWriterCommand::Commit(QueuedEvent {
                 acknowledgement,
                 canonical_jsonl: canonical_jsonl.to_owned(),
-                context_manifests: context_manifests.map(<[ContextManifest]>::to_vec),
+                context_manifest,
                 measurement_started_at,
                 event: Box::new(event.clone()),
                 pre_batch_latency_nanos: None,
@@ -263,7 +265,7 @@ impl RuntimeEventSink for ResumeEventSink<'_, '_> {
         &mut self,
         event: &EventEnvelope,
         _canonical_jsonl: &str,
-        context_manifests: Option<&[ContextManifest]>,
+        context_manifest: Option<ContextManifestCheckpoint>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.sequence <= self.planned_event_count as u64 {
@@ -290,7 +292,7 @@ impl RuntimeEventSink for ResumeEventSink<'_, '_> {
         self.writer.commit(
             &shifted,
             &canonical,
-            context_manifests,
+            context_manifest,
             measurement_started_at,
         )
     }
@@ -396,18 +398,88 @@ trait EventLogAppender {
             .map_err(BatchAppendFailure::none_committed)
     }
     fn sync(&mut self, path: &Path) -> Result<(), RuntimeError>;
-    fn persist_context_manifests(
-        &mut self,
-        path: &Path,
-        manifests: &[ContextManifest],
-    ) -> Result<(), RuntimeError> {
-        persist_context_manifests(path, manifests)
-    }
 }
 
 struct BatchAppendFailure {
     committed_events: usize,
     error: RuntimeError,
+}
+
+struct ContextManifestWriter {
+    appender: SessionLogAppender,
+    byte_count: u64,
+    last_manifest: Option<String>,
+    manifest_count: usize,
+}
+
+impl ContextManifestWriter {
+    fn open(path: &Path) -> Result<Self, RuntimeError> {
+        let text = read_to_string_with_limit(path, MAX_SESSION_LOG_BYTES)?;
+        if !text.is_empty() && !text.ends_with('\n') {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest stream must end with LF",
+                path.display()
+            )));
+        }
+        let byte_count = u64::try_from(text.len()).unwrap_or(u64::MAX);
+        Ok(Self {
+            appender: SessionLogAppender::open(path)?,
+            byte_count,
+            last_manifest: text.lines().next_back().map(|line| format!("{line}\n")),
+            manifest_count: text.lines().count(),
+        })
+    }
+
+    fn persist(
+        &mut self,
+        path: &Path,
+        checkpoint: &ContextManifestCheckpoint,
+    ) -> Result<(), RuntimeError> {
+        if checkpoint.ordinal == self.manifest_count {
+            if self.last_manifest.as_deref() == Some(&checkpoint.manifest.line) {
+                return self.appender.sync(path);
+            }
+            return Err(RuntimeError::Protocol(format!(
+                "{} in-flight context manifest does not match deterministic replay",
+                path.display()
+            )));
+        }
+        if checkpoint.ordinal != self.manifest_count.saturating_add(1) {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest ordinal {} does not follow persisted ordinal {}",
+                path.display(),
+                checkpoint.ordinal,
+                self.manifest_count
+            )));
+        }
+        if checkpoint.manifest.line.is_empty() || !checkpoint.manifest.line.ends_with('\n') {
+            return Err(RuntimeError::Protocol(
+                "context manifest must be one LF-terminated JSONL record".to_owned(),
+            ));
+        }
+        let appended_bytes = u64::try_from(checkpoint.manifest.line.len()).unwrap_or(u64::MAX);
+        let total = self.byte_count.saturating_add(appended_bytes);
+        if total > MAX_SESSION_LOG_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest size {total} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+                path.display()
+            )));
+        }
+        let actual = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
+        if actual != self.byte_count {
+            return Err(RuntimeError::Protocol(format!(
+                "{} changed outside context manifest append semantics",
+                path.display()
+            )));
+        }
+        self.appender
+            .append(path, checkpoint.manifest.line.as_bytes())?;
+        self.appender.sync(path)?;
+        self.byte_count = total;
+        self.last_manifest = Some(checkpoint.manifest.line.clone());
+        self.manifest_count = checkpoint.ordinal;
+        Ok(())
+    }
 }
 
 impl BatchAppendFailure {
@@ -423,6 +495,7 @@ struct WriterWorker<'a, A> {
     appender: A,
     batch: PendingEventBatch,
     context_path: &'a Path,
+    context_writer: ContextManifestWriter,
     dirty: DirtySyncState,
     notifier: Option<LiveEventNotifier>,
     path: &'a Path,
@@ -513,10 +586,11 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
                     context_path: self.context_path,
                     event: &event.event,
                     canonical_jsonl: &event.canonical_jsonl,
-                    context_manifests: event.context_manifests.as_deref(),
+                    context_manifest: event.context_manifest,
                     measurement_started_at: event.measurement_started_at,
                 },
                 &mut self.appender,
+                &mut self.context_writer,
                 &mut self.validation,
                 &mut self.dirty,
             )
@@ -571,6 +645,7 @@ fn session_writer_worker<A>(
     context_path: &Path,
     validation: SessionAppendValidationState,
     appender: A,
+    context_writer: ContextManifestWriter,
     notifier: Option<LiveEventNotifier>,
     receiver: &std::sync::mpsc::Receiver<SessionWriterCommand>,
 ) where
@@ -580,6 +655,7 @@ fn session_writer_worker<A>(
         appender,
         batch: PendingEventBatch::default(),
         context_path,
+        context_writer,
         dirty: DirtySyncState::default(),
         notifier,
         path,
@@ -613,7 +689,7 @@ fn validate_batch(
     batch: &[QueuedEvent],
 ) -> Result<(), RuntimeError> {
     for pending in batch {
-        if pending.context_manifests.is_some() {
+        if pending.context_manifest.is_some() {
             return Err(RuntimeError::Protocol(
                 "micro-batched events cannot carry context manifests".to_owned(),
             ));
@@ -679,13 +755,14 @@ struct SessionEventCommit<'a> {
     context_path: &'a Path,
     event: &'a EventEnvelope,
     canonical_jsonl: &'a str,
-    context_manifests: Option<&'a [ContextManifest]>,
+    context_manifest: Option<ContextManifestCheckpoint>,
     measurement_started_at: Option<Instant>,
 }
 
 fn commit_session_event<A>(
     commit: SessionEventCommit<'_>,
     appender: &mut A,
+    context_writer: &mut ContextManifestWriter,
     validation: &mut SessionAppendValidationState,
     dirty: &mut DirtySyncState,
 ) -> WriterOutcome
@@ -697,24 +774,24 @@ where
         context_path,
         event,
         canonical_jsonl,
-        context_manifests,
+        context_manifest,
         measurement_started_at,
     } = commit;
     if let Err(err) = validation.validate_constructed_event(path, event, canonical_jsonl.len()) {
         return WriterOutcome::failed(err);
     }
     let mut checkpoint_sync_duration = Duration::ZERO;
-    match (&event.event_type, context_manifests) {
-        (EventType::MessageCompleted, Some(manifests)) => {
+    match (&event.event_type, context_manifest) {
+        (EventType::MessageCompleted, Some(manifest)) => {
             let checkpoint_started_at = Instant::now();
-            if let Err(err) = appender.persist_context_manifests(context_path, manifests) {
+            if let Err(err) = context_writer.persist(context_path, &manifest) {
                 return WriterOutcome::failed(err);
             }
             checkpoint_sync_duration = checkpoint_started_at.elapsed();
         }
         (EventType::MessageCompleted, None) => {
             return WriterOutcome::failed(RuntimeError::Protocol(
-                "message.completed requires its full context manifest prefix".to_owned(),
+                "message.completed requires its context manifest".to_owned(),
             ));
         }
         (_, Some(_)) => {

@@ -196,12 +196,22 @@ impl<'a> RuntimeEventBuilder<'a> {
             )));
         }
         if let Some(sink) = self.sink.as_deref_mut() {
-            let context_manifests = (event.event_type == EventType::MessageCompleted)
-                .then_some(self.context_manifests.as_slice());
+            let context_manifest = if event.event_type == EventType::MessageCompleted {
+                Some(ContextManifestCheckpoint {
+                    manifest: self.context_manifests.last().cloned().ok_or_else(|| {
+                        RuntimeError::Protocol(
+                            "message.completed has no compiled context manifest".to_owned(),
+                        )
+                    })?,
+                    ordinal: self.context_manifests.len(),
+                })
+            } else {
+                None
+            };
             sink.commit(
                 &event,
                 &event_bytes,
-                context_manifests,
+                context_manifest,
                 measurement_started_at,
             )?;
         }

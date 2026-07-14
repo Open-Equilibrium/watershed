@@ -361,7 +361,7 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
             &mut self,
             event: &EventEnvelope,
             _canonical_jsonl: &str,
-            _context_manifests: Option<&[ContextManifest]>,
+            _context_manifest: Option<ContextManifestCheckpoint>,
             _measurement_started_at: Option<Instant>,
         ) -> Result<(), RuntimeError> {
             if event.event_type == EventType::ToolStarted

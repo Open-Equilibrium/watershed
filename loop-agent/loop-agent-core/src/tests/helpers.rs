@@ -345,7 +345,7 @@ impl RuntimeEventSink for FsmTransitionTimings {
         &mut self,
         _event: &EventEnvelope,
         _canonical_jsonl: &str,
-        _context_manifests: Option<&[ContextManifest]>,
+        _context_manifest: Option<ContextManifestCheckpoint>,
         _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         self.nanos.push(self.completed_at.elapsed().as_nanos());

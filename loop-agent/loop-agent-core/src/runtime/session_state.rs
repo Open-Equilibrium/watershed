@@ -630,27 +630,6 @@ fn reserve_session_log(
     })
 }
 
-fn persist_context_manifests(
-    path: &Path,
-    manifests: &[ContextManifest],
-) -> Result<(), RuntimeError> {
-    let byte_count = manifests
-        .iter()
-        .map(|manifest| manifest.line.len())
-        .sum::<usize>();
-    if u64::try_from(byte_count).unwrap_or(u64::MAX) > MAX_SESSION_LOG_BYTES {
-        return Err(RuntimeError::Protocol(format!(
-            "{} context manifest size {byte_count} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
-            path.display()
-        )));
-    }
-    let mut stream = String::with_capacity(byte_count);
-    for manifest in manifests {
-        stream.push_str(&manifest.line);
-    }
-    replace_existing_file_atomically(path, stream.as_bytes())
-}
-
 fn reserve_unique_session_log(
     workspace: &Path,
     base_session_id: &str,

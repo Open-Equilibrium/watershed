@@ -93,6 +93,50 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
     assert_eq!(notification.session_id, output.session_id);
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn context_manifest_growth_is_visible_through_the_existing_file() {
+    let workspace = empty_workspace("context-manifest-append");
+    let reservation = reserve_session_log(&workspace, "manifestappend001")
+        .expect("session reserved");
+    let manifests = [1, 2].map(|turn| ContextManifestCheckpoint {
+        manifest: ContextManifest {
+            line: format!("{{\"turn\":{turn}}}\n"),
+        },
+        ordinal: turn,
+    });
+    let mut writer = ContextManifestWriter::open(&reservation.context_path)
+        .expect("context manifest writer opens");
+    writer
+        .persist(&reservation.context_path, &manifests[0])
+        .expect("first manifest persists");
+    let mut observed = fs::File::open(&reservation.context_path).expect("manifest stream opens");
+
+    writer
+        .appender
+        .append_native_batch_with(
+            &reservation.context_path,
+            &[manifests[1].manifest.line.as_bytes()],
+            |file, bytes| {
+                file.write_all(&bytes[..5])?;
+                Err(io::Error::other("injected context append failure"))
+            },
+        )
+        .expect_err("partial context append fails");
+    for manifest in [&manifests[1], &manifests[1]] {
+        writer
+            .persist(&reservation.context_path, manifest)
+            .expect("manifest append or recovery sync succeeds");
+    }
+
+    let mut text = String::new();
+    observed
+        .read_to_string(&mut text)
+        .expect("existing file remains readable");
+    assert_eq!(text, "{\"turn\":1}\n{\"turn\":2}\n");
+    reservation.rollback();
+}
+
 #[test]
 fn replay_then_live_drain_has_no_sequence_gap() {
     let workspace = workspace_copy("hello-loop");

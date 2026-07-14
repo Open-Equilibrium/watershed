@@ -76,6 +76,12 @@ struct ContextManifest {
     line: String,
 }
 
+#[derive(Clone)]
+struct ContextManifestCheckpoint {
+    manifest: ContextManifest,
+    ordinal: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CompiledContext {
     cache_prefix_bytes: usize,
