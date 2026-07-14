@@ -140,7 +140,6 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
         command: command_policy,
         protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
         stub_model_fixture_profile: true,
-        target: &policy.target,
     };
     let invocation = LoopInvocation {
         loop_id: "loop-001".to_owned(),

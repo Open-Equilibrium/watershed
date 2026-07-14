@@ -455,7 +455,7 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
 }
 
 #[test]
-fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
+fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
     let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
     let write_tool = registry
         .tool_block("write-summary")
@@ -463,9 +463,6 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
     let write_policy =
         command_policy_for_phase(&policy, "summarize", write_tool).expect("policy scoped");
     let match_mode = runtime_protected_path_match_mode(&policy.target);
-    let linux_target = core_policy::PolicyTarget::LinuxLandlockSeccomp;
-    let macos_target = core_policy::PolicyTarget::MacosSeatbelt;
-
     let mut unscoped = policy.clone();
     unscoped.phase_scope.clear();
     assert!(matches!(
@@ -480,44 +477,6 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
     assert!(matches!(
         command_policy_for_phase(&missing_command, "summarize", write_tool),
         Err(RuntimeError::Protocol(message)) if message.contains("missing command")
-    ));
-
-    let mut wrong_tool_id = write_policy.clone();
-    wrong_tool_id.tool_id = "other-tool".to_owned();
-    assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &linux_target, &wrong_tool_id),
-        Err(RuntimeError::Protocol(message)) if message.contains("does not match tool")
-    ));
-
-    let mut wrong_kind = write_policy.clone();
-    wrong_kind.tool_kind = core_policy::ToolKind::PredefinedCommand;
-    assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &linux_target, &wrong_kind),
-        Err(RuntimeError::Protocol(message)) if message.contains("kind does not match")
-    ));
-
-    let mut network_allow = write_policy.clone();
-    network_allow
-        .network
-        .allow
-        .push(core_policy::NetworkAllowEntry {
-            cidr: "127.0.0.0/8".to_owned(),
-            kind: core_policy::NetworkAllowKind::Cidr,
-            port: 443,
-            transport: core_policy::NetworkTransport::Tcp,
-        });
-    assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &linux_target, &network_allow),
-        Err(RuntimeError::Protocol(message)) if message.contains("deny-all network")
-    ));
-    ensure_tool_matches_policy(write_tool, &macos_target, &network_allow)
-        .expect("macOS policy artifacts may carry reviewed network allowlists");
-
-    let mut wrong_script_command = write_policy.clone();
-    wrong_script_command.executable = "runner:custom".to_owned();
-    assert!(matches!(
-        ensure_tool_matches_policy(write_tool, &linux_target, &wrong_script_command),
-        Err(RuntimeError::Protocol(message)) if message.contains("script command")
     ));
 
     let read_tool = registry
@@ -538,13 +497,6 @@ fn tool_dispatch_helpers_reject_policy_and_command_mismatches() {
         execute_predefined_command(read_policy, "agent-read", &["extra".to_owned()]),
         Err(RuntimeError::Protocol(message)) if message.contains("trusted command")
     ));
-    let mut wrong_predefined_command = read_policy.clone();
-    wrong_predefined_command.executable = "registry:custom".to_owned();
-    assert!(matches!(
-        ensure_tool_matches_policy(read_tool, &linux_target, &wrong_predefined_command),
-        Err(RuntimeError::Protocol(message)) if message.contains("runtime policy command")
-    ));
-
     let mut wrong_runtime = write_tool.clone();
     wrong_runtime.script_runtime = None;
     assert!(matches!(

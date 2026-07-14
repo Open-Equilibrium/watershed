@@ -487,10 +487,8 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     let tool = registry
         .tool_block("negative-tool")
         .expect("negative tool exists");
-    let command_policy = command_policy_for_phase(&policy, &phase.identity.id, tool)
-        .expect("negative tool policy exists");
     assert!(
-        sandbox_tool_dispatch_failure(tool, &policy.target, command_policy, true)
+        sandbox_tool_dispatch_failure(tool, true)
             .expect("sandbox failure resolves")
             .is_some()
     );

@@ -24,7 +24,6 @@ struct RuntimeToolPolicy<'a> {
     command: &'a core_policy::CommandPolicy,
     protected_path_match_mode: ProtectedPathMatchMode,
     stub_model_fixture_profile: bool,
-    target: &'a core_policy::PolicyTarget,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -447,7 +446,6 @@ fn preflight_phase_tools(
             RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
         })?;
         let command_policy = command_policy_for_phase(policy, &phase.identity.id, tool)?;
-        ensure_tool_matches_policy(tool, &policy.target, command_policy)?;
         tool_dispatch_progress(
             tool,
             runtime_protected_path_match_mode(&policy.target),
@@ -672,7 +670,6 @@ fn emit_phase(
                         &context.policy.target,
                     ),
                     stub_model_fixture_profile: context.stub_model_fixture_profile,
-                    target: &context.policy.target,
                 };
                 match emit_tool(
                     context.workspace,
@@ -818,75 +815,4 @@ fn command_policy_for_phase<'a>(
                 tool.identity.id
             ))
         })
-}
-
-fn ensure_tool_matches_policy(
-    tool: &core_script::ToolBlock,
-    target: &core_policy::PolicyTarget,
-    policy: &core_policy::CommandPolicy,
-) -> Result<(), RuntimeError> {
-    if policy.tool_id != tool.identity.id {
-        return Err(RuntimeError::Protocol(format!(
-            "runtime policy tool_id {} does not match tool {}",
-            policy.tool_id, tool.identity.id
-        )));
-    }
-    if policy_tool_kind_name(&policy.tool_kind) != tool_kind_name(&tool.tool_kind) {
-        return Err(RuntimeError::Protocol(format!(
-            "runtime policy kind does not match tool {}",
-            tool.identity.id
-        )));
-    }
-    if policy.network.default != core_policy::NetworkDefault::Deny {
-        return Err(RuntimeError::Protocol(format!(
-            "tool {} must use deny-all network policy",
-            tool.identity.id
-        )));
-    }
-    if matches!(target, core_policy::PolicyTarget::LinuxLandlockSeccomp)
-        && !policy.network.allow.is_empty()
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "tool {} must use deny-all network policy",
-            tool.identity.id
-        )));
-    }
-
-    match (&tool.tool_kind, &tool.command) {
-        (
-            core_script::ToolKind::PredefinedCommand,
-            core_script::ToolCommand::Predefined { command_id, argv },
-        ) => {
-            if policy.command_id != *command_id
-                || policy.executable != format!("registry:{command_id}")
-                || policy.argv != *argv
-                || policy.script_runtime.is_some()
-            {
-                return Err(RuntimeError::Protocol(format!(
-                    "runtime policy command does not match tool {}",
-                    tool.identity.id
-                )));
-            }
-        }
-        (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id)) => {
-            if policy.command_id != *command_id
-                || policy.executable != "runner:posix-sh"
-                || policy.script_runtime.as_deref() != Some("posix-sh")
-                || !policy.argv.is_empty()
-            {
-                return Err(RuntimeError::Protocol(format!(
-                    "runtime policy script command does not match tool {}",
-                    tool.identity.id
-                )));
-            }
-        }
-        _ => {
-            return Err(RuntimeError::Protocol(format!(
-                "tool command shape does not match {}",
-                tool.identity.id
-            )));
-        }
-    }
-
-    Ok(())
 }

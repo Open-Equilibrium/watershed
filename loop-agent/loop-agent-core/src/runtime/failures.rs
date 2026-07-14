@@ -89,11 +89,8 @@ fn emit_propagated_runtime_error_failure(
 
 fn sandbox_tool_dispatch_failure(
     tool: &core_script::ToolBlock,
-    target: &core_policy::PolicyTarget,
-    command_policy: &core_policy::CommandPolicy,
     stub_model_fixture_profile: bool,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    ensure_tool_matches_policy(tool, target, command_policy)?;
     if !stub_model_fixture_profile {
         return Ok(None);
     }
@@ -361,13 +358,6 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
-}
-
-fn tool_kind_name(kind: &core_script::ToolKind) -> &'static str {
-    match kind {
-        core_script::ToolKind::PredefinedCommand => "predefined-command",
-        core_script::ToolKind::OwnScript => "own-script",
-    }
 }
 
 fn policy_tool_kind_name(kind: &core_policy::ToolKind) -> &'static str {

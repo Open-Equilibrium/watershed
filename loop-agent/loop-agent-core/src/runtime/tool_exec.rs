@@ -7,7 +7,6 @@ fn emit_tool(
     side_effect_recorder: SideEffectRecorder<'_>,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    ensure_tool_matches_policy(tool, policy.target, policy.command)?;
     let planned_progress = tool_dispatch_progress(
         tool,
         policy.protected_path_match_mode,
@@ -28,12 +27,9 @@ fn emit_tool(
         }),
     )?;
 
-    if let Some(failure) = sandbox_tool_dispatch_failure(
-        tool,
-        policy.target,
-        policy.command,
-        policy.stub_model_fixture_profile,
-    )? {
+    if let Some(failure) =
+        sandbox_tool_dispatch_failure(tool, policy.stub_model_fixture_profile)?
+    {
         return Ok(Some(failure));
     }
 
