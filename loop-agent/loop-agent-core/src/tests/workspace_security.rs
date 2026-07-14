@@ -43,13 +43,6 @@ fn file_guard_and_reservation_helpers_cover_direct_edges() {
         reserve_session_lock_file(&missing_parent_lock, "active002"),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
-    assert!(is_active_session_error(
-        &RuntimeError::ActiveSession {
-            session_id: "active001".to_owned(),
-            lock_path: lock_path.clone(),
-        },
-        "active001"
-    ));
 }
 
 #[test]

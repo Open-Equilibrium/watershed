@@ -531,7 +531,12 @@ fn emit_loop_block_at_depth(
             depth + 1,
         ) {
             Ok(Some(failure)) => {
-                emit_propagated_runtime_failure(loop_block, &invocation, &failure, builder)?;
+                emit_runtime_loop_failure(
+                    loop_block,
+                    &invocation,
+                    &failure.reason,
+                    builder,
+                )?;
                 return Ok(Some(failure));
             }
             Ok(None) => {}

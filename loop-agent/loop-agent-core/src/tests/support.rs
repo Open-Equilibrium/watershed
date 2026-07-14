@@ -21,25 +21,6 @@ impl<'a> LoopExecutionOptions<'a> {
     }
 }
 
-fn read_file_suffix_to_string(
-    path: &Path,
-    offset: usize,
-    expected_len: usize,
-) -> Result<String, RuntimeError> {
-    let bytes = read_file_suffix(path, offset, expected_len)?;
-    String::from_utf8(bytes).map_err(|source| {
-        RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
-    })
-}
-
-fn read_tail_file_suffix_to_string(
-    path: &Path,
-    offset: usize,
-    expected_len: usize,
-) -> Result<String, RuntimeError> {
-    retry_tail_transient_read_error(|| read_file_suffix_to_string(path, offset, expected_len))
-}
-
 fn write_initial_session_log_with_clock(
     reservation: &SessionReservation,
     session_id: &str,

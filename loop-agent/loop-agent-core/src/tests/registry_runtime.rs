@@ -323,6 +323,10 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
         b"hi\n"
     );
     assert_eq!(
+        evaluate_script_command("printf 'a\\\\b'").expect("printf backslash escape"),
+        b"a\\b"
+    );
+    assert_eq!(
         evaluate_script_command("printf '%s\\n' $SUMMARY").expect("stub SUMMARY evaluates"),
         b"hello\n"
     );

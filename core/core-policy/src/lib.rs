@@ -520,14 +520,16 @@ fn command_policy_from_tool(
             core_script::ToolKind::PredefinedCommand,
             core_script::ToolCommand::Predefined { command_id, argv },
         ) => {
-            let executable = trusted_predefined_command_executable(command_id).ok_or_else(|| {
-                PolicyCompileError::InvalidArtifact(PolicyArtifactValidationError {
-                    message: format!(
-                        "predefined-command tool {} references unknown trusted command {command_id:?}",
-                        tool.identity.id
-                    ),
-                })
-            })?;
+            let executable = is_trusted_predefined_command_id(command_id)
+                .then(|| format!("registry:{command_id}"))
+                .ok_or_else(|| {
+                    PolicyCompileError::InvalidArtifact(PolicyArtifactValidationError {
+                        message: format!(
+                            "predefined-command tool {} references unknown trusted command {command_id:?}",
+                            tool.identity.id
+                        ),
+                    })
+                })?;
             (command_id.clone(), argv.clone(), executable, None)
         }
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(command_id)) => (
@@ -610,10 +612,6 @@ fn network_allow_entry_from_tool(entry: &core_script::NetworkAllowEntry) -> Netw
             core_script::NetworkTransport::Udp => NetworkTransport::Udp,
         },
     }
-}
-
-fn trusted_predefined_command_executable(command_id: &str) -> Option<String> {
-    is_trusted_predefined_command_id(command_id).then(|| format!("registry:{command_id}"))
 }
 
 fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> AllowedParameterPolicy {

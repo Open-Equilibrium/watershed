@@ -276,12 +276,9 @@ impl<'a> SerialSessionWriter<'a> {
     }
 
     fn publish(&mut self, bytes: &[u8]) -> bool {
-        if !self.observer.publish(bytes) {
-            // WHY: the append-only log is authoritative. A disconnected or failed observer
-            // detaches and can catch up by sequence without rolling back committed events.
-            return false;
-        }
-        true
+        // WHY: the append-only log is authoritative. A disconnected or failed observer
+        // detaches and can catch up by sequence without rolling back committed events.
+        self.observer.publish(bytes)
     }
 }
 

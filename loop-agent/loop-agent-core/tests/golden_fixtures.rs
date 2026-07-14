@@ -75,14 +75,6 @@ fn hello_loop_stream_covers_m0_contract_dimensions() {
 }
 
 #[test]
-fn hello_loop_tracks_own_script_write_root() {
-    assert!(
-        fixture_root().join("hello-loop/out").is_dir(),
-        "hello-loop must track the workspace/out write root used by write-summary"
-    );
-}
-
-#[test]
 fn hello_loop_source_tools_cover_m0_contract() {
     let fixture = fixture_root().join("hello-loop");
     let loop_block = load_loop_block(&fixture.join("registry/loops/hello-loop.yaml"));
@@ -227,45 +219,6 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             stream_path.display()
         );
     }
-}
-
-#[test]
-fn out_of_phase_fixture_uses_phase_without_attempted_tool() {
-    let loop_file = fixture_root()
-        .join("sandbox-negative")
-        .join("registry/loops/sandbox-negative-tool-out-of-phase.yaml");
-    let phase_file = fixture_root()
-        .join("sandbox-negative")
-        .join("registry/phases/negative-no-tools.yaml");
-    let loop_block = load_loop_block(&loop_file);
-    let phase_block = load_phase_block(&phase_file);
-
-    assert_eq!(loop_block.phase_refs, vec!["negative-no-tools"]);
-    assert_eq!(phase_block.tool_refs, Vec::<String>::new());
-    assert!(!phase_block
-        .tool_refs
-        .iter()
-        .any(|tool_ref| tool_ref == "negative-tool"));
-}
-
-#[test]
-fn symlink_fixture_uses_tool_scoped_to_lexical_link_path() {
-    let loop_file = fixture_root()
-        .join("sandbox-negative")
-        .join("registry/loops/sandbox-negative-symlink.yaml");
-    let phase_file = fixture_root()
-        .join("sandbox-negative")
-        .join("registry/phases/negative-symlink.yaml");
-    let tool_file = fixture_root()
-        .join("sandbox-negative")
-        .join("registry/tools/symlink-tool.yaml");
-    let loop_block = load_loop_block(&loop_file);
-    let phase_block = load_phase_block(&phase_file);
-    let tool_block = load_tool_block(&tool_file);
-
-    assert_eq!(loop_block.phase_refs, vec!["negative-symlink"]);
-    assert_eq!(phase_block.tool_refs, vec!["symlink-tool"]);
-    assert_eq!(tool_block.write_scope, vec!["workspace/links"]);
 }
 
 fn sandbox_negative_attempts_tool_launch(path: &Path) -> bool {

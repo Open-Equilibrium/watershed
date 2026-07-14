@@ -255,21 +255,6 @@ fn ensure_opened_real_file_for_read_matches_path(
     Ok(file_metadata)
 }
 
-#[cfg(test)]
-fn read_file_suffix(
-    path: &Path,
-    offset: usize,
-    expected_len: usize,
-) -> Result<Vec<u8>, RuntimeError> {
-    match read_file_suffix_state(path, offset, expected_len)? {
-        TailSuffixRead::Appended(bytes) => Ok(bytes),
-        TailSuffixRead::RolledBack(_) => Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only tail semantics",
-            path.display()
-        ))),
-    }
-}
-
 #[derive(Debug, Eq, PartialEq)]
 enum TailSuffixRead {
     Appended(Vec<u8>),

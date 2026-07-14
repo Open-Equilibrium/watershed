@@ -68,15 +68,6 @@ fn emit_runtime_tool_failure(
     Ok(())
 }
 
-fn emit_propagated_runtime_failure(
-    loop_block: &core_script::LoopBlock,
-    invocation: &LoopInvocation,
-    failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder<'_>,
-) -> Result<(), RuntimeError> {
-    emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
-}
-
 fn emit_runtime_error_failure(
     loop_block: &core_script::LoopBlock,
     invocation: &LoopInvocation,
@@ -132,7 +123,7 @@ fn sandbox_out_of_phase_failure(
         .tools
         .values()
         .filter(|tool| {
-            is_sandbox_negative_sentinel_tool(tool)
+            sandbox_negative_operation_for_tool(tool).is_some()
                 && !policy_phase_contains_tool(policy, &phase.identity.id, &tool.identity.id)
         })
         .min_by_key(|tool| {
@@ -146,10 +137,6 @@ fn sandbox_out_of_phase_failure(
         phase.identity.id.clone(),
         unavailable_sentinel.identity.id.clone(),
     ))
-}
-
-fn is_sandbox_negative_sentinel_tool(tool: &core_script::ToolBlock) -> bool {
-    sandbox_negative_operation_for_tool(tool).is_some()
 }
 
 fn sandbox_negative_operation_for_tool(tool: &core_script::ToolBlock) -> Option<&str> {
@@ -243,7 +230,7 @@ fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
         RuntimeError::ContextBudgetExceeded { .. } => {
             ("context_budget_exceeded", "mandatory context exceeds the model input budget")
         }
-        _ => (RUNTIME_ERROR_REASON, runtime_error_message(err)),
+        _ => (RUNTIME_ERROR_REASON, "runtime execution failed"),
     };
     RuntimeFailure {
         reason: reason.to_owned(),
@@ -252,10 +239,6 @@ fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
         phase_id: None,
         emit_tool_failed: false,
     }
-}
-
-fn runtime_error_message(_err: &RuntimeError) -> &'static str {
-    "runtime execution failed"
 }
 
 fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<RuntimeFailure> {

@@ -669,14 +669,17 @@ fn tail_suffix_reader_uses_observed_range_when_log_grows() {
     fs::write(&path, format!("{initial}{observed_append}{later_append}"))
         .expect("grown session log written");
 
-    let suffix = read_tail_file_suffix_to_string(
+    let suffix = read_tail_file_suffix(
         &path,
         initial.len(),
         initial.len() + observed_append.len(),
     )
     .expect("growth after observed length must not reject the observed range");
 
-    assert_eq!(suffix, observed_append);
+    assert_eq!(
+        suffix,
+        TailSuffixRead::Appended(observed_append.as_bytes().to_vec())
+    );
 }
 
 #[test]
@@ -687,11 +690,7 @@ fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
 
     assert_eq!(session_log_len(&path).expect("log length is readable"), 3);
     assert!(matches!(
-        read_file_suffix_to_string(&path, 3, 2),
-        Err(RuntimeError::Protocol(message)) if message.contains("append-only")
-    ));
-    assert!(matches!(
-        read_file_suffix_to_string(&path, 0, 4),
+        read_tail_file_suffix(&path, 3, 2),
         Err(RuntimeError::Protocol(message)) if message.contains("append-only")
     ));
     assert_eq!(
@@ -713,11 +712,6 @@ fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
         read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES),
         Err(RuntimeError::Protocol(message)) if message.contains("not valid UTF-8")
     ));
-    assert!(matches!(
-        read_file_suffix_to_string(&path, 0, 1),
-        Err(RuntimeError::Protocol(message)) if message.contains("not valid UTF-8")
-    ));
-
     let oversized = workspace.join("oversized.jsonl");
     let file = fs::File::create(&oversized).expect("oversized file created");
     file.set_len(MAX_SESSION_LOG_BYTES + 1)
@@ -727,7 +721,7 @@ fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
         Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
     ));
     assert!(matches!(
-        read_file_suffix_to_string(&oversized, 0, 1),
+        read_tail_file_suffix(&oversized, 0, 1),
         Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
     ));
     assert!(matches!(

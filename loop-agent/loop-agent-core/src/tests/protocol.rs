@@ -517,19 +517,6 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     ));
     assert_eq!(sandbox_negative_reason_for_operation("process"), None);
 
-    assert!(matches!(
-        linux_sandbox_expected_decision("unknown-fixture"),
-        Err(RuntimeError::Protocol(message)) if message.contains("missing linux")
-    ));
-    validate_failed_sandbox_decisions("unknown-fixture", &[])
-        .expect("unknown fixture has no expected decisions");
-
-    let events_without_failure = vec![base_event()];
-    assert!(matches!(
-        validate_failed_sandbox_decisions("sandbox-negative-write", &events_without_failure),
-        Err(RuntimeError::Protocol(message)) if message.contains("session.failed reason")
-    ));
-
     assert_eq!(
         terminal_failure_reason(&[EventEnvelope::new(
             "evt-001",
@@ -771,91 +758,6 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
         "negpath001"
     );
     assert!(session_id_for_loop(&"x".repeat(160)).len() <= 128);
-}
-
-#[test]
-fn script_operation_helpers_cover_edge_paths() {
-    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let phase = registry
-        .phase_block("summarize")
-        .expect("summarize phase exists");
-    let tool = registry
-        .tool_block("write-summary")
-        .expect("write tool exists");
-    let command_policy =
-        command_policy_for_phase(&policy, &phase.identity.id, tool).expect("policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-
-    let write = compile_own_script_operations(
-        match_mode,
-        command_policy,
-        "\n# comment\n---\necho hello\nprintf 'ok\\n' > out/coverage.txt\n",
-    )
-    .expect("literal own-script compiles")
-    .expect("literal own-script plans one write");
-    assert_eq!(write.contents, b"ok\n");
-    assert_eq!(write.target, "out/coverage.txt");
-    assert!(matches!(
-        compile_own_script_operations(
-            match_mode,
-            command_policy,
-            "printf 'a' > out/a.txt\nprintf 'b' > out/b.txt\n"
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("multiple write")
-    ));
-
-    for line in [
-        "> out/file.txt",
-        "printf 'x' > out/a.txt > out/b.txt",
-        "printf 'x' >> out/file.txt",
-        "printf 'x > out/file.txt",
-    ] {
-        assert!(
-            script_redirection(line).is_err(),
-            "{line} must fail redirection parsing"
-        );
-    }
-    for target in ["", "\"unterminated", "two words", "bad\"quote"] {
-        assert!(
-            unquote_script_path(target).is_err(),
-            "{target:?} must fail target literal parsing"
-        );
-    }
-    for target in ["", "/abs", "C:tmp", "a\\b", "$HOME", "*.txt", "../out.txt"] {
-        assert!(
-            normalize_script_write_target(target).is_err(),
-            "{target:?} must fail target normalization"
-        );
-    }
-}
-
-#[test]
-fn script_evaluator_rejects_unsupported_commands() {
-    assert_eq!(
-        evaluate_script_command("printf '%s\\n' \"$SUMMARY\"").expect("printf summary"),
-        b"hello\n"
-    );
-    assert_eq!(
-        evaluate_script_command("echo 'hello'").expect("echo literal"),
-        b"hello\n"
-    );
-    assert_eq!(
-        evaluate_script_command("printf 'a\\\\b'").expect("printf backslash escape"),
-        b"a\\b"
-    );
-    for command in [
-        "printf \"bad\"",
-        "printf 'bad' $OTHER",
-        "printf '\\t'",
-        "printf 'dangling\\'",
-        "echo $HOME",
-        "cat file",
-    ] {
-        assert!(
-            evaluate_script_command(command).is_err(),
-            "{command:?} must fail script evaluation"
-        );
-    }
 }
 
 #[test]

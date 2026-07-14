@@ -71,15 +71,9 @@ fn compile_own_script_operations(
 }
 
 fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
-    let positions = redirection_positions(line)?;
-    let Some(&redirection_index) = positions.first() else {
+    let Some(redirection_index) = redirection_position(line)? else {
         return Ok(None);
     };
-    if positions.len() > 1 {
-        return Err(RuntimeError::Protocol(
-            "own-script multiple redirections are not supported in M1".to_owned(),
-        ));
-    }
     let command = line[..redirection_index].trim();
     if command.is_empty() {
         return Err(RuntimeError::Protocol(
@@ -90,8 +84,8 @@ fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeErr
     Ok(Some((command.to_owned(), target)))
 }
 
-fn redirection_positions(line: &str) -> Result<Vec<usize>, RuntimeError> {
-    let mut positions = Vec::new();
+fn redirection_position(line: &str) -> Result<Option<usize>, RuntimeError> {
+    let mut position = None;
     let mut quote = None;
     let mut chars = line.char_indices().peekable();
 
@@ -106,7 +100,11 @@ fn redirection_positions(line: &str) -> Result<Vec<usize>, RuntimeError> {
                         "own-script append redirection is not supported in M1".to_owned(),
                     ));
                 }
-                positions.push(index);
+                if position.replace(index).is_some() {
+                    return Err(RuntimeError::Protocol(
+                        "own-script multiple redirections are not supported in M1".to_owned(),
+                    ));
+                }
             }
             None => {}
         }
@@ -118,7 +116,7 @@ fn redirection_positions(line: &str) -> Result<Vec<usize>, RuntimeError> {
         ));
     }
 
-    Ok(positions)
+    Ok(position)
 }
 
 fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {

@@ -728,7 +728,6 @@ fn reserve_unique_session_log(
         match reserve_session_log(workspace, &candidate) {
             Ok(reservation) => return Ok(reservation),
             Err(RuntimeError::SessionLogExists(_)) => continue,
-            Err(err) if is_active_session_error(&err, &candidate) => return Err(err),
             Err(err) => return Err(err),
         }
     }
@@ -736,16 +735,6 @@ fn reserve_unique_session_log(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
-}
-
-fn is_active_session_error(err: &RuntimeError, session_id: &str) -> bool {
-    matches!(
-        err,
-        RuntimeError::ActiveSession {
-            session_id: active_session_id,
-            ..
-        } if active_session_id == session_id
-    )
 }
 
 fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
