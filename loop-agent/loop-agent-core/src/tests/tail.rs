@@ -68,18 +68,43 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
 }
 
 #[test]
-fn reader_rejects_mutation_of_an_observed_event() {
+fn tail_preserves_extensions_and_reader_rejects_their_mutation() {
     let workspace = empty_workspace("tail-mutation");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("tailmut001.jsonl");
-    let started = session_event_line("tailmut001", "evt-001", EventType::SessionStarted, 1);
+    let mut event = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "tailmut001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    );
+    event
+        .additional_fields
+        .insert("future".to_owned(), serde_json::json!({"enabled": true}));
+    let started = event.canonical_jsonl().expect("event serializes");
     fs::write(&path, &started).expect("initial event written");
+    let tailed = tail_session_with_options(
+        &workspace,
+        "tailmut001",
+        EmitMode::Jsonl,
+        TailOptions {
+            follow: false,
+            timeout: None,
+        },
+    )
+    .expect("existing prefix tails");
+    assert_eq!(tailed.stdout, started);
     let mut reader = SessionEventReader::open(&workspace, "tailmut001")
         .expect("reader opens");
     reader.read_after(0).expect("initial event reads");
     let mut changed: EventEnvelope = serde_json::from_str(started.trim()).expect("event parses");
-    changed.payload = serde_json::json!({"reason":"changed"});
+    changed
+        .additional_fields
+        .insert("future".to_owned(), serde_json::json!({"enabled": false}));
     fs::write(
         &path,
         changed.canonical_jsonl().expect("changed event serializes"),

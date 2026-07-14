@@ -81,12 +81,19 @@ fn protocol_validator_rejects_nulls_recursively_but_keeps_additive_values() {
         .expect("unknown non-null payload fields remain additive");
     let mut envelope = serde_json::to_value(&additive).expect("event converts to JSON");
     envelope["future"] = serde_json::json!({"enabled": true});
+    additive
+        .additional_fields
+        .insert("future".to_owned(), serde_json::json!({"enabled": true}));
     let mut text = proto::canonical_json(&envelope).expect("envelope canonicalizes");
     text.push('\n');
     assert_eq!(
         validate_protocol_jsonl_text(Path::new("additive-envelope.jsonl"), &text)
             .expect("unknown top-level envelope fields remain additive"),
         vec![additive.clone()]
+    );
+    assert_eq!(
+        canonical_event_stream(&[additive]).expect("additive envelope reserializes"),
+        text
     );
 
     let mut root_null = base_event();

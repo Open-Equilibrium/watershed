@@ -50,6 +50,8 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/ses
 | `payload` | JSON object; event-specific fields below |
 | `correlation_id` | optional non-empty opaque string linking request/result events |
 
+Consumers retain unknown top-level fields so additive v0 extensions survive replay and forwarding unchanged.
+
 M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequence - 1) seconds`. Fixture workspaces use a fixed base for byte-stable golden streams; non-fixture workspaces use a wall-clock base captured once at session start rather than sampling wall time per event.
 
 ## v0 ID safety and loop identity

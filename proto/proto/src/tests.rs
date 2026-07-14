@@ -223,6 +223,23 @@ fn event_envelope_serializer_rejects_non_object_payload() {
     assert!(err.to_string().contains("payload must be a JSON object"));
 }
 
+#[test]
+fn event_envelope_preserves_additive_top_level_fields_canonically() {
+    let mut event = test_event(json!({"reason": "fixture-start"}));
+    event
+        .additional_fields
+        .insert("future".to_owned(), json!({"enabled": true}));
+
+    let canonical = event.canonical_jsonl().expect("event serializes");
+    let parsed: EventEnvelope = serde_json::from_str(canonical.trim()).expect("event deserializes");
+
+    assert_eq!(parsed, event);
+    assert_eq!(
+        parsed.canonical_jsonl().expect("event reserializes"),
+        canonical
+    );
+}
+
 fn test_event(payload: Value) -> EventEnvelope {
     EventEnvelope::new(
         "evt-001",

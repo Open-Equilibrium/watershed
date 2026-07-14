@@ -4,7 +4,10 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
-use std::{collections::HashSet, fmt};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+};
 use unicode_normalization::UnicodeNormalization;
 
 /// Protocol version string emitted by all v0 event envelopes.
@@ -13,6 +16,9 @@ pub const PROTOCOL_VERSION_V0: &str = "0";
 /// Canonical runtime event envelope shared by Loop Agent, Meta-Harness and Liquid.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EventEnvelope {
+    /// Additive v0 envelope fields not yet understood by this implementation.
+    #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub additional_fields: BTreeMap<String, Value>,
     /// Optional cross-event correlation token.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
@@ -60,6 +66,7 @@ impl EventEnvelope {
         payload: Value,
     ) -> Self {
         Self {
+            additional_fields: BTreeMap::new(),
             correlation_id: None,
             event_id: nfc_string(event_id.into()),
             event_type,
