@@ -560,29 +560,7 @@ fn policy_artifact_rejects_commands_missing_from_phase_scope() {
 }
 
 #[test]
-fn expected_decision_fixture_files_are_canonical_and_deny_side_effects() {
-    for path in fixture_files("expected.json") {
-        let text = fs::read_to_string(&path).expect("fixture is readable");
-        assert!(text.ends_with('\n'), "{} must end with LF", path.display());
-
-        let expected: ExpectedDecision =
-            serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-        expected
-            .validate()
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-        assert_eq!(expected.expected, ExpectedDecisionKind::Deny);
-        assert!(!expected.side_effects_allowed);
-        assert_eq!(
-            canonical_artifact_json(&expected).expect("canonical JSON"),
-            text,
-            "{} must be canonical",
-            path.display()
-        );
-    }
-}
-
-#[test]
-fn expected_decision_fixtures_match_compiled_sandbox_negative_policies() {
+fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
     let registry = core_script::load_registry_root(
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../loop-agent/fixtures/sandbox-negative/registry"),
@@ -591,8 +569,24 @@ fn expected_decision_fixtures_match_compiled_sandbox_negative_policies() {
 
     for path in fixture_files("expected.json") {
         let text = fs::read_to_string(&path).expect("fixture is readable");
-        let expected: ExpectedDecision =
+        assert!(text.ends_with('\n'), "{} must end with LF", path.display());
+
+        let expected: ExpectedDecisionFixture =
             serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        assert_eq!(expected.expected, "deny");
+        assert!(!expected.side_effects_allowed);
+        assert_eq!(
+            canonical_artifact_json(&expected).expect("canonical JSON"),
+            text,
+            "{} must be canonical",
+            path.display()
+        );
+
+        let attempt = expected.attempt.as_object().expect("attempt is an object");
+        let kind = json_string(attempt, "kind");
+        assert_eq!(expected.reason_code.as_str(), expected_reason_code(kind));
+        assert_attempt_shape(kind, attempt);
+
         let artifact = compile_policy_artifact(
             &expected.fixture_name,
             &registry,
@@ -600,149 +594,11 @@ fn expected_decision_fixtures_match_compiled_sandbox_negative_policies() {
             expected.target.clone(),
         )
         .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-
-        expected
-            .validate_against_policy(&artifact)
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        assert_eq!(artifact.fixture_name, expected.fixture_name);
+        assert_eq!(artifact.source_loop_definition_id, expected.fixture_name);
+        assert_eq!(artifact.target, expected.target);
+        assert_attempt_denied(&artifact, attempt);
     }
-}
-
-#[test]
-fn policy_denial_evaluation_rejects_attempts_allowed_by_policy() {
-    let artifact = valid_policy_artifact("allowed-tool");
-
-    for (attempt, expected) in [
-        (
-            DeniedAttempt::ToolOutOfPhase {
-                phase_id: "inspect".to_owned(),
-                tool_id: "allowed-tool".to_owned(),
-            },
-            "policy allows tool",
-        ),
-        (
-            DeniedAttempt::Write {
-                from_path: None,
-                operation: "write".to_owned(),
-                path: Some("workspace/out.txt".to_owned()),
-                to_path: None,
-                tool_id: "allowed-tool".to_owned(),
-            },
-            "policy allows write",
-        ),
-        (
-            DeniedAttempt::ProtectedPath {
-                from_path: None,
-                operation: "read".to_owned(),
-                path: Some("workspace/src/main.rs".to_owned()),
-                to_path: None,
-                tool_id: "allowed-tool".to_owned(),
-            },
-            "policy allows protected path",
-        ),
-        (
-            DeniedAttempt::SymlinkEscape {
-                operation: "read".to_owned(),
-                path: "workspace/link".to_owned(),
-                symlink_path: "workspace/link".to_owned(),
-                symlink_target: "workspace/inside".to_owned(),
-                tool_id: "allowed-tool".to_owned(),
-            },
-            "does not model symlink",
-        ),
-        (
-            DeniedAttempt::InterpreterEscape {
-                argv: artifact.commands[0].argv.clone(),
-                executable: artifact.commands[0].executable.clone(),
-                tool_id: "allowed-tool".to_owned(),
-            },
-            "policy allows interpreter",
-        ),
-    ] {
-        let err = artifact
-            .evaluate_denied_attempt(&attempt)
-            .expect_err("allowed attempt must not validate as a denial");
-
-        assert!(err.to_string().contains(expected), "{err}");
-    }
-
-    let mut network_artifact = valid_policy_artifact("allowed-tool");
-    network_artifact.commands[0].network.allow = vec![NetworkAllowEntry {
-        cidr: "192.0.2.0/24".to_owned(),
-        kind: NetworkAllowKind::Cidr,
-        port: 5353,
-        transport: NetworkTransport::Udp,
-    }];
-    let err = network_artifact
-        .evaluate_denied_attempt(&DeniedAttempt::Network {
-            destination: "192.0.2.42".to_owned(),
-            port: 5353,
-            tool_id: "allowed-tool".to_owned(),
-            transport: NetworkTransport::Udp,
-        })
-        .expect_err("allowed network attempt must not validate as a denial");
-    assert!(err.to_string().contains("policy allows network"), "{err}");
-    assert_eq!(
-        network_artifact
-            .evaluate_denied_attempt(&DeniedAttempt::Network {
-                destination: "192.0.3.42".to_owned(),
-                port: 5353,
-                tool_id: "allowed-tool".to_owned(),
-                transport: NetworkTransport::Udp,
-            })
-            .expect("outside CIDR destination is denied"),
-        DenyReasonCode::NetworkDenied
-    );
-
-    let artifact = policy_artifact_with_environment_allow("SAFE_ENV");
-    let err = artifact
-        .evaluate_denied_attempt(&DeniedAttempt::Environment {
-            name: "SAFE_ENV".to_owned(),
-            tool_id: "environment-tool".to_owned(),
-        })
-        .expect_err("allowed environment attempt must not validate as a denial");
-    assert!(
-        err.to_string().contains("policy allows environment"),
-        "{err}"
-    );
-
-    let err = artifact
-        .evaluate_denied_attempt(&DeniedAttempt::Network {
-            destination: "203.0.113.0/24".to_owned(),
-            port: 443,
-            tool_id: "missing-tool".to_owned(),
-            transport: NetworkTransport::Tcp,
-        })
-        .expect_err("attempts must reference a policy command");
-    assert!(err.to_string().contains("policy missing tool"), "{err}");
-}
-
-#[test]
-fn expected_decision_rejects_policy_target_and_fixture_mismatches() {
-    let artifact = valid_policy_artifact("write-tool");
-    let mut expected = denied_decision(
-        DeniedAttempt::Write {
-            from_path: None,
-            operation: "write".to_owned(),
-            path: Some("/etc/passwd".to_owned()),
-            to_path: None,
-            tool_id: "write-tool".to_owned(),
-        },
-        DenyReasonCode::WriteDenied,
-    );
-    expected.fixture_name = artifact.fixture_name.clone();
-    expected.target = PolicyTarget::MacosSeatbelt;
-
-    let err = expected
-        .validate_against_policy(&artifact)
-        .expect_err("target mismatch must fail");
-    assert!(err.to_string().contains("target"), "{err}");
-
-    expected.target = artifact.target.clone();
-    expected.fixture_name = "other-fixture".to_owned();
-    let err = expected
-        .validate_against_policy(&artifact)
-        .expect_err("fixture mismatch must fail");
-    assert!(err.to_string().contains("fixture"), "{err}");
 }
 
 #[test]
@@ -753,38 +609,7 @@ fn policy_artifact_accepts_nonempty_safe_environment_allow() {
 }
 
 #[test]
-fn path_denial_helpers_cover_normalization_and_pattern_edges() {
-    let artifact = valid_policy_artifact("path-tool");
-    let command = &artifact.commands[0];
-
-    assert!(write_path_is_denied(command, "../outside.txt"));
-    assert!(!write_path_is_denied(command, "a-out/file.txt"));
-    assert!(!protected_path_attempt_is_denied(
-        ProtectedPathMatchMode::CaseSensitive,
-        command,
-        "../outside.txt"
-    ));
-    assert!(protected_path_attempt_is_denied(
-        ProtectedPathMatchMode::CaseSensitive,
-        command,
-        ".ssh/config"
-    ));
-    assert!(!protected_path_attempt_is_denied(
-        ProtectedPathMatchMode::CaseSensitive,
-        command,
-        "workspace/z.env"
-    ));
-
-    assert_eq!(
-        normalize_attempt_path("out/file.txt"),
-        Some("workspace/out/file.txt".to_owned())
-    );
-    assert_eq!(
-        normalize_attempt_path("workspace/out/file.txt"),
-        Some("workspace/out/file.txt".to_owned())
-    );
-    assert_eq!(normalize_attempt_path("../outside.txt"), None);
-
+fn protected_path_matcher_covers_normalization_and_pattern_edges() {
     assert!(protected_path_pattern_matches(
         ProtectedPathMatchMode::CaseSensitive,
         "src/main.rs",
@@ -918,22 +743,6 @@ fn default_protected_paths_have_behavioral_denial_examples() {
     }
 }
 
-fn ipv4_prefix_mask(prefix: u8) -> u32 {
-    if prefix == 0 {
-        0
-    } else {
-        u32::MAX << (32 - prefix)
-    }
-}
-
-fn ipv6_prefix_mask(prefix: u8) -> u128 {
-    if prefix == 0 {
-        0
-    } else {
-        u128::MAX << (128 - prefix)
-    }
-}
-
 proptest! {
     #[test]
     fn protected_path_double_star_matches_any_depth(
@@ -982,280 +791,6 @@ proptest! {
         ));
     }
 
-    #[test]
-    fn ipv4_cidr_matching_preserves_prefix_bits(
-        network in any::<u32>(),
-        host in any::<u32>(),
-        prefix in 0u8..=32
-    ) {
-        let mask = ipv4_prefix_mask(prefix);
-        let network_base = network & mask;
-        let inside = network_base | (host & !mask);
-        let cidr = format!("{}/{}", Ipv4Addr::from(network_base), prefix);
-
-        prop_assert!(cidr_contains_destination(&cidr, &Ipv4Addr::from(inside).to_string()));
-        if prefix > 0 {
-            let outside = network_base ^ (1_u32 << (32 - prefix));
-            prop_assert!(!cidr_contains_destination(&cidr, &Ipv4Addr::from(outside).to_string()));
-        }
-    }
-
-    #[test]
-    fn ipv6_cidr_matching_preserves_prefix_bits(
-        network in any::<u128>(),
-        host in any::<u128>(),
-        prefix in 0u8..=128
-    ) {
-        let mask = ipv6_prefix_mask(prefix);
-        let network_base = network & mask;
-        let inside = network_base | (host & !mask);
-        let cidr = format!("{}/{}", Ipv6Addr::from(network_base), prefix);
-
-        prop_assert!(cidr_contains_destination(&cidr, &Ipv6Addr::from(inside).to_string()));
-        if prefix > 0 {
-            let outside = network_base ^ (1_u128 << (128 - prefix));
-            prop_assert!(!cidr_contains_destination(&cidr, &Ipv6Addr::from(outside).to_string()));
-        }
-    }
-}
-
-#[test]
-fn network_allow_helpers_cover_cidr_matching_edges() {
-    let ipv4 = NetworkAllowEntry {
-        cidr: "192.0.2.0/24".to_owned(),
-        kind: NetworkAllowKind::Cidr,
-        port: 443,
-        transport: NetworkTransport::Tcp,
-    };
-    assert!(network_allow_matches_destination(&ipv4, "192.0.2.42"));
-    assert!(!network_allow_matches_destination(&ipv4, "192.0.3.42"));
-    assert!(!network_allow_matches_destination(&ipv4, "example.test"));
-
-    let ipv6 = NetworkAllowEntry {
-        cidr: "2001:db8::/32".to_owned(),
-        kind: NetworkAllowKind::Cidr,
-        port: 443,
-        transport: NetworkTransport::Tcp,
-    };
-    assert!(network_allow_matches_destination(&ipv6, "2001:db8::1"));
-    assert!(!network_allow_matches_destination(&ipv6, "2001:db9::1"));
-    assert!(!network_allow_matches_destination(&ipv6, "192.0.2.42"));
-
-    assert!(cidr_contains_destination("0.0.0.0/0", "203.0.113.42"));
-    assert!(cidr_contains_destination("::/0", "2001:db8::1"));
-    assert!(!cidr_contains_destination("not-a-cidr", "192.0.2.42"));
-    assert!(!cidr_contains_destination("not-an-ip/24", "192.0.2.42"));
-    assert!(!cidr_contains_destination(
-        "192.0.2.0/not-a-prefix",
-        "192.0.2.42"
-    ));
-    assert!(!cidr_contains_destination("192.0.2.0/33", "192.0.2.42"));
-    assert!(!cidr_contains_destination("2001:db8::/129", "2001:db8::1"));
-}
-
-#[test]
-fn expected_decision_supports_rename_without_path() {
-    let cases = [
-        (
-            DeniedAttempt::Write {
-                from_path: Some("workspace/a.txt".to_owned()),
-                operation: "rename".to_owned(),
-                path: None,
-                to_path: Some("workspace/b.txt".to_owned()),
-                tool_id: "rename-tool".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "workspace/a.txt",
-            "workspace/b.txt",
-        ),
-        (
-            DeniedAttempt::ProtectedPath {
-                from_path: Some("workspace/.env".to_owned()),
-                operation: "rename".to_owned(),
-                path: None,
-                to_path: Some("workspace/.env.bak".to_owned()),
-                tool_id: "rename-tool".to_owned(),
-            },
-            DenyReasonCode::ProtectedPathDenied,
-            "workspace/.env",
-            "workspace/.env.bak",
-        ),
-    ];
-
-    for (attempt, reason, from_path, to_path) in cases {
-        let expected = denied_decision(attempt, reason);
-        expected.validate().expect("rename shape is valid");
-        let json = canonical_artifact_json(&expected).expect("canonical JSON");
-
-        assert!(json.contains(&format!("\"from_path\":\"{from_path}\"")));
-        assert!(json.contains(&format!("\"to_path\":\"{to_path}\"")));
-        assert!(!json.contains("\"path\""));
-        serde_json::from_str::<ExpectedDecision>(&json).expect("rename shape deserializes");
-    }
-}
-
-#[test]
-fn expected_decision_rejects_invalid_operation_shapes() {
-    let cases = [
-        (
-            DeniedAttempt::Write {
-                from_path: None,
-                operation: "create".to_owned(),
-                path: None,
-                to_path: None,
-                tool_id: "write-tool".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "write create attempts must include path and omit from_path/to_path",
-        ),
-        (
-            DeniedAttempt::Write {
-                from_path: None,
-                operation: "delete".to_owned(),
-                path: Some("../outside.txt".to_owned()),
-                to_path: None,
-                tool_id: "write-tool".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "write delete attempts use unsupported operation; expected one of write, create, rename",
-        ),
-        (
-            DeniedAttempt::ProtectedPath {
-                from_path: None,
-                operation: "chmod".to_owned(),
-                path: Some(".env".to_owned()),
-                to_path: None,
-                tool_id: "protected-tool".to_owned(),
-            },
-            DenyReasonCode::ProtectedPathDenied,
-            "protected_path chmod attempts use unsupported operation; expected one of read, write, create, execute, rename",
-        ),
-        (
-            DeniedAttempt::ProtectedPath {
-                from_path: Some("workspace/.env".to_owned()),
-                operation: "rename".to_owned(),
-                path: None,
-                to_path: None,
-                tool_id: "rename-tool".to_owned(),
-            },
-            DenyReasonCode::ProtectedPathDenied,
-            "protected_path rename attempts must include from_path and to_path and omit path",
-        ),
-    ];
-
-    for (attempt, reason, message) in cases {
-        let error = denied_decision(attempt, reason)
-            .validate()
-            .expect_err("invalid operation shape must fail");
-        assert_eq!(error.to_string(), message);
-    }
-}
-
-#[test]
-fn expected_decision_rejects_reason_code_mismatches() {
-    let cases = vec![
-        (
-            DeniedAttempt::Write {
-                from_path: None,
-                operation: "create".to_owned(),
-                path: Some("../outside.txt".to_owned()),
-                to_path: None,
-                tool_id: "negative".to_owned(),
-            },
-            DenyReasonCode::NetworkDenied,
-            "write attempts must use reason_code write_denied, got network_denied",
-        ),
-        (
-            DeniedAttempt::Network {
-                destination: "example.com".to_owned(),
-                port: 443,
-                tool_id: "negative".to_owned(),
-                transport: NetworkTransport::Tcp,
-            },
-            DenyReasonCode::WriteDenied,
-            "network attempts must use reason_code network_denied, got write_denied",
-        ),
-        (
-            DeniedAttempt::Environment {
-                name: "OPENAI_API_KEY".to_owned(),
-                tool_id: "negative".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "environment attempts must use reason_code environment_denied, got write_denied",
-        ),
-        (
-            DeniedAttempt::ToolOutOfPhase {
-                phase_id: "negative-no-tools".to_owned(),
-                tool_id: "negative".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "tool_out_of_phase attempts must use reason_code tool_out_of_phase, got write_denied",
-        ),
-        (
-            DeniedAttempt::ProtectedPath {
-                from_path: None,
-                operation: "read".to_owned(),
-                path: Some(".env".to_owned()),
-                to_path: None,
-                tool_id: "negative".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "protected_path attempts must use reason_code protected_path_denied, got write_denied",
-        ),
-        (
-            DeniedAttempt::SymlinkEscape {
-                operation: "create".to_owned(),
-                path: "links/outside.txt".to_owned(),
-                symlink_path: "links".to_owned(),
-                symlink_target: "../outside".to_owned(),
-                tool_id: "negative".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "symlink_escape attempts must use reason_code symlink_escape_denied, got write_denied",
-        ),
-        (
-            DeniedAttempt::InterpreterEscape {
-                argv: vec!["-c".to_owned(), "cat .env".to_owned()],
-                executable: "python".to_owned(),
-                tool_id: "negative".to_owned(),
-            },
-            DenyReasonCode::WriteDenied,
-            "interpreter_escape attempts must use reason_code interpreter_escape_denied, got write_denied",
-        ),
-    ];
-
-    for (attempt, reason_code, expected_message) in cases {
-        let expected = denied_decision(attempt, reason_code);
-
-        let err = expected
-            .validate()
-            .expect_err("mismatched reason_code must fail");
-
-        assert_eq!(err.to_string(), expected_message);
-    }
-}
-
-#[test]
-fn expected_decision_rejects_allowed_side_effects() {
-    let mut expected = denied_decision(
-        DeniedAttempt::Network {
-            destination: "example.com".to_owned(),
-            port: 443,
-            tool_id: "negative".to_owned(),
-            transport: NetworkTransport::Tcp,
-        },
-        DenyReasonCode::NetworkDenied,
-    );
-    expected.side_effects_allowed = true;
-
-    let err = expected
-        .validate()
-        .expect_err("expected denials must not allow side effects");
-
-    assert_eq!(
-        err.to_string(),
-        "expected denials must set side_effects_allowed to false"
-    );
 }
 
 #[test]
@@ -1696,17 +1231,6 @@ fn command_policy(
     }
 }
 
-fn denied_decision(attempt: DeniedAttempt, reason_code: DenyReasonCode) -> ExpectedDecision {
-    ExpectedDecision {
-        attempt,
-        expected: ExpectedDecisionKind::Deny,
-        fixture_name: "sandbox-negative".to_owned(),
-        reason_code,
-        side_effects_allowed: false,
-        target: PolicyTarget::LinuxLandlockSeccomp,
-    }
-}
-
 fn policy_artifact_with_environment_allow(name: &str) -> PolicyArtifact {
     let mut artifact = valid_policy_artifact("environment-tool");
     artifact.commands[0].environment.allow = vec![name.to_owned()];
@@ -1822,6 +1346,175 @@ fn own_script_policy_artifact(tool_id: &str) -> PolicyArtifact {
     artifact.commands[0].script_runtime = Some("posix-sh".to_owned());
     artifact.commands[0].tool_kind = ToolKind::OwnScript;
     artifact
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExpectedDecisionFixture {
+    attempt: Value,
+    expected: String,
+    fixture_name: String,
+    reason_code: DenyReasonCode,
+    side_effects_allowed: bool,
+    target: PolicyTarget,
+}
+
+fn expected_reason_code(kind: &str) -> &'static str {
+    match kind {
+        "write" => "write_denied",
+        "network" => "network_denied",
+        "environment" => "environment_denied",
+        "tool_out_of_phase" => "tool_out_of_phase",
+        "protected_path" => "protected_path_denied",
+        "symlink_escape" => "symlink_escape_denied",
+        "interpreter_escape" => "interpreter_escape_denied",
+        _ => panic!("unknown attempt kind {kind}"),
+    }
+}
+
+fn assert_attempt_shape(kind: &str, attempt: &serde_json::Map<String, Value>) {
+    let operation = || json_string(attempt, "operation");
+    let fields = match kind {
+        "write" => match operation() {
+            "write" | "create" => &["kind", "operation", "path", "tool_id"][..],
+            "rename" => &["from_path", "kind", "operation", "to_path", "tool_id"],
+            other => panic!("unsupported write operation {other}"),
+        },
+        "network" => &["destination", "kind", "port", "tool_id", "transport"],
+        "environment" => &["kind", "name", "tool_id"],
+        "tool_out_of_phase" => &["kind", "phase_id", "tool_id"],
+        "protected_path" => match operation() {
+            "read" | "write" | "create" | "execute" => {
+                &["kind", "operation", "path", "tool_id"][..]
+            }
+            "rename" => &["from_path", "kind", "operation", "to_path", "tool_id"],
+            other => panic!("unsupported protected-path operation {other}"),
+        },
+        "symlink_escape" => &[
+            "kind",
+            "operation",
+            "path",
+            "symlink_path",
+            "symlink_target",
+            "tool_id",
+        ],
+        "interpreter_escape" => &["argv", "executable", "kind", "tool_id"],
+        _ => panic!("unknown attempt kind {kind}"),
+    };
+    assert_eq!(
+        attempt.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+        fields.iter().copied().collect(),
+        "unexpected {kind} attempt fields"
+    );
+    for field in fields
+        .iter()
+        .filter(|field| **field != "argv" && **field != "port")
+    {
+        json_string(attempt, field);
+    }
+}
+
+fn assert_attempt_denied(artifact: &PolicyArtifact, attempt: &serde_json::Map<String, Value>) {
+    let kind = json_string(attempt, "kind");
+    let tool_id = json_string(attempt, "tool_id");
+    if kind == "tool_out_of_phase" {
+        let phase_id = json_string(attempt, "phase_id");
+        assert!(artifact.phase_scope.iter().any(|phase| {
+            phase.phase_id == phase_id && !phase.tool_ids.iter().any(|id| id == tool_id)
+        }));
+        return;
+    }
+
+    let command = artifact
+        .commands
+        .iter()
+        .find(|command| command.tool_id == tool_id)
+        .expect("attempt tool has a compiled command");
+    match kind {
+        "write" => assert!(attempt_paths(attempt).into_iter().any(|path| {
+            let Some(path) = workspace_path(path) else {
+                return true;
+            };
+            !command.filesystem.write_roots.iter().any(|root| {
+                core_script::normalize_safe_relative_path(root)
+                    .is_some_and(|root| core_script::relative_path_is_inside_scope(&path, &root))
+            })
+        })),
+        "network" => {
+            assert!(command.network.allow.is_empty());
+            let port = attempt
+                .get("port")
+                .and_then(Value::as_u64)
+                .expect("network port is an integer");
+            assert!(port > 0 && u16::try_from(port).is_ok());
+            serde_json::from_value::<NetworkTransport>(attempt["transport"].clone())
+                .expect("network transport is valid");
+        }
+        "environment" => assert!(
+            !command
+                .environment
+                .allow
+                .iter()
+                .any(|name| name == json_string(attempt, "name"))
+        ),
+        "protected_path" => {
+            let mode = protected_path_match_mode_for_policy_target(&artifact.target);
+            assert!(attempt_paths(attempt).into_iter().any(|path| {
+                let Some(path) = workspace_path(path) else {
+                    return false;
+                };
+                !command
+                    .filesystem
+                    .protected_path_grants
+                    .iter()
+                    .any(|grant| workspace_path(grant).as_deref() == Some(path.as_str()))
+                    && command
+                        .filesystem
+                        .protected_paths
+                        .iter()
+                        .any(|pattern| protected_path_pattern_matches(mode, pattern, &path))
+            }));
+        }
+        "symlink_escape" => assert!(
+            json_string(attempt, "symlink_target").starts_with('/')
+                || core_script::normalize_safe_relative_path(json_string(
+                    attempt,
+                    "symlink_target"
+                ))
+                .is_none()
+        ),
+        "interpreter_escape" => {
+            let argv = serde_json::from_value::<Vec<String>>(attempt["argv"].clone())
+                .expect("interpreter argv is valid");
+            assert!(
+                command.executable != json_string(attempt, "executable") || command.argv != argv
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn json_string<'a>(object: &'a serde_json::Map<String, Value>, field: &str) -> &'a str {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("{field} must be a string"))
+}
+
+fn attempt_paths(attempt: &serde_json::Map<String, Value>) -> Vec<&str> {
+    ["path", "from_path", "to_path"]
+        .into_iter()
+        .filter_map(|field| attempt.get(field).and_then(Value::as_str))
+        .collect()
+}
+
+fn workspace_path(path: &str) -> Option<String> {
+    let path = core_script::normalize_safe_relative_path(path)?;
+    Some(if path == "workspace" || path.starts_with("workspace/") {
+        path
+    } else {
+        format!("workspace/{path}")
+    })
 }
 
 fn fixture_files(suffix: &str) -> Vec<std::path::PathBuf> {
