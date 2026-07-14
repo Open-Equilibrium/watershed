@@ -10,10 +10,7 @@ Thanks for contributing to Watershed.
 
 ## Ground rules
 
-- **English only** — code, comments, docs, identifiers.
-- **Keep docs minimal and non-overlapping** — reference, don't duplicate. The visual V-Specs are the exception: optimize them for information quality.
-- **Definition of Done** — see `AGENTS.md` and `TESTING.md`.
-- **MVP VCS boundary** — do not add Watershed project-history/VCS-engine behavior to MVP work. Loop Agent runs in normal Git projects but does not own VCS.
+Follow [AGENTS.md](AGENTS.md) for language, documentation, scope, VCS, and Definition-of-Done rules. Test and performance requirements are canonical in [TESTING.md](TESTING.md) and [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Workflow
 

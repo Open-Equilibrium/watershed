@@ -29,74 +29,18 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **Wedge:** Loop Agent execution wedge (developer/open-source credibility).
 
-**Purpose:** make the repository ready for a Codex session to implement the Loop Agent MVP without making architectural guesses. Establish the event schema, local runtime surfaces, transcript/session log, script parser, FSM and sandbox policy model that prove deterministic, reusable, evented agent loops. Do not overbuild, and do not scope Loop Agent as a generic coding agent.
+**Purpose:** establish the implementation packet and walking skeleton needed to build the standalone Loop Agent MVP without inventing architecture.
 
 **Deliverables:**
 
-- Repo scaffold: Rust workspace, root toolchain policy, `core/`, `proto/`, `loop-agent/`, `meta-harness/`, `liquid/` placeholder crates/packages as needed.
-- `core` v0 contracts:
-  - building-block/script model types;
-  - script parser contract and fixtures;
-  - policy model and policy→sandbox compiler contract;
-  - identity/permissions placeholder types where needed by the protocol.
-- `proto` v0 contract:
-  - event envelope fields;
-  - session lifecycle messages;
-  - loop/activity messages;
-  - artifact/log messages;
-  - attention messages;
-  - generic `error` event family and versioning rules.
-- Loop Agent MVP packet (Loop Agent is a **standalone CLI product**; Meta-Harness and Liquid are optional consumers, not prerequisites — see `docs/concept/V-Spec_LoopAgent.html`):
-  - CLI command names and flags, including by-name `loop run <name> --emit jsonl`,
-    `loop chat` and in-session `/hello-loop`;
-  - the M1 runtime surfaces: human CLI and headless machine-readable event stream;
-    remote-control/RPC and `loop-agent-core` embedding are designed-for seams, not
-    M1 implementation scope;
-  - event schema v0 (envelope + runtime event families);
-  - local session/transcript store path, retention assumptions and local
-    replay/tail/resume semantics;
-  - `loop-agent-core` vs `loop-agent-cli` crate boundaries;
-  - deterministic FSM model;
-  - minimum v0 building-block schema fields and recursion rules (`Loop` is a
-    building block);
-  - instruction/tool/phase/connection terminology;
-  - D-015 fixture suite descriptions and golden-stream contract (see
-    `TESTING.md`):
-    `smoke-loop`, contract-spanning `hello-loop` and sandbox-negative fixtures,
-    all deterministic through a stub model;
-  - explicit statement that Loop Agent does not manage VCS in the MVP and that the
-    local session store is runtime state, not project history;
-  - pass/fail definition such that Codex does not have to invent these surfaces.
-- Security packet:
-  - exact M0 sandbox output artifact shape per `SECURITY.md`;
-  - list of sandbox-negative policy-emulation tests to implement in M1;
-  - network deny-by-default policy model;
-  - declared read/write roots model;
-  - headless in-process M1 boundary and post-M1 subprocess-timeout model.
-- CI packet:
-  - Linux + macOS + Windows workflow plan;
-  - `cargo fmt --check`, `cargo clippy` and `cargo nextest run` (deterministic,
-    process-isolated test runs) as the M0 lint/test gates;
-  - dependency-hygiene gate — `cargo audit` (RustSec advisories) and `cargo deny`
-    (license/bans/sources/advisory policy via `deny.toml`); see `SECURITY.md`;
-  - docs link/HTML validation gate via `lychee` (link integrity) + HTML render check;
-  - coverage harness `cargo llvm-cov nextest` wired now; the `TESTING.md` gate
-    is enforced from M1 (ADR-0022/ADR-0060);
-  - M0 pass/fail checklist.
-    These gates (`cargo fmt --check`, `cargo clippy`, `cargo nextest`,
-    `cargo audit`/`cargo deny`, `lychee` and HTML render validation) are mandatory
-    M0 essentials (ADR-0021); D-049/ADR-0043 decides the HTML render requirement,
-    and D-050/ADR-0045 pins the exact command and viewport constants.
+- Rust workspace and the `core`, `proto`, `loop-agent`, `meta-harness`, and `liquid` scaffold.
+- Versioned building-block, event, runtime, session, policy, and sandbox contracts. Canonical owners: `PROTOCOL.md`, `SECURITY.md`, and the Loop Agent V-Spec.
+- Deterministic D-015 fixtures and expected streams per `TESTING.md`.
+- Cross-platform CI, dependency, coverage, link, and render gates per `TESTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml`.
 
-**M0-blocking decisions:** none remain. D-002, D-006, D-012…D-018 and D-047…D-050 are decided in ADR-0029…ADR-0037 and ADR-0041…ADR-0045.
+**Decision state:** no M0 blocker remains. M0 decisions are recorded in ADR-0029…ADR-0037 and ADR-0041…ADR-0045; later M1 decisions are in ADR-0050…ADR-0052 and ADR-0055…ADR-0060. D-020 remains a non-blocking post-M1 seam, D-046 remains post-M1, and D-061 is the sole open M1 decision: authorize a maintained YAML 1.2 parser dependency or narrow the accepted registry format.
 
-D-008/D-057 are closed for M1 in ADR-0050/ADR-0058: M1 provider context uses the single deterministic, cache-stable `loop-context-v0` profile; compaction and retrieval remain post-M1. D-058 is closed by ADR-0059: canonical events append through one serial session writer before bounded near-real-time publication. ADR-0051/ADR-0052 close the M1 network/sandbox behavior: M1 Linux-target network policy is fail-closed deny-all with non-empty allowlists rejected for deterministic in-process runs, while D-046 remains open for post-M1 positive CIDR egress enforcement. D-019 is closed by ADR-0055; D-020 remains a non-blocking post-M1 embedded-API seam. D-056 is closed by ADR-0056: main-branch protection requires the M1 gates for PR merges, while `feat/**` push CI stays advisory. D-061 is the sole open M1 decision: whether to authorize a maintained YAML 1.2 parser dependency or narrow the accepted registry format.
-
-**DoD / pass-fail definition:**
-
-- Pass if a fresh Codex session can read `README.md`, `AGENTS.md`, `PLAN.md`, `PROTOCOL.md`, `SECURITY.md`, `TESTING.md`, the Loop Agent V-Spec and the M0 ADR entries in `docs/adr/ADR-LOG.md`, then create the M1 implementation PR without stopping for architecture questions.
-- Pass if the repo contains the M0 scaffold, placeholder crates compile, CI runs green on Linux + macOS + Windows across the mandatory M0 gates (`cargo fmt --check`, `cargo clippy`, `cargo nextest run`, `cargo audit`/`cargo deny`, `lychee` docs link-check + `pnpm run docs:render-check`), and the D-015 fixture suite follows the contract in `TESTING.md` and the M0 scaffold includes checked-in expected event streams.
-- Fail if Codex must choose protocol transport, script schema, CLI shape, sandbox depth, crate layout, D-015 fixture strategy, fixture discovery/stub-model activation, predefined-command registry trust boundary, coverage or invocation contract.
+**DoD:** the scaffold compiles on Linux, macOS, and Windows; its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
 
 ### M1 — Loop Agent MVP (standalone CLI)
 
