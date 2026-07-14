@@ -147,154 +147,120 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
 
-    def test_rejects_unknown_config_key(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/config.toml",
-            "\n[sandbox_workspace_write]",
-            "\nunknown_key = true\n\n[sandbox_workspace_write]",
-        )
+    def test_rejects_harness_text_drift(self) -> None:
+        cases = [
+            (
+                "unknown config key",
+                ".codex/config.toml",
+                "\n[sandbox_workspace_write]",
+                "\nunknown_key = true\n\n[sandbox_workspace_write]",
+                ".codex/config.toml: unknown root key 'unknown_key'",
+            ),
+            (
+                "disabled network",
+                ".codex/config.toml",
+                "network_access = true",
+                "network_access = false",
+                ".codex/config.toml: sandbox_workspace_write.network_access must be true",
+            ),
+            (
+                "non-boolean network",
+                ".codex/config.toml",
+                "network_access = true",
+                'network_access = "true"',
+                ".codex/config.toml: sandbox_workspace_write.network_access must be true",
+            ),
+            (
+                "agent name",
+                ".codex/agents/docs-scout.toml",
+                'name = "docs_scout"',
+                'name = "wrong_name"',
+                ".codex/agents/docs-scout.toml: name must be 'docs_scout'",
+            ),
+            (
+                "unknown agent key",
+                ".codex/agents/repo-mapper.toml",
+                'sandbox_mode = "read-only"',
+                'sandbox_mode = "read-only"\nunknown_key = "drift"',
+                ".codex/agents/repo-mapper.toml: unknown key 'unknown_key'",
+            ),
+            (
+                "skill name",
+                ".agents/skills/tdd/SKILL.md",
+                "name: tdd",
+                "name: test_driven",
+                ".agents/skills/tdd/SKILL.md: name must be 'tdd'",
+            ),
+            (
+                "skill rules reference",
+                ".agents/skills/tdd/SKILL.md",
+                "AGENTS.md",
+                "RULES.md",
+                ".agents/skills/tdd/SKILL.md: must reference AGENTS.md or canonical repo rules",
+            ),
+            (
+                "git Windows CI guidance",
+                ".agents/skills/git/SKILL.md",
+                "gh pr checks",
+                "gh checks",
+                ".agents/skills/git/SKILL.md: git skill must direct Windows coverage to CI with gh",
+            ),
+            (
+                "validator Windows CI guidance",
+                ".codex/agents/pr-validator.toml",
+                "CI-only",
+                "local-only",
+                ".codex/agents/pr-validator.toml: pr_validator must direct Windows coverage to CI with gh",
+            ),
+            (
+                "validator gate reference",
+                ".codex/agents/pr-validator.toml",
+                "TESTING.md",
+                "GATES.md",
+                ".codex/agents/pr-validator.toml: pr_validator must reference TESTING.md",
+            ),
+        ]
 
-        self.assertIn(".codex/config.toml: unknown root key 'unknown_key'", errors)
+        for name, path, old, new, expected in cases:
+            with self.subTest(name=name):
+                self.assertIn(expected, validate_text_replacement(path, old, new))
 
-    def test_rejects_disabled_network_access(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/config.toml", "network_access = true", "network_access = false"
-        )
+    def test_rejects_hook_drift(self) -> None:
+        cases = [
+            (
+                "unknown key",
+                "entry",
+                "extra",
+                True,
+                ".codex/hooks.json: hooks.PreToolUse[0]: unknown key 'extra'",
+            ),
+            (
+                "missing script",
+                "hook",
+                "command",
+                'python ".codex/hooks/missing.py"',
+                ".codex/hooks.json: hook command references missing script .codex/hooks/missing.py",
+            ),
+            (
+                "POSIX shell",
+                "hook",
+                "command",
+                'sh -c \'exec python "$1"\' sh ".codex/hooks/pre_tool_use_guard.py"',
+                ".codex/hooks.json: hook command must not require a POSIX shell",
+            ),
+        ]
 
-        self.assertIn(
-            ".codex/config.toml: sandbox_workspace_write.network_access must be true",
-            errors,
-        )
+        for name, target, key, value, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                write_valid_harness(root)
+                hooks_path = root / ".codex" / "hooks.json"
+                payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+                entry = payload["hooks"]["PreToolUse"][0]
+                (entry if target == "entry" else entry["hooks"][0])[key] = value
+                hooks_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    def test_rejects_non_boolean_network_access(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/config.toml", "network_access = true", 'network_access = "true"'
-        )
-
-        self.assertIn(
-            ".codex/config.toml: sandbox_workspace_write.network_access must be true",
-            errors,
-        )
-
-    def test_rejects_unknown_hook_key(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            hooks_path = root / ".codex" / "hooks.json"
-            payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-            payload["hooks"]["PreToolUse"][0]["extra"] = True
-            hooks_path.write_text(json.dumps(payload), encoding="utf-8")
-
-            errors = validator.validate_repo(root)
-
-        self.assertIn(".codex/hooks.json: hooks.PreToolUse[0]: unknown key 'extra'", errors)
-
-    def test_rejects_missing_hook_script(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            hooks_path = root / ".codex" / "hooks.json"
-            payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-            payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = (
-                'python ".codex/hooks/missing.py"'
-            )
-            hooks_path.write_text(json.dumps(payload), encoding="utf-8")
-
-            errors = validator.validate_repo(root)
-
-        self.assertIn(
-            ".codex/hooks.json: hook command references missing script .codex/hooks/missing.py",
-            errors,
-        )
-
-    def test_rejects_posix_shell_hook_launcher(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            write_valid_harness(root)
-            hooks_path = root / ".codex" / "hooks.json"
-            payload = json.loads(hooks_path.read_text(encoding="utf-8"))
-            payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = (
-                'sh -c \'exec python "$1"\' sh ".codex/hooks/pre_tool_use_guard.py"'
-            )
-            hooks_path.write_text(json.dumps(payload), encoding="utf-8")
-
-            errors = validator.validate_repo(root)
-
-        self.assertIn(
-            ".codex/hooks.json: hook command must not require a POSIX shell",
-            errors,
-        )
-
-    def test_rejects_agent_name_file_drift(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/agents/docs-scout.toml",
-            'name = "docs_scout"',
-            'name = "wrong_name"',
-        )
-
-        self.assertIn(
-            ".codex/agents/docs-scout.toml: name must be 'docs_scout'",
-            errors,
-        )
-
-    def test_rejects_unknown_agent_key(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/agents/repo-mapper.toml",
-            'sandbox_mode = "read-only"',
-            'sandbox_mode = "read-only"\nunknown_key = "drift"',
-        )
-
-        self.assertIn(
-            ".codex/agents/repo-mapper.toml: unknown key 'unknown_key'",
-            errors,
-        )
-
-    def test_rejects_skill_name_file_drift(self) -> None:
-        errors = validate_text_replacement(
-            ".agents/skills/tdd/SKILL.md", "name: tdd", "name: test_driven"
-        )
-
-        self.assertIn(".agents/skills/tdd/SKILL.md: name must be 'tdd'", errors)
-
-    def test_rejects_skill_without_canonical_rules_reference(self) -> None:
-        errors = validate_text_replacement(
-            ".agents/skills/tdd/SKILL.md", "AGENTS.md", "RULES.md"
-        )
-
-        self.assertIn(
-            ".agents/skills/tdd/SKILL.md: must reference AGENTS.md or canonical repo rules",
-            errors,
-        )
-
-    def test_rejects_git_skill_without_windows_ci_coverage_guidance(self) -> None:
-        errors = validate_text_replacement(
-            ".agents/skills/git/SKILL.md", "gh pr checks", "gh checks"
-        )
-
-        self.assertIn(
-            ".agents/skills/git/SKILL.md: git skill must direct Windows coverage to CI with gh",
-            errors,
-        )
-
-    def test_rejects_pr_validator_without_windows_ci_coverage_guidance(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/agents/pr-validator.toml", "CI-only", "local-only"
-        )
-
-        self.assertIn(
-            ".codex/agents/pr-validator.toml: pr_validator must direct Windows coverage to CI with gh",
-            errors,
-        )
-
-    def test_rejects_pr_validator_without_canonical_gate_reference(self) -> None:
-        errors = validate_text_replacement(
-            ".codex/agents/pr-validator.toml", "TESTING.md", "GATES.md"
-        )
-
-        self.assertIn(
-            ".codex/agents/pr-validator.toml: pr_validator must reference TESTING.md",
-            errors,
-        )
+                self.assertIn(expected, validator.validate_repo(root))
 
     def test_pre_tool_guard_accepts_command_and_cmd_envelopes(self) -> None:
         for key in ("command", "cmd"):

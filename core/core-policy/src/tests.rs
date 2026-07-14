@@ -1067,141 +1067,101 @@ fn network_allow_helpers_cover_cidr_matching_edges() {
 }
 
 #[test]
-fn expected_decision_can_represent_write_rename_without_path() {
-    let expected = denied_decision(
-        DeniedAttempt::Write {
-            from_path: Some("workspace/a.txt".to_owned()),
-            operation: "rename".to_owned(),
-            path: None,
-            to_path: Some("workspace/b.txt".to_owned()),
-            tool_id: "rename-tool".to_owned(),
-        },
-        DenyReasonCode::WriteDenied,
-    );
+fn expected_decision_supports_rename_without_path() {
+    let cases = [
+        (
+            DeniedAttempt::Write {
+                from_path: Some("workspace/a.txt".to_owned()),
+                operation: "rename".to_owned(),
+                path: None,
+                to_path: Some("workspace/b.txt".to_owned()),
+                tool_id: "rename-tool".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "workspace/a.txt",
+            "workspace/b.txt",
+        ),
+        (
+            DeniedAttempt::ProtectedPath {
+                from_path: Some("workspace/.env".to_owned()),
+                operation: "rename".to_owned(),
+                path: None,
+                to_path: Some("workspace/.env.bak".to_owned()),
+                tool_id: "rename-tool".to_owned(),
+            },
+            DenyReasonCode::ProtectedPathDenied,
+            "workspace/.env",
+            "workspace/.env.bak",
+        ),
+    ];
 
-    expected.validate().expect("rename shape is valid");
-    let json = canonical_artifact_json(&expected).expect("canonical JSON");
+    for (attempt, reason, from_path, to_path) in cases {
+        let expected = denied_decision(attempt, reason);
+        expected.validate().expect("rename shape is valid");
+        let json = canonical_artifact_json(&expected).expect("canonical JSON");
 
-    assert!(json.contains("\"from_path\":\"workspace/a.txt\""));
-    assert!(json.contains("\"to_path\":\"workspace/b.txt\""));
-    assert!(!json.contains("\"path\""));
-    serde_json::from_str::<ExpectedDecision>(&json).expect("rename shape deserializes");
+        assert!(json.contains(&format!("\"from_path\":\"{from_path}\"")));
+        assert!(json.contains(&format!("\"to_path\":\"{to_path}\"")));
+        assert!(!json.contains("\"path\""));
+        serde_json::from_str::<ExpectedDecision>(&json).expect("rename shape deserializes");
+    }
 }
 
 #[test]
-fn expected_decision_can_represent_protected_path_rename_without_path() {
-    let expected = denied_decision(
-        DeniedAttempt::ProtectedPath {
-            from_path: Some("workspace/.env".to_owned()),
-            operation: "rename".to_owned(),
-            path: None,
-            to_path: Some("workspace/.env.bak".to_owned()),
-            tool_id: "rename-tool".to_owned(),
-        },
-        DenyReasonCode::ProtectedPathDenied,
-    );
+fn expected_decision_rejects_invalid_operation_shapes() {
+    let cases = [
+        (
+            DeniedAttempt::Write {
+                from_path: None,
+                operation: "create".to_owned(),
+                path: None,
+                to_path: None,
+                tool_id: "write-tool".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "write create attempts must include path and omit from_path/to_path",
+        ),
+        (
+            DeniedAttempt::Write {
+                from_path: None,
+                operation: "delete".to_owned(),
+                path: Some("../outside.txt".to_owned()),
+                to_path: None,
+                tool_id: "write-tool".to_owned(),
+            },
+            DenyReasonCode::WriteDenied,
+            "write delete attempts use unsupported operation; expected one of write, create, rename",
+        ),
+        (
+            DeniedAttempt::ProtectedPath {
+                from_path: None,
+                operation: "chmod".to_owned(),
+                path: Some(".env".to_owned()),
+                to_path: None,
+                tool_id: "protected-tool".to_owned(),
+            },
+            DenyReasonCode::ProtectedPathDenied,
+            "protected_path chmod attempts use unsupported operation; expected one of read, write, create, execute, rename",
+        ),
+        (
+            DeniedAttempt::ProtectedPath {
+                from_path: Some("workspace/.env".to_owned()),
+                operation: "rename".to_owned(),
+                path: None,
+                to_path: None,
+                tool_id: "rename-tool".to_owned(),
+            },
+            DenyReasonCode::ProtectedPathDenied,
+            "protected_path rename attempts must include from_path and to_path and omit path",
+        ),
+    ];
 
-    expected
-        .validate()
-        .expect("protected rename shape is valid");
-    let json = canonical_artifact_json(&expected).expect("canonical JSON");
-
-    assert!(json.contains("\"from_path\":\"workspace/.env\""));
-    assert!(json.contains("\"to_path\":\"workspace/.env.bak\""));
-    assert!(!json.contains("\"path\""));
-    serde_json::from_str::<ExpectedDecision>(&json).expect("protected rename shape deserializes");
-}
-
-#[test]
-fn expected_decision_rejects_write_create_without_path() {
-    let expected = denied_decision(
-        DeniedAttempt::Write {
-            from_path: None,
-            operation: "create".to_owned(),
-            path: None,
-            to_path: None,
-            tool_id: "write-tool".to_owned(),
-        },
-        DenyReasonCode::WriteDenied,
-    );
-
-    let err = expected
-        .validate()
-        .expect_err("create attempts must include path");
-
-    assert_eq!(
-        err.to_string(),
-        "write create attempts must include path and omit from_path/to_path"
-    );
-}
-
-#[test]
-fn expected_decision_rejects_unsupported_write_operation() {
-    let expected = denied_decision(
-        DeniedAttempt::Write {
-            from_path: None,
-            operation: "delete".to_owned(),
-            path: Some("../outside.txt".to_owned()),
-            to_path: None,
-            tool_id: "write-tool".to_owned(),
-        },
-        DenyReasonCode::WriteDenied,
-    );
-
-    let err = expected
-        .validate()
-        .expect_err("delete is not a supported write operation");
-
-    assert_eq!(
-        err.to_string(),
-        "write delete attempts use unsupported operation; expected one of write, create, rename"
-    );
-}
-
-#[test]
-fn expected_decision_rejects_unsupported_protected_path_operation() {
-    let expected = denied_decision(
-        DeniedAttempt::ProtectedPath {
-            from_path: None,
-            operation: "chmod".to_owned(),
-            path: Some(".env".to_owned()),
-            to_path: None,
-            tool_id: "protected-tool".to_owned(),
-        },
-        DenyReasonCode::ProtectedPathDenied,
-    );
-
-    let err = expected
-        .validate()
-        .expect_err("chmod is not a supported protected-path operation");
-
-    assert_eq!(
-            err.to_string(),
-            "protected_path chmod attempts use unsupported operation; expected one of read, write, create, execute, rename"
-        );
-}
-
-#[test]
-fn expected_decision_rejects_protected_path_rename_without_endpoints() {
-    let expected = denied_decision(
-        DeniedAttempt::ProtectedPath {
-            from_path: Some("workspace/.env".to_owned()),
-            operation: "rename".to_owned(),
-            path: None,
-            to_path: None,
-            tool_id: "rename-tool".to_owned(),
-        },
-        DenyReasonCode::ProtectedPathDenied,
-    );
-
-    let err = expected
-        .validate()
-        .expect_err("rename attempts must include both endpoints");
-
-    assert_eq!(
-        err.to_string(),
-        "protected_path rename attempts must include from_path and to_path and omit path"
-    );
+    for (attempt, reason, message) in cases {
+        let error = denied_decision(attempt, reason)
+            .validate()
+            .expect_err("invalid operation shape must fail");
+        assert_eq!(error.to_string(), message);
+    }
 }
 
 #[test]
