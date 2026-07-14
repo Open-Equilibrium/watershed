@@ -89,12 +89,12 @@ fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
     assert!(registry.instruction_block("InspectInput").is_some());
     assert!(registry.connection_block("InspectData").is_some());
 
-    let canonical =
-        canonical_resolved_registry_json(&registry).expect("resolved registry serializes");
-    assert!(canonical.ends_with('\n'));
+    let canonical = registry
+        .canonical_json()
+        .expect("resolved registry serializes");
     assert_eq!(
         canonical,
-        canonical_resolved_registry_json(&registry).expect("canonical output repeats")
+        registry.canonical_json().expect("canonical output repeats")
     );
     assert!(canonical.contains("\"hello-loop\""));
     assert!(canonical.contains("\"write-summary\""));

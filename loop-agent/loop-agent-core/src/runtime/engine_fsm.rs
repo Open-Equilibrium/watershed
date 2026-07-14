@@ -186,7 +186,6 @@ impl<'a> RuntimeEventBuilder<'a> {
             event.loop_id = Some(invocation.loop_id.clone());
             event.parent_loop_id = invocation.parent_loop_id.clone();
         }
-        event.normalize_strings_to_nfc();
         let event_bytes = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
         })?;

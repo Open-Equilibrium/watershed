@@ -1,9 +1,4 @@
 impl ResolvedRegistry {
-    /// Loads and validates a registry root with M1 read caps.
-    pub fn load(root: &Path) -> Result<Self, RegistryError> {
-        Self::load_with_limits(root, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES)
-    }
-
     fn load_with_limits(
         root: &Path,
         max_file_bytes: u64,

@@ -1,6 +1,10 @@
 /// Loads and validates a registry root from disk.
 pub fn load_registry_root(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
-    ResolvedRegistry::load(root.as_ref())
+    ResolvedRegistry::load_with_limits(
+        root.as_ref(),
+        MAX_REGISTRY_FILE_BYTES,
+        MAX_REGISTRY_TOTAL_BYTES,
+    )
 }
 
 /// Parses one registry block from a named YAML source.
@@ -13,15 +17,6 @@ pub fn parse_registry_block(
     validate_registry_block_semantics(&block)
         .map_err(|error| registry_source_error(source_name, error.into()))?;
     Ok(block)
-}
-
-/// Serializes a resolved registry as canonical JSON plus a trailing newline.
-pub fn canonical_resolved_registry_json(
-    registry: &ResolvedRegistry,
-) -> Result<String, RegistryError> {
-    let mut out = registry.canonical_json()?;
-    out.push('\n');
-    Ok(out)
 }
 
 fn read_registry_file_to_string(

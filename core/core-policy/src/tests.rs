@@ -14,14 +14,16 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
         )
         .expect("fixture registry loads");
 
-        let artifacts = compile_policy_artifacts(fixture, &registry, fixture)
-            .expect("policy artifacts compile");
-        assert_eq!(artifacts.len(), 2);
-        for (artifact, file_name) in artifacts.iter().zip([
-            "linux-landlock-seccomp.policy.json",
-            "macos-seatbelt.policy.json",
-        ]) {
-            let actual = canonical_artifact_json(artifact).expect("artifact serializes");
+        for (target, file_name) in [
+            (
+                PolicyTarget::LinuxLandlockSeccomp,
+                "linux-landlock-seccomp.policy.json",
+            ),
+            (PolicyTarget::MacosSeatbelt, "macos-seatbelt.policy.json"),
+        ] {
+            let artifact = compile_policy_artifact(fixture, &registry, fixture, target)
+                .expect("policy artifact compiles");
+            let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
             let expected = fs::read_to_string(
                 Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join("fixtures")
@@ -33,7 +35,7 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
                 serde_json::from_str(&expected).expect("expected policy fixture parses");
 
             assert_eq!(actual, expected, "{fixture} {file_name}");
-            assert_eq!(*artifact, expected_artifact, "{fixture} {file_name}");
+            assert_eq!(artifact, expected_artifact, "{fixture} {file_name}");
         }
     }
 }

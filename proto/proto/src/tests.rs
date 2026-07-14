@@ -89,7 +89,7 @@ fn canonical_json_normalizes_strings_to_nfc() {
 }
 
 #[test]
-fn event_envelope_build_normalizes_string_values_to_nfc() {
+fn canonical_event_output_normalizes_all_string_values_to_nfc() {
     let mut event = EventEnvelope::new(
         "evt-e\u{301}",
         EventType::LoopStarted,
@@ -104,13 +104,14 @@ fn event_envelope_build_normalizes_string_values_to_nfc() {
     );
     event.loop_id = Some("loop-e\u{301}".to_owned());
     event.correlation_id = Some("corr-e\u{301}".to_owned());
-    event.normalize_strings_to_nfc();
+    let canonical = event.canonical_jsonl().expect("event canonicalizes");
+    let event: serde_json::Value = serde_json::from_str(&canonical).expect("event parses");
 
-    assert_eq!(event.event_id, "evt-é");
-    assert_eq!(event.loop_id.as_deref(), Some("loop-é"));
-    assert_eq!(event.correlation_id.as_deref(), Some("corr-é"));
-    assert_eq!(event.payload["loop_name"], json!("Café"));
-    assert_eq!(event.payload["nested"][0], json!("é"));
+    assert_eq!(event["event_id"], "evt-é");
+    assert_eq!(event["loop_id"], "loop-é");
+    assert_eq!(event["correlation_id"], "corr-é");
+    assert_eq!(event["payload"]["loop_name"], json!("Café"));
+    assert_eq!(event["payload"]["nested"][0], json!("é"));
 }
 
 #[test]

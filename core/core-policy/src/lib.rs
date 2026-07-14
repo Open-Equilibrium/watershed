@@ -247,28 +247,6 @@ impl std::error::Error for PolicyCompileError {
     }
 }
 
-/// Compiles policy artifacts for every M1 sandbox target.
-pub fn compile_policy_artifacts(
-    fixture_name: &str,
-    registry: &core_script::ResolvedRegistry,
-    loop_ref: &str,
-) -> Result<Vec<PolicyArtifact>, PolicyCompileError> {
-    Ok(vec![
-        compile_policy_artifact(
-            fixture_name,
-            registry,
-            loop_ref,
-            PolicyTarget::LinuxLandlockSeccomp,
-        )?,
-        compile_policy_artifact(
-            fixture_name,
-            registry,
-            loop_ref,
-            PolicyTarget::MacosSeatbelt,
-        )?,
-    ])
-}
-
 /// Compiles a policy artifact for one sandbox target.
 pub fn compile_policy_artifact(
     fixture_name: &str,

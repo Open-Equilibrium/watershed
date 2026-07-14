@@ -74,19 +74,6 @@ impl EventEnvelope {
         }
     }
 
-    /// Normalizes envelope string fields and payload string values to Unicode NFC.
-    pub fn normalize_strings_to_nfc(&mut self) {
-        normalize_optional_string_to_nfc(&mut self.correlation_id);
-        self.event_id = nfc_string(std::mem::take(&mut self.event_id));
-        normalize_optional_string_to_nfc(&mut self.loop_id);
-        normalize_optional_string_to_nfc(&mut self.parent_loop_id);
-        self.payload = nfc_json_string_values(std::mem::take(&mut self.payload));
-        self.protocol_version = nfc_string(std::mem::take(&mut self.protocol_version));
-        self.session_id = nfc_string(std::mem::take(&mut self.session_id));
-        self.source = nfc_string(std::mem::take(&mut self.source));
-        self.timestamp = nfc_string(std::mem::take(&mut self.timestamp));
-    }
-
     /// Serializes the envelope as canonical JSON plus a trailing newline.
     pub fn canonical_jsonl(&self) -> Result<String, CanonicalJsonError> {
         if !self.payload.is_object() {
@@ -102,12 +89,6 @@ impl EventEnvelope {
         let mut out = canonical_json(&value)?;
         out.push('\n');
         Ok(out)
-    }
-}
-
-fn normalize_optional_string_to_nfc(value: &mut Option<String>) {
-    if let Some(current) = value {
-        *current = nfc_string(std::mem::take(current));
     }
 }
 
