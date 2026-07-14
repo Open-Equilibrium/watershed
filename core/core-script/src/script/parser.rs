@@ -1408,13 +1408,16 @@ fn list_objects(
                     items: Vec::new(),
                 });
             }
-        } else if indent == shape.property_indent + 2
-            && trimmed.starts_with("- ")
-            && pending_list_property.is_some()
-        {
-            let pending = pending_list_property
-                .as_mut()
-                .expect("checked pending list property");
+        } else if indent == shape.property_indent + 2 && trimmed.starts_with("- ") {
+            let Some(pending) = pending_list_property.as_mut() else {
+                return Err(parse_error(
+                    source_name,
+                    format!(
+                        "{}.{} uses unsupported indentation",
+                        shape.section, shape.field
+                    ),
+                ));
+            };
             let item = trimmed.trim_start_matches("- ").trim();
             push_inline_list_item(source_name, &pending.field, &mut pending.items, item)?;
         } else {

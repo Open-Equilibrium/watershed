@@ -44,7 +44,7 @@ enum SessionWriterCommand {
         canonical_jsonl: String,
         context_manifests: Option<Vec<ContextManifest>>,
         measurement_started_at: Option<Instant>,
-        event: EventEnvelope,
+        event: Box<EventEnvelope>,
     },
     Shutdown {
         acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
@@ -309,7 +309,7 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
                 canonical_jsonl: canonical_jsonl.to_owned(),
                 context_manifests: context_manifests.map(<[ContextManifest]>::to_vec),
                 measurement_started_at,
-                event: event.clone(),
+                event: Box::new(event.clone()),
             })
             .map_err(|_| event_writer_failure(writer_channel_closed_error()))?;
         let outcome = response

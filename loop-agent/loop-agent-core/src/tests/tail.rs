@@ -724,6 +724,6 @@ fn write_tail_bytes_reports_non_broken_pipe_writer_errors() {
     assert!(matches!(
         err,
         RuntimeError::Io { path, source }
-            if path == PathBuf::from("<tail>") && source.kind() == io::ErrorKind::Other
+            if path == Path::new("<tail>") && source.kind() == io::ErrorKind::Other
     ));
 }

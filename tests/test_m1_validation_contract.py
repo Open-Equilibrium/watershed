@@ -1,5 +1,6 @@
 import re
 import subprocess
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -80,6 +81,24 @@ class M1ValidationContractTest(unittest.TestCase):
 
         self.assertIn("pull_request:\n    branches: [main]", workflow)
         self.assertIn('push:\n    branches: [main, "feat/**"]', workflow)
+
+    def test_rust_1_97_toolchain_is_pinned_across_active_config(self) -> None:
+        toolchain = tomllib.loads(
+            (ROOT / "rust-toolchain.toml").read_text(encoding="utf-8")
+        )["toolchain"]
+        manifest = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(toolchain["channel"], "1.97.0")
+        self.assertEqual(toolchain["profile"], "minimal")
+        self.assertCountEqual(
+            toolchain["components"],
+            ["rustfmt", "clippy", "llvm-tools-preview"],
+        )
+        self.assertEqual(manifest["workspace"]["package"]["rust-version"], "1.97")
+        self.assertRegex(workflow, r"rustup toolchain install 1\.97\.0(?:\s|$)")
 
 
 if __name__ == "__main__":

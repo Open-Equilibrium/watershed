@@ -2,7 +2,7 @@
 fn runtime_error_display_source_and_exit_codes_cover_variants() {
     let io_error = RuntimeError::Io {
         path: PathBuf::from("session.jsonl"),
-        source: io::Error::new(io::ErrorKind::Other, "disk full"),
+        source: io::Error::other("disk full"),
     };
     assert_eq!(io_error.to_string(), "session.jsonl: disk full");
     assert_eq!(io_error.exit_code(), 65);

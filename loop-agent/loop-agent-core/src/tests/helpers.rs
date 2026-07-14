@@ -610,7 +610,7 @@ struct ErrorWriter;
 
 impl Write for ErrorWriter {
     fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-        Err(io::Error::new(io::ErrorKind::Other, "writer failed"))
+        Err(io::Error::other("writer failed"))
     }
 
     fn flush(&mut self) -> io::Result<()> {

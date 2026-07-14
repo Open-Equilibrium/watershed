@@ -489,10 +489,7 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        self.stream_bytes = self
-            .stream_bytes
-            .checked_add(canonical_bytes)
-            .unwrap_or(usize::MAX);
+        self.stream_bytes = self.stream_bytes.saturating_add(canonical_bytes);
         if self.stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
             return Err(RuntimeError::Protocol(format!(
                 "{} event stream budget exceeded at line {line_number}: {} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
@@ -1409,5 +1406,5 @@ fn days_in_month(year: u16, month: u16) -> u16 {
 }
 
 fn is_leap_year(year: u16) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }

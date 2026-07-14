@@ -27,7 +27,7 @@ jobs:
 
       - name: Install Rust
         run: >-
-          rustup toolchain install 1.81.0
+          rustup toolchain install 1.97.0
           --profile minimal
           --component clippy
           --component rustfmt

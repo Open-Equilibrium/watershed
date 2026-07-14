@@ -216,10 +216,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         let event_bytes = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
         })?;
-        let next_stream_bytes = self
-            .stream_bytes
-            .checked_add(event_bytes.len())
-            .unwrap_or(usize::MAX);
+        let next_stream_bytes = self.stream_bytes.saturating_add(event_bytes.len());
         if next_stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
             return Err(RuntimeError::Protocol(format!(
                 "event stream budget exceeded: next event would use {next_stream_bytes} bytes, max {MAX_LOOP_EVENT_STREAM_BYTES}"
