@@ -371,7 +371,6 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         LoopExecutionOptions::new(
             EventClock::fixed_fixture(),
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
         ),
     )
     .expect("budget failure becomes a deterministic failed stream");
@@ -413,7 +412,6 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
         LoopExecutionOptions::new(
             EventClock::fixed_fixture(),
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
         ),
     )
     .expect("deterministic replay plans");

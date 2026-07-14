@@ -3,7 +3,6 @@ fn execute_own_script(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
-    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
     if let Some(write) = plan_own_script(tool, protected_path_match_mode, policy)? {
         write_script_output(
@@ -12,7 +11,6 @@ fn execute_own_script(
             &write.contents,
             protected_path_match_mode,
             policy,
-            side_effect_recorder,
         )?;
     }
     Ok(())
@@ -191,7 +189,6 @@ fn write_script_output(
     contents: &[u8],
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
-    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
     ensure_resolved_script_target_not_protected(
         workspace,
@@ -199,8 +196,8 @@ fn write_script_output(
         protected_path_match_mode,
         policy,
     )?;
-    let path = ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
-    replace_script_output_atomically(workspace, target, &path, contents, side_effect_recorder)
+    let path = ensure_real_workspace_write_path(workspace, target)?;
+    replace_script_output_atomically(workspace, target, &path, contents)
 }
 
 fn preflight_own_script_outputs(
@@ -227,9 +224,8 @@ fn replace_script_output_atomically(
     target: &str,
     path: &Path,
     contents: &[u8],
-    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<(), RuntimeError> {
-    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    ensure_real_workspace_write_path(workspace, target)?;
     let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
     let (temp_path, mut temp_file) =
         create_replacement_temp(path, Some(core_policy::DenyReasonCode::WriteDenied))?;
@@ -245,20 +241,19 @@ fn replace_script_output_atomically(
     }
     drop(temp_file);
 
-    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    ensure_real_workspace_write_path(workspace, target)?;
     if initial_leaf_existed {
         if ensure_writable_regular_leaf(path)? {
             return replace_existing_leaf_from_temp(
                 path,
                 &temp_path,
-                side_effect_recorder,
                 Some(core_policy::DenyReasonCode::WriteDenied),
             );
         }
     } else {
         ensure_new_leaf_available(path)?;
     }
-    ensure_real_workspace_write_path(workspace, target, side_effect_recorder)?;
+    ensure_real_workspace_write_path(workspace, target)?;
     if let Err(source) = fs::rename(&temp_path, path) {
         let _ = fs::remove_file(&temp_path);
         return Err(RuntimeError::Io {
@@ -266,7 +261,6 @@ fn replace_script_output_atomically(
             source,
         });
     }
-    side_effect_recorder.mark_applied();
     Ok(())
 }
 
@@ -274,7 +268,6 @@ fn replace_script_output_atomically(
 fn replace_existing_leaf_from_temp(
     path: &Path,
     temp_path: &Path,
-    side_effect_recorder: SideEffectRecorder<'_>,
     _denied_reason: Option<core_policy::DenyReasonCode>,
 ) -> Result<(), RuntimeError> {
     if let Err(source) = fs::rename(temp_path, path) {
@@ -284,7 +277,6 @@ fn replace_existing_leaf_from_temp(
             source,
         });
     }
-    side_effect_recorder.mark_applied();
     Ok(())
 }
 
@@ -292,7 +284,6 @@ fn replace_existing_leaf_from_temp(
 fn replace_existing_leaf_from_temp(
     path: &Path,
     temp_path: &Path,
-    side_effect_recorder: SideEffectRecorder<'_>,
     denied_reason: Option<core_policy::DenyReasonCode>,
 ) -> Result<(), RuntimeError> {
     let backup_path = create_replacement_backup_path(path, denied_reason)?;
@@ -303,9 +294,6 @@ fn replace_existing_leaf_from_temp(
             source,
         });
     }
-    // WHY: once the original target is moved aside, a later failure must not
-    // erase the session attempt that explains the workspace change.
-    side_effect_recorder.mark_applied();
     if let Err(source) = fs::rename(temp_path, path) {
         if fs::rename(&backup_path, path).is_ok() {
             let _ = fs::remove_file(temp_path);
@@ -519,16 +507,13 @@ fn resolved_workspace_scoped_target(
 fn ensure_real_workspace_write_path(
     workspace: &Path,
     target: &str,
-    side_effect_recorder: SideEffectRecorder<'_>,
 ) -> Result<PathBuf, RuntimeError> {
     let mut parts = target.split('/').peekable();
     let mut path = workspace.to_path_buf();
     while let Some(part) = parts.next() {
         path.push(part);
-        if parts.peek().is_some() && ensure_created_script_real_directory(&path)? {
-            // WHY: a newly created parent directory is already a durable
-            // workspace mutation even if the later leaf write fails.
-            side_effect_recorder.mark_applied();
+        if parts.peek().is_some() {
+            ensure_created_script_real_directory(&path)?;
         }
     }
     Ok(path)

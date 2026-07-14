@@ -36,14 +36,6 @@ fn every_fixture_workspace_has_config_and_expected_stream() {
 }
 
 #[test]
-fn golden_streams_are_valid_protocol_jsonl() {
-    for stream_path in expected_streams() {
-        let text = fs::read_to_string(&stream_path).expect("stream is readable");
-        validate_protocol_jsonl_text(&stream_path, &text).unwrap_or_else(|err| panic!("{err}"));
-    }
-}
-
-#[test]
 fn smoke_loop_stream_matches_m0_order_contract() {
     let stream = load_stream("smoke-loop", "smoke-loop.jsonl");
     let event_types = event_types(&stream);
@@ -290,13 +282,9 @@ fn load_stream(fixture: &str, name: &str) -> Vec<EventEnvelope> {
 }
 
 fn load_stream_from_path(path: &Path) -> Vec<EventEnvelope> {
-    fs::read_to_string(path)
-        .expect("stream readable")
-        .lines()
-        .map(|line| {
-            serde_json::from_str(line).unwrap_or_else(|err| panic!("{}: {err}", path.display()))
-        })
-        .collect()
+    let text = fs::read_to_string(path).expect("stream readable");
+    loop_agent_core::validate_protocol_jsonl_text(path, &text)
+        .unwrap_or_else(|err| panic!("{}: {err}", path.display()))
 }
 
 fn event_types(stream: &[EventEnvelope]) -> Vec<EventType> {
@@ -581,10 +569,4 @@ fn assert_payload_eq(event: &EventEnvelope, field: &str, expected: serde_json::V
         event.event_type.as_str(),
         event.sequence
     );
-}
-
-fn validate_protocol_jsonl_text(path: &Path, text: &str) -> Result<(), String> {
-    loop_agent_core::validate_protocol_jsonl_text(path, text)
-        .map(|_| ())
-        .map_err(|err| err.to_string())
 }

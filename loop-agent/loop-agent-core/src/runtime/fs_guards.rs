@@ -192,7 +192,7 @@ fn replace_existing_file(
 
     ensure_parent_real_directory(path)?;
     ensure_non_hardlinked_real_file(path)?;
-    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
+    replace_existing_leaf_from_temp(path, &temp_path, None)
 }
 
 #[cfg(any(unix, windows))]

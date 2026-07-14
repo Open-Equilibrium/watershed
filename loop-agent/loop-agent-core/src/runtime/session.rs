@@ -64,7 +64,6 @@ fn run_loop_internal(
         LoopExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
             config.stub_model_fixture_profile,
         ),
     )?;
@@ -83,7 +82,6 @@ fn run_loop_internal(
         LoopExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
             ToolSideEffectMode::ApplyAll,
-            SideEffectRecorder::for_reservation(&reservation),
             config.stub_model_fixture_profile,
         ),
         Some(&mut serial_writer),
@@ -91,7 +89,6 @@ fn run_loop_internal(
     let finish_result = serial_writer.finish();
     let runtime = runtime_result?;
     finish_result?;
-    reservation.mark_side_effects_applied();
     let runtime_failed = runtime.failed;
     if !runtime_failed
         && (runtime.events != planned_runtime.events

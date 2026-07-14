@@ -4,7 +4,6 @@ fn emit_tool(
     policy: RuntimeToolPolicy<'_>,
     invocation: &LoopInvocation,
     side_effect_mode: ToolSideEffectMode,
-    side_effect_recorder: SideEffectRecorder<'_>,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     let planned_progress = tool_dispatch_progress(
@@ -45,10 +44,7 @@ fn emit_tool(
             tool,
             policy.protected_path_match_mode,
             policy.command,
-            ToolDispatchMode::Execute {
-                workspace,
-                side_effect_recorder,
-            },
+            ToolDispatchMode::Execute { workspace },
         ) {
             Ok(progress) => progress,
             Err(err) => {
@@ -91,10 +87,7 @@ enum ToolDispatchMode<'a> {
     Preflight {
         workspace: &'a Path,
     },
-    Execute {
-        workspace: &'a Path,
-        side_effect_recorder: SideEffectRecorder<'a>,
-    },
+    Execute { workspace: &'a Path },
 }
 
 fn tool_dispatch_progress(
@@ -122,16 +115,9 @@ fn tool_dispatch_progress(
                         policy,
                     )?;
                 }
-                ToolDispatchMode::Execute {
-                    workspace,
-                    side_effect_recorder,
-                } => execute_own_script(
-                    workspace,
-                    tool,
-                    protected_path_match_mode,
-                    policy,
-                    side_effect_recorder,
-                )?,
+                ToolDispatchMode::Execute { workspace } => {
+                    execute_own_script(workspace, tool, protected_path_match_mode, policy)?
+                }
             }
             Ok(Some("stub write completed"))
         }

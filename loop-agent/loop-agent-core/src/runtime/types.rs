@@ -208,17 +208,7 @@ pub enum RuntimeError {
 impl RuntimeError {
     /// Returns the process exit code associated with this runtime error.
     pub fn exit_code(&self) -> i32 {
-        match self {
-            Self::Denied { .. }
-            | Self::Protocol(_)
-            | Self::ContextBudgetExceeded { .. }
-            | Self::EventWriter(_)
-            | Self::ActiveSession { .. }
-            | Self::SessionLogExists(_)
-            | Self::TerminalSession(_) => 65,
-            Self::Usage(_) => 64,
-            Self::Io { .. } | Self::Json(_) | Self::Policy(_) | Self::Registry(_) => 65,
-        }
+        if matches!(self, Self::Usage(_)) { 64 } else { 65 }
     }
 }
 

@@ -266,7 +266,7 @@ fn existing_leaf_replacement_restores_original_when_final_rename_fails() {
     fs::write(&path, "old").expect("file written");
 
     assert!(matches!(
-        replace_existing_leaf_from_temp(&path, &missing_temp_path, SideEffectRecorder::none(), None),
+        replace_existing_leaf_from_temp(&path, &missing_temp_path, None),
         Err(RuntimeError::Io { path: failed_path, .. }) if failed_path == path
     ));
     assert_eq!(

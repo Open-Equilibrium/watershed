@@ -348,6 +348,61 @@ fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
     assert!(workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
+#[test]
+fn tool_started_commit_failure_prevents_own_script_side_effect() {
+    struct RejectWriteStart;
+
+    impl RuntimeEventSink for RejectWriteStart {
+        fn measurement_started_at(&self) -> Option<Instant> {
+            None
+        }
+
+        fn commit(
+            &mut self,
+            event: &EventEnvelope,
+            _canonical_jsonl: &str,
+            _context_manifests: Option<&[ContextManifest]>,
+            _measurement_started_at: Option<Instant>,
+        ) -> Result<(), RuntimeError> {
+            if event.event_type == EventType::ToolStarted
+                && event.payload.get("tool_id").and_then(serde_json::Value::as_str)
+                    == Some("write-summary")
+            {
+                return Err(RuntimeError::EventWriter(Box::new(RuntimeError::Protocol(
+                    "injected tool.started commit failure".to_owned(),
+                ))));
+            }
+            Ok(())
+        }
+    }
+
+    let workspace = workspace_copy("hello-loop");
+    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let loop_block = registry
+        .loop_block("hello-loop")
+        .expect("hello loop exists");
+    let err = match execute_loop_with_sink(
+        &workspace,
+        &registry,
+        &policy,
+        loop_block,
+        "commitfail001",
+        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::ApplyAll),
+        Some(&mut RejectWriteStart),
+    ) {
+        Err(err) => err,
+        Ok(_) => panic!("tool.started commit failure must stop dispatch"),
+    };
+
+    assert!(matches!(
+        err,
+        RuntimeError::EventWriter(source)
+            if matches!(source.as_ref(), RuntimeError::Protocol(message)
+                if message.contains("tool.started"))
+    ));
+    assert!(!workspace.join("out/summary.txt").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {

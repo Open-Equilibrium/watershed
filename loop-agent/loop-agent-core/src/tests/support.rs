@@ -11,13 +11,9 @@ use std::{
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-impl<'a> LoopExecutionOptions<'a> {
-    fn new(
-        clock: EventClock,
-        side_effect_mode: ToolSideEffectMode,
-        side_effect_recorder: SideEffectRecorder<'a>,
-    ) -> Self {
-        Self::with_stub_model_fixture_profile(clock, side_effect_mode, side_effect_recorder, true)
+impl LoopExecutionOptions {
+    fn new(clock: EventClock, side_effect_mode: ToolSideEffectMode) -> Self {
+        Self::with_stub_model_fixture_profile(clock, side_effect_mode, true)
     }
 }
 

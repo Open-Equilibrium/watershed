@@ -52,48 +52,22 @@ impl ToolSideEffectMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct SideEffectRecorder<'a> {
-    reservation: Option<&'a SessionReservation>,
-}
-
-impl<'a> SideEffectRecorder<'a> {
-    fn none() -> Self {
-        Self { reservation: None }
-    }
-
-    fn for_reservation(reservation: &'a SessionReservation) -> Self {
-        Self {
-            reservation: Some(reservation),
-        }
-    }
-
-    fn mark_applied(self) {
-        if let Some(reservation) = self.reservation {
-            reservation.mark_side_effects_applied();
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
-struct LoopExecutionOptions<'a> {
+struct LoopExecutionOptions {
     clock: EventClock,
     side_effect_mode: ToolSideEffectMode,
-    side_effect_recorder: SideEffectRecorder<'a>,
     stub_model_fixture_profile: bool,
 }
 
-impl<'a> LoopExecutionOptions<'a> {
+impl LoopExecutionOptions {
     fn with_stub_model_fixture_profile(
         clock: EventClock,
         side_effect_mode: ToolSideEffectMode,
-        side_effect_recorder: SideEffectRecorder<'a>,
         stub_model_fixture_profile: bool,
     ) -> Self {
         Self {
             clock,
             side_effect_mode,
-            side_effect_recorder,
             stub_model_fixture_profile,
         }
     }
@@ -245,7 +219,7 @@ fn execute_loop(
     policy: &core_policy::PolicyArtifact,
     root_loop: &core_script::LoopBlock,
     session_id: &str,
-    options: LoopExecutionOptions<'_>,
+    options: LoopExecutionOptions,
 ) -> Result<RuntimeExecution, RuntimeError> {
     execute_loop_with_sink(
         workspace,
@@ -264,7 +238,7 @@ fn execute_loop_with_sink(
     policy: &core_policy::PolicyArtifact,
     root_loop: &core_script::LoopBlock,
     session_id: &str,
-    options: LoopExecutionOptions<'_>,
+    options: LoopExecutionOptions,
     sink: Option<&mut dyn RuntimeEventSink>,
 ) -> Result<RuntimeExecution, RuntimeError> {
     let mut builder = match sink {
@@ -282,7 +256,6 @@ fn execute_loop_with_sink(
         registry,
         policy,
         side_effect_mode: options.side_effect_mode,
-        side_effect_recorder: options.side_effect_recorder,
         stub_model_fixture_profile: options.stub_model_fixture_profile,
     };
     let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
@@ -438,7 +411,6 @@ struct LoopEmitContext<'a> {
     registry: &'a core_script::ResolvedRegistry,
     policy: &'a core_policy::PolicyArtifact,
     side_effect_mode: ToolSideEffectMode,
-    side_effect_recorder: SideEffectRecorder<'a>,
     stub_model_fixture_profile: bool,
 }
 
@@ -645,7 +617,6 @@ fn emit_phase(
                     tool_policy,
                     invocation,
                     context.side_effect_mode,
-                    context.side_effect_recorder,
                     builder,
                 ) {
                     Ok(Some(mut failure)) => {

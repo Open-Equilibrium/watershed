@@ -1,11 +1,13 @@
 #[test]
-fn sandbox_denial_follows_resolved_operation_not_loop_id() {
+fn sandbox_denial_follows_resolved_operation_not_loop_identity() {
     let workspace = workspace_copy("sandbox-negative");
     let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
     let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
     fs::write(
         &loop_path,
-        source.replace("id: sandbox-negative-write", "id: custom-denied-write"),
+        source
+            .replace("id: sandbox-negative-write", "id: custom-denied-write")
+            .replace("name: SandboxNegativeWrite", "name: RenamedNegativeWrite"),
     )
     .expect("loop fixture rewritten");
 
@@ -17,24 +19,6 @@ fn sandbox_denial_follows_resolved_operation_not_loop_id() {
     assert!(output
         .stdout
         .contains("\"loop_definition_id\":\"custom-denied-write\""));
-}
-
-#[test]
-fn sandbox_denial_follows_resolved_operation_not_loop_name() {
-    let workspace = workspace_copy("sandbox-negative");
-    let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        source.replace("name: SandboxNegativeWrite", "name: RenamedNegativeWrite"),
-    )
-    .expect("loop fixture rewritten");
-
-    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
-        .expect("renamed negative operation runs");
-
-    assert!(output.failed);
-    assert!(output.stdout.contains("\"reason\":\"write_denied\""));
     assert!(output
         .stdout
         .contains("\"loop_name\":\"RenamedNegativeWrite\""));

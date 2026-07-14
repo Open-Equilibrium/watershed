@@ -80,38 +80,6 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
 }
 
 #[test]
-fn created_parent_directory_keeps_reserved_audit_on_rollback() {
-    let workspace = empty_workspace("created-parent-audit");
-    let reservation = reserve_session_log(&workspace, "audit001").expect("reservation succeeds");
-    write_initial_session_log(&reservation, "audit001").expect("started audit writes");
-    write_reserved_session_metadata(&reservation, "audit001", 1, None)
-        .expect("started metadata writes");
-
-    let target = "out/nested/summary.txt";
-    let path = ensure_real_workspace_write_path(
-        &workspace,
-        target,
-        SideEffectRecorder::for_reservation(&reservation),
-    )
-    .expect("parent dirs created");
-
-    assert_eq!(path, workspace.join("out/nested/summary.txt"));
-    assert!(workspace.join("out/nested").is_dir());
-
-    reservation.rollback();
-
-    assert!(
-        reservation.session_path.exists(),
-        "created parent directories must keep the started session audit"
-    );
-    assert!(
-        reservation.log_path.exists(),
-        "created parent directories must keep session metadata"
-    );
-    assert!(!reservation.lock_path.exists());
-}
-
-#[test]
 fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let workspace = empty_workspace("reservation-helper-edges");
     let missing_lock = SessionReservation {
@@ -122,7 +90,6 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         session_id: "missing001".to_owned(),
         cleanup_on_drop: std::cell::Cell::new(true),
         committed: std::cell::Cell::new(false),
-        side_effects_applied: std::cell::Cell::new(false),
     };
 
     let err = missing_lock
@@ -190,57 +157,6 @@ fn completed_session_log_append_keeps_audit_when_log_update_fails() {
             .expect("committed audit stream survives rollback"),
         stream
     );
-}
-
-#[test]
-fn failed_completion_append_after_side_effect_keeps_started_audit() {
-    let workspace = empty_workspace("audit-retained-after-side-effect");
-    let reservation = reserve_session_log(&workspace, "audit001").expect("reservation succeeds");
-    write_initial_session_log(&reservation, "audit001").expect("initial audit writes");
-    write_reserved_session_metadata(&reservation, "audit001", 1, None)
-        .expect("initial metadata writes");
-    let initial = fs::read_to_string(&reservation.session_path).expect("initial audit readable");
-    let initial_metadata =
-        fs::read_to_string(&reservation.log_path).expect("initial metadata readable");
-    fs::create_dir_all(workspace.join("out")).expect("out dir created");
-    fs::write(workspace.join("out/summary.txt"), "mutation\n").expect("side effect written");
-    reservation.mark_side_effects_applied();
-
-    let completed = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionCompleted,
-        "audit001",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({"padding":"x".repeat(MAX_SESSION_LOG_BYTES as usize)}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    let stream = format!("{initial}{completed}");
-
-    let err = commit_reserved_session_log(&reservation, "audit001", &stream, 2, None)
-        .expect_err("completion append fails");
-
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message)
-            if message.contains("session log size") && message.contains("exceeds max")
-    ));
-    reservation.rollback();
-    assert_eq!(
-        fs::read_to_string(&reservation.session_path).expect("started audit remains readable"),
-        initial
-    );
-    assert_eq!(
-        fs::read_to_string(&reservation.log_path).expect("metadata remains readable"),
-        initial_metadata
-    );
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("side effect remains"),
-        "mutation\n"
-    );
-    assert!(!reservation.lock_path.exists());
 }
 
 #[test]

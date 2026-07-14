@@ -116,7 +116,6 @@ fn write_definition_hash_metadata(
         LoopExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
             config.stub_model_fixture_profile,
         ),
     )
@@ -372,7 +371,6 @@ fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
         LoopExecutionOptions::new(
             EventClock::fixed_fixture(),
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
         ),
         Some(&mut timings),
     )?;
@@ -414,7 +412,6 @@ fn emit_noop_dispatch_for_budget(
         policy,
         invocation,
         ToolSideEffectMode::ApplyAll,
-        SideEffectRecorder::none(),
         &mut builder,
     )?;
     Ok(builder.events.len())

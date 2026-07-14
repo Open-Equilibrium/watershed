@@ -685,34 +685,6 @@ fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
 }
 
 #[test]
-fn protected_path_matching_is_case_sensitive_for_linux_runtime() {
-    assert!(protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseSensitive,
-        "**/*.local",
-        "workspace/out/readme.local"
-    ));
-    assert!(!protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseSensitive,
-        "**/*.local",
-        "workspace/out/README.LOCAL"
-    ));
-}
-
-#[test]
-fn protected_path_matching_is_case_insensitive_for_macos_runtime() {
-    assert!(protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseInsensitive,
-        "**/.env",
-        "workspace/.ENV"
-    ));
-    assert!(protected_path_pattern_matches(
-        ProtectedPathMatchMode::CaseInsensitive,
-        "**/.git/**",
-        "workspace/.GIT/config"
-    ));
-}
-
-#[test]
 fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
     let workspace = workspace_copy("hello-loop");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");

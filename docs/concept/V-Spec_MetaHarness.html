@@ -79,7 +79,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
   owns one local agent runtime
   owns deterministic loop execution
   owns local transcript/session persistence
-  owns JSONL/tail/export runtime surfaces and future RPC/SDK seams
+  owns run/replay/tail/resume and JSONL runtime surfaces
 
 Meta-Harness
   consumes Loop Agent's public runtime surfaces
@@ -87,7 +87,7 @@ Meta-Harness
   normalizes events across providers
   resolves shared config to target CLIs
   computes cross-agent metrics</code></pre>
-      <p>Meta-Harness integrates through Loop Agent's <strong>public runtime surfaces</strong>: the JSONL event stream, RPC mode when implemented, explicit tail/export commands over the event stream, and a future embedded/API surface if available. It never reads Loop Agent's <code>.loop/sessions</code> store directly. It does not replace Loop Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence, and <strong>must not reach into Loop Agent internals</strong>. No Watershed project-history/VCS engine is required in the MVP.</p>
+      <p>Meta-Harness integrates through Loop Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC, export and embedded APIs when implemented. It never reads Loop Agent's <code>.loop/sessions</code> store directly. It does not replace Loop Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence, and <strong>must not reach into Loop Agent internals</strong>. No Watershed project-history/VCS engine is required in the MVP.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">

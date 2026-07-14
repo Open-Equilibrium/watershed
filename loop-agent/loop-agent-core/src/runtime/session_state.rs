@@ -108,7 +108,6 @@ fn resume_session_internal(
         LoopExecutionOptions::with_stub_model_fixture_profile(
             clock,
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
             config.stub_model_fixture_profile,
         ),
     )?;
@@ -141,7 +140,6 @@ fn resume_session_internal(
             ToolSideEffectMode::PreflightResume {
                 prefix_event_count: resume_prefix.planned_event_count as u64,
             },
-            SideEffectRecorder::none(),
             config.stub_model_fixture_profile,
         ),
     )?;
@@ -197,7 +195,6 @@ fn resume_session_internal(
                 ToolSideEffectMode::Resume {
                     prefix_event_count: resume_prefix.planned_event_count as u64,
                 },
-                SideEffectRecorder::none(),
                 config.stub_model_fixture_profile,
             ),
             Some(&mut resume_sink),
@@ -444,15 +441,11 @@ struct SessionReservation {
     session_id: String,
     cleanup_on_drop: Cell<bool>,
     committed: Cell<bool>,
-    side_effects_applied: Cell<bool>,
 }
 
 impl SessionReservation {
     fn rollback(&self) {
-        // WHY: committed JSONL streams are durable audit records, and once side effects
-        // have applied, even an incomplete started stream ties workspace mutation to a
-        // session attempt.
-        if !self.committed.get() && !self.side_effects_applied.get() {
+        if !self.committed.get() {
             let _ = fs::remove_file(&self.session_path);
             let _ = fs::remove_file(&self.log_path);
             let _ = fs::remove_file(&self.context_path);
@@ -472,10 +465,6 @@ impl SessionReservation {
 
     fn mark_committed(&self) {
         self.committed.set(true);
-    }
-
-    fn mark_side_effects_applied(&self) {
-        self.side_effects_applied.set(true);
     }
 }
 
@@ -646,7 +635,6 @@ fn reserve_session_log(
         session_id: session_id.to_owned(),
         cleanup_on_drop: Cell::new(true),
         committed: Cell::new(false),
-        side_effects_applied: Cell::new(false),
     })
 }
 

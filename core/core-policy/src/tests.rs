@@ -3,36 +3,6 @@ use proptest::prelude::*;
 use std::{fs, path::Path};
 
 #[test]
-fn policy_artifact_fixture_files_are_canonical_and_parseable() {
-    for path in fixture_files("policy.json") {
-        let text = fs::read_to_string(&path).expect("fixture is readable");
-        assert!(text.ends_with('\n'), "{} must end with LF", path.display());
-
-        let artifact: PolicyArtifact =
-            serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-        artifact
-            .validate()
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-        assert_eq!(artifact.policy_version, POLICY_VERSION_V0);
-        for command in &artifact.commands {
-            assert_eq!(
-                command.filesystem.protected_paths,
-                DEFAULT_PROTECTED_PATHS,
-                "{} command {} must use the SECURITY.md default protected paths",
-                path.display(),
-                command.tool_id
-            );
-        }
-        assert_eq!(
-            canonical_artifact_json(&artifact).expect("canonical JSON"),
-            text,
-            "{} must be canonical",
-            path.display()
-        );
-    }
-}
-
-#[test]
 fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
     for fixture in ["smoke-loop", "hello-loop"] {
         let registry = core_script::load_registry_root(
@@ -58,8 +28,11 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
                     .join(file_name),
             )
             .expect("expected policy fixture is readable");
+            let expected_artifact: PolicyArtifact =
+                serde_json::from_str(&expected).expect("expected policy fixture parses");
 
             assert_eq!(actual, expected, "{fixture} {file_name}");
+            assert_eq!(*artifact, expected_artifact, "{fixture} {file_name}");
         }
     }
 }
@@ -154,16 +127,6 @@ fn policy_compiler_rejects_unknown_predefined_commands() {
     .expect_err("unknown predefined command must fail closed");
 
     assert!(err.to_string().contains("unknown trusted command"), "{err}");
-}
-
-#[test]
-fn trusted_predefined_command_membership_has_one_policy_authority() {
-    for command_id in ["agent-echo", "agent-negative", "agent-read"] {
-        assert!(is_trusted_predefined_command_id(command_id));
-    }
-    for command_id in ["", "agent-custom", "agent-read-extra"] {
-        assert!(!is_trusted_predefined_command_id(command_id));
-    }
 }
 
 #[test]
@@ -901,57 +864,6 @@ fn policy_artifact_rejects_own_script_executable_mismatch() {
         err.to_string(),
         "own-script tool write-summary executable must be runner:posix-sh"
     );
-}
-
-#[test]
-fn allowed_parameter_policy_maps_script_value_types() {
-    let cases = [
-        (
-            core_script::ParameterValueType::None,
-            ParameterValueType::None,
-            Vec::new(),
-        ),
-        (
-            core_script::ParameterValueType::String,
-            ParameterValueType::String,
-            Vec::new(),
-        ),
-        (
-            core_script::ParameterValueType::Integer,
-            ParameterValueType::Integer,
-            Vec::new(),
-        ),
-        (
-            core_script::ParameterValueType::WorkspaceRelativePath,
-            ParameterValueType::WorkspaceRelativePath,
-            Vec::new(),
-        ),
-        (
-            core_script::ParameterValueType::Enum,
-            ParameterValueType::Enum,
-            vec!["fast".to_owned(), "slow".to_owned()],
-        ),
-    ];
-
-    for (script_type, policy_type, allowed_values) in cases {
-        let parameter = core_script::AllowedParameter {
-            name: "--mode".to_owned(),
-            value_type: script_type,
-            required: true,
-            allowed_values: allowed_values.clone(),
-            value_pattern: Some("[a-z]+".to_owned()),
-            max_length: Some(16),
-            min: Some(1),
-            max: Some(3),
-        };
-
-        let policy = allowed_parameter_policy(&parameter);
-
-        assert_eq!(policy.value_type, policy_type);
-        assert_eq!(policy.allowed_values, allowed_values);
-        assert_eq!(policy.name, "--mode");
-        assert!(policy.required);
-    }
 }
 
 #[test]

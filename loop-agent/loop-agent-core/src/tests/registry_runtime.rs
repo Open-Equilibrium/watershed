@@ -62,21 +62,6 @@ fn registry_root_rejects_junction_path_components() {
     assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
 }
 
-#[test]
-fn run_loop_executes_registry_without_expected_streams() {
-    let workspace = workspace_copy("smoke-loop");
-
-    let output =
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("loop executes from registry");
-
-    assert!(!output.failed);
-    assert_eq!(output.event_count, 11);
-    assert_eq!(
-        output.stdout,
-        expected_stream("smoke-loop", "smoke-loop.jsonl")
-    );
-}
-
 #[cfg(target_os = "macos")]
 #[test]
 fn run_loop_accepts_reviewed_macos_network_allowlist() {
@@ -113,7 +98,6 @@ fn runtime_executes_subloops_after_all_parent_phases() {
         LoopExecutionOptions::new(
             EventClock::fixed_fixture(),
             ToolSideEffectMode::DryRun,
-            SideEffectRecorder::none(),
         ),
     )
     .expect("hello loop executes");
@@ -559,13 +543,13 @@ fn predefined_command_runtime_uses_policy_membership_and_local_progress() {
         );
     }
 
-    assert!(!core_policy::is_trusted_predefined_command_id(
-        "agent-custom"
-    ));
-    assert!(matches!(
-        trusted_predefined_command_progress("agent-custom"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported predefined")
-    ));
+    for command_id in ["", "agent-custom", "agent-read-extra"] {
+        assert!(!core_policy::is_trusted_predefined_command_id(command_id));
+        assert!(matches!(
+            trusted_predefined_command_progress(command_id),
+            Err(RuntimeError::Protocol(message)) if message.contains("unsupported predefined")
+        ));
+    }
 }
 
 #[test]
@@ -593,7 +577,6 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             LoopExecutionOptions::new(
                 EventClock::fixed_fixture(),
                 ToolSideEffectMode::DryRun,
-                SideEffectRecorder::none(),
             ),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing phase")
@@ -615,7 +598,6 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             LoopExecutionOptions::new(
                 EventClock::fixed_fixture(),
                 ToolSideEffectMode::DryRun,
-                SideEffectRecorder::none(),
             ),
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("missing loop")
@@ -641,7 +623,6 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
             LoopExecutionOptions::new(
                 EventClock::fixed_fixture(),
                 ToolSideEffectMode::DryRun,
-                SideEffectRecorder::none(),
             ),
         ),
         Err(RuntimeError::Protocol(message))
@@ -690,7 +671,6 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         registry: &missing_instruction,
         policy: &policy,
         side_effect_mode: ToolSideEffectMode::DryRun,
-        side_effect_recorder: SideEffectRecorder::none(),
         stub_model_fixture_profile: true,
     };
     let mut builder =
@@ -713,7 +693,6 @@ fn mutated_registry_helpers_fail_closed_before_runtime_side_effects() {
         registry: &missing_connection,
         policy: &policy,
         side_effect_mode: ToolSideEffectMode::DryRun,
-        side_effect_recorder: SideEffectRecorder::none(),
         stub_model_fixture_profile: true,
     };
     let mut builder =
