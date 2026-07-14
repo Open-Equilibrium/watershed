@@ -108,7 +108,20 @@ pub fn tail_session_to_writer_with_options(
         if current_len == observed_len {
             continue;
         }
-        let suffix = read_tail_file_suffix(&path, observed_len, current_len)?;
+        let suffix = match read_tail_file_suffix(&path, observed_len, current_len)? {
+            TailSuffixRead::Appended(suffix) => suffix,
+            TailSuffixRead::RolledBack(actual_len) => {
+                if actual_len < validated_len {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} changed outside append-only tail semantics",
+                        path.display()
+                    )));
+                }
+                pending.truncate(actual_len - validated_len);
+                observed_len = actual_len;
+                continue;
+            }
+        };
         observed_len = current_len;
         pending.extend_from_slice(&suffix);
         let complete_len = complete_jsonl_prefix_len(&pending);

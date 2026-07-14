@@ -255,11 +255,32 @@ fn ensure_opened_real_file_for_read_matches_path(
     Ok(file_metadata)
 }
 
+#[cfg(test)]
 fn read_file_suffix(
     path: &Path,
     offset: usize,
     expected_len: usize,
 ) -> Result<Vec<u8>, RuntimeError> {
+    match read_file_suffix_state(path, offset, expected_len)? {
+        TailSuffixRead::Appended(bytes) => Ok(bytes),
+        TailSuffixRead::RolledBack(_) => Err(RuntimeError::Protocol(format!(
+            "{} changed outside append-only tail semantics",
+            path.display()
+        ))),
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum TailSuffixRead {
+    Appended(Vec<u8>),
+    RolledBack(usize),
+}
+
+fn read_file_suffix_state(
+    path: &Path,
+    offset: usize,
+    expected_len: usize,
+) -> Result<TailSuffixRead, RuntimeError> {
     if expected_len < offset {
         return Err(RuntimeError::Protocol(format!(
             "{} changed outside append-only tail semantics",
@@ -283,10 +304,9 @@ fn read_file_suffix(
         ))
     })?;
     if total_len < expected_len {
-        return Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only tail semantics",
-            path.display()
-        )));
+        return Ok(TailSuffixRead::RolledBack(
+            usize::try_from(total_len).unwrap_or(usize::MAX),
+        ));
     }
     let offset = u64::try_from(offset).unwrap_or(u64::MAX);
     let suffix_len = u64::try_from(suffix_len).unwrap_or(u64::MAX);
@@ -296,27 +316,40 @@ fn read_file_suffix(
             source,
         })?;
     let mut bytes = Vec::new();
-    file.take(suffix_len)
+    (&mut file)
+        .take(suffix_len)
         .read_to_end(&mut bytes)
         .map_err(|source| RuntimeError::Io {
             path: path.to_path_buf(),
             source,
         })?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != suffix_len {
+        let current_len = file
+            .metadata()
+            .map_err(|source| RuntimeError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?
+            .len();
+        if current_len < expected_len {
+            return Ok(TailSuffixRead::RolledBack(
+                usize::try_from(current_len).unwrap_or(usize::MAX),
+            ));
+        }
         return Err(RuntimeError::Protocol(format!(
             "{} changed outside append-only tail semantics",
             path.display()
         )));
     }
-    Ok(bytes)
+    Ok(TailSuffixRead::Appended(bytes))
 }
 
 fn read_tail_file_suffix(
     path: &Path,
     offset: usize,
     expected_len: usize,
-) -> Result<Vec<u8>, RuntimeError> {
-    retry_tail_transient_read_error(|| read_file_suffix(path, offset, expected_len))
+) -> Result<TailSuffixRead, RuntimeError> {
+    retry_tail_transient_read_error(|| read_file_suffix_state(path, offset, expected_len))
 }
 
 fn retry_tail_transient_read_error<T>(

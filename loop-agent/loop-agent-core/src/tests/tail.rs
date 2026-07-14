@@ -694,6 +694,11 @@ fn tail_file_readers_reject_append_only_size_and_utf8_edges() {
         read_file_suffix_to_string(&path, 0, 4),
         Err(RuntimeError::Protocol(message)) if message.contains("append-only")
     ));
+    assert_eq!(
+        read_tail_file_suffix(&path, 0, 4)
+            .expect("tail-specific read classifies a rollback after length sampling"),
+        TailSuffixRead::RolledBack(3)
+    );
     assert!(matches!(
         read_file_range(&path, 4, 1),
         Err(RuntimeError::Protocol(message)) if message.contains("append-only")
