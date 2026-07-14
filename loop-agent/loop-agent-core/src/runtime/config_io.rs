@@ -1,9 +1,13 @@
 fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
     let path = workspace.join(".loop/config.yaml");
     let text = read_workspace_config_to_string(&path)?;
-    let registry_root = config_value(&text, "registry_root")
-        .ok_or_else(|| RuntimeError::Usage("missing .loop/config.yaml registry_root".to_owned()))?;
-    let registry_root = PathBuf::from(registry_root);
+    let source: WorkspaceConfigSource = core_script::parse_safe_yaml(".loop/config.yaml", &text)
+        .map_err(|error| RuntimeError::Usage(error.to_string()))?;
+    let stub_model_fixture_profile = workspace_stub_model_fixture_profile(
+        &source.fixture_profile,
+        &source.stub_model,
+    )?;
+    let registry_root = PathBuf::from(source.registry_root);
     if registry_root.components().any(|component| {
         matches!(
             component,
@@ -16,7 +20,6 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
             ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
         ));
     }
-    let stub_model_fixture_profile = workspace_stub_model_fixture_profile(&text)?;
     let event_clock = if stub_model_fixture_profile {
         EventClock::fixed_fixture()
     } else {
@@ -65,45 +68,6 @@ fn registry_root_path(workspace: &Path, registry_root: &Path) -> Result<PathBuf,
     Ok(path)
 }
 
-fn config_value(text: &str, key: &str) -> Option<String> {
-    let prefix = format!("{key}:");
-    for raw_line in text.lines() {
-        let line = strip_config_comment(raw_line);
-        let line = line.trim();
-        if let Some(value) = line.strip_prefix(&prefix) {
-            let value = unquote_config_scalar(value.trim());
-            if !value.is_empty() {
-                return Some(value);
-            }
-        }
-    }
-    None
-}
-
-fn strip_config_comment(line: &str) -> &str {
-    let mut in_double_quotes = false;
-    let mut in_single_quotes = false;
-    for (index, ch) in line.char_indices() {
-        match ch {
-            '"' if !in_single_quotes => in_double_quotes = !in_double_quotes,
-            '\'' if !in_double_quotes => in_single_quotes = !in_single_quotes,
-            '#' if !in_double_quotes && !in_single_quotes => return &line[..index],
-            _ => {}
-        }
-    }
-    line
-}
-
-fn unquote_config_scalar(value: &str) -> String {
-    if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
-        return value[1..value.len() - 1].replace("\\\"", "\"");
-    }
-    if value.len() >= 2 && value.starts_with('\'') && value.ends_with('\'') {
-        return value[1..value.len() - 1].replace("''", "'");
-    }
-    value.to_owned()
-}
-
 #[derive(Debug)]
 struct WorkspaceConfig {
     event_clock: EventClock,
@@ -111,26 +75,33 @@ struct WorkspaceConfig {
     stub_model_fixture_profile: bool,
 }
 
-fn workspace_stub_model_fixture_profile(text: &str) -> Result<bool, RuntimeError> {
-    match (
-        config_value(text, "fixture_profile"),
-        config_value(text, "stub_model"),
-    ) {
-        (Some(profile), Some(model)) if profile == "stub-model" && model == "deterministic" => {
-            Ok(true)
-        }
-        (Some(profile), None) if profile == "stub-model" => Err(RuntimeError::Usage(
+#[derive(serde::Deserialize)]
+struct WorkspaceConfigSource {
+    registry_root: String,
+    #[serde(default)]
+    fixture_profile: String,
+    #[serde(default)]
+    stub_model: String,
+}
+
+fn workspace_stub_model_fixture_profile(
+    fixture_profile: &str,
+    stub_model: &str,
+) -> Result<bool, RuntimeError> {
+    match (fixture_profile, stub_model) {
+        ("stub-model", "deterministic") => Ok(true),
+        ("stub-model", "") => Err(RuntimeError::Usage(
             ".loop/config.yaml fixture_profile stub-model requires stub_model: deterministic"
                 .to_owned(),
         )),
-        (Some(profile), _) if profile != "stub-model" => Err(RuntimeError::Usage(format!(
+        (profile, _) if !profile.is_empty() && profile != "stub-model" => Err(RuntimeError::Usage(format!(
             "unsupported .loop/config.yaml fixture_profile {profile:?}"
         ))),
-        (None, Some(model)) if model == "deterministic" => Err(RuntimeError::Usage(
+        ("", "deterministic") => Err(RuntimeError::Usage(
             ".loop/config.yaml stub_model deterministic requires fixture_profile: stub-model"
                 .to_owned(),
         )),
-        (_, Some(model)) if model != "deterministic" => Err(RuntimeError::Usage(format!(
+        (_, model) if !model.is_empty() && model != "deterministic" => Err(RuntimeError::Usage(format!(
             "unsupported .loop/config.yaml stub_model {model:?}"
         ))),
         _ => Ok(false),

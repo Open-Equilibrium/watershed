@@ -25,6 +25,7 @@ struct EventWriterTimings {
 struct WriterOutcome {
     append_latency_nanos: Option<u128>,
     appended: bool,
+    checkpoint_sync_duration: Duration,
     error: Option<RuntimeError>,
 }
 
@@ -33,6 +34,7 @@ impl WriterOutcome {
         Self {
             append_latency_nanos: None,
             appended: false,
+            checkpoint_sync_duration: Duration::ZERO,
             error: Some(error),
         }
     }
@@ -332,11 +334,15 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
         if outcome.appended && self.emit == EmitMode::Jsonl {
             let delivered = self.publish(canonical_jsonl.as_bytes());
             if delivered
-                && !is_event_sync_checkpoint(&event.event_type)
                 && let (Some(timings), Some(started_at)) =
                     (self.timings.as_deref_mut(), measurement_started_at)
             {
-                timings.delivery_nanos.push(started_at.elapsed().as_nanos());
+                timings.delivery_nanos.push(
+                    started_at
+                        .elapsed()
+                        .saturating_sub(outcome.checkpoint_sync_duration)
+                        .as_nanos(),
+                );
             }
         }
         if let Some(err) = outcome.error {
@@ -515,6 +521,7 @@ fn session_writer_worker<A>(
                 let _ = acknowledgement.send(WriterOutcome {
                     append_latency_nanos: None,
                     appended: false,
+                    checkpoint_sync_duration: Duration::ZERO,
                     error,
                 });
                 break;
@@ -591,18 +598,23 @@ where
     });
     dirty.mark_dirty(Instant::now());
     if is_event_sync_checkpoint(&event.event_type) {
+        let sync_started_at = Instant::now();
         if let Err(err) = appender.sync(path) {
             return WriterOutcome {
                 append_latency_nanos,
                 appended: true,
+                checkpoint_sync_duration: checkpoint_sync_duration
+                    .saturating_add(sync_started_at.elapsed()),
                 error: Some(err),
             };
         }
+        checkpoint_sync_duration = checkpoint_sync_duration.saturating_add(sync_started_at.elapsed());
         dirty.mark_synced();
     }
     WriterOutcome {
         append_latency_nanos,
         appended: true,
+        checkpoint_sync_duration,
         error: None,
     }
 }

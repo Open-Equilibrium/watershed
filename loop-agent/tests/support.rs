@@ -1,4 +1,34 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
+static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn fixture_dir(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("fixtures")
+        .join(name)
+}
+
+pub(crate) fn workspace_copy(fixture: &str) -> PathBuf {
+    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let target =
+        std::env::temp_dir().join(format!("watershed-loop-agent-{}-{id}", std::process::id()));
+    if target.exists() {
+        fs::remove_dir_all(&target).expect("stale temp workspace removed");
+    }
+    copy_fixture_workspace(&fixture_dir(fixture), &target);
+    target
+}
+
+#[allow(dead_code)]
+pub(crate) fn expected_stream(fixture: &str, stream: &str) -> String {
+    fs::read_to_string(fixture_dir(fixture).join("expected").join(stream))
+        .expect("expected stream is readable")
+}
 
 pub(crate) fn copy_fixture_workspace(source: &Path, target: &Path) {
     copy_dir(&source.join("registry"), &target.join("registry"));

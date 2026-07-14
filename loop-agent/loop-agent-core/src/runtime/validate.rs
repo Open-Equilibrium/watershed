@@ -517,21 +517,11 @@ impl SessionAppendValidationState {
             )));
         }
         validate_event_metadata(path, line_number, event)?;
-        if line_number == 1 {
-            if self.expected_session_id.is_some()
-                && event.event_type != EventType::SessionStarted
-            {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line 1 must start with session.started",
-                    path.display()
-                )));
-            }
-            if event.sequence != 1 {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} first sequence must be 1",
-                    path.display()
-                )));
-            }
+        if line_number == 1 && event.sequence != 1 {
+            return Err(RuntimeError::Protocol(format!(
+                "{} first sequence must be 1",
+                path.display()
+            )));
         }
         if self.previous_sequence.checked_add(1) != Some(event.sequence) {
             return Err(RuntimeError::Protocol(format!(

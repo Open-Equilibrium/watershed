@@ -1,23 +1,3 @@
-fn fixture_dir(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("fixtures")
-        .join(name)
-}
-
-fn workspace_copy(fixture: &str) -> PathBuf {
-    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let target = std::env::temp_dir().join(format!(
-        "watershed-loop-agent-core-{}-{id}",
-        std::process::id()
-    ));
-    if target.exists() {
-        fs::remove_dir_all(&target).expect("stale temp workspace removed");
-    }
-    copy_fixture_workspace(&fixture_dir(fixture), &target);
-    target
-}
-
 fn empty_workspace(label: &str) -> PathBuf {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
@@ -45,11 +25,6 @@ fn create_windows_junction(link: &Path, target: &Path) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-fn expected_stream(fixture: &str, stream: &str) -> String {
-    fs::read_to_string(fixture_dir(fixture).join("expected").join(stream))
-        .expect("expected stream is readable")
 }
 
 fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {

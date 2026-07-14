@@ -68,7 +68,7 @@ loop resume &lt;session-id&gt;
 loop sessions
 loop tail &lt;session-id&gt;</code></pre><p>Direct human use; nice terminal rendering is allowed. <code>/hello-loop</code> is entered inside the interactive <code>loop chat</code> terminal, not in the OS shell.</p></div>
         <div class="card"><h3>B. Headless JSONL event stream</h3><pre><code>loop run smoke-loop --emit jsonl
-loop run hello-loop --emit jsonl</code></pre><p>Streams newline-delimited JSON events to stdout for automation, CI, external dashboards, custom terminal UIs and Meta-Harness later. CI captures and diffs this stream against D-015 goldens.</p></div>
+loop run hello-loop --emit jsonl</code></pre><p>Streams newline-delimited JSON events to stdout for automation, CI, external dashboards, custom terminal UIs and Meta-Harness later. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
         <div class="card"><h3>C. Remote-control surface (designed-for)</h3><pre><code>loop --mode rpc
 # or: loop rpc</code></pre><p>Bidirectional external control is a post-M1 seam. ADR-0055 selects local JSON-RPC over stdio (ADR-0029) with a minimal <code>loop.start</code>, <code>loop.status</code>, <code>loop.cancel</code>, <code>loop.tail</code> and <code>loop.export</code> command set; it carries the same runtime events instead of adding <code>cmd.*</code> event types.</p></div>
         <div class="card"><h3>D. Embedded core API (future)</h3><pre><code>let session = create_agent_session(config).await?;
@@ -242,7 +242,7 @@ while let Some(event) = events.next().await {
     <section id="events" class="section"><h2>9. Events &amp; measurement</h2><div class="body">
       <p>Loop Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition emits one normalized event; JSONL mode (§3B), future RPC mode (§3C) and the local session log (§3E) all carry the same events. Golden loops compare expected event streams, which makes individual loops measurable and optimizable.</p>
       <p>These are the same normalized events defined in <a href="../../PROTOCOL.md">PROTOCOL.md</a> (single source of truth for the event-envelope fields and runtime event families). Exact v0 names are decided by ADR-0036; do not introduce a competing naming convention. Command/request shape is a separate post-M1 surface selected by ADR-0055.</p>
-      <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted D-015 test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines delivery budgets.</p>
+      <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted ADR-0034 test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines delivery budgets.</p>
     </div></section>
 
     <section id="m0" class="section"><h2>10. M0/M1 implementation references</h2><div class="body">

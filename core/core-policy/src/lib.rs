@@ -1,4 +1,4 @@
-//! Policy artifact contracts for M0.
+//! Policy artifact contracts.
 
 #![deny(missing_docs)]
 
@@ -330,7 +330,7 @@ pub enum PolicyCompileError {
         /// Maximum allowed nesting depth.
         max: usize,
     },
-    /// M1 OS policy target was asked to encode network allow entries.
+    /// Supported policy-artifact target was asked to encode network allow entries.
     NonEmptyNetworkAllowlist {
         /// Tool id with non-empty network allow entries.
         tool_id: String,
@@ -361,7 +361,7 @@ impl fmt::Display for PolicyCompileError {
             ),
             Self::NonEmptyNetworkAllowlist { tool_id } => write!(
                 f,
-                "OS-enforced M1 policy for tool {tool_id} must use a deny-all network allowlist"
+                "supported policy-artifact target for tool {tool_id} must use a deny-all network allowlist"
             ),
             Self::InvalidArtifact(err) => write!(f, "{err}"),
         }

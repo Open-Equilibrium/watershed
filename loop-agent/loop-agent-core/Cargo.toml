@@ -12,5 +12,6 @@ publish.workspace = true
 core-policy.workspace = true
 core-script.workspace = true
 proto.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

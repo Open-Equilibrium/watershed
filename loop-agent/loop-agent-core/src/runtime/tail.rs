@@ -70,13 +70,7 @@ pub fn tail_session_to_writer_with_options(
     if (!stream.is_empty() || emit == EmitMode::Jsonl)
         && !write_tail_chunk(writer, emit, session_id, &stream)?
     {
-        return Ok(RunOutput {
-            event_count: events.len(),
-            failed: stream_is_failed(&events),
-            session_id: session_id.to_owned(),
-            session_path: path,
-            stdout: String::new(),
-        });
+        return Ok(tail_output(session_id, &path, &events));
     }
     drop(stream);
 
@@ -144,13 +138,7 @@ pub fn tail_session_to_writer_with_options(
         };
         events.extend(appended_events);
         if !write_tail_chunk(writer, emit, session_id, &appended)? {
-            return Ok(RunOutput {
-                event_count: events.len(),
-                failed: stream_is_failed(&events),
-                session_id: session_id.to_owned(),
-                session_path: path,
-                stdout: String::new(),
-            });
+            return Ok(tail_output(session_id, &path, &events));
         }
         validated_len += appended_len;
     }
@@ -161,22 +149,20 @@ pub fn tail_session_to_writer_with_options(
             human_session_status(session_id, "tailed", &events).as_bytes(),
         )?
     {
-        return Ok(RunOutput {
-            event_count: events.len(),
-            failed: stream_is_failed(&events),
-            session_id: session_id.to_owned(),
-            session_path: path,
-            stdout: String::new(),
-        });
+        return Ok(tail_output(session_id, &path, &events));
     }
 
-    Ok(RunOutput {
+    Ok(tail_output(session_id, &path, &events))
+}
+
+fn tail_output(session_id: &str, path: &Path, events: &[EventEnvelope]) -> RunOutput {
+    RunOutput {
         event_count: events.len(),
-        failed: stream_is_failed(&events),
+        failed: stream_is_failed(events),
         session_id: session_id.to_owned(),
-        session_path: path,
+        session_path: path.to_owned(),
         stdout: String::new(),
-    })
+    }
 }
 
 fn tail_poll_interval(options: &TailOptions, started: Instant) -> Duration {

@@ -158,6 +158,14 @@ fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError>
 }
 
 fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
+    replace_existing_file(path, contents, true)
+}
+
+fn replace_existing_file(
+    path: &Path,
+    contents: &[u8],
+    sync_temp: bool,
+) -> Result<(), RuntimeError> {
     ensure_parent_real_directory(path)?;
     ensure_non_hardlinked_real_file(path)?;
     let (temp_path, mut temp_file) = create_replacement_temp(path, None)?;
@@ -171,7 +179,9 @@ fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), 
         let _ = fs::remove_file(&temp_path);
         return Err(err);
     }
-    if let Err(source) = temp_file.sync_all() {
+    if sync_temp
+        && let Err(source) = temp_file.sync_all()
+    {
         let _ = fs::remove_file(&temp_path);
         return Err(RuntimeError::Io {
             path: temp_path,
@@ -305,24 +315,7 @@ fn replace_existing_file_without_link_count(
     path: &Path,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
-    ensure_parent_real_directory(path)?;
-    ensure_non_hardlinked_real_file(path)?;
-    let (temp_path, mut temp_file) = create_replacement_temp(path, None)?;
-    if let Err(err) = temp_file
-        .write_all(contents)
-        .map_err(|source| RuntimeError::Io {
-            path: temp_path.clone(),
-            source,
-        })
-    {
-        let _ = fs::remove_file(&temp_path);
-        return Err(err);
-    }
-    drop(temp_file);
-
-    ensure_parent_real_directory(path)?;
-    ensure_non_hardlinked_real_file(path)?;
-    replace_existing_leaf_from_temp(path, &temp_path, SideEffectRecorder::none(), None)
+    replace_existing_file(path, contents, false)
 }
 
 fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {

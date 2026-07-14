@@ -17,6 +17,7 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
         .expect("measured runtime emit succeeds");
         assert!(!output.failed);
         assert_eq!(timings.append_nanos.len(), output.event_count);
+        assert_eq!(timings.delivery_nanos.len(), output.event_count);
         append_nanos.extend(timings.append_nanos);
         delivery_nanos.extend(timings.delivery_nanos);
     }
@@ -55,10 +56,9 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
             Some(&mut timings),
         )
         .expect("measured resume succeeds");
-        assert_eq!(
-            timings.append_nanos.len(),
-            output.event_count - prefix_events
-        );
+        let appended_events = output.event_count - prefix_events;
+        assert_eq!(timings.append_nanos.len(), appended_events);
+        assert_eq!(timings.delivery_nanos.len(), appended_events);
         append_nanos.extend(timings.append_nanos);
         delivery_nanos.extend(timings.delivery_nanos);
     }

@@ -1,4 +1,4 @@
-//! Building-block script model contracts for M0.
+//! Building-block script model contracts.
 
 #![deny(missing_docs)]
 

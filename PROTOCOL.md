@@ -28,7 +28,7 @@ Protocol v0 is designed for the Loop Agent CLI MVP and later Meta-Harness integr
 
 Runtime events use the v0 Loop Agent short-form name set decided in ADR-0036. `message.delta` and `tool.progress` stay first-class for near-real-time consumers. Do not maintain a second event naming convention.
 
-M1 Loop Agent emits the families exercised by the D-015 fixtures and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
+M1 Loop Agent emits the families exercised by the ADR-0034 fixtures and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
 
 Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029); ADR-0055 selects the initial method set as `loop.start`, `loop.status`, `loop.cancel`, `loop.tail` and `loop.export`. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
 
@@ -105,7 +105,7 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 
 ## Canonical event JSONL serialization (v0)
 
-D-015 golden streams and `.loop/sessions/<session_id>.jsonl` logs use the same canonical event JSONL bytes:
+ADR-0034 golden streams and `.loop/sessions/<session_id>.jsonl` logs use the same canonical event JSONL bytes:
 
 - UTF-8; one event object per line; LF line endings; final LF required.
 - No insignificant whitespace outside or inside JSON objects.
@@ -124,7 +124,7 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must emit monotonically increasing `sequence` values per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
-- **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Loop Agent's `.loop/sessions` is consumed via the event stream or tail/export surfaces, and RPC when implemented, never from disk by Meta-Harness or Liquid). This keeps the local-only M0 transport (D-002) from foreclosing later remote topologies (D-043/ADR-0038).
+- **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Loop Agent's `.loop/sessions` is consumed via the event stream or tail/export surfaces, and RPC when implemented, never from disk by Meta-Harness or Liquid). This keeps the local transport (ADR-0029) from foreclosing later remote topologies (ADR-0038).
 
 ## Implementation constraints
 

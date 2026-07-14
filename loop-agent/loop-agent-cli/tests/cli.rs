@@ -1,44 +1,16 @@
 use std::{
     ffi::OsString,
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
-#[path = "../../test_support.rs"]
+#[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::copy_fixture_workspace;
-
-static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+use test_support::{expected_stream, workspace_copy};
 
 fn loop_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_loop"))
-}
-
-fn fixture_dir(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("fixtures")
-        .join(name)
-}
-
-fn expected_stream(fixture: &str, stream: &str) -> String {
-    fs::read_to_string(fixture_dir(fixture).join("expected").join(stream))
-        .expect("expected stream is readable")
-}
-
-fn workspace_copy(fixture: &str) -> PathBuf {
-    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let target = std::env::temp_dir().join(format!(
-        "watershed-loop-agent-cli-{}-{id}",
-        std::process::id()
-    ));
-    if target.exists() {
-        fs::remove_dir_all(&target).expect("stale temp workspace removed");
-    }
-    copy_fixture_workspace(&fixture_dir(fixture), &target);
-    target
 }
 
 fn replace_seeded_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {

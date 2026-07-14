@@ -48,6 +48,7 @@ class M1ValidationContractTest(unittest.TestCase):
             "proto/proto/src/tests.rs",
             "loop-agent/loop-agent-core/src/tests.rs",
             "loop-agent/loop-agent-core/tests/performance.rs",
+            "loop-agent/tests/support.rs",
         ]:
             self.assertRegex(path, ignore)
         for path in [

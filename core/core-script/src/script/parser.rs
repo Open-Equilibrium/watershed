@@ -48,14 +48,7 @@ fn deserialize_registry_block(
     source_name: &str,
     source: &str,
 ) -> Result<RegistryBlock, RegistryError> {
-    let value: noyalib::Value = noyalib::from_str_with_config(source, &safe_yaml_config())
-        .map_err(|error| parse_error(source_name, error.to_string()))?;
-    if contains_null(&value) {
-        return Err(parse_error(
-            source_name,
-            "explicit YAML null values are not allowed".to_owned(),
-        ));
-    }
+    let value = parse_safe_yaml_value(source_name, source)?;
     let mapping = value
         .as_mapping()
         .filter(|mapping| mapping.len() == 1)
@@ -75,6 +68,30 @@ fn deserialize_registry_block(
             format!("unsupported registry block kind `{kind}`"),
         )),
     }
+}
+
+/// Parses one Safe-YAML document into a typed value while rejecting unknown fields.
+pub fn parse_safe_yaml<T>(source_name: &str, source: &str) -> Result<T, RegistryError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let value = parse_safe_yaml_value(source_name, source)?;
+    deserialize_value(source_name, &value)
+}
+
+fn parse_safe_yaml_value(
+    source_name: &str,
+    source: &str,
+) -> Result<noyalib::Value, RegistryError> {
+    let value = noyalib::from_str_with_config(source, &safe_yaml_config())
+        .map_err(|error| parse_error(source_name, error.to_string()))?;
+    if contains_null(&value) {
+        return Err(parse_error(
+            source_name,
+            "explicit YAML null values are not allowed".to_owned(),
+        ));
+    }
+    Ok(value)
 }
 
 fn deserialize_value<T>(source_name: &str, value: &noyalib::Value) -> Result<T, RegistryError>

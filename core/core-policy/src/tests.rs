@@ -1308,7 +1308,7 @@ fn policy_compile_error_messages_and_sources_cover_variants() {
     };
     assert_eq!(
         network.to_string(),
-        "OS-enforced M1 policy for tool network-tool must use a deny-all network allowlist"
+        "supported policy-artifact target for tool network-tool must use a deny-all network allowlist"
     );
 
     let mut artifact = valid_policy_artifact("invalid-artifact");

@@ -27,7 +27,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 - Rust workspace and the `core`, `proto`, `loop-agent`, `meta-harness`, and `liquid` scaffold.
 - Versioned building-block, event, runtime, session, policy, and sandbox contracts. Canonical owners: `PROTOCOL.md`, `SECURITY.md`, and the Loop Agent V-Spec.
-- Deterministic D-015 fixtures and expected streams per `TESTING.md`.
+- Deterministic fixtures and expected streams per `TESTING.md` (ADR-0034).
 - Cross-platform CI, dependency, coverage, link, and render gates per `TESTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml`.
 
 **Decision state:** M0 and M1 are unblocked; accepted decisions are in [`ADR-LOG.md`](docs/adr/ADR-LOG.md).
@@ -54,7 +54,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Runtime kernel: deterministic bounded in-process fixture interpretation plus session event and context-manifest logs. External subprocess timeouts, bounded stdout/stderr, per-tool run logs and `tool.timed_out` remain post-M1.
 - Deterministic in-process enforcement/emulation for declared command, parameter, read/write, protected-path and deny-all network capabilities per loop. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
 - Protocol adapter that emits normalized `proto` v0 events.
-- D-015 golden loops and sandbox-negative tests.
+- Golden loops and sandbox-negative tests per `TESTING.md` (ADR-0034).
 
 **DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; appends every canonical event before publishing it; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
 

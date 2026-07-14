@@ -565,7 +565,7 @@ fn timestamp_parser_rejects_non_rfc3339_utc_shapes() {
 }
 
 #[test]
-fn event_clock_config_and_payload_helpers_cover_success_paths() {
+fn event_clock_and_payload_helpers_cover_success_paths() {
     let first = EventEnvelope::new(
         "evt-010",
         EventType::SessionStarted,
@@ -581,13 +581,6 @@ fn event_clock_config_and_payload_helpers_cover_success_paths() {
     invalid_first.timestamp = "not-a-time".to_owned();
     assert_eq!(EventClock::from_first_event(&invalid_first), None);
 
-    assert_eq!(
-        config_value(
-            "registry_root: 'reg''istry # still scalar'\n",
-            "registry_root"
-        ),
-        Some("reg'istry # still scalar".to_owned())
-    );
     for (event_type, payload) in [
         (
             EventType::SessionStarted,

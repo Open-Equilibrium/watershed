@@ -75,21 +75,36 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
     fs::create_dir(workspace.join("registry")).expect("registry dir");
     fs::write(workspace.join("registry-file"), "not a dir").expect("registry file");
 
-    assert_eq!(
-        config_value(
-            "registry_root: \"registry\"\nother: ignored\n",
-            "registry_root"
+    for (label, source, expected) in [
+        (
+            "unknown field",
+            "registry_root: registry\nother: ignored\n",
+            "unknown field",
         ),
-        Some("registry".to_owned())
-    );
-    assert_eq!(
-        config_value(
-            "registry_root: registry # fixture registry\n",
-            "registry_root"
+        (
+            "duplicate field",
+            "registry_root: registry\nregistry_root: other\n",
+            "duplicate",
         ),
-        Some("registry".to_owned())
-    );
-    assert_eq!(config_value("registry_root:\n", "registry_root"), None);
+        (
+            "explicit tag",
+            "registry_root: !!str registry\n",
+            "explicit YAML tag",
+        ),
+        (
+            "multiple documents",
+            "registry_root: registry\n---\nregistry_root: other\n",
+            "document",
+        ),
+    ] {
+        fs::write(workspace.join(".loop/config.yaml"), source).expect("invalid config written");
+        match load_workspace_config(&workspace).expect_err("invalid config must be rejected") {
+            RuntimeError::Usage(message) => {
+                assert!(message.contains(expected), "{label}: {message}")
+            }
+            error => panic!("{label}: {error}"),
+        }
+    }
 
     fs::write(
         workspace.join(".loop/config.yaml"),

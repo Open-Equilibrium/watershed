@@ -5,18 +5,15 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Barrier,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
     thread,
     time::{Duration, Instant},
 };
 
-#[path = "../../test_support.rs"]
+#[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::copy_fixture_workspace;
-
-static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 #[ignore = "performance gate"]
@@ -143,13 +140,6 @@ impl Drop for PeakRssSampler {
     }
 }
 
-fn fixture_dir(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("fixtures")
-        .join(name)
-}
-
 struct TempWorkspace {
     path: PathBuf,
 }
@@ -181,16 +171,7 @@ impl Drop for TempWorkspace {
 }
 
 fn workspace_copy(fixture: &str) -> TempWorkspace {
-    let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let target = std::env::temp_dir().join(format!(
-        "watershed-loop-agent-core-perf-{}-{id}",
-        std::process::id()
-    ));
-    if target.exists() {
-        fs::remove_dir_all(&target).expect("stale temp workspace removed");
-    }
-    copy_fixture_workspace(&fixture_dir(fixture), &target);
-    TempWorkspace::new(target)
+    TempWorkspace::new(test_support::workspace_copy(fixture))
 }
 
 fn rss_budget_must_be_enforced() -> bool {

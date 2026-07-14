@@ -27,22 +27,22 @@
       <article id="d-010" class="decision">
         <h3>D-010 - AgentPulse v0 Formulas</h3>
         <p><strong>Status:</strong> Open, M2 blocker.</p>
-        <p><strong>Question:</strong> Which exact event-derived formulas define rework ratio, first-attempt success and cost-per-productive-outcome?</p>
-        <ul><li><strong>A:</strong> Conservative event-derived formulas only. Pro: deterministic and auditable. Con: less nuanced at first.</li><li><strong>B:</strong> Add model-scored quality labels. Pro: richer signal. Con: more subjective and harder to test.</li></ul>
+        <p><strong>Question:</strong> Should the three scores use only facts already recorded during runs, or also an AI judgment?</p>
+        <ul><li><strong>A:</strong> Use recorded run facts only. Pro: the same input always gives the same auditable score. Con: the first version captures fewer nuances.</li><li><strong>B:</strong> Add AI-assigned quality labels. Pro: captures more nuance. Con: scores become subjective and harder to test.</li></ul>
         <p><strong>Recommendation:</strong> A for M2; reserve model-scored labels for later evaluation.</p>
       </article>
       <article id="d-021" class="decision">
         <h3>D-021 - Meta-Harness Packaging</h3>
-        <p><strong>Status:</strong> Open implementation detail before M2 implementation; the headless control-plane baseline is accepted in ADR-0018.</p>
-        <p><strong>Question:</strong> Which CLI/service/daemon packaging shape ships first for the already-decided headless MVP?</p>
-        <ul><li><strong>A:</strong> Headless CLI plus service/daemon. Pro: useful without Liquid and easy to test. Con: no rich GUI.</li><li><strong>B:</strong> Include only a small status/admin UI after the control plane works. Pro: easier demos. Con: extra packaging surface.</li></ul>
+        <p><strong>Status:</strong> Open implementation detail before M2; ADR-0018 already requires a non-graphical controller.</p>
+        <p><strong>Question:</strong> How should that controller be packaged for its first release?</p>
+        <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen after the controller works. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
         <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
       </article>
       <article id="d-022" class="decision">
         <h3>D-022 - Meta-Harness Deployment Modes</h3>
         <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> Which modes are required for the first control-plane MVP?</p>
-        <ul><li><strong>A:</strong> Local daemon/sidecar plus CLI. Pro: simplest and matches local agents. Con: remote teams wait.</li><li><strong>B:</strong> Local plus remote server. Pro: broader use. Con: pulls in auth, hosting and network trust.</li></ul>
+        <p><strong>Question:</strong> Should the first controller run only on the same computer, or also as a remote server?</p>
+        <ul><li><strong>A:</strong> A background process on the same computer plus a command-line app. Pro: simplest for local agents. Con: remote teams wait.</li><li><strong>B:</strong> Local operation plus a remote server. Pro: supports more users. Con: also requires sign-in, hosting and network-security work.</li></ul>
         <p><strong>Recommendation:</strong> A; preserve remote-capable protocol seams.</p>
       </article>
       <article id="d-023" class="decision">
@@ -62,8 +62,8 @@
       <article id="d-025" class="decision">
         <h3>D-025 - Liquid/Meta-Harness Boundary</h3>
         <p><strong>Status:</strong> Open implementation detail before Liquid integration work; the one-backend boundary is accepted in ADR-0018.</p>
-        <p><strong>Question:</strong> Which API/data slices expose Meta-Harness-owned capabilities for Liquid to render?</p>
-        <ul><li><strong>A:</strong> Meta-Harness exposes session/config/metrics capabilities through its public surfaces; Liquid consumes those surfaces. Pro: one source of truth. Con: Liquid must wait for API coverage.</li><li><strong>B:</strong> Liquid keeps temporary local projections that sync from Meta-Harness without becoming authority. Pro: faster UI prototypes. Con: sync rules need care.</li></ul>
+        <p><strong>Question:</strong> Which Meta-Harness information and actions should Liquid be allowed to show and use?</p>
+        <ul><li><strong>A:</strong> Meta-Harness provides sessions, settings and measurements through one official interface; Liquid uses it. Pro: one source of truth. Con: Liquid must wait until the interface supports each need.</li><li><strong>B:</strong> Liquid keeps temporary local copies synchronized with Meta-Harness. Pro: faster interface prototypes. Con: synchronization rules need care.</li></ul>
         <p><strong>Recommendation:</strong> A first; any projection must remain non-authoritative.</p>
       </article>
     </div>
@@ -96,8 +96,8 @@
       <article id="d-027" class="decision">
         <h3>D-027 - Liquid CLI/API Surface</h3>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
-        <p><strong>Question:</strong> Which workspace read/write commands and API calls are stable in the MVP?</p>
-        <ul><li><strong>A:</strong> Small typed CRUD/mutation surface. Pro: testable and permissionable. Con: less flexible.</li><li><strong>B:</strong> Broad generic document API. Pro: flexible. Con: harder to secure and version.</li></ul>
+        <p><strong>Question:</strong> Which workspace read and change commands should remain stable in the MVP?</p>
+        <ul><li><strong>A:</strong> A small set of specific create, read, update and delete commands. Pro: easy to test and restrict. Con: less flexible.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-028" class="decision">
@@ -117,8 +117,8 @@
       <article id="d-030" class="decision">
         <h3>D-030 - External-Agent Permissions</h3>
         <p><strong>Status:</strong> Open implementation detail before CLI/API mutation access; scoped, auditable access is the security baseline.</p>
-        <p><strong>Question:</strong> Which scoped grant model allows external actors to read or mutate Liquid workspace data?</p>
-        <ul><li><strong>A:</strong> Resource/action-scoped grants with approval for sensitive writes. Pro: clear blast radius. Con: more permission UX.</li><li><strong>B:</strong> Capability bundles scoped by workspace area and command family. Pro: easier administration. Con: coarser permissions.</li></ul>
+        <p><strong>Question:</strong> How should outside tools receive limited permission to read or change Liquid workspace data?</p>
+        <ul><li><strong>A:</strong> Grant named resources and actions, and ask before sensitive changes. Pro: damage is clearly limited. Con: more permission prompts and settings.</li><li><strong>B:</strong> Offer predefined permission bundles by workspace area. Pro: easier to manage. Con: each bundle gives broader access.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-031" class="decision">
@@ -131,29 +131,29 @@
       <article id="d-032" class="decision">
         <h3>D-032 - Shared Mutation Pipeline</h3>
         <p><strong>Status:</strong> Open implementation detail before any Liquid write surface ships; one recorded mutation path is the accepted product invariant.</p>
-        <p><strong>Question:</strong> Which typed command model lets UI, CLI/API, Liquid AI and external actors share that mutation path?</p>
-        <ul><li><strong>A:</strong> One typed command/mutation pipeline. Pro: no hidden writes. Con: stricter component contracts.</li><li><strong>B:</strong> Per-surface adapters that normalize into the same internal command log. Pro: flexible integration. Con: adapters must prove equivalence.</li></ul>
+        <p><strong>Question:</strong> How should the interface, command line, Liquid AI and outside tools all send changes through one recorded path?</p>
+        <ul><li><strong>A:</strong> One shared, defined change pipeline. Pro: no hidden changes. Con: every component must follow a stricter contract.</li><li><strong>B:</strong> A translator for each entry point that writes to the same internal log. Pro: flexible integration. Con: every translator must behave identically.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-033" class="decision">
         <h3>D-033 - Component Runtime Contract</h3>
         <p><strong>Status:</strong> Open before component implementation.</p>
-        <p><strong>Question:</strong> What typed contract do dashboard components expose?</p>
-        <ul><li><strong>A:</strong> Minimal typed props/data/events contract. Pro: stable and testable. Con: less expressive initially.</li><li><strong>B:</strong> Open component object model. Pro: flexible. Con: hard to sandbox and version.</li></ul>
+        <p><strong>Question:</strong> What information and actions can dashboard components receive and send?</p>
+        <ul><li><strong>A:</strong> Small, defined inputs, data and events. Pro: stable and testable. Con: fewer possibilities at first.</li><li><strong>B:</strong> A flexible component model with few restrictions. Pro: expressive. Con: harder to isolate safely and change later.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-034" class="decision">
         <h3>D-034 - Script Component Runtime</h3>
         <p><strong>Status:</strong> Open before script components.</p>
-        <p><strong>Question:</strong> What sandbox/runtime executes Liquid script components?</p>
-        <ul><li><strong>A:</strong> Capability-scoped local runtime. Pro: useful offline and auditable. Con: sandbox work.</li><li><strong>B:</strong> Remote execution only. Pro: isolates local device. Con: weaker local-first story.</li></ul>
+        <p><strong>Question:</strong> Where and how should Liquid script components run safely?</p>
+        <ul><li><strong>A:</strong> Run locally with access only to explicitly granted abilities. Pro: works offline and actions can be reviewed. Con: safe isolation must be built.</li><li><strong>B:</strong> Run only on a remote service. Pro: isolates the local device. Con: depends on a network service and weakens offline use.</li></ul>
         <p><strong>Recommendation:</strong> A, with the exact runtime chosen during M3 design.</p>
       </article>
       <article id="d-035" class="decision">
         <h3>D-035 - Sync And Collaboration</h3>
         <p><strong>Status:</strong> Open before shared-workspace work.</p>
-        <p><strong>Question:</strong> Which sync/collaboration model supports multiple users and agents?</p>
-        <ul><li><strong>A:</strong> Local-first action log with view-scoped subscriptions. Pro: matches performance targets. Con: harder conflict logic.</li><li><strong>B:</strong> Central server as source of truth. Pro: simpler multi-user authority. Con: weaker offline/local-first posture.</li></ul>
+        <p><strong>Question:</strong> How should changes stay synchronized among multiple people and agents?</p>
+        <ul><li><strong>A:</strong> Keep a change log on each device and send each client updates only for views it uses. Pro: matches offline and performance goals. Con: conflicting changes are harder to resolve.</li><li><strong>B:</strong> Make one central server authoritative. Pro: simpler ownership of shared changes. Con: weaker offline operation.</li></ul>
         <p><strong>Recommendation:</strong> A, unless M3 constraints force a narrower local-only MVP.</p>
       </article>
     </div>
@@ -165,8 +165,8 @@
       <article id="d-020" class="decision">
         <h3>D-020 - Loop Agent Embedded Core API</h3>
         <p><strong>Status:</strong> Open, not an M1 blocker.</p>
-        <p><strong>Question:</strong> Which Rust API becomes stable for embedding Loop Agent?</p>
-        <ul><li><strong>A:</strong> Keep internals private through M1, then stabilize a small <code>loop-agent-core</code> API. Pro: avoids freezing early mistakes. Con: embedding waits.</li><li><strong>B:</strong> Stabilize the API during M1. Pro: earlier integration. Con: high churn risk.</li></ul>
+        <p><strong>Question:</strong> Which small part of Loop Agent should other Rust programs be allowed to call directly?</p>
+        <ul><li><strong>A:</strong> Keep internal code private through M1, then publish a small stable <code>loop-agent-core</code> interface. Pro: avoids committing to early mistakes. Con: direct integration waits.</li><li><strong>B:</strong> Publish the direct-call interface during M1. Pro: earlier integration. Con: later changes may break users.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-046" class="decision">
