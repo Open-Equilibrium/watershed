@@ -225,13 +225,6 @@ fn ensure_opened_real_file_for_read_matches_path(
 fn read_file_with_limit(path: &Path, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
     let (file, metadata) = open_real_file_for_read(path)?;
     let total_len = metadata.len();
-    if total_len > MAX_SESSION_LOG_BYTES {
-        return Err(RuntimeError::Protocol(format!(
-            "{} read size {total_len} bytes exceeds max {}",
-            path.display(),
-            MAX_SESSION_LOG_BYTES
-        )));
-    }
     if total_len > max_bytes {
         return Err(RuntimeError::Protocol(format!(
             "{} read size {total_len} bytes exceeds max {max_bytes}",
