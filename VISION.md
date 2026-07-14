@@ -44,11 +44,11 @@ Because Watershed is AGPL/free software, the platform emphasizes **transparency,
 ## Integration model: shared core, modular surfaces
 Watershed is a monorepo, **not** a monolith. The tools share `core` (building-block /script format, identity/permissions, policy→sandbox compiler and configuration helpers) and talk over one versioned **protocol** (`proto`). Each tool stays independently runnable:
 
-- **Loop Agent** is a **standalone CLI agent product** (CLI-only, local). It is usable on its own — by humans, by scripts/CI, and later as an embeddable core library — and exposes its CLI, JSONL event stream and explicit tail/export surfaces over the protocol; RPC/control and embedding are designed-for later seams. Per-product detail: [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html).
+- **Loop Agent** is a **standalone CLI agent product** (CLI-only, local). It is usable on its own — by humans, by scripts/CI, and later as an embeddable core library — and exposes CLI run/replay/tail/resume plus a JSONL event stream; RPC/control, export and embedding are later seams. Per-product detail: [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html).
 - **Meta-Harness** is a **self-contained headless control plane** over N agents (Loop Agent + adapters for external agents). It centralizes configuration, runs a session registry, schedules and automations, persists its own state/audit trail and computes AgentPulse — all reachable through CLI/API/service. Per-product detail: [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html).
 - **Liquid** is a **standalone native workspace and app-building product**: dashboards, views, components, scripts, data sources, automations, local workspace data, an internal workspace action history/VCS and a workspace CLI/API. It is useful on its own and integrates Loop Agent and Meta-Harness as **optional protocol clients**, not as compiled-in modules. Per-product detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
 
-**Loop Agent is a standalone product, not a backend.** Meta-Harness and Liquid are *optional consumers/integrators* of Loop Agent's public runtime surfaces (CLI, JSONL event stream and explicit tail/export surfaces; RPC/control and embedding when implemented). They do not read Loop Agent's local `.loop/sessions` store directly, and neither is a prerequisite for using Loop Agent.
+**Loop Agent is a standalone product, not a backend.** Meta-Harness and Liquid are *optional consumers/integrators* of Loop Agent's public runtime surfaces (CLI and JSONL now; RPC/control, export and embedding when implemented). They do not read Loop Agent's local `.loop/sessions` store directly, and neither is a prerequisite for using Loop Agent.
 
 **Meta-Harness and Liquid are architecturally separate but integrated.** Meta-Harness can run without Liquid (headless, CI, server, BYOA); Liquid *consumes* Meta-Harness's session/config/metric/automation surfaces instead of duplicating that backend, and owns the rich UI (dashboards, views, components, PowerBar). Meta-Harness does not own UI; it does not reach into Loop Agent internals; and it is not a project VCS/history engine. The three-layer split is: Loop Agent = execution layer (standalone agent runtime); Meta-Harness = control layer (standalone headless many-agent control plane); Liquid = workspace/action layer (standalone native workspace / app-building product).
 
@@ -64,7 +64,7 @@ The layers integrate through **public surfaces and protocol/event contracts**, n
 Loop Agent
   emits structured runtime events
   persists local session/transcript logs
-  exposes CLI/JSONL/tail-export surfaces and future RPC/SDK seams
+  exposes CLI/JSONL run-replay-tail-resume surfaces and future export/RPC/SDK seams
 
 Meta-Harness
   consumes Loop Agent and external-agent event surfaces

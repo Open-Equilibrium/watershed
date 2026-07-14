@@ -128,7 +128,7 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must emit monotonically increasing `sequence` values per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
-- **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Loop Agent's `.loop/sessions` is consumed via the event stream or tail/export surfaces, and RPC when implemented, never from disk by Meta-Harness or Liquid). This keeps the local transport (ADR-0029) from foreclosing later remote topologies (ADR-0038).
+- **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Meta-Harness or Liquid consumes Loop Agent sessions through public event/control surfaces, not `.loop/sessions`). This keeps the local transport (ADR-0029) from foreclosing later remote topologies (ADR-0038).
 
 ## Implementation constraints
 
