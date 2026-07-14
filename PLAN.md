@@ -3,23 +3,15 @@
 Implementation milestones with deliverables and a Definition of Done (DoD). Performance targets are canonical in `PERFORMANCE.md`.
 
 Created: 2026-06-05
-Updated: 2026-07-13
+Updated: 2026-07-14
 
 ## MVP boundary
 
 The first MVP is **Loop Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. Project-code-history/VCS questions are deferred until after the Loop Agent + Meta-Harness MVPs validate the core workflow. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3).
 
-## Sequencing rationale
+## Sequencing and adoption
 
-Build the shared substrate first, then the most differentiated/validatable layer (Loop Agent) as a standalone CLI, then the layer that depends on it (Meta-Harness), then the integrating surface (Liquid). This keeps the broadest surface (Liquid) from blocking validation while still designing all MVP pieces so they remain compatible with the overall `VISION.md` integration model.
-
-## Platform wedge sequencing
-
-Watershed is one AGPL/free-software platform with three independently usable layers. The milestones validate the layers in dependency/order-of-risk sequence, not as three unrelated products.
-
-1. Loop Agent proves structured agent execution and creates the developer/open-source credibility wedge.
-2. Meta-Harness proves multi-agent control, observability, policy, metrics, and creates the team/control/governance wedge.
-3. Liquid proves safe human/agent workspace co-editing with reversible history and creates the long-term workspace/action wedge.
+Build the shared substrate, then Loop Agent, Meta-Harness and Liquid. This dependency/order-of-risk sequence validates execution, then multi-agent governance, then the integrated workspace without letting the broadest surface block earlier validation. All three remain independently usable layers of one platform; integration is canonical in `VISION.md`.
 
 The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Loop Agent and Meta-Harness wedges are validated.
 
