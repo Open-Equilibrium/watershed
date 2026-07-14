@@ -30,7 +30,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Deterministic D-015 fixtures and expected streams per `TESTING.md`.
 - Cross-platform CI, dependency, coverage, link, and render gates per `TESTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml`.
 
-**Decision state:** no M0 blocker remains. M0 decisions are recorded in ADR-0029…ADR-0037 and ADR-0041…ADR-0045; later M1 decisions are in ADR-0050…ADR-0052 and ADR-0055…ADR-0060. D-020 remains a non-blocking post-M1 seam, D-046 remains post-M1, and D-061 is the sole open M1 decision: authorize a maintained YAML 1.2 parser dependency or narrow the accepted registry format.
+**Decision state:** M0 is unblocked; accepted decisions are in [`ADR-LOG.md`](docs/adr/ADR-LOG.md), and [D-061](docs/decisions/open-decisions.html#d-061) is the sole open M1 blocker.
 
 **DoD:** the scaffold compiles on Linux, macOS, and Windows; its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
 

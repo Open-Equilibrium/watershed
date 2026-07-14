@@ -78,13 +78,11 @@ The writer uses bounded queues and backpressure. `message.delta` and `tool.progr
 
 Append-before-publish is distinct from machine/power-loss durability. A successful append means the ordered bytes have crossed Loop Agent's userspace buffering boundary into the local log; it does not mean one `fsync` per event. The writer flushes and synchronizes at `message.completed`, `tool.completed`, `tool.failed`, `tool.timed_out`, `session.paused`, `session.completed` and `session.failed`, and at least once per second while an active stream has unsynchronized events. High-frequency deltas may share these boundaries. Remote replication cadence, crash recovery on a new host and the durable ownership lease remain post-M1 under ADR-0039.
 
-Future Liquid/Meta-Harness consumers render published events immediately, retain the highest contiguous sequence, deduplicate by `event_id`, request catch-up on a gap and reconnect from that sequence. Live delivery supplies low latency; the authoritative log and sequence replay supply correctness.
-
 Minimum v0 payload fields:
 
 All listed payload fields are strings unless noted otherwise; string arrays are JSON arrays of strings. `role` is `system | user | assistant | tool`, `value` is a JSON number, `exit_code` is an integer and `data` is a JSON object.
 
-- `session.*`: `reason` optional except failure events, where it is required. M1 currently emits `reason: "fixture-start"` on `session.started` for all run starts.
+- `session.*`: `reason` optional except failure events, where it is required.
 - `loop.*`: `loop_definition_id` required; `loop_name` optional; `error` required for `loop.failed`.
 - `phase.entered`: `phase_id`, `phase_name`, `instruction_ids` and `tool_ids` (string arrays; empty when none).
 - `step.started | step.completed`: `step_id`, `step_name`, optional `phase_id`, optional `instruction_id`, optional `connection_ids` and `connection_kinds` (string arrays; `connection_kinds` values are `data | trigger | refresh`). If either connection array is present, both are present with the same length; index `i` in `connection_ids` pairs with index `i` in `connection_kinds`, in the owning Step block's `connection_refs` order after registry resolution. With no connections, omit both arrays or emit both as empty arrays.

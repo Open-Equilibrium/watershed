@@ -20,7 +20,7 @@ M1 implementation budgets (ADR-0049):
 
 Tool runs are bounded/headless; the harness itself must not be the bottleneck when local inference is fast.
 
-The event budgets measure individual events, not averages of batch averages. Append-before-publish remains mandatory: batching may amortize writes but cannot publish first. Semantic checkpoints and the one-second maximum dirty interval bound machine/power-loss exposure; no per-delta `fsync` is required.
+The event budgets measure individual events, not averages of batch averages; ordering and durability semantics are canonical in `PROTOCOL.md`.
 
 ## Meta-Harness
 
