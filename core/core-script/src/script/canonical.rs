@@ -1,6 +1,6 @@
-fn materialize_registry_defaults(value: &mut Value) {
+fn canonicalize_registry_value(value: &mut Value) {
     match value {
-        Value::Array(items) => items.iter_mut().for_each(materialize_registry_defaults),
+        Value::Array(items) => items.iter_mut().for_each(canonicalize_registry_value),
         Value::Object(map) => {
             if map.contains_key("phase_refs") {
                 map.entry("connection_refs".to_owned())
@@ -16,18 +16,6 @@ fn materialize_registry_defaults(value: &mut Value) {
                     }
                 }
             }
-            for child in map.values_mut() {
-                materialize_registry_defaults(child);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
-    }
-}
-
-fn sort_allowed_parameters(value: &mut Value) {
-    match value {
-        Value::Array(items) => items.iter_mut().for_each(sort_allowed_parameters),
-        Value::Object(map) => {
             if let Some(Value::Array(parameters)) = map.get_mut("allowed_parameters") {
                 parameters.sort_by(|left, right| {
                     left.get("name")
@@ -36,7 +24,7 @@ fn sort_allowed_parameters(value: &mut Value) {
                 });
             }
             for child in map.values_mut() {
-                sort_allowed_parameters(child);
+                canonicalize_registry_value(child);
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}

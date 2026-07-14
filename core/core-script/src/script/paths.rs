@@ -62,7 +62,6 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
         return None;
     }
 
-    let mut components = Vec::new();
     for component in value.split('/') {
         if component.is_empty() || component == "." || component == ".." {
             return None;
@@ -72,11 +71,8 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
         {
             return None;
         }
-        components.push(component);
     }
-
-    let canonical = components.join("/");
-    (canonical == value).then_some(canonical)
+    Some(value.to_owned())
 }
 
 /// Returns whether `path` is equal to or contained under `scope`.

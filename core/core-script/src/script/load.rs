@@ -78,7 +78,6 @@ fn read_registry_file_to_string(
 
 struct RegistryFile {
     path: PathBuf,
-    bytes: u64,
     identity: RegistryFileIdentity,
 }
 
@@ -186,18 +185,13 @@ struct RegistryTraversalLimits {
     max_depth: usize,
 }
 
-#[derive(Default)]
-struct RegistryTraversalState {
-    total_bytes: u64,
-}
-
 fn collect_registry_files_with_limits(
     root: &Path,
     dir: &Path,
     out: &mut Vec<RegistryFile>,
     limits: RegistryTraversalLimits,
     depth: usize,
-    state: &mut RegistryTraversalState,
+    total_bytes: &mut u64,
 ) -> Result<(), RegistryError> {
     let dir_metadata = fs::symlink_metadata(dir).map_err(|source| RegistryError::Io {
         path: dir.to_path_buf(),
@@ -246,7 +240,7 @@ fn collect_registry_files_with_limits(
                     max: limits.max_depth,
                 });
             }
-            collect_registry_files_with_limits(root, &path, out, limits, next_depth, state)?;
+            collect_registry_files_with_limits(root, &path, out, limits, next_depth, total_bytes)?;
         } else if metadata.is_file()
             && path
                 .extension()
@@ -261,11 +255,11 @@ fn collect_registry_files_with_limits(
                     max: limits.max_file_bytes,
                 });
             }
-            state.total_bytes = state.total_bytes.saturating_add(bytes);
-            if state.total_bytes > limits.max_total_bytes {
+            *total_bytes = (*total_bytes).saturating_add(bytes);
+            if *total_bytes > limits.max_total_bytes {
                 return Err(RegistryError::ReadLimitExceeded {
                     path: root.to_path_buf(),
-                    bytes: state.total_bytes,
+                    bytes: *total_bytes,
                     max: limits.max_total_bytes,
                 });
             }
@@ -280,11 +274,7 @@ fn collect_registry_files_with_limits(
                 });
             }
             let identity = registry_file_identity(&path, &metadata)?;
-            out.push(RegistryFile {
-                path,
-                bytes,
-                identity,
-            });
+            out.push(RegistryFile { path, identity });
         }
     }
     Ok(())

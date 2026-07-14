@@ -32,20 +32,20 @@ impl ResolvedRegistry {
             max_files,
             max_depth,
         };
-        let mut state = RegistryTraversalState::default();
-        collect_registry_files_with_limits(root, root, &mut paths, limits, 0, &mut state)?;
+        let mut collected_bytes = 0;
+        collect_registry_files_with_limits(
+            root,
+            root,
+            &mut paths,
+            limits,
+            0,
+            &mut collected_bytes,
+        )?;
         paths.sort_by(|left, right| left.path.cmp(&right.path));
         let mut blocks = Vec::new();
         let mut total_bytes = 0u64;
 
         for file in paths {
-            if file.bytes > max_file_bytes {
-                return Err(RegistryError::ReadLimitExceeded {
-                    path: file.path,
-                    bytes: file.bytes,
-                    max: max_file_bytes,
-                });
-            }
             let source = read_registry_file_to_string(&file, max_file_bytes)?;
             let bytes = u64::try_from(source.len()).unwrap_or(u64::MAX);
             total_bytes = total_bytes.saturating_add(bytes);
@@ -93,8 +93,7 @@ impl ResolvedRegistry {
     /// Serializes the resolved registry as canonical JSON without a trailing newline.
     pub fn canonical_json(&self) -> Result<String, RegistryError> {
         let mut value = serde_json::to_value(self).map_err(RegistryError::Serialize)?;
-        materialize_registry_defaults(&mut value);
-        sort_allowed_parameters(&mut value);
+        canonicalize_registry_value(&mut value);
         proto::canonical_json(&value).map_err(RegistryError::CanonicalJson)
     }
 

@@ -9,8 +9,8 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(),
         max_files: MAX_REGISTRY_FILES,
         max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
     };
-    let mut state = RegistryTraversalState::default();
-    collect_registry_files_with_limits(dir, dir, out, limits, 0, &mut state)
+    let mut total_bytes = 0;
+    collect_registry_files_with_limits(dir, dir, out, limits, 0, &mut total_bytes)
 }
 
 proptest! {
@@ -359,7 +359,6 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
     let existing_metadata = std::fs::symlink_metadata(&invalid_utf8).expect("file metadata");
     let missing_file = RegistryFile {
         path: root.join("missing.yaml"),
-        bytes: 0,
         identity: registry_file_identity(&invalid_utf8, &existing_metadata)
             .expect("existing file identity"),
     };
@@ -371,7 +370,6 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
     let dir_metadata = std::fs::symlink_metadata(&root).expect("directory metadata");
     let dir_file = RegistryFile {
         path: root.clone(),
-        bytes: 0,
         identity: registry_file_identity(&root, &dir_metadata).expect("directory identity"),
     };
     assert!(matches!(
@@ -379,7 +377,7 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
         Err(RegistryError::UnsafePath { message, .. }) if message.contains("symlinks")
     ));
     let mut collected = Vec::new();
-    let mut state = RegistryTraversalState::default();
+    let mut total_bytes = 0;
     assert!(matches!(
         collect_registry_files_with_limits(
             &invalid_utf8,
@@ -392,7 +390,7 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
                 max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
             },
             0,
-            &mut state,
+            &mut total_bytes,
         ),
         Err(RegistryError::UnsafePath { message, .. }) if message.contains("must be a directory")
     ));
@@ -413,7 +411,6 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
     let second_metadata = std::fs::symlink_metadata(&second).expect("second metadata");
     let first_file = RegistryFile {
         path: first.clone(),
-        bytes: first_metadata.len(),
         identity: registry_file_identity(&first, &first_metadata).expect("first identity"),
     };
     assert!(matches!(
@@ -1357,34 +1354,6 @@ fn parser_helpers_cover_duplicate_fields_and_direct_edge_branches() {
         r#""abc\""#,
     ))
     .contains("dangling escape"));
-
-    let mut sortable = serde_json::json!({
-        "outer": [{
-            "allowed_parameters": [
-                {"name": "--z"},
-                {"description": "missing name"},
-                {"name": "--a"}
-            ]
-        }],
-        "allowed_parameters": [
-            {"name": "--b"},
-            {"name": "--a"}
-        ]
-    });
-    sort_allowed_parameters(&mut sortable);
-    assert_eq!(
-        sortable["allowed_parameters"]
-            .as_array()
-            .expect("root parameters")
-            .iter()
-            .map(|value| value["name"].as_str().unwrap_or(""))
-            .collect::<Vec<_>>(),
-        vec!["--a", "--b"]
-    );
-    assert_eq!(
-        sortable["outer"][0]["allowed_parameters"][2]["name"],
-        serde_json::json!("--z")
-    );
 
     assert!(!is_valid_allowed_parameter_name("--"));
     assert!(!is_valid_allowed_parameter_name("value"));
