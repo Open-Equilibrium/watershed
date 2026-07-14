@@ -1,4 +1,6 @@
 const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
+const EVENT_WRITER_BATCH_CAPACITY: usize = EVENT_WRITER_QUEUE_CAPACITY;
+const EVENT_WRITER_BATCH_WINDOW: Duration = Duration::from_millis(25);
 const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 
 trait RuntimeEventSink {
@@ -23,6 +25,7 @@ struct WriterOutcome {
     append_latency_nanos: Option<u128>,
     appended: bool,
     error: Option<RuntimeError>,
+    notification_latency_nanos: Option<u128>,
 }
 
 impl WriterOutcome {
@@ -31,27 +34,29 @@ impl WriterOutcome {
             append_latency_nanos: None,
             appended: false,
             error: Some(error),
+            notification_latency_nanos: None,
         }
     }
 }
 
+struct QueuedEvent {
+    acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
+    canonical_jsonl: String,
+    context_manifests: Option<Vec<ContextManifest>>,
+    event: Box<EventEnvelope>,
+    measurement_started_at: Option<Instant>,
+    pre_batch_latency_nanos: Option<u128>,
+}
+
 enum SessionWriterCommand {
-    Commit {
-        acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
-        canonical_jsonl: String,
-        context_manifests: Option<Vec<ContextManifest>>,
-        measurement_started_at: Option<Instant>,
-        event: Box<EventEnvelope>,
-    },
-    Shutdown {
-        acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
-    },
+    Commit(QueuedEvent),
+    Shutdown(std::sync::mpsc::SyncSender<WriterOutcome>),
 }
 
 struct SerialSessionWriter<'a> {
     commit_reservation: Option<&'a SessionReservation>,
+    deferred: Vec<std::sync::mpsc::Receiver<WriterOutcome>>,
     failed: bool,
-    notifier: Option<LiveEventNotifier>,
     sender: Option<std::sync::mpsc::SyncSender<SessionWriterCommand>>,
     timings: Option<&'a mut EventWriterTimings>,
     worker: Option<thread::JoinHandle<()>>,
@@ -108,7 +113,14 @@ impl<'a> SerialSessionWriter<'a> {
         let worker = thread::Builder::new()
             .name(format!("loop-event-writer-{session_id}"))
             .spawn(move || {
-                session_writer_worker(&path, &context_path, validation, appender, &receiver)
+                session_writer_worker(
+                    &path,
+                    &context_path,
+                    validation,
+                    appender,
+                    notifier,
+                    &receiver,
+                )
             })
             .map_err(|source| RuntimeError::Io {
                 path: PathBuf::from("<event-writer-thread>"),
@@ -116,12 +128,47 @@ impl<'a> SerialSessionWriter<'a> {
             })?;
         Ok(Self {
             commit_reservation,
+            deferred: Vec::new(),
             failed: false,
-            notifier,
             sender: Some(sender),
             timings,
             worker: Some(worker),
         })
+    }
+
+    fn apply_outcome(&mut self, outcome: WriterOutcome) -> Result<(), RuntimeError> {
+        if outcome.appended
+            && let Some(reservation) = self.commit_reservation
+        {
+            reservation.mark_committed();
+        }
+        if let Some(timings) = self.timings.as_deref_mut() {
+            if let Some(append_latency) = outcome.append_latency_nanos {
+                timings.append_nanos.push(append_latency);
+            }
+            if let Some(notification_latency) = outcome.notification_latency_nanos {
+                timings.notification_nanos.push(notification_latency);
+            }
+        }
+        if let Some(err) = outcome.error {
+            self.failed = true;
+            return Err(event_writer_failure(err));
+        }
+        Ok(())
+    }
+
+    fn drain_deferred(&mut self) -> Result<(), RuntimeError> {
+        let mut first_error = None;
+        for response in std::mem::take(&mut self.deferred) {
+            let result = response
+                .recv()
+                .map_err(|_| event_writer_failure(writer_channel_closed_error()))
+                .and_then(|outcome| self.apply_outcome(outcome));
+            if first_error.is_none() {
+                first_error = result.err();
+            }
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     fn finish(&mut self) -> Result<(), RuntimeError> {
@@ -129,8 +176,9 @@ impl<'a> SerialSessionWriter<'a> {
             return Ok(());
         };
         let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
-        let send_result = sender.send(SessionWriterCommand::Shutdown { acknowledgement });
+        let send_result = sender.send(SessionWriterCommand::Shutdown(acknowledgement));
         drop(sender);
+        let deferred_result = self.drain_deferred();
         let outcome = send_result
             .map_err(|_| writer_channel_closed_error())
             .and_then(|()| response.recv().map_err(|_| writer_channel_closed_error()));
@@ -140,15 +188,11 @@ impl<'a> SerialSessionWriter<'a> {
             .expect("started event writer owns a worker")
             .join()
             .map_err(|_| RuntimeError::Protocol("session event writer panicked".to_owned()));
-        let outcome = outcome?;
+        deferred_result?;
+        let outcome = outcome.map_err(event_writer_failure)?;
         join_result?;
-        if let Some(err) = outcome.error {
-            self.failed = true;
-            return Err(err);
-        }
-        Ok(())
+        self.apply_outcome(outcome)
     }
-
 }
 
 impl RuntimeEventSink for SerialSessionWriter<'_> {
@@ -168,48 +212,35 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
                 "session event writer is closed after a prior failure".to_owned(),
             )));
         }
+        let is_batchable = is_micro_batch_event(&event.event_type);
+        if is_batchable && self.deferred.len() == EVENT_WRITER_BATCH_CAPACITY {
+            self.drain_deferred()?;
+        }
         let sender = self.sender.as_ref().ok_or_else(|| {
             RuntimeError::Protocol("session event writer is already closed".to_owned())
         })?;
         let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
         sender
-            .send(SessionWriterCommand::Commit {
+            .send(SessionWriterCommand::Commit(QueuedEvent {
                 acknowledgement,
                 canonical_jsonl: canonical_jsonl.to_owned(),
                 context_manifests: context_manifests.map(<[ContextManifest]>::to_vec),
                 measurement_started_at,
                 event: Box::new(event.clone()),
-            })
+                pre_batch_latency_nanos: None,
+            }))
             .map_err(|_| event_writer_failure(writer_channel_closed_error()))?;
+        if is_batchable {
+            self.deferred.push(response);
+            return Ok(());
+        }
+        let deferred_result = self.drain_deferred();
         let outcome = response
             .recv()
             .map_err(|_| event_writer_failure(writer_channel_closed_error()))?;
-        if outcome.appended {
-            if let Some(reservation) = self.commit_reservation {
-                reservation.mark_committed();
-            }
-            if let (Some(timings), Some(append_latency)) =
-                (self.timings.as_deref_mut(), outcome.append_latency_nanos)
-            {
-                timings.append_nanos.push(append_latency);
-            }
-        }
-        if outcome.appended
-            && let Some(notifier) = &self.notifier
-        {
-            let notification_started_at = Instant::now();
-            let _ = notifier.try_notify(&event.session_id, event.sequence);
-            if let Some(timings) = self.timings.as_deref_mut() {
-                timings
-                    .notification_nanos
-                    .push(notification_started_at.elapsed().as_nanos());
-            }
-        }
-        if let Some(err) = outcome.error {
-            self.failed = true;
-            return Err(event_writer_failure(err));
-        }
-        Ok(())
+        let outcome_result = self.apply_outcome(outcome);
+        deferred_result?;
+        outcome_result
     }
 }
 
@@ -307,6 +338,53 @@ impl DirtySyncState {
     }
 }
 
+#[derive(Default)]
+struct PendingEventBatch {
+    events: Vec<QueuedEvent>,
+    started_at: Option<Instant>,
+}
+
+impl PendingEventBatch {
+    fn start(&mut self, now: Instant) {
+        self.started_at.get_or_insert(now);
+    }
+
+    fn push(&mut self, mut event: QueuedEvent) {
+        let now = Instant::now();
+        self.start(now);
+        event.pre_batch_latency_nanos = event
+            .measurement_started_at
+            .take()
+            .map(|started_at| started_at.elapsed().as_nanos());
+        self.events.push(event);
+    }
+
+    fn is_due(&self, now: Instant) -> bool {
+        self.started_at.is_some_and(|started_at| {
+            now.checked_duration_since(started_at)
+                .is_some_and(|elapsed| elapsed >= EVENT_WRITER_BATCH_WINDOW)
+        })
+    }
+
+    fn is_full(&self) -> bool {
+        self.events.len() == EVENT_WRITER_BATCH_CAPACITY
+    }
+
+    fn wait_timeout(&self, now: Instant) -> Option<Duration> {
+        self.started_at.map(|started_at| {
+            EVENT_WRITER_BATCH_WINDOW.saturating_sub(
+                now.checked_duration_since(started_at)
+                    .unwrap_or(Duration::ZERO),
+            )
+        })
+    }
+
+    fn take(&mut self) -> Vec<QueuedEvent> {
+        self.started_at = None;
+        std::mem::take(&mut self.events)
+    }
+}
+
 trait EventLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError>;
     fn sync(&mut self, path: &Path) -> Result<(), RuntimeError>;
@@ -319,81 +397,223 @@ trait EventLogAppender {
     }
 }
 
+struct WriterWorker<'a, A> {
+    appender: A,
+    batch: PendingEventBatch,
+    context_path: &'a Path,
+    dirty: DirtySyncState,
+    notifier: Option<LiveEventNotifier>,
+    path: &'a Path,
+    pending_error: Option<RuntimeError>,
+    stopped: bool,
+    validation: SessionAppendValidationState,
+}
+
+impl<A: EventLogAppender> WriterWorker<'_, A> {
+    fn flush_batch(&mut self) {
+        let pending = self.batch.take();
+        if pending.is_empty() {
+            return;
+        }
+        if let Some(error) = self.pending_error.take() {
+            reject_batch(pending, error);
+            self.stopped = true;
+            return;
+        }
+        let append_started_at = Instant::now();
+        if let Err(error) = validate_batch(self.path, &mut self.validation, &pending) {
+            reject_batch(pending, error);
+            self.stopped = true;
+            return;
+        }
+        let jsonl = pending
+            .iter()
+            .map(|event| event.canonical_jsonl.as_str())
+            .collect::<String>();
+        if let Err(error) = self.appender.append(self.path, jsonl.as_bytes()) {
+            reject_batch(pending, error);
+            self.stopped = true;
+            return;
+        }
+        let append_latency_nanos = append_started_at.elapsed().as_nanos();
+        self.dirty.mark_dirty(Instant::now());
+        for event in pending {
+            let _ = event.acknowledgement.send(WriterOutcome {
+                append_latency_nanos: event
+                    .pre_batch_latency_nanos
+                    .map(|latency| latency.saturating_add(append_latency_nanos)),
+                appended: true,
+                error: None,
+                notification_latency_nanos: notify_committed(
+                    self.notifier.as_ref(),
+                    &event.event,
+                ),
+            });
+        }
+    }
+
+    fn commit(&mut self, event: QueuedEvent) {
+        if is_micro_batch_event(&event.event.event_type) && !self.stopped {
+            self.batch.push(event);
+            if self.batch.is_full() {
+                self.flush_batch();
+            }
+            return;
+        }
+        self.flush_batch();
+        let mut outcome = if self.stopped {
+            WriterOutcome::failed(discarded_after_writer_failure())
+        } else if let Some(error) = self.pending_error.take() {
+            WriterOutcome::failed(error)
+        } else {
+            commit_session_event(
+                SessionEventCommit {
+                    path: self.path,
+                    context_path: self.context_path,
+                    event: &event.event,
+                    canonical_jsonl: &event.canonical_jsonl,
+                    context_manifests: event.context_manifests.as_deref(),
+                    measurement_started_at: event.measurement_started_at,
+                },
+                &mut self.appender,
+                &mut self.validation,
+                &mut self.dirty,
+            )
+        };
+        if outcome.appended {
+            outcome.notification_latency_nanos =
+                notify_committed(self.notifier.as_ref(), &event.event);
+        }
+        self.stopped |= outcome.error.is_some();
+        let _ = event.acknowledgement.send(outcome);
+    }
+
+    fn tick(&mut self) {
+        let now = Instant::now();
+        if self.batch.is_due(now) {
+            self.flush_batch();
+        }
+        if self.dirty.is_due(now) && !self.stopped && self.pending_error.is_none() {
+            self.pending_error = self.appender.sync(self.path).err();
+            self.dirty.mark_synced();
+        }
+    }
+
+    fn wait_timeout(&self) -> Duration {
+        let now = Instant::now();
+        self.batch.wait_timeout(now).map_or_else(
+            || self.dirty.wait_timeout(now),
+            |batch| batch.min(self.dirty.wait_timeout(now)),
+        )
+    }
+
+    fn shutdown(&mut self, acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>) {
+        self.flush_batch();
+        let error = self.pending_error.take().or_else(|| {
+            if self.dirty.is_dirty() && !self.stopped {
+                self.appender.sync(self.path).err()
+            } else {
+                None
+            }
+        });
+        let _ = acknowledgement.send(WriterOutcome {
+            append_latency_nanos: None,
+            appended: false,
+            error,
+            notification_latency_nanos: None,
+        });
+    }
+}
+
 fn session_writer_worker<A>(
     path: &Path,
     context_path: &Path,
-    mut validation: SessionAppendValidationState,
-    mut appender: A,
+    validation: SessionAppendValidationState,
+    appender: A,
+    notifier: Option<LiveEventNotifier>,
     receiver: &std::sync::mpsc::Receiver<SessionWriterCommand>,
 ) where
     A: EventLogAppender,
 {
-    let mut dirty = DirtySyncState::default();
-    let mut stopped = false;
-    let mut pending_error = None;
+    let mut worker = WriterWorker {
+        appender,
+        batch: PendingEventBatch::default(),
+        context_path,
+        dirty: DirtySyncState::default(),
+        notifier,
+        path,
+        pending_error: None,
+        stopped: false,
+        validation,
+    };
     loop {
-        if dirty.is_due(Instant::now()) && !stopped && pending_error.is_none() {
-            if let Err(err) = appender.sync(path) {
-                pending_error = Some(err);
-            }
-            dirty.mark_synced();
-        }
-        let command = receiver.recv_timeout(dirty.wait_timeout(Instant::now()));
-        match command {
-            Ok(SessionWriterCommand::Commit {
-                acknowledgement,
-                canonical_jsonl,
-                context_manifests,
-                measurement_started_at,
-                event,
-            }) => {
-                let outcome = if let Some(err) = pending_error.take() {
-                    stopped = true;
-                    WriterOutcome::failed(err)
-                } else {
-                    commit_session_event(
-                        SessionEventCommit {
-                            path,
-                            context_path,
-                            event: &event,
-                            canonical_jsonl: &canonical_jsonl,
-                            context_manifests: context_manifests.as_deref(),
-                            measurement_started_at,
-                        },
-                        &mut appender,
-                        &mut validation,
-                        &mut dirty,
-                    )
-                };
-                if outcome.error.is_some() {
-                    stopped = true;
-                }
-                let _ = acknowledgement.send(outcome);
-            }
-            Ok(SessionWriterCommand::Shutdown { acknowledgement }) => {
-                let error = pending_error.take().or_else(|| {
-                    if dirty.is_dirty() && !stopped {
-                        appender.sync(path).err()
-                    } else {
-                        None
-                    }
-                });
-                let _ = acknowledgement.send(WriterOutcome {
-                    append_latency_nanos: None,
-                    appended: false,
-                    error,
-                });
+        worker.tick();
+        match receiver.recv_timeout(worker.wait_timeout()) {
+            Ok(SessionWriterCommand::Commit(event)) => worker.commit(event),
+            Ok(SessionWriterCommand::Shutdown(acknowledgement)) => {
+                worker.shutdown(acknowledgement);
                 break;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                if dirty.is_dirty() && !stopped {
-                    let _ = appender.sync(path);
+                worker.flush_batch();
+                if worker.dirty.is_dirty() && !worker.stopped {
+                    let _ = worker.appender.sync(path);
                 }
                 break;
             }
         }
     }
+}
+
+fn validate_batch(
+    path: &Path,
+    validation: &mut SessionAppendValidationState,
+    batch: &[QueuedEvent],
+) -> Result<(), RuntimeError> {
+    for pending in batch {
+        if pending.context_manifests.is_some() {
+            return Err(RuntimeError::Protocol(
+                "micro-batched events cannot carry context manifests".to_owned(),
+            ));
+        }
+        validation.validate_constructed_event(
+            path,
+            &pending.event,
+            pending.canonical_jsonl.len(),
+        )?;
+    }
+    Ok(())
+}
+
+fn reject_batch(batch: Vec<QueuedEvent>, error: RuntimeError) {
+    let mut error = Some(error);
+    for pending in batch {
+        let outcome = error.take().map_or_else(
+            || WriterOutcome::failed(discarded_after_writer_failure()),
+            WriterOutcome::failed,
+        );
+        let _ = pending.acknowledgement.send(outcome);
+    }
+}
+
+fn notify_committed(
+    notifier: Option<&LiveEventNotifier>,
+    event: &EventEnvelope,
+) -> Option<u128> {
+    notifier.map(|notifier| {
+        let started_at = Instant::now();
+        let _ = notifier.try_notify(&event.session_id, event.sequence);
+        started_at.elapsed().as_nanos()
+    })
+}
+
+fn is_micro_batch_event(event_type: &EventType) -> bool {
+    matches!(event_type, EventType::MessageDelta | EventType::ToolProgress)
+}
+
+fn discarded_after_writer_failure() -> RuntimeError {
+    RuntimeError::Protocol("event discarded after a prior session writer failure".to_owned())
 }
 
 struct SessionEventCommit<'a> {
@@ -462,6 +682,7 @@ where
                 append_latency_nanos,
                 appended: true,
                 error: Some(err),
+                notification_latency_nanos: None,
             };
         }
         dirty.mark_synced();
@@ -470,6 +691,7 @@ where
         append_latency_nanos,
         appended: true,
         error: None,
+        notification_latency_nanos: None,
     }
 }
 

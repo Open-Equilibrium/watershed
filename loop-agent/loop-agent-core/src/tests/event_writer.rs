@@ -269,6 +269,216 @@ impl EventLogAppender for SyncFailAppender {
     }
 }
 
+struct BatchProbeAppender {
+    appends: Arc<Mutex<Vec<Vec<u8>>>>,
+    fail_next: bool,
+}
+
+impl EventLogAppender for BatchProbeAppender {
+    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        if std::mem::take(&mut self.fail_next) {
+            return Err(RuntimeError::Io {
+                path: path.to_owned(),
+                source: io::Error::other("injected batch append failure"),
+            });
+        }
+        self.appends
+            .lock()
+            .expect("batch append probe lock")
+            .push(bytes.to_vec());
+        Ok(())
+    }
+
+    fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+fn progress_batch(
+    path: &Path,
+    count: usize,
+) -> (
+    SessionAppendValidationState,
+    Vec<EventEnvelope>,
+    EventEnvelope,
+) {
+    let fixture = expected_stream("hello-loop", "hello-loop.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str::<EventEnvelope>(line).expect("fixture event parses"))
+        .collect::<Vec<_>>();
+    let validation =
+        SessionAppendValidationState::from_prior_events(path, "hello001", &fixture[..7])
+            .expect("fixture prefix validates");
+    let progress = (0..count)
+        .map(|index| {
+            let sequence = index as u64 + 8;
+            let mut event = fixture[7].clone();
+            event.event_id = format!("evt-batch-{sequence:03}");
+            event.sequence = sequence;
+            event.timestamp = EventClock::fixed_fixture().timestamp(sequence);
+            event
+        })
+        .collect::<Vec<_>>();
+    let sequence = count as u64 + 8;
+    let mut terminal = fixture[8].clone();
+    terminal.event_id = format!("evt-batch-{sequence:03}");
+    terminal.sequence = sequence;
+    terminal.timestamp = EventClock::fixed_fixture().timestamp(sequence);
+    (validation, progress, terminal)
+}
+
+fn progress_writer<'a>(
+    reservation: &'a SessionReservation,
+    count: usize,
+    notifier: LiveEventNotifier,
+    appends: Arc<Mutex<Vec<Vec<u8>>>>,
+    fail_next: bool,
+) -> (SerialSessionWriter<'a>, Vec<EventEnvelope>, EventEnvelope) {
+    let (validation, progress, terminal) = progress_batch(&reservation.session_path, count);
+    let writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation,
+            commit_reservation: None,
+            notifier: Some(notifier),
+            timings: None,
+        },
+        BatchProbeAppender { appends, fail_next },
+    )
+    .expect("writer starts");
+    (writer, progress, terminal)
+}
+
+fn enqueue_test_event(writer: &mut SerialSessionWriter<'_>, event: &EventEnvelope) -> String {
+    let jsonl = event.canonical_jsonl().expect("event serializes");
+    writer
+        .commit(event, &jsonl, None, Some(Instant::now()))
+        .expect("event enqueue succeeds");
+    jsonl
+}
+
+#[test]
+fn progress_batches_are_bounded_and_flush_before_semantic_events() {
+    let workspace = empty_workspace("event-writer-batch-bound");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (notifier, receiver) = live_event_channel();
+    let (mut writer, progress, terminal) = progress_writer(
+        &reservation,
+        EVENT_WRITER_BATCH_CAPACITY + 1,
+        notifier,
+        Arc::clone(&appends),
+        false,
+    );
+
+    let progress_jsonl = progress
+        .iter()
+        .map(|event| enqueue_test_event(&mut writer, event))
+        .collect::<Vec<_>>();
+    let terminal_jsonl = enqueue_test_event(&mut writer, &terminal);
+    writer.finish().expect("writer finishes");
+
+    let appends = appends.lock().expect("batch append probe lock");
+    assert_eq!(appends.len(), 3);
+    assert_eq!(
+        appends[0],
+        progress_jsonl[..EVENT_WRITER_BATCH_CAPACITY]
+            .concat()
+            .into_bytes()
+    );
+    assert_eq!(
+        appends[1],
+        progress_jsonl[EVENT_WRITER_BATCH_CAPACITY].as_bytes()
+    );
+    assert_eq!(appends[2], terminal_jsonl.as_bytes());
+    assert_eq!(
+        receiver
+            .recv_timeout(Duration::from_millis(50))
+            .expect("committed batch notifies")
+            .highest_committed_sequence,
+        terminal.sequence
+    );
+    reservation.rollback();
+}
+
+#[test]
+fn lone_progress_flushes_on_a_non_sliding_deadline() {
+    let first = Instant::now();
+    let mut batch = PendingEventBatch::default();
+    batch.start(first);
+    batch.start(first + Duration::from_millis(20));
+    assert!(batch.is_due(first + EVENT_WRITER_BATCH_WINDOW));
+
+    let workspace = empty_workspace("event-writer-batch-deadline");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (notifier, receiver) = live_event_channel();
+    let (mut writer, progress, _) =
+        progress_writer(&reservation, 1, notifier, Arc::clone(&appends), false);
+
+    let jsonl = enqueue_test_event(&mut writer, &progress[0]);
+    assert_eq!(
+        receiver
+            .recv_timeout(Duration::from_millis(500))
+            .expect("deadline flush notifies")
+            .highest_committed_sequence,
+        progress[0].sequence
+    );
+    assert_eq!(
+        appends
+            .lock()
+            .expect("batch append probe lock")
+            .as_slice(),
+        [jsonl.into_bytes()]
+    );
+    writer.finish().expect("writer finishes");
+    reservation.rollback();
+}
+
+#[test]
+fn failed_progress_batch_is_not_notified_and_blocks_the_semantic_event() {
+    let workspace = empty_workspace("event-writer-batch-failure");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (notifier, receiver) = live_event_channel();
+    let (mut writer, progress, terminal) =
+        progress_writer(&reservation, 2, notifier, Arc::clone(&appends), true);
+
+    for event in &progress {
+        enqueue_test_event(&mut writer, event);
+    }
+    let err = writer
+        .commit(
+            &terminal,
+            &terminal.canonical_jsonl().expect("terminal serializes"),
+            None,
+            Some(Instant::now()),
+        )
+        .expect_err("batch append failure blocks the terminal event");
+
+    assert!(matches!(
+        err,
+        RuntimeError::EventWriter(source)
+            if matches!(source.as_ref(), RuntimeError::Io { source, .. }
+                if source.to_string().contains("injected batch append failure"))
+    ));
+    assert!(
+        appends
+            .lock()
+            .expect("batch append probe lock")
+            .is_empty(),
+        "the semantic event must not append after the batch failed"
+    );
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_millis(10)),
+        Err(LiveEventReceiveError::Timeout)
+    );
+    writer.finish().expect("failed writer shuts down cleanly");
+    reservation.rollback();
+}
+
 #[test]
 fn appended_checkpoint_notifies_but_sync_failure_remains_visible() {
     let workspace = empty_workspace("event-writer-sync-failure");
