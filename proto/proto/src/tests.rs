@@ -3,7 +3,30 @@ use serde_json::json;
 
 #[test]
 fn event_type_names_match_protocol_v0_set_and_round_trip() {
-    let names = event_type_names();
+    let names = [
+        "session.started",
+        "session.paused",
+        "session.resumed",
+        "session.completed",
+        "session.failed",
+        "loop.started",
+        "loop.completed",
+        "loop.failed",
+        "phase.entered",
+        "step.started",
+        "step.completed",
+        "message.delta",
+        "message.completed",
+        "tool.started",
+        "tool.progress",
+        "tool.completed",
+        "tool.failed",
+        "tool.timed_out",
+        "artifact.logged",
+        "attention.requested",
+        "metric.sample",
+        "error",
+    ];
 
     assert_eq!(names.len(), 22);
     assert!(names.contains(&"message.delta"));
@@ -11,9 +34,9 @@ fn event_type_names_match_protocol_v0_set_and_round_trip() {
     assert!(names.contains(&"attention.requested"));
     assert!(names.contains(&"error"));
     for name in names {
-        let event_type = EventType::try_from(*name).expect("event type name parses");
+        let event_type = EventType::try_from(name).expect("event type name parses");
 
-        assert_eq!(event_type.as_str(), *name);
+        assert_eq!(event_type.as_str(), name);
         assert_eq!(
             serde_json::to_string(&event_type).expect("event type serializes"),
             format!("\"{name}\"")

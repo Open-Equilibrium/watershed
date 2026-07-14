@@ -291,34 +291,6 @@ impl fmt::Display for CanonicalJsonError {
 
 impl std::error::Error for CanonicalJsonError {}
 
-/// Returns every v0 event type name in canonical order.
-pub fn event_type_names() -> &'static [&'static str] {
-    &[
-        "session.started",
-        "session.paused",
-        "session.resumed",
-        "session.completed",
-        "session.failed",
-        "loop.started",
-        "loop.completed",
-        "loop.failed",
-        "phase.entered",
-        "step.started",
-        "step.completed",
-        "message.delta",
-        "message.completed",
-        "tool.started",
-        "tool.progress",
-        "tool.completed",
-        "tool.failed",
-        "tool.timed_out",
-        "artifact.logged",
-        "attention.requested",
-        "metric.sample",
-        "error",
-    ]
-}
-
 /// Returns whether a value is a lowercase path-safe session id.
 pub fn is_valid_session_id(value: &str) -> bool {
     !value.is_empty()
