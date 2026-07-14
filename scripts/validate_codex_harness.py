@@ -227,17 +227,9 @@ def validate_agents(root: Path) -> list[str]:
         if agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
             errors.append(f"{rel}: doc_sync must reference docs/decisions/open-decisions.html")
         if agent.get("name") == "pr_validator":
-            for token in (
-                "cargo fmt",
-                "cargo clippy",
-                "cargo nextest",
-                "cargo llvm-cov",
-                "cargo audit",
-                "cargo deny",
-                "lychee",
-            ):
-                if token not in instructions:
-                    errors.append(f"{rel}: pr_validator must include {token}")
+            for reference in ("TESTING.md", ".github/workflows/ci.yml"):
+                if reference not in instructions:
+                    errors.append(f"{rel}: pr_validator must reference {reference}")
             if not all(
                 token in instructions
                 for token in ("Windows", "CI-only", "Check line coverage", "gh")

@@ -286,6 +286,16 @@ class CodexHarnessValidatorTest(unittest.TestCase):
             errors,
         )
 
+    def test_rejects_pr_validator_without_canonical_gate_reference(self) -> None:
+        errors = validate_text_replacement(
+            ".codex/agents/pr-validator.toml", "TESTING.md", "GATES.md"
+        )
+
+        self.assertIn(
+            ".codex/agents/pr-validator.toml: pr_validator must reference TESTING.md",
+            errors,
+        )
+
     def test_pre_tool_guard_accepts_command_and_cmd_envelopes(self) -> None:
         for key in ("command", "cmd"):
             with self.subTest(key=key):
