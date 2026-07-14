@@ -166,15 +166,29 @@ fn registry_file_reader_enforces_limit_before_utf8_decoding() {
 fn registry_file_reader_rejects_file_replaced_after_collection() {
     let root = temp_registry_dir("registry-file-replaced-after-collection");
     let path = root.join("instruction.yaml");
-    std::fs::write(
-        &path,
-        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
-    )
-    .expect("registry file written");
+    let source = "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n";
+    std::fs::write(&path, source).expect("registry file written");
     let mut files = Vec::new();
     collect_registry_files(&root, &mut files).expect("registry file collected");
     assert_eq!(files.len(), 1);
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+
+        let original = std::fs::metadata(&path).expect("original metadata");
+        std::fs::rename(&path, root.join("retired.yaml"))
+            .expect("original file retained under another name");
+        std::fs::write(&path, source.replace("inspect", "replace"))
+            .expect("equal-sized replacement written");
+        set_windows_file_times(&path, original.creation_time(), original.last_write_time());
+        let replacement = std::fs::metadata(&path).expect("replacement metadata");
+        assert_eq!(replacement.creation_time(), original.creation_time());
+        assert_eq!(replacement.file_attributes(), original.file_attributes());
+        assert_eq!(replacement.file_size(), original.file_size());
+        assert_eq!(replacement.last_write_time(), original.last_write_time());
+    }
+    #[cfg(not(windows))]
     std::fs::write(
         &path,
         "instruction:\n  id: replaced\n  name: Replaced\n  prompt: Replaced\n",
@@ -203,9 +217,10 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
         Err(RegistryError::Io { source, .. }) if source.kind() == std::io::ErrorKind::InvalidData
     ));
     let existing_metadata = std::fs::symlink_metadata(&invalid_utf8).expect("file metadata");
+    let existing_open = open_registry_file(&invalid_utf8).expect("existing file opened");
     let missing_file = RegistryFile {
         path: root.join("missing.yaml"),
-        identity: registry_file_identity(&invalid_utf8, &existing_metadata)
+        identity: registry_file_identity(&invalid_utf8, &existing_open, &existing_metadata)
             .expect("existing file identity"),
     };
     assert!(matches!(
@@ -216,10 +231,10 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
     let dir_metadata = std::fs::symlink_metadata(&root).expect("directory metadata");
     let dir_file = RegistryFile {
         path: root.clone(),
-        identity: registry_file_identity(&root, &dir_metadata).expect("directory identity"),
+        identity: missing_file.identity,
     };
     assert!(matches!(
-        ensure_opened_registry_file_matches(&dir_file, &dir_metadata),
+        ensure_opened_registry_file_matches(&dir_file, &existing_open, &dir_metadata),
         Err(RegistryError::UnsafePath { message, .. }) if message.contains("symlinks")
     ));
     let mut collected = Vec::new();
@@ -255,12 +270,15 @@ fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
     .expect("second registry file written");
     let first_metadata = std::fs::symlink_metadata(&first).expect("first metadata");
     let second_metadata = std::fs::symlink_metadata(&second).expect("second metadata");
+    let first_open = open_registry_file(&first).expect("first file opened");
+    let second_open = open_registry_file(&second).expect("second file opened");
     let first_file = RegistryFile {
         path: first.clone(),
-        identity: registry_file_identity(&first, &first_metadata).expect("first identity"),
+        identity: registry_file_identity(&first, &first_open, &first_metadata)
+            .expect("first identity"),
     };
     assert!(matches!(
-        ensure_opened_registry_file_matches(&first_file, &second_metadata),
+        ensure_opened_registry_file_matches(&first_file, &second_open, &second_metadata),
         Err(RegistryError::UnsafePath { message, .. }) if message.contains("changed before open")
     ));
 }
@@ -1841,6 +1859,42 @@ fn temp_registry_dir(label: &str) -> std::path::PathBuf {
     }
     std::fs::create_dir_all(&target).expect("temp registry created");
     target
+}
+
+#[cfg(windows)]
+fn set_windows_file_times(path: &Path, creation_time: u64, last_write_time: u64) {
+    use std::{ffi::c_void, os::windows::io::AsRawHandle};
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SetFileTime(
+            file: *mut c_void,
+            creation_time: *const WindowsFileTime,
+            last_access_time: *const WindowsFileTime,
+            last_write_time: *const WindowsFileTime,
+        ) -> i32;
+    }
+
+    let creation_time = WindowsFileTime::from_u64(creation_time);
+    let last_write_time = WindowsFileTime::from_u64(last_write_time);
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("replacement opened for timestamp restoration");
+    let result = unsafe {
+        SetFileTime(
+            file.as_raw_handle().cast::<c_void>(),
+            &creation_time,
+            std::ptr::null(),
+            &last_write_time,
+        )
+    };
+    assert_ne!(
+        result,
+        0,
+        "SetFileTime failed: {}",
+        std::io::Error::last_os_error()
+    );
 }
 
 #[cfg(windows)]

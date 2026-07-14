@@ -23,15 +23,12 @@ fn read_registry_file_to_string(
     file: &RegistryFile,
     max_bytes: u64,
 ) -> Result<String, RegistryError> {
-    let opened = fs::File::open(&file.path).map_err(|source| RegistryError::Io {
-        path: file.path.clone(),
-        source,
-    })?;
+    let opened = open_registry_file(&file.path)?;
     let opened_metadata = opened.metadata().map_err(|source| RegistryError::Io {
         path: file.path.clone(),
         source,
     })?;
-    ensure_opened_registry_file_matches(file, &opened_metadata)?;
+    ensure_opened_registry_file_matches(file, &opened, &opened_metadata)?;
 
     let mut bytes = Vec::new();
     let mut reader = opened.take(max_bytes.saturating_add(1));
@@ -73,13 +70,53 @@ struct RegistryFileIdentity {
 }
 
 #[cfg(windows)]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RegistryFileIdentity {
-    canonical_path: PathBuf,
+    volume_serial_number: u32,
+    file_index: u64,
     creation_time: u64,
     file_attributes: u32,
     file_size: u64,
     last_write_time: u64,
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct WindowsFileTime {
+    low_date_time: u32,
+    high_date_time: u32,
+}
+
+#[cfg(windows)]
+impl WindowsFileTime {
+    fn as_u64(&self) -> u64 {
+        (u64::from(self.high_date_time) << 32) | u64::from(self.low_date_time)
+    }
+
+    #[cfg(test)]
+    fn from_u64(time: u64) -> Self {
+        Self {
+            low_date_time: time as u32,
+            high_date_time: (time >> 32) as u32,
+        }
+    }
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct ByHandleFileInformation {
+    file_attributes: u32,
+    creation_time: WindowsFileTime,
+    last_access_time: WindowsFileTime,
+    last_write_time: WindowsFileTime,
+    volume_serial_number: u32,
+    file_size_high: u32,
+    file_size_low: u32,
+    number_of_links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -90,15 +127,11 @@ struct RegistryFileIdentity {
 
 fn ensure_opened_registry_file_matches(
     file: &RegistryFile,
+    opened: &fs::File,
     opened_metadata: &fs::Metadata,
 ) -> Result<(), RegistryError> {
-    if registry_path_is_link_or_reparse(opened_metadata) || !opened_metadata.is_file() {
-        return Err(RegistryError::UnsafePath {
-            path: file.path.clone(),
-            message: "registry paths must not be symlinks or reparse points".to_owned(),
-        });
-    }
-    let opened_identity = registry_file_identity(&file.path, opened_metadata)?;
+    ensure_safe_registry_file(&file.path, opened_metadata)?;
+    let opened_identity = registry_file_identity(&file.path, opened, opened_metadata)?;
     if opened_identity != file.identity {
         return Err(RegistryError::UnsafePath {
             path: file.path.clone(),
@@ -111,6 +144,7 @@ fn ensure_opened_registry_file_matches(
 #[cfg(unix)]
 fn registry_file_identity(
     _path: &Path,
+    _opened: &fs::File,
     metadata: &fs::Metadata,
 ) -> Result<RegistryFileIdentity, RegistryError> {
     use std::os::unix::fs::MetadataExt;
@@ -129,31 +163,86 @@ fn registry_file_identity(
 #[cfg(windows)]
 fn registry_file_identity(
     path: &Path,
-    metadata: &fs::Metadata,
+    opened: &fs::File,
+    _metadata: &fs::Metadata,
 ) -> Result<RegistryFileIdentity, RegistryError> {
-    use std::os::windows::fs::MetadataExt;
+    use std::{ffi::c_void, os::windows::io::AsRawHandle};
 
-    let canonical_path = path.canonicalize().map_err(|source| RegistryError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetFileInformationByHandle(
+            file: *mut c_void,
+            file_information: *mut ByHandleFileInformation,
+        ) -> i32;
+    }
+
+    let mut information = ByHandleFileInformation::default();
+    let ok = unsafe {
+        GetFileInformationByHandle(
+            opened.as_raw_handle().cast::<c_void>(),
+            &mut information as *mut ByHandleFileInformation,
+        )
+    };
+    if ok == 0 {
+        return Err(RegistryError::Io {
+            path: path.to_path_buf(),
+            source: io::Error::last_os_error(),
+        });
+    }
+
+    let join_u32 = |high: u32, low: u32| (u64::from(high) << 32) | u64::from(low);
     Ok(RegistryFileIdentity {
-        canonical_path,
-        creation_time: metadata.creation_time(),
-        file_attributes: metadata.file_attributes(),
-        file_size: metadata.file_size(),
-        last_write_time: metadata.last_write_time(),
+        volume_serial_number: information.volume_serial_number,
+        file_index: join_u32(information.file_index_high, information.file_index_low),
+        creation_time: information.creation_time.as_u64(),
+        file_attributes: information.file_attributes,
+        file_size: join_u32(information.file_size_high, information.file_size_low),
+        last_write_time: information.last_write_time.as_u64(),
     })
 }
 
 #[cfg(not(any(unix, windows)))]
 fn registry_file_identity(
     _path: &Path,
+    _opened: &fs::File,
     metadata: &fs::Metadata,
 ) -> Result<RegistryFileIdentity, RegistryError> {
     Ok(RegistryFileIdentity {
         len: metadata.len(),
     })
+}
+
+#[cfg(windows)]
+fn open_registry_file(path: &Path) -> Result<fs::File, RegistryError> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|source| RegistryError::Io {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+#[cfg(not(windows))]
+fn open_registry_file(path: &Path) -> Result<fs::File, RegistryError> {
+    fs::File::open(path).map_err(|source| RegistryError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn ensure_safe_registry_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RegistryError> {
+    if registry_path_is_link_or_reparse(metadata) || !metadata.is_file() {
+        return Err(RegistryError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "registry paths must not be symlinks or reparse points".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -226,7 +315,13 @@ fn collect_registry_files_with_limits(
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
         {
-            let bytes = metadata.len();
+            let opened = open_registry_file(&path)?;
+            let opened_metadata = opened.metadata().map_err(|source| RegistryError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            ensure_safe_registry_file(&path, &opened_metadata)?;
+            let bytes = opened_metadata.len();
             if bytes > limits.max_file_bytes {
                 return Err(RegistryError::ReadLimitExceeded {
                     path,
@@ -252,7 +347,7 @@ fn collect_registry_files_with_limits(
                     max: limits.max_files,
                 });
             }
-            let identity = registry_file_identity(&path, &metadata)?;
+            let identity = registry_file_identity(&path, &opened, &opened_metadata)?;
             out.push(RegistryFile { path, identity });
         }
     }
