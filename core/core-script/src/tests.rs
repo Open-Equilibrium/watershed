@@ -520,231 +520,90 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
         SemanticValidationError::ToolCommandKindMismatch { .. }
     ));
 
-    let missing_instruction = ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
-        identity: BlockIdentity {
-            id: "phase".to_owned(),
-            name: "Phase".to_owned(),
-        },
-        instruction_refs: vec!["missing-instruction".to_owned()],
-        tool_refs: Vec::new(),
-        steps: vec![StepBlock {
-            id: "step".to_owned(),
-            name: "Step".to_owned(),
-            connection_refs: Vec::new(),
-        }],
-    })])
-    .expect_err("missing instruction rejected");
-    assert!(matches!(
-        missing_instruction,
-        RegistryError::MissingReference {
-            reference_kind: "instruction",
-            ..
-        }
-    ));
-
-    let missing_tool = ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
-        identity: BlockIdentity {
-            id: "phase".to_owned(),
-            name: "Phase".to_owned(),
-        },
-        instruction_refs: Vec::new(),
-        tool_refs: vec!["missing-tool".to_owned()],
-        steps: vec![StepBlock {
-            id: "step".to_owned(),
-            name: "Step".to_owned(),
-            connection_refs: Vec::new(),
-        }],
-    })])
-    .expect_err("missing tool rejected");
-    assert!(matches!(
-        missing_tool,
-        RegistryError::MissingReference {
-            reference_kind: "tool",
-            ..
-        }
-    ));
-
-    let invalid_step = ResolvedRegistry::from_blocks([RegistryBlock::Phase(PhaseBlock {
-        identity: BlockIdentity {
-            id: "phase".to_owned(),
-            name: "Phase".to_owned(),
-        },
-        instruction_refs: Vec::new(),
-        tool_refs: Vec::new(),
-        steps: vec![StepBlock {
-            id: "BadStep".to_owned(),
-            name: "Step".to_owned(),
-            connection_refs: Vec::new(),
-        }],
-    })])
-    .expect_err("invalid step id rejected");
+    let mut invalid_phase = test_phase();
+    invalid_phase.steps[0].id = "BadStep".to_owned();
+    let invalid_step = ResolvedRegistry::from_blocks([RegistryBlock::Phase(invalid_phase)])
+        .expect_err("invalid step id rejected");
     assert!(matches!(invalid_step, RegistryError::InvalidBlockId(value) if value == "BadStep"));
 
-    let missing_phase = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
-        identity: BlockIdentity {
-            id: "root".to_owned(),
-            name: "Root".to_owned(),
-        },
-        phase_refs: vec!["missing-phase".to_owned()],
-        subloop_refs: Vec::new(),
-        connection_refs: Vec::new(),
-    })])
-    .expect_err("missing phase rejected");
-    assert!(matches!(
-        missing_phase,
-        RegistryError::MissingReference {
-            reference_kind: "phase",
-            ..
-        }
-    ));
-
-    let missing_loop = ResolvedRegistry::from_blocks([
-        simple_phase_block("phase"),
-        RegistryBlock::Loop(LoopBlock {
-            identity: BlockIdentity {
-                id: "root".to_owned(),
-                name: "Root".to_owned(),
-            },
-            phase_refs: vec!["phase".to_owned()],
-            subloop_refs: vec!["missing-loop".to_owned()],
-            connection_refs: Vec::new(),
-        }),
-    ])
-    .expect_err("missing loop rejected");
-    assert!(matches!(
-        missing_loop,
-        RegistryError::MissingReference {
-            reference_kind: "loop",
-            ..
-        }
-    ));
-
-    let missing_connection = ResolvedRegistry::from_blocks([
-        simple_phase_block("phase"),
-        RegistryBlock::Loop(LoopBlock {
-            identity: BlockIdentity {
-                id: "root".to_owned(),
-                name: "Root".to_owned(),
-            },
-            phase_refs: vec!["phase".to_owned()],
-            subloop_refs: Vec::new(),
-            connection_refs: vec!["missing-connection".to_owned()],
-        }),
-    ])
-    .expect_err("missing connection rejected");
-    assert!(matches!(
-        missing_connection,
-        RegistryError::MissingReference {
-            reference_kind: "connection",
-            ..
-        }
-    ));
-
     let empty_loop = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
-        identity: BlockIdentity {
-            id: "root".to_owned(),
-            name: "Root".to_owned(),
-        },
         phase_refs: Vec::new(),
-        subloop_refs: Vec::new(),
-        connection_refs: Vec::new(),
+        ..test_loop()
     })])
     .expect_err("empty loop phase_refs rejected");
     assert!(empty_loop.to_string().contains("loop.phase_refs"));
 
-    let missing_endpoint =
-        ResolvedRegistry::from_blocks([RegistryBlock::Connection(ConnectionBlock {
-            identity: BlockIdentity {
-                id: "link".to_owned(),
-                name: "Link".to_owned(),
-            },
-            connection_kind: ConnectionKind::Data,
-            from_ref: "missing-endpoint".to_owned(),
-            to_ref: "also-missing".to_owned(),
-        })])
-        .expect_err("missing endpoint rejected");
-    assert!(matches!(
-        missing_endpoint,
-        RegistryError::MissingReference {
-            reference_kind: "endpoint",
-            ..
-        }
-    ));
-
-    let missing_step_endpoint = ResolvedRegistry::from_blocks([
-        RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "phase".to_owned(),
-                name: "Phase".to_owned(),
-            },
-            instruction_refs: Vec::new(),
-            tool_refs: Vec::new(),
-            steps: vec![StepBlock {
-                id: "step".to_owned(),
-                name: "Step".to_owned(),
-                connection_refs: Vec::new(),
-            }],
-        }),
-        RegistryBlock::Connection(ConnectionBlock {
-            identity: BlockIdentity {
-                id: "link".to_owned(),
-                name: "Link".to_owned(),
-            },
-            connection_kind: ConnectionKind::Data,
-            from_ref: "phase.missing-step".to_owned(),
-            to_ref: "phase.step".to_owned(),
-        }),
-    ])
-    .expect_err("missing step endpoint rejected");
-    assert!(matches!(
-        missing_step_endpoint,
-        RegistryError::MissingReference {
-            reference_kind: "step",
-            ..
-        }
-    ));
-
-    let step_connection_not_declared_by_loop = ResolvedRegistry::from_blocks([
-        RegistryBlock::Phase(PhaseBlock {
-            identity: BlockIdentity {
-                id: "phase".to_owned(),
-                name: "Phase".to_owned(),
-            },
-            instruction_refs: Vec::new(),
-            tool_refs: Vec::new(),
-            steps: vec![StepBlock {
-                id: "step".to_owned(),
-                name: "Step".to_owned(),
-                connection_refs: vec!["link".to_owned()],
-            }],
-        }),
-        RegistryBlock::Connection(ConnectionBlock {
-            identity: BlockIdentity {
-                id: "link".to_owned(),
-                name: "Link".to_owned(),
-            },
-            connection_kind: ConnectionKind::Data,
-            from_ref: "phase.step".to_owned(),
-            to_ref: "phase.step".to_owned(),
-        }),
-        RegistryBlock::Loop(LoopBlock {
-            identity: BlockIdentity {
-                id: "root".to_owned(),
-                name: "Root".to_owned(),
-            },
-            phase_refs: vec!["phase".to_owned()],
-            subloop_refs: Vec::new(),
-            connection_refs: Vec::new(),
-        }),
-    ])
-    .expect_err("step connection must be declared by loop");
-    assert!(matches!(
-        step_connection_not_declared_by_loop,
-        RegistryError::MissingReference {
-            reference_kind: "step connection",
-            ..
-        }
-    ));
+    let mut phase_with_connection = test_phase();
+    phase_with_connection.steps[0]
+        .connection_refs
+        .push("link".to_owned());
+    for (reference_kind, blocks) in [
+        (
+            "instruction",
+            vec![RegistryBlock::Phase(PhaseBlock {
+                instruction_refs: vec!["missing-instruction".to_owned()],
+                ..test_phase()
+            })],
+        ),
+        (
+            "tool",
+            vec![RegistryBlock::Phase(PhaseBlock {
+                tool_refs: vec!["missing-tool".to_owned()],
+                ..test_phase()
+            })],
+        ),
+        (
+            "phase",
+            vec![RegistryBlock::Loop(LoopBlock {
+                phase_refs: vec!["missing-phase".to_owned()],
+                ..test_loop()
+            })],
+        ),
+        (
+            "loop",
+            vec![
+                simple_phase_block("phase"),
+                RegistryBlock::Loop(LoopBlock {
+                    subloop_refs: vec!["missing-loop".to_owned()],
+                    ..test_loop()
+                }),
+            ],
+        ),
+        (
+            "connection",
+            vec![
+                simple_phase_block("phase"),
+                RegistryBlock::Loop(LoopBlock {
+                    connection_refs: vec!["missing-connection".to_owned()],
+                    ..test_loop()
+                }),
+            ],
+        ),
+        (
+            "endpoint",
+            vec![RegistryBlock::Connection(test_connection(
+                "missing-endpoint",
+                "also-missing",
+            ))],
+        ),
+        (
+            "step",
+            vec![
+                simple_phase_block("phase"),
+                RegistryBlock::Connection(test_connection("phase.missing-step", "phase.step")),
+            ],
+        ),
+        (
+            "step connection",
+            vec![
+                RegistryBlock::Phase(phase_with_connection),
+                RegistryBlock::Connection(test_connection("phase.step", "phase.step")),
+                RegistryBlock::Loop(test_loop()),
+            ],
+        ),
+    ] {
+        assert_missing_reference(blocks, reference_kind);
+    }
 }
 
 #[test]
@@ -1847,6 +1706,16 @@ fn simple_phase_block(id: &str) -> RegistryBlock {
             id: id.to_owned(),
             name: format!("Phase {id}"),
         },
+        ..test_phase()
+    })
+}
+
+fn test_phase() -> PhaseBlock {
+    PhaseBlock {
+        identity: BlockIdentity {
+            id: "phase".to_owned(),
+            name: "Phase".to_owned(),
+        },
         instruction_refs: Vec::new(),
         tool_refs: Vec::new(),
         steps: vec![StepBlock {
@@ -1854,7 +1723,40 @@ fn simple_phase_block(id: &str) -> RegistryBlock {
             name: "Step".to_owned(),
             connection_refs: Vec::new(),
         }],
-    })
+    }
+}
+
+fn test_loop() -> LoopBlock {
+    LoopBlock {
+        identity: BlockIdentity {
+            id: "root".to_owned(),
+            name: "Root".to_owned(),
+        },
+        phase_refs: vec!["phase".to_owned()],
+        subloop_refs: Vec::new(),
+        connection_refs: Vec::new(),
+    }
+}
+
+fn test_connection(from_ref: &str, to_ref: &str) -> ConnectionBlock {
+    ConnectionBlock {
+        identity: BlockIdentity {
+            id: "link".to_owned(),
+            name: "Link".to_owned(),
+        },
+        connection_kind: ConnectionKind::Data,
+        from_ref: from_ref.to_owned(),
+        to_ref: to_ref.to_owned(),
+    }
+}
+
+fn assert_missing_reference(blocks: Vec<RegistryBlock>, expected: &str) {
+    match ResolvedRegistry::from_blocks(blocks).expect_err("missing reference rejected") {
+        RegistryError::MissingReference { reference_kind, .. } => {
+            assert_eq!(reference_kind, expected)
+        }
+        error => panic!("expected missing {expected} reference, got {error}"),
+    }
 }
 
 fn loop_chain_blocks(depth: usize) -> Vec<RegistryBlock> {
