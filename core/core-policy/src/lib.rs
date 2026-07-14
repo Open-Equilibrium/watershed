@@ -2,6 +2,10 @@
 
 #![deny(missing_docs)]
 
+pub use core_script::{
+    NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkTransport, ParameterValueType,
+    ToolKind,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -560,7 +564,7 @@ fn command_policy_from_tool(
                 });
             }
             NetworkPolicy {
-                allow: allow.iter().map(network_allow_entry_from_tool).collect(),
+                allow: allow.clone(),
                 default: NetworkDefault::Deny,
             }
         }
@@ -591,25 +595,8 @@ fn command_policy_from_tool(
         network,
         script_runtime,
         tool_id: tool.identity.id.clone(),
-        tool_kind: match &tool.tool_kind {
-            core_script::ToolKind::PredefinedCommand => ToolKind::PredefinedCommand,
-            core_script::ToolKind::OwnScript => ToolKind::OwnScript,
-        },
+        tool_kind: tool.tool_kind.clone(),
     })
-}
-
-fn network_allow_entry_from_tool(entry: &core_script::NetworkAllowEntry) -> NetworkAllowEntry {
-    NetworkAllowEntry {
-        cidr: entry.cidr.clone(),
-        kind: match &entry.kind {
-            core_script::NetworkAllowKind::Cidr => NetworkAllowKind::Cidr,
-        },
-        port: entry.port,
-        transport: match &entry.transport {
-            core_script::NetworkTransport::Tcp => NetworkTransport::Tcp,
-            core_script::NetworkTransport::Udp => NetworkTransport::Udp,
-        },
-    }
 }
 
 fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> AllowedParameterPolicy {
@@ -620,15 +607,7 @@ fn allowed_parameter_policy(parameter: &core_script::AllowedParameter) -> Allowe
         max_length: parameter.max_length,
         min: parameter.min,
         value_pattern: parameter.value_pattern.clone(),
-        value_type: match &parameter.value_type {
-            core_script::ParameterValueType::None => ParameterValueType::None,
-            core_script::ParameterValueType::String => ParameterValueType::String,
-            core_script::ParameterValueType::Integer => ParameterValueType::Integer,
-            core_script::ParameterValueType::WorkspaceRelativePath => {
-                ParameterValueType::WorkspaceRelativePath
-            }
-            core_script::ParameterValueType::Enum => ParameterValueType::Enum,
-        },
+        value_type: parameter.value_type.clone(),
         allowed_values: parameter.allowed_values.clone(),
     }
 }
@@ -851,32 +830,6 @@ impl AllowedParameterPolicy {
 
         Ok(())
     }
-}
-
-/// Parameter value type in a compiled policy.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ParameterValueType {
-    /// Flag-style parameter with no value.
-    None,
-    /// String value.
-    String,
-    /// Integer value.
-    Integer,
-    /// Workspace-relative path value.
-    WorkspaceRelativePath,
-    /// Explicit enum value.
-    Enum,
-}
-
-/// Tool execution kind in a compiled policy.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ToolKind {
-    /// Trusted predefined command.
-    PredefinedCommand,
-    /// Inline own-script command.
-    OwnScript,
 }
 
 /// Environment variable policy.
@@ -1149,45 +1102,6 @@ impl NetworkPolicy {
 
         Ok(())
     }
-}
-
-/// Default network behavior.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NetworkDefault {
-    /// Deny access unless allowed by a matching entry.
-    Deny,
-}
-
-/// One network allow entry.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct NetworkAllowEntry {
-    /// Canonical CIDR destination.
-    pub cidr: String,
-    /// Allow entry kind.
-    pub kind: NetworkAllowKind,
-    /// Destination port.
-    pub port: u16,
-    /// Transport protocol.
-    pub transport: NetworkTransport,
-}
-
-/// Network allow entry kind.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NetworkAllowKind {
-    /// CIDR destination range.
-    Cidr,
-}
-
-/// Network transport protocol.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum NetworkTransport {
-    /// TCP transport.
-    Tcp,
-    /// UDP transport.
-    Udp,
 }
 
 /// Tools available within a phase.

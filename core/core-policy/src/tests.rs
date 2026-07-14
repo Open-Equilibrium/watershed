@@ -746,17 +746,6 @@ fn expected_decision_rejects_policy_target_and_fixture_mismatches() {
 }
 
 #[test]
-fn network_policy_mapping_preserves_udp_transport() {
-    let udp = network_allow_entry_from_tool(&core_script::NetworkAllowEntry {
-        cidr: "192.0.2.0/24".to_owned(),
-        kind: core_script::NetworkAllowKind::Cidr,
-        port: 5353,
-        transport: core_script::NetworkTransport::Udp,
-    });
-    assert_eq!(udp.transport, NetworkTransport::Udp);
-}
-
-#[test]
 fn policy_artifact_accepts_nonempty_safe_environment_allow() {
     policy_artifact_with_environment_allow("_A1")
         .validate()
