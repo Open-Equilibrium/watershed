@@ -51,7 +51,6 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0041** | 2026-06-21 | Accepted | Fixture workspaces use checked-in `.loop/config.yaml` to select registry root and stub model profile — `TESTING.md`.
 - **ADR-0042** | 2026-06-21 | Accepted | Trusted core code owns the predefined-command registry; loop YAML may only reference command IDs — `SECURITY.md`.
 - **ADR-0043** | 2026-06-21 | Accepted | CI renders self-contained HTML docs in Chromium at fixed desktop/mobile viewports — `TESTING.md`.
-- **ADR-0044** | 2026-06-21 | Accepted | Flow Agent/Flow terminology is renamed to Loop Agent/Loop — docs and runtime naming.
 - **ADR-0045** | 2026-06-22 | Accepted | HTML render gate is `pnpm run docs:render-check` via `scripts/check-html-render.mjs` — `TESTING.md`.
 - **ADR-0046** | 2026-06-22 | Accepted | Branch workflow uses one short-lived topic branch per logical change, reused when it fits — `AGENTS.md`.
 - **ADR-0047** | 2026-06-22 | Accepted | PR workflow uses GitHub CLI (`gh`) — `AGENTS.md`.

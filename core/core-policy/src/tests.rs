@@ -879,8 +879,6 @@ fn default_protected_paths_have_behavioral_denial_examples() {
         ("**/.docker/**", "workspace/home/user/.docker/config.json"),
         ("**/.env", "workspace/app/.env"),
         ("**/.env.*", "workspace/app/.env.production"),
-        ("**/.flow", "workspace/app/.flow"),
-        ("**/.flow/**", "workspace/app/.flow/token"),
         ("**/.git", "workspace/project/.git"),
         (
             "**/.git-credentials",

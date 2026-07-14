@@ -35,8 +35,6 @@ pub const DEFAULT_PROTECTED_PATHS: &[&str] = &[
     "**/.docker/**",
     "**/.env",
     "**/.env.*",
-    "**/.flow",
-    "**/.flow/**",
     "**/.git",
     "**/.git-credentials",
     "**/.git/**",
