@@ -144,24 +144,6 @@ fn reject_unknown_fields(
             if let Some(command) = tool.get("command") {
                 reject_mapping_fields(source_name, command, &["command_id", "argv"])?;
             }
-            if let Some(parameters) = tool.get("allowed_parameters").and_then(|v| v.as_sequence()) {
-                for parameter in parameters {
-                    reject_mapping_fields(
-                        source_name,
-                        parameter,
-                        &[
-                            "name",
-                            "value_type",
-                            "required",
-                            "allowed_values",
-                            "value_pattern",
-                            "max_length",
-                            "min",
-                            "max",
-                        ],
-                    )?;
-                }
-            }
             if let Some(network) = tool.get("network") {
                 reject_mapping_fields(source_name, network, &["default", "allow"])?;
                 if let Some(entries) = network
@@ -180,22 +162,11 @@ fn reject_unknown_fields(
             }
         }
         "instruction" => reject_mapping_fields(source_name, value, &["id", "name", "prompt"] )?,
-        "phase" => {
-            reject_mapping_fields(
-                source_name,
-                value,
-                &["id", "name", "instruction_refs", "tool_refs", "steps"],
-            )?;
-            if let Some(steps) = value
-                .as_mapping()
-                .and_then(|phase| phase.get("steps"))
-                .and_then(|steps| steps.as_sequence())
-            {
-                for step in steps {
-                    reject_mapping_fields(source_name, step, &["id", "name", "connection_refs"])?;
-                }
-            }
-        }
+        "phase" => reject_mapping_fields(
+            source_name,
+            value,
+            &["id", "name", "instruction_refs", "tool_refs", "steps"],
+        )?,
         "connection" => reject_mapping_fields(
             source_name,
             value,
