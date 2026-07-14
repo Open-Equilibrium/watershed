@@ -12,11 +12,8 @@ inner-loop checks (fmt/clippy/nextest) are the main thread's job during the tdd
 loop — do not duplicate that churn; run the full matrix here.
 
 Read TESTING.md and .github/workflows/ci.yml, then run exactly their full current
-pre-PR gate matrix, including the current milestone's PERFORMANCE.md checks.
-
-On Windows hosts where local llvm-cov is blocked by the Rust GNU profiler
-runtime, do not add wrapper or WSL workaround code. Treat coverage as a CI-only
-gate and verify the already-pushed branch's `Check line coverage` jobs with gh.
+pre-PR gate matrix and documented platform fallback, including the current
+milestone's PERFORMANCE.md checks.
 
 Never modify or fix source. Build artifacts under target/ are expected. Return
 only the exact commands, pass/fail per gate, and minimal file:line failure excerpts.

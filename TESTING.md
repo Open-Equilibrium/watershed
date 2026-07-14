@@ -47,4 +47,5 @@ The same metrics AgentPulse reports (rework ratio, first-attempt success rate, c
 
 - Run on Linux + macOS + Windows.
 - Mandatory gates: `cargo fmt --check`, `cargo clippy`, `cargo nextest run` (ignored timing tests run separately), optimized Loop Agent performance tests, the M1 coverage gate, `cargo audit` + `cargo deny`, and the `lychee` docs link + HTML render checks.
+- If Windows cannot run llvm-cov because the Rust GNU profiler runtime is unavailable, verify the pushed branch's `Check line coverage` CI jobs with `gh`; do not add wrapper or WSL workaround code.
 - Block merge on any mandatory gate failure, including current-milestone performance checks and planned platform sandbox/parity checks once implemented.

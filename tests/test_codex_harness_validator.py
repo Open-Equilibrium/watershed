@@ -199,20 +199,6 @@ class CodexHarnessValidatorTest(unittest.TestCase):
                 ".agents/skills/tdd/SKILL.md: must reference AGENTS.md or canonical repo rules",
             ),
             (
-                "git Windows CI guidance",
-                ".agents/skills/git/SKILL.md",
-                "gh pr checks",
-                "gh checks",
-                ".agents/skills/git/SKILL.md: git skill must direct Windows coverage to CI with gh",
-            ),
-            (
-                "validator Windows CI guidance",
-                ".codex/agents/pr-validator.toml",
-                "CI-only",
-                "local-only",
-                ".codex/agents/pr-validator.toml: pr_validator must direct Windows coverage to CI with gh",
-            ),
-            (
                 "validator gate reference",
                 ".codex/agents/pr-validator.toml",
                 "TESTING.md",

@@ -37,7 +37,7 @@ Commit every stable state: code compiles, `cargo fmt --check` and `cargo clippy`
 
 ## PR-ready closeout (mandatory, in this order)
 
-1. Run the full matrix defined by `TESTING.md`, `PERFORMANCE.md`, and CI via the `pr_validator` subagent; routine fmt/clippy/nextest may run in the main thread. On Windows hosts where the Rust GNU profiler runtime blocks local coverage, use the CI `Check line coverage` jobs through `gh pr checks` / `gh run view`, without wrapper or WSL workaround code.
+1. Run the full matrix and any platform fallback defined by `TESTING.md`, `PERFORMANCE.md`, and CI via the `pr_validator` subagent; routine fmt/clippy/nextest may run in the main thread.
 2. Run the `autoreview` skill on the branch diff (`--mode branch --base origin/main`) per its `SKILL.md` — normally via the `autoreview_runner` subagent; verify and fix accepted findings, **commit each stable fix state**, rerun until clean.
 3. Run the `clawpatch` skill (final gate, own terminal) per its `SKILL.md` — normally via the `clawpatch_runner` subagent; fix/triage findings, **commit each stable fix state**, rerun until no open actionable findings remain.
 4. Draft the PR body in a local untracked file such as `.codex-logs/pr-body.md`. Confirm every box in `.github/PULL_REQUEST_TEMPLATE.md` is satisfiable. The draft must be squash-ready: it is the future `main` commit body and must cover the relevant content, decision/ADR references, validation evidence and DCO trailers for all contributors.
