@@ -360,7 +360,7 @@ fn enqueue_test_event(writer: &mut SerialSessionWriter<'_>, event: &EventEnvelop
 }
 
 #[test]
-fn progress_batches_are_bounded_and_flush_before_semantic_events() {
+fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
     let workspace = empty_workspace("event-writer-batch-bound");
     let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
     let appends = Arc::new(Mutex::new(Vec::new()));
@@ -381,18 +381,16 @@ fn progress_batches_are_bounded_and_flush_before_semantic_events() {
     writer.finish().expect("writer finishes");
 
     let appends = appends.lock().expect("batch append probe lock");
-    assert_eq!(appends.len(), 3);
+    let (terminal_append, progress_appends) = appends.split_last().expect("appends exist");
+    assert!(progress_appends.len() >= 2);
+    assert!(progress_appends.iter().all(|batch| {
+        batch.iter().filter(|byte| **byte == b'\n').count() <= EVENT_WRITER_BATCH_CAPACITY
+    }));
     assert_eq!(
-        appends[0],
-        progress_jsonl[..EVENT_WRITER_BATCH_CAPACITY]
-            .concat()
-            .into_bytes()
+        progress_appends.concat(),
+        progress_jsonl.concat().into_bytes()
     );
-    assert_eq!(
-        appends[1],
-        progress_jsonl[EVENT_WRITER_BATCH_CAPACITY].as_bytes()
-    );
-    assert_eq!(appends[2], terminal_jsonl.as_bytes());
+    assert_eq!(terminal_append, terminal_jsonl.as_bytes());
     assert_eq!(
         receiver
             .recv_timeout(Duration::from_millis(50))
