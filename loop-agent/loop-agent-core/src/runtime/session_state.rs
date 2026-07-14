@@ -168,12 +168,7 @@ where
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{session_id}.contexts.jsonl"));
-    let validation = SessionAppendValidationState::from_prior_events(
-        &path,
-        session_id,
-        &events,
-        before.len(),
-    )?;
+    let validation = SessionAppendValidationState::from_prior_events(&path, session_id, &events)?;
     let mut serial_writer = SerialSessionWriter::start_prevalidated(
         SerialWriterStart {
             context_path,

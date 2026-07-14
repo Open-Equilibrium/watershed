@@ -11,105 +11,13 @@ pub fn validate_protocol_jsonl_text(
         )));
     }
 
-    let mut previous_sequence = 0_u64;
-    let mut session_id = None::<String>;
-    let mut event_ids = BTreeSet::new();
-    let mut loop_started_ids = BTreeSet::new();
-    let mut terminal_line = None::<usize>;
-    let mut events = Vec::new();
-    let mut stream_bytes = 0usize;
-    for (index, line) in text.split_terminator('\n').enumerate() {
-        let line_number = index + 1;
-        // WHY: count JSONL bytes and events before parsing payloads so oversized streams
-        // fail cheaply and deterministically.
-        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
-            return Err(RuntimeError::Protocol(format!(
-                "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
-                path.display()
-            )));
-        }
-        stream_bytes = stream_bytes
-            .checked_add(line.len().saturating_add(1))
-            .unwrap_or(usize::MAX);
-        if stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "{} event stream budget exceeded at line {line_number}: {stream_bytes} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
-                path.display()
-            )));
-        }
-        if line.ends_with('\r') {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use LF-only line endings",
-                path.display()
-            )));
-        }
-        let event = parse_canonical_event(path, line_number, line)?;
-        validate_event_metadata(path, line_number, &event)?;
-        if line_number == 1 && event.sequence != 1 {
-            return Err(RuntimeError::Protocol(format!(
-                "{} first sequence must be 1",
-                path.display()
-            )));
-        }
-        if previous_sequence.checked_add(1) != Some(event.sequence) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} sequence must increase by exactly 1",
-                path.display()
-            )));
-        }
-        previous_sequence = event.sequence;
-        if !event_ids.insert(event.event_id.clone()) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} must use a unique event_id",
-                path.display()
-            )));
-        }
-        if let Some(terminal_line) = terminal_line {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} appears after terminal session event on line {terminal_line}",
-                path.display()
-            )));
-        }
-        validate_event_payload(path, line_number, &event)?;
-        if event.event_type == EventType::LoopStarted {
-            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
-                RuntimeError::Protocol(format!(
-                    "{} line {line_number} loop.started must include loop_id",
-                    path.display()
-                ))
-            })?;
-            if !loop_started_ids.insert(loop_id.to_owned()) {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a unique loop_id for loop.started",
-                    path.display()
-                )));
-            }
-        }
-        match &session_id {
-            Some(existing) if existing != &event.session_id => {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} must use one session_id",
-                    path.display()
-                )));
-            }
-            None => session_id = Some(event.session_id.clone()),
-            Some(_) => {}
-        }
-        if matches!(
-            event.event_type,
-            EventType::SessionCompleted | EventType::SessionFailed
-        ) {
-            terminal_line = Some(line_number);
-        }
-        events.push(event);
-    }
+    let events = SessionAppendValidationState::unscoped().validate_appended(path, text)?;
     if events.is_empty() {
         return Err(RuntimeError::Protocol(format!(
             "{} must contain at least one event",
             path.display()
         )));
     }
-    validate_session_lifecycle(path, &events)?;
     Ok(events)
 }
 
@@ -456,7 +364,8 @@ impl PayloadValidator<'_> {
 }
 
 struct SessionAppendValidationState {
-    expected_session_id: String,
+    expected_session_id: Option<String>,
+    stream_session_id: Option<String>,
     previous_sequence: u64,
     event_ids: BTreeSet<String>,
     loop_started_ids: BTreeSet<String>,
@@ -467,9 +376,18 @@ struct SessionAppendValidationState {
 }
 
 impl SessionAppendValidationState {
+    fn unscoped() -> Self {
+        Self::new(None)
+    }
+
     fn empty(expected_session_id: &str) -> Self {
+        Self::new(Some(expected_session_id))
+    }
+
+    fn new(expected_session_id: Option<&str>) -> Self {
         Self {
-            expected_session_id: expected_session_id.to_owned(),
+            expected_session_id: expected_session_id.map(str::to_owned),
+            stream_session_id: None,
             previous_sequence: 0,
             event_ids: BTreeSet::new(),
             loop_started_ids: BTreeSet::new(),
@@ -484,66 +402,36 @@ impl SessionAppendValidationState {
         path: &Path,
         expected_session_id: &str,
         prior_events: &[EventEnvelope],
-        stream_bytes: usize,
     ) -> Result<Self, RuntimeError> {
-        let prior_session_id = &prior_events
-            .first()
-            .expect("prior events are non-empty")
-            .session_id;
-        if prior_events
-            .first()
-            .expect("prior events are non-empty")
-            .event_type
-            != EventType::SessionStarted
-        {
+        let first = prior_events.first().expect("prior events are non-empty");
+        if first.event_type != EventType::SessionStarted {
             return Err(RuntimeError::Protocol(format!(
                 "{} line 1 must start with session.started",
                 path.display()
             )));
         }
-        if prior_session_id != expected_session_id {
+        if first.session_id != expected_session_id {
             return Err(RuntimeError::Protocol(format!(
-                "{} contains session_id {prior_session_id:?}, expected {expected_session_id:?}",
-                path.display()
+                "{} contains session_id {:?}, expected {expected_session_id:?}",
+                path.display(),
+                first.session_id,
             )));
         }
 
-        let mut lifecycle = SessionLifecycleState::default();
-        for (index, event) in prior_events.iter().enumerate() {
-            lifecycle.validate_event(path, index + 1, event)?;
+        let mut state = Self::empty(expected_session_id);
+        for event in prior_events {
+            let canonical_bytes = event
+                .canonical_jsonl()
+                .map_err(|err| {
+                    RuntimeError::Protocol(format!(
+                        "{} prior event stream: {err}",
+                        path.display()
+                    ))
+                })?
+                .len();
+            state.validate_constructed_event(path, event, canonical_bytes)?;
         }
-        lifecycle.validate_terminal_session(path, prior_events.last())?;
-
-        let terminal_line = prior_events
-            .iter()
-            .position(|event| {
-                matches!(
-                    event.event_type,
-                    EventType::SessionCompleted | EventType::SessionFailed
-                )
-            })
-            .map(|index| index + 1);
-
-        Ok(Self {
-            expected_session_id: expected_session_id.to_owned(),
-            previous_sequence: prior_events
-                .last()
-                .expect("prior events are non-empty")
-                .sequence,
-            event_ids: prior_events
-                .iter()
-                .map(|event| event.event_id.clone())
-                .collect(),
-            loop_started_ids: prior_events
-                .iter()
-                .filter(|event| event.event_type == EventType::LoopStarted)
-                .filter_map(|event| event.loop_id.clone())
-                .collect(),
-            terminal_line,
-            stream_bytes,
-            line_count: prior_events.len(),
-            lifecycle,
-        })
+        Ok(state)
     }
 
     fn validate_appended(
@@ -563,7 +451,7 @@ impl SessionAppendValidationState {
 
         let mut appended_events = Vec::new();
         for line in text.split_terminator('\n') {
-            let line_number = self.line_count + 1;
+            let line_number = self.validate_budget(path, line.len().saturating_add(1))?;
             if line.ends_with('\r') {
                 return Err(RuntimeError::Protocol(format!(
                     "{} line {line_number} must use LF-only line endings",
@@ -571,7 +459,7 @@ impl SessionAppendValidationState {
                 )));
             }
             let event = parse_canonical_event(path, line_number, line)?;
-            self.validate_constructed_event(path, &event, line.len().saturating_add(1))?;
+            self.validate_event(path, line_number, &event)?;
             appended_events.push(event);
         }
         Ok(appended_events)
@@ -583,9 +471,18 @@ impl SessionAppendValidationState {
         event: &EventEnvelope,
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
+        let line_number = self.validate_budget(path, canonical_bytes)?;
+        self.validate_event(path, line_number, event)
+    }
+
+    fn validate_budget(
+        &mut self,
+        path: &Path,
+        canonical_bytes: usize,
+    ) -> Result<usize, RuntimeError> {
         let line_number = self.line_count + 1;
-        // WHY: incremental tail validation and live commits preserve the same cumulative
-        // public stream budgets as full replay validation.
+        // WHY: reject oversized input before JSON parsing and preserve one cumulative
+        // budget for full validation, incremental tails and live commits.
         if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
@@ -603,7 +500,20 @@ impl SessionAppendValidationState {
                 self.stream_bytes
             )));
         }
-        if event.session_id != self.expected_session_id {
+        Ok(line_number)
+    }
+
+    fn validate_event(
+        &mut self,
+        path: &Path,
+        line_number: usize,
+        event: &EventEnvelope,
+    ) -> Result<(), RuntimeError> {
+        if self
+            .expected_session_id
+            .as_ref()
+            .is_some_and(|expected| expected != &event.session_id)
+        {
             return Err(RuntimeError::Protocol(format!(
                 "{} must use one session_id",
                 path.display()
@@ -611,7 +521,9 @@ impl SessionAppendValidationState {
         }
         validate_event_metadata(path, line_number, event)?;
         if line_number == 1 {
-            if event.event_type != EventType::SessionStarted {
+            if self.expected_session_id.is_some()
+                && event.event_type != EventType::SessionStarted
+            {
                 return Err(RuntimeError::Protocol(format!(
                     "{} line 1 must start with session.started",
                     path.display()
@@ -657,6 +569,22 @@ impl SessionAppendValidationState {
                     path.display()
                 )));
             }
+        }
+        match &self.stream_session_id {
+            Some(existing) if existing != &event.session_id => {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} must use one session_id",
+                    path.display()
+                )));
+            }
+            None => self.stream_session_id = Some(event.session_id.clone()),
+            Some(_) => {}
+        }
+        if line_number == 1 && event.event_type != EventType::SessionStarted {
+            return Err(RuntimeError::Protocol(format!(
+                "{} line 1 must start with session.started",
+                path.display()
+            )));
         }
         self.lifecycle.validate_event(path, line_number, event)?;
         if matches!(
@@ -711,34 +639,6 @@ fn validate_session_log_text(
         )));
     }
     Ok(events)
-}
-
-/// Validates lifecycle invariants after envelope and payload validation:
-/// every loop/step/tool/message must start before use, terminal lifecycle
-/// items cannot receive later events, and terminal sessions cannot leave open
-/// lifecycle items.
-fn validate_session_lifecycle(path: &Path, events: &[EventEnvelope]) -> Result<(), RuntimeError> {
-    if events
-        .first()
-        .expect("validated streams contain at least one event")
-        .event_type
-        != EventType::SessionStarted
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line 1 must start with session.started",
-            path.display()
-        )));
-    }
-
-    let mut state = SessionLifecycleState::default();
-
-    for (index, event) in events.iter().enumerate() {
-        let line_number = index + 1;
-        state.validate_event(path, line_number, event)?;
-    }
-
-    state.validate_terminal_session(path, events.last())?;
-    Ok(())
 }
 
 #[derive(Default)]

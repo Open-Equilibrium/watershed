@@ -58,7 +58,6 @@ pub fn tail_session_to_writer_with_options(
             &path,
             session_id,
             &events,
-            validated_len,
         )?)
     };
     let mut observed_len = complete_len + pending.len();
@@ -130,8 +129,8 @@ pub fn tail_session_to_writer_with_options(
         }
         let remainder = pending.split_off(complete_len);
         let appended_bytes = std::mem::replace(&mut pending, remainder);
-        let appended_len = appended_bytes.len();
         let appended = decode_jsonl_bytes(&path, appended_bytes)?;
+        let appended_len = appended.len();
         let appended_events = if let Some(state) = &mut append_state {
             state.validate_appended(&path, &appended)?
         } else {
@@ -140,7 +139,6 @@ pub fn tail_session_to_writer_with_options(
                 &path,
                 session_id,
                 &appended_events,
-                appended_len,
             )?);
             appended_events
         };

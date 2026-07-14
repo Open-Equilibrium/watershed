@@ -49,21 +49,8 @@ fn validate_appended_session_log_text(
     if prior_events.is_empty() {
         return validate_session_log_text(path, expected_session_id, text);
     }
-    let stream_bytes = prior_events.iter().try_fold(0usize, |size, event| {
-        event
-            .canonical_jsonl()
-            .map(|line| size.saturating_add(line.len()))
-            .map_err(|err| {
-                RuntimeError::Protocol(format!("{} prior event stream: {err}", path.display()))
-            })
-    })?;
-    SessionAppendValidationState::from_prior_events(
-        path,
-        expected_session_id,
-        prior_events,
-        stream_bytes,
-    )?
-    .validate_appended(path, text)
+    SessionAppendValidationState::from_prior_events(path, expected_session_id, prior_events)?
+        .validate_appended(path, text)
 }
 
 fn write_initial_session_log(
