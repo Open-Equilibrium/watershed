@@ -1175,20 +1175,31 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
 }
 
 fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
-    let blocks = (0..depth)
-        .map(|index| {
-            let id = format!("loop-{index:03}");
-            core_script::RegistryBlock::Loop(core_script::LoopBlock {
-                identity: core_script::BlockIdentity {
-                    id,
-                    name: format!("Loop {index:03}"),
-                },
-                phase_refs: Vec::new(),
-                subloop_refs: Vec::new(),
-                connection_refs: Vec::new(),
-            })
+    let mut blocks = vec![core_script::RegistryBlock::Phase(core_script::PhaseBlock {
+        identity: core_script::BlockIdentity {
+            id: "chain-phase".to_owned(),
+            name: "Chain Phase".to_owned(),
+        },
+        instruction_refs: Vec::new(),
+        tool_refs: Vec::new(),
+        steps: vec![core_script::StepBlock {
+            id: "chain-step".to_owned(),
+            name: "Chain Step".to_owned(),
+            connection_refs: Vec::new(),
+        }],
+    })];
+    blocks.extend((0..depth).map(|index| {
+        let id = format!("loop-{index:03}");
+        core_script::RegistryBlock::Loop(core_script::LoopBlock {
+            identity: core_script::BlockIdentity {
+                id,
+                name: format!("Loop {index:03}"),
+            },
+            phase_refs: vec!["chain-phase".to_owned()],
+            subloop_refs: Vec::new(),
+            connection_refs: Vec::new(),
         })
-        .collect::<Vec<_>>();
+    }));
     let mut registry =
         core_script::ResolvedRegistry::from_blocks(blocks).expect("loop-chain registry resolves");
     for index in 1..depth {
