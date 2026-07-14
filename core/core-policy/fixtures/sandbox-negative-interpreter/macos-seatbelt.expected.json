@@ -1,1 +1,0 @@
-{"attempt":{"argv":["-c","cat .env"],"executable":"python","kind":"interpreter_escape","tool_id":"interpreter-tool"},"expected":"deny","fixture_name":"sandbox-negative-interpreter","reason_code":"interpreter_escape_denied","side_effects_allowed":false,"target":"macos-seatbelt"}

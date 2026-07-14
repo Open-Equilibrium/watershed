@@ -64,7 +64,7 @@ The M0 security packet describes policy artifacts and sandbox-negative tests for
 
 ### M0 policy artifact contract
 
-M0 policy artifacts are canonical JSON review/test outputs from `core-policy`, not OS-enforced sandboxes. Fixtures are checked in under `core/core-policy/fixtures/<fixture-name>/<target>.policy.json`, plus `<target>.expected.json` for sandbox-negative expected decisions. Targets are `linux-landlock-seccomp` and `macos-seatbelt`.
+M0 policy artifacts are canonical JSON review/test outputs from `core-policy`, not OS-enforced sandboxes. One fixture per scenario is checked in under `core/core-policy/fixtures/<fixture-name>/`; tests instantiate it for both `linux-landlock-seccomp` and `macos-seatbelt`. Add target-specific fixtures only when their outputs differ.
 
 Policy artifact serialization is UTF-8 JSON with lexicographically sorted object keys at every level, deterministic array order, no insignificant whitespace, LF line ending and final LF.
 

@@ -1,1 +1,0 @@
-{"attempt":{"kind":"symlink_escape","operation":"create","path":"links/outside.txt","symlink_path":"links","symlink_target":"../outside","tool_id":"symlink-tool"},"expected":"deny","fixture_name":"sandbox-negative-symlink","reason_code":"symlink_escape_denied","side_effects_allowed":false,"target":"macos-seatbelt"}

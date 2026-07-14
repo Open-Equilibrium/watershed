@@ -3,6 +3,11 @@ use proptest::prelude::*;
 use serde_json::Value;
 use std::{fs, path::Path};
 
+const POLICY_TARGETS: [PolicyTarget; 2] = [
+    PolicyTarget::LinuxLandlockSeccomp,
+    PolicyTarget::MacosSeatbelt,
+];
+
 #[test]
 fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
     for fixture in ["smoke-loop", "hello-loop"] {
@@ -14,28 +19,31 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
         )
         .expect("fixture registry loads");
 
-        for (target, file_name) in [
-            (
-                PolicyTarget::LinuxLandlockSeccomp,
-                "linux-landlock-seccomp.policy.json",
-            ),
-            (PolicyTarget::MacosSeatbelt, "macos-seatbelt.policy.json"),
-        ] {
+        let expected = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("fixtures")
+                .join(fixture)
+                .join("policy.json"),
+        )
+        .expect("expected policy fixture is readable");
+        let expected_artifact: PolicyArtifact =
+            serde_json::from_str(&expected).expect("expected policy fixture parses");
+
+        for target in POLICY_TARGETS {
             let artifact = compile_policy_artifact(fixture, &registry, fixture, target)
                 .expect("policy artifact compiles");
             let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
-            let expected = fs::read_to_string(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("fixtures")
-                    .join(fixture)
-                    .join(file_name),
-            )
-            .expect("expected policy fixture is readable");
-            let expected_artifact: PolicyArtifact =
-                serde_json::from_str(&expected).expect("expected policy fixture parses");
+            let mut expected_artifact = expected_artifact.clone();
+            expected_artifact.target = artifact.target.clone();
+            let expected = canonical_artifact_json(&expected_artifact)
+                .expect("expected policy artifact serializes");
 
-            assert_eq!(actual, expected, "{fixture} {file_name}");
-            assert_eq!(artifact, expected_artifact, "{fixture} {file_name}");
+            assert_eq!(actual, expected, "{fixture} {:?}", artifact.target);
+            assert_eq!(
+                artifact, expected_artifact,
+                "{fixture} {:?}",
+                artifact.target
+            );
         }
     }
 }
@@ -553,17 +561,19 @@ fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
         assert_eq!(expected.reason_code.as_str(), expected_reason_code(kind));
         assert_attempt_shape(kind, attempt);
 
-        let artifact = compile_policy_artifact(
-            &expected.fixture_name,
-            &registry,
-            &expected.fixture_name,
-            expected.target.clone(),
-        )
-        .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-        assert_eq!(artifact.fixture_name, expected.fixture_name);
-        assert_eq!(artifact.source_loop_definition_id, expected.fixture_name);
-        assert_eq!(artifact.target, expected.target);
-        assert_attempt_denied(&artifact, attempt);
+        for target in POLICY_TARGETS {
+            let artifact = compile_policy_artifact(
+                &expected.fixture_name,
+                &registry,
+                &expected.fixture_name,
+                target.clone(),
+            )
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+            assert_eq!(artifact.fixture_name, expected.fixture_name);
+            assert_eq!(artifact.source_loop_definition_id, expected.fixture_name);
+            assert_eq!(artifact.target, target);
+            assert_attempt_denied(&artifact, attempt);
+        }
     }
 }
 
@@ -1254,7 +1264,6 @@ struct ExpectedDecisionFixture {
     fixture_name: String,
     reason_code: DenyReasonCode,
     side_effects_allowed: bool,
-    target: PolicyTarget,
 }
 
 fn expected_reason_code(kind: &str) -> &'static str {

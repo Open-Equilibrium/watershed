@@ -1,1 +1,0 @@
-{"attempt":{"kind":"tool_out_of_phase","phase_id":"negative-no-tools","tool_id":"negative-tool"},"expected":"deny","fixture_name":"sandbox-negative-tool-out-of-phase","reason_code":"tool_out_of_phase","side_effects_allowed":false,"target":"macos-seatbelt"}
