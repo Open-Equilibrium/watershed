@@ -612,6 +612,8 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
         "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect input\n";
     let tool =
         include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+    let phase =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
     let cases = [
         (
             "duplicate-key.yaml",
@@ -652,6 +654,20 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
         (
             "unknown-nested-field.yaml",
             tool.replace("    argv: []", "    argv: []\n    extra: true"),
+        ),
+        (
+            "unknown-parameter-field.yaml",
+            tool.replace(
+                "      required: true",
+                "      required: true\n      extra: true",
+            ),
+        ),
+        (
+            "unknown-step-field.yaml",
+            phase.replace(
+                "      name: Gather",
+                "      name: Gather\n      extra: true",
+            ),
         ),
         (
             "explicit-null.yaml",
