@@ -387,6 +387,14 @@ impl PendingEventBatch {
 
 trait EventLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError>;
+    fn append_batch(
+        &mut self,
+        path: &Path,
+        events: &[&[u8]],
+    ) -> Result<(), BatchAppendFailure> {
+        self.append(path, &events.concat())
+            .map_err(BatchAppendFailure::none_committed)
+    }
     fn sync(&mut self, path: &Path) -> Result<(), RuntimeError>;
     fn persist_context_manifests(
         &mut self,
@@ -394,6 +402,20 @@ trait EventLogAppender {
         manifests: &[ContextManifest],
     ) -> Result<(), RuntimeError> {
         persist_context_manifests(path, manifests)
+    }
+}
+
+struct BatchAppendFailure {
+    committed_events: usize,
+    error: RuntimeError,
+}
+
+impl BatchAppendFailure {
+    fn none_committed(error: RuntimeError) -> Self {
+        Self {
+            committed_events: 0,
+            error,
+        }
     }
 }
 
@@ -421,35 +443,54 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
             return;
         }
         let append_started_at = Instant::now();
-        if let Err(error) = validate_batch(self.path, &mut self.validation, &pending) {
+        let mut validated = self.validation.clone();
+        if let Err(error) = validate_batch(self.path, &mut validated, &pending) {
             reject_batch(pending, error);
             self.stopped = true;
             return;
         }
         let jsonl = pending
             .iter()
-            .map(|event| event.canonical_jsonl.as_str())
-            .collect::<String>();
-        if let Err(error) = self.appender.append(self.path, jsonl.as_bytes()) {
-            reject_batch(pending, error);
-            self.stopped = true;
-            return;
-        }
+            .map(|event| event.canonical_jsonl.as_bytes())
+            .collect::<Vec<_>>();
+        let batch_len = pending.len();
+        match self.appender.append_batch(self.path, &jsonl) {
+            Ok(()) => {}
+            Err(failure) if failure.committed_events <= pending.len() => {
+                let committed_events = failure.committed_events;
+                let mut committed = pending;
+                let rejected = committed.split_off(committed_events);
+                let mut committed_validation = self.validation.clone();
+                validate_batch(self.path, &mut committed_validation, &committed)
+                    .expect("a validated batch prefix remains valid");
+                self.validation = committed_validation;
+                acknowledge_batch(
+                    committed,
+                    append_started_at.elapsed().as_nanos(),
+                    self.notifier.as_ref(),
+                );
+                reject_batch(rejected, failure.error);
+                self.stopped = true;
+                return;
+            }
+            Err(failure) => {
+                reject_batch(
+                    pending,
+                    RuntimeError::Protocol(format!(
+                        "session event appender reported {} committed events for a batch of {}: {}",
+                        failure.committed_events,
+                        batch_len,
+                        failure.error
+                    )),
+                );
+                self.stopped = true;
+                return;
+            }
+        };
+        self.validation = validated;
         let append_latency_nanos = append_started_at.elapsed().as_nanos();
         self.dirty.mark_dirty(Instant::now());
-        for event in pending {
-            let _ = event.acknowledgement.send(WriterOutcome {
-                append_latency_nanos: event
-                    .pre_batch_latency_nanos
-                    .map(|latency| latency.saturating_add(append_latency_nanos)),
-                appended: true,
-                error: None,
-                notification_latency_nanos: notify_committed(
-                    self.notifier.as_ref(),
-                    &event.event,
-                ),
-            });
-        }
+        acknowledge_batch(pending, append_latency_nanos, self.notifier.as_ref());
     }
 
     fn commit(&mut self, event: QueuedEvent) {
@@ -597,6 +638,23 @@ fn reject_batch(batch: Vec<QueuedEvent>, error: RuntimeError) {
     }
 }
 
+fn acknowledge_batch(
+    batch: Vec<QueuedEvent>,
+    append_latency_nanos: u128,
+    notifier: Option<&LiveEventNotifier>,
+) {
+    for event in batch {
+        let _ = event.acknowledgement.send(WriterOutcome {
+            append_latency_nanos: event
+                .pre_batch_latency_nanos
+                .map(|latency| latency.saturating_add(append_latency_nanos)),
+            appended: true,
+            error: None,
+            notification_latency_nanos: notify_committed(notifier, &event.event),
+        });
+    }
+}
+
 fn notify_committed(
     notifier: Option<&LiveEventNotifier>,
     event: &EventEnvelope,
@@ -730,16 +788,17 @@ impl SessionLogAppender {
     }
 
     #[cfg(any(unix, windows))]
-    fn append_native_with<F>(
+    fn append_native_batch_with<F>(
         &mut self,
         path: &Path,
-        bytes: &[u8],
+        events: &[&[u8]],
         write: F,
-    ) -> Result<(), RuntimeError>
+    ) -> Result<(), BatchAppendFailure>
     where
         F: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
     {
-        validate_open_session_log_append_file(path, &self.file)?;
+        validate_open_session_log_append_file(path, &self.file)
+            .map_err(BatchAppendFailure::none_committed)?;
 
         let original_len = self
             .file
@@ -747,28 +806,54 @@ impl SessionLogAppender {
             .map_err(|source| RuntimeError::Io {
                 path: path.to_owned(),
                 source,
-            })?
+            })
+            .map_err(BatchAppendFailure::none_committed)?
             .len();
         self.file
             .seek(SeekFrom::End(0))
             .map_err(|source| RuntimeError::Io {
                 path: path.to_owned(),
                 source,
-            })?;
-        if let Err(source) = write(&mut self.file, bytes) {
+            })
+            .map_err(BatchAppendFailure::none_committed)?;
+        let byte_count = events.iter().map(|event| event.len()).sum();
+        let mut bytes = Vec::with_capacity(byte_count);
+        let mut complete_prefixes = Vec::with_capacity(events.len());
+        for event in events {
+            bytes.extend_from_slice(event);
+            complete_prefixes.push(bytes.len());
+        }
+        if let Err(source) = write(&mut self.file, &bytes) {
+            let current_len = self
+                .file
+                .metadata()
+                .map(|metadata| metadata.len())
+                .unwrap_or(original_len);
+            let written = usize::try_from(current_len.saturating_sub(original_len))
+                .unwrap_or(usize::MAX);
+            let committed_events = complete_prefixes.partition_point(|end| *end <= written);
+            let retained_bytes = committed_events
+                .checked_sub(1)
+                .map_or(0, |index| complete_prefixes[index]);
+            let retained_len = original_len.saturating_add(retained_bytes as u64);
             let rollback = self
                 .file
-                .set_len(original_len)
+                .set_len(retained_len)
                 .and_then(|()| self.file.sync_all());
             if let Err(rollback) = rollback {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} append failed ({source}) and rollback failed ({rollback})",
-                    path.display()
+                return Err(BatchAppendFailure::none_committed(RuntimeError::Protocol(
+                    format!(
+                        "{} append failed ({source}) and incomplete-suffix cleanup failed ({rollback})",
+                        path.display()
+                    ),
                 )));
             }
-            return Err(RuntimeError::Io {
-                path: path.to_owned(),
-                source,
+            return Err(BatchAppendFailure {
+                committed_events,
+                error: RuntimeError::Io {
+                    path: path.to_owned(),
+                    source,
+                },
             });
         }
         Ok(())
@@ -779,12 +864,30 @@ impl EventLogAppender for SessionLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
         #[cfg(any(unix, windows))]
         {
-            self.append_native_with(path, bytes, |file, bytes| file.write_all(bytes))
+            self.append_native_batch_with(path, &[bytes], |file, bytes| file.write_all(bytes))
+                .map_err(|failure| failure.error)
         }
 
         #[cfg(not(any(unix, windows)))]
         {
             append_session_log_bytes(path, bytes)
+        }
+    }
+
+    fn append_batch(
+        &mut self,
+        path: &Path,
+        events: &[&[u8]],
+    ) -> Result<(), BatchAppendFailure> {
+        #[cfg(any(unix, windows))]
+        {
+            self.append_native_batch_with(path, events, |file, bytes| file.write_all(bytes))
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            self.append(path, &events.concat())
+                .map_err(BatchAppendFailure::none_committed)
         }
     }
 

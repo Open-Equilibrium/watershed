@@ -363,6 +363,7 @@ impl PayloadValidator<'_> {
     }
 }
 
+#[derive(Clone)]
 struct SessionAppendValidationState {
     expected_session_id: Option<String>,
     stream_session_id: Option<String>,
@@ -628,7 +629,7 @@ fn validate_session_log_text(
     Ok(events)
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SessionLifecycleState {
     loops: LifecycleTracker<String>,
     loop_parents: BTreeMap<String, Option<String>>,
@@ -966,6 +967,7 @@ fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
     ))
 }
 
+#[derive(Clone)]
 struct LifecycleTracker<K: Ord> {
     started: BTreeSet<K>,
     terminal: BTreeMap<K, usize>,

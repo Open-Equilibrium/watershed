@@ -271,22 +271,38 @@ impl EventLogAppender for SyncFailAppender {
 
 struct BatchProbeAppender {
     appends: Arc<Mutex<Vec<Vec<u8>>>>,
-    fail_next: bool,
+    fail_after: Option<usize>,
 }
 
 impl EventLogAppender for BatchProbeAppender {
-    fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        if std::mem::take(&mut self.fail_next) {
-            return Err(RuntimeError::Io {
-                path: path.to_owned(),
-                source: io::Error::other("injected batch append failure"),
-            });
-        }
+    fn append(&mut self, _path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
         self.appends
             .lock()
             .expect("batch append probe lock")
             .push(bytes.to_vec());
         Ok(())
+    }
+
+    fn append_batch(
+        &mut self,
+        path: &Path,
+        events: &[&[u8]],
+    ) -> Result<(), BatchAppendFailure> {
+        if let Some(committed_events) = self.fail_after.take() {
+            if committed_events > 0 {
+                self.append(path, &events[..committed_events].concat())
+                    .expect("probe append succeeds");
+            }
+            return Err(BatchAppendFailure {
+                committed_events,
+                error: RuntimeError::Io {
+                    path: path.to_owned(),
+                    source: io::Error::other("injected batch append failure"),
+                },
+            });
+        }
+        self.append(path, &events.concat())
+            .map_err(BatchAppendFailure::none_committed)
     }
 
     fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
@@ -332,7 +348,7 @@ fn progress_writer<'a>(
     count: usize,
     notifier: LiveEventNotifier,
     appends: Arc<Mutex<Vec<Vec<u8>>>>,
-    fail_next: bool,
+    fail_after: Option<usize>,
 ) -> (SerialSessionWriter<'a>, Vec<EventEnvelope>, EventEnvelope) {
     let (validation, progress, terminal) = progress_batch(&reservation.session_path, count);
     let writer = SerialSessionWriter::start_with_appender(
@@ -345,7 +361,10 @@ fn progress_writer<'a>(
             notifier: Some(notifier),
             timings: None,
         },
-        BatchProbeAppender { appends, fail_next },
+        BatchProbeAppender {
+            appends,
+            fail_after,
+        },
     )
     .expect("writer starts");
     (writer, progress, terminal)
@@ -370,7 +389,7 @@ fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
         EVENT_WRITER_BATCH_CAPACITY + 1,
         notifier,
         Arc::clone(&appends),
-        false,
+        None,
     );
 
     let progress_jsonl = progress
@@ -414,7 +433,7 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
     let appends = Arc::new(Mutex::new(Vec::new()));
     let (notifier, receiver) = live_event_channel();
     let (mut writer, progress, _) =
-        progress_writer(&reservation, 1, notifier, Arc::clone(&appends), false);
+        progress_writer(&reservation, 1, notifier, Arc::clone(&appends), None);
 
     let jsonl = enqueue_test_event(&mut writer, &progress[0]);
     assert_eq!(
@@ -436,45 +455,60 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
 }
 
 #[test]
-fn failed_progress_batch_is_not_notified_and_blocks_the_semantic_event() {
-    let workspace = empty_workspace("event-writer-batch-failure");
-    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
-    let appends = Arc::new(Mutex::new(Vec::new()));
-    let (notifier, receiver) = live_event_channel();
-    let (mut writer, progress, terminal) =
-        progress_writer(&reservation, 2, notifier, Arc::clone(&appends), true);
+fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
+    for committed_events in 0..=1 {
+        let workspace = empty_workspace(&format!("event-writer-batch-failure-{committed_events}"));
+        let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+        let appends = Arc::new(Mutex::new(Vec::new()));
+        let (notifier, receiver) = live_event_channel();
+        let (mut writer, progress, terminal) = progress_writer(
+            &reservation,
+            2,
+            notifier,
+            Arc::clone(&appends),
+            Some(committed_events),
+        );
+        let progress_jsonl = progress
+            .iter()
+            .map(|event| enqueue_test_event(&mut writer, event))
+            .collect::<Vec<_>>();
 
-    for event in &progress {
-        enqueue_test_event(&mut writer, event);
+        let error = writer
+            .commit(
+                &terminal,
+                &terminal.canonical_jsonl().expect("terminal serializes"),
+                None,
+                Some(Instant::now()),
+            )
+            .expect_err("batch suffix failure blocks the terminal event");
+
+        assert!(matches!(
+            error,
+            RuntimeError::EventWriter(source)
+                if matches!(source.as_ref(), RuntimeError::Io { source, .. }
+                    if source.to_string().contains("injected batch append failure"))
+        ));
+        assert_eq!(
+            appends.lock().expect("batch append probe lock").concat(),
+            progress_jsonl[..committed_events].concat().into_bytes()
+        );
+        if committed_events == 0 {
+            assert_eq!(
+                receiver.recv_timeout(Duration::from_millis(10)),
+                Err(LiveEventReceiveError::Timeout)
+            );
+        } else {
+            assert_eq!(
+                receiver
+                    .recv_timeout(Duration::from_millis(50))
+                    .expect("retained prefix notifies")
+                    .highest_committed_sequence,
+                progress[committed_events - 1].sequence
+            );
+        }
+        writer.finish().expect("failed writer shuts down cleanly");
+        reservation.rollback();
     }
-    let err = writer
-        .commit(
-            &terminal,
-            &terminal.canonical_jsonl().expect("terminal serializes"),
-            None,
-            Some(Instant::now()),
-        )
-        .expect_err("batch append failure blocks the terminal event");
-
-    assert!(matches!(
-        err,
-        RuntimeError::EventWriter(source)
-            if matches!(source.as_ref(), RuntimeError::Io { source, .. }
-                if source.to_string().contains("injected batch append failure"))
-    ));
-    assert!(
-        appends
-            .lock()
-            .expect("batch append probe lock")
-            .is_empty(),
-        "the semantic event must not append after the batch failed"
-    );
-    assert_eq!(
-        receiver.recv_timeout(Duration::from_millis(10)),
-        Err(LiveEventReceiveError::Timeout)
-    );
-    writer.finish().expect("failed writer shuts down cleanly");
-    reservation.rollback();
 }
 
 #[test]
@@ -564,56 +598,73 @@ fn test_event(
 
 #[cfg(any(unix, windows))]
 #[test]
-fn partial_append_failure_rolls_back_to_the_last_complete_event() {
-    let workspace = empty_workspace("event-writer-partial-append");
+fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
+    let workspace = empty_workspace("event-writer-visible-batch-prefix");
     let reservation =
-        reserve_session_log(&workspace, "partialappend001").expect("session reserved");
-    let started = test_event(
-        "partialappend001",
-        "evt-partial-started",
+        reserve_session_log(&workspace, "visibleprefix001").expect("session reserved");
+    let first = test_event(
+        "visibleprefix001",
+        "evt-visible-first",
         EventType::SessionStarted,
         1,
     );
-    let completed = test_event(
-        "partialappend001",
-        "evt-partial-completed",
-        EventType::SessionCompleted,
+    let second = test_event(
+        "visibleprefix001",
+        "evt-visible-second",
+        EventType::MessageDelta,
         2,
     );
-    let started_jsonl = started.canonical_jsonl().expect("started serializes");
-    let completed_jsonl = completed.canonical_jsonl().expect("completed serializes");
-    let mut appender =
-        SessionLogAppender::open(&reservation.session_path).expect("appender opens");
-    appender
-        .append(&reservation.session_path, started_jsonl.as_bytes())
-        .expect("initial event appends");
-
-    let err = appender
-        .append_native_with(
-            &reservation.session_path,
-            completed_jsonl.as_bytes(),
+    let first_jsonl = first.canonical_jsonl().expect("first event serializes");
+    let second_jsonl = second.canonical_jsonl().expect("second event serializes");
+    let path = reservation.session_path.clone();
+    let append_path = path.clone();
+    let first_len = first_jsonl.len();
+    let (prefix_visible, observe_prefix) = std::sync::mpsc::sync_channel(0);
+    let (prefix_observed, continue_append) = std::sync::mpsc::sync_channel(0);
+    let append = thread::spawn(move || {
+        let mut appender = SessionLogAppender::open(&append_path).expect("appender opens");
+        appender.append_native_batch_with(
+            &append_path,
+            &[first_jsonl.as_bytes(), second_jsonl.as_bytes()],
             |file, bytes| {
-                file.write_all(&bytes[..bytes.len() / 2])?;
-                Err(io::Error::other("injected partial append failure"))
+                file.write_all(&bytes[..first_len + 1])?;
+                file.sync_all()?;
+                prefix_visible.send(()).expect("reader is waiting");
+                continue_append.recv().expect("reader observed prefix");
+                Err(io::Error::other("injected second-event write failure"))
             },
         )
-        .expect_err("partial append failure is reported");
+    });
+
+    observe_prefix.recv().expect("complete prefix becomes visible");
+    let mut reader = SessionEventReader::open(&workspace, "visibleprefix001")
+        .expect("visible prefix opens");
+    assert_eq!(
+        reader
+            .read_after(0)
+            .expect("complete prefix is readable")
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [1]
+    );
+    prefix_observed.send(()).expect("append may finish");
+
+    let failure = append
+        .join()
+        .expect("append thread joins")
+        .expect_err("partial second event fails");
+    assert_eq!(failure.committed_events, 1);
     assert!(matches!(
-        &err,
+        failure.error,
         RuntimeError::Io { source, .. }
-            if source.to_string().contains("injected partial append failure")
+            if source.to_string().contains("injected second-event write failure")
     ));
     assert_eq!(
-        fs::read(&reservation.session_path).expect("rolled-back stream reads"),
-        started_jsonl.as_bytes()
-    );
-
-    appender
-        .append(&reservation.session_path, completed_jsonl.as_bytes())
-        .expect("retry appends after rollback");
-    assert_eq!(
-        fs::read_to_string(&reservation.session_path).expect("completed stream reads"),
-        format!("{started_jsonl}{completed_jsonl}")
+        reader
+            .read_after(1)
+            .expect("observed prefix remains authoritative"),
+        Vec::new()
     );
     reservation.rollback();
 }
