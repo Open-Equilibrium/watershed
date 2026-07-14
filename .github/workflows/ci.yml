@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Validate Codex harness
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
@@ -34,7 +34,7 @@ jobs:
           --component llvm-tools-preview
 
       - name: Install gate tools
-        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907
+        uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: cargo-nextest,cargo-llvm-cov,cargo-audit,cargo-deny,lychee@0.24.2
 
