@@ -183,12 +183,7 @@ fn resumed_notifications_replay_exactly_the_appended_suffix() {
         + "\n";
     let prefix_events = prefix.lines().count() as u64;
     fs::write(session_dir.join("smoke001.jsonl"), &prefix).expect("partial log written");
-    write_definition_hash_metadata(
-        &workspace,
-        "smoke001",
-        "smoke-loop",
-        prefix_events as usize,
-    );
+    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop");
     let (notifier, receiver) = live_event_channel();
 
     let output = resume_session_with_live_events(&workspace, "smoke001", notifier)

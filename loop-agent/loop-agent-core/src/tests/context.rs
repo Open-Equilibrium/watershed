@@ -464,12 +464,7 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
             .expect("fixture loop completes");
         let before = prefix_before_tool_started(&output.stdout, "write-summary");
         fs::write(&output.session_path, &before).expect("partial session prefix written");
-        write_definition_hash_metadata(
-            &workspace,
-            &output.session_id,
-            "hello-loop",
-            before.lines().count(),
-        );
+        write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
         let context_path = workspace
             .join(LOCAL_LOG_DIR)
             .join(format!("{}.contexts.jsonl", output.session_id));
@@ -508,12 +503,7 @@ fn resume_recovers_one_deterministic_inflight_context_manifest() {
     let context_stream = fs::read_to_string(&context_path).expect("context manifest reads");
     let prefix = prefix_before_message_completed(&output.stdout);
     fs::write(&output.session_path, &prefix).expect("incomplete event prefix written");
-    write_definition_hash_metadata(
-        &workspace,
-        &output.session_id,
-        "smoke-loop",
-        prefix.lines().count(),
-    );
+    write_definition_hash_metadata(&workspace, &output.session_id, "smoke-loop");
     fs::write(&context_path, &context_stream).expect("in-flight manifest restored");
 
     let resumed = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
@@ -556,12 +546,7 @@ fn resume_rejects_more_than_one_future_context_manifest() {
     assert!(context_stream.lines().count() > 1);
     let prefix = prefix_before_message_completed(&output.stdout);
     fs::write(&output.session_path, &prefix).expect("incomplete event prefix written");
-    write_definition_hash_metadata(
-        &workspace,
-        &output.session_id,
-        "hello-loop",
-        prefix.lines().count(),
-    );
+    write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
     fs::write(&context_path, context_stream).expect("future manifests restored");
     let before = fs::read_to_string(&output.session_path).expect("event prefix reads");
 

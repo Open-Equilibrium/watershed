@@ -121,78 +121,6 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     ));
 }
 
-#[test]
-fn completed_session_log_append_keeps_audit_when_log_update_fails() {
-    let workspace = empty_workspace("audit-retained");
-    let reservation = reserve_session_log(&workspace, "audit001").expect("reservation succeeds");
-    write_initial_session_log(&reservation, "audit001").expect("initial audit writes");
-    let initial = fs::read_to_string(&reservation.session_path).expect("initial audit readable");
-    let completed = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionCompleted,
-        "audit001",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    let stream = format!("{initial}{completed}");
-    fs::remove_file(&reservation.log_path).expect("reserved log removed");
-    fs::create_dir(&reservation.log_path).expect("log path replaced by directory");
-
-    let err = complete_reserved_session_log(&reservation, "audit001", &stream, 2)
-        .expect_err("log metadata update fails");
-
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("must be a file")));
-    assert_eq!(
-        fs::read_to_string(&reservation.session_path).expect("audit stream remains readable"),
-        stream
-    );
-    fs::remove_dir_all(&reservation.log_path).expect("log directory cleanup");
-    reservation.rollback();
-    assert_eq!(
-        fs::read_to_string(&reservation.session_path)
-            .expect("committed audit stream survives rollback"),
-        stream
-    );
-}
-
-#[test]
-fn completed_session_log_append_rejects_streams_above_size_limit() {
-    let workspace = empty_workspace("session-completion-size-limit");
-    let reservation = reserve_session_log(&workspace, "limit001").expect("reservation succeeds");
-    write_initial_session_log(&reservation, "limit001").expect("initial session log writes");
-    let initial = fs::read_to_string(&reservation.session_path).expect("initial log readable");
-    let completed = EventEnvelope::new(
-        "evt-002",
-        EventType::SessionCompleted,
-        "limit001",
-        2,
-        "2026-01-01T00:00:01Z",
-        "loop-agent-cli",
-        serde_json::json!({"padding":"x".repeat(MAX_SESSION_LOG_BYTES as usize)}),
-    )
-    .canonical_jsonl()
-    .expect("completed event serializes");
-    let stream = format!("{initial}{completed}");
-
-    let err = complete_reserved_session_log(&reservation, "limit001", &stream, 2)
-        .expect_err("oversized completion must fail before append");
-
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message)
-            if message.contains("session log size") && message.contains("exceeds max")
-    ));
-    assert_eq!(
-        fs::read_to_string(&reservation.session_path).expect("initial log remains readable"),
-        initial
-    );
-    reservation.rollback();
-}
-
 #[cfg(any(unix, windows))]
 #[test]
 fn write_and_append_reject_hardlinked_leaf_without_changing_target() {
@@ -1219,9 +1147,8 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("progress prefix written");
-    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
     fs::create_dir_all(workspace.join("out")).expect("output dir created");
     fs::write(workspace.join("out/summary.txt"), "already-written\n")
         .expect("sentinel summary written");
@@ -1254,9 +1181,8 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
     let completed =
         run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("initial run completes");
     let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
-    let event_count = prefix.lines().count();
     fs::write(&completed.session_path, &prefix).expect("partial canonical prefix written");
-    write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop");
     fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
     let source = fs::read_to_string(&loop_path).expect("loop fixture remains readable");
     fs::write(
@@ -1293,9 +1219,8 @@ fn resume_rejects_registry_drift_before_side_effects() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("progress prefix written");
-    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
     fs::create_dir_all(workspace.join("out")).expect("output dir created");
     fs::write(workspace.join("out/summary.txt"), "already-written\n")
         .expect("sentinel summary written");
@@ -1331,12 +1256,11 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
         .expect("fixture registry loads");
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
     let metadata_path =
-        session_log_metadata_path(&workspace, "legacy001").expect("metadata path resolves");
+        session_log_metadata_path(&workspace, "partial001").expect("metadata path resolves");
     fs::create_dir_all(metadata_path.parent().expect("metadata parent")).expect("metadata dir");
 
-    fs::write(&metadata_path, "session_id=legacy001\nevents=2\n")
-        .expect("legacy metadata without hashes");
-    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+    fs::write(&metadata_path, "").expect("empty metadata writes");
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
         .expect_err("metadata without registry hash must fail closed");
     assert!(matches!(
         err,
@@ -1345,10 +1269,10 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
 
     fs::write(
         &metadata_path,
-        "session_id=legacy001\nevents=2\nregistry_hash=fnv64:legacy\n",
+        "registry_hash=fnv64:partial\n",
     )
-    .expect("legacy metadata with partial hash");
-    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+    .expect("partial metadata writes");
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
         .expect_err("metadata without loop hash must fail closed");
     assert!(matches!(
         err,
@@ -1356,7 +1280,7 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     ));
 
     fs::remove_file(&metadata_path).expect("metadata removed");
-    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
         .expect_err("absent metadata must fail closed");
     assert!(matches!(
         err,
@@ -1364,7 +1288,7 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     ));
 
     fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR)).expect("metadata directory removed");
-    let err = verify_resume_definition_metadata(&workspace, "legacy001", &registry, loop_block)
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
         .expect_err("missing metadata directory must fail closed");
     assert!(matches!(
         err,
@@ -1433,12 +1357,7 @@ fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
         .join("\n")
         + "\n";
     fs::write(&completed.session_path, &prefix).expect("partial live session written");
-    write_definition_hash_metadata(
-        &workspace,
-        &completed.session_id,
-        "smoke-loop",
-        prefix.lines().count(),
-    );
+    write_definition_hash_metadata(&workspace, &completed.session_id, "smoke-loop");
 
     let output = resume_session(&workspace, &completed.session_id, EmitMode::Human)
         .expect("live-profile session resumes");
@@ -1474,14 +1393,8 @@ fn resume_human_mode_reports_the_terminal_failure_reason() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("partial log written");
-    write_definition_hash_metadata(
-        &workspace,
-        "negwrite001",
-        "sandbox-negative-write",
-        event_count,
-    );
+    write_definition_hash_metadata(&workspace, "negwrite001", "sandbox-negative-write");
 
     let output = resume_session(&workspace, "negwrite001", EmitMode::Human)
         .expect("session resumes to its deterministic failed terminal state");
@@ -1506,9 +1419,8 @@ fn resume_rejects_tool_started_prefix_without_side_effects() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("started prefix written");
-    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
 
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("tool.started prefix is ambiguous and must not resume");
@@ -1527,9 +1439,8 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
         "write-summary",
     );
     let path = session_dir.join("hello001.jsonl");
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("prefix written");
-    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
 
     let summary_path = workspace.join("out/summary.txt");
     for attempt in 0..100 {
@@ -1582,7 +1493,7 @@ fn resume_rejects_prior_resume_marker_tail_without_rerunning_tool() {
     );
     let before = format!("{prefix}{resume_marker}");
     fs::write(&path, &before).expect("prior resume marker written");
-    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
 
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("marker-only resume tail must fail closed");
@@ -1649,9 +1560,8 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "hello001", "hello-loop", event_count);
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
 
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
@@ -1681,12 +1591,11 @@ fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let event_count = prefix.lines().count();
     let outside_target = outside.join("smoke001.jsonl");
     fs::write(&outside_target, &prefix).expect("outside log written");
     let session_path = session_dir.join("smoke001.jsonl");
     fs::hard_link(&outside_target, &session_path).expect("session hard link");
-    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop", event_count);
+    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop");
 
     let output = resume_session(&workspace, "smoke001", EmitMode::Jsonl).expect("session resumes");
 
@@ -1713,9 +1622,8 @@ fn resume_rejects_noncanonical_prefix_without_rewriting_log() {
         .replace("\"event_id\":\"evt-002\"", "\"event_id\":\"evt-999\"")
         + "\n";
     let path = session_dir.join("smoke001.jsonl");
-    let event_count = prefix.lines().count();
     fs::write(&path, &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop", event_count);
+    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop");
 
     let err = resume_session(&workspace, "smoke001", EmitMode::Jsonl)
         .expect_err("noncanonical prefix must not resume");

@@ -42,7 +42,6 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
             &workspace,
             &completed.session_id,
             "hello-loop",
-            prefix_events,
         );
         fs::remove_file(workspace.join("out/summary.txt"))
             .expect("completed side effect removed");

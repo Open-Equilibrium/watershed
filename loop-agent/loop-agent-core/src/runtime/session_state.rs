@@ -91,7 +91,6 @@ fn resume_session_internal(
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;
     verify_resume_definition_metadata(workspace, session_id, &registry, loop_block)?;
-    let definition_hashes = session_definition_hashes(&registry, loop_block)?;
     let policy = core_policy::compile_policy_artifact(
         &loop_block.identity.id,
         &registry,
@@ -213,12 +212,6 @@ fn resume_session_internal(
     }
     let committed = read_session_log_to_string(&path)?;
     let combined_events = validate_session_log_text(&path, session_id, &committed)?;
-    write_existing_session_metadata(
-        workspace,
-        session_id,
-        combined_events.len(),
-        &definition_hashes,
-    )?;
     if let Some(err) = terminal_error {
         return Err(err);
     }
@@ -584,7 +577,6 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
         match key {
             "registry_hash" => metadata.registry_hash = Some(value.to_owned()),
             "loop_definition_hash" => metadata.loop_definition_hash = Some(value.to_owned()),
-            "session_id" | "events" => {}
             _ => {}
         }
     }
@@ -789,35 +781,16 @@ fn acquire_session_lock(
 
 fn write_reserved_session_metadata(
     reservation: &SessionReservation,
-    session_id: &str,
-    event_count: usize,
     definition_hashes: Option<&SessionDefinitionHashes>,
 ) -> Result<(), RuntimeError> {
     replace_existing_file_atomically(
         &reservation.log_path,
-        session_log_metadata_text(session_id, event_count, definition_hashes).as_bytes(),
+        session_log_metadata_text(definition_hashes).as_bytes(),
     )
 }
 
-fn write_existing_session_metadata(
-    workspace: &Path,
-    session_id: &str,
-    event_count: usize,
-    definition_hashes: &SessionDefinitionHashes,
-) -> Result<(), RuntimeError> {
-    let path = session_log_metadata_path(workspace, session_id)?;
-    replace_existing_file_atomically(
-        &path,
-        session_log_metadata_text(session_id, event_count, Some(definition_hashes)).as_bytes(),
-    )
-}
-
-fn session_log_metadata_text(
-    session_id: &str,
-    event_count: usize,
-    definition_hashes: Option<&SessionDefinitionHashes>,
-) -> String {
-    let mut metadata = format!("session_id={session_id}\nevents={event_count}\n");
+fn session_log_metadata_text(definition_hashes: Option<&SessionDefinitionHashes>) -> String {
+    let mut metadata = String::new();
     if let Some(hashes) = definition_hashes {
         metadata.push_str("registry_hash=");
         metadata.push_str(&hashes.registry_hash);

@@ -49,12 +49,7 @@ fn run_loop_internal(
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
-    write_reserved_session_metadata(
-        &reservation,
-        &expected_session_id,
-        0,
-        Some(&definition_hashes),
-    )?;
+    write_reserved_session_metadata(&reservation, Some(&definition_hashes))?;
     let planned_runtime = execute_loop(
         workspace,
         &registry,
@@ -112,12 +107,6 @@ fn run_loop_internal(
             reservation.session_path.display()
         )));
     }
-    write_reserved_session_metadata(
-        &reservation,
-        &expected_session_id,
-        runtime.events.len(),
-        Some(&definition_hashes),
-    )?;
     reservation.release_lock()?;
     if let Some(err) = runtime.terminal_error {
         return Err(err);

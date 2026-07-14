@@ -67,7 +67,6 @@ fn write_definition_hash_metadata(
     workspace: &Path,
     session_id: &str,
     loop_ref: &str,
-    event_count: usize,
 ) {
     let registry =
         core_script::load_registry_root(workspace.join("registry")).expect("registry loads");
@@ -82,7 +81,7 @@ fn write_definition_hash_metadata(
     fs::write(
         log_dir.join(format!("{session_id}.log")),
         format!(
-            "session_id={session_id}\nevents={event_count}\nregistry_hash=fnv64:{:016x}\nloop_definition_hash=fnv64:{:016x}\n",
+            "registry_hash=fnv64:{:016x}\nloop_definition_hash=fnv64:{:016x}\n",
             stable_hash64(registry_json.as_bytes()),
             stable_hash64(loop_json.as_bytes())
         ),

@@ -82,6 +82,19 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
         .join(LOCAL_SESSION_DIR)
         .join("smoke001-2.jsonl")
         .is_file());
+    for session_id in [&first.session_id, &second.session_id] {
+        let metadata = fs::read_to_string(
+            workspace
+                .join(LOCAL_LOG_DIR)
+                .join(format!("{session_id}.log")),
+        )
+        .expect("definition metadata reads");
+        assert!(metadata.starts_with("registry_hash=fnv64:"));
+        assert_eq!(
+            metadata.lines().map(|line| line.split_once('=').unwrap().0).collect::<Vec<_>>(),
+            ["registry_hash", "loop_definition_hash"]
+        );
+    }
 }
 
 #[test]

@@ -56,34 +56,6 @@ fn write_initial_session_log(
     write_initial_session_log_with_clock(reservation, session_id, EventClock::fixed_fixture())
 }
 
-fn complete_reserved_session_log(
-    reservation: &SessionReservation,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-) -> Result<(), RuntimeError> {
-    let commit_result =
-        commit_reserved_session_log(reservation, session_id, stream, event_count, None);
-    let release_result = reservation.release_lock();
-    commit_result?;
-    release_result
-}
-
-fn commit_reserved_session_log(
-    reservation: &SessionReservation,
-    session_id: &str,
-    stream: &str,
-    event_count: usize,
-    definition_hashes: Option<&SessionDefinitionHashes>,
-) -> Result<(), RuntimeError> {
-    let (_, append) = stream.split_once('\n').ok_or_else(|| {
-        RuntimeError::Protocol("fixture stream must contain its initial event".to_owned())
-    })?;
-    append_session_log_bytes(&reservation.session_path, append.as_bytes())?;
-    reservation.mark_committed();
-    write_reserved_session_metadata(reservation, session_id, event_count, definition_hashes)
-}
-
 fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
     append_session_log_bytes(path, line.as_bytes())
 }
