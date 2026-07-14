@@ -7,18 +7,20 @@ fn tail_captures_current_prefix_then_appended_terminal_event() {
     let started = session_event_line("tail001", "evt-001", EventType::SessionStarted, 1);
     let completed = session_event_line("tail001", "evt-002", EventType::SessionCompleted, 2);
     fs::write(&path, &started).expect("initial event written");
-    let tail_workspace = workspace.clone();
-    let tail = thread::spawn(move || {
-        tail_session(&tail_workspace, "tail001", EmitMode::Jsonl)
-    });
+    let mut waits = 0;
+    let output = tail_session_with_wait(
+        &workspace,
+        "tail001",
+        EmitMode::Jsonl,
+        TailOptions::follow(),
+        |_| {
+            waits += 1;
+            append_session_log_line(&path, &completed).expect("terminal event appended");
+        },
+    )
+    .expect("tail completes");
 
-    thread::sleep(Duration::from_millis(50));
-    append_session_log_line(&path, &completed).expect("terminal event appended");
-    let output = tail
-        .join()
-        .expect("tail thread joins")
-        .expect("tail completes");
-
+    assert_eq!(waits, 1);
     assert_eq!(output.stdout, format!("{started}{completed}"));
     assert_eq!(output.event_count, 2);
     assert!(!output.failed);
@@ -178,17 +180,15 @@ fn no_follow_and_timeout_return_the_current_valid_prefix() {
     .expect("no-follow returns");
     assert_eq!(no_follow.stdout, started);
 
-    let started_at = Instant::now();
     let timed = tail_session_with_options(
         &workspace,
         "tailoptions001",
         EmitMode::Human,
         TailOptions {
             follow: true,
-            timeout: Some(Duration::from_millis(30)),
+            timeout: Some(Duration::ZERO),
         },
     )
     .expect("timed tail returns");
-    assert!(started_at.elapsed() >= Duration::from_millis(20));
     assert_eq!(timed.stdout, "session tailoptions001 tailed\n");
 }

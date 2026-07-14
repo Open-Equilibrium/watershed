@@ -23,6 +23,16 @@ pub fn tail_session_with_options(
     emit: EmitMode,
     options: TailOptions,
 ) -> Result<RunOutput, RuntimeError> {
+    tail_session_with_wait(workspace.as_ref(), session_id, emit, options, thread::sleep)
+}
+
+fn tail_session_with_wait(
+    workspace: &Path,
+    session_id: &str,
+    emit: EmitMode,
+    options: TailOptions,
+    mut wait: impl FnMut(Duration),
+) -> Result<RunOutput, RuntimeError> {
     let mut reader = SessionEventReader::open(workspace, session_id)?;
     let started = Instant::now();
     let mut events = Vec::new();
@@ -38,7 +48,7 @@ pub fn tail_session_with_options(
         {
             break;
         }
-        thread::sleep(tail_poll_interval(&options, started));
+        wait(tail_poll_interval(&options, started));
     }
     Ok(RunOutput {
         event_count: events.len(),
