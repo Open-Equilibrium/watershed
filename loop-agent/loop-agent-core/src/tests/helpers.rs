@@ -51,8 +51,7 @@ fn workspace_with_later_invalid_own_script_path() -> PathBuf {
         ),
     )
     .expect("phase fixture rewritten");
-    fs::create_dir_all(workspace.join("out/summary.txt"))
-        .expect("conflicting output directory");
+    fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
     workspace
 }
 
@@ -108,11 +107,7 @@ fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> S
     panic!("missing {event_type} for {tool_id}");
 }
 
-fn write_definition_hash_metadata(
-    workspace: &Path,
-    session_id: &str,
-    loop_ref: &str,
-) {
+fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: &str) {
     let registry =
         core_script::load_registry_root(workspace.join("registry")).expect("registry loads");
     let loop_block = registry.loop_block(loop_ref).expect("loop exists");
@@ -126,9 +121,9 @@ fn write_definition_hash_metadata(
     fs::write(
         log_dir.join(format!("{session_id}.log")),
         format!(
-            "registry_hash=fnv64:{:016x}\nloop_definition_hash=fnv64:{:016x}\n",
-            stable_hash64(registry_json.as_bytes()),
-            stable_hash64(loop_json.as_bytes())
+            "registry_hash=sha256:{}\nloop_definition_hash=sha256:{}\n",
+            sha256_hex(registry_json.as_bytes()),
+            sha256_hex(loop_json.as_bytes())
         ),
     )
     .expect("definition hash metadata written");
@@ -412,10 +407,7 @@ fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
         &policy,
         root_loop,
         "budget001",
-        LoopExecutionOptions::new(
-            EventClock::fixed_fixture(),
-            ToolSideEffectMode::DryRun,
-        ),
+        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
         Some(&mut timings),
     )?;
     if runtime.failed || timings.nanos.len() != runtime.events.len() {
@@ -474,13 +466,9 @@ fn fixture_runtime_policy(
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
     let registry = core_script::load_registry_root(fixture_dir(fixture).join("registry"))
         .expect("fixture registry loads");
-    let policy = core_policy::compile_policy_artifact(
-        loop_id,
-        &registry,
-        loop_id,
-        runtime_policy_target(),
-    )
-    .expect("fixture policy compiles");
+    let policy =
+        core_policy::compile_policy_artifact(loop_id, &registry, loop_id, runtime_policy_target())
+            .expect("fixture policy compiles");
     (registry, policy)
 }
 

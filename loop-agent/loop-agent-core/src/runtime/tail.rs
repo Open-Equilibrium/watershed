@@ -37,7 +37,9 @@ fn tail_session_with_wait(
     let started = Instant::now();
     let mut events = Vec::new();
     loop {
-        let cursor = events.last().map_or(0, |event: &EventEnvelope| event.sequence);
+        let cursor = events
+            .last()
+            .map_or(0, |event: &EventEnvelope| event.sequence);
         events.extend(reader.read_after(cursor)?);
         if stream_is_failed(&events)
             || stream_is_completed(&events)

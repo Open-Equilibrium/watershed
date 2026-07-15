@@ -234,13 +234,7 @@ fn execute_loop(
     options: LoopExecutionOptions,
 ) -> Result<RuntimeExecution, RuntimeError> {
     execute_loop_with_sink(
-        workspace,
-        registry,
-        policy,
-        root_loop,
-        session_id,
-        options,
-        None,
+        workspace, registry, policy, root_loop, session_id, options, None,
     )
 }
 
@@ -481,12 +475,7 @@ fn emit_loop_block_at_depth(
             depth + 1,
         ) {
             Ok(Some(failure)) => {
-                emit_runtime_loop_failure(
-                    loop_block,
-                    &invocation,
-                    &failure.reason,
-                    builder,
-                )?;
+                emit_runtime_loop_failure(loop_block, &invocation, &failure.reason, builder)?;
                 return Ok(Some(failure));
             }
             Ok(None) => {}
@@ -573,11 +562,7 @@ fn emit_phase(
                 &builder.session_id,
                 &builder.history,
             )?;
-            let content = stub_message_content(
-                context.registry,
-                phase,
-                &compiled.provider_bytes,
-            )?;
+            let content = stub_message_content(context.registry, phase, &compiled.provider_bytes)?;
             builder.context_manifests.push(compiled.manifest);
             let message_id = builder.next_message_id();
             builder.emit(
@@ -682,8 +667,7 @@ fn step_payload(
                 ))
             })
             .collect::<Result<Vec<_>, RuntimeError>>()?;
-        let (connection_ids, connection_kinds): (Vec<_>, Vec<_>) =
-            connections.into_iter().unzip();
+        let (connection_ids, connection_kinds): (Vec<_>, Vec<_>) = connections.into_iter().unzip();
         let object = payload
             .as_object_mut()
             .expect("step payload is constructed as an object");

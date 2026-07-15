@@ -32,12 +32,7 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("tailpartial001.jsonl");
-    let started = session_event_line(
-        "tailpartial001",
-        "evt-001",
-        EventType::SessionStarted,
-        1,
-    );
+    let started = session_event_line("tailpartial001", "evt-001", EventType::SessionStarted, 1);
     let completed = EventEnvelope::new(
         "evt-002",
         EventType::SessionCompleted,
@@ -58,8 +53,7 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let mut initial = started.as_bytes().to_vec();
     initial.extend_from_slice(&completed.as_bytes()[..split]);
     fs::write(&path, initial).expect("partial stream written");
-    let mut reader = SessionEventReader::open(&workspace, "tailpartial001")
-        .expect("reader opens");
+    let mut reader = SessionEventReader::open(&workspace, "tailpartial001").expect("reader opens");
 
     let prefix = reader.read_after(0).expect("prefix reads");
     assert_eq!(prefix.len(), 1);
@@ -102,8 +96,7 @@ fn tail_preserves_extensions_and_reader_rejects_their_mutation() {
     )
     .expect("existing prefix tails");
     assert_eq!(tailed.stdout, started);
-    let mut reader = SessionEventReader::open(&workspace, "tailmut001")
-        .expect("reader opens");
+    let mut reader = SessionEventReader::open(&workspace, "tailmut001").expect("reader opens");
     reader.read_after(0).expect("initial event reads");
     let mut changed: EventEnvelope = serde_json::from_str(started.trim()).expect("event parses");
     changed
@@ -144,8 +137,8 @@ fn reader_rejects_partial_bytes_after_a_terminal_event() {
     );
     fs::write(&path, format!("{started}{completed}partial"))
         .expect("terminal partial stream written");
-    let mut reader = SessionEventReader::open(&workspace, "tailterminalpartial001")
-        .expect("reader opens");
+    let mut reader =
+        SessionEventReader::open(&workspace, "tailterminalpartial001").expect("reader opens");
 
     let err = reader
         .read_after(0)
@@ -154,8 +147,7 @@ fn reader_rejects_partial_bytes_after_a_terminal_event() {
         err,
         RuntimeError::Protocol(message) if message.contains("partial line after a terminal event")
     ));
-    fs::write(&path, format!("{started}{completed}"))
-        .expect("uncommitted partial suffix removed");
+    fs::write(&path, format!("{started}{completed}")).expect("uncommitted partial suffix removed");
     assert_eq!(
         reader
             .read_after(0)
@@ -171,12 +163,7 @@ fn no_follow_and_timeout_return_the_current_valid_prefix() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("tailoptions001.jsonl");
-    let started = session_event_line(
-        "tailoptions001",
-        "evt-001",
-        EventType::SessionStarted,
-        1,
-    );
+    let started = session_event_line("tailoptions001", "evt-001", EventType::SessionStarted, 1);
     fs::write(&path, &started).expect("initial event written");
 
     let no_follow = tail_session_with_options(

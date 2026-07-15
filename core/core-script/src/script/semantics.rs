@@ -98,10 +98,7 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
                 });
             }
         }
-        (
-            ToolKind::PredefinedCommand,
-            ToolCommand::Predefined { command_id, .. },
-        ) => {
+        (ToolKind::PredefinedCommand, ToolCommand::Predefined { command_id, .. }) => {
             if !is_valid_command_id(command_id) {
                 return Err(invalid_tool(tool, "command_id must be a valid command id"));
             }

@@ -544,6 +544,22 @@ fn hard_link_count(path: &Path, _metadata: &fs::Metadata) -> Result<u64, Runtime
 
 #[cfg(windows)]
 fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, RuntimeError> {
+    Ok(windows_open_file_information(path, file)?.number_of_links)
+}
+
+#[cfg(windows)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WindowsOpenFileInformation {
+    volume_serial_number: u32,
+    file_index: u64,
+    number_of_links: u64,
+}
+
+#[cfg(windows)]
+fn windows_open_file_information(
+    path: &Path,
+    file: &fs::File,
+) -> Result<WindowsOpenFileInformation, RuntimeError> {
     use std::{ffi::c_void, os::windows::io::AsRawHandle};
 
     #[repr(C)]
@@ -608,7 +624,12 @@ fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, Ru
         });
     }
 
-    Ok(u64::from(information.number_of_links))
+    Ok(WindowsOpenFileInformation {
+        volume_serial_number: information.volume_serial_number,
+        file_index: (u64::from(information.file_index_high) << 32)
+            | u64::from(information.file_index_low),
+        number_of_links: u64::from(information.number_of_links),
+    })
 }
 
 fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {

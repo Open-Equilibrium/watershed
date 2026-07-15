@@ -42,15 +42,16 @@ fn twenty_runs_finish_and_catch_up_with_permanently_lagging_receivers() {
 
         assert_eq!(notification.session_id, output.session_id, "run {run}");
         assert_eq!(
-            notification.highest_committed_sequence,
-            output.event_count as u64,
+            notification.highest_committed_sequence, output.event_count as u64,
             "run {run}"
         );
         assert_eq!(events.len(), output.event_count, "run {run}");
-        assert!(events
-            .iter()
-            .enumerate()
-            .all(|(index, event)| event.sequence == index as u64 + 1));
+        assert!(
+            events
+                .iter()
+                .enumerate()
+                .all(|(index, event)| event.sequence == index as u64 + 1)
+        );
         assert_eq!(
             events.last().map(|event| &event.event_type),
             Some(&EventType::SessionCompleted),
@@ -69,9 +70,8 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
     let workspace = workspace_copy("hello-loop");
     let (notifier, receiver) = live_event_channel();
     let run_workspace = workspace.clone();
-    let run = thread::spawn(move || {
-        run_loop_with_live_events(&run_workspace, "hello-loop", notifier)
-    });
+    let run =
+        thread::spawn(move || run_loop_with_live_events(&run_workspace, "hello-loop", notifier));
 
     let notification = receiver
         .recv_timeout(Duration::from_secs(2))
@@ -80,9 +80,9 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
         .expect("notified session is already readable");
     let events = reader.read_after(0).expect("committed prefix validates");
     assert!(
-        events.last().is_some_and(|event| {
-            event.sequence >= notification.highest_committed_sequence
-        }),
+        events
+            .last()
+            .is_some_and(|event| { event.sequence >= notification.highest_committed_sequence }),
         "the observed high-watermark must already exist in the authoritative log"
     );
 
@@ -97,8 +97,8 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
 #[test]
 fn context_manifest_growth_is_visible_through_the_existing_file() {
     let workspace = empty_workspace("context-manifest-append");
-    let reservation = reserve_session_log(&workspace, "manifestappend001")
-        .expect("session reserved");
+    let reservation =
+        reserve_session_log(&workspace, "manifestappend001").expect("session reserved");
     let manifests = [1, 2].map(|turn| ContextManifestCheckpoint {
         manifest: ContextManifest {
             line: format!("{{\"turn\":{turn}}}\n"),
@@ -142,9 +142,8 @@ fn replay_then_live_drain_has_no_sequence_gap() {
     let workspace = workspace_copy("hello-loop");
     let (notifier, receiver) = live_event_channel();
     let run_workspace = workspace.clone();
-    let run = thread::spawn(move || {
-        run_loop_with_live_events(&run_workspace, "hello-loop", notifier)
-    });
+    let run =
+        thread::spawn(move || run_loop_with_live_events(&run_workspace, "hello-loop", notifier));
     let mut reader = None;
     let mut cursor = 0;
     let mut sequences = Vec::new();
@@ -235,21 +234,26 @@ fn resumed_notifications_replay_exactly_the_appended_suffix() {
     let notification = receiver
         .recv_timeout(Duration::from_millis(50))
         .expect("resumed suffix wakes receiver");
-    let mut reader = SessionEventReader::open(&workspace, "smoke001")
-        .expect("resumed session opens");
+    let mut reader =
+        SessionEventReader::open(&workspace, "smoke001").expect("resumed session opens");
     let appended = reader
         .read_after(prefix_events)
         .expect("resumed suffix replays");
 
-    assert_eq!(notification.highest_committed_sequence, output.event_count as u64);
+    assert_eq!(
+        notification.highest_committed_sequence,
+        output.event_count as u64
+    );
     assert_eq!(
         appended.first().map(|event| &event.event_type),
         Some(&EventType::SessionResumed)
     );
-    assert!(appended
-        .iter()
-        .enumerate()
-        .all(|(index, event)| event.sequence == prefix_events + index as u64 + 1));
+    assert!(
+        appended
+            .iter()
+            .enumerate()
+            .all(|(index, event)| event.sequence == prefix_events + index as u64 + 1)
+    );
 }
 
 #[test]
@@ -257,8 +261,8 @@ fn validation_failure_closes_the_writer_without_notifying() {
     let workspace = empty_workspace("event-writer-validation");
     let reservation = reserve_session_log(&workspace, "invalid001").expect("session reserved");
     let (notifier, receiver) = live_event_channel();
-    let mut writer = SerialSessionWriter::start(&reservation, Some(notifier), None)
-        .expect("writer starts");
+    let mut writer =
+        SerialSessionWriter::start(&reservation, Some(notifier), None).expect("writer starts");
     let invalid = EventEnvelope::new(
         "evt-invalid",
         EventType::SessionStarted,
@@ -322,11 +326,7 @@ impl EventLogAppender for BatchProbeAppender {
         Ok(())
     }
 
-    fn append_batch(
-        &mut self,
-        path: &Path,
-        events: &[&[u8]],
-    ) -> Result<(), BatchAppendFailure> {
+    fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
         if let Some(committed_events) = self.fail_after.take() {
             if committed_events > 0 {
                 self.append(path, &events[..committed_events].concat())
@@ -461,6 +461,7 @@ fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
 
 #[test]
 fn lone_progress_flushes_on_a_non_sliding_deadline() {
+    assert_eq!(EVENT_WRITER_BATCH_WINDOW, Duration::from_millis(25));
     let first = Instant::now();
     let mut batch = PendingEventBatch::default();
     batch.start(first);
@@ -483,10 +484,7 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
         progress[0].sequence
     );
     assert_eq!(
-        appends
-            .lock()
-            .expect("batch append probe lock")
-            .as_slice(),
+        appends.lock().expect("batch append probe lock").as_slice(),
         [jsonl.into_bytes()]
     );
     writer.finish().expect("writer finishes");
@@ -571,7 +569,12 @@ fn appended_checkpoint_notifies_but_sync_failure_remains_visible() {
         },
     )
     .expect("writer starts");
-    let started = test_event("syncfail001", "evt-sync-started", EventType::SessionStarted, 1);
+    let started = test_event(
+        "syncfail001",
+        "evt-sync-started",
+        EventType::SessionStarted,
+        1,
+    );
     let completed = test_event(
         "syncfail001",
         "evt-sync-completed",
@@ -675,9 +678,11 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
         )
     });
 
-    observe_prefix.recv().expect("complete prefix becomes visible");
-    let mut reader = SessionEventReader::open(&workspace, "visibleprefix001")
-        .expect("visible prefix opens");
+    observe_prefix
+        .recv()
+        .expect("complete prefix becomes visible");
+    let mut reader =
+        SessionEventReader::open(&workspace, "visibleprefix001").expect("visible prefix opens");
     assert_eq!(
         reader
             .read_after(0)

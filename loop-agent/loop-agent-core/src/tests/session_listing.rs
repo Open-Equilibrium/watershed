@@ -74,14 +74,18 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
             .len(),
         first.event_count
     );
-    assert!(workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("smoke001.jsonl")
-        .is_file());
-    assert!(workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("smoke001-2.jsonl")
-        .is_file());
+    assert!(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .is_file()
+    );
+    assert!(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001-2.jsonl")
+            .is_file()
+    );
     for session_id in [&first.session_id, &second.session_id] {
         let metadata = fs::read_to_string(
             workspace
@@ -89,9 +93,12 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
                 .join(format!("{session_id}.log")),
         )
         .expect("definition metadata reads");
-        assert!(metadata.starts_with("registry_hash=fnv64:"));
+        assert!(metadata.starts_with("registry_hash=sha256:"));
         assert_eq!(
-            metadata.lines().map(|line| line.split_once('=').unwrap().0).collect::<Vec<_>>(),
+            metadata
+                .lines()
+                .map(|line| line.split_once('=').unwrap().0)
+                .collect::<Vec<_>>(),
             ["registry_hash", "loop_definition_hash"]
         );
     }
@@ -127,12 +134,8 @@ fn human_run_replay_tail_and_session_listing_report_status() {
     );
 
     let failed_workspace = workspace_copy("sandbox-negative");
-    let failed = run_loop(
-        &failed_workspace,
-        "sandbox-negative-write",
-        EmitMode::Human,
-    )
-    .expect("negative fixture reaches its deterministic terminal state");
+    let failed = run_loop(&failed_workspace, "sandbox-negative-write", EmitMode::Human)
+        .expect("negative fixture reaches its deterministic terminal state");
     assert!(failed.failed);
     assert_eq!(
         failed.stdout,
@@ -276,10 +279,12 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
 
     assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "write scope");
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -304,10 +309,12 @@ fn run_loop_rejects_unsupported_own_script_before_side_effects() {
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -375,10 +382,12 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -437,10 +446,12 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
         "must be a file",
     );
     assert!(!workspace.join("out/partial.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -505,12 +516,16 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
         &output.stdout,
     )
     .expect("failed apply stream validates");
-    assert!(events
-        .iter()
-        .any(|event| event.event_type == EventType::ToolFailed));
-    assert!(events
-        .iter()
-        .any(|event| event.event_type == EventType::LoopFailed));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolFailed)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event_type == EventType::LoopFailed)
+    );
     assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
     assert!(
         fs::read_to_string(&output.session_path).expect("session log readable") == output.stdout,
@@ -550,10 +565,12 @@ fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
     );
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("smoke001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
 }
 
@@ -585,10 +602,12 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
         "protected path",
     );
     assert!(!workspace.join(".env").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -651,10 +670,12 @@ fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
         "protected path",
     );
     assert!(!workspace.join(".ENV").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 

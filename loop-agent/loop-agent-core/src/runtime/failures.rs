@@ -223,9 +223,10 @@ fn runtime_failure_for_reason(
 
 fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
     let (reason, message) = match err {
-        RuntimeError::ContextBudgetExceeded { .. } => {
-            ("context_budget_exceeded", "mandatory context exceeds the model input budget")
-        }
+        RuntimeError::ContextBudgetExceeded { .. } => (
+            "context_budget_exceeded",
+            "mandatory context exceeds the model input budget",
+        ),
         _ => (RUNTIME_ERROR_REASON, "runtime execution failed"),
     };
     RuntimeFailure {

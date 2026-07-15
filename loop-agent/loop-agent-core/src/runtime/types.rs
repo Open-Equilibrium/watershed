@@ -1,6 +1,6 @@
 use core_policy::{
-    protected_path_match_mode_for_policy_target, protected_path_pattern_matches,
-    ProtectedPathMatchMode,
+    ProtectedPathMatchMode, protected_path_match_mode_for_policy_target,
+    protected_path_pattern_matches,
 };
 use proto::{EventEnvelope, EventType};
 use std::{
@@ -107,7 +107,11 @@ fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
         .rev()
         .find(|event| {
             event.event_type == EventType::Error
-                && event.payload.get("code").and_then(serde_json::Value::as_str) == Some(reason)
+                && event
+                    .payload
+                    .get("code")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(reason)
         })
         .and_then(|event| {
             event
@@ -146,7 +150,6 @@ impl TailOptions {
             timeout: None,
         }
     }
-
 }
 
 /// Error returned by Loop Agent runtime operations.
@@ -201,7 +204,11 @@ pub enum RuntimeError {
 impl RuntimeError {
     /// Returns the process exit code associated with this runtime error.
     pub fn exit_code(&self) -> i32 {
-        if matches!(self, Self::Usage(_)) { 64 } else { 65 }
+        if matches!(self, Self::Usage(_)) {
+            64
+        } else {
+            65
+        }
     }
 }
 

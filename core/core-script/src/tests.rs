@@ -632,6 +632,15 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
         include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
     let phase =
         include_str!("../../../loop-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
+    let connection = include_str!(
+        "../../../loop-agent/fixtures/hello-loop/registry/connections/inspect-data.yaml"
+    );
+    let loop_block =
+        include_str!("../../../loop-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
+    let network_tool = tool.replace(
+        "  network: deny",
+        "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443",
+    );
     let cases = [
         (
             "duplicate-key.yaml",
@@ -686,6 +695,22 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
                 "      name: Gather",
                 "      name: Gather\n      extra: true",
             ),
+        ),
+        (
+            "unknown-network-field.yaml",
+            network_tool.replace("    default:", "    extra: true\n    default:"),
+        ),
+        (
+            "unknown-network-entry-field.yaml",
+            network_tool.replace("        port:", "        extra: true\n        port:"),
+        ),
+        (
+            "unknown-connection-field.yaml",
+            connection.replace("  connection_kind:", "  extra: true\n  connection_kind:"),
+        ),
+        (
+            "unknown-loop-field.yaml",
+            loop_block.replace("  phase_refs:", "  extra: true\n  phase_refs:"),
         ),
         (
             "explicit-null.yaml",

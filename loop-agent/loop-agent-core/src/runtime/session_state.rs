@@ -59,8 +59,7 @@ pub fn resume_session_with_live_events(
     session_id: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let (mut output, _) =
-        resume_session_internal(workspace, session_id, Some(notifier), None)?;
+    let (mut output, _) = resume_session_internal(workspace, session_id, Some(notifier), None)?;
     output.stdout.clear();
     Ok(output)
 }
@@ -75,7 +74,7 @@ fn resume_session_internal(
     let path = session_path(workspace, session_id)?;
     ensure_existing_session_log_path(workspace, &path)?;
     ensure_non_hardlinked_real_file(&path)?;
-    let _lock = acquire_session_lock(workspace, session_id)?;
+    let lock = acquire_session_lock(workspace, session_id)?;
     let before = read_session_log_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &before)?;
     let prior_event_count = events.len();
@@ -116,13 +115,8 @@ fn resume_session_internal(
         &events,
         &planned_runtime.context_manifests,
     )?;
-    let resume_prefix = validate_resume_replay_prefix(
-        &path,
-        &events,
-        &planned_runtime.events,
-        loop_block,
-        clock,
-    )?;
+    let resume_prefix =
+        validate_resume_replay_prefix(&path, &events, &planned_runtime.events, loop_block, clock)?;
     if let Some(tool_id) = started_tool_without_progress(&events) {
         return Err(RuntimeError::Protocol(format!(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
@@ -162,17 +156,15 @@ fn resume_session_internal(
         .join(LOCAL_LOG_DIR)
         .join(format!("{session_id}.contexts.jsonl"));
     let validation = SessionAppendValidationState::from_prior_events(&path, session_id, &events)?;
-    let mut serial_writer = SerialSessionWriter::start_prevalidated(
-        SerialWriterStart {
-            context_path,
-            path: path.clone(),
-            session_id: session_id.to_owned(),
-            validation,
-            commit_reservation: None,
-            notifier,
-            timings,
-        }
-    )?;
+    let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
+        context_path,
+        path: path.clone(),
+        session_id: session_id.to_owned(),
+        validation,
+        commit_reservation: None,
+        notifier,
+        timings,
+    })?;
     let runtime_result = {
         let mut resume_sink = ResumeEventSink {
             clock,
@@ -212,6 +204,7 @@ fn resume_session_internal(
     }
     let committed = read_session_log_to_string(&path)?;
     let combined_events = validate_session_log_text(&path, session_id, &committed)?;
+    lock.release()?;
     if let Some(err) = terminal_error {
         return Err(err);
     }
@@ -336,7 +329,7 @@ fn append_session_log_bytes(path: &Path, contents: &[u8]) -> Result<(), RuntimeE
 fn ensure_session_log_growth_within_limit(
     path: &Path,
     appended_bytes: usize,
-) -> Result<(), RuntimeError> {
+) -> Result<u64, RuntimeError> {
     let existing_bytes = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
     let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     let total = existing_bytes.saturating_add(appended_bytes);
@@ -347,7 +340,7 @@ fn ensure_session_log_growth_within_limit(
             MAX_SESSION_LOG_BYTES
         )));
     }
-    Ok(())
+    Ok(existing_bytes)
 }
 
 fn shift_resumed_event(
@@ -456,11 +449,25 @@ impl Drop for SessionReservation {
 
 struct SessionLockGuard {
     path: PathBuf,
+    cleanup_on_drop: Cell<bool>,
+}
+
+impl SessionLockGuard {
+    fn release(&self) -> Result<(), RuntimeError> {
+        fs::remove_file(&self.path).map_err(|source| RuntimeError::Io {
+            path: self.path.clone(),
+            source,
+        })?;
+        self.cleanup_on_drop.set(false);
+        Ok(())
+    }
 }
 
 impl Drop for SessionLockGuard {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if self.cleanup_on_drop.get() {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -485,13 +492,13 @@ fn session_definition_hashes(
         RuntimeError::Protocol(format!("failed to serialize loop definition hash: {err}"))
     })?;
     Ok(SessionDefinitionHashes {
-        registry_hash: stable_hash_text(registry_json.as_bytes()),
-        loop_definition_hash: stable_hash_text(loop_json.as_bytes()),
+        registry_hash: sha256_hash_text(registry_json.as_bytes()),
+        loop_definition_hash: sha256_hash_text(loop_json.as_bytes()),
     })
 }
 
-fn stable_hash_text(bytes: &[u8]) -> String {
-    format!("fnv64:{:016x}", stable_hash64(bytes))
+fn sha256_hash_text(bytes: &[u8]) -> String {
+    format!("sha256:{}", sha256_hex(bytes))
 }
 
 fn verify_resume_definition_metadata(
@@ -740,7 +747,10 @@ fn acquire_session_lock(
     let path = session_lock_path(workspace, session_id)?;
     ensure_existing_real_directory(&workspace.join(LOCAL_SESSION_DIR))?;
     reserve_session_lock_file(&path, session_id)?;
-    Ok(SessionLockGuard { path })
+    Ok(SessionLockGuard {
+        path,
+        cleanup_on_drop: Cell::new(true),
+    })
 }
 
 fn write_reserved_session_metadata(

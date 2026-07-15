@@ -95,10 +95,7 @@ fn runtime_executes_subloops_after_all_parent_phases() {
         &policy,
         loop_block,
         "ordering001",
-        LoopExecutionOptions::new(
-            EventClock::fixed_fixture(),
-            ToolSideEffectMode::DryRun,
-        ),
+        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
     )
     .expect("hello loop executes");
     let root_loop_id = loop_id_for_definition(&runtime.events, "hello-loop");
@@ -147,10 +144,12 @@ fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     assert!(
         matches!(err, RuntimeError::Policy(message) if message.to_string().contains("unknown trusted command"))
     );
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("smoke001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
 }
 
@@ -371,13 +370,11 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
         Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script command")
     ));
 
-    assert!(compile_own_script_operations(
-        match_mode,
-        command_policy,
-        "\n# comment\n---\necho noop\n"
-    )
-    .expect("noop-like lines and echo compile")
-    .is_none());
+    assert!(
+        compile_own_script_operations(match_mode, command_policy, "\n# comment\n---\necho noop\n")
+            .expect("noop-like lines and echo compile")
+            .is_none()
+    );
 }
 
 #[test]

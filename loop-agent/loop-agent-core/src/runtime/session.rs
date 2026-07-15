@@ -96,11 +96,7 @@ fn run_loop_internal(
     }
     if runtime_failed {
         let stream = canonical_event_stream(&runtime.events)?;
-        validate_session_log_text(
-            &reservation.session_path,
-            &expected_session_id,
-            &stream,
-        )?;
+        validate_session_log_text(&reservation.session_path, &expected_session_id, &stream)?;
     } else if runtime.events != planned_events {
         return Err(RuntimeError::Protocol(format!(
             "{} committed runtime did not match its validated plan",

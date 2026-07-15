@@ -1,7 +1,5 @@
 use noyalib::policy::{DenyAnchors, MaxScalarLength, Policy, PolicyEvent};
-use noyalib::{
-    DuplicateKeyPolicy, MergeKeyPolicy, ParserConfig, RequireIndent, YamlVersion,
-};
+use noyalib::{DuplicateKeyPolicy, MergeKeyPolicy, ParserConfig, RequireIndent, YamlVersion};
 
 const MAX_YAML_BYTES: usize = MAX_REGISTRY_FILE_BYTES as usize;
 const MAX_YAML_DEPTH: usize = 64;
@@ -53,7 +51,10 @@ fn deserialize_registry_block(
         .as_mapping()
         .filter(|mapping| mapping.len() == 1)
         .ok_or_else(|| {
-            parse_error(source_name, "expected exactly one registry block".to_owned())
+            parse_error(
+                source_name,
+                "expected exactly one registry block".to_owned(),
+            )
         })?;
     let (kind, payload) = mapping.iter().next().expect("one mapping entry");
     reject_unknown_fields(source_name, kind, payload)?;
@@ -70,8 +71,11 @@ fn deserialize_registry_block(
     }
 }
 
-/// Parses one Safe-YAML document into a typed value while rejecting unknown fields.
-pub fn parse_safe_yaml<T>(source_name: &str, source: &str) -> Result<T, RegistryError>
+/// Parses one Safe-YAML document into a configuration model.
+///
+/// The target type owns its structural field contract. Registry callers must use
+/// [`parse_registry_block`], which also validates flattened registry fields.
+pub fn parse_safe_yaml_config<T>(source_name: &str, source: &str) -> Result<T, RegistryError>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -79,10 +83,7 @@ where
     deserialize_value(source_name, &value)
 }
 
-fn parse_safe_yaml_value(
-    source_name: &str,
-    source: &str,
-) -> Result<noyalib::Value, RegistryError> {
+fn parse_safe_yaml_value(source_name: &str, source: &str) -> Result<noyalib::Value, RegistryError> {
     let value = noyalib::from_str_with_config(source, &safe_yaml_config())
         .map_err(|error| parse_error(source_name, error.to_string()))?;
     if contains_null(&value) {
@@ -161,7 +162,7 @@ fn reject_unknown_fields(
                 }
             }
         }
-        "instruction" => reject_mapping_fields(source_name, value, &["id", "name", "prompt"] )?,
+        "instruction" => reject_mapping_fields(source_name, value, &["id", "name", "prompt"])?,
         "phase" => reject_mapping_fields(
             source_name,
             value,
@@ -175,7 +176,13 @@ fn reject_unknown_fields(
         "loop" => reject_mapping_fields(
             source_name,
             value,
-            &["id", "name", "phase_refs", "subloop_refs", "connection_refs"],
+            &[
+                "id",
+                "name",
+                "phase_refs",
+                "subloop_refs",
+                "connection_refs",
+            ],
         )?,
         _ => {}
     }
@@ -187,10 +194,11 @@ fn reject_mapping_fields(
     value: &noyalib::Value,
     fields: &[&str],
 ) -> Result<(), RegistryError> {
-    if let Some(field) = value
-        .as_mapping()
-        .and_then(|mapping| mapping.keys().find(|field| !fields.contains(&field.as_str())))
-    {
+    if let Some(field) = value.as_mapping().and_then(|mapping| {
+        mapping
+            .keys()
+            .find(|field| !fields.contains(&field.as_str()))
+    }) {
         return Err(parse_error(
             source_name,
             format!("unknown field at `{field}`"),

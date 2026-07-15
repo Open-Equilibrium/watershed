@@ -16,12 +16,16 @@ fn sandbox_denial_follows_resolved_operation_not_loop_identity() {
 
     assert!(output.failed);
     assert!(output.stdout.contains("\"reason\":\"write_denied\""));
-    assert!(output
-        .stdout
-        .contains("\"loop_definition_id\":\"custom-denied-write\""));
-    assert!(output
-        .stdout
-        .contains("\"loop_name\":\"RenamedNegativeWrite\""));
+    assert!(
+        output
+            .stdout
+            .contains("\"loop_definition_id\":\"custom-denied-write\"")
+    );
+    assert!(
+        output
+            .stdout
+            .contains("\"loop_name\":\"RenamedNegativeWrite\"")
+    );
 }
 
 #[test]
@@ -67,9 +71,11 @@ fn sandbox_negative_write_reaches_tool_dispatch_before_denial() {
             .and_then(serde_json::Value::as_str),
         Some("negative-tool")
     );
-    assert!(!events
-        .iter()
-        .any(|event| event.event_type == EventType::ToolCompleted));
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolCompleted)
+    );
 }
 
 #[test]
@@ -85,9 +91,11 @@ fn sandbox_negative_dispatch_requires_stub_model_fixture_profile() {
         .expect("non-fixture workspace runs");
 
     assert!(!output.failed);
-    assert!(output
-        .stdout
-        .contains("\"event_type\":\"session.completed\""));
+    assert!(
+        output
+            .stdout
+            .contains("\"event_type\":\"session.completed\"")
+    );
     assert!(!output.stdout.contains("write_denied"));
 }
 
@@ -184,9 +192,11 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
 
     assert!(output.failed);
     assert!(output.stdout.contains("\"reason\":\"tool_out_of_phase\""));
-    assert!(output
-        .stdout
-        .contains("\"loop_definition_id\":\"custom-tool-out-of-phase\""));
+    assert!(
+        output
+            .stdout
+            .contains("\"loop_definition_id\":\"custom-tool-out-of-phase\"")
+    );
 }
 
 #[test]
@@ -258,9 +268,11 @@ fn sandbox_out_of_phase_denial_requires_stub_model_fixture_profile() {
     .expect("non-fixture workspace runs");
 
     assert!(!output.failed);
-    assert!(output
-        .stdout
-        .contains("\"event_type\":\"session.completed\""));
+    assert!(
+        output
+            .stdout
+            .contains("\"event_type\":\"session.completed\"")
+    );
     assert!(!output.stdout.contains("tool_out_of_phase"));
 }
 
@@ -304,9 +316,11 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
         .expect("loop with reused fixture id runs");
 
     assert!(!output.failed);
-    assert!(output
-        .stdout
-        .contains("\"event_type\":\"session.completed\""));
+    assert!(
+        output
+            .stdout
+            .contains("\"event_type\":\"session.completed\"")
+    );
     assert!(!output.stdout.contains("write_denied"));
 }
 
@@ -337,8 +351,35 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
         .expect("normal loop can reuse fixture phase id");
 
     assert!(!output.failed);
-    assert!(output
-        .stdout
-        .contains("\"event_type\":\"session.completed\""));
+    assert!(
+        output
+            .stdout
+            .contains("\"event_type\":\"session.completed\"")
+    );
     assert!(!output.stdout.contains("tool_out_of_phase"));
+}
+
+#[test]
+fn sandbox_negative_runtime_matches_non_write_denial_fixtures() {
+    for loop_id in [
+        "sandbox-negative-environment",
+        "sandbox-negative-interpreter",
+        "sandbox-negative-network",
+        "sandbox-negative-protected-path",
+        "sandbox-negative-symlink",
+    ] {
+        let workspace = workspace_copy("sandbox-negative");
+        let output = run_loop(&workspace, loop_id, EmitMode::Jsonl)
+            .expect("sandbox denial produces a valid stream");
+        let expected = expected_stream("sandbox-negative", &format!("{loop_id}.jsonl"));
+        assert_eq!(output.stdout, expected, "{loop_id} output");
+        assert_eq!(
+            fs::read_to_string(
+                workspace.join(format!(".loop/sessions/{}.jsonl", output.session_id))
+            )
+            .expect("authoritative session log readable"),
+            expected,
+            "{loop_id} session log"
+        );
+    }
 }

@@ -8,10 +8,12 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
 
     reserve_session_log(&log_conflict, "clean001").expect_err("log conflict must fail reservation");
 
-    assert!(!log_conflict
-        .join(LOCAL_SESSION_DIR)
-        .join("clean001.jsonl")
-        .exists());
+    assert!(
+        !log_conflict
+            .join(LOCAL_SESSION_DIR)
+            .join("clean001.jsonl")
+            .exists()
+    );
 
     let lock_conflict = empty_workspace("reserve-lock-conflict");
     fs::create_dir_all(lock_conflict.join(LOCAL_SESSION_DIR)).expect("session dir");
@@ -24,14 +26,18 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
     reserve_session_log(&lock_conflict, "clean002")
         .expect_err("lock conflict must fail reservation");
 
-    assert!(!lock_conflict
-        .join(LOCAL_SESSION_DIR)
-        .join("clean002.jsonl")
-        .exists());
-    assert!(!lock_conflict
-        .join(LOCAL_LOG_DIR)
-        .join("clean002.log")
-        .exists());
+    assert!(
+        !lock_conflict
+            .join(LOCAL_SESSION_DIR)
+            .join("clean002.jsonl")
+            .exists()
+    );
+    assert!(
+        !lock_conflict
+            .join(LOCAL_LOG_DIR)
+            .join("clean002.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -201,10 +207,12 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         MAX_SESSION_LOG_BYTES
     );
 
-    assert!(replacement_temp_path(&path, 7)
-        .expect("temp path derives from file name")
-        .to_string_lossy()
-        .contains(".watershed-"));
+    assert!(
+        replacement_temp_path(&path, 7)
+            .expect("temp path derives from file name")
+            .to_string_lossy()
+            .contains(".watershed-")
+    );
     assert!(matches!(
         replacement_temp_path(Path::new(""), 0),
         Err(RuntimeError::Protocol(message)) if message.contains("file name")
@@ -240,16 +248,16 @@ fn windows_file_replacement_does_not_require_backup_names() {
     fs::write(&path, "old").expect("file written");
     for attempt in 0..100 {
         let mut name = path.file_name().expect("file name").to_os_string();
-        name.push(format!(
-            ".watershed-{}-{attempt}.bak",
-            std::process::id()
-        ));
+        name.push(format!(".watershed-{}-{attempt}.bak", std::process::id()));
         fs::write(path.with_file_name(name), "unrelated").expect("backup name occupied");
     }
 
     replace_existing_file_atomically(&path, b"new")
         .expect("unrelated backup names cannot block replacement");
-    assert_eq!(fs::read_to_string(path).expect("replacement readable"), "new");
+    assert_eq!(
+        fs::read_to_string(path).expect("replacement readable"),
+        "new"
+    );
 }
 
 #[test]
@@ -301,5 +309,22 @@ fn opened_file_identity_guard_detects_symlink_directory_and_replaced_paths() {
     assert!(matches!(
         ensure_opened_regular_leaf_matches_path(&changing, &old_file),
         Err(RuntimeError::Protocol(message)) if message.contains("changed before write")
+    ));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn opened_file_read_identity_guard_rejects_replaced_path() {
+    let workspace = empty_workspace("opened-file-read-identity");
+    let path = workspace.join("changing.txt");
+    fs::write(&path, "old").expect("file written");
+    let expected_metadata = fs::symlink_metadata(&path).expect("file metadata");
+    let old_file = open_file_for_read_without_following_reparse(&path).expect("file opens");
+    fs::remove_file(&path).expect("old path removed");
+    fs::write(&path, "new").expect("replacement written");
+
+    assert!(matches!(
+        ensure_opened_real_file_for_read_matches_path(&path, &expected_metadata, &old_file),
+        Err(RuntimeError::Protocol(message)) if message.contains("changed before read")
     ));
 }

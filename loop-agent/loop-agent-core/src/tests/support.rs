@@ -2,8 +2,8 @@ use super::*;
 use std::{
     io,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Barrier, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},

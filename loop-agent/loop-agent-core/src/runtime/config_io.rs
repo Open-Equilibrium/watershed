@@ -1,12 +1,11 @@
 fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
     let path = workspace.join(".loop/config.yaml");
     let text = read_workspace_config_to_string(&path)?;
-    let source: WorkspaceConfigSource = core_script::parse_safe_yaml(".loop/config.yaml", &text)
-        .map_err(|error| RuntimeError::Usage(error.to_string()))?;
-    let stub_model_fixture_profile = workspace_stub_model_fixture_profile(
-        &source.fixture_profile,
-        &source.stub_model,
-    )?;
+    let source: WorkspaceConfigSource =
+        core_script::parse_safe_yaml_config(".loop/config.yaml", &text)
+            .map_err(|error| RuntimeError::Usage(error.to_string()))?;
+    let stub_model_fixture_profile =
+        workspace_stub_model_fixture_profile(&source.fixture_profile, &source.stub_model)?;
     let registry_root = PathBuf::from(source.registry_root);
     if registry_root.components().any(|component| {
         matches!(
@@ -76,6 +75,7 @@ struct WorkspaceConfig {
 }
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorkspaceConfigSource {
     registry_root: String,
     #[serde(default)]
@@ -94,16 +94,16 @@ fn workspace_stub_model_fixture_profile(
             ".loop/config.yaml fixture_profile stub-model requires stub_model: deterministic"
                 .to_owned(),
         )),
-        (profile, _) if !profile.is_empty() && profile != "stub-model" => Err(RuntimeError::Usage(format!(
-            "unsupported .loop/config.yaml fixture_profile {profile:?}"
-        ))),
+        (profile, _) if !profile.is_empty() && profile != "stub-model" => Err(RuntimeError::Usage(
+            format!("unsupported .loop/config.yaml fixture_profile {profile:?}"),
+        )),
         ("", "deterministic") => Err(RuntimeError::Usage(
             ".loop/config.yaml stub_model deterministic requires fixture_profile: stub-model"
                 .to_owned(),
         )),
-        (_, model) if !model.is_empty() && model != "deterministic" => Err(RuntimeError::Usage(format!(
-            "unsupported .loop/config.yaml stub_model {model:?}"
-        ))),
+        (_, model) if !model.is_empty() && model != "deterministic" => Err(RuntimeError::Usage(
+            format!("unsupported .loop/config.yaml stub_model {model:?}"),
+        )),
         _ => Ok(false),
     }
 }
@@ -217,6 +217,32 @@ fn ensure_opened_real_file_for_read_matches_path(
             "{} changed before read",
             path.display()
         )));
+    }
+
+    #[cfg(windows)]
+    {
+        let current_file =
+            open_file_for_read_without_following_reparse(path).map_err(|source| {
+                RuntimeError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
+        let current_file_metadata = current_file.metadata().map_err(|source| RuntimeError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        validate_real_file(path, &current_file_metadata)?;
+        let opened = windows_open_file_information(path, file)?;
+        let current = windows_open_file_information(path, &current_file)?;
+        if (opened.volume_serial_number, opened.file_index)
+            != (current.volume_serial_number, current.file_index)
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} changed before read",
+                path.display()
+            )));
+        }
     }
 
     Ok(file_metadata)

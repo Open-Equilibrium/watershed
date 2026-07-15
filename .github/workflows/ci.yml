@@ -39,7 +39,11 @@ jobs:
           tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        shell: pwsh
+        run: |
+          cargo fmt --all -- --check
+          $rustSources = @(git ls-files -- '*.rs')
+          rustfmt --edition 2024 --check @rustSources
 
       - name: Check lints
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

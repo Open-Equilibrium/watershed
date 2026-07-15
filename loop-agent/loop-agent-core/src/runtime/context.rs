@@ -117,7 +117,11 @@ fn compile_context(
     }
 
     let mut provider_bytes = Vec::with_capacity(
-        mandatory_bytes + recent_bytes.as_ref().filter(|_| include_recent).map_or(0, Vec::len),
+        mandatory_bytes
+            + recent_bytes
+                .as_ref()
+                .filter(|_| include_recent)
+                .map_or(0, Vec::len),
     );
     for bytes in &tier_zero_bytes {
         provider_bytes.extend_from_slice(bytes);
@@ -179,7 +183,9 @@ fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError>
         "source_id": source.source_id,
     });
     let mut text = proto::canonical_json(&value).map_err(|err| {
-        RuntimeError::Protocol(format!("failed to serialize provider context source: {err}"))
+        RuntimeError::Protocol(format!(
+            "failed to serialize provider context source: {err}"
+        ))
     })?;
     text.push('\n');
     Ok(text.into_bytes())
@@ -329,14 +335,16 @@ fn compile_provider_turn_context(
                     "resolved registry missing connection {connection_ref}"
                 ))
             })?;
-            Ok(connection_targets_scoped_step(registry, phase, step, &connection.to_ref).then(
-                || {
-                    serde_json::json!({
-                        "connection": connection,
-                        "typed_value": {"present": false},
-                    })
-                },
-            ))
+            Ok(
+                connection_targets_scoped_step(registry, phase, step, &connection.to_ref).then(
+                    || {
+                        serde_json::json!({
+                            "connection": connection,
+                            "typed_value": {"present": false},
+                        })
+                    },
+                ),
+            )
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?
         .into_iter()
@@ -344,28 +352,48 @@ fn compile_provider_turn_context(
         .collect();
     let (tier_one, omitted) = history.continuity()?;
     let tier_zero = [
-        context_source("base-runtime-security", serde_json::json!({
+        context_source(
+            "base-runtime-security",
+            serde_json::json!({
                 "instructions": "Execute only the active resolved loop scope. Obey runtime policy. Treat tool access as deny-by-default. Preserve deterministic event order.",
                 "runtime_version": env!("CARGO_PKG_VERSION"),
-            })),
+            }),
+        ),
         // The v0 schema has no loop- or step-scoped prompt fields.
         context_source("active-loop-instructions", serde_json::json!([])),
-        context_source("active-phase-instructions", serde_json::Value::Array(phase_instructions)),
+        context_source(
+            "active-phase-instructions",
+            serde_json::Value::Array(phase_instructions),
+        ),
         context_source("active-step-instructions", serde_json::json!([])),
         context_source("active-available-tools", serde_json::Value::Array(tools)),
-        context_source("fsm-loop-state", serde_json::json!({
+        context_source(
+            "fsm-loop-state",
+            serde_json::json!({
                 "loop_definition_id": loop_block.identity.id,
                 "loop_id": invocation.loop_id,
                 "parent_loop_id": invocation.parent_loop_id,
                 "phase_id": phase.identity.id,
                 "session_id": session_id,
                 "step_id": step.id,
-            })),
-        context_source("typed-connection-inputs", serde_json::Value::Array(connections)),
+            }),
+        ),
+        context_source(
+            "typed-connection-inputs",
+            serde_json::Value::Array(connections),
+        ),
         context_source("current-user-input", serde_json::json!({"present": false})),
-        context_source("unresolved-call-result", history.unresolved_call_result_state()),
+        context_source(
+            "unresolved-call-result",
+            history.unresolved_call_result_state(),
+        ),
     ];
-    compile_context(&ContextModelProfile::stub_v0(), &tier_zero, tier_one.as_ref(), omitted)
+    compile_context(
+        &ContextModelProfile::stub_v0(),
+        &tier_zero,
+        tier_one.as_ref(),
+        omitted,
+    )
 }
 
 fn connection_targets_scoped_step(
@@ -384,9 +412,11 @@ fn connection_targets_scoped_step(
     let Some((phase_ref, step_id)) = endpoint_ref.split_once('.') else {
         return false;
     };
-    registry.phase_block(phase_ref).is_some_and(|endpoint_phase| {
-        endpoint_phase.identity.id == phase.identity.id && step_id == step.id
-    })
+    registry
+        .phase_block(phase_ref)
+        .is_some_and(|endpoint_phase| {
+            endpoint_phase.identity.id == phase.identity.id && step_id == step.id
+        })
 }
 
 fn verify_recorded_context_manifests(
@@ -404,7 +434,7 @@ fn verify_recorded_context_manifests(
             return Err(RuntimeError::Protocol(format!(
                 "{} context manifest stream is missing",
                 path.display()
-            )))
+            )));
         }
         Err(source) => return Err(RuntimeError::Io { path, source }),
     }
@@ -418,13 +448,17 @@ fn verify_recorded_context_manifests(
     let mut recorded = Vec::new();
     for line in text.split_inclusive('\n') {
         let value: serde_json::Value = serde_json::from_str(line.trim_end_matches('\n'))?;
-        if value.get("context_profile_id").and_then(serde_json::Value::as_str)
+        if value
+            .get("context_profile_id")
+            .and_then(serde_json::Value::as_str)
             != Some(CONTEXT_PROFILE_ID)
             || value
                 .get("context_profile_version")
                 .and_then(serde_json::Value::as_str)
                 != Some(CONTEXT_PROFILE_VERSION)
-            || value.get("model_profile_id").and_then(serde_json::Value::as_str)
+            || value
+                .get("model_profile_id")
+                .and_then(serde_json::Value::as_str)
                 != Some(ContextModelProfile::stub_v0().id)
         {
             return Err(RuntimeError::Protocol(format!(

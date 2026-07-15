@@ -8,13 +8,9 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
         let workspace = workspace_copy("hello-loop");
         let mut timings = EventWriterTimings::default();
         let (notifier, _receiver) = live_event_channel();
-        let output = run_loop_internal(
-            &workspace,
-            "hello-loop",
-            Some(notifier),
-            Some(&mut timings),
-        )
-        .expect("measured runtime emit succeeds");
+        let output =
+            run_loop_internal(&workspace, "hello-loop", Some(notifier), Some(&mut timings))
+                .expect("measured runtime emit succeeds");
         assert!(!output.failed);
         assert_eq!(timings.append_nanos.len(), output.event_count);
         assert_eq!(timings.notification_nanos.len(), output.event_count);
@@ -38,13 +34,8 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
         let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
         let prefix_events = prefix.lines().count();
         fs::write(&completed.session_path, &prefix).expect("partial prefix written");
-        write_definition_hash_metadata(
-            &workspace,
-            &completed.session_id,
-            "hello-loop",
-        );
-        fs::remove_file(workspace.join("out/summary.txt"))
-            .expect("completed side effect removed");
+        write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop");
+        fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
         let mut timings = EventWriterTimings::default();
         let (notifier, _receiver) = live_event_channel();
 
@@ -65,11 +56,7 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
     assert_event_writer_p95(append_nanos, notification_nanos, "hello-loop resume");
 }
 
-fn assert_event_writer_p95(
-    append_nanos: Vec<u128>,
-    notification_nanos: Vec<u128>,
-    path: &str,
-) {
+fn assert_event_writer_p95(append_nanos: Vec<u128>, notification_nanos: Vec<u128>, path: &str) {
     assert!(!notification_nanos.is_empty(), "{path} must notify events");
     let append_p95 = p95_nanos(append_nanos);
     let notification_p95 = p95_nanos(notification_nanos);
@@ -112,10 +99,7 @@ fn fsm_transition_p95_stays_under_m1_budget() {
     }
     for _ in 0..200 {
         let samples = fsm_transition_samples_for_budget().expect("runtime emit succeeds");
-        assert_eq!(
-            samples.len(),
-            event_count
-        );
+        assert_eq!(samples.len(), event_count);
         transition_nanos.extend(samples);
     }
     let p95_nanos = p95_nanos(transition_nanos);

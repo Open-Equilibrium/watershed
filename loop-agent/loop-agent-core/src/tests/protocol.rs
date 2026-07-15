@@ -98,7 +98,11 @@ fn protocol_validator_rejects_nulls_recursively_but_keeps_additive_values() {
 
     let mut root_null = base_event();
     root_null.payload = serde_json::json!({"future": null, "reason": "fixture-start"});
-    assert_invalid_event("root-null.jsonl", root_null, "payload.future must not be null");
+    assert_invalid_event(
+        "root-null.jsonl",
+        root_null,
+        "payload.future must not be null",
+    );
 
     let mut nested_null = base_event();
     nested_null.event_type = EventType::Error;
@@ -482,7 +486,6 @@ fn protocol_validator_rejects_stream_identity_edges() {
         ),
         "parent_loop_id",
     );
-
 }
 
 #[test]
@@ -745,7 +748,6 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("event stream budget")
     ));
-
 }
 
 #[test]
@@ -803,22 +805,26 @@ fn runtime_failure_and_sandbox_negative_helpers_cover_edge_paths() {
         .reason,
         core_policy::DenyReasonCode::WriteDenied.as_str()
     );
-    assert!(runtime_failure_for_tool_error(
-        &RuntimeError::Io {
-            path: PathBuf::from("out/file"),
-            source: io::Error::from(io::ErrorKind::Other),
-        },
-        "tool",
-    )
-    .is_none());
+    assert!(
+        runtime_failure_for_tool_error(
+            &RuntimeError::Io {
+                path: PathBuf::from("out/file"),
+                source: io::Error::from(io::ErrorKind::Other),
+            },
+            "tool",
+        )
+        .is_none()
+    );
     assert!(
         runtime_failure_for_tool_error(&RuntimeError::Usage("bad".to_owned()), "tool").is_none()
     );
-    assert!(runtime_failure_for_tool_error(
-        &RuntimeError::Protocol("protected path denied".to_owned()),
-        "tool",
-    )
-    .is_none());
+    assert!(
+        runtime_failure_for_tool_error(
+            &RuntimeError::Protocol("protected path denied".to_owned()),
+            "tool",
+        )
+        .is_none()
+    );
 
     let mut non_negative_tool = tool.clone();
     non_negative_tool.command = core_script::ToolCommand::OwnScript("noop".to_owned());
@@ -965,7 +971,11 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
         (EventType::ToolCompleted, tool_terminal.as_str(), "tool"),
         (EventType::ToolTimedOut, tool_terminal.as_str(), "tool"),
         (EventType::ToolFailed, tool_terminal.as_str(), "tool"),
-        (EventType::MessageDelta, message_terminal.as_str(), "message"),
+        (
+            EventType::MessageDelta,
+            message_terminal.as_str(),
+            "message",
+        ),
         (
             EventType::MessageCompleted,
             message_terminal.as_str(),
@@ -977,7 +987,10 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
         assert_invalid_session_log(
             &format!("late-{}.jsonl", event_type.as_str()),
             "meta001",
-            &format!("{prefix}{}", lifecycle_event_line(event_type, &event_id, sequence)),
+            &format!(
+                "{prefix}{}",
+                lifecycle_event_line(event_type, &event_id, sequence)
+            ),
             &format!("after terminal {kind}"),
         );
     }

@@ -185,10 +185,12 @@ fn run_loop_rejects_symlinked_log_dir_without_side_effects() {
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside.join("smoke001.log").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("smoke001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke001.jsonl")
+            .exists()
+    );
 }
 
 #[cfg(unix)]
@@ -235,10 +237,12 @@ fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
     );
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -274,17 +278,18 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     );
     assert!(!workspace.join("out/partial.txt").exists());
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
 #[test]
 fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
-    for (leaf_is_directory, expected) in
-        [(true, "must be a file"), (false, "must be a directory")]
+    for (leaf_is_directory, expected) in [(true, "must be a file"), (false, "must be a directory")]
     {
         let workspace = workspace_copy("hello-loop");
         let output_parent = workspace.join("out");
@@ -295,18 +300,19 @@ fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
             if output_parent.exists() {
                 fs::remove_dir_all(&output_parent).expect("fixture output directory removed");
             }
-            fs::write(&output_parent, "not a directory\n")
-                .expect("file created in write ancestor");
+            fs::write(&output_parent, "not a directory\n").expect("file created in write ancestor");
         }
 
         let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
             .expect_err("non-file declared write path must fail preflight");
 
         assert_denied(err, core_policy::DenyReasonCode::WriteDenied, expected);
-        assert!(!workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
-            .exists());
+        assert!(
+            !workspace
+                .join(LOCAL_SESSION_DIR)
+                .join("hello001.jsonl")
+                .exists()
+        );
         assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
     }
 }
@@ -337,9 +343,11 @@ fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
         &output.stdout,
     )
     .expect("failed apply stream validates");
-    assert!(events
-        .iter()
-        .any(|event| event.event_type == EventType::ToolFailed));
+    assert!(
+        events
+            .iter()
+            .any(|event| event.event_type == EventType::ToolFailed)
+    );
     assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
     assert_eq!(
         fs::read_to_string(&output.session_path).expect("session log readable"),
@@ -365,7 +373,10 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
             _measurement_started_at: Option<Instant>,
         ) -> Result<(), RuntimeError> {
             if event.event_type == EventType::ToolStarted
-                && event.payload.get("tool_id").and_then(serde_json::Value::as_str)
+                && event
+                    .payload
+                    .get("tool_id")
+                    .and_then(serde_json::Value::as_str)
                     == Some("write-summary")
             {
                 return Err(RuntimeError::EventWriter(Box::new(RuntimeError::Protocol(
@@ -422,10 +433,12 @@ fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
         "symlink",
     );
     assert!(!outside.join("summary.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -446,10 +459,12 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
         "reparse",
     );
     assert!(!outside.join("summary.txt").exists());
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
@@ -471,17 +486,19 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
     );
-    assert!(!workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("hello001.jsonl")
-        .exists());
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello001.jsonl")
+            .exists()
+    );
     assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
 }
 
 #[cfg(not(any(unix, windows)))]
 #[test]
-fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified(
-) {
+fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified()
+ {
     let workspace = workspace_copy("hello-loop");
     fs::create_dir_all(workspace.join("out")).expect("out dir");
     let outside = empty_workspace("outside-summary-hardlink-unverified");

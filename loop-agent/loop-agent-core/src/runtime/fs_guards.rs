@@ -179,9 +179,7 @@ fn replace_existing_file(
         let _ = fs::remove_file(&temp_path);
         return Err(err);
     }
-    if sync_temp
-        && let Err(source) = temp_file.sync_all()
-    {
+    if sync_temp && let Err(source) = temp_file.sync_all() {
         let _ = fs::remove_file(&temp_path);
         return Err(RuntimeError::Io {
             path: temp_path,
@@ -289,17 +287,7 @@ fn read_existing_file_for_session_log_append(
     path: &Path,
     appended_bytes: usize,
 ) -> Result<Vec<u8>, RuntimeError> {
-    let existing_bytes = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
-    let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
-    let total = existing_bytes.saturating_add(appended_bytes);
-    if total > MAX_SESSION_LOG_BYTES {
-        return Err(RuntimeError::Protocol(format!(
-            "{} session log size {total} bytes exceeds max {}",
-            path.display(),
-            MAX_SESSION_LOG_BYTES
-        )));
-    }
-
+    let existing_bytes = ensure_session_log_growth_within_limit(path, appended_bytes)?;
     let bytes = read_file_with_limit(path, existing_bytes)?;
     if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != existing_bytes {
         return Err(RuntimeError::Protocol(format!(

@@ -102,6 +102,18 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     ));
     missing_lock.rollback();
 
+    let missing_guard = SessionLockGuard {
+        path: workspace.join(".loop/sessions/missing-resume.lock"),
+        cleanup_on_drop: std::cell::Cell::new(true),
+    };
+    let err = missing_guard
+        .release()
+        .expect_err("missing resume lock release reports an IO error");
+    assert!(matches!(
+        err,
+        RuntimeError::Io { path, .. } if path.ends_with("missing-resume.lock")
+    ));
+
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir created");
     let directory_leaf = session_dir.join("dirleaf001.jsonl");
@@ -1267,11 +1279,7 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
         RuntimeError::Protocol(message) if message.contains("missing registry_hash")
     ));
 
-    fs::write(
-        &metadata_path,
-        "registry_hash=fnv64:partial\n",
-    )
-    .expect("partial metadata writes");
+    fs::write(&metadata_path, "registry_hash=sha256:partial\n").expect("partial metadata writes");
     let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
         .expect_err("metadata without loop hash must fail closed");
     assert!(matches!(
@@ -1373,12 +1381,16 @@ fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
     .expect("resumed live-profile stream validates");
     let anchored_clock = EventClock::from_first_event(&resumed_events[0])
         .expect("recorded timestamp anchors the resumed clock");
-    assert!(resumed_events
-        .iter()
-        .any(|event| event.event_type == EventType::SessionResumed));
-    assert!(resumed_events
-        .iter()
-        .all(|event| event.timestamp == anchored_clock.timestamp(event.sequence)));
+    assert!(
+        resumed_events
+            .iter()
+            .any(|event| event.event_type == EventType::SessionResumed)
+    );
+    assert!(
+        resumed_events
+            .iter()
+            .all(|event| event.timestamp == anchored_clock.timestamp(event.sequence))
+    );
 }
 
 #[test]
@@ -1404,9 +1416,11 @@ fn resume_human_mode_reports_the_terminal_failure_reason() {
         output.stdout,
         "session negwrite001 resumed: failed (write_denied): write outside declared roots denied\n"
     );
-    assert!(fs::read_to_string(&path)
-        .expect("resumed log readable")
-        .contains("\"event_type\":\"session.failed\""));
+    assert!(
+        fs::read_to_string(&path)
+            .expect("resumed log readable")
+            .contains("\"event_type\":\"session.failed\"")
+    );
 }
 
 #[test]
@@ -1586,9 +1600,11 @@ fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         prefix
     );
-    assert!(fs::read_to_string(&session_path)
-        .expect("workspace session log readable")
-        .contains("\"event_type\":\"session.completed\""));
+    assert!(
+        fs::read_to_string(&session_path)
+            .expect("workspace session log readable")
+            .contains("\"event_type\":\"session.completed\"")
+    );
 }
 
 #[test]

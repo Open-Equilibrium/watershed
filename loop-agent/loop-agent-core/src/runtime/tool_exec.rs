@@ -26,9 +26,7 @@ fn emit_tool(
         }),
     )?;
 
-    if let Some(failure) =
-        sandbox_tool_dispatch_failure(tool, policy.stub_model_fixture_profile)?
-    {
+    if let Some(failure) = sandbox_tool_dispatch_failure(tool, policy.stub_model_fixture_profile)? {
         return Ok(Some(failure));
     }
 
@@ -84,9 +82,7 @@ fn emit_tool(
 
 enum ToolDispatchMode<'a> {
     Plan,
-    Preflight {
-        workspace: &'a Path,
-    },
+    Preflight { workspace: &'a Path },
     Execute { workspace: &'a Path },
 }
 

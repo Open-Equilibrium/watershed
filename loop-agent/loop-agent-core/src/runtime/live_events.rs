@@ -58,11 +58,7 @@ impl LiveEventNotifier {
     ///
     /// Call this only after `committed_sequence` is readable from the authoritative session
     /// log. A full or closed channel never blocks and never changes persistence semantics.
-    pub fn try_notify(
-        &self,
-        session_id: &str,
-        committed_sequence: u64,
-    ) -> LiveEventNotifyStatus {
+    pub fn try_notify(&self, session_id: &str, committed_sequence: u64) -> LiveEventNotifyStatus {
         self.state
             .highest_committed_sequence
             .fetch_max(committed_sequence, std::sync::atomic::Ordering::Release);
@@ -91,10 +87,13 @@ impl LiveEventReceiver {
         &self,
         timeout: Duration,
     ) -> Result<LiveEventNotification, LiveEventReceiveError> {
-        let session_id = self.receiver.recv_timeout(timeout).map_err(|err| match err {
-            std::sync::mpsc::RecvTimeoutError::Timeout => LiveEventReceiveError::Timeout,
-            std::sync::mpsc::RecvTimeoutError::Disconnected => LiveEventReceiveError::Closed,
-        })?;
+        let session_id = self
+            .receiver
+            .recv_timeout(timeout)
+            .map_err(|err| match err {
+                std::sync::mpsc::RecvTimeoutError::Timeout => LiveEventReceiveError::Timeout,
+                std::sync::mpsc::RecvTimeoutError::Disconnected => LiveEventReceiveError::Closed,
+            })?;
         Ok(LiveEventNotification {
             session_id,
             highest_committed_sequence: self
@@ -107,8 +106,7 @@ impl LiveEventReceiver {
 
 /// Creates a capacity-one live-event notification channel with no runtime-owned worker.
 pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
-    let (sender, receiver) =
-        std::sync::mpsc::sync_channel(LIVE_EVENT_NOTIFICATION_CAPACITY);
+    let (sender, receiver) = std::sync::mpsc::sync_channel(LIVE_EVENT_NOTIFICATION_CAPACITY);
     let state = std::sync::Arc::new(LiveEventState {
         highest_committed_sequence: std::sync::atomic::AtomicU64::new(0),
     });
@@ -135,10 +133,7 @@ pub struct SessionEventReader {
 
 impl SessionEventReader {
     /// Opens a session's validated log boundary without reading event payloads yet.
-    pub fn open(
-        workspace: impl AsRef<Path>,
-        session_id: &str,
-    ) -> Result<Self, RuntimeError> {
+    pub fn open(workspace: impl AsRef<Path>, session_id: &str) -> Result<Self, RuntimeError> {
         let workspace = workspace.as_ref();
         let path = session_path(workspace, session_id)?;
         ensure_existing_session_log_path(workspace, &path)?;
@@ -168,7 +163,10 @@ impl SessionEventReader {
         }
         let appended_bytes = &bytes[self.observed_bytes.len()..complete_len];
         let appended_text = std::str::from_utf8(appended_bytes).map_err(|source| {
-            RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", self.path.display()))
+            RuntimeError::Protocol(format!(
+                "{} is not valid UTF-8: {source}",
+                self.path.display()
+            ))
         })?;
         let (appended, next_validation) = if appended_text.is_empty() {
             (Vec::new(), None)

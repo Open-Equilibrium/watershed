@@ -78,17 +78,15 @@ impl<'a> SerialSessionWriter<'a> {
         notifier: Option<LiveEventNotifier>,
         timings: Option<&'a mut EventWriterTimings>,
     ) -> Result<Self, RuntimeError> {
-        Self::start_prevalidated(
-            SerialWriterStart {
-                context_path: reservation.context_path.clone(),
-                path: reservation.session_path.clone(),
-                session_id: reservation.session_id.clone(),
-                validation: SessionAppendValidationState::empty(&reservation.session_id),
-                commit_reservation: Some(reservation),
-                notifier,
-                timings,
-            },
-        )
+        Self::start_prevalidated(SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(reservation),
+            notifier,
+            timings,
+        })
     }
 
     fn start_prevalidated(start: SerialWriterStart<'a>) -> Result<Self, RuntimeError> {
@@ -96,7 +94,10 @@ impl<'a> SerialSessionWriter<'a> {
         Self::start_with_appender(start, appender)
     }
 
-    fn start_with_appender<A>(start: SerialWriterStart<'a>, appender: A) -> Result<Self, RuntimeError>
+    fn start_with_appender<A>(
+        start: SerialWriterStart<'a>,
+        appender: A,
+    ) -> Result<Self, RuntimeError>
     where
         A: EventLogAppender + Send + 'static,
     {
@@ -389,11 +390,7 @@ impl PendingEventBatch {
 
 trait EventLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError>;
-    fn append_batch(
-        &mut self,
-        path: &Path,
-        events: &[&[u8]],
-    ) -> Result<(), BatchAppendFailure> {
+    fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
         self.append(path, &events.concat())
             .map_err(BatchAppendFailure::none_committed)
     }
@@ -546,9 +543,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
                     pending,
                     RuntimeError::Protocol(format!(
                         "session event appender reported {} committed events for a batch of {}: {}",
-                        failure.committed_events,
-                        batch_len,
-                        failure.error
+                        failure.committed_events, batch_len, failure.error
                     )),
                 );
                 self.stopped = true;
@@ -725,10 +720,7 @@ fn acknowledge_batch(
     }
 }
 
-fn notify_committed(
-    notifier: Option<&LiveEventNotifier>,
-    event: &EventEnvelope,
-) -> Option<u128> {
+fn notify_committed(notifier: Option<&LiveEventNotifier>, event: &EventEnvelope) -> Option<u128> {
     notifier.map(|notifier| {
         let started_at = Instant::now();
         let _ = notifier.try_notify(&event.session_id, event.sequence);
@@ -737,7 +729,10 @@ fn notify_committed(
 }
 
 fn is_micro_batch_event(event_type: &EventType) -> bool {
-    matches!(event_type, EventType::MessageDelta | EventType::ToolProgress)
+    matches!(
+        event_type,
+        EventType::MessageDelta | EventType::ToolProgress
+    )
 }
 
 fn discarded_after_writer_failure() -> RuntimeError {
@@ -900,8 +895,8 @@ impl SessionLogAppender {
                 .metadata()
                 .map(|metadata| metadata.len())
                 .unwrap_or(original_len);
-            let written = usize::try_from(current_len.saturating_sub(original_len))
-                .unwrap_or(usize::MAX);
+            let written =
+                usize::try_from(current_len.saturating_sub(original_len)).unwrap_or(usize::MAX);
             let committed_events = complete_prefixes.partition_point(|end| *end <= written);
             let retained_bytes = committed_events
                 .checked_sub(1)
@@ -945,11 +940,7 @@ impl EventLogAppender for SessionLogAppender {
         }
     }
 
-    fn append_batch(
-        &mut self,
-        path: &Path,
-        events: &[&[u8]],
-    ) -> Result<(), BatchAppendFailure> {
+    fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
         #[cfg(any(unix, windows))]
         {
             self.append_native_batch_with(path, events, |file, bytes| file.write_all(bytes))

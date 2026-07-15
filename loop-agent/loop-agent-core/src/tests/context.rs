@@ -9,7 +9,10 @@ fn test_profile(input_budget: usize) -> ContextModelProfile {
 
 fn tier_zero(turn_value: &str) -> [ContextSource; 9] {
     [
-        context_source("base-runtime-security", serde_json::json!({"policy":"deny"})),
+        context_source(
+            "base-runtime-security",
+            serde_json::json!({"policy":"deny"}),
+        ),
         context_source("active-loop-instructions", serde_json::json!([])),
         context_source("active-phase-instructions", serde_json::json!(["phase"])),
         context_source("active-step-instructions", serde_json::json!([])),
@@ -60,7 +63,10 @@ fn context_source_content(compiled: &CompiledContext, source_id: &str) -> serde_
 fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
     let path = workspace.join("registry").join(path);
     let text = fs::read_to_string(&path).expect("registry fixture reads");
-    assert!(text.contains(before), "registry fixture contains target text");
+    assert!(
+        text.contains(before),
+        "registry fixture contains target text"
+    );
     fs::write(path, text.replacen(before, after, 1)).expect("registry fixture updates");
 }
 
@@ -137,7 +143,10 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
 
     let manifest: serde_json::Value =
         serde_json::from_str(first.manifest.line.trim()).expect("manifest parses");
-    assert_eq!(manifest["cache_boundaries"][0]["after_source_id"], expected_ids[4]);
+    assert_eq!(
+        manifest["cache_boundaries"][0]["after_source_id"],
+        expected_ids[4]
+    );
     assert_eq!(
         manifest["cache_boundaries"][0]["byte_offset"],
         serde_json::json!(expected_prefix)
@@ -146,12 +155,17 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
     let expected_sources = source_lines
         .iter()
         .zip(expected_ids)
-        .map(|(line, source_id)| serde_json::json!({
-            "projection_hash": sha256_hex(format!("{line}\n").as_bytes()),
-            "source_id": source_id,
-        }))
+        .map(|(line, source_id)| {
+            serde_json::json!({
+                "projection_hash": sha256_hex(format!("{line}\n").as_bytes()),
+                "source_id": source_id,
+            })
+        })
         .collect::<Vec<_>>();
-    assert_eq!(manifest["ordered_sources"], serde_json::json!(expected_sources));
+    assert_eq!(
+        manifest["ordered_sources"],
+        serde_json::json!(expected_sources)
+    );
 }
 
 #[test]
@@ -266,7 +280,11 @@ fn context_compiler_rejects_mandatory_content_over_budget() {
     let mandatory = tier_zero("large");
     let required = mandatory
         .iter()
-        .map(|source| context_source_bytes(source).expect("mandatory source serializes").len())
+        .map(|source| {
+            context_source_bytes(source)
+                .expect("mandatory source serializes")
+                .len()
+        })
         .sum::<usize>();
     let err = compile_context(
         &test_profile(required - 1),
@@ -330,7 +348,11 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     let mandatory = tier_zero("turn");
     let mandatory_bytes = mandatory
         .iter()
-        .map(|source| context_source_bytes(source).expect("mandatory source serializes").len())
+        .map(|source| {
+            context_source_bytes(source)
+                .expect("mandatory source serializes")
+                .len()
+        })
         .sum::<usize>();
     let recent_bytes = context_source_bytes(&recent)
         .expect("recent interaction serializes")
@@ -342,9 +364,11 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
         ContextOmissionCounts::default(),
     )
     .expect("fitting interaction compiles");
-    assert!(std::str::from_utf8(&fitting.provider_bytes)
-        .expect("context is UTF-8")
-        .contains("interaction-4"));
+    assert!(
+        std::str::from_utf8(&fitting.provider_bytes)
+            .expect("context is UTF-8")
+            .contains("interaction-4")
+    );
     let compiled = compile_context(
         &test_profile(mandatory_bytes + recent_bytes - 1),
         &mandatory,
@@ -355,8 +379,8 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     let text = std::str::from_utf8(&compiled.provider_bytes).expect("context is UTF-8");
 
     assert!(!text.contains("interaction-4"));
-    let manifest: serde_json::Value = serde_json::from_str(compiled.manifest.line.trim_end())
-        .expect("manifest parses");
+    let manifest: serde_json::Value =
+        serde_json::from_str(compiled.manifest.line.trim_end()).expect("manifest parses");
     assert_eq!(
         manifest["omitted_source_counts"]["recent_complete_interaction"],
         1
@@ -367,8 +391,8 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
 #[test]
 fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
     let workspace = workspace_copy("hello-loop");
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect("fixture loop completes");
+    let output =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
     let manifest_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));
@@ -377,15 +401,12 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("manifest parses"))
         .collect::<Vec<_>>();
-    let model_turns = validate_session_log_text(
-        &output.session_path,
-        &output.session_id,
-        &output.stdout,
-    )
-    .expect("runtime stream validates")
-    .iter()
-    .filter(|event| event.event_type == EventType::MessageCompleted)
-    .count();
+    let model_turns =
+        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
+            .expect("runtime stream validates")
+            .iter()
+            .filter(|event| event.event_type == EventType::MessageCompleted)
+            .count();
 
     assert_eq!(manifests.len(), model_turns);
     assert!(!manifests.is_empty());
@@ -393,10 +414,7 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
         assert_eq!(manifest["context_profile_id"], CONTEXT_PROFILE_ID);
         assert_eq!(manifest["model_profile_id"], "stub-model-v0");
         assert_eq!(manifest["estimator_id"], CONTEXT_ESTIMATOR_ID);
-        assert_eq!(
-            manifest["context_hash"].as_str().map(str::len),
-            Some(64)
-        );
+        assert_eq!(manifest["context_hash"].as_str().map(str::len), Some(64));
         assert_eq!(
             proto::canonical_json(&manifest).expect("manifest canonicalizes"),
             serde_json::to_string(&manifest).expect("manifest serializes canonically")
@@ -441,10 +459,7 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         &policy,
         &loop_block,
         "contextbudget001",
-        LoopExecutionOptions::new(
-            EventClock::fixed_fixture(),
-            ToolSideEffectMode::DryRun,
-        ),
+        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
     )
     .expect("budget failure becomes a deterministic failed stream");
 
@@ -454,8 +469,7 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         Some(RuntimeError::ContextBudgetExceeded { .. })
     ));
     assert!(runtime.events.iter().any(|event| {
-        event.event_type == EventType::Error
-            && event.payload["code"] == "context_budget_exceeded"
+        event.event_type == EventType::Error && event.payload["code"] == "context_budget_exceeded"
     }));
     assert_eq!(
         runtime.events.last().map(|event| &event.event_type),
@@ -466,14 +480,11 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
 #[test]
 fn recorded_context_profile_is_verified_before_resume_replay() {
     let workspace = workspace_copy("hello-loop");
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect("fixture loop completes");
-    let events = validate_session_log_text(
-        &output.session_path,
-        &output.session_id,
-        &output.stdout,
-    )
-    .expect("runtime stream validates");
+    let output =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+    let events =
+        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
+            .expect("runtime stream validates");
     let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
     let planned = execute_loop(
@@ -482,10 +493,7 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
         &policy,
         loop_block,
         &output.session_id,
-        LoopExecutionOptions::new(
-            EventClock::fixed_fixture(),
-            ToolSideEffectMode::DryRun,
-        ),
+        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
     )
     .expect("deterministic replay plans");
     verify_recorded_context_manifests(
@@ -533,8 +541,8 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
         ("whitespace", "context manifest is not canonical JSONL"),
     ] {
         let workspace = workspace_copy("hello-loop");
-        let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-            .expect("fixture loop completes");
+        let output =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
         let before = prefix_before_tool_started(&output.stdout, "write-summary");
         fs::write(&output.session_path, &before).expect("partial session prefix written");
         write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
@@ -550,8 +558,7 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
                 .expect("noncanonical context stream written"),
             _ => unreachable!(),
         }
-        fs::remove_file(workspace.join("out/summary.txt"))
-            .expect("completed side effect removed");
+        fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
 
         let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
             .expect_err("invalid context audit evidence must block resume");
@@ -568,8 +575,8 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
 #[test]
 fn resume_recovers_one_deterministic_inflight_context_manifest() {
     let workspace = workspace_copy("smoke-loop");
-    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
-        .expect("fixture loop completes");
+    let output =
+        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("fixture loop completes");
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));
@@ -588,12 +595,8 @@ fn resume_recovers_one_deterministic_inflight_context_manifest() {
         context_stream
     );
     let committed = fs::read_to_string(&output.session_path).expect("recovered session reads");
-    let events = validate_session_log_text(
-        &output.session_path,
-        &output.session_id,
-        &committed,
-    )
-    .expect("recovered session validates");
+    let events = validate_session_log_text(&output.session_path, &output.session_id, &committed)
+        .expect("recovered session validates");
     assert_eq!(
         events
             .iter()
@@ -610,8 +613,8 @@ fn resume_recovers_one_deterministic_inflight_context_manifest() {
 #[test]
 fn resume_rejects_more_than_one_future_context_manifest() {
     let workspace = workspace_copy("hello-loop");
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect("fixture loop completes");
+    let output =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));

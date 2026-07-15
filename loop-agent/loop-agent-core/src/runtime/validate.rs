@@ -138,9 +138,9 @@ fn validate_event_payload(
             match (connection_ids, connection_kinds) {
                 (Some(ids), Some(kinds)) => {
                     if ids.len() != kinds.len() {
-                        return Err(validator.error(
-                            "payload connection arrays must have the same length",
-                        ));
+                        return Err(
+                            validator.error("payload connection arrays must have the same length")
+                        );
                     }
                     for kind in kinds {
                         if !matches!(kind, "data" | "trigger" | "refresh") {
@@ -152,9 +152,9 @@ fn validate_event_payload(
                 }
                 (None, None) => {}
                 _ => {
-                    return Err(validator.error(
-                        "payload connection arrays must be present together",
-                    ));
+                    return Err(
+                        validator.error("payload connection arrays must be present together")
+                    );
                 }
             }
         }
@@ -172,18 +172,16 @@ fn validate_event_payload(
             validator.require_string("tool_name")?;
             let tool_kind = validator.require_string("tool_kind")?;
             if !matches!(tool_kind, "predefined-command" | "own-script") {
-                return Err(validator.error(
-                    "payload.tool_kind must be predefined-command or own-script",
-                ));
+                return Err(
+                    validator.error("payload.tool_kind must be predefined-command or own-script")
+                );
             }
             validator.require_string_array("read_scope")?;
             validator.require_string_array("write_scope")?;
             validator.require_string_array("allowed_parameters")?;
             let network_access = validator.require_string("network_access")?;
             if !matches!(network_access, "deny" | "declared") {
-                return Err(validator.error(
-                    "payload.network_access must be deny or declared",
-                ));
+                return Err(validator.error("payload.network_access must be deny or declared"));
             }
         }
         EventType::ToolProgress => {
@@ -229,11 +227,7 @@ struct PayloadValidator<'a> {
 }
 
 impl PayloadValidator<'_> {
-    fn reject_nulls(
-        &self,
-        value: &serde_json::Value,
-        location: &str,
-    ) -> Result<(), RuntimeError> {
+    fn reject_nulls(&self, value: &serde_json::Value, location: &str) -> Result<(), RuntimeError> {
         match value {
             serde_json::Value::Null => {
                 Err(self.error(&format!("{location} must not be null in protocol v0")))
@@ -255,15 +249,9 @@ impl PayloadValidator<'_> {
     }
 
     fn require_string(&self, field: &str) -> Result<&str, RuntimeError> {
-        match self
-            .payload
-            .get(field)
-            .and_then(serde_json::Value::as_str)
-        {
+        match self.payload.get(field).and_then(serde_json::Value::as_str) {
             Some(value) if !value.is_empty() => Ok(value),
-            _ => Err(self.error(&format!(
-                "payload.{field} must be a non-empty string"
-            ))),
+            _ => Err(self.error(&format!("payload.{field} must be a non-empty string"))),
         }
     }
 
@@ -309,9 +297,7 @@ impl PayloadValidator<'_> {
             .iter()
             .map(|value| {
                 value.as_str().ok_or_else(|| {
-                    self.error(&format!(
-                        "payload.{field} must contain only strings"
-                    ))
+                    self.error(&format!("payload.{field} must contain only strings"))
                 })
             })
             .collect()
@@ -425,10 +411,7 @@ impl SessionAppendValidationState {
             let canonical_bytes = event
                 .canonical_jsonl()
                 .map_err(|err| {
-                    RuntimeError::Protocol(format!(
-                        "{} prior event stream: {err}",
-                        path.display()
-                    ))
+                    RuntimeError::Protocol(format!("{} prior event stream: {err}", path.display()))
                 })?
                 .len();
             state.validate_constructed_event(path, event, canonical_bytes)?;
@@ -587,7 +570,8 @@ impl SessionAppendValidationState {
             event.event_type,
             EventType::SessionCompleted | EventType::SessionFailed
         ) {
-            self.lifecycle.validate_terminal_session(path, Some(event))?;
+            self.lifecycle
+                .validate_terminal_session(path, Some(event))?;
         }
         Ok(())
     }
