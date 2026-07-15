@@ -84,7 +84,9 @@ fn runtime_policy_target() -> core_policy::PolicyTarget {
 }
 
 #[cfg(windows)]
-fn runtime_protected_path_match_mode(_target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
+fn runtime_protected_path_match_mode(
+    _target: &core_policy::PolicyTarget,
+) -> ProtectedPathMatchMode {
     ProtectedPathMatchMode::CaseInsensitive
 }
 
