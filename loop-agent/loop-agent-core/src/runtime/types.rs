@@ -1,7 +1,4 @@
-use core_policy::{
-    ProtectedPathMatchMode, protected_path_match_mode_for_policy_target,
-    protected_path_pattern_matches,
-};
+use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
 use proto::{EventEnvelope, EventType};
 use std::{
     cell::Cell,

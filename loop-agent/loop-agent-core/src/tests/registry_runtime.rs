@@ -584,6 +584,8 @@ fn run_loop_rejects_windows_short_alias_of_protected_directory() {
 
 #[test]
 fn protected_path_modes_follow_policy_target() {
+    use core_policy::protected_path_match_mode_for_policy_target;
+
     assert_eq!(
         protected_path_match_mode_for_policy_target(
             &core_policy::PolicyTarget::LinuxLandlockSeccomp

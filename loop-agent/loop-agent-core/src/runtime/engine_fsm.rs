@@ -84,14 +84,13 @@ fn runtime_policy_target() -> core_policy::PolicyTarget {
 }
 
 #[cfg(windows)]
-fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
-    let _policy_mode = protected_path_match_mode_for_policy_target(target);
+fn runtime_protected_path_match_mode(_target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
     ProtectedPathMatchMode::CaseInsensitive
 }
 
 #[cfg(not(windows))]
 fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
-    protected_path_match_mode_for_policy_target(target)
+    core_policy::protected_path_match_mode_for_policy_target(target)
 }
 
 struct RuntimeEventBuilder<'a> {
