@@ -264,7 +264,6 @@ fn replace_script_output_atomically(
     Ok(())
 }
 
-#[cfg(unix)]
 fn replace_existing_leaf_from_temp(
     path: &Path,
     temp_path: &Path,
@@ -278,35 +277,6 @@ fn replace_existing_leaf_from_temp(
         });
     }
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn replace_existing_leaf_from_temp(
-    path: &Path,
-    temp_path: &Path,
-    denied_reason: Option<core_policy::DenyReasonCode>,
-) -> Result<(), RuntimeError> {
-    let backup_path = create_replacement_backup_path(path, denied_reason)?;
-    if let Err(source) = fs::rename(path, &backup_path) {
-        let _ = fs::remove_file(temp_path);
-        return Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        });
-    }
-    if let Err(source) = fs::rename(temp_path, path) {
-        if fs::rename(&backup_path, path).is_ok() {
-            let _ = fs::remove_file(temp_path);
-        }
-        return Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        });
-    }
-    fs::remove_file(&backup_path).map_err(|source| RuntimeError::Io {
-        path: backup_path,
-        source,
-    })
 }
 
 fn create_replacement_temp(
@@ -339,49 +309,12 @@ fn create_replacement_temp(
     ))
 }
 
-#[cfg(not(unix))]
-fn create_replacement_backup_path(
-    path: &Path,
-    denied_reason: Option<core_policy::DenyReasonCode>,
-) -> Result<PathBuf, RuntimeError> {
-    for attempt in 0..100 {
-        let backup_path = replacement_backup_path(path, attempt)?;
-        match fs::symlink_metadata(&backup_path) {
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(backup_path),
-            Ok(_) => {}
-            Err(source) => {
-                return Err(RuntimeError::Io {
-                    path: backup_path,
-                    source,
-                });
-            }
-        }
-    }
-    Err(runtime_protocol_or_denied(
-        denied_reason,
-        format!(
-            "could not allocate backup replacement path for {}",
-            path.display()
-        ),
-    ))
-}
-
 fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
     let mut file_name = path
         .file_name()
         .ok_or_else(|| RuntimeError::Protocol("replacement path must have a file name".to_owned()))?
         .to_os_string();
     file_name.push(format!(".watershed-{}-{attempt}.tmp", std::process::id()));
-    Ok(path.with_file_name(file_name))
-}
-
-#[cfg(not(unix))]
-fn replacement_backup_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
-    let mut file_name = path
-        .file_name()
-        .ok_or_else(|| RuntimeError::Protocol("replacement path must have a file name".to_owned()))?
-        .to_os_string();
-    file_name.push(format!(".watershed-{}-{attempt}.bak", std::process::id()));
     Ok(path.with_file_name(file_name))
 }
 

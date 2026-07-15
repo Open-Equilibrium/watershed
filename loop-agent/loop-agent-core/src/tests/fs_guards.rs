@@ -223,18 +223,6 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         create_replacement_temp(&missing_parent_temp, None),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
-    #[cfg(not(unix))]
-    {
-        for attempt in 0..100 {
-            let backup_path = replacement_backup_path(&path, attempt).expect("backup path");
-            fs::write(backup_path, "held").expect("backup collision file written");
-        }
-        assert!(matches!(
-            create_replacement_backup_path(&path, None),
-            Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
-        ));
-    }
-
     let dir_leaf = workspace.join("dir-leaf");
     fs::create_dir(&dir_leaf).expect("dir leaf written");
     assert_denied(
@@ -244,8 +232,28 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
     );
 }
 
+#[cfg(windows)]
 #[test]
-fn existing_leaf_replacement_restores_original_when_final_rename_fails() {
+fn windows_file_replacement_does_not_require_backup_names() {
+    let workspace = empty_workspace("windows-replacement-with-backup-names");
+    let path = workspace.join("file.txt");
+    fs::write(&path, "old").expect("file written");
+    for attempt in 0..100 {
+        let mut name = path.file_name().expect("file name").to_os_string();
+        name.push(format!(
+            ".watershed-{}-{attempt}.bak",
+            std::process::id()
+        ));
+        fs::write(path.with_file_name(name), "unrelated").expect("backup name occupied");
+    }
+
+    replace_existing_file_atomically(&path, b"new")
+        .expect("unrelated backup names cannot block replacement");
+    assert_eq!(fs::read_to_string(path).expect("replacement readable"), "new");
+}
+
+#[test]
+fn existing_leaf_replacement_preserves_original_when_rename_fails() {
     let workspace = empty_workspace("existing-leaf-replacement-restore");
     let path = workspace.join("file.txt");
     let missing_temp_path = replacement_temp_path(&path, 0).expect("temp path");
