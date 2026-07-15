@@ -66,13 +66,11 @@ The append-only session event log is authoritative for replay and catch-up. Loca
 
 ## M1 local append and live delivery (ADR-0059, ADR-0062)
 
-One asynchronous serial writer owns each session's event order. For every event or ordered micro-batch it:
+Runtime execution constructs each typed event, assigns its stable `event_id` and next per-session `sequence`, and canonically serializes it once. One asynchronous serial writer then owns each session's append order. For every event or ordered micro-batch it:
 
-1. constructs the typed event and validates it against the active protocol version;
-2. assigns or validates the stable `event_id`, then assigns the next per-session `sequence`;
-3. canonically serializes the event once;
-4. appends the canonical bytes to the session's append-only log and confirms the process-level write;
-5. updates the session's highest committed sequence and attempts a non-blocking live notification.
+1. validates the constructed event against the active protocol version and expected session order;
+2. appends the canonical bytes to the session's append-only log and confirms the process-level write;
+3. updates the session's highest committed sequence and attempts a non-blocking live notification.
 
 Notification never overtakes persistence. A failed write retains and notifies any complete event prefix already visible in the log, removes only the incomplete suffix, then stops the writer before later events can pass it. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status while leaving the prior log as a valid prefix.
 
