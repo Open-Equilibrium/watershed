@@ -38,7 +38,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Building Block** — The flexible, modular and recursive unit of configuration; every Tool, Instruction, Phase and Loop is a building block. Loops can contain loops.
 - **Building-block registry** — The resolver for addressable Tools, Instructions, Phases, Loops and Connections. In v0 it discovers one-block YAML entries under a configured registry root, resolves explicit by-name/id references, validates recursion and rejects duplicates, ambiguity and cycles.
-- **Canonical serialization** — Deterministic UTF-8 JSON of the parsed, schema-validated and registry-resolved building-block model; equivalent scripts serialize to the same bytes for review, audit and golden tests.
+- **Canonical serialization** — Deterministic UTF-8 JSON of the parsed, semantically validated and registry-resolved building-block model; equivalent scripts serialize to the same bytes for review, audit and golden tests.
 - **Tool** — A capability with a description, an exact command identity (predefined or own script), and allowed/forbidden parameters, directories and patterns. Nothing outside the declared command is permitted.
 - **Policy artifact** — The canonical JSON output produced by `core-policy` to show tool-scoped capabilities for a target sandbox backend, including deterministic object-key and array ordering. M1 enforces compatible policy deterministically in process; OS sandbox backends are post-M1.
 - **Predefined-command registry** — The trusted id-to-executable map used by predefined-command Tools. A script names a `command_id`; Loop Agent resolves it to one executable identity and combines it with the script's literal base `argv` without PATH lookup or shell parsing.

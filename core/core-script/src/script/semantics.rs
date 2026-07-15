@@ -56,7 +56,7 @@ fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
 
 fn validate_loop_semantics(loop_block: &LoopBlock) -> Result<(), SemanticValidationError> {
     if loop_block.phase_refs.is_empty() {
-        return Err(SemanticValidationError::LoopSchemaViolation {
+        return Err(SemanticValidationError::InvalidLoopDefinition {
             loop_id: loop_block.identity.id.clone(),
             message: "loop.phase_refs must contain at least one item".to_owned(),
         });
@@ -76,13 +76,13 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
                 });
             }
             if tool.script_runtime.as_ref() != Some(&ScriptRuntime::PosixSh) {
-                return Err(SemanticValidationError::ToolSchemaViolation {
+                return Err(SemanticValidationError::InvalidToolDefinition {
                     tool_id: tool.identity.id.clone(),
                     message: "own-script tools must set script_runtime: posix-sh".to_owned(),
                 });
             }
             if tool.script_body.is_none() {
-                return Err(SemanticValidationError::ToolSchemaViolation {
+                return Err(SemanticValidationError::InvalidToolDefinition {
                     tool_id: tool.identity.id.clone(),
                     message: "own-script tools must set script_body".to_owned(),
                 });
@@ -92,7 +92,7 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
                 .as_deref()
                 .is_some_and(|body| body.trim().is_empty())
             {
-                return Err(SemanticValidationError::ToolSchemaViolation {
+                return Err(SemanticValidationError::InvalidToolDefinition {
                     tool_id: tool.identity.id.clone(),
                     message: "own-script tools must set a non-empty script_body".to_owned(),
                 });
@@ -103,10 +103,10 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
             ToolCommand::Predefined { command_id, .. },
         ) => {
             if !is_valid_command_id(command_id) {
-                return Err(tool_schema_error(tool, "command_id must be a valid command id"));
+                return Err(invalid_tool(tool, "command_id must be a valid command id"));
             }
             if tool.script_runtime.is_some() || tool.script_body.is_some() {
-                return Err(SemanticValidationError::ToolSchemaViolation {
+                return Err(SemanticValidationError::InvalidToolDefinition {
                     tool_id: tool.identity.id.clone(),
                     message: "predefined-command tools must omit script_runtime and script_body"
                         .to_owned(),
@@ -123,7 +123,7 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
 
     for parameter in &tool.allowed_parameters {
         if !is_valid_allowed_parameter_name(&parameter.name) {
-            return Err(tool_schema_error(
+            return Err(invalid_tool(
                 tool,
                 "allowed_parameters.name must start with -- and contain only letters, digits, _ or -",
             ));
@@ -144,7 +144,7 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
             ParameterValueType::WorkspaceRelativePath => !has_values && !has_integer_bounds,
         };
         if !valid_shape {
-            return Err(tool_schema_error(
+            return Err(invalid_tool(
                 tool,
                 &format!(
                     "allowed parameter {} has fields incompatible with {:?}; string requires value_pattern and max_length, enum requires allowed_values",
@@ -155,7 +155,7 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
         if matches!(parameter.value_type, ParameterValueType::Integer)
             && matches!((parameter.min, parameter.max), (Some(min), Some(max)) if min > max)
         {
-            return Err(SemanticValidationError::ToolSchemaViolation {
+            return Err(SemanticValidationError::InvalidToolDefinition {
                 tool_id: tool.identity.id.clone(),
                 message: format!("integer parameter {} min must be <= max", parameter.name),
             });
@@ -165,7 +165,7 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
     if let NetworkPolicy::Declared { allow, .. } = &tool.network {
         for entry in allow {
             if entry.port == 0 {
-                return Err(tool_schema_error(tool, "network allow port must be at least 1"));
+                return Err(invalid_tool(tool, "network allow port must be at least 1"));
             }
             if !is_valid_canonical_cidr(&entry.cidr) {
                 return Err(SemanticValidationError::InvalidCanonicalCidr {
@@ -179,8 +179,8 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
     Ok(())
 }
 
-fn tool_schema_error(tool: &ToolBlock, message: &str) -> SemanticValidationError {
-    SemanticValidationError::ToolSchemaViolation {
+fn invalid_tool(tool: &ToolBlock, message: &str) -> SemanticValidationError {
+    SemanticValidationError::InvalidToolDefinition {
         tool_id: tool.identity.id.clone(),
         message: message.to_owned(),
     }

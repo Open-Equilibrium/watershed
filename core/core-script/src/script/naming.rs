@@ -260,8 +260,8 @@ pub enum SemanticValidationError {
         /// Declared tool kind.
         tool_kind: ToolKind,
     },
-    /// Tool-specific schema validation failed.
-    ToolSchemaViolation {
+    /// A tool definition violates its semantic constraints.
+    InvalidToolDefinition {
         /// Tool id.
         tool_id: String,
         /// Rejection reason.
@@ -281,8 +281,8 @@ pub enum SemanticValidationError {
         /// Tool id.
         tool_id: String,
     },
-    /// Loop-specific schema validation failed.
-    LoopSchemaViolation {
+    /// A loop definition violates its semantic constraints.
+    InvalidLoopDefinition {
         /// Loop id.
         loop_id: String,
         /// Rejection reason.
@@ -299,8 +299,8 @@ impl fmt::Display for SemanticValidationError {
                     "tool command shape does not match {tool_kind:?}: {tool_id}"
                 )
             }
-            Self::ToolSchemaViolation { tool_id, message } => {
-                write!(f, "tool schema violation for {tool_id}: {message}")
+            Self::InvalidToolDefinition { tool_id, message } => {
+                write!(f, "invalid tool definition {tool_id}: {message}")
             }
             Self::OwnScriptCommandIdMismatch { command, tool_id } => write!(
                 f,
@@ -309,8 +309,8 @@ impl fmt::Display for SemanticValidationError {
             Self::InvalidCanonicalCidr { cidr, tool_id } => {
                 write!(f, "invalid canonical CIDR for tool {tool_id}: {cidr}")
             }
-            Self::LoopSchemaViolation { loop_id, message } => {
-                write!(f, "loop schema violation for {loop_id}: {message}")
+            Self::InvalidLoopDefinition { loop_id, message } => {
+                write!(f, "invalid loop definition {loop_id}: {message}")
             }
         }
     }

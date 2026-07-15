@@ -467,13 +467,13 @@ fn registry_errors_report_sources_and_conversions() {
         semantic.to_string(),
         "tool command shape does not match OwnScript: bad-tool"
     );
-    let schema = SemanticValidationError::ToolSchemaViolation {
+    let definition = SemanticValidationError::InvalidToolDefinition {
         tool_id: "bad-tool".to_owned(),
-        message: "bad schema".to_owned(),
+        message: "bad definition".to_owned(),
     };
     assert_eq!(
-        schema.to_string(),
-        "tool schema violation for bad-tool: bad schema"
+        definition.to_string(),
+        "invalid tool definition bad-tool: bad definition"
     );
     let own_script = SemanticValidationError::OwnScriptCommandIdMismatch {
         command: "agent-echo".to_owned(),
@@ -491,9 +491,9 @@ fn registry_errors_report_sources_and_conversions() {
         invalid_cidr.to_string(),
         "invalid canonical CIDR for tool network-tool: 192.0.2.1/24"
     );
-    let semantic_registry = RegistryError::from(schema.clone());
+    let semantic_registry = RegistryError::from(definition.clone());
     assert!(std::error::Error::source(&semantic_registry).is_some());
-    assert_eq!(semantic_registry.to_string(), schema.to_string());
+    assert_eq!(semantic_registry.to_string(), definition.to_string());
 
     let canonical_registry = RegistryError::CanonicalJson(
         proto::canonical_json(&serde_json::json!({
@@ -517,7 +517,7 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
     let err = validate_tool_semantics(&tool).expect_err("script body is required");
     assert!(matches!(
         err,
-        SemanticValidationError::ToolSchemaViolation { message, .. }
+        SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("script_body")
     ));
 
@@ -526,7 +526,7 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
     let err = validate_tool_semantics(&tool).expect_err("blank script body is rejected");
     assert!(matches!(
         err,
-        SemanticValidationError::ToolSchemaViolation { message, .. }
+        SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("non-empty")
     ));
 
@@ -1654,7 +1654,7 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
 
     assert!(matches!(
         err,
-        SemanticValidationError::ToolSchemaViolation { message, .. }
+        SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("script_runtime")
     ));
 
@@ -1682,7 +1682,7 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
 
     assert!(matches!(
         err,
-        SemanticValidationError::ToolSchemaViolation { message, .. }
+        SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("omit script_runtime")
     ));
 }
