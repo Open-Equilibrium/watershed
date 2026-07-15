@@ -125,14 +125,14 @@ pub struct AllowedParameter {
     /// Allowed enum values when [`ParameterValueType::Enum`] is used.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_values: Vec<String>,
-    /// Optional string value pattern.
+    /// Pattern: required for string values, optional for workspace-relative paths.
     #[serde(
         default,
         deserialize_with = "deserialize_present",
         skip_serializing_if = "Option::is_none"
     )]
     pub value_pattern: Option<String>,
-    /// Optional maximum string length.
+    /// Maximum length: required for string values, optional for workspace-relative paths.
     #[serde(
         default,
         deserialize_with = "deserialize_present",

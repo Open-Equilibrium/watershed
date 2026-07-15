@@ -27,7 +27,7 @@ impl ContextModelProfile {
         }
     }
 
-    fn input_budget(self) -> Result<usize, RuntimeError> {
+    fn input_budget_tokens(self) -> Result<usize, RuntimeError> {
         self.context_limit
             .checked_sub(self.output_reserve)
             .and_then(|remaining| remaining.checked_sub(self.safety_margin))
@@ -96,22 +96,22 @@ fn compile_context(
     recent_interaction: Option<&ContextSource>,
     mut omitted: ContextOmissionCounts,
 ) -> Result<CompiledContext, RuntimeError> {
-    let input_budget = model.input_budget()?;
+    let input_budget_tokens = model.input_budget_tokens()?;
     let tier_zero_bytes = tier_zero
         .iter()
         .map(context_source_bytes)
         .collect::<Result<Vec<_>, RuntimeError>>()?;
     let mandatory_bytes = tier_zero_bytes.iter().map(Vec::len).sum::<usize>();
-    if mandatory_bytes > input_budget {
+    if mandatory_bytes > input_budget_tokens {
         return Err(RuntimeError::ContextBudgetExceeded {
-            input_budget,
+            input_budget_tokens,
             required_bytes: mandatory_bytes,
         });
     }
     let recent_bytes = recent_interaction.map(context_source_bytes).transpose()?;
     let include_recent = recent_bytes
         .as_ref()
-        .is_some_and(|bytes| mandatory_bytes + bytes.len() <= input_budget);
+        .is_some_and(|bytes| mandatory_bytes + bytes.len() <= input_budget_tokens);
     if recent_interaction.is_some() && !include_recent {
         omitted.recent_complete_interaction += 1;
     }

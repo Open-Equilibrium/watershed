@@ -465,7 +465,7 @@ fn registry_errors_report_sources_and_conversions() {
     };
     assert_eq!(
         semantic.to_string(),
-        "tool command shape does not match OwnScript: bad-tool"
+        "tool command shape does not match own-script: bad-tool"
     );
     let definition = SemanticValidationError::InvalidToolDefinition {
         tool_id: "bad-tool".to_owned(),
@@ -753,7 +753,11 @@ fn parser_enforces_registry_schema() {
     ];
 
     for (name, source) in cases {
-        assert!(parse_registry_block(name, &source).is_err(), "{name}");
+        let error = parse_registry_block(name, &source).expect_err(name);
+        assert!(
+            name != "missing-string-bound.yaml" || error.to_string().contains("value_type string"),
+            "{name}: {error}"
+        );
     }
 }
 

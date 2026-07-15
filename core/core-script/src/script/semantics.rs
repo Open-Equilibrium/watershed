@@ -131,6 +131,13 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
         let has_values = !parameter.allowed_values.is_empty();
         let has_string_bounds = parameter.value_pattern.is_some() || parameter.max_length.is_some();
         let has_integer_bounds = parameter.min.is_some() || parameter.max.is_some();
+        let value_type = match parameter.value_type {
+            ParameterValueType::Enum => "enum",
+            ParameterValueType::Integer => "integer",
+            ParameterValueType::None => "none",
+            ParameterValueType::String => "string",
+            ParameterValueType::WorkspaceRelativePath => "workspace-relative-path",
+        };
         let valid_shape = match parameter.value_type {
             ParameterValueType::String => {
                 !has_values
@@ -147,8 +154,8 @@ pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidatio
             return Err(invalid_tool(
                 tool,
                 &format!(
-                    "allowed parameter {} has fields incompatible with {:?}; string requires value_pattern and max_length, enum requires allowed_values",
-                    parameter.name, parameter.value_type
+                    "allowed parameter {} has fields incompatible with value_type {value_type}",
+                    parameter.name,
                 ),
             ));
         }

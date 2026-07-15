@@ -1,4 +1,4 @@
-/// Replays a persisted terminal or partial session log without modifying it.
+/// Replays a persisted terminal or non-terminal session log without modifying it.
 pub fn replay_session(
     workspace: impl AsRef<Path>,
     session_id: &str,

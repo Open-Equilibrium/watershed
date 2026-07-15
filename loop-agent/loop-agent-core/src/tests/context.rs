@@ -276,12 +276,17 @@ fn context_compiler_rejects_mandatory_content_over_budget() {
     )
     .expect_err("mandatory context must not be truncated");
 
+    let message = err.to_string();
+    assert!(
+        message.contains("canonical bytes (one estimated token per byte)"),
+        "{message}"
+    );
     assert!(matches!(
         err,
         RuntimeError::ContextBudgetExceeded {
             required_bytes,
-            input_budget
-        } if required_bytes == required && input_budget == required - 1
+            input_budget_tokens
+        } if required_bytes == required && input_budget_tokens == required - 1
     ));
 }
 
@@ -402,7 +407,7 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
 #[test]
 fn context_budget_error_maps_to_the_typed_runtime_failure_code() {
     let failure = runtime_failure_for_unhandled_error(&RuntimeError::ContextBudgetExceeded {
-        input_budget: 5,
+        input_budget_tokens: 5,
         required_bytes: 6,
     });
 

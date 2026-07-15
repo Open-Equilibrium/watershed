@@ -552,13 +552,13 @@ pub struct AllowedParameterPolicy {
     /// Optional maximum integer value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max: Option<i64>,
-    /// Optional maximum string length.
+    /// Maximum length: required for string values, optional for workspace-relative paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_length: Option<u16>,
     /// Optional minimum integer value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<i64>,
-    /// Optional string validation pattern.
+    /// Pattern: required for string values, optional for workspace-relative paths.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value_pattern: Option<String>,
     /// Accepted parameter value type.

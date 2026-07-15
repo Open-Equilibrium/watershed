@@ -294,9 +294,13 @@ impl fmt::Display for SemanticValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ToolCommandKindMismatch { tool_id, tool_kind } => {
+                let tool_kind = match tool_kind {
+                    ToolKind::PredefinedCommand => "predefined-command",
+                    ToolKind::OwnScript => "own-script",
+                };
                 write!(
                     f,
-                    "tool command shape does not match {tool_kind:?}: {tool_id}"
+                    "tool command shape does not match {tool_kind}: {tool_id}"
                 )
             }
             Self::InvalidToolDefinition { tool_id, message } => {

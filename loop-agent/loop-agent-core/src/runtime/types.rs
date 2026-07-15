@@ -75,7 +75,7 @@ pub enum EmitMode {
 /// Result of a run, replay, tail or resume operation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunOutput {
-    /// Number of events represented by this output.
+    /// Number of validated session events observed when the operation returned.
     pub event_count: usize,
     /// Whether the represented session is known to have failed.
     pub failed: bool,
@@ -83,7 +83,7 @@ pub struct RunOutput {
     pub session_id: String,
     /// Path to the persisted session log.
     pub session_path: PathBuf,
-    /// Captured stdout for non-streaming callers.
+    /// Rendered status or event output; empty for live-event operations.
     pub stdout: String,
 }
 
@@ -176,8 +176,8 @@ pub enum RuntimeError {
     Protocol(String),
     /// Mandatory provider context exceeded the selected model profile's input budget.
     ContextBudgetExceeded {
-        /// Available input budget under the selected model profile.
-        input_budget: usize,
+        /// Available input-token budget under the selected model profile.
+        input_budget_tokens: usize,
         /// Canonical mandatory context bytes required by the turn.
         required_bytes: usize,
     },
@@ -215,11 +215,11 @@ impl fmt::Display for RuntimeError {
             Self::Denied { message, .. } => f.write_str(message),
             Self::Protocol(message) | Self::Usage(message) => f.write_str(message),
             Self::ContextBudgetExceeded {
-                input_budget,
+                input_budget_tokens,
                 required_bytes,
             } => write!(
                 f,
-                "context_budget_exceeded: mandatory context requires {required_bytes} estimated tokens, input budget is {input_budget}"
+                "context_budget_exceeded: mandatory context is {required_bytes} canonical bytes (one estimated token per byte), input budget is {input_budget_tokens} tokens"
             ),
             Self::EventWriter(source) => write!(f, "event writer: {source}"),
             Self::ActiveSession {
