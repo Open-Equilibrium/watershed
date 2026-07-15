@@ -244,11 +244,7 @@ fn replace_script_output_atomically(
     ensure_real_workspace_write_path(workspace, target)?;
     if initial_leaf_existed {
         if ensure_writable_regular_leaf(path)? {
-            return replace_existing_leaf_from_temp(
-                path,
-                &temp_path,
-                Some(core_policy::DenyReasonCode::WriteDenied),
-            );
+            return replace_existing_leaf_from_temp(path, &temp_path);
         }
     } else {
         ensure_new_leaf_available(path)?;
@@ -264,11 +260,7 @@ fn replace_script_output_atomically(
     Ok(())
 }
 
-fn replace_existing_leaf_from_temp(
-    path: &Path,
-    temp_path: &Path,
-    _denied_reason: Option<core_policy::DenyReasonCode>,
-) -> Result<(), RuntimeError> {
+fn replace_existing_leaf_from_temp(path: &Path, temp_path: &Path) -> Result<(), RuntimeError> {
     if let Err(source) = fs::rename(temp_path, path) {
         let _ = fs::remove_file(temp_path);
         return Err(RuntimeError::Io {

@@ -204,6 +204,10 @@ fn list_sessions_handles_missing_dirs_and_filters_unsafe_names() {
     fs::write(session_dir.join("good001.jsonl"), "").expect("valid session file");
     fs::write(session_dir.join("Bad.jsonl"), "").expect("invalid session file");
     fs::write(session_dir.join("good002.txt"), "").expect("non-jsonl file");
+    fs::create_dir(session_dir.join("good003.jsonl")).expect("non-session directory");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("good001.jsonl", session_dir.join("good004.jsonl"))
+        .expect("non-session symlink");
 
     assert_eq!(
         list_sessions(&workspace).expect("sessions list"),

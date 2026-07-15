@@ -26,6 +26,13 @@ pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, Runtime
             continue;
         };
         if proto::is_valid_session_id(stem) {
+            let metadata = fs::symlink_metadata(&path).map_err(|source| RuntimeError::Io {
+                path: path.clone(),
+                source,
+            })?;
+            if has_windows_reparse_point(&metadata) || !metadata.is_file() {
+                continue;
+            }
             sessions.push(stem.to_owned());
         }
     }
