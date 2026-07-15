@@ -516,8 +516,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
             return;
         }
         let append_started_at = Instant::now();
-        let mut validated = self.validation.clone();
-        if let Err(error) = validate_batch(self.path, &mut validated, &pending) {
+        if let Err(error) = validate_batch(self.path, &mut self.validation, &pending) {
             reject_batch(pending, error);
             self.stopped = true;
             return;
@@ -533,10 +532,6 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
                 let committed_events = failure.committed_events;
                 let mut committed = pending;
                 let rejected = committed.split_off(committed_events);
-                let mut committed_validation = self.validation.clone();
-                validate_batch(self.path, &mut committed_validation, &committed)
-                    .expect("a validated batch prefix remains valid");
-                self.validation = committed_validation;
                 acknowledge_batch(
                     committed,
                     append_started_at.elapsed().as_nanos(),
@@ -560,7 +555,6 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
                 return;
             }
         };
-        self.validation = validated;
         let append_latency_nanos = append_started_at.elapsed().as_nanos();
         self.dirty.mark_dirty(Instant::now());
         acknowledge_batch(pending, append_latency_nanos, self.notifier.as_ref());

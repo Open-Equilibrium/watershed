@@ -190,31 +190,32 @@ impl ResolvedRegistry {
 
     /// Resolves a loop by id or unambiguous name.
     pub fn loop_block(&self, reference: &str) -> Option<&LoopBlock> {
-        self.named_block("loop", reference, &self.loops, |block| &block.identity.name)
+        self.named_block("loop", reference, &self.loops)
     }
 
     /// Resolves a phase by id or unambiguous name.
     pub fn phase_block(&self, reference: &str) -> Option<&PhaseBlock> {
-        self.named_block("phase", reference, &self.phases, |block| &block.identity.name)
+        self.named_block("phase", reference, &self.phases)
     }
 
     /// Resolves a tool by id or unambiguous name.
     pub fn tool_block(&self, reference: &str) -> Option<&ToolBlock> {
-        self.named_block("tool", reference, &self.tools, |block| &block.identity.name)
+        self.named_block("tool", reference, &self.tools)
+    }
+
+    /// Returns tool blocks in canonical id order.
+    pub fn tool_blocks(&self) -> impl Iterator<Item = &ToolBlock> {
+        self.tools.values()
     }
 
     /// Resolves an instruction by id or unambiguous name.
     pub fn instruction_block(&self, reference: &str) -> Option<&InstructionBlock> {
-        self.named_block("instruction", reference, &self.instructions, |block| {
-            &block.identity.name
-        })
+        self.named_block("instruction", reference, &self.instructions)
     }
 
     /// Resolves a connection by id or unambiguous name.
     pub fn connection_block(&self, reference: &str) -> Option<&ConnectionBlock> {
-        self.named_block("connection", reference, &self.connections, |block| {
-            &block.identity.name
-        })
+        self.named_block("connection", reference, &self.connections)
     }
 
     fn named_block<'a, T>(
@@ -222,19 +223,12 @@ impl ResolvedRegistry {
         kind: &'static str,
         reference: &str,
         blocks: &'a BTreeMap<String, T>,
-        name: impl Fn(&T) -> &str,
     ) -> Option<&'a T> {
         blocks.get(reference).or_else(|| {
             self.name_ids
                 .get(kind)
                 .and_then(|names| names.get(&normalize_string(reference)))
                 .and_then(|id| blocks.get(id))
-                .filter(|block| normalized_eq(name(block), reference))
-                .or_else(|| {
-                    blocks
-                        .values()
-                        .find(|block| normalized_eq(name(block), reference))
-                })
         })
     }
 

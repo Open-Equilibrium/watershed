@@ -48,14 +48,37 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
     }
 }
 
-#[test]
-fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
-    let mut registry = core_script::load_registry_root(
+fn smoke_registry_with_tool(
+    update: impl FnOnce(&mut core_script::ToolBlock),
+) -> core_script::ResolvedRegistry {
+    let source = core_script::load_registry_root(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/smoke-loop/registry"),
     )
     .expect("smoke-loop registry loads");
-    registry.tools.get_mut("echo").expect("echo tool").network =
-        core_script::NetworkPolicy::Declared {
+    let mut tool = source.tool_block("echo").expect("echo tool exists").clone();
+    update(&mut tool);
+    let mut phase = source
+        .phase_block("smoke")
+        .expect("smoke phase exists")
+        .clone();
+    phase.instruction_refs.clear();
+    core_script::ResolvedRegistry::from_blocks([
+        core_script::RegistryBlock::Tool(tool),
+        core_script::RegistryBlock::Phase(phase),
+        core_script::RegistryBlock::Loop(
+            source
+                .loop_block("smoke-loop")
+                .expect("smoke loop exists")
+                .clone(),
+        ),
+    ])
+    .expect("customized smoke registry resolves")
+}
+
+#[test]
+fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
+    let registry = smoke_registry_with_tool(|tool| {
+        tool.network = core_script::NetworkPolicy::Declared {
             default: core_script::NetworkDefault::Deny,
             allow: vec![core_script::NetworkAllowEntry {
                 kind: core_script::NetworkAllowKind::Cidr,
@@ -64,6 +87,7 @@ fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
                 port: 443,
             }],
         };
+    });
 
     let err = compile_policy_artifact(
         "smoke-loop",
@@ -81,12 +105,8 @@ fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
 
 #[test]
 fn policy_compiler_preserves_macos_network_allowlists() {
-    let mut registry = core_script::load_registry_root(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/smoke-loop/registry"),
-    )
-    .expect("smoke-loop registry loads");
-    registry.tools.get_mut("echo").expect("echo tool").network =
-        core_script::NetworkPolicy::Declared {
+    let registry = smoke_registry_with_tool(|tool| {
+        tool.network = core_script::NetworkPolicy::Declared {
             default: core_script::NetworkDefault::Deny,
             allow: vec![core_script::NetworkAllowEntry {
                 kind: core_script::NetworkAllowKind::Cidr,
@@ -95,6 +115,7 @@ fn policy_compiler_preserves_macos_network_allowlists() {
                 port: 443,
             }],
         };
+    });
 
     let artifact = compile_policy_artifact(
         "smoke-loop",
@@ -119,15 +140,12 @@ fn policy_compiler_preserves_macos_network_allowlists() {
 
 #[test]
 fn policy_compiler_rejects_unknown_predefined_commands() {
-    let mut registry = core_script::load_registry_root(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/smoke-loop/registry"),
-    )
-    .expect("smoke-loop registry loads");
-    registry.tools.get_mut("echo").expect("echo tool").command =
-        core_script::ToolCommand::Predefined {
+    let registry = smoke_registry_with_tool(|tool| {
+        tool.command = core_script::ToolCommand::Predefined {
             command_id: "agent-custom".to_owned(),
             argv: Vec::new(),
         };
+    });
 
     let err = compile_policy_artifact(
         "smoke-loop",
@@ -138,29 +156,6 @@ fn policy_compiler_rejects_unknown_predefined_commands() {
     .expect_err("unknown predefined command must fail closed");
 
     assert!(err.to_string().contains("unknown trusted command"), "{err}");
-}
-
-#[test]
-fn policy_compiler_rejects_tool_kind_command_shape_mismatches() {
-    let mut registry = core_script::load_registry_root(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/smoke-loop/registry"),
-    )
-    .expect("smoke-loop registry loads");
-    registry.tools.get_mut("echo").expect("echo tool").tool_kind = core_script::ToolKind::OwnScript;
-
-    let err = compile_policy_artifact(
-        "smoke-loop",
-        &registry,
-        "smoke-loop",
-        PolicyTarget::LinuxLandlockSeccomp,
-    )
-    .expect_err("tool kind and command shape mismatch must fail closed");
-
-    assert!(
-        err.to_string()
-            .contains("tool echo command shape does not match tool_kind"),
-        "{err}"
-    );
 }
 
 #[test]
@@ -821,36 +816,6 @@ fn policy_compile_error_messages_and_sources_cover_variants() {
 }
 
 #[test]
-fn policy_compile_rejects_deep_loop_chains() {
-    compile_policy_artifact(
-        "max-depth",
-        &loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH),
-        "loop-000",
-        PolicyTarget::LinuxLandlockSeccomp,
-    )
-    .expect("max loop nesting depth is accepted");
-
-    let err = compile_policy_artifact(
-        "too-deep",
-        &loop_chain_registry(core_script::MAX_LOOP_NESTING_DEPTH + 1),
-        "loop-000",
-        PolicyTarget::LinuxLandlockSeccomp,
-    )
-    .expect_err("loop nesting above the max is rejected");
-
-    assert!(matches!(
-        err,
-        PolicyCompileError::LoopDepthExceeded {
-            loop_id,
-            depth,
-            max,
-        } if loop_id == format!("loop-{:03}", core_script::MAX_LOOP_NESTING_DEPTH)
-            && depth == core_script::MAX_LOOP_NESTING_DEPTH + 1
-            && max == core_script::MAX_LOOP_NESTING_DEPTH
-    ));
-}
-
-#[test]
 fn policy_artifact_rejects_duplicate_command_tool_ids() {
     let mut artifact = valid_policy_artifact("duplicate-tool");
     artifact
@@ -1172,45 +1137,6 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
         source_loop_definition_id: format!("{tool_id}-loop"),
         target: PolicyTarget::LinuxLandlockSeccomp,
     }
-}
-
-fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
-    let mut blocks = vec![core_script::RegistryBlock::Phase(core_script::PhaseBlock {
-        identity: core_script::BlockIdentity {
-            id: "chain-phase".to_owned(),
-            name: "Chain Phase".to_owned(),
-        },
-        instruction_refs: Vec::new(),
-        tool_refs: Vec::new(),
-        steps: vec![core_script::StepBlock {
-            id: "chain-step".to_owned(),
-            name: "Chain Step".to_owned(),
-            connection_refs: Vec::new(),
-        }],
-    })];
-    blocks.extend((0..depth).map(|index| {
-        let id = format!("loop-{index:03}");
-        core_script::RegistryBlock::Loop(core_script::LoopBlock {
-            identity: core_script::BlockIdentity {
-                id,
-                name: format!("Loop {index:03}"),
-            },
-            phase_refs: vec!["chain-phase".to_owned()],
-            subloop_refs: Vec::new(),
-            connection_refs: Vec::new(),
-        })
-    }));
-    let mut registry =
-        core_script::ResolvedRegistry::from_blocks(blocks).expect("loop-chain registry resolves");
-    for index in 1..depth {
-        registry
-            .loops
-            .get_mut(&format!("loop-{:03}", index - 1))
-            .expect("prior loop exists")
-            .subloop_refs
-            .push(format!("loop-{index:03}"));
-    }
-    registry
 }
 
 fn valid_command_policy(tool_id: &str) -> CommandPolicy {

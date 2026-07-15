@@ -42,7 +42,7 @@ fn compile_summarize_turn_context(
             parent_loop_id: None,
         },
         "contextdirection001",
-        &[],
+        &ContextHistory::default(),
     )
     .expect("context compiles")
 }
@@ -55,6 +55,13 @@ fn context_source_content(compiled: &CompiledContext, source_id: &str) -> serde_
         .find(|source| source["source_id"] == source_id)
         .unwrap_or_else(|| panic!("missing {source_id} context source"))["content"]
         .clone()
+}
+
+fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
+    let path = workspace.join("registry").join(path);
+    let text = fs::read_to_string(&path).expect("registry fixture reads");
+    assert!(text.contains(before), "registry fixture contains target text");
+    fs::write(path, text.replacen(before, after, 1)).expect("registry fixture updates");
 }
 
 fn prefix_before_message_completed(stream: &str) -> String {
@@ -149,15 +156,18 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
 
 #[test]
 fn typed_connection_inputs_exclude_outbound_step_connections() {
-    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let workspace = workspace_copy("hello-loop");
+    let registry = core_script::load_registry_root(workspace.join("registry"))
+        .expect("fixture registry loads");
     let with_outbound_reference = compile_summarize_turn_context(&registry, "hello-loop#1");
-    let mut inbound_reference_only = registry.clone();
-    inbound_reference_only
-        .phases
-        .get_mut("summarize")
-        .expect("phase exists")
-        .steps[0]
-        .connection_refs = vec!["inspect-trigger".to_owned()];
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "connection_refs: [inspect-trigger, summary-refresh]",
+        "connection_refs: [inspect-trigger]",
+    );
+    let inbound_reference_only = core_script::load_registry_root(workspace.join("registry"))
+        .expect("updated registry resolves");
     let without_outbound_reference =
         compile_summarize_turn_context(&inbound_reference_only, "hello-loop#1");
 
@@ -180,27 +190,27 @@ fn typed_connection_inputs_exclude_outbound_step_connections() {
 
 #[test]
 fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order() {
-    let (mut registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
-    registry
-        .connections
-        .get_mut("inspect-trigger")
-        .expect("trigger exists")
-        .to_ref = "Summarize.write".to_owned();
-    registry
-        .connections
-        .get_mut("inspect-data")
-        .expect("data connection exists")
-        .to_ref = "summarize.write".to_owned();
-    registry
-        .phases
-        .get_mut("summarize")
-        .expect("phase exists")
-        .steps[0]
-        .connection_refs = vec![
-            "InspectTrigger".to_owned(),
-            "inspect-data".to_owned(),
-            "SummaryRefresh".to_owned(),
-        ];
+    let workspace = workspace_copy("hello-loop");
+    replace_registry_text(
+        &workspace,
+        "connections/inspect-trigger.yaml",
+        "to_ref: summarize.write",
+        "to_ref: Summarize.write",
+    );
+    replace_registry_text(
+        &workspace,
+        "connections/inspect-data.yaml",
+        "to_ref: inspect.gather",
+        "to_ref: summarize.write",
+    );
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "connection_refs: [inspect-trigger, summary-refresh]",
+        "connection_refs: [InspectTrigger, inspect-data, SummaryRefresh]",
+    );
+    let registry = core_script::load_registry_root(workspace.join("registry"))
+        .expect("updated registry resolves");
     let declared = compile_summarize_turn_context(&registry, "hello-loop#1");
 
     let inputs = context_source_content(&declared, "typed-connection-inputs");
@@ -208,13 +218,14 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
     assert_eq!(inputs[0]["connection"]["id"], "inspect-trigger");
     assert_eq!(inputs[1]["connection"]["id"], "inspect-data");
 
-    registry
-        .phases
-        .get_mut("summarize")
-        .expect("phase exists")
-        .steps[0]
-        .connection_refs
-        .swap(0, 1);
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "connection_refs: [InspectTrigger, inspect-data, SummaryRefresh]",
+        "connection_refs: [inspect-data, InspectTrigger, SummaryRefresh]",
+    );
+    let registry = core_script::load_registry_root(workspace.join("registry"))
+        .expect("reordered registry resolves");
     let reordered = compile_summarize_turn_context(&registry, "hello-loop#1");
     let reordered_inputs = context_source_content(&reordered, "typed-connection-inputs");
     assert_eq!(reordered_inputs[0]["connection"]["id"], "inspect-data");
@@ -275,7 +286,7 @@ fn context_compiler_rejects_mandatory_content_over_budget() {
 }
 
 #[test]
-fn context_compiler_selects_the_latest_interaction_and_omits_it_whole() {
+fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     let events = [
         (EventType::MessageDelta, "old"),
         (EventType::MessageCompleted, "old"),
@@ -301,7 +312,11 @@ fn context_compiler_selects_the_latest_interaction_and_omits_it_whole() {
         )
     })
     .collect::<Vec<_>>();
-    let (recent, omitted) = context_continuity(&events).expect("continuity compiles");
+    let mut history = ContextHistory::default();
+    for event in &events {
+        history.record(event);
+    }
+    let (recent, omitted) = history.continuity().expect("continuity compiles");
     let recent = recent.expect("latest complete interaction is selected");
     assert_eq!(recent.source_id, "interaction-4");
     assert_eq!(recent.content["deltas"][0]["content_delta"], "recent");
@@ -400,19 +415,23 @@ fn context_budget_error_maps_to_the_typed_runtime_failure_code() {
 
 #[test]
 fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
-    let (mut registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    registry
-        .instructions
-        .get_mut("inspect-input")
-        .expect("instruction exists")
-        .prompt = "x".repeat(STUB_MODEL_CONTEXT_LIMIT);
+    let workspace = workspace_copy("hello-loop");
+    let (_, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    replace_registry_text(
+        &workspace,
+        "instructions/inspect-input.yaml",
+        "prompt: \"Read the selected input and report only deterministic facts.\"",
+        &format!("prompt: \"{}\"", "x".repeat(STUB_MODEL_CONTEXT_LIMIT)),
+    );
+    let registry = core_script::load_registry_root(workspace.join("registry"))
+        .expect("oversized registry resolves");
     let loop_block = registry
         .loop_block("hello-loop")
         .expect("loop exists")
         .clone();
 
     let runtime = execute_loop(
-        Path::new("."),
+        &workspace,
         &registry,
         &policy,
         &loop_block,

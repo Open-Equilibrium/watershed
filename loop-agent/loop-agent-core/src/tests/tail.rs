@@ -154,6 +154,15 @@ fn reader_rejects_partial_bytes_after_a_terminal_event() {
         err,
         RuntimeError::Protocol(message) if message.contains("partial line after a terminal event")
     ));
+    fs::write(&path, format!("{started}{completed}"))
+        .expect("uncommitted partial suffix removed");
+    assert_eq!(
+        reader
+            .read_after(0)
+            .expect("reader recovers after uncommitted suffix removal")
+            .len(),
+        2
+    );
 }
 
 #[test]

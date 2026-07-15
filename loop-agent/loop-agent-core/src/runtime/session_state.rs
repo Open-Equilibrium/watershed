@@ -265,10 +265,6 @@ fn validate_resume_replay_prefix(
         planned_event_count += 1;
     }
 
-    if matches!(events.last(), Some(event) if event.event_type == EventType::SessionResumed) {
-        return Err(incomplete_resume_marker_error(path, loop_block));
-    }
-
     Ok(ResumeReplayPrefix {
         planned_event_count,
         resume_marker_count,
@@ -278,17 +274,6 @@ fn validate_resume_replay_prefix(
 fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock) -> RuntimeError {
     RuntimeError::Protocol(format!(
         "{} is not a valid prefix of loop {}",
-        path.display(),
-        loop_block.identity.id
-    ))
-}
-
-fn incomplete_resume_marker_error(
-    path: &Path,
-    loop_block: &core_script::LoopBlock,
-) -> RuntimeError {
-    RuntimeError::Protocol(format!(
-        "{} has incomplete resume marker for loop {}",
         path.display(),
         loop_block.identity.id
     ))

@@ -98,6 +98,7 @@ struct RuntimeEventBuilder<'a> {
     clock: EventClock,
     context_manifests: Vec<ContextManifest>,
     events: Vec<EventEnvelope>,
+    history: ContextHistory,
     loop_counter: u64,
     message_counter: u64,
     sequence: u64,
@@ -112,6 +113,7 @@ impl<'a> RuntimeEventBuilder<'a> {
             clock,
             context_manifests: Vec::new(),
             events: Vec::new(),
+            history: ContextHistory::default(),
             loop_counter: 0,
             message_counter: 0,
             sequence: 0,
@@ -217,6 +219,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         }
         self.sequence = sequence;
         self.stream_bytes = next_stream_bytes;
+        self.history.record(&event);
         self.events.push(event);
         Ok(())
     }
@@ -568,7 +571,7 @@ fn emit_phase(
                 step,
                 invocation,
                 &builder.session_id,
-                &builder.events,
+                &builder.history,
             )?;
             let content = stub_message_content(
                 context.registry,

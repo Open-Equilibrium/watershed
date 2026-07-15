@@ -363,7 +363,6 @@ impl PayloadValidator<'_> {
     }
 }
 
-#[derive(Clone)]
 struct SessionAppendValidationState {
     expected_session_id: Option<String>,
     stream_session_id: Option<String>,
@@ -404,7 +403,9 @@ impl SessionAppendValidationState {
         expected_session_id: &str,
         prior_events: &[EventEnvelope],
     ) -> Result<Self, RuntimeError> {
-        let first = prior_events.first().expect("prior events are non-empty");
+        let Some(first) = prior_events.first() else {
+            return Ok(Self::empty(expected_session_id));
+        };
         if first.event_type != EventType::SessionStarted {
             return Err(RuntimeError::Protocol(format!(
                 "{} line 1 must start with session.started",
@@ -629,7 +630,7 @@ fn validate_session_log_text(
     Ok(events)
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct SessionLifecycleState {
     loops: LifecycleTracker<String>,
     loop_parents: BTreeMap<String, Option<String>>,
@@ -967,7 +968,6 @@ fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
     ))
 }
 
-#[derive(Clone)]
 struct LifecycleTracker<K: Ord> {
     started: BTreeSet<K>,
     terminal: BTreeMap<K, usize>,

@@ -11,6 +11,51 @@ fn empty_workspace(label: &str) -> PathBuf {
     target
 }
 
+fn workspace_with_later_invalid_own_script_path() -> PathBuf {
+    let workspace = workspace_copy("hello-loop");
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
+    fs::write(
+        &tool_path,
+        source.replace(
+            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+            "printf 'partial\\n' > out/partial.txt",
+        ),
+    )
+    .expect("first tool fixture rewritten");
+    fs::write(
+        workspace.join("registry/tools/bad-write.yaml"),
+        r#"tool:
+  id: bad-write
+  name: BadWrite
+  tool_kind: own-script
+  command: script:bad-write
+  script_runtime: posix-sh
+  script_body: |
+    printf 'later\n' > out/summary.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#,
+    )
+    .expect("bad tool fixture written");
+    let phase_path = workspace.join("registry/phases/summarize.yaml");
+    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+    fs::write(
+        &phase_path,
+        source.replace(
+            "tool_refs: [write-summary]",
+            "tool_refs: [write-summary, bad-write]",
+        ),
+    )
+    .expect("phase fixture rewritten");
+    fs::create_dir_all(workspace.join("out/summary.txt"))
+        .expect("conflicting output directory");
+    workspace
+}
+
 #[cfg(windows)]
 fn create_windows_junction(link: &Path, target: &Path) {
     let output = std::process::Command::new("cmd")
@@ -437,60 +482,6 @@ fn fixture_runtime_policy(
     )
     .expect("fixture policy compiles");
     (registry, policy)
-}
-
-fn loop_chain_registry(depth: usize) -> core_script::ResolvedRegistry {
-    let mut blocks = (0..depth)
-        .map(|index| {
-            let id = format!("loop-{index:03}");
-            core_script::RegistryBlock::Loop(core_script::LoopBlock {
-                identity: core_script::BlockIdentity {
-                    id,
-                    name: format!("Loop {index:03}"),
-                },
-                phase_refs: vec!["phase".to_owned()],
-                subloop_refs: Vec::new(),
-                connection_refs: Vec::new(),
-            })
-        })
-        .collect::<Vec<_>>();
-    blocks.push(core_script::RegistryBlock::Phase(
-        core_script::PhaseBlock {
-            identity: core_script::BlockIdentity {
-                id: "phase".to_owned(),
-                name: "Phase".to_owned(),
-            },
-            instruction_refs: Vec::new(),
-            steps: Vec::new(),
-            tool_refs: Vec::new(),
-        },
-    ));
-    let mut registry =
-        core_script::ResolvedRegistry::from_blocks(blocks).expect("loop-chain registry resolves");
-    for index in 1..depth {
-        registry
-            .loops
-            .get_mut(&format!("loop-{:03}", index - 1))
-            .expect("prior loop exists")
-            .subloop_refs
-            .push(format!("loop-{index:03}"));
-    }
-    registry
-}
-
-fn empty_policy_artifact(loop_id: &str) -> core_policy::PolicyArtifact {
-    core_policy::PolicyArtifact {
-        commands: Vec::new(),
-        fixture_name: loop_id.to_owned(),
-        phase_scope: Vec::new(),
-        policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
-        runtime_limits: core_policy::RuntimeLimits {
-            headless: true,
-            timeout_ms: 30_000,
-        },
-        source_loop_definition_id: loop_id.to_owned(),
-        target: core_policy::PolicyTarget::LinuxLandlockSeccomp,
-    }
 }
 
 fn session_event_line(

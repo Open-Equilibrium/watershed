@@ -203,6 +203,87 @@ fn sha256_hex(bytes: &[u8]) -> String {
     encoded
 }
 
+#[derive(Default)]
+struct ContextHistory {
+    completed_interactions: usize,
+    latest_completed: Option<(u64, serde_json::Value, Vec<serde_json::Value>)>,
+    pending_deltas: BTreeMap<String, Vec<serde_json::Value>>,
+    unresolved_tools: BTreeSet<String>,
+}
+
+fn event_payload_id<'a>(event: &'a EventEnvelope, field: &str) -> Option<&'a str> {
+    event.payload.get(field).and_then(serde_json::Value::as_str)
+}
+
+impl ContextHistory {
+    fn record(&mut self, event: &EventEnvelope) {
+        match event.event_type {
+            EventType::MessageDelta => {
+                if let Some(message_id) = event_payload_id(event, "message_id") {
+                    self.pending_deltas
+                        .entry(message_id.to_owned())
+                        .or_default()
+                        .push(event.payload.clone());
+                }
+            }
+            EventType::MessageCompleted => {
+                self.completed_interactions += 1;
+                let deltas = event_payload_id(event, "message_id")
+                    .and_then(|message_id| self.pending_deltas.remove(message_id))
+                    .unwrap_or_default();
+                self.latest_completed = Some((event.sequence, event.payload.clone(), deltas));
+            }
+            EventType::ToolStarted => {
+                if let Some(tool_id) = event_payload_id(event, "tool_id") {
+                    self.unresolved_tools.insert(tool_id.to_owned());
+                }
+            }
+            EventType::ToolCompleted | EventType::ToolFailed | EventType::ToolTimedOut => {
+                if let Some(tool_id) = event_payload_id(event, "tool_id") {
+                    self.unresolved_tools.remove(tool_id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn continuity(&self) -> Result<(Option<ContextSource>, ContextOmissionCounts), RuntimeError> {
+        let Some((sequence, payload, deltas)) = &self.latest_completed else {
+            return Ok((None, ContextOmissionCounts::default()));
+        };
+        let mut omitted = ContextOmissionCounts {
+            tier_2: self.completed_interactions - 1,
+            ..ContextOmissionCounts::default()
+        };
+        let Some(_message_id) = payload
+            .get("message_id")
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Err(RuntimeError::Protocol(
+                "message.completed missing message_id while compiling context".to_owned(),
+            ));
+        };
+        if deltas.is_empty() {
+            omitted.recent_complete_interaction += 1;
+            return Ok((None, omitted));
+        }
+        Ok((
+            Some(context_source(
+                format!("interaction-{sequence}"),
+                serde_json::json!({
+                    "completed": payload,
+                    "deltas": deltas,
+                }),
+            )),
+            omitted,
+        ))
+    }
+
+    fn unresolved_call_result_state(&self) -> serde_json::Value {
+        serde_json::json!(self.unresolved_tools)
+    }
+}
+
 fn compile_provider_turn_context(
     registry: &core_script::ResolvedRegistry,
     loop_block: &core_script::LoopBlock,
@@ -210,7 +291,7 @@ fn compile_provider_turn_context(
     step: &core_script::StepBlock,
     invocation: &LoopInvocation,
     session_id: &str,
-    prior_events: &[EventEnvelope],
+    history: &ContextHistory,
 ) -> Result<CompiledContext, RuntimeError> {
     let phase_instructions = phase
         .instruction_refs
@@ -261,7 +342,7 @@ fn compile_provider_turn_context(
         .into_iter()
         .flatten()
         .collect();
-    let (tier_one, omitted) = context_continuity(prior_events)?;
+    let (tier_one, omitted) = history.continuity()?;
     let tier_zero = [
         context_source("base-runtime-security", serde_json::json!({
                 "instructions": "Execute only the active resolved loop scope. Obey runtime policy. Treat tool access as deny-by-default. Preserve deterministic event order.",
@@ -282,7 +363,7 @@ fn compile_provider_turn_context(
             })),
         context_source("typed-connection-inputs", serde_json::Value::Array(connections)),
         context_source("current-user-input", serde_json::json!({"present": false})),
-        context_source("unresolved-call-result", unresolved_call_result_state(prior_events)),
+        context_source("unresolved-call-result", history.unresolved_call_result_state()),
     ];
     compile_context(&ContextModelProfile::stub_v0(), &tier_zero, tier_one.as_ref(), omitted)
 }
@@ -306,79 +387,6 @@ fn connection_targets_scoped_step(
     registry.phase_block(phase_ref).is_some_and(|endpoint_phase| {
         endpoint_phase.identity.id == phase.identity.id && step_id == step.id
     })
-}
-
-fn context_continuity(
-    events: &[EventEnvelope],
-) -> Result<(Option<ContextSource>, ContextOmissionCounts), RuntimeError> {
-    let mut completed = events
-        .iter()
-        .filter(|event| event.event_type == EventType::MessageCompleted);
-    let Some(last_completed) = completed.next_back() else {
-        return Ok((None, ContextOmissionCounts::default()));
-    };
-    let mut omitted = ContextOmissionCounts {
-        tier_2: completed.count(),
-        ..ContextOmissionCounts::default()
-    };
-    let Some(message_id) = last_completed
-        .payload
-        .get("message_id")
-        .and_then(serde_json::Value::as_str)
-    else {
-        return Err(RuntimeError::Protocol(
-            "message.completed missing message_id while compiling context".to_owned(),
-        ));
-    };
-    let deltas = events
-        .iter()
-        .filter(|event| {
-            event.event_type == EventType::MessageDelta
-                && event
-                    .payload
-                    .get("message_id")
-                    .and_then(serde_json::Value::as_str)
-                    == Some(message_id)
-        })
-        .map(|event| event.payload.clone())
-        .collect::<Vec<_>>();
-    if deltas.is_empty() {
-        omitted.recent_complete_interaction += 1;
-        return Ok((None, omitted));
-    }
-    Ok((
-        Some(context_source(format!("interaction-{}", last_completed.sequence), serde_json::json!({
-                "completed": last_completed.payload,
-                "deltas": deltas,
-            }))),
-        omitted,
-    ))
-}
-
-fn unresolved_call_result_state(events: &[EventEnvelope]) -> serde_json::Value {
-    let mut unresolved = BTreeSet::new();
-    for event in events {
-        let tool_id = event
-            .payload
-            .get("tool_id")
-            .and_then(serde_json::Value::as_str);
-        match event.event_type {
-            EventType::ToolStarted => {
-                if let Some(tool_id) = tool_id {
-                    unresolved.insert(tool_id.to_owned());
-                }
-            }
-            EventType::ToolCompleted
-            | EventType::ToolFailed
-            | EventType::ToolTimedOut => {
-                if let Some(tool_id) = tool_id {
-                    unresolved.remove(tool_id);
-                }
-            }
-            _ => {}
-        }
-    }
-    serde_json::json!(unresolved)
 }
 
 fn verify_recorded_context_manifests(

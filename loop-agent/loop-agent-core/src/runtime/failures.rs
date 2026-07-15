@@ -117,8 +117,7 @@ fn sandbox_out_of_phase_failure(
         return None;
     }
     let unavailable_sentinel = registry
-        .tools
-        .values()
+        .tool_blocks()
         .filter(|tool| {
             sandbox_negative_operation_for_tool(tool).is_some()
                 && !policy_phase_contains_tool(policy, &phase.identity.id, &tool.identity.id)

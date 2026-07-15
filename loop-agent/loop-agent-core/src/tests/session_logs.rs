@@ -1472,7 +1472,7 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
 }
 
 #[test]
-fn resume_rejects_prior_resume_marker_tail_without_rerunning_tool() {
+fn resume_retries_prior_resume_marker_tail_without_duplicate_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
@@ -1495,62 +1495,44 @@ fn resume_rejects_prior_resume_marker_tail_without_rerunning_tool() {
     fs::write(&path, &before).expect("prior resume marker written");
     write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
 
-    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
-        .expect_err("marker-only resume tail must fail closed");
+    let output = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect("marker-only resume tail retries from the durable prefix");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message.contains("incomplete resume marker")
-    ));
+    assert!(!output.failed);
+    let resumed = fs::read_to_string(&path).expect("resumed log remains readable");
+    let events =
+        validate_session_log_text(&path, "hello001", &resumed).expect("resumed log remains valid");
     assert_eq!(
-        fs::read_to_string(&path).expect("marker-only log remains readable"),
-        before
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::SessionResumed)
+            .count(),
+        2
     );
-    assert!(!workspace.join("out/summary.txt").exists());
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| {
+                event.event_type == EventType::ToolStarted
+                    && event
+                        .payload
+                        .get("tool_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("write-summary")
+            })
+            .count(),
+        1
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary written once"),
+        "hello\n"
+    );
+    assert!(stream_is_completed(&events));
 }
 
 #[test]
 fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
-    let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "printf 'partial\\n' > out/partial.txt",
-        ),
-    )
-    .expect("first tool fixture rewritten");
-    fs::write(
-        workspace.join("registry/tools/bad-write.yaml"),
-        r#"tool:
-  id: bad-write
-  name: BadWrite
-  tool_kind: own-script
-  command: script:bad-write
-  script_runtime: posix-sh
-  script_body: |
-    printf 'later\n' > out/summary.txt
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("bad tool fixture written");
-    let phase_path = workspace.join("registry/phases/summarize.yaml");
-    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        source.replace(
-            "tool_refs: [write-summary]",
-            "tool_refs: [write-summary, bad-write]",
-        ),
-    )
-    .expect("phase fixture rewritten");
-    fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
+    let workspace = workspace_with_later_invalid_own_script_path();
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("hello001.jsonl");

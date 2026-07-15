@@ -173,12 +173,23 @@ impl SessionEventReader {
         let (appended, next_validation) = if appended_text.is_empty() {
             (Vec::new(), None)
         } else {
-            let mut validation = self.validation.clone();
-            let appended = validation.validate_appended(&self.path, appended_text)?;
-            (appended, Some(validation))
+            let mut validation = std::mem::replace(
+                &mut self.validation,
+                SessionAppendValidationState::unscoped(),
+            );
+            match validation.validate_appended(&self.path, appended_text) {
+                Ok(appended) => (appended, Some(validation)),
+                Err(error) => {
+                    self.restore_validation(&validation);
+                    return Err(error);
+                }
+            }
         };
         let validation = next_validation.as_ref().unwrap_or(&self.validation);
         if has_partial_line && validation.terminal_line.is_some() {
+            if let Some(validation) = &next_validation {
+                self.restore_validation(validation);
+            }
             return Err(RuntimeError::Protocol(format!(
                 "{} contains a partial line after a terminal event",
                 self.path.display()
@@ -186,6 +197,9 @@ impl SessionEventReader {
         }
         let latest_sequence = validation.previous_sequence;
         if cursor > latest_sequence {
+            if let Some(validation) = &next_validation {
+                self.restore_validation(validation);
+            }
             return Err(RuntimeError::Protocol(format!(
                 "{} no longer contains processed sequence {cursor}",
                 self.path.display()
@@ -202,6 +216,16 @@ impl SessionEventReader {
             .filter(|event| event.sequence > cursor)
             .cloned()
             .collect())
+    }
+
+    fn restore_validation(&mut self, candidate: &SessionAppendValidationState) {
+        let session_id = candidate
+            .expected_session_id
+            .as_deref()
+            .expect("session readers always validate one session");
+        self.validation =
+            SessionAppendValidationState::from_prior_events(&self.path, session_id, &self.observed)
+                .expect("cached observed events remain valid");
     }
 }
 

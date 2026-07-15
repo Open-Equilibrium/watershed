@@ -342,15 +342,15 @@ pub struct LoopBlock {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ResolvedRegistry {
     /// Connection blocks keyed by id.
-    pub connections: BTreeMap<String, ConnectionBlock>,
+    connections: BTreeMap<String, ConnectionBlock>,
     /// Instruction blocks keyed by id.
-    pub instructions: BTreeMap<String, InstructionBlock>,
+    instructions: BTreeMap<String, InstructionBlock>,
     /// Loop blocks keyed by id.
-    pub loops: BTreeMap<String, LoopBlock>,
+    loops: BTreeMap<String, LoopBlock>,
     /// Phase blocks keyed by id.
-    pub phases: BTreeMap<String, PhaseBlock>,
+    phases: BTreeMap<String, PhaseBlock>,
     /// Tool blocks keyed by id.
-    pub tools: BTreeMap<String, ToolBlock>,
+    tools: BTreeMap<String, ToolBlock>,
     #[serde(skip)]
     name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
 }

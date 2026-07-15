@@ -49,10 +49,6 @@ fn normalize_string(value: &str) -> String {
     value.nfc().collect()
 }
 
-fn normalized_eq(left: &str, right: &str) -> bool {
-    left.nfc().eq(right.nfc())
-}
-
 /// Error returned while loading, resolving or serializing a registry.
 #[derive(Debug)]
 pub enum RegistryError {

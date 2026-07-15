@@ -426,46 +426,7 @@ fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
 
 #[test]
 fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
-    let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "printf 'partial\\n' > out/partial.txt",
-        ),
-    )
-    .expect("first tool fixture rewritten");
-    fs::write(
-        workspace.join("registry/tools/bad-write.yaml"),
-        r#"tool:
-  id: bad-write
-  name: BadWrite
-  tool_kind: own-script
-  command: script:bad-write
-  script_runtime: posix-sh
-  script_body: |
-    printf 'later\n' > out/summary.txt
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("bad tool fixture written");
-    let phase_path = workspace.join("registry/phases/summarize.yaml");
-    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        source.replace(
-            "tool_refs: [write-summary]",
-            "tool_refs: [write-summary, bad-write]",
-        ),
-    )
-    .expect("phase fixture rewritten");
-    fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
+    let workspace = workspace_with_later_invalid_own_script_path();
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
