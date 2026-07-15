@@ -1444,6 +1444,10 @@ fn parser_rejects_malformed_or_quoted_typed_scalars() {
             "malformed-required.yaml",
             parameter_tool.replace("required: true", "required: maybe"),
         ),
+        (
+            "uppercase-required.yaml",
+            parameter_tool.replace("required: true", "required: True"),
+        ),
         ("malformed-min.yaml", integer_parameter),
         (
             "malformed-port.yaml",
