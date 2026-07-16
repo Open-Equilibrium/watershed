@@ -1461,8 +1461,12 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
     let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
         .expect_err("apply-time side effect failure must fail the resume");
 
+    let RuntimeError::SessionFailed { session_id, source } = err else {
+        panic!("expected identified session failure, got {err:?}");
+    };
+    assert_eq!(session_id, "hello001");
     assert_denied(
-        err,
+        *source,
         core_policy::DenyReasonCode::WriteDenied,
         "temporary replacement path",
     );
