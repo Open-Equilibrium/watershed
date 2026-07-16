@@ -85,18 +85,9 @@ fn complete_active_step(
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     let payload = builder
-        .events
-        .iter()
-        .rev()
-        .find(|event| {
-            event.loop_id.as_deref() == Some(&invocation.loop_id)
-                && matches!(
-                    event.event_type,
-                    EventType::StepStarted | EventType::StepCompleted
-                )
-        })
-        .filter(|event| event.event_type == EventType::StepStarted)
-        .map(|event| event.payload.clone());
+        .active_step_payloads
+        .get(&invocation.loop_id)
+        .cloned();
     match payload {
         Some(payload) => builder.emit(Some(invocation), EventType::StepCompleted, payload),
         None => Ok(()),

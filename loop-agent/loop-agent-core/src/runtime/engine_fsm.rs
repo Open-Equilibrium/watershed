@@ -103,6 +103,7 @@ fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> Prot
 }
 
 struct RuntimeEventBuilder<'a> {
+    active_step_payloads: BTreeMap<String, serde_json::Value>,
     capture_output: bool,
     clock: EventClock,
     context_manifest_count: usize,
@@ -121,6 +122,7 @@ struct RuntimeEventBuilder<'a> {
 impl<'a> RuntimeEventBuilder<'a> {
     fn with_clock(session_id: String, clock: EventClock) -> Self {
         Self {
+            active_step_payloads: BTreeMap::new(),
             capture_output: true,
             clock,
             context_manifest_count: 0,
@@ -242,6 +244,18 @@ impl<'a> RuntimeEventBuilder<'a> {
         self.sequence = sequence;
         self.stream_bytes = next_stream_bytes;
         self.history.record(&event);
+        if let Some(invocation) = invocation {
+            match event.event_type {
+                EventType::StepStarted => {
+                    self.active_step_payloads
+                        .insert(invocation.loop_id.clone(), event.payload.clone());
+                }
+                EventType::StepCompleted => {
+                    self.active_step_payloads.remove(&invocation.loop_id);
+                }
+                _ => {}
+            }
+        }
         if self.capture_output {
             self.events.push(event);
         }
