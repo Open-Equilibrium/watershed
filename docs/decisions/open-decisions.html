@@ -29,8 +29,15 @@
         <h3>D-063 - Race-Safe Registry Traversal</h3>
         <p><strong>Status:</strong> Open, M1 release blocker.</p>
         <p><strong>Question:</strong> How should Watershed prevent a registry file or parent folder from being replaced with a link to content outside the registry while it is being opened?</p>
-        <ul><li><strong>A:</strong> Use <code>cap-std 4.0.2</code> internally for directory-handle-based traversal and same-handle reads. Pro: portable and least project-owned platform code. Con: adds a production dependency that must pass license, security and compatibility checks.</li><li><strong>B:</strong> Use <code>rustix 1.1.4</code> on Unix and custom Windows code. Pro: direct operating-system control. Con: more platform-specific code and maintenance.</li><li><strong>C:</strong> Implement all platforms directly. Pro: no new dependency. Con: most code, testing and maintenance.</li></ul>
-        <p><strong>Recommendation:</strong> A, only if a spike confirms Rust 1.97 compatibility, green dependency gates, a private API boundary and less project code. Otherwise reopen the decision; the current path-based checks do not close the proven race.</p>
+        <ul><li><strong>A:</strong> Exact-pin <code>cap-std 4.0.2</code> and <code>cap-fs-ext 4.0.2</code>, then open the workspace once and traverse every registry component without following links. Pro: portable, least project-owned security code and removes the custom identity/reopen machinery. Con: the broadest dependency graph and requires D-064.</li><li><strong>B:</strong> Use <code>rustix 1.1.4</code> on Unix and custom Windows code. Pro: smaller dependency graph. Con: more platform-specific security code and maintenance.</li><li><strong>C:</strong> Implement all platforms directly. Pro: no new dependency. Con: most code, testing and maintenance.</li></ul>
+        <p><strong>Recommendation:</strong> A with a private capability boundary, component-by-component no-follow traversal and same-handle reads. The full cross-platform swap corpus and dependency gates must pass; otherwise reopen the decision rather than weakening the boundary.</p>
+      </article>
+      <article id="d-064" class="decision">
+        <h3>D-064 - Capability Dependency License</h3>
+        <p><strong>Status:</strong> Open, conditional M1 blocker if D-063 A is selected.</p>
+        <p><strong>Question:</strong> May Watershed use the transitive <code>winx 0.36.4</code> crate under <code>Apache-2.0 WITH LLVM-exception</code>? The current license gate does not allow that expression.</p>
+        <ul><li><strong>A:</strong> Add a package-specific license exception for this exact crate. Pro: enables the smallest portable registry fix without broadly changing allowed licenses. Con: accepts one additional license expression.</li><li><strong>B:</strong> Keep the current license policy unchanged and choose D-063 B or C. Pro: no license-policy change. Con: Watershed owns more platform-specific security code.</li></ul>
+        <p><strong>Recommendation:</strong> A if the maintainer accepts the license, limited to the exact package; otherwise B.</p>
       </article>
     </div>
   </section>
