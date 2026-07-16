@@ -514,7 +514,6 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
 #[test]
 fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let workspace = workspace_copy("hello-loop");
-    run_loop(&workspace, "hello-loop", EmitMode::Human).expect("first session completes");
     replace_registry_text(
         &workspace,
         "instructions/inspect-input.yaml",
@@ -524,20 +523,23 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Human)
         .expect_err("the committed context failure must be returned");
-    assert!(matches!(
-        &err,
-        RuntimeError::SessionFailed { session_id, source }
-            if session_id == "hello001-2"
-                && matches!(source.as_ref(), RuntimeError::ContextBudgetExceeded { .. })
-    ));
+    assert!(
+        matches!(
+            &err,
+            RuntimeError::SessionFailed { session_id, source }
+                if session_id == "hello001"
+                    && matches!(source.as_ref(), RuntimeError::ContextBudgetExceeded { .. })
+        ),
+        "{err:?}"
+    );
     assert!(
         err.to_string()
-            .starts_with("session hello001-2 failed: context_budget_exceeded:"),
+            .starts_with("session hello001 failed: context_budget_exceeded:"),
         "{err}"
     );
-    let path = workspace.join(".loop/sessions/hello001-2.jsonl");
+    let path = workspace.join(".loop/sessions/hello001.jsonl");
     let stream = read_session_log_to_string(&path).expect("failed session log is readable");
-    let events = validate_session_log_text(&path, "hello001-2", &stream)
+    let events = validate_session_log_text(&path, "hello001", &stream)
         .expect("failed session log remains authoritative");
     assert_eq!(
         events.last().map(|event| &event.event_type),
