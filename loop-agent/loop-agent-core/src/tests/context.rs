@@ -309,6 +309,45 @@ fn context_compiler_rejects_mandatory_content_over_budget() {
 }
 
 #[test]
+fn context_array_source_stops_materializing_repeated_content_at_its_budget() {
+    let item = "x".repeat(64 * 1024);
+    let source_id = "active-phase-instructions";
+    let one_item_source = context_source(
+        source_id,
+        serde_json::json!([{"id":"repeated","prompt":item.as_str()}]),
+    );
+    let input_budget_tokens = context_source_bytes(&one_item_source)
+        .expect("one-item source serializes")
+        .len();
+    let mut materialized = 0;
+
+    let result = bounded_context_array_source(
+        source_id,
+        (0..4_096).map(|_| {
+            materialized += 1;
+            Ok(Some(serde_json::json!({
+                "id": "repeated",
+                "prompt": item.as_str(),
+            })))
+        }),
+        input_budget_tokens,
+    );
+    let err = match result {
+        Err(err) => err,
+        Ok(_) => panic!("the second repeated item must exceed the source budget"),
+    };
+
+    assert_eq!(materialized, 2);
+    assert!(matches!(
+        err,
+        RuntimeError::ContextBudgetExceeded {
+            input_budget_tokens: actual_budget,
+            required_bytes,
+        } if actual_budget == input_budget_tokens && required_bytes > input_budget_tokens
+    ));
+}
+
+#[test]
 fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     let events = [
         (EventType::MessageDelta, "old"),

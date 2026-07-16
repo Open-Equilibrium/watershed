@@ -191,6 +191,43 @@ fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError>
     Ok(text.into_bytes())
 }
 
+fn bounded_context_array_source(
+    source_id: impl Into<String>,
+    items: impl IntoIterator<Item = Result<Option<serde_json::Value>, RuntimeError>>,
+    input_budget_tokens: usize,
+) -> Result<ContextSource, RuntimeError> {
+    let source_id = source_id.into();
+    let empty_source = context_source(source_id.clone(), serde_json::json!([]));
+    let mut required_bytes = context_source_bytes(&empty_source)?.len();
+    let mut content = Vec::new();
+    for item in items {
+        let Some(item) = item? else {
+            continue;
+        };
+        let item_bytes = proto::canonical_json(&item)
+            .map_err(|err| {
+                RuntimeError::Protocol(format!(
+                    "failed to serialize provider context array item: {err}"
+                ))
+            })?
+            .len();
+        required_bytes = required_bytes
+            .saturating_add(usize::from(!content.is_empty()))
+            .saturating_add(item_bytes);
+        if required_bytes > input_budget_tokens {
+            return Err(RuntimeError::ContextBudgetExceeded {
+                input_budget_tokens,
+                required_bytes,
+            });
+        }
+        content.push(item);
+    }
+    Ok(context_source(
+        source_id,
+        serde_json::Value::Array(content),
+    ))
+}
+
 fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_json::Value {
     serde_json::json!({
         "projection_hash": sha256_hex(bytes),
@@ -299,37 +336,39 @@ fn compile_provider_turn_context(
     session_id: &str,
     history: &ContextHistory,
 ) -> Result<CompiledContext, RuntimeError> {
-    let phase_instructions = phase
-        .instruction_refs
-        .iter()
-        .map(|instruction_ref| {
+    let model = ContextModelProfile::stub_v0();
+    let input_budget_tokens = model.input_budget_tokens()?;
+    let phase_instructions = bounded_context_array_source(
+        "active-phase-instructions",
+        phase.instruction_refs.iter().map(|instruction_ref| {
             let instruction = registry.instruction_block(instruction_ref).ok_or_else(|| {
                 RuntimeError::Protocol(format!(
                     "resolved registry missing instruction {instruction_ref}"
                 ))
             })?;
-            Ok(serde_json::json!({
+            Ok(Some(serde_json::json!({
                 "id": instruction.identity.id,
                 "prompt": instruction.prompt,
-            }))
-        })
-        .collect::<Result<Vec<_>, RuntimeError>>()?;
-    let tools = phase
-        .tool_refs
-        .iter()
-        .map(|tool_ref| {
+            })))
+        }),
+        input_budget_tokens,
+    )?;
+    let tools = bounded_context_array_source(
+        "active-available-tools",
+        phase.tool_refs.iter().map(|tool_ref| {
             registry
                 .tool_block(tool_ref)
                 .ok_or_else(|| {
                     RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
                 })
                 .and_then(|tool| serde_json::to_value(tool).map_err(RuntimeError::Json))
-        })
-        .collect::<Result<Vec<_>, RuntimeError>>()?;
-    let connections = step
-        .connection_refs
-        .iter()
-        .map(|connection_ref| {
+                .map(Some)
+        }),
+        input_budget_tokens,
+    )?;
+    let connections = bounded_context_array_source(
+        "typed-connection-inputs",
+        step.connection_refs.iter().map(|connection_ref| {
             let connection = registry.connection_block(connection_ref).ok_or_else(|| {
                 RuntimeError::Protocol(format!(
                     "resolved registry missing connection {connection_ref}"
@@ -345,11 +384,9 @@ fn compile_provider_turn_context(
                     },
                 ),
             )
-        })
-        .collect::<Result<Vec<_>, RuntimeError>>()?
-        .into_iter()
-        .flatten()
-        .collect();
+        }),
+        input_budget_tokens,
+    )?;
     let (tier_one, omitted) = history.continuity()?;
     let tier_zero = [
         context_source(
@@ -361,12 +398,9 @@ fn compile_provider_turn_context(
         ),
         // The v0 schema has no loop- or step-scoped prompt fields.
         context_source("active-loop-instructions", serde_json::json!([])),
-        context_source(
-            "active-phase-instructions",
-            serde_json::Value::Array(phase_instructions),
-        ),
+        phase_instructions,
         context_source("active-step-instructions", serde_json::json!([])),
-        context_source("active-available-tools", serde_json::Value::Array(tools)),
+        tools,
         context_source(
             "fsm-loop-state",
             serde_json::json!({
@@ -378,22 +412,14 @@ fn compile_provider_turn_context(
                 "step_id": step.id,
             }),
         ),
-        context_source(
-            "typed-connection-inputs",
-            serde_json::Value::Array(connections),
-        ),
+        connections,
         context_source("current-user-input", serde_json::json!({"present": false})),
         context_source(
             "unresolved-call-result",
             history.unresolved_call_result_state(),
         ),
     ];
-    compile_context(
-        &ContextModelProfile::stub_v0(),
-        &tier_zero,
-        tier_one.as_ref(),
-        omitted,
-    )
+    compile_context(&model, &tier_zero, tier_one.as_ref(), omitted)
 }
 
 fn connection_targets_scoped_step(
