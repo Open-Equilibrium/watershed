@@ -490,14 +490,8 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
     let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
     let appends = Arc::new(Mutex::new(Vec::new()));
     let (notifier, receiver) = live_event_channel();
-    let (mut writer, progress, _) = progress_writer(
-        &reservation,
-        1,
-        notifier,
-        Arc::clone(&appends),
-        None,
-        None,
-    );
+    let (mut writer, progress, _) =
+        progress_writer(&reservation, 1, notifier, Arc::clone(&appends), None, None);
 
     let jsonl = enqueue_test_event(&mut writer, &progress[0]);
     assert_eq!(
