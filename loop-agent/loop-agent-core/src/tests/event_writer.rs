@@ -67,30 +67,34 @@ fn twenty_runs_finish_and_catch_up_with_permanently_lagging_receivers() {
 
 #[test]
 fn notification_is_observable_only_after_the_sequence_is_persisted() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = empty_workspace("event-writer-notify-order");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+    let appends = Arc::new(Mutex::new(Vec::new()));
     let (notifier, receiver) = live_event_channel();
-    let run_workspace = workspace.clone();
-    let run =
-        thread::spawn(move || run_loop_with_live_events(&run_workspace, "hello-loop", notifier));
+    let receiver = Arc::new(Mutex::new(receiver));
+    let (mut writer, _, event) = progress_writer(
+        &reservation,
+        0,
+        notifier,
+        Arc::clone(&appends),
+        None,
+        Some(Arc::clone(&receiver)),
+    );
+    let jsonl = enqueue_test_event(&mut writer, &event);
+    writer.finish().expect("writer finishes");
 
     let notification = receiver
-        .recv_timeout(Duration::from_secs(2))
-        .expect("first committed sequence wakes receiver");
-    let mut reader = SessionEventReader::open(&workspace, &notification.session_id)
-        .expect("notified session is already readable");
-    let events = reader.read_after(0).expect("committed prefix validates");
-    assert!(
-        events
-            .last()
-            .is_some_and(|event| { event.sequence >= notification.highest_committed_sequence }),
-        "the observed high-watermark must already exist in the authoritative log"
+        .lock()
+        .expect("notification probe lock")
+        .recv_timeout(Duration::ZERO)
+        .expect("successful append is notified");
+    assert_eq!(notification.highest_committed_sequence, event.sequence);
+    assert_eq!(
+        appends.lock().expect("append probe lock").as_slice(),
+        [jsonl.into_bytes()]
     );
-
-    let output = run
-        .join()
-        .expect("run thread joins")
-        .expect("run completes");
-    assert_eq!(notification.session_id, output.session_id);
+    drop(writer);
+    reservation.rollback();
 }
 
 #[cfg(any(unix, windows))]
@@ -315,10 +319,21 @@ impl EventLogAppender for SyncFailAppender {
 struct BatchProbeAppender {
     appends: Arc<Mutex<Vec<Vec<u8>>>>,
     fail_after: Option<usize>,
+    notification_probe: Option<Arc<Mutex<LiveEventReceiver>>>,
 }
 
 impl EventLogAppender for BatchProbeAppender {
     fn append(&mut self, _path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
+        if let Some(probe) = &self.notification_probe {
+            assert_eq!(
+                probe
+                    .lock()
+                    .expect("notification probe lock")
+                    .recv_timeout(Duration::ZERO),
+                Err(LiveEventReceiveError::Timeout),
+                "notification must not precede append"
+            );
+        }
         self.appends
             .lock()
             .expect("batch append probe lock")
@@ -388,6 +403,7 @@ fn progress_writer<'a>(
     notifier: LiveEventNotifier,
     appends: Arc<Mutex<Vec<Vec<u8>>>>,
     fail_after: Option<usize>,
+    notification_probe: Option<Arc<Mutex<LiveEventReceiver>>>,
 ) -> (SerialSessionWriter<'a>, Vec<EventEnvelope>, EventEnvelope) {
     let (validation, progress, terminal) = progress_batch(&reservation.session_path, count);
     let writer = SerialSessionWriter::start_with_appender(
@@ -403,6 +419,7 @@ fn progress_writer<'a>(
         BatchProbeAppender {
             appends,
             fail_after,
+            notification_probe,
         },
     )
     .expect("writer starts");
@@ -428,6 +445,7 @@ fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
         EVENT_WRITER_BATCH_CAPACITY + 1,
         notifier,
         Arc::clone(&appends),
+        None,
         None,
     );
 
@@ -472,8 +490,14 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
     let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
     let appends = Arc::new(Mutex::new(Vec::new()));
     let (notifier, receiver) = live_event_channel();
-    let (mut writer, progress, _) =
-        progress_writer(&reservation, 1, notifier, Arc::clone(&appends), None);
+    let (mut writer, progress, _) = progress_writer(
+        &reservation,
+        1,
+        notifier,
+        Arc::clone(&appends),
+        None,
+        None,
+    );
 
     let jsonl = enqueue_test_event(&mut writer, &progress[0]);
     assert_eq!(
@@ -504,6 +528,7 @@ fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
             notifier,
             Arc::clone(&appends),
             Some(committed_events),
+            None,
         );
         let progress_jsonl = progress
             .iter()
