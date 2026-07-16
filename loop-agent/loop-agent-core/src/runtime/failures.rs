@@ -75,8 +75,32 @@ fn emit_runtime_error_failure(
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     let failure = runtime_failure_for_unhandled_error(err);
+    complete_active_step(invocation, builder)?;
     emit_runtime_error(invocation, &failure, builder)?;
     emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
+}
+
+fn complete_active_step(
+    invocation: &LoopInvocation,
+    builder: &mut RuntimeEventBuilder<'_>,
+) -> Result<(), RuntimeError> {
+    let payload = builder
+        .events
+        .iter()
+        .rev()
+        .find(|event| {
+            event.loop_id.as_deref() == Some(&invocation.loop_id)
+                && matches!(
+                    event.event_type,
+                    EventType::StepStarted | EventType::StepCompleted
+                )
+        })
+        .filter(|event| event.event_type == EventType::StepStarted)
+        .map(|event| event.payload.clone());
+    match payload {
+        Some(payload) => builder.emit(Some(invocation), EventType::StepCompleted, payload),
+        None => Ok(()),
+    }
 }
 
 fn emit_propagated_runtime_error_failure(
