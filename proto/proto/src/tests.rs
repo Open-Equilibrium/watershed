@@ -73,6 +73,42 @@ fn session_id_is_lowercase_path_safe_token() {
 }
 
 #[test]
+fn envelope_metadata_validation_reports_invalid_fields() {
+    let valid = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "session001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        json!({}),
+    );
+    assert_eq!(valid.validate_metadata(), Ok(()));
+
+    macro_rules! assert_invalid {
+        ($field:ident, $value:expr) => {{
+            let mut event = valid.clone();
+            event.$field = $value;
+            assert_eq!(
+                event
+                    .validate_metadata()
+                    .expect_err(stringify!($field))
+                    .field(),
+                stringify!($field)
+            );
+        }};
+    }
+    assert_invalid!(sequence, 0);
+    assert_invalid!(session_id, "Bad".to_owned());
+    assert_invalid!(event_id, String::new());
+    assert_invalid!(source, String::new());
+    assert_invalid!(timestamp, "not-a-time".to_owned());
+    assert_invalid!(correlation_id, Some(String::new()));
+    assert_invalid!(loop_id, Some(String::new()));
+    assert_invalid!(parent_loop_id, Some(String::new()));
+}
+
+#[test]
 fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
     let event = EventEnvelope::new(
         "evt-001",

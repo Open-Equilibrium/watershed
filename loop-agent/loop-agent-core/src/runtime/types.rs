@@ -49,7 +49,7 @@ impl EventClock {
     }
 
     fn from_first_event(event: &EventEnvelope) -> Option<Self> {
-        parse_rfc3339_utc_timestamp(&event.timestamp).map(|base_unix_seconds| Self {
+        proto::parse_rfc3339_utc_timestamp(&event.timestamp).map(|base_unix_seconds| Self {
             base_unix_seconds: base_unix_seconds.saturating_sub(
                 i64::try_from(event.sequence.saturating_sub(1)).unwrap_or(i64::MAX),
             ),

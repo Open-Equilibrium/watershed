@@ -26,61 +26,12 @@ fn validate_event_metadata(
     line_number: usize,
     event: &EventEnvelope,
 ) -> Result<(), RuntimeError> {
-    if !proto::is_valid_session_id(&event.session_id) {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use a valid session_id",
+    event.validate_metadata().map_err(|err| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number} has invalid envelope metadata: {err}",
             path.display()
-        )));
-    }
-    if event.event_id.is_empty() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use a non-empty event_id",
-            path.display()
-        )));
-    }
-    if event.source.is_empty() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use a non-empty source",
-            path.display()
-        )));
-    }
-    if !is_rfc3339_utc_timestamp(&event.timestamp) {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use an RFC3339 UTC timestamp",
-            path.display()
-        )));
-    }
-    if event
-        .correlation_id
-        .as_ref()
-        .is_some_and(|correlation_id| correlation_id.is_empty())
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use a non-empty correlation_id",
-            path.display()
-        )));
-    }
-    if event
-        .loop_id
-        .as_ref()
-        .is_some_and(|loop_id| loop_id.is_empty())
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use a non-empty loop_id",
-            path.display()
-        )));
-    }
-    if event
-        .parent_loop_id
-        .as_ref()
-        .is_some_and(|parent_loop_id| parent_loop_id.is_empty())
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} must use a non-empty parent_loop_id",
-            path.display()
-        )));
-    }
-    Ok(())
+        ))
+    })
 }
 
 fn validate_event_payload(
@@ -1278,58 +1229,6 @@ fn next_event_id(sequence: u64, events: &[EventEnvelope]) -> String {
     }
 }
 
-fn is_rfc3339_utc_timestamp(value: &str) -> bool {
-    parse_rfc3339_utc_timestamp(value).is_some()
-}
-
-fn parse_rfc3339_utc_timestamp(value: &str) -> Option<i64> {
-    let value = value.strip_suffix('Z')?;
-    let (date, time) = value.split_once('T')?;
-
-    let mut date_parts = date.split('-');
-    let year = date_parts.next().and_then(|part| parse_digits(part, 4))?;
-    let month = date_parts.next().and_then(|part| parse_digits(part, 2))?;
-    let day = date_parts.next().and_then(|part| parse_digits(part, 2))?;
-    if date_parts.next().is_some() || !(1..=12).contains(&month) {
-        return None;
-    }
-    if day == 0 || day > days_in_month(year, month) {
-        return None;
-    }
-
-    let mut time_parts = time.split(':');
-    let hour = time_parts.next().and_then(|part| parse_digits(part, 2))?;
-    let minute = time_parts.next().and_then(|part| parse_digits(part, 2))?;
-    let second_part = time_parts.next()?;
-    if time_parts.next().is_some() {
-        return None;
-    }
-
-    let (second, fraction) = second_part
-        .split_once('.')
-        .map_or((second_part, None), |(second, fraction)| {
-            (second, Some(fraction))
-        });
-    let second = parse_digits(second, 2)?;
-    if fraction
-        .is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return None;
-    }
-
-    if hour > 23 || minute > 59 || second > 59 {
-        return None;
-    }
-
-    let days = days_from_civil(i64::from(year), i64::from(month), i64::from(day));
-    Some(
-        days.saturating_mul(86_400)
-            .saturating_add(i64::from(hour) * 3_600)
-            .saturating_add(i64::from(minute) * 60)
-            .saturating_add(i64::from(second)),
-    )
-}
-
 fn format_unix_timestamp(seconds: i64) -> String {
     let days = seconds.div_euclid(86_400);
     let seconds_of_day = seconds.rem_euclid(86_400);
@@ -1352,35 +1251,4 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let month = mp + if mp < 10 { 3 } else { -9 };
     let year = y + i64::from(month <= 2);
     (year, month, day)
-}
-
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - i64::from(month <= 2);
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let month_prime = month + if month > 2 { -3 } else { 9 };
-    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
-}
-
-fn parse_digits(value: &str, len: usize) -> Option<u16> {
-    if value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit()) {
-        value.parse().ok()
-    } else {
-        None
-    }
-}
-
-fn days_in_month(year: u16, month: u16) -> u16 {
-    match month {
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 31,
-    }
-}
-
-fn is_leap_year(year: u16) -> bool {
-    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
 }

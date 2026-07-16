@@ -54,6 +54,28 @@ pub struct EventEnvelope {
     pub timestamp: String,
 }
 
+/// Invalid field in one event envelope's stream-independent metadata.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EventMetadataError {
+    field: &'static str,
+    requirement: &'static str,
+}
+
+impl EventMetadataError {
+    /// Returns the invalid envelope field.
+    pub const fn field(self) -> &'static str {
+        self.field
+    }
+}
+
+impl fmt::Display for EventMetadataError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.field, self.requirement)
+    }
+}
+
+impl std::error::Error for EventMetadataError {}
+
 impl EventEnvelope {
     /// Builds a v0 event envelope with no loop, parent-loop or correlation id.
     pub fn new(
@@ -96,6 +118,42 @@ impl EventEnvelope {
         let mut out = canonical_json(&value)?;
         out.push('\n');
         Ok(out)
+    }
+
+    /// Validates metadata that does not depend on other events in the stream.
+    pub fn validate_metadata(&self) -> Result<(), EventMetadataError> {
+        let invalid = if self.sequence == 0 {
+            Some(("sequence", "must be one-based"))
+        } else if !is_valid_session_id(&self.session_id) {
+            Some(("session_id", "must be a lowercase path-safe token"))
+        } else if self.event_id.is_empty() {
+            Some(("event_id", "must be non-empty"))
+        } else if self.source.is_empty() {
+            Some(("source", "must be non-empty"))
+        } else if parse_rfc3339_utc_timestamp(&self.timestamp).is_none() {
+            Some(("timestamp", "must be an RFC 3339 UTC timestamp"))
+        } else if self
+            .correlation_id
+            .as_ref()
+            .is_some_and(|value| value.is_empty())
+        {
+            Some(("correlation_id", "must be non-empty when present"))
+        } else if self.loop_id.as_ref().is_some_and(|value| value.is_empty()) {
+            Some(("loop_id", "must be non-empty when present"))
+        } else if self
+            .parent_loop_id
+            .as_ref()
+            .is_some_and(|value| value.is_empty())
+        {
+            Some(("parent_loop_id", "must be non-empty when present"))
+        } else {
+            None
+        };
+
+        match invalid {
+            Some((field, requirement)) => Err(EventMetadataError { field, requirement }),
+            None => Ok(()),
+        }
     }
 }
 
@@ -305,6 +363,83 @@ pub fn is_valid_session_id(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
         })
+}
+
+/// Parses the protocol's RFC 3339 UTC timestamp shape to Unix seconds.
+pub fn parse_rfc3339_utc_timestamp(value: &str) -> Option<i64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+
+    let mut date_parts = date.split('-');
+    let year = date_parts.next().and_then(|part| parse_digits(part, 4))?;
+    let month = date_parts.next().and_then(|part| parse_digits(part, 2))?;
+    let day = date_parts.next().and_then(|part| parse_digits(part, 2))?;
+    if date_parts.next().is_some() || !(1..=12).contains(&month) {
+        return None;
+    }
+    if day == 0 || day > days_in_month(year, month) {
+        return None;
+    }
+
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next().and_then(|part| parse_digits(part, 2))?;
+    let minute = time_parts.next().and_then(|part| parse_digits(part, 2))?;
+    let second_part = time_parts.next()?;
+    if time_parts.next().is_some() {
+        return None;
+    }
+    let (second, fraction) = second_part
+        .split_once('.')
+        .map_or((second_part, None), |(second, fraction)| {
+            (second, Some(fraction))
+        });
+    let second = parse_digits(second, 2)?;
+    if fraction
+        .is_some_and(|value| value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return None;
+    }
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+
+    let days = days_from_civil(i64::from(year), i64::from(month), i64::from(day));
+    Some(
+        days.saturating_mul(86_400)
+            .saturating_add(i64::from(hour) * 3_600)
+            .saturating_add(i64::from(minute) * 60)
+            .saturating_add(i64::from(second)),
+    )
+}
+
+fn parse_digits(value: &str, len: usize) -> Option<u16> {
+    (value.len() == len && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.parse().ok())
+        .flatten()
+}
+
+fn days_in_month(year: u16, month: u16) -> u16 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: u16) -> bool {
+    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
 }
 
 /// Serializes a JSON value with deterministic key ordering and NFC normalization.
