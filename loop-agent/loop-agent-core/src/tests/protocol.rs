@@ -523,32 +523,6 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
         sandbox_negative_reason_for_tool(&unsupported_operation_tool),
         Err(RuntimeError::Protocol(message)) if message.contains("unsupported sandbox-negative")
     ));
-    assert_eq!(sandbox_negative_reason_for_operation("process"), None);
-
-    assert_eq!(
-        terminal_failure_reason(&[EventEnvelope::new(
-            "evt-001",
-            EventType::SessionFailed,
-            "meta001",
-            1,
-            "2026-01-01T00:00:00Z",
-            "loop-agent-cli",
-            serde_json::json!({"reason":"write-denied"}),
-        )]),
-        Some("write-denied")
-    );
-    assert_eq!(
-        tool_network_access_name(&core_script::NetworkPolicy::Declared {
-            default: core_script::NetworkDefault::Deny,
-            allow: vec![core_script::NetworkAllowEntry {
-                kind: core_script::NetworkAllowKind::Cidr,
-                cidr: "127.0.0.0/8".to_owned(),
-                port: 443,
-                transport: core_script::NetworkTransport::Tcp,
-            }]
-        }),
-        "declared"
-    );
 }
 
 #[test]

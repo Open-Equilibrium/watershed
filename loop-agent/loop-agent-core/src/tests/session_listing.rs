@@ -110,7 +110,7 @@ fn human_run_replay_tail_and_session_listing_report_status() {
 
     let run = run_loop(&workspace, "smoke-loop", EmitMode::Human).expect("loop runs");
     assert!(!run.failed);
-    assert_eq!(run.stdout, "loop smoke-loop completed\n");
+    assert_eq!(run.stdout, "loop smoke-loop (session smoke001) completed\n");
 
     let replay = replay_session(&workspace, "smoke001", EmitMode::Human).expect("session replays");
     assert_eq!(replay.stdout, "session smoke001 replayed\n");
@@ -139,7 +139,7 @@ fn human_run_replay_tail_and_session_listing_report_status() {
     assert!(failed.failed);
     assert_eq!(
         failed.stdout,
-        "loop sandbox-negative-write failed (write_denied): write outside declared roots denied\n"
+        "loop sandbox-negative-write (session negwrite001) failed (write_denied): write outside declared roots denied\n"
     );
 }
 

@@ -106,11 +106,11 @@ fn run_loop_internal(
     if let Some(err) = runtime.terminal_error {
         return Err(err);
     }
-    let status = if let Some(failure) = human_failure_status(&runtime.events) {
-        format!("loop {} {failure}\n", loop_block.identity.id)
-    } else {
-        format!("loop {} completed\n", loop_block.identity.id)
-    };
+    let outcome = human_failure_status(&runtime.events).unwrap_or_else(|| "completed".to_owned());
+    let status = format!(
+        "loop {} (session {expected_session_id}) {outcome}\n",
+        loop_block.identity.id
+    );
     Ok(RunOutput {
         event_count: runtime.events.len(),
         failed: runtime_failed,

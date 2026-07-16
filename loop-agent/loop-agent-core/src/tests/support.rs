@@ -33,7 +33,7 @@ fn write_initial_session_log_with_clock(
     )
     .canonical_jsonl()
     .map_err(|err| RuntimeError::Protocol(format!("failed to serialize initial event: {err}")))?;
-    write_existing_file(&reservation.session_path, stream.as_bytes())
+    append_existing_file(&reservation.session_path, stream.as_bytes())
 }
 
 fn validate_appended_session_log_text(

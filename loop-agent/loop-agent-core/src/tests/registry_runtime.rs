@@ -88,6 +88,7 @@ fn run_loop_accepts_reviewed_macos_network_allowlist() {
         .expect("macOS runtime compiles its target policy");
 
     assert!(!output.failed);
+    assert!(output.stdout.contains("\"network_access\":\"declared\""));
 }
 
 #[test]

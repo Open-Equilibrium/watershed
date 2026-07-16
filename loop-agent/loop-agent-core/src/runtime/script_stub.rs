@@ -227,48 +227,53 @@ fn replace_script_output_atomically(
 ) -> Result<(), RuntimeError> {
     ensure_real_workspace_write_path(workspace, target)?;
     let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
-    let (temp_path, mut temp_file) =
-        create_replacement_temp(path, Some(core_policy::DenyReasonCode::WriteDenied))?;
-    if let Err(err) = temp_file
-        .write_all(contents)
-        .map_err(|source| RuntimeError::Io {
-            path: temp_path.clone(),
-            source,
-        })
-    {
-        let _ = fs::remove_file(&temp_path);
-        return Err(err);
-    }
-    drop(temp_file);
+    with_replacement_temp(
+        path,
+        Some(core_policy::DenyReasonCode::WriteDenied),
+        |temp_path, mut temp_file| {
+            temp_file
+                .write_all(contents)
+                .map_err(|source| RuntimeError::Io {
+                    path: temp_path.to_owned(),
+                    source,
+                })?;
+            drop(temp_file);
 
-    ensure_real_workspace_write_path(workspace, target)?;
-    if initial_leaf_existed {
-        if ensure_writable_regular_leaf(path)? {
-            return replace_existing_leaf_from_temp(path, &temp_path);
-        }
-    } else {
-        ensure_new_leaf_available(path)?;
-    }
-    ensure_real_workspace_write_path(workspace, target)?;
-    if let Err(source) = fs::rename(&temp_path, path) {
-        let _ = fs::remove_file(&temp_path);
-        return Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        });
-    }
-    Ok(())
+            ensure_real_workspace_write_path(workspace, target)?;
+            if initial_leaf_existed {
+                if ensure_writable_regular_leaf(path)? {
+                    return replace_existing_leaf_from_temp(path, temp_path);
+                }
+            } else {
+                ensure_new_leaf_available(path)?;
+            }
+            ensure_real_workspace_write_path(workspace, target)?;
+            fs::rename(temp_path, path).map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
+                source,
+            })
+        },
+    )
 }
 
 fn replace_existing_leaf_from_temp(path: &Path, temp_path: &Path) -> Result<(), RuntimeError> {
-    if let Err(source) = fs::rename(temp_path, path) {
+    fs::rename(temp_path, path).map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+fn with_replacement_temp<T>(
+    path: &Path,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+    operation: impl FnOnce(&Path, fs::File) -> Result<T, RuntimeError>,
+) -> Result<T, RuntimeError> {
+    let (temp_path, temp_file) = create_replacement_temp(path, denied_reason)?;
+    let result = operation(&temp_path, temp_file);
+    if result.is_err() {
         let _ = fs::remove_file(temp_path);
-        return Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        });
     }
-    Ok(())
+    result
 }
 
 fn create_replacement_temp(
@@ -542,7 +547,7 @@ fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, Ru
 #[cfg(windows)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct WindowsOpenFileInformation {
-    volume_serial_number: u32,
+    volume_serial_number: u64,
     file_index: u64,
     number_of_links: u64,
 }
@@ -552,75 +557,21 @@ fn windows_open_file_information(
     path: &Path,
     file: &fs::File,
 ) -> Result<WindowsOpenFileInformation, RuntimeError> {
-    use std::{ffi::c_void, os::windows::io::AsRawHandle};
+    use cap_fs_ext::MetadataExt as _;
 
-    #[repr(C)]
-    struct FileTime {
-        low_date_time: u32,
-        high_date_time: u32,
-    }
-
-    #[repr(C)]
-    struct ByHandleFileInformation {
-        file_attributes: u32,
-        creation_time: FileTime,
-        last_access_time: FileTime,
-        last_write_time: FileTime,
-        volume_serial_number: u32,
-        file_size_high: u32,
-        file_size_low: u32,
-        number_of_links: u32,
-        file_index_high: u32,
-        file_index_low: u32,
-    }
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetFileInformationByHandle(
-            file: *mut c_void,
-            file_information: *mut ByHandleFileInformation,
-        ) -> i32;
-    }
-
-    let mut information = ByHandleFileInformation {
-        file_attributes: 0,
-        creation_time: FileTime {
-            low_date_time: 0,
-            high_date_time: 0,
-        },
-        last_access_time: FileTime {
-            low_date_time: 0,
-            high_date_time: 0,
-        },
-        last_write_time: FileTime {
-            low_date_time: 0,
-            high_date_time: 0,
-        },
-        volume_serial_number: 0,
-        file_size_high: 0,
-        file_size_low: 0,
-        number_of_links: 0,
-        file_index_high: 0,
-        file_index_low: 0,
-    };
-    let ok = unsafe {
-        GetFileInformationByHandle(
-            file.as_raw_handle().cast::<c_void>(),
-            &mut information as *mut ByHandleFileInformation,
-        )
-    };
-    if ok == 0 {
-        return Err(RuntimeError::Io {
+    let file =
+        cap_std::fs::File::from_std(file.try_clone().map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
-            source: io::Error::last_os_error(),
-        });
-    }
-
+            source,
+        })?);
+    let metadata = file.metadata().map_err(|source| RuntimeError::Io {
+        path: path.to_owned(),
+        source,
+    })?;
     Ok(WindowsOpenFileInformation {
-        volume_serial_number: information.volume_serial_number,
-        file_index: (u64::from(information.file_index_high) << 32)
-            | u64::from(information.file_index_low),
-        number_of_links: u64::from(information.number_of_links),
+        volume_serial_number: metadata.dev(),
+        file_index: metadata.ino(),
+        number_of_links: metadata.nlink(),
     })
 }
 

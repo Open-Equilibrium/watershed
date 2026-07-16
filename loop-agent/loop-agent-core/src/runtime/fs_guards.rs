@@ -126,37 +126,6 @@ fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-#[cfg(all(unix, test))]
-fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    ensure_non_hardlinked_real_file(path)?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    ensure_opened_regular_leaf_matches_path(path, &file)?;
-    file.set_len(0).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    file.seek(SeekFrom::Start(0))
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    file.write_all(contents).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })
-}
-
-#[cfg(all(not(unix), test))]
-fn write_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    replace_existing_file_without_link_count(path, contents)
-}
-
 fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
     replace_existing_file(path, contents, true)
 }
@@ -168,29 +137,25 @@ fn replace_existing_file(
 ) -> Result<(), RuntimeError> {
     ensure_parent_real_directory(path)?;
     ensure_non_hardlinked_real_file(path)?;
-    let (temp_path, mut temp_file) = create_replacement_temp(path, None)?;
-    if let Err(err) = temp_file
-        .write_all(contents)
-        .map_err(|source| RuntimeError::Io {
-            path: temp_path.clone(),
-            source,
-        })
-    {
-        let _ = fs::remove_file(&temp_path);
-        return Err(err);
-    }
-    if sync_temp && let Err(source) = temp_file.sync_all() {
-        let _ = fs::remove_file(&temp_path);
-        return Err(RuntimeError::Io {
-            path: temp_path,
-            source,
-        });
-    }
-    drop(temp_file);
+    with_replacement_temp(path, None, |temp_path, mut temp_file| {
+        temp_file
+            .write_all(contents)
+            .map_err(|source| RuntimeError::Io {
+                path: temp_path.to_owned(),
+                source,
+            })?;
+        if sync_temp {
+            temp_file.sync_all().map_err(|source| RuntimeError::Io {
+                path: temp_path.to_owned(),
+                source,
+            })?;
+        }
+        drop(temp_file);
 
-    ensure_parent_real_directory(path)?;
-    ensure_non_hardlinked_real_file(path)?;
-    replace_existing_leaf_from_temp(path, &temp_path)
+        ensure_parent_real_directory(path)?;
+        ensure_non_hardlinked_real_file(path)?;
+        replace_existing_leaf_from_temp(path, temp_path)
+    })
 }
 
 #[cfg(any(unix, windows))]

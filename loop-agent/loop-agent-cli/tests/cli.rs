@@ -575,7 +575,7 @@ fn failed_human_commands_report_the_terminal_reason() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     assert_eq!(
         stdout,
-        "loop sandbox-negative-write failed (write_denied): write outside declared roots denied\n"
+        "loop sandbox-negative-write (session negwrite001) failed (write_denied): write outside declared roots denied\n"
     );
     assert!(!stdout.contains("completed"));
     assert!(

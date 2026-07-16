@@ -135,7 +135,7 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn write_and_append_reject_hardlinked_leaf_without_changing_target() {
+fn append_rejects_hardlinked_leaf_without_changing_target() {
     let workspace = empty_workspace("session-hardlink");
     let outside = empty_workspace("outside-session-hardlink");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -147,10 +147,6 @@ fn write_and_append_reject_hardlinked_leaf_without_changing_target() {
 
     let err = append_existing_file(&session_path, b"appended\n")
         .expect_err("hard-linked session leaf must reject before append");
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
-    let err = write_existing_file(&session_path, b"changed\n")
-        .expect_err("hard-linked session leaf must reject before truncate");
-
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
     assert_eq!(
         fs::read_to_string(&outside_target).expect("outside target readable"),

@@ -218,6 +218,14 @@ fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
         Err(RuntimeError::Protocol(message)) if message.contains("file name")
     ));
 
+    let err = with_replacement_temp(&path, None, |temp_path, _file| {
+        assert!(temp_path.exists());
+        Err::<(), _>(RuntimeError::Protocol("replacement failed".to_owned()))
+    })
+    .expect_err("failed replacement must clean up its temporary file");
+    assert!(matches!(err, RuntimeError::Protocol(message) if message == "replacement failed"));
+    assert!(!replacement_temp_path(&path, 0).expect("temp path").exists());
+
     for attempt in 0..100 {
         let temp_path = replacement_temp_path(&path, attempt).expect("temp path");
         fs::write(temp_path, "held").expect("temp collision file written");
