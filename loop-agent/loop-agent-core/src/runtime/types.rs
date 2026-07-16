@@ -273,9 +273,7 @@ impl std::error::Error for RuntimeError {
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
-            Self::EventWriter(source) | Self::SessionFailed { source, .. } => {
-                Some(source.as_ref())
-            }
+            Self::EventWriter(source) | Self::SessionFailed { source, .. } => Some(source.as_ref()),
         }
     }
 }

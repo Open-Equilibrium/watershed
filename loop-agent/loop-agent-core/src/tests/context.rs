@@ -530,7 +530,8 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
                 && matches!(source.as_ref(), RuntimeError::ContextBudgetExceeded { .. })
     ));
     assert!(
-        err.to_string().starts_with("session hello001-2 failed: context_budget_exceeded:"),
+        err.to_string()
+            .starts_with("session hello001-2 failed: context_budget_exceeded:"),
         "{err}"
     );
     let path = workspace.join(".loop/sessions/hello001-2.jsonl");
