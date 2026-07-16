@@ -183,19 +183,6 @@ pub enum PolicyTarget {
 pub enum PolicyCompileError {
     /// Requested loop reference was missing.
     MissingLoop(String),
-    /// A loop referenced a missing phase.
-    MissingPhase(String),
-    /// A phase referenced a missing tool.
-    MissingTool(String),
-    /// Recursive loop policy collection exceeded the nesting cap.
-    LoopDepthExceeded {
-        /// Loop id where the cap was exceeded.
-        loop_id: String,
-        /// Observed nesting depth.
-        depth: usize,
-        /// Maximum allowed nesting depth.
-        max: usize,
-    },
     /// Supported policy-artifact target was asked to encode network allow entries.
     NonEmptyNetworkAllowlist {
         /// Tool id with non-empty network allow entries.
@@ -211,20 +198,6 @@ impl fmt::Display for PolicyCompileError {
             Self::MissingLoop(reference) => {
                 write!(f, "policy compile references missing loop {reference}")
             }
-            Self::MissingPhase(reference) => {
-                write!(f, "policy compile references missing phase {reference}")
-            }
-            Self::MissingTool(reference) => {
-                write!(f, "policy compile references missing tool {reference}")
-            }
-            Self::LoopDepthExceeded {
-                loop_id,
-                depth,
-                max,
-            } => write!(
-                f,
-                "policy compile loop nesting depth {depth} for {loop_id} exceeds max {max}"
-            ),
             Self::NonEmptyNetworkAllowlist { tool_id } => write!(
                 f,
                 "supported policy-artifact target for tool {tool_id} must use a deny-all network allowlist"
@@ -238,11 +211,7 @@ impl std::error::Error for PolicyCompileError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidArtifact(err) => Some(err),
-            Self::MissingLoop(_)
-            | Self::MissingPhase(_)
-            | Self::MissingTool(_)
-            | Self::LoopDepthExceeded { .. }
-            | Self::NonEmptyNetworkAllowlist { .. } => None,
+            Self::MissingLoop(_) | Self::NonEmptyNetworkAllowlist { .. } => None,
         }
     }
 }
@@ -263,17 +232,16 @@ pub fn compile_policy_artifact(
     collect_loop_policy_scope(
         registry,
         loop_block,
-        1,
         &mut phase_tools,
         &mut tool_ids,
         &mut visited_loops,
-    )?;
+    );
 
     let mut commands = Vec::new();
     for tool_id in tool_ids {
         let tool = registry
             .tool_block(&tool_id)
-            .ok_or_else(|| PolicyCompileError::MissingTool(tool_id.clone()))?;
+            .expect("resolved registry preserves collected tools");
         commands.push(command_policy_from_tool(tool, &target)?);
     }
 
@@ -308,31 +276,23 @@ pub fn compile_policy_artifact(
 fn collect_loop_policy_scope(
     registry: &core_script::ResolvedRegistry,
     loop_block: &core_script::LoopBlock,
-    depth: usize,
     phase_tools: &mut BTreeMap<String, BTreeSet<String>>,
     tool_ids: &mut BTreeSet<String>,
     visited_loops: &mut BTreeSet<String>,
-) -> Result<(), PolicyCompileError> {
-    if depth > core_script::MAX_LOOP_NESTING_DEPTH {
-        return Err(PolicyCompileError::LoopDepthExceeded {
-            loop_id: loop_block.identity.id.clone(),
-            depth,
-            max: core_script::MAX_LOOP_NESTING_DEPTH,
-        });
-    }
+) {
     if !visited_loops.insert(loop_block.identity.id.clone()) {
-        return Ok(());
+        return;
     }
 
     for phase_ref in &loop_block.phase_refs {
         let phase = registry
             .phase_block(phase_ref)
-            .ok_or_else(|| PolicyCompileError::MissingPhase(phase_ref.clone()))?;
+            .expect("resolved registry validates loop phase references");
         let scoped_tools = phase_tools.entry(phase.identity.id.clone()).or_default();
         for tool_ref in &phase.tool_refs {
             let tool = registry
                 .tool_block(tool_ref)
-                .ok_or_else(|| PolicyCompileError::MissingTool(tool_ref.clone()))?;
+                .expect("resolved registry validates phase tool references");
             scoped_tools.insert(tool.identity.id.clone());
             tool_ids.insert(tool.identity.id.clone());
         }
@@ -341,18 +301,9 @@ fn collect_loop_policy_scope(
     for subloop_ref in &loop_block.subloop_refs {
         let subloop = registry
             .loop_block(subloop_ref)
-            .ok_or_else(|| PolicyCompileError::MissingLoop(subloop_ref.clone()))?;
-        collect_loop_policy_scope(
-            registry,
-            subloop,
-            depth + 1,
-            phase_tools,
-            tool_ids,
-            visited_loops,
-        )?;
+            .expect("resolved registry validates subloop references");
+        collect_loop_policy_scope(registry, subloop, phase_tools, tool_ids, visited_loops);
     }
-
-    Ok(())
 }
 
 fn command_policy_from_tool(

@@ -50,6 +50,24 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
     }
 }
 
+#[test]
+fn policy_compiler_reports_a_missing_root_loop() {
+    let registry = fixture_registry("smoke-loop");
+
+    let err = compile_policy_artifact(
+        "smoke-loop",
+        &registry,
+        "missing-loop",
+        PolicyTarget::LinuxLandlockSeccomp,
+    )
+    .expect_err("missing root loop must fail");
+
+    assert_eq!(
+        err.to_string(),
+        "policy compile references missing loop missing-loop"
+    );
+}
+
 fn smoke_registry_with_tool(
     update: impl FnOnce(&mut core_script::ToolBlock),
 ) -> core_script::ResolvedRegistry {
@@ -775,57 +793,6 @@ proptest! {
         ));
     }
 
-}
-
-#[test]
-fn policy_compile_error_messages_and_sources_cover_variants() {
-    let missing_loop = PolicyCompileError::MissingLoop("missing-loop".to_owned());
-    assert_eq!(
-        missing_loop.to_string(),
-        "policy compile references missing loop missing-loop"
-    );
-    assert!(std::error::Error::source(&missing_loop).is_none());
-
-    let missing_phase = PolicyCompileError::MissingPhase("missing-phase".to_owned());
-    assert_eq!(
-        missing_phase.to_string(),
-        "policy compile references missing phase missing-phase"
-    );
-
-    let missing_tool = PolicyCompileError::MissingTool("missing-tool".to_owned());
-    assert_eq!(
-        missing_tool.to_string(),
-        "policy compile references missing tool missing-tool"
-    );
-
-    let depth = PolicyCompileError::LoopDepthExceeded {
-        loop_id: "loop-064".to_owned(),
-        depth: core_script::MAX_LOOP_NESTING_DEPTH + 1,
-        max: core_script::MAX_LOOP_NESTING_DEPTH,
-    };
-    assert_eq!(
-        depth.to_string(),
-        "policy compile loop nesting depth 65 for loop-064 exceeds max 64"
-    );
-    assert!(std::error::Error::source(&depth).is_none());
-
-    let network = PolicyCompileError::NonEmptyNetworkAllowlist {
-        tool_id: "network-tool".to_owned(),
-    };
-    assert_eq!(
-        network.to_string(),
-        "supported policy-artifact target for tool network-tool must use a deny-all network allowlist"
-    );
-
-    let mut artifact = valid_policy_artifact("invalid-artifact");
-    artifact.policy_version = "1".to_owned();
-    let validation = artifact.validate().expect_err("invalid artifact");
-    let invalid = PolicyCompileError::InvalidArtifact(validation);
-    assert_eq!(
-        invalid.to_string(),
-        "policy_version must be fixed string \"0\""
-    );
-    assert!(std::error::Error::source(&invalid).is_some());
 }
 
 #[test]
