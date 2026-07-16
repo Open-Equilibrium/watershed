@@ -41,7 +41,7 @@ fn tail_backs_off_while_idle_and_resets_after_progress() {
     let progress = session_event_line(
         "tailbackoff001",
         "evt-tail-backoff-progress",
-        EventType::MessageDelta,
+        EventType::MetricSample,
         2,
     );
     let completed = session_event_line(
