@@ -13,8 +13,8 @@ pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
 pub const MAX_REGISTRY_FILE_BYTES: u64 = 1024 * 1024;
 /// Maximum cumulative size for a registry root.
 pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
-/// Maximum number of registry YAML files under one root.
-pub const MAX_REGISTRY_FILES: usize = 4096;
+/// Maximum number of filesystem entries visited under one registry root.
+pub const MAX_REGISTRY_ENTRIES: usize = 4096;
 /// Maximum directory nesting depth walked below one registry root.
 pub const MAX_REGISTRY_TRAVERSAL_DEPTH: usize = 64;
 

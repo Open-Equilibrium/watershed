@@ -120,7 +120,7 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         Err(RuntimeError::Usage(message)) if message.contains("within the workspace")
     ));
     assert!(matches!(
-        read_workspace_config_to_string(&workspace.join("missing-config.yaml")),
+        read_workspace_config_to_string(&workspace.join("missing-workspace")),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
 
@@ -152,6 +152,28 @@ fn workspace_config_rejects_symlinked_config_file() {
     let err = load_workspace_config(&workspace).expect_err("config symlink must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn workspace_config_rejects_linked_parent_directory() {
+    let workspace = empty_workspace("workspace-config-linked-parent");
+    let outside = empty_workspace("outside-workspace-config-parent");
+    fs::write(outside.join("config.yaml"), "registry_root: registry\n")
+        .expect("outside config written");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, workspace.join(".loop"))
+        .expect("config parent symlink created");
+    #[cfg(windows)]
+    create_windows_junction(&workspace.join(".loop"), &outside);
+
+    let err = load_workspace_config(&workspace).expect_err("linked config parent must fail");
+
+    assert!(
+        matches!(&err, RuntimeError::Protocol(message)
+            if message.contains("symlink") || message.contains("reparse")),
+        "unexpected error: {err:?}"
+    );
 }
 
 #[cfg(unix)]

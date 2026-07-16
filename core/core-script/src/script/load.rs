@@ -39,8 +39,14 @@ struct RegistryFile {
 struct RegistryTraversalLimits {
     max_file_bytes: u64,
     max_total_bytes: u64,
-    max_files: usize,
+    max_entries: usize,
     max_depth: usize,
+}
+
+#[derive(Default)]
+struct RegistryTraversalState {
+    entries: usize,
+    bytes: u64,
 }
 
 fn open_registry_root(
@@ -180,7 +186,7 @@ fn collect_registry_files_with_limits(
     out: &mut Vec<RegistryFile>,
     limits: RegistryTraversalLimits,
     depth: usize,
-    total_bytes: &mut u64,
+    state: &mut RegistryTraversalState,
 ) -> Result<(), RegistryError> {
     for entry in dir.entries().map_err(|source| RegistryError::Io {
         path: root.path.join(relative_dir),
@@ -193,6 +199,15 @@ fn collect_registry_files_with_limits(
         let name = entry.file_name();
         let relative_path = relative_dir.join(&name);
         let path = root.path.join(&relative_path);
+        state.entries = state.entries.saturating_add(1);
+        if state.entries > limits.max_entries {
+            return Err(RegistryError::TraversalLimitExceeded {
+                path,
+                limit: "entry count",
+                observed: state.entries,
+                max: limits.max_entries,
+            });
+        }
         let file_type = entry.file_type().map_err(|source| RegistryError::Io {
             path: path.clone(),
             source,
@@ -223,7 +238,7 @@ fn collect_registry_files_with_limits(
                 out,
                 limits,
                 next_depth,
-                total_bytes,
+                state,
             )?;
         } else if file_type.is_file()
             && relative_path
@@ -254,21 +269,12 @@ fn collect_registry_files_with_limits(
                     max: limits.max_file_bytes,
                 });
             }
-            *total_bytes = (*total_bytes).saturating_add(bytes);
-            if *total_bytes > limits.max_total_bytes {
+            state.bytes = state.bytes.saturating_add(bytes);
+            if state.bytes > limits.max_total_bytes {
                 return Err(RegistryError::ReadLimitExceeded {
                     path: root.path.clone(),
-                    bytes: *total_bytes,
+                    bytes: state.bytes,
                     max: limits.max_total_bytes,
-                });
-            }
-            let observed = out.len().saturating_add(1);
-            if observed > limits.max_files {
-                return Err(RegistryError::TraversalLimitExceeded {
-                    path,
-                    limit: "file count",
-                    observed,
-                    max: limits.max_files,
                 });
             }
             out.push(RegistryFile {

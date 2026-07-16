@@ -10,7 +10,7 @@ impl ResolvedRegistry {
             registry_root,
             max_file_bytes,
             max_total_bytes,
-            MAX_REGISTRY_FILES,
+            MAX_REGISTRY_ENTRIES,
             MAX_REGISTRY_TRAVERSAL_DEPTH,
         )
     }
@@ -20,7 +20,7 @@ impl ResolvedRegistry {
         registry_root: &Path,
         max_file_bytes: u64,
         max_total_bytes: u64,
-        max_files: usize,
+        max_entries: usize,
         max_depth: usize,
     ) -> Result<Self, RegistryError> {
         let root = open_registry_root(workspace, registry_root)?;
@@ -28,10 +28,10 @@ impl ResolvedRegistry {
         let limits = RegistryTraversalLimits {
             max_file_bytes,
             max_total_bytes,
-            max_files,
+            max_entries,
             max_depth,
         };
-        let mut collected_bytes = 0;
+        let mut state = RegistryTraversalState::default();
         collect_registry_files_with_limits(
             &root,
             &root.dir,
@@ -39,7 +39,7 @@ impl ResolvedRegistry {
             &mut paths,
             limits,
             0,
-            &mut collected_bytes,
+            &mut state,
         )?;
         paths.sort_by(|left, right| left.path.cmp(&right.path));
         let mut blocks = Vec::new();

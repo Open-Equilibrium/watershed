@@ -1,6 +1,5 @@
 fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
-    let path = workspace.join(".loop/config.yaml");
-    let text = read_workspace_config_to_string(&path)?;
+    let text = read_workspace_config_to_string(workspace)?;
     let source: WorkspaceConfigSource =
         core_script::parse_safe_yaml_config(".loop/config.yaml", &text)
             .map_err(|error| RuntimeError::Usage(error.to_string()))?;
@@ -87,9 +86,50 @@ fn resume_event_clock(
     })
 }
 
-fn read_workspace_config_to_string(path: &Path) -> Result<String, RuntimeError> {
-    ensure_real_file(path)?;
-    read_to_string_with_limit(path, MAX_WORKSPACE_CONFIG_BYTES)
+fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
+    let loop_path = workspace.join(".loop");
+    let config_path = loop_path.join("config.yaml");
+    let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
+        RuntimeError::Io {
+            path: workspace.to_path_buf(),
+            source,
+        }
+    })?;
+    let loop_dir = workspace_dir
+        .open_dir_nofollow(".loop")
+        .map_err(|source| unsafe_workspace_config_path(loop_path, source, "directory"))?;
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    let file = loop_dir
+        .open_with("config.yaml", &options)
+        .map_err(|source| unsafe_workspace_config_path(config_path.clone(), source, "file"))?;
+    let metadata = file.metadata().map_err(|source| RuntimeError::Io {
+        path: config_path.clone(),
+        source,
+    })?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink or reparse point",
+            config_path.display()
+        )));
+    }
+    let bytes = read_opened_file_with_limit(
+        file,
+        metadata.len(),
+        &config_path,
+        MAX_WORKSPACE_CONFIG_BYTES,
+    )?;
+    decode_utf8(&config_path, bytes)
+}
+
+fn unsafe_workspace_config_path(path: PathBuf, source: io::Error, kind: &str) -> RuntimeError {
+    if source.kind() == io::ErrorKind::NotFound {
+        return RuntimeError::Io { path, source };
+    }
+    RuntimeError::Protocol(format!(
+        "{} {kind} must not be a symlink or reparse point: {source}",
+        path.display()
+    ))
 }
 
 fn read_session_log_to_string(path: &Path) -> Result<String, RuntimeError> {
@@ -116,6 +156,10 @@ fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
 
 fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
     let bytes = read_file_with_limit(path, max_bytes)?;
+    decode_utf8(path, bytes)
+}
+
+fn decode_utf8(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {
     String::from_utf8(bytes).map_err(|source| {
         RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
     })
@@ -214,7 +258,15 @@ fn ensure_opened_real_file_for_read_matches_path(
 
 fn read_file_with_limit(path: &Path, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
     let (file, metadata) = open_real_file_for_read(path)?;
-    let total_len = metadata.len();
+    read_opened_file_with_limit(file, metadata.len(), path, max_bytes)
+}
+
+fn read_opened_file_with_limit(
+    file: impl Read,
+    total_len: u64,
+    path: &Path,
+    max_bytes: u64,
+) -> Result<Vec<u8>, RuntimeError> {
     if total_len > max_bytes {
         return Err(RuntimeError::Protocol(format!(
             "{} read size {total_len} bytes exceeds max {max_bytes}",

@@ -20,10 +20,10 @@ fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile
     let limits = RegistryTraversalLimits {
         max_file_bytes: MAX_REGISTRY_FILE_BYTES,
         max_total_bytes: MAX_REGISTRY_TOTAL_BYTES,
-        max_files: MAX_REGISTRY_FILES,
+        max_entries: MAX_REGISTRY_ENTRIES,
         max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
     };
-    let mut total_bytes = 0;
+    let mut state = RegistryTraversalState::default();
     let mut files = Vec::new();
     collect_registry_files_with_limits(
         &opened_root,
@@ -32,7 +32,7 @@ fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile
         &mut files,
         limits,
         0,
-        &mut total_bytes,
+        &mut state,
     )?;
     Ok((opened_root, files))
 }
@@ -125,6 +125,27 @@ fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
 }
 
 #[test]
+fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
+    let workspace = temp_registry_dir("registry-workspace-boundary");
+    let escaping_root = Path::new("../outside");
+    let err = load_registry_from_workspace(&workspace, escaping_root)
+        .expect_err("registry root must stay within workspace");
+    assert!(
+        matches!(&err, RegistryError::UnsafePath { path, .. } if path == escaping_root),
+        "unexpected error: {err:?}"
+    );
+
+    let missing_workspace = workspace.join("missing-workspace");
+    let err = load_registry_from_workspace(&missing_workspace, Path::new("registry"))
+        .expect_err("missing workspace must remain an I/O failure");
+    assert!(
+        matches!(&err, RegistryError::Io { path, source }
+            if path.as_path() == missing_workspace && source.kind() == std::io::ErrorKind::NotFound),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
 fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
     let root = temp_registry_dir("nested-registry");
     std::fs::write(root.join("README.txt"), "ignored").expect("ignored file written");
@@ -199,6 +220,27 @@ fn registry_file_reader_rejects_invalid_utf8() {
     ));
 }
 
+#[test]
+fn registry_file_reader_reports_leaf_removed_after_collection() {
+    let root = temp_registry_dir("registry-leaf-removed");
+    let path = root.join("instruction.yaml");
+    std::fs::write(
+        &path,
+        "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
+    )
+    .expect("registry file written");
+    let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
+    std::fs::remove_file(&path).expect("registry file removed");
+
+    let err = read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES)
+        .expect_err("disappearing registry file must remain an I/O failure");
+    assert!(
+        matches!(&err, RegistryError::Io { path: error_path, source }
+            if error_path.as_path() == path && source.kind() == std::io::ErrorKind::NotFound),
+        "unexpected error: {err:?}"
+    );
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn registry_file_reader_rejects_ancestor_replaced_by_link_after_collection() {
@@ -258,27 +300,23 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
 }
 
 #[test]
-fn registry_loader_rejects_file_counts_above_traversal_limit() {
-    let root = temp_registry_dir("registry-file-count-limit");
+fn registry_loader_bounds_all_visited_entries() {
+    let root = temp_registry_dir("registry-entry-count-limit");
     std::fs::write(
         root.join("a.yaml"),
         "instruction:\n  id: inspect-a\n  name: InspectA\n  prompt: Inspect\n",
     )
-    .expect("first registry file written");
-    std::fs::write(
-        root.join("b.yaml"),
-        "instruction:\n  id: inspect-b\n  name: InspectB\n  prompt: Inspect\n",
-    )
-    .expect("second registry file written");
+    .expect("registry file written");
+    std::fs::write(root.join("README.txt"), "ignored").expect("non-registry entry written");
 
     let (workspace, registry_root) = registry_location(&root);
     let err = ResolvedRegistry::load_with_all_limits(workspace, registry_root, 1024, 1024, 1, 64)
-        .expect_err("registry file count is rejected during traversal");
+        .expect_err("all visited entries count toward the traversal budget");
 
     assert!(matches!(
         err,
         RegistryError::TraversalLimitExceeded {
-            limit: "file count",
+            limit: "entry count",
             observed: 2,
             max: 1,
             ..

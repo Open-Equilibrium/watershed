@@ -1,3 +1,5 @@
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::{ambient_authority, fs::Dir};
 use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
 use proto::{EventEnvelope, EventType};
 use std::{
