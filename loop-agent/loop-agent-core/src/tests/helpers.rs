@@ -1,3 +1,8 @@
+fn load_test_registry(workspace: &Path) -> core_script::ResolvedRegistry {
+    core_script::load_registry_from_workspace(workspace, Path::new("registry"))
+        .expect("fixture registry loads")
+}
+
 fn empty_workspace(label: &str) -> PathBuf {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = std::env::temp_dir().join(format!(
@@ -108,8 +113,7 @@ fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> S
 }
 
 fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: &str) {
-    let registry =
-        core_script::load_registry_root(workspace.join("registry")).expect("registry loads");
+    let registry = load_test_registry(workspace);
     let loop_block = registry.loop_block(loop_ref).expect("loop exists");
     let registry_json = registry.canonical_json().expect("registry serializes");
     let loop_json = proto::canonical_json(
@@ -464,8 +468,8 @@ fn fixture_runtime_policy(
     fixture: &str,
     loop_id: &str,
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
-    let registry = core_script::load_registry_root(fixture_dir(fixture).join("registry"))
-        .expect("fixture registry loads");
+    let workspace = fixture_dir(fixture);
+    let registry = load_test_registry(&workspace);
     let policy =
         core_policy::compile_policy_artifact(loop_id, &registry, loop_id, runtime_policy_target())
             .expect("fixture policy compiles");

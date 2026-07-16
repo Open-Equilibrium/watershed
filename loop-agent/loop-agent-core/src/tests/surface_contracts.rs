@@ -16,8 +16,11 @@ fn runtime_error_display_source_and_exit_codes_cover_variants() {
     assert!(std::error::Error::source(&json_error).is_some());
 
     let registry_error = RuntimeError::from(
-        core_script::load_registry_root(Path::new("missing-registry-root"))
-            .expect_err("missing registry root"),
+        core_script::load_registry_from_workspace(
+            Path::new("."),
+            Path::new("missing-registry-root"),
+        )
+        .expect_err("missing registry root"),
     );
     assert!(registry_error.to_string().contains("missing-registry-root"));
     assert_eq!(registry_error.exit_code(), 65);

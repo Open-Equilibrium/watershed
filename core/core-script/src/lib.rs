@@ -1,6 +1,7 @@
 //! Building-block script model contracts.
 
 #![deny(missing_docs)]
+#![forbid(unsafe_code)]
 
 include!("script/model.rs");
 include!("script/registry.rs");

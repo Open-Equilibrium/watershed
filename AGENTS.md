@@ -51,6 +51,7 @@ docs/adr/ADR-LOG.md                  decided records (agents)
 
 ## Conventions
 
+- **Platform priority:** Linux and macOS are primary; Windows compatibility remains required but must not drive cross-platform design. Evaluate dependency and build effects per target—a `cfg(windows)`-only dependency is not a Linux/macOS cost—and prefer one portable boundary unless evidence justifies a target split.
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior, without duplicating code, tests, docs or abstractions.
 - **Meaningful tests:** follow the test-economy rules in `TESTING.md`; protect all established behavior, including prior milestones, through distinct functional, contract, risk or regression cases—never line-by-line coverage tests.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).

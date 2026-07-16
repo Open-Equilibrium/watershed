@@ -19,6 +19,9 @@ allow = [
     "Unicode-3.0",
 ]
 confidence-threshold = 0.8
+exceptions = [
+    { crate = "winx@0.36.4", allow = ["Apache-2.0 WITH LLVM-exception"] },
+]
 
 [licenses.private]
 ignore = true

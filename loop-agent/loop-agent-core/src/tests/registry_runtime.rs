@@ -35,7 +35,11 @@ fn registry_root_rejects_symlinked_path_components() {
     let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect_err("symlinked registry root component must fail");
 
-    assert!(matches!(err, RuntimeError::Usage(message) if message.contains("symlink")));
+    assert!(matches!(
+        err,
+        RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
+            if message.contains("symlink")
+    ));
     assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
 }
 
@@ -58,7 +62,11 @@ fn registry_root_rejects_junction_path_components() {
     let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect_err("junction registry root component must fail");
 
-    assert!(matches!(err, RuntimeError::Usage(message) if message.contains("reparse")));
+    assert!(matches!(
+        err,
+        RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
+            if message.contains("reparse")
+    ));
     assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
 }
 

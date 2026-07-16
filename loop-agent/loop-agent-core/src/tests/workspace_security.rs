@@ -53,15 +53,7 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
     .expect("valid config");
     let config = load_workspace_config(&workspace).expect("config loads");
     assert_ne!(config.event_clock, EventClock::fixed_fixture());
-    assert_eq!(
-        registry_root_path(&workspace, &config.registry_root).expect("registry path resolves"),
-        workspace.join("registry")
-    );
-    assert_eq!(
-        registry_root_path(&workspace, Path::new("./registry"))
-            .expect("curdir registry path resolves"),
-        workspace.join("registry")
-    );
+    assert_eq!(config.registry_root, PathBuf::from("registry"));
     fs::write(
         workspace.join(".loop/config.yaml"),
         "registry_root: registry # fixture registry\n",
@@ -126,14 +118,6 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
     assert!(matches!(
         load_workspace_config(&workspace),
         Err(RuntimeError::Usage(message)) if message.contains("within the workspace")
-    ));
-    assert!(matches!(
-        registry_root_path(&workspace, Path::new("registry-file")),
-        Err(RuntimeError::Usage(message)) if message.contains("through directories")
-    ));
-    assert!(matches!(
-        registry_root_path(&workspace, Path::new("missing-registry")),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
     assert!(matches!(
         read_workspace_config_to_string(&workspace.join("missing-config.yaml")),

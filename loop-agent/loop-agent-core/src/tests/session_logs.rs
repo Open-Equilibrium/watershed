@@ -1264,8 +1264,7 @@ fn resume_rejects_registry_drift_before_side_effects() {
 #[test]
 fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     let workspace = workspace_copy("hello-loop");
-    let registry = core_script::load_registry_root(workspace.join("registry"))
-        .expect("fixture registry loads");
+    let registry = load_test_registry(&workspace);
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
     let metadata_path =
         session_log_metadata_path(&workspace, "partial001").expect("metadata path resolves");

@@ -52,7 +52,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Script-defined Tools/Instructions/Phases/Loops with recursive composition (`Loop` as a building block).
 - Event-driven execution: no polling loop for normal agent progress.
 - Runtime kernel: deterministic bounded in-process fixture interpretation plus session event and context-manifest logs. External subprocess timeouts, bounded stdout/stderr, per-tool run logs and `tool.timed_out` remain post-M1.
-- Deterministic in-process enforcement/emulation for declared command, parameter, read/write, protected-path and deny-all network capabilities per loop. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
+- Deterministic in-process enforcement/emulation for declared command, parameter-schema, read/write, protected-path and deny-all network capabilities per loop. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
 - Protocol adapter that emits normalized `proto` v0 events.
 - Golden loops and sandbox-negative tests per `TESTING.md` (ADR-0034).
 

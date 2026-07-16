@@ -59,7 +59,7 @@ pub enum RegistryError {
         /// Underlying I/O error.
         source: std::io::Error,
     },
-    /// Registry path failed lexical safety checks.
+    /// Registry path failed safety checks.
     UnsafePath {
         /// Rejected path.
         path: PathBuf,

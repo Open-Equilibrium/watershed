@@ -2,7 +2,21 @@ use super::*;
 use proptest::prelude::*;
 use std::path::{Path, PathBuf};
 
-fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(), RegistryError> {
+fn registry_location(root: &Path) -> (&Path, &Path) {
+    (
+        root.parent().expect("registry has a parent"),
+        Path::new(root.file_name().expect("registry has a name")),
+    )
+}
+
+fn load_registry(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
+    let (workspace, registry_root) = registry_location(root.as_ref());
+    load_registry_from_workspace(workspace, registry_root)
+}
+
+fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile>), RegistryError> {
+    let (workspace, registry_root) = registry_location(root);
+    let opened_root = open_registry_root(workspace, registry_root)?;
     let limits = RegistryTraversalLimits {
         max_file_bytes: MAX_REGISTRY_FILE_BYTES,
         max_total_bytes: MAX_REGISTRY_TOTAL_BYTES,
@@ -10,7 +24,17 @@ fn collect_registry_files(dir: &Path, out: &mut Vec<RegistryFile>) -> Result<(),
         max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
     };
     let mut total_bytes = 0;
-    collect_registry_files_with_limits(dir, dir, out, limits, 0, &mut total_bytes)
+    let mut files = Vec::new();
+    collect_registry_files_with_limits(
+        &opened_root,
+        &opened_root.dir,
+        Path::new(""),
+        &mut files,
+        limits,
+        0,
+        &mut total_bytes,
+    )?;
+    Ok((opened_root, files))
 }
 
 proptest! {
@@ -71,10 +95,10 @@ proptest! {
 
 #[test]
 fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
-    let registry = load_registry_root(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/hello-loop/registry"),
-    )
-    .expect("hello-loop registry loads");
+    let workspace =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/hello-loop");
+    let registry = load_registry_from_workspace(&workspace, Path::new("registry"))
+        .expect("hello-loop registry loads");
 
     assert!(registry.loop_block("hello-loop").is_some());
     assert!(registry.loop_block("HelloLoop").is_some());
@@ -111,7 +135,7 @@ fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
     )
     .expect("registry file written");
 
-    let registry = load_registry_root(root).expect("nested yml registry loads");
+    let registry = load_registry(root).expect("nested yml registry loads");
 
     assert!(registry.instruction_block("Inspect").is_some());
 }
@@ -125,7 +149,8 @@ fn registry_loader_rejects_files_above_read_limit() {
     )
     .expect("registry file written");
 
-    let err = ResolvedRegistry::load_with_limits(&root, 16, 1024)
+    let (workspace, registry_root) = registry_location(&root);
+    let err = ResolvedRegistry::load_with_limits(workspace, registry_root, 16, 1024)
         .expect_err("oversized registry file is rejected before parsing");
 
     assert!(matches!(
@@ -145,11 +170,10 @@ fn registry_file_reader_enforces_limit_before_utf8_decoding() {
     let mut source = vec![b'a'; 17];
     source.push(0xff);
     std::fs::write(&path, source).expect("registry file written");
-    let mut files = Vec::new();
-    collect_registry_files(&root, &mut files).expect("registry file collected");
+    let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
     assert_eq!(files.len(), 1);
 
-    let err = read_registry_file_to_string(&files[0], 16)
+    let err = read_registry_file_to_string(&opened_root, &files[0], 16)
         .expect_err("oversized registry file is rejected before decoding trailing bytes");
 
     assert!(matches!(
@@ -163,124 +187,47 @@ fn registry_file_reader_enforces_limit_before_utf8_decoding() {
 }
 
 #[test]
-fn registry_file_reader_rejects_file_replaced_after_collection() {
-    let root = temp_registry_dir("registry-file-replaced-after-collection");
-    let path = root.join("instruction.yaml");
-    let source = "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n";
-    std::fs::write(&path, source).expect("registry file written");
-    let mut files = Vec::new();
-    collect_registry_files(&root, &mut files).expect("registry file collected");
-    assert_eq!(files.len(), 1);
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-
-        let original = std::fs::metadata(&path).expect("original metadata");
-        std::fs::rename(&path, root.join("retired.yaml"))
-            .expect("original file retained under another name");
-        std::fs::write(&path, source.replace("inspect", "replace"))
-            .expect("equal-sized replacement written");
-        set_windows_file_times(&path, original.creation_time(), original.last_write_time());
-        let replacement = std::fs::metadata(&path).expect("replacement metadata");
-        assert_eq!(replacement.creation_time(), original.creation_time());
-        assert_eq!(replacement.file_attributes(), original.file_attributes());
-        assert_eq!(replacement.file_size(), original.file_size());
-        assert_eq!(replacement.last_write_time(), original.last_write_time());
-    }
-    #[cfg(not(windows))]
-    std::fs::write(
-        &path,
-        "instruction:\n  id: replaced\n  name: Replaced\n  prompt: Replaced\n",
-    )
-    .expect("registry file replaced");
-
-    let err = read_registry_file_to_string(&files[0], MAX_REGISTRY_FILE_BYTES)
-        .expect_err("replaced registry file must be rejected");
-
-    assert!(
-        matches!(err, RegistryError::UnsafePath { ref message, .. } if message.contains("changed before open")),
-        "unexpected error: {err:?}"
-    );
-}
-
-#[test]
-fn registry_file_reader_rejects_invalid_utf8_and_identity_edges() {
-    let root = temp_registry_dir("registry-file-reader-edges");
+fn registry_file_reader_rejects_invalid_utf8() {
+    let root = temp_registry_dir("registry-invalid-utf8");
     let invalid_utf8 = root.join("invalid.yaml");
     std::fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 registry file written");
-    let mut files = Vec::new();
-    collect_registry_files(&root, &mut files).expect("registry file collected");
+    let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
     assert_eq!(files.len(), 1);
     assert!(matches!(
-        read_registry_file_to_string(&files[0], MAX_REGISTRY_FILE_BYTES),
+        read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES),
         Err(RegistryError::Io { source, .. }) if source.kind() == std::io::ErrorKind::InvalidData
     ));
-    let existing_metadata = std::fs::symlink_metadata(&invalid_utf8).expect("file metadata");
-    let existing_open = open_registry_file(&invalid_utf8).expect("existing file opened");
-    let missing_file = RegistryFile {
-        path: root.join("missing.yaml"),
-        identity: registry_file_identity(&invalid_utf8, &existing_open, &existing_metadata)
-            .expect("existing file identity"),
-    };
-    assert!(matches!(
-        read_registry_file_to_string(&missing_file, MAX_REGISTRY_FILE_BYTES),
-        Err(RegistryError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound
-    ));
+}
 
-    let dir_metadata = std::fs::symlink_metadata(&root).expect("directory metadata");
-    let dir_file = RegistryFile {
-        path: root.clone(),
-        identity: missing_file.identity,
-    };
-    assert!(matches!(
-        ensure_opened_registry_file_matches(&dir_file, &existing_open, &dir_metadata),
-        Err(RegistryError::UnsafePath { message, .. }) if message.contains("symlinks")
-    ));
-    let mut collected = Vec::new();
-    let mut total_bytes = 0;
-    assert!(matches!(
-        collect_registry_files_with_limits(
-            &invalid_utf8,
-            &invalid_utf8,
-            &mut collected,
-            RegistryTraversalLimits {
-                max_file_bytes: MAX_REGISTRY_FILE_BYTES,
-                max_total_bytes: MAX_REGISTRY_TOTAL_BYTES,
-                max_files: MAX_REGISTRY_FILES,
-                max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
-            },
-            0,
-            &mut total_bytes,
-        ),
-        Err(RegistryError::UnsafePath { message, .. }) if message.contains("must be a directory")
-    ));
+#[cfg(any(unix, windows))]
+#[test]
+fn registry_file_reader_rejects_ancestor_replaced_by_link_after_collection() {
+    let root = temp_registry_dir("registry-ancestor-swap");
+    let nested = root.join("nested");
+    let outside = temp_registry_dir("registry-ancestor-swap-outside");
+    std::fs::create_dir(&nested).expect("nested registry directory created");
+    std::fs::write(
+        nested.join("instruction.yaml"),
+        "instruction:\n  id: inside\n  name: Inside\n  prompt: Inside\n",
+    )
+    .expect("inside registry file written");
+    std::fs::write(
+        outside.join("instruction.yaml"),
+        "instruction:\n  id: outside\n  name: Outside\n  prompt: Outside\n",
+    )
+    .expect("outside registry file written");
+    let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
+    assert_eq!(files.len(), 1);
 
-    let first = root.join("first.yaml");
-    let second = root.join("second.yaml");
-    std::fs::write(
-        &first,
-        "instruction:\n  id: first\n  name: First\n  prompt: First\n",
-    )
-    .expect("first registry file written");
-    std::fs::write(
-        &second,
-        "instruction:\n  id: second\n  name: Second\n  prompt: Second\n",
-    )
-    .expect("second registry file written");
-    let first_metadata = std::fs::symlink_metadata(&first).expect("first metadata");
-    let second_metadata = std::fs::symlink_metadata(&second).expect("second metadata");
-    let first_open = open_registry_file(&first).expect("first file opened");
-    let second_open = open_registry_file(&second).expect("second file opened");
-    let first_file = RegistryFile {
-        path: first.clone(),
-        identity: registry_file_identity(&first, &first_open, &first_metadata)
-            .expect("first identity"),
-    };
-    assert!(matches!(
-        ensure_opened_registry_file_matches(&first_file, &second_open, &second_metadata),
-        Err(RegistryError::UnsafePath { message, .. }) if message.contains("changed before open")
-    ));
+    std::fs::rename(&nested, root.join("retired")).expect("nested directory retired");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, &nested).expect("replacement symlink created");
+    #[cfg(windows)]
+    create_windows_junction(&nested, &outside);
+
+    let err = read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES)
+        .expect_err("replacement link must not be followed");
+    assert!(matches!(err, RegistryError::UnsafePath { .. }));
 }
 
 #[test]
@@ -291,8 +238,10 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
     std::fs::write(root.join("a.yaml"), first).expect("first registry file written");
     std::fs::write(root.join("b.yaml"), second).expect("second registry file written");
 
+    let (workspace, registry_root) = registry_location(&root);
     let err = ResolvedRegistry::load_with_limits(
-        &root,
+        workspace,
+        registry_root,
         1024,
         u64::try_from(first.len()).expect("test length fits u64"),
     )
@@ -322,7 +271,8 @@ fn registry_loader_rejects_file_counts_above_traversal_limit() {
     )
     .expect("second registry file written");
 
-    let err = ResolvedRegistry::load_with_all_limits(&root, 1024, 1024, 1, 64)
+    let (workspace, registry_root) = registry_location(&root);
+    let err = ResolvedRegistry::load_with_all_limits(workspace, registry_root, 1024, 1024, 1, 64)
         .expect_err("registry file count is rejected during traversal");
 
     assert!(matches!(
@@ -346,7 +296,8 @@ fn registry_loader_rejects_directories_above_traversal_depth_limit() {
     )
     .expect("registry file written");
 
-    let err = ResolvedRegistry::load_with_all_limits(&root, 1024, 1024, 1024, 0)
+    let (workspace, registry_root) = registry_location(&root);
+    let err = ResolvedRegistry::load_with_all_limits(workspace, registry_root, 1024, 1024, 1024, 0)
         .expect_err("registry traversal depth is rejected before recursion");
 
     assert!(matches!(
@@ -816,7 +767,7 @@ fn registry_loader_rejects_symlinked_registry_entries() {
     let outside = temp_registry_dir("symlink-outside");
     symlink(&outside, root.join("linked")).expect("registry symlink created");
 
-    let err = load_registry_root(&root).expect_err("registry symlink must be rejected");
+    let err = load_registry(&root).expect_err("registry symlink must be rejected");
 
     assert!(
         matches!(err, RegistryError::UnsafePath { message, .. } if message.contains("symlink"))
@@ -849,7 +800,7 @@ tool:
     .expect("outside registry file written");
     create_windows_junction(&root.join("linked"), &outside);
 
-    let err = load_registry_root(&root).expect_err("registry junction must be rejected");
+    let err = load_registry(&root).expect_err("registry junction must be rejected");
 
     assert!(
         matches!(err, RegistryError::UnsafePath { ref message, .. } if message.contains("reparse")),
@@ -868,7 +819,8 @@ fn registry_loader_rejects_linked_registry_root() {
     #[cfg(windows)]
     create_windows_junction(&linked_root, &outside);
 
-    let err = load_registry_root(&linked_root).expect_err("linked registry root must be rejected");
+    let err = load_registry_from_workspace(&parent, Path::new("linked-root"))
+        .expect_err("linked registry root must be rejected");
 
     assert!(
         matches!(err, RegistryError::UnsafePath { ref path, ref message }
@@ -1892,42 +1844,6 @@ fn temp_registry_dir(label: &str) -> std::path::PathBuf {
     }
     std::fs::create_dir_all(&target).expect("temp registry created");
     target
-}
-
-#[cfg(windows)]
-fn set_windows_file_times(path: &Path, creation_time: u64, last_write_time: u64) {
-    use std::{ffi::c_void, os::windows::io::AsRawHandle};
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn SetFileTime(
-            file: *mut c_void,
-            creation_time: *const WindowsFileTime,
-            last_access_time: *const WindowsFileTime,
-            last_write_time: *const WindowsFileTime,
-        ) -> i32;
-    }
-
-    let creation_time = WindowsFileTime::from_u64(creation_time);
-    let last_write_time = WindowsFileTime::from_u64(last_write_time);
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .expect("replacement opened for timestamp restoration");
-    let result = unsafe {
-        SetFileTime(
-            file.as_raw_handle().cast::<c_void>(),
-            &creation_time,
-            std::ptr::null(),
-            &last_write_time,
-        )
-    };
-    assert_ne!(
-        result,
-        0,
-        "SetFileTime failed: {}",
-        std::io::Error::last_os_error()
-    );
 }
 
 #[cfg(windows)]

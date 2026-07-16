@@ -31,42 +31,6 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
     })
 }
 
-fn registry_root_path(workspace: &Path, registry_root: &Path) -> Result<PathBuf, RuntimeError> {
-    let mut path = workspace.to_path_buf();
-    for component in registry_root.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::Normal(segment) => {
-                path.push(segment);
-                let metadata = fs::symlink_metadata(&path).map_err(|source| RuntimeError::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                if metadata.file_type().is_symlink() || has_windows_reparse_point(&metadata) {
-                    return Err(RuntimeError::Usage(
-                        ".loop/config.yaml registry_root must not contain symlinks or reparse points"
-                            .to_owned(),
-                    ));
-                }
-                if !metadata.is_dir() {
-                    return Err(RuntimeError::Usage(
-                        ".loop/config.yaml registry_root must resolve through directories"
-                            .to_owned(),
-                    ));
-                }
-            }
-            std::path::Component::ParentDir
-            | std::path::Component::Prefix(_)
-            | std::path::Component::RootDir => {
-                return Err(RuntimeError::Usage(
-                    ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
-                ));
-            }
-        }
-    }
-    Ok(path)
-}
-
 #[derive(Debug)]
 struct WorkspaceConfig {
     event_clock: EventClock,

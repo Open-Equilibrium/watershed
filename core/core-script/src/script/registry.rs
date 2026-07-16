@@ -1,11 +1,13 @@
 impl ResolvedRegistry {
     fn load_with_limits(
-        root: &Path,
+        workspace: &Path,
+        registry_root: &Path,
         max_file_bytes: u64,
         max_total_bytes: u64,
     ) -> Result<Self, RegistryError> {
         Self::load_with_all_limits(
-            root,
+            workspace,
+            registry_root,
             max_file_bytes,
             max_total_bytes,
             MAX_REGISTRY_FILES,
@@ -14,12 +16,14 @@ impl ResolvedRegistry {
     }
 
     fn load_with_all_limits(
-        root: &Path,
+        workspace: &Path,
+        registry_root: &Path,
         max_file_bytes: u64,
         max_total_bytes: u64,
         max_files: usize,
         max_depth: usize,
     ) -> Result<Self, RegistryError> {
+        let root = open_registry_root(workspace, registry_root)?;
         let mut paths = Vec::new();
         let limits = RegistryTraversalLimits {
             max_file_bytes,
@@ -29,8 +33,9 @@ impl ResolvedRegistry {
         };
         let mut collected_bytes = 0;
         collect_registry_files_with_limits(
-            root,
-            root,
+            &root,
+            &root.dir,
+            Path::new(""),
             &mut paths,
             limits,
             0,
@@ -41,22 +46,17 @@ impl ResolvedRegistry {
         let mut total_bytes = 0u64;
 
         for file in paths {
-            let source = read_registry_file_to_string(&file, max_file_bytes)?;
+            let source = read_registry_file_to_string(&root, &file, max_file_bytes)?;
             let bytes = u64::try_from(source.len()).unwrap_or(u64::MAX);
             total_bytes = total_bytes.saturating_add(bytes);
             if total_bytes > max_total_bytes {
                 return Err(RegistryError::ReadLimitExceeded {
-                    path: root.to_path_buf(),
+                    path: root.path.clone(),
                     bytes: total_bytes,
                     max: max_total_bytes,
                 });
             }
-            let source_name = file
-                .path
-                .strip_prefix(root)
-                .unwrap_or(file.path.as_path())
-                .to_string_lossy()
-                .replace('\\', "/");
+            let source_name = file.path.to_string_lossy().replace('\\', "/");
             let block = parse_registry_block(&source_name, &source)?;
             blocks.push(block);
         }

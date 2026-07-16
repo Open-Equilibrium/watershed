@@ -8,16 +8,18 @@ const POLICY_TARGETS: [PolicyTarget; 2] = [
     PolicyTarget::MacosSeatbelt,
 ];
 
+fn fixture_registry(fixture: &str) -> core_script::ResolvedRegistry {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../loop-agent/fixtures")
+        .join(fixture);
+    core_script::load_registry_from_workspace(&workspace, Path::new("registry"))
+        .expect("fixture registry loads")
+}
+
 #[test]
 fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
     for fixture in ["smoke-loop", "hello-loop"] {
-        let registry = core_script::load_registry_root(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../loop-agent/fixtures")
-                .join(fixture)
-                .join("registry"),
-        )
-        .expect("fixture registry loads");
+        let registry = fixture_registry(fixture);
 
         let expected = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -51,10 +53,7 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
 fn smoke_registry_with_tool(
     update: impl FnOnce(&mut core_script::ToolBlock),
 ) -> core_script::ResolvedRegistry {
-    let source = core_script::load_registry_root(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/smoke-loop/registry"),
-    )
-    .expect("smoke-loop registry loads");
+    let source = fixture_registry("smoke-loop");
     let mut tool = source.tool_block("echo").expect("echo tool exists").clone();
     update(&mut tool);
     let mut phase = source
@@ -530,11 +529,7 @@ fn policy_artifact_rejects_commands_missing_from_phase_scope() {
 
 #[test]
 fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
-    let registry = core_script::load_registry_root(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../loop-agent/fixtures/sandbox-negative/registry"),
-    )
-    .expect("sandbox-negative registry loads");
+    let registry = fixture_registry("sandbox-negative");
 
     for path in fixture_files("expected.json") {
         let text = fs::read_to_string(&path).expect("fixture is readable");
