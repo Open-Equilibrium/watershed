@@ -134,6 +134,7 @@ fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
         matches!(&err, RegistryError::UnsafePath { path, .. } if path == escaping_root),
         "unexpected error: {err:?}"
     );
+    assert!(err.to_string().contains("stay within workspace"));
 
     let missing_workspace = workspace.join("missing-workspace");
     let err = load_registry_from_workspace(&missing_workspace, Path::new("registry"))
@@ -218,6 +219,7 @@ fn registry_file_reader_rejects_invalid_utf8() {
     let error = read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES)
         .expect_err("invalid UTF-8 is rejected");
     assert!(std::error::Error::source(&error).is_some());
+    assert!(error.to_string().contains("invalid.yaml"));
     assert!(matches!(
         error,
         RegistryError::Io { source, .. } if source.kind() == std::io::ErrorKind::InvalidData
@@ -912,6 +914,7 @@ fn registry_reference_validation_rejects_deep_loop_chains() {
     let err = ResolvedRegistry::from_blocks(loop_chain_blocks(MAX_LOOP_NESTING_DEPTH + 1))
         .expect_err("loop nesting above the max is rejected");
 
+    assert!(std::error::Error::source(&err).is_none());
     assert!(err.to_string().contains("loop nesting depth"));
     assert!(matches!(
         err,
@@ -1544,7 +1547,7 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
             if message.contains("script_runtime")
     ));
 
-    let predefined = ToolBlock {
+    let mut predefined = ToolBlock {
         allowed_parameters: Vec::new(),
         command: ToolCommand::Predefined {
             command_id: "agent-echo".to_owned(),
@@ -1571,6 +1574,10 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
         SemanticValidationError::InvalidToolDefinition { message, .. }
             if message.contains("omit script_runtime")
     ));
+
+    predefined.tool_kind = ToolKind::OwnScript;
+    let err = validate_tool_semantics(&predefined).expect_err("command shape must match tool kind");
+    assert!(err.to_string().contains("own-script"));
 }
 
 #[test]
