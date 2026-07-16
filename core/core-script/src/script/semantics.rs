@@ -1,5 +1,4 @@
-/// Validates block-level semantic rules that are independent of registry references.
-pub fn validate_registry_block_semantics(
+fn validate_registry_block_semantics(
     block: &RegistryBlock,
 ) -> Result<(), SemanticValidationError> {
     match block {
@@ -64,8 +63,7 @@ fn validate_loop_semantics(loop_block: &LoopBlock) -> Result<(), SemanticValidat
     Ok(())
 }
 
-/// Validates the semantic contract for one tool block.
-pub fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
+fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
     match (&tool.tool_kind, &tool.command) {
         (ToolKind::OwnScript, ToolCommand::OwnScript(command)) => {
             let expected = format!("script:{}", tool.identity.id);
