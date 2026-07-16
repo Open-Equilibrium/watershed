@@ -89,13 +89,8 @@ fn resume_event_clock(
 fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
     let loop_path = workspace.join(".loop");
     let config_path = loop_path.join("config.yaml");
-    let workspace_dir =
-        Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
-            RuntimeError::Io {
-                path: workspace.to_path_buf(),
-                source,
-            }
-        })?;
+    let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority())
+        .map_err(|source| path_io_error(workspace, source))?;
     let loop_dir = workspace_dir
         .open_dir_nofollow(".loop")
         .map_err(|source| unsafe_workspace_config_path(loop_path, source, "directory"))?;
@@ -104,10 +99,9 @@ fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeEr
     let file = loop_dir
         .open_with("config.yaml", &options)
         .map_err(|source| unsafe_workspace_config_path(config_path.clone(), source, "file"))?;
-    let metadata = file.metadata().map_err(|source| RuntimeError::Io {
-        path: config_path.clone(),
-        source,
-    })?;
+    let metadata = file
+        .metadata()
+        .map_err(|source| path_io_error(&config_path, source))?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(RuntimeError::Protocol(format!(
             "{} must not be a symlink or reparse point",
@@ -131,6 +125,13 @@ fn unsafe_workspace_config_path(path: PathBuf, source: io::Error, kind: &str) ->
         "{} {kind} must not be a symlink or reparse point: {source}",
         path.display()
     ))
+}
+
+fn path_io_error(path: &Path, source: io::Error) -> RuntimeError {
+    RuntimeError::Io {
+        path: path.to_path_buf(),
+        source,
+    }
 }
 
 fn read_session_log_to_string(path: &Path) -> Result<String, RuntimeError> {
@@ -167,16 +168,11 @@ fn decode_utf8(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {
 }
 
 fn open_real_file_for_read(path: &Path) -> Result<(fs::File, fs::Metadata), RuntimeError> {
-    let expected_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let expected_metadata =
+        fs::symlink_metadata(path).map_err(|source| path_io_error(path, source))?;
     validate_real_file(path, &expected_metadata)?;
-    let file =
-        open_file_for_read_without_following_reparse(path).map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let file = open_file_for_read_without_following_reparse(path)
+        .map_err(|source| path_io_error(path, source))?;
     let file_metadata =
         ensure_opened_real_file_for_read_matches_path(path, &expected_metadata, &file)?;
     Ok((file, file_metadata))
@@ -206,16 +202,13 @@ fn ensure_opened_real_file_for_read_matches_path(
     #[cfg(not(unix))]
     let _ = expected_metadata;
 
-    let current_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let current_metadata =
+        fs::symlink_metadata(path).map_err(|source| path_io_error(path, source))?;
     validate_real_file(path, &current_metadata)?;
 
-    let file_metadata = file.metadata().map_err(|source| RuntimeError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+    let file_metadata = file
+        .metadata()
+        .map_err(|source| path_io_error(path, source))?;
     validate_real_file(path, &file_metadata)?;
 
     #[cfg(unix)]
@@ -230,17 +223,11 @@ fn ensure_opened_real_file_for_read_matches_path(
 
     #[cfg(windows)]
     {
-        let current_file =
-            open_file_for_read_without_following_reparse(path).map_err(|source| {
-                RuntimeError::Io {
-                    path: path.to_path_buf(),
-                    source,
-                }
-            })?;
-        let current_file_metadata = current_file.metadata().map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let current_file = open_file_for_read_without_following_reparse(path)
+            .map_err(|source| path_io_error(path, source))?;
+        let current_file_metadata = current_file
+            .metadata()
+            .map_err(|source| path_io_error(path, source))?;
         validate_real_file(path, &current_file_metadata)?;
         let opened = windows_open_file_information(path, file)?;
         let current = windows_open_file_information(path, &current_file)?;
@@ -277,10 +264,7 @@ fn read_opened_file_with_limit(
     let mut bytes = Vec::new();
     file.take(max_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        .map_err(|source| path_io_error(path, source))?;
     let bytes_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if bytes_len > max_bytes {
         return Err(RuntimeError::Protocol(format!(
