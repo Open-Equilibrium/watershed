@@ -222,10 +222,7 @@ fn bounded_context_array_source(
         }
         content.push(item);
     }
-    Ok(context_source(
-        source_id,
-        serde_json::Value::Array(content),
-    ))
+    Ok(context_source(source_id, serde_json::Value::Array(content)))
 }
 
 fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_json::Value {
