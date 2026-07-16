@@ -78,6 +78,25 @@ fn version_flags_print_package_version() {
 }
 
 #[test]
+fn help_flags_print_usage() {
+    for flag in ["--help", "-h"] {
+        let output = loop_command()
+            .arg(flag)
+            .output()
+            .expect("loop binary should run");
+
+        assert!(output.status.success(), "{flag}");
+        assert!(
+            String::from_utf8(output.stdout)
+                .expect("stdout should be UTF-8")
+                .starts_with("usage: loop run <loop>"),
+            "{flag}"
+        );
+        assert!(output.stderr.is_empty(), "{flag}");
+    }
+}
+
+#[test]
 fn no_arguments_and_unknown_commands_print_usage_errors() {
     for args in [Vec::<&str>::new(), vec!["unknown"]] {
         let output = loop_command()

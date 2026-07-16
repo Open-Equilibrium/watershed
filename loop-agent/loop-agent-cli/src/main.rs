@@ -6,7 +6,7 @@ use loop_agent_core::{
 };
 use std::{
     env,
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     io::{self, BufRead, Write},
     path::{Path, PathBuf},
     process::ExitCode,
@@ -27,11 +27,13 @@ fn main() -> ExitCode {
         }
     };
 
-    if args
-        .first()
-        .is_some_and(|arg| arg == "--version" || arg == "-V")
-    {
-        return match write_stdout(&format!("loop {}\n", env!("CARGO_PKG_VERSION"))) {
+    let informational_output = match args.first().map(String::as_str) {
+        Some("--version" | "-V") => Some(format!("loop {}\n", env!("CARGO_PKG_VERSION"))),
+        Some("--help" | "-h") => Some(format!("{}\n", usage())),
+        _ => None,
+    };
+    if let Some(output) = informational_output {
+        return match write_stdout(&output) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
                 eprintln!("error: {err}");
@@ -391,9 +393,6 @@ fn reject_extra_args(args: &[String], expected_len: usize) -> Result<(), Runtime
 }
 
 fn os_string_to_string(value: OsString) -> Result<String, &'static str> {
-    if value == OsStr::new("--version") || value == OsStr::new("-V") {
-        return Ok(value.to_string_lossy().into_owned());
-    }
     value
         .into_string()
         .map_err(|_| "arguments must be valid UTF-8")
