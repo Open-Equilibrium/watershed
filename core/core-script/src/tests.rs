@@ -134,7 +134,7 @@ fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
         matches!(&err, RegistryError::UnsafePath { path, .. } if path == escaping_root),
         "unexpected error: {err:?}"
     );
-    assert!(err.to_string().contains("stay within workspace"));
+    assert!(err.to_string().contains("stay within the workspace"));
 
     let missing_workspace = workspace.join("missing-workspace");
     let err = load_registry_from_workspace(&missing_workspace, Path::new("registry"))
