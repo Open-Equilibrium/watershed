@@ -215,9 +215,12 @@ fn registry_file_reader_rejects_invalid_utf8() {
     std::fs::write(&invalid_utf8, [0xff]).expect("invalid UTF-8 registry file written");
     let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
     assert_eq!(files.len(), 1);
+    let error = read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES)
+        .expect_err("invalid UTF-8 is rejected");
+    assert!(std::error::Error::source(&error).is_some());
     assert!(matches!(
-        read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES),
-        Err(RegistryError::Io { source, .. }) if source.kind() == std::io::ErrorKind::InvalidData
+        error,
+        RegistryError::Io { source, .. } if source.kind() == std::io::ErrorKind::InvalidData
     ));
 }
 
@@ -374,6 +377,7 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
     let mut tool = own_script_tool("write-summary", "script:write-summary");
     tool.tool_kind = ToolKind::PredefinedCommand;
     let err = validate_tool_semantics(&tool).expect_err("tool kind must match command shape");
+    assert!(err.to_string().contains("predefined-command"));
     assert!(matches!(
         err,
         SemanticValidationError::ToolCommandKindMismatch { .. }
@@ -383,6 +387,7 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
     invalid_phase.steps[0].id = "BadStep".to_owned();
     let invalid_step = ResolvedRegistry::from_blocks([RegistryBlock::Phase(invalid_phase)])
         .expect_err("invalid step id rejected");
+    assert!(invalid_step.to_string().contains("invalid block id"));
     assert!(matches!(invalid_step, RegistryError::InvalidBlockId(value) if value == "BadStep"));
 
     let empty_loop = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
@@ -390,6 +395,7 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
         ..test_loop()
     })])
     .expect_err("empty loop phase_refs rejected");
+    assert!(std::error::Error::source(&empty_loop).is_some());
     assert!(empty_loop.to_string().contains("loop.phase_refs"));
 
     let mut phase_with_connection = test_phase();
@@ -894,6 +900,7 @@ fn registry_reference_validation_rejects_loop_cycles() {
     ])
     .expect_err("cycle rejected");
 
+    assert!(err.to_string().contains("loop cycle"));
     assert!(matches!(err, RegistryError::LoopCycle { .. }));
 }
 
@@ -1000,6 +1007,7 @@ fn registry_rejects_duplicate_ids_and_ids_that_shadow_names() {
     ])
     .expect_err("duplicate block ids must fail");
 
+    assert!(duplicate_id.to_string().contains("duplicate instruction"));
     assert!(matches!(
         duplicate_id,
         RegistryError::DuplicateId {
@@ -1509,6 +1517,7 @@ fn semantic_validation_requires_own_script_command_to_match_tool_id() {
 
     let err = validate_tool_semantics(&tool).expect_err("mismatched script id rejected");
 
+    assert!(err.to_string().contains("script:<tool-id>"));
     assert_eq!(
         err,
         SemanticValidationError::OwnScriptCommandIdMismatch {
@@ -1579,6 +1588,7 @@ fn semantic_validation_rejects_noncanonical_network_cidr() {
 
     let err = validate_tool_semantics(&tool).expect_err("host-bit CIDR rejected");
 
+    assert!(err.to_string().contains("invalid canonical CIDR"));
     assert_eq!(
         err,
         SemanticValidationError::InvalidCanonicalCidr {

@@ -95,8 +95,6 @@ pub enum RegistryError {
         /// Block id.
         id: String,
     },
-    /// Command id was not a valid v0 command token.
-    InvalidCommandId(String),
     /// Source text could not be parsed.
     Parse {
         /// Source name used in diagnostics.
@@ -182,7 +180,6 @@ impl fmt::Display for RegistryError {
             Self::InvalidBlockName { kind, id } => {
                 write!(f, "{kind} {id} name must be non-empty")
             }
-            Self::InvalidCommandId(value) => write!(f, "invalid command id: {value}"),
             Self::Parse {
                 source_name,
                 message,
@@ -232,7 +229,6 @@ impl std::error::Error for RegistryError {
             | Self::TraversalLimitExceeded { .. }
             | Self::InvalidBlockId(_)
             | Self::InvalidBlockName { .. }
-            | Self::InvalidCommandId(_)
             | Self::Parse { .. }
             | Self::DuplicateId { .. }
             | Self::DuplicateName { .. }
