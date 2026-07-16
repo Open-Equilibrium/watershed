@@ -16,7 +16,7 @@
     <a href="#modes">2. Standalone &amp; integration modes</a>
     <a href="#principles">3. Differentiators</a>
     <a href="#stack">4. Tech stack &amp; architecture</a>
-    <a href="#model">5. Workspace &amp; component model</a>
+    <a href="#model">5. Page, Block &amp; View model</a>
     <a href="#history">6. Action history / workspace VCS</a>
     <a href="#cliapi">7. Workspace CLI/API</a>
     <a href="#agent-edits">8. External-agent edit safety</a>
@@ -35,32 +35,31 @@
     </header>
 
     <section id="purpose" class="section"><h2>1. Purpose &amp; product boundary</h2><div class="body">
-      <p><strong>Liquid is a standalone native workspace and app-building product.</strong> It lets users compose dashboards, views, components, scripts, data sources and automations into custom workflows across desktop and mobile, with local workspace storage, an internal workspace action history/VCS and a workspace CLI/API. <strong>Liquid remains useful without Loop Agent or Meta-Harness.</strong> External agents and tools interact with Liquid through its workspace CLI/API, and all workspace mutations are recorded in Liquid's internal action history so changes can be reviewed and reverted.</p>
+      <p><strong>Liquid is a standalone local-first native workspace and app-building product.</strong> Users compose Pages from typed Blocks, switch a Block between its supported Views, connect Blocks explicitly and work across desktop and mobile. Liquid always reads and writes a local workspace replica through its action-history pipeline. <strong>Liquid remains useful without a network, Loop Agent or Meta-Harness.</strong></p>
       <p>Liquid is the Watershed platform's <strong>workspace/action layer</strong> and its long-term workspace/action wedge (see <a href="../../PLAN.md">PLAN.md</a> wedge sequencing and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>let humans and agents safely co-edit a workspace with reversible history.</em> It is an <strong>agent-editable native workspace with action history and safe revert — not a Notion clone and not merely the UI for Meta-Harness.</strong> Its defensible niche is the <strong>long tail of personal/internal/data-centric apps</strong> — agent-built, inside a sovereign, local-first, reversible workspace where the data and agent governance also live, a combination generative-app tools and SaaS workspaces do not offer; the ambition is that long tail, not literally "most applications."</p>
       <p>The clean product model across the three Watershed tools:</p>
       <pre><code>Loop Agent    = standalone agent runtime
 Meta-Harness  = standalone headless many-agent control plane
 Liquid        = standalone native workspace / app-building product</code></pre>
-      <p>Liquid can integrate Loop Agent and Meta-Harness as <strong>optional</strong> runtime/control-plane providers, but neither is a prerequisite. <strong>Liquid is not merely a UI for Meta-Harness.</strong> When Liquid does consume Meta-Harness it renders that backend rather than reimplementing it (boundary: <a href="../decisions/open-decisions.html#d-025">D-025</a>).</p>
+      <p>Liquid can integrate one or more Meta-Harness instances as <strong>optional</strong> control-plane providers, but neither Meta-Harness nor Loop Agent is a prerequisite. Liquid does not manage CLI agent processes directly. It renders public Meta-Harness projections without reimplementing their backends and preserves the owning instance for every command (boundary: <a href="../decisions/open-decisions.html#d-025">D-025</a>).</p>
       <div class="grid">
         <div class="card"><h3 class="good">Liquid owns</h3><ul>
           <li>native app shell (desktop/mobile);</li>
-          <li>workspace, dashboard, view and component models;</li>
-          <li>component runtime, rendering and layout;</li>
+          <li>Workspace, Page, Block, Block Type and View models;</li>
+          <li>Block runtime, rendering, responsive layout and Block SDK;</li>
           <li>PowerBar;</li>
           <li>local workspace storage;</li>
           <li>internal workspace action history / VCS;</li>
           <li>workspace CLI/API for external agents/tools;</li>
           <li>local user data model;</li>
           <li>connections / data-source model;</li>
-          <li>script component runtime;</li>
-          <li>extension / component SDK;</li>
+          <li>Script Block runtime;</li>
           <li>Liquid AI workspace assistant;</li>
           <li>workspace permissions and review/revert flow;</li>
-          <li>import/export; sync/collaboration later.</li>
+          <li>import/export and optional local-first sync.</li>
         </ul></div>
         <div class="card"><h3 class="bad">Liquid does not own</h3><ul>
-          <li>Loop Agent execution internals;</li>
+          <li>CLI agent process ownership or Loop Agent execution internals;</li>
           <li>Loop Agent deterministic FSM / runtime kernel;</li>
           <li>Meta-Harness session registry;</li>
           <li>Meta-Harness adapter logic;</li>
@@ -75,50 +74,48 @@ Liquid        = standalone native workspace / app-building product</code></pre>
 
     <section id="modes" class="section"><h2>2. Standalone &amp; integration modes</h2><div class="body">
       <div class="grid">
-        <div class="card"><h3>Mode A — Liquid alone (no Loop Agent, no Meta-Harness)</h3>
+        <div class="card"><h3>Mode A — local-only workspace</h3>
           <pre><code>Liquid Desktop/Mobile
-  workspace, dashboards, views, components
-  scripts, local data
-  PowerBar, Liquid AI
-  internal action history
-  workspace CLI/API</code></pre>
-          <p class="muted">Recommended standalone scope pending <a href="../decisions/open-decisions.html#d-026">D-026</a>: notes/documents, custom dashboards, tables and charts, local script components, data analysis, personal productivity, workspace/app building, LLM-assisted dashboard/component creation, and external agents reading/editing workspace data through the Liquid CLI/API.</p>
+  local replica + action history
+  Pages, Blocks, Views, Connections
+  PowerBar, Liquid AI, workspace CLI/API</code></pre>
+          <p class="muted">The complete standalone path. All interactive reads and writes remain local and continue offline.</p>
         </div>
-        <div class="card"><h3>Mode B — Liquid + Loop Agent direct</h3>
-          <pre><code>Liquid
-  connects directly to Loop Agent public runtime surfaces
-    JSONL / tail-export surfaces / RPC when implemented</code></pre>
-          <p class="muted">Simple local workflows: start a local loop from PowerBar, display a live transcript, render loop progress, inspect loop artifacts, replay/tail a Loop Agent session through public surfaces. Optional and thinner than the Meta-Harness integration.</p>
+        <div class="card"><h3>Mode B — local workspace + sync host</h3>
+          <pre><code>Liquid local replica
+  exchanges committed actions resumably
+  with optional sync host when reachable</code></pre>
+          <p class="muted">Sync is opportunistic, not a remote operating mode. Interrupted exchange resumes later; conflict semantics remain <a href="../decisions/open-decisions.html#d-035">D-035</a>.</p>
         </div>
-        <div class="card"><h3>Mode C — Liquid + local Meta-Harness sidecar</h3>
-          <pre><code>Liquid
-  starts local Meta-Harness sidecar
-    manages Loop Agent, Codex CLI,
-    Claude Code, Pi Agent, ...</code></pre>
-          <p class="muted">Default agent-enabled single-user setup. Liquid renders sessions, transcripts, approvals, the config editor, AgentPulse, schedules, automation views and the artifact inbox.</p>
+        <div class="card"><h3>Mode C — local Meta-Harness sidecar</h3>
+          <pre><code>Liquid → local Meta-Harness API
+            → host-local CLI agents</code></pre>
+          <p class="muted">Default agent-enabled setup. Meta-Harness owns the local CLI processes; Liquid renders their sessions, metrics, approvals and automations.</p>
         </div>
-        <div class="card"><h3>Mode D — Liquid + remote Meta-Harness</h3>
-          <pre><code>Liquid Desktop/Mobile
-  connects to remote Meta-Harness</code></pre>
-          <p class="muted">Team/mobile/server setup: team sessions, remote runners, mobile monitoring, shared dashboards, shared config and long-running automations.</p>
+        <div class="card"><h3>Mode D — one or more Meta-Harness APIs</h3>
+          <pre><code>Liquid → Meta A (this host)
+       → Meta B (server host)
+       → Meta C (edge host)</code></pre>
+          <p class="muted">One pane of glass, not one fictional controller. Every projection retains instance identity, freshness and authority; commands return to the owning instance.</p>
         </div>
       </div>
-      <p>In every integrated mode Liquid <em>consumes</em> the provider's public surfaces and renders them; it does not duplicate provider backends. See the <a href="V-Spec_MetaHarness.html">Meta-Harness</a> and <a href="V-Spec_LoopAgent.html">Loop Agent</a> V-Specs.</p>
+      <p>Workspace sync and live Meta-Harness control are separate planes. Offline Liquid may show explicitly stale cached agent state, but live commands are unavailable until the owning instance is reachable.</p>
     </div></section>
 
     <section id="principles" class="section"><h2>3. Differentiators / core principles</h2><div class="body grid">
-      <div class="card"><h3>Self-contained workspace product</h3><p>Workspace → dashboards → views → components is enough to build custom tools inside Liquid (e.g. a table component plus a script component generating an analysis diagram) with no agents installed.</p></div>
+      <div class="card"><h3>Self-contained workspace product</h3><p>Workspace → Page → Block is enough to build custom functionality inside Liquid: for example, a Database Block connected to a Script Block, with no agents installed.</p></div>
       <div class="card"><h3>Agent-editable workspace</h3><p>Liquid exposes a workspace CLI/API so external agents and tools can read and edit workspace data through a permissioned, fully-recorded mutation pipeline.</p></div>
       <div class="card"><h3>Workspace history is first-class</h3><p>Every mutation is appended to an internal action history/VCS with actor and origin, so changes are auditable and revertible.</p></div>
       <div class="card"><h3>Native cross-device app</h3><p>Desktop/mobile native across Linux, Windows, macOS and mobile. Users should not need separate provider apps on each device.</p></div>
-      <div class="card"><h3>LLMs build functionality in place</h3><p>Describe a dashboard/component/automation; Liquid AI proposes it through the same mutation pipeline and the user reviews/runs it without per-platform build/deploy flows.</p></div>
-      <div class="card"><h3>Optional protocol-native integrations</h3><p>Loop Agent and Meta-Harness integrate as protocol clients, not compiled-in UI modules, and are never prerequisites.</p></div>
+      <div class="card"><h3>LLMs build functionality in place</h3><p>Describe a Page, Block or automation; Liquid AI proposes it through the same mutation pipeline and the user reviews/runs it without per-platform build/deploy flows.</p></div>
+      <div class="card"><h3>Optional protocol-native integrations</h3><p>Meta-Harness instances integrate through public APIs, not compiled-in UI modules, and are never prerequisites.</p></div>
     </div></section>
 
     <section id="stack" class="section"><h2>4. Tech stack &amp; architecture</h2><div class="body">
       <p>Recommended module structure (crate/package names remain provisional until M3 implementation planning; the layout below is a design target, not a frozen decision):</p>
       <pre><code>liquid-core
-  workspace model, component model, connection model
+  Workspace, Page, Block, View and Connection models
+  Block SDK contracts and responsive layout
   action-history / workspace-VCS model
   permissions, command/mutation pipeline
   storage abstraction
@@ -139,40 +136,52 @@ liquid-api
 
 liquid-ui
   native Dart/Flutter candidate UI
-  dashboards, views, components, PowerBar
+  Pages, Blocks, Views, Arrange mode, PowerBar
   action-history / revert UI
 
 liquid-ai
   workspace assistant; uses the same mutation/action-history pipeline
 
 integrations
-  Loop Agent client, Meta-Harness client, external data-source clients</code></pre>
+  Meta-Harness clients, sync client, external Source clients</code></pre>
       <ul>
-        <li><strong>Core:</strong> Rust for the workspace/component/history models, permissions, mutation pipeline and protocol clients.</li>
+        <li><strong>Core:</strong> Rust for workspace/Block/history models, permissions, mutation pipeline and protocol clients.</li>
         <li><strong>UI:</strong> Dart-based native cross-platform target; exact framework is open in <a href="../decisions/open-decisions.html#d-009">D-009</a>.</li>
         <li><strong>Storage/history:</strong> recommended local-first store + append-only action log + snapshots/checkpoints (<a href="../decisions/open-decisions.html#d-029">D-029</a>, <a href="../decisions/open-decisions.html#d-028">D-028</a>).</li>
-        <li><strong>Components:</strong> built-in components plus SDK/extensions; script-component isolation remains open in <a href="../decisions/open-decisions.html#d-034">D-034</a>.</li>
-        <li><strong>Integration:</strong> Loop Agent and Meta-Harness through <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</li>
+        <li><strong>Blocks:</strong> trusted built-in Block Types implement the Block SDK; Script Block isolation remains open in <a href="../decisions/open-decisions.html#d-034">D-034</a>. Third-party executable/custom UI loading remains post-MVP under ADR-0040.</li>
+        <li><strong>Integration:</strong> Meta-Harness and sync clients use public contracts in <a href="../../PROTOCOL.md">PROTOCOL.md</a>; neither becomes part of the local workspace core.</li>
       </ul>
     </div></section>
 
-    <section id="model" class="section"><h2>5. Workspace &amp; component model</h2><div class="body">
+    <section id="model" class="section"><h2>5. Page, Block &amp; View model</h2><div class="body">
       <div class="tree">
-        <div class="node"><strong>Workspace</strong> — top-level user/agent container: dashboards, sources, settings, action history</div>
-        <div class="node indent"><strong>Source</strong> — anything addressable in a workspace: a <strong>Link</strong> (external reference) or a <strong>Dashboard</strong></div>
-        <div class="node indent"><strong>Dashboard</strong> — composition of views; has layout and permissions</div>
-        <div class="node indent"><strong>View</strong> — representation of one or more components; filters and presentation state</div>
-        <div class="node indent"><strong>Component</strong> — smallest composable unit: <code>id</code>, <code>type</code>, <code>state</code>, input/output ports, permissions, actions, events</div>
-        <div class="node indent"><strong>Connection</strong> — explicit relation between components, scripts, sources or loops: source, target, mapping, trigger/refresh behavior</div>
+        <div class="node"><strong>Workspace</strong> — Pages, Sources, settings and action history</div>
+        <div class="node indent"><strong>Page</strong> — top-level authored surface with canonical Block order and responsive layout metadata</div>
+        <div class="node indent"><strong>Block</strong> — typed, addressable content or functionality placed on a Page</div>
+        <div class="node indent"><strong>Block Type</strong> — behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities</div>
+        <div class="node indent"><strong>View</strong> — one representation/interaction surface over its owning Block's state</div>
+        <div class="node indent"><strong>Connection</strong> — typed, permissioned Block-to-Block relation independent of layout and active View</div>
+        <div class="node indent"><strong>Source</strong> — external or shared data input; never a Page container</div>
       </div>
-      <p>This model is what the CLI/API and action history read and mutate. The minimal typed component contract for the MVP is <a href="../decisions/open-decisions.html#d-033">D-033</a>; it must align with the <code>GLOSSARY.md</code> Liquid primitives rather than introduce competing terms. Built-in component types for the MVP: note/document, table, chart, script, and file/link/source.</p>
-      <p>In the MVP a <strong>script component computes</strong> (e.g. produces an analysis/diagram) and visualization is via built-in components wired by connections; ADR-0040 keeps the MVP fixed-palette while preserving later <strong>arbitrary interactive UI</strong> (the "generate an app" capability).</p>
+      <p><strong>View ownership:</strong> a Block owns its state and supported Views. A Database Block may expose table, board, calendar and gallery Views; a Script Block may expose code, UI and output/log Views. Changing View does not duplicate state. The MVP shows one active View per Block; larger screens may support a split View within that Block.</p>
+      <p><strong>Connections:</strong> adjacency never grants access. A Script Block beside a Database Block reads or writes it only through an explicit typed Connection and permission grant. Writes return through Liquid's mutation pipeline and action history. Moving or resizing either Block changes only Page layout.</p>
+      <p><strong>Block SDK:</strong> one contract covers built-in and future third-party Block Types: identity, state serialization/migrations, Views, typed ports/actions, permissions, responsive behavior and lifecycle. The MVP ships a fixed trusted palette under ADR-0040; the SDK contract does not imply loading untrusted custom UI in M3.</p>
+      <h3>Creation and arrangement</h3>
+      <ul>
+        <li>A new Page is blank and type-neutral. Typing creates a Text Block; <code>/</code> opens the Block chooser; paste/drop and explicit drawing create deterministic matching Blocks.</li>
+        <li>Text shortcuts format within a Text Block; for example, <code>&gt;</code> plus space applies toggle formatting. A toggle is not its own Block.</li>
+        <li>Content starts as an ordered vertical flow. Explicit <strong>Arrange mode</strong> reveals the responsive grid and resize/reorder handles; there is no second container or layout mode.</li>
+        <li>Desktop uses drag handles. Mobile uses long-press or an explicit arrange command. The grid never shakes.</li>
+      </ul>
+      <h3>Responsive and mobile behavior</h3>
+      <p>Canonical Block order is device-independent; responsive spans derive desktop grids and mobile stacks. Every Block remains visible in the Liquid mobile app, but compact inline editing is capability-based: text, lists and safe controls may edit inline, while code, wide database tables and whiteboards open a focused/full-screen View. Blocks advertise compact, standard and expanded size support through the Block SDK.</p>
+      <p>OS home-screen widgets are a separate post-MVP surface, not miniature editable Blocks. Only safe, compact Views/actions qualify (for example quick note, task list, KPI, session status or a safe shortcut); scripts, sensitive actions and complex editing open Liquid.</p>
     </div></section>
 
     <section id="history" class="section"><h2>6. Internal action history / workspace VCS</h2><div class="body">
       <p>Liquid maintains an internal action history / workspace VCS to support undo/redo, change review, attribution (who/what changed what), reverting faulty external-agent changes, auditability, historical views, future sync/collaboration, and robustness as an agent-editable workspace.</p>
-      <p><strong>Scope (in):</strong> Liquid workspace data — workspace metadata, dashboards, views, components, component state, documents/notes, tables/databases, script components, data-source definitions, connections, automations defined in Liquid, user-defined PowerBar commands, and permissions/settings where applicable.</p>
-      <p><strong>Scope (out):</strong> managing arbitrary external code repositories; replacing Git in software projects; Loop Agent project-history behavior; Meta-Harness/provider session logs except where represented as Liquid components/views.</p>
+      <p><strong>Scope (in):</strong> Liquid workspace data — Workspace metadata, Pages, Blocks, Block state and Views, Sources, Connections, responsive layout, automations, PowerBar commands and applicable permissions/settings.</p>
+      <p><strong>Scope (out):</strong> managing arbitrary external code repositories; replacing Git in software projects; Loop Agent project-history behavior; Meta-Harness/provider session logs except where projected through Liquid Blocks.</p>
       <p class="warn">Liquid's internal action history is a workspace VCS, <strong>not</strong> a project-code VCS.</p>
       <h3>Provisional conceptual model (<a href="../decisions/open-decisions.html#d-028">D-028</a>)</h3>
       <pre><code>Action
@@ -180,7 +189,7 @@ integrations
   timestamp
   actor:     human | liquid-ai | external-agent | meta-harness | system
   origin:    ui | cli | api | automation | import | sync
-  target:    workspace / dashboard / view / component / source / script / ...
+  target:    workspace / page / block / view / connection / source / ...
   operation: create | update | delete | move | connect | disconnect | run | import | revert
   before/after or patch
   permissions result
@@ -197,15 +206,15 @@ review proposed changes before apply</code></pre>
     </div></section>
 
     <section id="cliapi" class="section"><h2>7. Workspace CLI/API for external agents</h2><div class="body">
-      <p>Liquid exposes itself to external agents and tools through CLI/API surfaces so they can inspect workspace structure; read documents, tables, dashboards, views and components; propose or apply workspace edits subject to permissions; create/update dashboards/components/scripts; query action history; revert faulty changes or request a revert; and act as a workspace data source and controlled mutation target for Meta-Harness and BYOA agents.</p>
+      <p>Liquid exposes CLI/API surfaces so external agents and tools can inspect Pages, Blocks, Views, Connections and Sources; propose or apply permissioned workspace edits; query action history; and request or perform allowed reverts. The same APIs are the controlled data boundary for Meta-Harness-orchestrated and BYOA agents.</p>
       <p>CLI verbs below are <em>target product shape, not final syntax</em> (<a href="../decisions/open-decisions.html#d-027">D-027</a>):</p>
       <pre><code>liq workspace list
 liq workspace open &lt;workspace-id&gt;
-liq dashboard list
-liq dashboard get &lt;dashboard-id&gt;
-liq component list --dashboard &lt;dashboard-id&gt;
-liq component get &lt;component-id&gt;
-liq component update &lt;component-id&gt; --patch patch.json
+liq page list
+liq page get &lt;page-id&gt;
+liq block list --page &lt;page-id&gt;
+liq block get &lt;block-id&gt;
+liq block update &lt;block-id&gt; --patch patch.json
 liq source list
 liq source query &lt;source-id&gt; --query query.json
 liq action-history list --workspace &lt;workspace-id&gt;
@@ -213,7 +222,7 @@ liq action-history show &lt;action-id&gt;
 liq action-history revert &lt;action-id&gt;
 liq diff &lt;before-action-id&gt; &lt;after-action-id&gt;
 liq export &lt;workspace-id&gt;</code></pre>
-      <p>Target API/protocol capabilities: read workspace tree; read dashboard/view/component state; query workspace data sources; create/update/delete components; create/update/delete dashboards/views; run or update script components; propose workspace mutations; apply approved workspace mutations; inspect action history; diff workspace states/actions; revert actions; subscribe to workspace events.</p>
+      <p>Target capabilities: read workspace/Page/Block/View state; query Sources; create/update/delete/reorder Blocks and Pages; switch Block Views; connect/disconnect typed ports; run or update Script Blocks; propose/apply approved mutations; inspect/diff/revert action history; and subscribe to workspace events.</p>
       <ul>
         <li>The CLI/API <strong>must not</strong> bypass permission, review or action-history recording.</li>
         <li>Every mutation through the CLI/API produces an action-history entry.</li>
@@ -237,21 +246,21 @@ user or agent can revert via action-history API</code></pre>
 
     <section id="ai" class="section"><h2>9. Liquid AI vs external agents</h2><div class="body">
       <p>Liquid AI is Liquid's built-in workspace assistant. External agents may interact with Liquid through the CLI/API, and Meta-Harness may orchestrate external agents that read/edit Liquid. <strong>Liquid AI and external agents both go through the same permissioned mutation/action-history pipeline</strong> (<a href="../decisions/open-decisions.html#d-032">D-032</a>).</p>
-      <p>Liquid AI helps with: creating dashboards; adding/editing components; writing script components; explaining workspace data; building views; connecting data sources; suggesting automations; and reverting/reviewing previous actions.</p>
-      <p>When Liquid AI needs to run or coordinate coding/agent tasks, it calls Loop Agent or Meta-Harness through their <strong>public surfaces</strong>; it does not embed their runtimes.</p>
+      <p>Liquid AI helps create Pages, add/edit Blocks, write Script Blocks, explain workspace data, choose Views, create Connections, suggest automations and review/revert actions.</p>
+      <p>When Liquid AI needs to run or coordinate agent tasks, it calls the owning Meta-Harness through its <strong>public surface</strong>; it does not embed agent runtimes or own CLI processes.</p>
     </div></section>
 
     <section id="llm-apps" class="section"><h2>10. LLM-built functionality inside Liquid</h2><div class="body">
-      <p>Liquid makes app-building feel like workspace customization: describe the desired dashboard, component or automation; Liquid AI proposes components/scripts/connections; the user reviews and runs them inside Liquid. The proposal flows through the same pipeline as any other mutation (§8) and is recorded in the action history (§6).</p>
-      <pre><code>User: "Build a dashboard that tracks open sessions, compares AgentPulse scores,
+      <p>Liquid makes app-building feel like workspace customization: describe the desired Page, Block or automation; Liquid AI proposes Blocks, Views and Connections; the user reviews and runs them inside Liquid. The proposal flows through the same pipeline as any other mutation (§8) and is recorded in the action history (§6).</p>
+      <pre><code>User: "Build a page that tracks open sessions, compares AgentPulse scores,
 and charts rework ratio by loop."
 
 Liquid AI (via the mutation pipeline):
-  - proposes a new dashboard
-  - adds a session table component
-  - adds an AgentPulse metric view
-  - adds a chart component
-  - connects the metric source to the chart
+  - proposes a new Page
+  - adds a session Database Block
+  - selects its table View
+  - adds a Chart Block
+  - connects an AgentPulse Source to the Chart Block
   - asks before enabling scheduled refresh
   -> every applied step appends an action-history entry and is revertible</code></pre>
       <p>Security-sensitive automations and external data access go through explicit capability prompts and policy gates (see §11).</p>
@@ -266,7 +275,7 @@ Liquid AI (via the mutation pipeline):
         <li>The action history must be tamper-evident enough for product needs; exact cryptographic guarantees are open.</li>
         <li>Revert is available for applied external-agent mutations.</li>
         <li>Secrets/credentials in workspace data require special handling.</li>
-        <li>Script components and external-agent edits are different risk classes and are treated separately (<a href="../decisions/open-decisions.html#d-034">D-034</a>).</li>
+        <li>Script Blocks and external-agent edits are different risk classes and are treated separately (<a href="../decisions/open-decisions.html#d-034">D-034</a>).</li>
       </ul>
       <p>External-agent permission model is <a href="../decisions/open-decisions.html#d-030">D-030</a>.</p>
     </div></section>
@@ -276,28 +285,29 @@ Liquid AI (via the mutation pipeline):
     </div></section>
 
     <section id="m3" class="section"><h2>13. M3 implementation packet</h2><div class="body">
-      <p>M3 delivers Liquid as a <strong>self-contained product</strong> (see <a href="../../PLAN.md">PLAN.md</a> M3). The following is the recommended working scope pending the cited open decisions:</p>
+      <p>M3 delivers Liquid as a <strong>self-contained local-first product</strong> (see <a href="../../PLAN.md">PLAN.md</a> M3). The working scope pending the cited open decisions:</p>
       <ul>
         <li>native Rust + Dart app shell (after <a href="../decisions/open-decisions.html#d-009">D-009</a> closes);</li>
-        <li>local workspace store;</li>
+        <li>local workspace replica and optional resumable sync client;</li>
         <li>internal action-history / workspace-VCS model;</li>
-        <li>workspace/dashboard/view/component model;</li>
+        <li>Workspace/Page/Block/View model and Block SDK contract;</li>
+        <li>deterministic first-action creation, text formatting shortcuts and <code>/</code> Block chooser;</li>
+        <li>content flow, Arrange mode and responsive/mobile behavior;</li>
         <li>PowerBar;</li>
-        <li>built-in components: note/document, table, chart, script, file/link/source;</li>
-        <li>component connection model;</li>
+        <li>trusted built-in Text, Database, Chart, Code, Formula, Script, Media/Embed and agent-session Blocks;</li>
+        <li>typed Block Connection model;</li>
         <li>Liquid CLI for workspace read/edit;</li>
         <li>local API/service for external agents/tools;</li>
         <li>action-history UI and CLI commands;</li>
         <li>Liquid AI assistant skeleton;</li>
-        <li>script component runtime (local sandbox recommended; <a href="../decisions/open-decisions.html#d-034">D-034</a>);</li>
-        <li>optional Meta-Harness client component;</li>
-        <li>optional Loop Agent transcript/session component.</li>
+        <li>Script Block runtime (local sandbox recommended; <a href="../decisions/open-decisions.html#d-034">D-034</a>);</li>
+        <li>optional multi-instance Meta-Harness client projections with provenance, freshness and authority.</li>
       </ul>
-      <p><strong>Provisional M3 pass/fail (pending D-026, D-028, D-031 and D-034)</strong> includes: a user can create a useful dashboard without agents; add/edit/connect components; run a script component over local data; use PowerBar for workspace actions; Liquid AI can propose or modify a dashboard/component through the same mutation pipeline; an external agent can read permitted workspace info through the CLI/API; an external agent can propose/apply a permitted workspace mutation; every mutation is recorded in the action history; a faulty external-agent mutation can be reverted; and, optionally, a user can add a Meta-Harness session/AgentPulse widget.</p>
+      <p><strong>Provisional M3 pass/fail (pending D-026, D-028, D-031, D-034 and D-035):</strong> offline, a user can start a blank Page by acting immediately, edit/connect multi-View Blocks, arrange them responsively and run a Script Block over local data; every human, AI, CLI/API and sync mutation uses the action-history pipeline and can be reviewed/reverted as permitted; interrupted sync resumes without blocking local work. Optional agent integration projects multiple Meta-Harness instances without losing provenance and rejects live commands while the owning instance is unreachable.</p>
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>. Liquid-specific decisions: standalone MVP scope (<a href="../decisions/open-decisions.html#d-026">D-026</a>), CLI/API surface (<a href="../decisions/open-decisions.html#d-027">D-027</a>), action history/workspace VCS (<a href="../decisions/open-decisions.html#d-028">D-028</a>), storage model (<a href="../decisions/open-decisions.html#d-029">D-029</a>), external-agent permissions (<a href="../decisions/open-decisions.html#d-030">D-030</a>), revert semantics (<a href="../decisions/open-decisions.html#d-031">D-031</a>), shared mutation pipeline (<a href="../decisions/open-decisions.html#d-032">D-032</a>), component runtime contract (<a href="../decisions/open-decisions.html#d-033">D-033</a>), script component runtime (<a href="../decisions/open-decisions.html#d-034">D-034</a>) and sync/collaboration (<a href="../decisions/open-decisions.html#d-035">D-035</a>). The Meta-Harness integration boundary Liquid respects is <a href="../decisions/open-decisions.html#d-025">D-025</a>; UI framework is <a href="../decisions/open-decisions.html#d-009">D-009</a>; navigation/layout is <a href="../decisions/open-decisions.html#d-005">D-005</a>. None of these should block M0–M2.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>. Liquid-specific decisions: Page navigation (<a href="../decisions/open-decisions.html#d-005">D-005</a>), UI framework (<a href="../decisions/open-decisions.html#d-009">D-009</a>), standalone MVP scope (<a href="../decisions/open-decisions.html#d-026">D-026</a>), CLI/API surface (<a href="../decisions/open-decisions.html#d-027">D-027</a>), action history (<a href="../decisions/open-decisions.html#d-028">D-028</a>), storage (<a href="../decisions/open-decisions.html#d-029">D-029</a>), external-agent permissions (<a href="../decisions/open-decisions.html#d-030">D-030</a>), revert semantics (<a href="../decisions/open-decisions.html#d-031">D-031</a>), mutation pipeline implementation (<a href="../decisions/open-decisions.html#d-032">D-032</a>), Block SDK/runtime contract (<a href="../decisions/open-decisions.html#d-033">D-033</a>), Script Block runtime (<a href="../decisions/open-decisions.html#d-034">D-034</a>) and sync conflict semantics (<a href="../decisions/open-decisions.html#d-035">D-035</a>). Multi-instance Meta-Harness projection detail remains <a href="../decisions/open-decisions.html#d-025">D-025</a>. None blocks M0–M2.</p>
     </div></section>
   </main>
 </div>

@@ -42,16 +42,19 @@ A Meta-Agent may reconfigure underlying agents, **policy-gated**: low-risk chang
 
 The same gate applies to **all Meta-Harness control surfaces** — its CLI, API/service and BYOA/external command surface. Meta-Harness runs headlessly (without Liquid), so the policy/audit gate, not a UI confirmation dialog, is the boundary: sensitive commands from any client must be authorized and audited identically.
 
+Execution ownership is host-local. A Meta-Harness executor may control only CLI processes created or adopted on its own host under an explicit local identity; it rejects cross-host process claims. Exposing the API to another device requires authenticated, integrity-protected transport and does not expand executor authority. Liquid must route live commands to the instance that owns the addressed session/configuration and must not treat cached state as controllable while that instance is unreachable.
+
 ## Liquid workspace access & external-agent edits
 
 Liquid is a standalone workspace product that external agents and tools can read and edit through its workspace CLI/API. That access is permissioned and auditable:
 
 - CLI/API access requires explicit workspace permission; agent reads and writes are **scoped** (external-agent permission model: D-030).
 - Every workspace write — from the UI, Liquid AI, the CLI/API or an external agent — goes through one **permissioned mutation pipeline** and is recorded in Liquid's **action history**; there are no hidden writes that bypass it (D-032).
+- Sync applies received actions through that same pipeline. Sync credentials authorize workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
 - External-agent writes are **attributed** (actor/origin) and **revertible**; sensitive changes require approval, and a proposed diff can be reviewed before apply.
 - The action history must be tamper-evident enough for product needs; exact cryptographic guarantees are open.
 - Secrets/credentials stored in workspace data require special handling.
-- Script components and external-agent edits are different risk classes and are treated separately (script component runtime/sandbox: D-034).
+- Script Blocks and external-agent edits are different risk classes and are treated separately (Script Block runtime/sandbox: D-034).
 
 This is Liquid's **workspace** action history (over Liquid's own data), not a project-code VCS. Detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
 

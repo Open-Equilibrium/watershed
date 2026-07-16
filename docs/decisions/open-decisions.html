@@ -38,18 +38,11 @@
         <ul><li><strong>A:</strong> A command-line app plus a background service. Pro: useful without Liquid and easy to test. Con: no rich interface.</li><li><strong>B:</strong> Add a small status screen after the controller works. Pro: easier demonstrations. Con: another part to package and maintain.</li></ul>
         <p><strong>Recommendation:</strong> A; no competing full standalone GUI in the MVP.</p>
       </article>
-      <article id="d-022" class="decision">
-        <h3>D-022 - Meta-Harness Deployment Modes</h3>
-        <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> Should the first controller run only on the same computer, or also as a remote server?</p>
-        <ul><li><strong>A:</strong> A background process on the same computer plus a command-line app. Pro: simplest for local agents. Con: remote teams wait.</li><li><strong>B:</strong> Local operation plus a remote server. Pro: supports more users. Con: also requires sign-in, hosting and network-security work.</li></ul>
-        <p><strong>Recommendation:</strong> A; preserve remote-capable protocol seams.</p>
-      </article>
       <article id="d-023" class="decision">
         <h3>D-023 - Meta-Harness Service/API Transport</h3>
         <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> How should local apps send commands to Meta-Harness and receive live updates?</p>
-        <ul><li><strong>A:</strong> Use a private app-to-app channel (JSON-RPC over a local socket or named pipe). Pro: small and not exposed to the network. Con: browser-based clients need an adapter.</li><li><strong>B:</strong> Use a local web interface (HTTP with a live update connection). Pro: easy for Liquid and other tools to use. Con: creates a larger security surface.</li><li><strong>C:</strong> Use the web interface for Liquid and the private channel for command-line and external agents. Pro: fits both client types. Con: two paths must stay consistent.</li></ul>
+        <p><strong>Question:</strong> Which transport should serve same-host CLI clients and authenticated Liquid clients on other devices without changing host-local execution ownership?</p>
+        <ul><li><strong>A:</strong> Use JSON-RPC over a local socket or named pipe only. Pro: smallest security surface. Con: remote Liquid needs a later gateway.</li><li><strong>B:</strong> Use authenticated HTTP plus a live update connection for every client. Pro: one network-capable path. Con: larger local security surface.</li><li><strong>C:</strong> Keep one shared API contract over a private local transport and an authenticated network transport. Pro: fits both topologies. Con: two bindings must remain equivalent.</li></ul>
         <p><strong>Recommendation:</strong> C as the direction, starting with only the parts M2 needs.</p>
       </article>
       <article id="d-024" class="decision">
@@ -60,11 +53,11 @@
         <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
       </article>
       <article id="d-025" class="decision">
-        <h3>D-025 - Liquid/Meta-Harness Boundary</h3>
-        <p><strong>Status:</strong> Open implementation detail before Liquid integration work; the one-backend boundary is accepted in ADR-0018.</p>
-        <p><strong>Question:</strong> Which Meta-Harness information and actions should Liquid be allowed to show and use?</p>
-        <ul><li><strong>A:</strong> Meta-Harness provides sessions, settings and measurements through one official interface; Liquid uses it. Pro: one source of truth. Con: Liquid must wait until the interface supports each need.</li><li><strong>B:</strong> Liquid keeps temporary local copies synchronized with Meta-Harness. Pro: faster interface prototypes. Con: synchronization rules need care.</li></ul>
-        <p><strong>Recommendation:</strong> A first; any projection must remain non-authoritative.</p>
+        <h3>D-025 - Multi-Instance Meta-Harness Projection</h3>
+        <p><strong>Status:</strong> Open implementation detail before Liquid integration; instance-owned authority and provenance are accepted invariants.</p>
+        <p><strong>Question:</strong> How should Liquid combine read models from several Meta-Harness instances?</p>
+        <ul><li><strong>A:</strong> Query each instance and merge non-authoritative projections in Liquid, retaining instance id, freshness and command route. Pro: simple ownership. Con: offline caching and cross-instance sorting need care.</li><li><strong>B:</strong> Add a separate federation service that aggregates instances. Pro: central team queries. Con: another service and authority boundary.</li></ul>
+        <p><strong>Recommendation:</strong> A for M3; begin with one primary/local instance and add merged projections without globalizing config or schedules.</p>
       </article>
     </div>
   </section>
@@ -73,10 +66,10 @@
     <h2>M3 - Liquid</h2>
     <div class="grid">
       <article id="d-005" class="decision">
-        <h3>D-005 - Liquid Navigation And Layout</h3>
+        <h3>D-005 - Liquid Page Navigation</h3>
         <p><strong>Status:</strong> Open before Liquid UI implementation.</p>
-        <p><strong>Question:</strong> What navigation model should the first Liquid workspace use?</p>
-        <ul><li><strong>A:</strong> Workspace sidebar plus command palette. Pro: scalable and agent-friendly. Con: more interaction design.</li><li><strong>B:</strong> Dashboard-first tabs. Pro: simple. Con: weaker for many workspaces/actions.</li></ul>
+        <p><strong>Question:</strong> How should users move among Pages and Sources in the first Liquid workspace?</p>
+        <ul><li><strong>A:</strong> Workspace sidebar plus command palette. Pro: scales to many Pages and is agent-friendly. Con: more interaction design.</li><li><strong>B:</strong> Page tabs plus command palette. Pro: familiar for a few open Pages. Con: weak discovery and crowding at scale.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-009" class="decision">
@@ -90,7 +83,7 @@
         <h3>D-026 - Liquid Standalone MVP Scope</h3>
         <p><strong>Status:</strong> Open before M3 scoping freeze.</p>
         <p><strong>Question:</strong> Which Liquid capabilities are required when no agents are installed?</p>
-        <ul><li><strong>A:</strong> Dashboard/component workspace, local scripts, command palette and action history. Pro: proves standalone value. Con: narrower integrations.</li><li><strong>B:</strong> Include rich agent integration first. Pro: stronger platform demo. Con: weakens standalone proof.</li></ul>
+        <ul><li><strong>A:</strong> Page/Block workspace, local Script Blocks, PowerBar and action history. Pro: proves standalone value. Con: narrower agent integration.</li><li><strong>B:</strong> Include rich agent integration first. Pro: stronger platform demo. Con: weakens standalone proof.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-027" class="decision">
@@ -111,7 +104,7 @@
         <h3>D-029 - Liquid Storage Model</h3>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
         <p><strong>Question:</strong> Which local-first store backs workspace state and history?</p>
-        <ul><li><strong>A:</strong> SQLite-backed local store. Pro: reliable local queries. Con: schema migrations.</li><li><strong>B:</strong> File tree plus JSON. Pro: transparent. Con: weaker consistency and indexing.</li></ul>
+        <ul><li><strong>A:</strong> SQLite-backed local replica. Pro: reliable offline queries and transactions. Con: schema migrations and sync mapping.</li><li><strong>B:</strong> File tree plus JSON local replica. Pro: transparent. Con: weaker consistency and indexing.</li></ul>
         <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
       </article>
       <article id="d-030" class="decision">
@@ -132,29 +125,29 @@
         <h3>D-032 - Shared Mutation Pipeline</h3>
         <p><strong>Status:</strong> Open implementation detail before any Liquid write surface ships; one recorded mutation path is the accepted product invariant.</p>
         <p><strong>Question:</strong> How should the interface, command line, Liquid AI and outside tools all send changes through one recorded path?</p>
-        <ul><li><strong>A:</strong> One shared, defined change pipeline. Pro: no hidden changes. Con: every component must follow a stricter contract.</li><li><strong>B:</strong> A translator for each entry point that writes to the same internal log. Pro: flexible integration. Con: every translator must behave identically.</li></ul>
+        <ul><li><strong>A:</strong> One shared, defined change pipeline. Pro: no hidden changes. Con: every Block and entry point follows a stricter contract.</li><li><strong>B:</strong> A translator for each entry point that writes to the same internal log. Pro: flexible integration. Con: every translator must behave identically.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-033" class="decision">
-        <h3>D-033 - Component Runtime Contract</h3>
-        <p><strong>Status:</strong> Open before component implementation.</p>
-        <p><strong>Question:</strong> What information and actions can dashboard components receive and send?</p>
-        <ul><li><strong>A:</strong> Small, defined inputs, data and events. Pro: stable and testable. Con: fewer possibilities at first.</li><li><strong>B:</strong> A flexible component model with few restrictions. Pro: expressive. Con: harder to isolate safely and change later.</li></ul>
+        <h3>D-033 - Block SDK Runtime Contract</h3>
+        <p><strong>Status:</strong> Open before Block implementation.</p>
+        <p><strong>Question:</strong> What exact state, View, typed-port, action, permission, migration and responsive interfaces form the first Block SDK?</p>
+        <ul><li><strong>A:</strong> A small versioned contract with declared capabilities. Pro: stable, testable and safe. Con: fewer possibilities at first.</li><li><strong>B:</strong> A broad dynamic contract with few restrictions. Pro: expressive. Con: harder to isolate and evolve safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-034" class="decision">
-        <h3>D-034 - Script Component Runtime</h3>
-        <p><strong>Status:</strong> Open before script components.</p>
-        <p><strong>Question:</strong> Where and how should Liquid script components run safely?</p>
+        <h3>D-034 - Script Block Runtime</h3>
+        <p><strong>Status:</strong> Open before Script Blocks.</p>
+        <p><strong>Question:</strong> Where and how should Liquid Script Blocks run safely?</p>
         <ul><li><strong>A:</strong> Run locally with access only to explicitly granted abilities. Pro: works offline and actions can be reviewed. Con: safe isolation must be built.</li><li><strong>B:</strong> Run only on a remote service. Pro: isolates the local device. Con: depends on a network service and weakens offline use.</li></ul>
         <p><strong>Recommendation:</strong> A, with the exact runtime chosen during M3 design.</p>
       </article>
       <article id="d-035" class="decision">
-        <h3>D-035 - Sync And Collaboration</h3>
+        <h3>D-035 - Sync Conflict Semantics</h3>
         <p><strong>Status:</strong> Open before shared-workspace work.</p>
-        <p><strong>Question:</strong> How should changes stay synchronized among multiple people and agents?</p>
-        <ul><li><strong>A:</strong> Keep a change log on each device and send each client updates only for views it uses. Pro: matches offline and performance goals. Con: conflicting changes are harder to resolve.</li><li><strong>B:</strong> Make one central server authoritative. Pro: simpler ownership of shared changes. Con: weaker offline operation.</li></ul>
-        <p><strong>Recommendation:</strong> A, unless M3 constraints force a narrower local-only MVP.</p>
+        <p><strong>Question:</strong> Liquid always writes locally and exchanges committed actions resumably; how should concurrent offline edits merge?</p>
+        <ul><li><strong>A:</strong> Operation/change-log merge with deterministic per-field rules and explicit conflicts for unsafe cases. Pro: preserves local-first behavior and audit history. Con: more merge design.</li><li><strong>B:</strong> Last-writer-wins for ordinary fields plus explicit conflicts only for deletes and structural edits. Pro: smaller first implementation. Con: can silently discard intent.</li></ul>
+        <p><strong>Recommendation:</strong> A, scoped first to the M3 Block Types and action model.</p>
       </article>
     </div>
   </section>

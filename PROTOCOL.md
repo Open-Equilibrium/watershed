@@ -2,14 +2,22 @@
 
 The protocol is the **integration seam** between the tools (editor + LSP model). Tools are protocol clients, not compiled-in modules. This file is the canonical contract; build tools against it, not against each other's internals. ADR-0029 selects local JSON-RPC over stdio for designed control/RPC surfaces, but M1's implemented runtime stream is bare JSONL events. The envelope is transport-agnostic and all cross-tool state is addressed by IDs.
 
-Loop Agent is a **standalone product**, and its event stream is a public runtime contract in its own right (CLI JSONL mode, future RPC mode and local session log all carry these events — see [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html)). Meta-Harness and Liquid consume that contract; they are not required to run Loop Agent.
+Loop Agent is a **standalone host-local product**, and its event stream is a public runtime contract in its own right (CLI JSONL mode, future RPC mode and local session log all carry these events — see [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html)). A Meta-Harness on the same host consumes that contract; neither Meta-Harness nor Liquid is required to run Loop Agent.
 
 ## Participants
 
-- **Loop Agent** — emits execution events; accepts local loop commands. Standalone; its event stream is public.
-- **Meta-Harness** — self-contained headless control plane: consumes events from N agents through adapters; issues control/config commands; emits metrics. Exposes its own CLI/API/service surface for Liquid and BYOA (transport: D-023; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)).
-- **Liquid** — standalone workspace product; consumes events/metrics for rendering and issues user-originated commands. Liquid also exposes its **own** workspace CLI/API surface so external agents/tools read and edit workspace data; those mutations go through Liquid's permissioned pipeline and are recorded in its action history (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Loop Agent and Meta-Harness must use that surface; they do not mutate Liquid storage internals.
+- **Loop Agent** — standalone CLI that emits execution events and accepts commands on its current host; its event stream is public.
+- **Meta-Harness** — self-contained, host-scoped headless control plane: consumes events from CLI agents on its own host through adapters; issues control/config commands; emits metrics; and exposes a local-or-remote CLI/API/service surface for Liquid and BYOA (transport: D-023; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)). It never controls another host's processes.
+- **Liquid** — standalone local-first workspace product. It reads and mutates its local replica, optionally exchanges committed workspace changes with a sync host, and projects one or more Meta-Harness APIs into one UI. Every remote projection retains its instance identity, freshness and authority. Liquid exposes its **own** workspace CLI/API so external agents/tools read and edit workspace data through its permissioned action-history pipeline (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Loop Agent and Meta-Harness do not mutate Liquid storage internals.
 - **Adapters** — translate external agents (Codex CLI, Claude Code, Pi Agent, etc.) into the same contract.
+
+## Topology and ownership invariants
+
+- Agent-process ownership is host-local: a Meta-Harness may start, stop and observe only CLI processes on its own host.
+- API reachability is independent of execution locality: Liquid or BYOA may call a Meta-Harness from another device when authenticated transport exists.
+- Liquid routes every live command to the Meta-Harness instance that owns the addressed session or configuration. A merged projection never creates cross-instance authority.
+- Workspace sync and live agent control are separate planes. Sync exchanges Liquid actions/state; it does not tunnel Meta-Harness commands or imply that a cached agent session is controllable offline.
+- Loss of sync connectivity does not change Liquid's working store: local reads and mutations continue, while resumable exchange waits for connectivity.
 
 ## MVP boundary
 
@@ -62,7 +70,7 @@ M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequ
 
 ## M1 local session storage
 
-The append-only session event log is authoritative for replay and catch-up. Local paths, locks, recovery and replay/resume behavior are defined in the [Loop Agent V-Spec](docs/concept/V-Spec_LoopAgent.html#surfaces); other tools consume public surfaces, never this store directly (see "No co-location assumption" below).
+The append-only session event log is authoritative for replay and catch-up. Local paths, locks, recovery and replay/resume behavior are defined in the [Loop Agent V-Spec](docs/concept/V-Spec_LoopAgent.html#surfaces); other tools consume public surfaces, never this store directly (see the topology invariants below).
 
 ## M1 local append and live delivery (ADR-0059, ADR-0062)
 
@@ -128,10 +136,10 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
 - **Deterministic ordering within a session.** A participant must emit monotonically increasing `sequence` values per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
-- **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Meta-Harness or Liquid consumes Loop Agent sessions through public event/control surfaces, not `.loop/sessions`). This keeps the local transport (ADR-0029) from foreclosing later remote topologies (ADR-0038).
+- **No private-store or implicit co-location coupling.** A protocol client must not infer shared filesystem/process access from API reachability. All cross-tool state is addressed by IDs and public surfaces; a tool never reads another tool's local store directly. The only deliberate process co-location is a Meta-Harness executor owning CLI agents on the same host. Remote Liquid/Meta-Harness clients remain possible without remote agent-process ownership (ADR-0038).
 
 ## Implementation constraints
 
 The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Control methods stay separate from runtime events; do not add `cmd.*` event names.
 
-Later cloud/remote durability requires replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Remote replication cadence, resume on a new host, crash replay to the last durable `sequence` and the session-ownership lease must be defined before remote execution ships.
+Later server-host durability requires replication plus durable storage, with live ingestion by the Meta-Harness on that host and a persistent `.loop` append-only JSONL volume otherwise. Replication cadence, crash replay and any transfer of session ownership to a new host must be defined before such migration ships; a Meta-Harness must never silently control a CLI process on another host.

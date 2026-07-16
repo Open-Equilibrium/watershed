@@ -14,8 +14,8 @@ core/         core-script (building-block model/parser) and core-policy
 proto/        proto: event schema and serialization (the integration seam)
 loop-agent/   loop-agent-core (engine/runtime/session) and loop-agent-cli
               (human CLI, machine-readable run mode, tail/replay/resume)
-meta-harness/ self-contained headless many-agent control plane
-liquid/       standalone native workspace/app-building product
+meta-harness/ host-scoped headless control plane for local CLI agents
+liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions
 ```
 
@@ -49,7 +49,7 @@ Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN
 - **Why & how it fits together:** [VISION.md](VISION.md)
 - **Build plan & milestones:** [PLAN.md](PLAN.md)
 - **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
-- **Open decisions (human dashboard):** `docs/decisions/open-decisions.html`
+- **Open decisions (human decision page):** `docs/decisions/open-decisions.html`
 - **Terminology:** [GLOSSARY.md](GLOSSARY.md)
 
 ## License

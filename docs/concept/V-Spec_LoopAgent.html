@@ -33,12 +33,12 @@
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
       <p>Loop Agent is a <strong>standalone CLI agent product first</strong>: a local harness that runs deterministic, script-defined AI-native processes. It exists for agentic engineers who need control, repeatability, bounded tool execution and measurable loop quality. It is usable on its own — by humans at a terminal, headlessly by scripts/CI/automation, and later embeddable as a core library — with Pi-style runtime integration surfaces.</p>
-      <p><strong>Meta-Harness and Liquid integrate with Loop Agent through its public runtime surfaces; they are not required to run Loop Agent.</strong> <strong>No UI in Loop Agent</strong> — Liquid owns the future UI. Loop Agent exposes a CLI and a public event stream.</p>
+      <p><strong>A Meta-Harness on the same host may integrate through Loop Agent's public runtime surfaces; neither Meta-Harness nor Liquid is required to run Loop Agent.</strong> Loop Agent exposes only its CLI and public event stream. Liquid reaches agent sessions through Meta-Harness and owns the optional UI.</p>
       <p>Loop Agent is the Watershed platform's <strong>execution layer</strong> and its developer/open-source credibility wedge (see <a href="../../PLAN.md">PLAN.md</a> wedge sequencing and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>run repeatable, auditable AI-agent workflows from my CLI.</em> It is a <strong>deterministic, auditable, reusable agent-loop runtime — not another generic coding agent.</strong></p>
     </div></section>
 
     <section id="boundary" class="section"><h2>2. Product boundary</h2><div class="body">
-      <p>Loop Agent is a standalone CLI agent product, similar in product boundary to a Pi-style CLI agent. Meta-Harness and Liquid are <em>optional consumers/integrators</em>, never prerequisites.</p>
+      <p>Loop Agent is a standalone host-local CLI agent product, similar in product boundary to a Pi-style CLI agent. Meta-Harness is an optional same-host consumer; Liquid is an optional client of Meta-Harness. Neither is a prerequisite.</p>
       <div class="grid">
         <div class="card"><h3 class="good">Loop Agent owns</h3><ul>
           <li>local execution;</li>
@@ -50,11 +50,11 @@
           <li>its standalone CLI integration surfaces.</li>
         </ul></div>
         <div class="card"><h3 class="bad">Loop Agent does not own</h3>
-          <p class="muted"><b>Meta-Harness responsibilities:</b> multi-agent orchestration; central config across different agents; AgentPulse across providers; scheduling across agents; Liquid dashboards.</p>
-          <p class="muted"><b>Liquid responsibilities:</b> standalone workspace/app-building product — UI, dashboards/views/components, mobile/desktop app shell, workspace data, workspace action history/VCS and the workspace CLI/API. Liquid may render Loop Agent sessions/transcripts as optional components, but Loop Agent does not mutate Liquid storage internals — it is consumed through public runtime surfaces, and any Liquid edits flow through Liquid's own CLI/API/mutation pipeline.</p>
+          <p class="muted"><b>Meta-Harness responsibilities:</b> same-host multi-agent process ownership, central config, AgentPulse, scheduling and a local-or-remote client API.</p>
+          <p class="muted"><b>Liquid responsibilities:</b> local-first Pages, Blocks, Views, responsive desktop/mobile UI, workspace data, action history and workspace CLI/API. Liquid may render Loop Agent sessions through Meta-Harness-backed Blocks; neither layer reads Loop Agent storage directly, and Liquid edits use Liquid's mutation pipeline.</p>
         </div>
       </div>
-      <p>Meta-Harness consumes Loop Agent's public surfaces later (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own the Loop Agent runtime. M1 ships the human CLI plus machine-readable event stream; remote-control and embedding are designed-for seams (ADR-0035).</p>
+      <p>Meta-Harness consumes Loop Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own the runtime internals. M1 ships the human CLI plus machine-readable event stream; local machine control and embedding are designed-for seams (ADR-0035).</p>
     </div></section>
 
     <section id="surfaces" class="section"><h2>3. Standalone runtime surfaces</h2><div class="body">
@@ -68,8 +68,8 @@ loop resume &lt;session-id&gt;
 loop sessions
 loop tail &lt;session-id&gt;</code></pre><p>Direct human use; nice terminal rendering is allowed. <code>/hello-loop</code> is entered inside the interactive <code>loop chat</code> terminal, not in the OS shell.</p></div>
         <div class="card"><h3>B. Headless JSONL event stream</h3><pre><code>loop run smoke-loop --emit jsonl
-loop run hello-loop --emit jsonl</code></pre><p>The CLI owns stdout and streams newline-delimited committed events for automation, CI, external dashboards, custom terminal UIs and Meta-Harness later. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
-        <div class="card"><h3>C. Remote-control surface (designed-for)</h3><pre><code>loop --mode rpc
+loop run hello-loop --emit jsonl</code></pre><p>The CLI owns stdout and streams newline-delimited committed events for automation, CI, custom terminal UIs and same-host Meta-Harness ingestion. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
+        <div class="card"><h3>C. Local machine-control surface (designed-for)</h3><pre><code>loop --mode rpc
 # or: loop rpc</code></pre><p>Bidirectional external control is a post-M1 seam. ADR-0055 selects local JSON-RPC over stdio (ADR-0029) with a minimal <code>loop.start</code>, <code>loop.status</code>, <code>loop.cancel</code>, <code>loop.tail</code> and <code>loop.export</code> command set; it carries the same runtime events instead of adding <code>cmd.*</code> event types.</p></div>
         <div class="card"><h3>D. Embedded core API (future)</h3><pre><code>let session = create_agent_session(config).await?;
 let loop_def = load_loop_definition(config).await?;
@@ -103,8 +103,8 @@ while let Some(event) = events.next().await {
 
     <section id="mvp-boundary" class="section"><h2>5. MVP boundary</h2><div class="body">
       <p><span class="good">In scope:</span> standalone CLI, scripts, deterministic FSM, public event stream, JSONL headless mode, local session/transcript store, deterministic bounded in-process fixture interpretation, context manifests, sandbox policy, subloops and golden loops.</p>
-      <p><span class="bad">Out of scope:</span> Loop Agent UI, central Meta-Harness control, Liquid dashboards, marketplace/plugins unless needed for a stub, and any Watershed project-history/VCS engine.</p>
-      <p>Meta-Harness and Liquid are optional consumers and are <strong>not</strong> required to run Loop Agent.</p>
+      <p><span class="bad">Out of scope:</span> Loop Agent UI, cross-host process control, central Meta-Harness behavior, Liquid Pages/Blocks, marketplace/plugins unless needed for a stub, and any Watershed project-history/VCS engine.</p>
+      <p>A same-host Meta-Harness is an optional consumer; Liquid is an optional client of Meta-Harness. Neither is required to run Loop Agent.</p>
       <p>Loop Agent may run inside normal Git projects. Git operations are just tool commands when explicitly declared and sandboxed; Loop Agent does not own commits, branches, slices or history in the MVP. The local session store (§3E) is runtime state, not project VCS/history.</p>
     </div></section>
 
@@ -132,7 +132,7 @@ while let Some(event) = events.next().await {
         <li><code>loop-agent/loop-agent-core</code> — FSM engine, runtime kernel, session manager, local log, bounded live notification and embeddable entry.</li>
         <li><code>loop-agent/loop-agent-cli</code> — interactive terminal, slash commands, machine-readable mode, <code>loop run</code>, tail/replay/resume.</li>
       </ul>
-      <p>The building-block model lives in <code>core-script</code> and is serializable over <code>proto</code>. Meta-Harness consumes it through <code>core-script</code> as a config resolver; Liquid consumes it through <code>proto</code>/API for render/edit loops. Neither consumes Loop Agent internals.</p>
+      <p>The building-block model lives in <code>core-script</code> and is serializable over <code>proto</code>. Same-host Meta-Harness consumes it through <code>core-script</code> as a config resolver; Liquid renders derived state through Meta-Harness-backed Blocks. Neither consumes Loop Agent internals.</p>
       <h3>Build strategy &amp; reuse</h3>
       <p>Orchestration is built in-house; non-differentiating <strong>plumbing</strong> (model/provider I/O, tool execution, OS-sandbox wrappers, MCP client and context handling) is reused via general-purpose crates where it fits. Loop Agent is <strong>not built on or forked from Codex</strong>; Codex integrates as a Meta-Harness adapter. Rationale/licensing: <a href="../adr/ADR-LOG.md">ADR-0028</a>.</p>
       <h3 id="context-compiler">Deterministic Tiered Context Compiler v0 (ADR-0050, ADR-0058)</h3>

@@ -37,21 +37,21 @@ Implementation budgets to define before M2:
 
 Product targets (tiered; each tier gets its own benchmark — ADR-0014):
 
-1. **Local UI:** p95 < 100 ms from user action to acknowledged workspace mutation; representative dashboards hold a 60 fps render budget.
+1. **Local UI:** p95 < 100 ms from user action to acknowledged workspace mutation; representative Pages and Arrange mode hold a 60 fps render budget.
 2. **Single shared workspace:** **250 concurrent active actors** (humans + agents) with p95 mutation→ack < 250 ms and p95 mutation→peer-visible < 1 s.
-3. **Organization scale (design-for):** **1,000 users + 5,000 agents** across many workspaces via workspace sharding and **view-scoped event subscriptions** (clients receive only events for views/scopes they subscribe to — no workspace-wide broadcast), holding the tier-2 latencies. Depends on the sync/collaboration model (D-035) and remote deployment; a design constraint on the history/storage/event model, **not** an MVP gate.
+3. **Organization scale (design-for):** **1,000 users + 5,000 agents** across many workspaces via workspace sharding and **Block- and scope-filtered event subscriptions** (clients receive only subscribed state — no workspace-wide broadcast), holding the tier-2 latencies. Depends on the sync/conflict model (D-035); it is a history/storage/event-model constraint, **not** an MVP gate.
 4. **Throughput budget:** ≥ 1,000 mutations/s sustained per workspace node, including action-history append.
 
-The binding constraint at scale is event fan-out, not mutation processing; view-scoped subscriptions are therefore a design assumption, not an optimization.
+The binding constraint at scale is event fan-out, not mutation processing; Block- and scope-filtered subscriptions are therefore a design assumption, not an optimization.
 
 Implementation budgets to define before M3:
-- Component update dispatch latency.
-- Dashboard/view render/update latency for representative views.
+- Block update dispatch latency.
+- Page/View render/update latency for representative content and Arrange mode.
 - Workspace query latency for common PowerBar lookups and CLI/API reads.
 - Action-history append latency per workspace mutation.
-- Diff calculation latency for common component/dashboard changes.
+- Diff calculation latency for common Block/Page changes.
 - Revert latency for recent actions.
-- Memory per component/view/session card.
+- Memory per Block/View/session card.
 
 ## Notes
 
