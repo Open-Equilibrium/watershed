@@ -15,11 +15,25 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1">
+    <h2>M1 - Loop Agent</h2>
+    <div class="grid">
+      <article id="d-067" class="decision">
+        <h3>D-067 - Registry Memory Budget</h3>
+        <p><strong>Status:</strong> Open, M1 release blocker.</p>
+        <p><strong>Question:</strong> A valid registry can currently contain enough very large names and definitions to exceed the promised 10 MiB of memory per active loop before model or tool data. Which promise should change?</p>
+        <ul><li><strong>A:</strong> Keep the 10 MiB budget, lower registry limits and reject unusually large names or definitions, with a near-limit memory test in CI. Pro: preserves the ten-loop device target and makes the limit enforceable. Con: exceptionally large registry files become invalid.</li><li><strong>B:</strong> Keep today's registry limits and raise the per-loop memory budget to a measured worst case. Pro: accepts larger registries. Con: each active loop may consume substantially more memory.</li><li><strong>C:</strong> Exclude registry data from the budget. Pro: no implementation limit changes. Con: hides real per-loop memory and no longer protects the product target.</li></ul>
+        <p><strong>Recommendation:</strong> A; derive the smallest practical limits from existing fixtures and a measured near-limit registry.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>
@@ -41,8 +55,8 @@
       <article id="d-023" class="decision">
         <h3>D-023 - Meta-Harness Service/API Transport</h3>
         <p><strong>Status:</strong> Open before M2 implementation.</p>
-        <p><strong>Question:</strong> Which transport should serve same-host CLI clients and authenticated Liquid clients on other devices without changing host-local execution ownership?</p>
-        <ul><li><strong>A:</strong> Use JSON-RPC over a local socket or named pipe only. Pro: smallest security surface. Con: remote Liquid needs a later gateway.</li><li><strong>B:</strong> Use authenticated HTTP plus a live update connection for every client. Pro: one network-capable path. Con: larger local security surface.</li><li><strong>C:</strong> Keep one shared API contract over a private local transport and an authenticated network transport. Pro: fits both topologies. Con: two bindings must remain equivalent.</li></ul>
+        <p><strong>Question:</strong> How should programs on the same computer, and authenticated Liquid clients on other devices, communicate with Meta-Harness without moving agent ownership off the host?</p>
+        <ul><li><strong>A:</strong> Use a private connection that works only on the same computer. Pro: smallest security surface. Con: remote Liquid needs a later gateway.</li><li><strong>B:</strong> Use one protected web connection for local and remote clients. Pro: one network-capable path. Con: larger local security surface.</li><li><strong>C:</strong> Define one shared set of commands, carried by a private local connection on the host and a protected network connection remotely. Pro: fits both topologies. Con: both connections must behave alike.</li></ul>
         <p><strong>Recommendation:</strong> C as the direction, starting with only the parts M2 needs.</p>
       </article>
       <article id="d-024" class="decision">
@@ -96,15 +110,15 @@
       <article id="d-028" class="decision">
         <h3>D-028 - Liquid Action History Model</h3>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
-        <p><strong>Question:</strong> What is the internal workspace history model?</p>
-        <ul><li><strong>A:</strong> Append-only action log plus snapshots/checkpoints. Pro: auditable and revertible. Con: compaction work later.</li><li><strong>B:</strong> Mutable state plus periodic backups. Pro: simpler storage. Con: weak audit/revert.</li></ul>
+        <p><strong>Question:</strong> How should Liquid remember changes so users can inspect and undo them?</p>
+        <ul><li><strong>A:</strong> Keep an unchangeable sequence of actions plus occasional full save points. Pro: auditable and reversible. Con: old entries must be combined or archived later.</li><li><strong>B:</strong> Keep only the current state plus periodic backups. Pro: simpler storage. Con: weak audit and undo.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-029" class="decision">
         <h3>D-029 - Liquid Storage Model</h3>
         <p><strong>Status:</strong> Open before M3 storage work.</p>
-        <p><strong>Question:</strong> Which local-first store backs workspace state and history?</p>
-        <ul><li><strong>A:</strong> SQLite-backed local replica. Pro: reliable offline queries and transactions. Con: schema migrations and sync mapping.</li><li><strong>B:</strong> File tree plus JSON local replica. Pro: transparent. Con: weaker consistency and indexing.</li></ul>
+        <p><strong>Question:</strong> How should Liquid store workspace state and history on the user's device?</p>
+        <ul><li><strong>A:</strong> Use a SQLite database as the local copy. Pro: reliable offline searches and all-or-nothing updates. Con: upgrades and sharing need careful data conversion.</li><li><strong>B:</strong> Use folders of readable JSON files as the local copy. Pro: transparent. Con: weaker consistency and slower searching.</li></ul>
         <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
       </article>
       <article id="d-030" class="decision">
@@ -117,8 +131,8 @@
       <article id="d-031" class="decision">
         <h3>D-031 - Revert Semantics</h3>
         <p><strong>Status:</strong> Open before action-history implementation.</p>
-        <p><strong>Question:</strong> How does Liquid undo faulty or unwanted mutations?</p>
-        <ul><li><strong>A:</strong> Compensating actions, with checkpoint restore on conflicts. Pro: preserves history. Con: conflict handling needed.</li><li><strong>B:</strong> Destructive rollback. Pro: simple. Con: weaker audit trail.</li></ul>
+        <p><strong>Question:</strong> How should Liquid undo a faulty or unwanted change?</p>
+        <ul><li><strong>A:</strong> Record a new action that reverses the earlier one, or restore a save point when changes conflict. Pro: preserves history. Con: conflicts need clear handling.</li><li><strong>B:</strong> Replace history with the earlier state. Pro: simple. Con: weakens the audit trail.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-032" class="decision">
@@ -145,8 +159,8 @@
       <article id="d-035" class="decision">
         <h3>D-035 - Sync Conflict Semantics</h3>
         <p><strong>Status:</strong> Open before shared-workspace work.</p>
-        <p><strong>Question:</strong> Liquid always writes locally and exchanges committed actions resumably; how should concurrent offline edits merge?</p>
-        <ul><li><strong>A:</strong> Operation/change-log merge with deterministic per-field rules and explicit conflicts for unsafe cases. Pro: preserves local-first behavior and audit history. Con: more merge design.</li><li><strong>B:</strong> Last-writer-wins for ordinary fields plus explicit conflicts only for deletes and structural edits. Pro: smaller first implementation. Con: can silently discard intent.</li></ul>
+        <p><strong>Question:</strong> Liquid always saves locally and can share saved actions later; how should it combine changes made offline at the same time?</p>
+        <ul><li><strong>A:</strong> Combine recorded changes using the same fixed rule for each field and ask the user when no safe combination exists. Pro: preserves local-first behavior and audit history. Con: more merge design.</li><li><strong>B:</strong> Keep the most recent ordinary field value and ask only about deletes or structural changes. Pro: smaller first implementation. Con: can silently discard intent.</li></ul>
         <p><strong>Recommendation:</strong> A, scoped first to the M3 Block Types and action model.</p>
       </article>
     </div>
@@ -163,10 +177,10 @@
         <p><strong>Recommendation:</strong> A only when a concrete post-M1 consumer proves the smallest useful interface; see <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
       </article>
       <article id="d-046" class="decision">
-        <h3>D-046 - Positive CIDR Egress Enforcement</h3>
+        <h3>D-046 - Approved Network Address Enforcement</h3>
         <p><strong>Status:</strong> Open, post-M1.</p>
         <p><strong>Question:</strong> After M1's block-all policy, how should Linux allow connections only to approved network addresses and ports?</p>
-        <ul><li><strong>A:</strong> Put the process in an isolated network area with firewall rules. Pro: uses common Linux features. Con: needs extra privileges and CI setup.</li><li><strong>B:</strong> Route connection requests through a checker that approves each one. Pro: precise decisions. Con: more components must work correctly.</li><li><strong>C:</strong> Filter connections inside the Linux kernel (eBPF/cgroups). Pro: strong low-level enforcement. Con: harder to operate and also needs privileges.</li></ul>
+        <ul><li><strong>A:</strong> Put the process in an isolated network area with firewall rules. Pro: uses common Linux features. Con: needs extra privileges and CI setup.</li><li><strong>B:</strong> Route connection requests through a checker that approves each one. Pro: precise decisions. Con: more components must work correctly.</li><li><strong>C:</strong> Let Linux itself filter the process's connections. Pro: strong low-level enforcement. Con: harder to operate and also needs privileges.</li></ul>
         <p><strong>Recommendation:</strong> Keep M1 block-all; choose and prove one approach before allowing any network destinations.</p>
       </article>
     </div>

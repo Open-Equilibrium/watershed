@@ -36,7 +36,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 ### M1 — Loop Agent MVP (standalone CLI)
 
-**Wedge:** Loop Agent execution wedge — prove deterministic, reusable, evented agent loops as a deterministic, auditable, reusable agent-loop runtime (not a generic coding agent).
+**Wedge:** Loop Agent execution wedge — prove evented agent loops as a deterministic, auditable, reusable agent-loop runtime (not a generic coding agent).
 
 **Status:** M1 implementation is in progress. The standalone CLI runtime, JSONL event stream, local session log, replay/tail/resume commands, fixture registry loading and validation gates are in active hardening against the DoD.
 
