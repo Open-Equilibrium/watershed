@@ -15,11 +15,25 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1">
+    <h2>M1 - Loop Agent Closeout</h2>
+    <div class="grid">
+      <article id="d-063" class="decision">
+        <h3>D-063 - Race-Safe Registry Traversal</h3>
+        <p><strong>Status:</strong> Open, M1 release blocker.</p>
+        <p><strong>Question:</strong> How should Watershed prevent a registry file or parent folder from being replaced with a link to content outside the registry while it is being opened?</p>
+        <ul><li><strong>A:</strong> Use <code>cap-std 4.0.2</code> internally for directory-handle-based traversal and same-handle reads. Pro: portable and least project-owned platform code. Con: adds a production dependency that must pass license, security and compatibility checks.</li><li><strong>B:</strong> Use <code>rustix 1.1.4</code> on Unix and custom Windows code. Pro: direct operating-system control. Con: more platform-specific code and maintenance.</li><li><strong>C:</strong> Implement all platforms directly. Pro: no new dependency. Con: most code, testing and maintenance.</li></ul>
+        <p><strong>Recommendation:</strong> A, only if a spike confirms Rust 1.97 compatibility, green dependency gates, a private API boundary and less project code. Otherwise reopen the decision; the current path-based checks do not close the proven race.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>
