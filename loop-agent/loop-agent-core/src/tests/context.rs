@@ -514,6 +514,7 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
 #[test]
 fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let workspace = workspace_copy("hello-loop");
+    run_loop(&workspace, "hello-loop", EmitMode::Human).expect("first session completes");
     replace_registry_text(
         &workspace,
         "instructions/inspect-input.yaml",
