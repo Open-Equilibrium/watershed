@@ -360,7 +360,11 @@ fn protocol_validator_rejects_stream_identity_edges() {
 
     let mut bad_session = base_event();
     bad_session.session_id = "BadSession".to_owned();
-    assert_invalid_event("bad-session-id.jsonl", bad_session, "valid session_id");
+    assert_invalid_event(
+        "bad-session-id.jsonl",
+        bad_session,
+        "session_id must be a lowercase path-safe token",
+    );
 
     let mut empty_event_id = base_event();
     empty_event_id.event_id.clear();
