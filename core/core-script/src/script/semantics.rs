@@ -1,6 +1,4 @@
-fn validate_registry_block_semantics(
-    block: &RegistryBlock,
-) -> Result<(), SemanticValidationError> {
+fn validate_registry_block_semantics(block: &RegistryBlock) -> Result<(), SemanticValidationError> {
     match block {
         RegistryBlock::Tool(tool) => validate_tool_semantics(tool),
         RegistryBlock::Loop(loop_block) => validate_loop_semantics(loop_block),
