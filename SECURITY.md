@@ -52,7 +52,6 @@ Liquid is a standalone workspace product that external agents and tools can read
 - Every workspace write — from the UI, Liquid AI, the CLI/API or an external agent — goes through one **permissioned mutation pipeline** and is recorded in Liquid's **action history**; there are no hidden writes that bypass it (D-032).
 - Sync applies received actions through that same pipeline. Sync credentials authorize workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
 - External-agent writes are **attributed** (actor/origin) and **revertible**; sensitive changes require approval, and a proposed diff can be reviewed before apply.
-- The action history must be tamper-evident enough for product needs; exact cryptographic guarantees are open.
 - Secrets/credentials stored in workspace data require special handling.
 - Script Blocks and external-agent edits are different risk classes and are treated separately (Script Block runtime/sandbox: D-034).
 

@@ -163,7 +163,7 @@ integrations
         <div class="node indent"><strong>Connection</strong> — typed, permissioned Block-to-Block relation independent of layout and active View</div>
         <div class="node indent"><strong>Source</strong> — external or shared data input; never a Page container</div>
       </div>
-      <p><strong>View ownership:</strong> a Block owns its state and supported Views. A Database Block may expose table, board, calendar and gallery Views; a Script Block may expose code, UI and output/log Views. Changing View does not duplicate state. The MVP shows one active View per Block; larger screens may support a split View within that Block.</p>
+      <p><strong>View ownership:</strong> a Block owns its state and supported Views. A Database Block may expose table, board, calendar and gallery Views; a Script Block may expose code and output/log Views. Changing View does not duplicate state. The MVP shows one active View per Block; larger screens may support a split View within that Block.</p>
       <p><strong>Connections:</strong> adjacency never grants access. A Script Block beside a Database Block reads or writes it only through an explicit typed Connection and permission grant. Writes return through Liquid's mutation pipeline and action history. Moving or resizing either Block changes only Page layout.</p>
       <p><strong>Block SDK:</strong> one contract covers built-in and future third-party Block Types: identity, state serialization/migrations, Views, typed ports/actions, permissions, responsive behavior and lifecycle. The MVP ships a fixed trusted palette under ADR-0040; the SDK contract does not imply loading untrusted custom UI in M3.</p>
       <h3>Creation and arrangement</h3>
@@ -171,7 +171,7 @@ integrations
         <li>A new Page is blank and type-neutral. Typing creates a Text Block; <code>/</code> opens the Block chooser; paste/drop and explicit drawing create deterministic matching Blocks.</li>
         <li>Text shortcuts format within a Text Block; for example, <code>&gt;</code> plus space applies toggle formatting. A toggle is not its own Block.</li>
         <li>Content starts as an ordered vertical flow. Explicit <strong>Arrange mode</strong> reveals the responsive grid and resize/reorder handles; there is no second container or layout mode.</li>
-        <li>Desktop uses drag handles. Mobile uses long-press or an explicit arrange command. The grid never shakes.</li>
+        <li>Desktop uses drag handles. Mobile uses long-press or an explicit arrange command.</li>
       </ul>
       <h3>Responsive and mobile behavior</h3>
       <p>Canonical Block order is device-independent; responsive spans derive desktop grids and mobile stacks. Every Block remains visible in the Liquid mobile app, but compact inline editing is capability-based: text, lists and safe controls may edit inline, while code, wide database tables and whiteboards open a focused/full-screen View. Blocks advertise compact, standard and expanded size support through the Block SDK.</p>
@@ -272,7 +272,6 @@ Liquid AI (via the mutation pipeline):
         <li>CLI/API access requires explicit workspace permission; agent reads and writes are scoped.</li>
         <li>External-agent writes are attributed (actor/origin) in the action history.</li>
         <li>Sensitive changes require approval; nothing bypasses the permissioned mutation pipeline.</li>
-        <li>The action history must be tamper-evident enough for product needs; exact cryptographic guarantees are open.</li>
         <li>Revert is available for applied external-agent mutations.</li>
         <li>Secrets/credentials in workspace data require special handling.</li>
         <li>Script Blocks and external-agent edits are different risk classes and are treated separately (<a href="../decisions/open-decisions.html#d-034">D-034</a>).</li>
