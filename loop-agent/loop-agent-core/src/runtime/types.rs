@@ -185,6 +185,13 @@ pub enum RuntimeError {
     },
     /// The per-session event writer failed after event construction.
     EventWriter(Box<RuntimeError>),
+    /// A persisted session failed during runtime execution.
+    SessionFailed {
+        /// Identifier of the authoritative failed session.
+        session_id: String,
+        /// Typed runtime cause recorded by the session.
+        source: Box<RuntimeError>,
+    },
     /// A session lock already exists for the requested session.
     ActiveSession {
         /// Requested session id.
@@ -203,10 +210,17 @@ pub enum RuntimeError {
 impl RuntimeError {
     /// Returns the process exit code associated with this runtime error.
     pub fn exit_code(&self) -> i32 {
-        if matches!(self, Self::Usage(_)) {
-            64
-        } else {
-            65
+        match self {
+            Self::Usage(_) => 64,
+            Self::SessionFailed { source, .. } => source.exit_code(),
+            _ => 65,
+        }
+    }
+
+    pub(crate) fn session_failed(session_id: &str, source: Self) -> Self {
+        Self::SessionFailed {
+            session_id: session_id.to_owned(),
+            source: Box::new(source),
         }
     }
 }
@@ -228,6 +242,9 @@ impl fmt::Display for RuntimeError {
                 "context_budget_exceeded: mandatory context is {required_bytes} canonical bytes (one estimated token per byte), input budget is {input_budget_tokens} tokens"
             ),
             Self::EventWriter(source) => write!(f, "event writer: {source}"),
+            Self::SessionFailed { session_id, source } => {
+                write!(f, "session {session_id} failed: {source}")
+            }
             Self::ActiveSession {
                 session_id,
                 lock_path,
@@ -256,7 +273,9 @@ impl std::error::Error for RuntimeError {
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
-            Self::EventWriter(source) => Some(source.as_ref()),
+            Self::EventWriter(source) | Self::SessionFailed { source, .. } => {
+                Some(source.as_ref())
+            }
         }
     }
 }

@@ -251,6 +251,7 @@ fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<R
         | RuntimeError::Protocol(_)
         | RuntimeError::ContextBudgetExceeded { .. }
         | RuntimeError::EventWriter(_)
+        | RuntimeError::SessionFailed { .. }
         | RuntimeError::ActiveSession { .. }
         | RuntimeError::SessionLogExists(_)
         | RuntimeError::TerminalSession(_)

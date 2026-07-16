@@ -104,7 +104,7 @@ fn run_loop_internal(
     }
     reservation.release_lock()?;
     if let Some(err) = runtime.terminal_error {
-        return Err(err);
+        return Err(RuntimeError::session_failed(&expected_session_id, err));
     }
     let outcome = human_failure_status(&runtime.events).unwrap_or_else(|| "completed".to_owned());
     let status = format!(

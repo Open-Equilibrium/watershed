@@ -212,7 +212,7 @@ fn resume_session_internal(
     let combined_events = validate_session_log_text(&path, session_id, &committed)?;
     lock.release()?;
     if let Some(err) = terminal_error {
-        return Err(err);
+        return Err(RuntimeError::session_failed(session_id, err));
     }
 
     Ok((
