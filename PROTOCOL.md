@@ -98,6 +98,7 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `loop.*`: `loop_definition_id` required; `loop_name` optional; `error` required for `loop.failed`.
 - `phase.entered`: `phase_id`, `phase_name`, `instruction_ids` and `tool_ids` (string arrays; empty when none).
 - `step.started | step.completed`: `step_id`, `step_name`, optional `phase_id`, optional `instruction_id`, optional `connection_ids` and `connection_kinds` (string arrays; `connection_kinds` values are `data | trigger | refresh`). If either connection array is present, both are present with the same length; index `i` in `connection_ids` pairs with index `i` in `connection_kinds`, in the owning Step block's `connection_refs` order after registry resolution. With no connections, omit both arrays or emit both as empty arrays.
+- `step.completed` closes the step lifecycle on success or failure; derive outcome from the tool, error, loop and session events.
 - `message.delta`: `message_id`, `role`, `content_delta`.
 - `message.completed`: `message_id`, `role`.
 - `tool.started`: `tool_id`, `tool_name`, `tool_kind` (`predefined-command | own-script`), `read_scope` and `write_scope` (string arrays), `allowed_parameters` (string array of allowed parameter names), `network_access` (`deny | declared`).

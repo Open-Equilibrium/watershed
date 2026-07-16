@@ -142,7 +142,7 @@ pub enum EventType {
     PhaseEntered,
     /// Runtime started a phase step.
     StepStarted,
-    /// Runtime completed a phase step.
+    /// Runtime closed a phase step on success or failure.
     StepCompleted,
     /// Assistant message content chunk.
     MessageDelta,
