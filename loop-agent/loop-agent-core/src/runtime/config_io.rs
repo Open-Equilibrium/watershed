@@ -89,12 +89,13 @@ fn resume_event_clock(
 fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
     let loop_path = workspace.join(".loop");
     let config_path = loop_path.join("config.yaml");
-    let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
-        RuntimeError::Io {
-            path: workspace.to_path_buf(),
-            source,
-        }
-    })?;
+    let workspace_dir =
+        Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
+            RuntimeError::Io {
+                path: workspace.to_path_buf(),
+                source,
+            }
+        })?;
     let loop_dir = workspace_dir
         .open_dir_nofollow(".loop")
         .map_err(|source| unsafe_workspace_config_path(loop_path, source, "directory"))?;
