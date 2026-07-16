@@ -38,12 +38,17 @@ fn tail_backs_off_while_idle_and_resets_after_progress() {
         EventType::SessionStarted,
         1,
     );
-    let progress = session_event_line(
-        "tailbackoff001",
+    let progress = EventEnvelope::new(
         "evt-tail-backoff-progress",
         EventType::MetricSample,
+        "tailbackoff001",
         2,
-    );
+        event_timestamp(2),
+        "loop-agent-cli",
+        serde_json::json!({"metric_name":"tail.progress","value":1}),
+    )
+    .canonical_jsonl()
+    .expect("progress event serializes");
     let completed = session_event_line(
         "tailbackoff001",
         "evt-tail-backoff-completed",
