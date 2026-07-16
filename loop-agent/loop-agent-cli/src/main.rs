@@ -269,9 +269,14 @@ fn tail_command(
     let mut failed = false;
     let mut terminal = false;
     let started = std::time::Instant::now();
+    let mut poll_interval = Duration::from_millis(25);
     let mut stdout = io::stdout().lock();
     loop {
-        for event in reader.read_after(cursor)? {
+        let events = reader.read_after(cursor)?;
+        if !events.is_empty() {
+            poll_interval = Duration::from_millis(25);
+        }
+        for event in events {
             let event_type = event.event_type.as_str();
             let jsonl = event.canonical_jsonl().map_err(|err| {
                 RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
@@ -291,7 +296,11 @@ fn tail_command(
         {
             return Ok(failed);
         }
-        thread::sleep(Duration::from_millis(25));
+        let wait = options.timeout.map_or(poll_interval, |timeout| {
+            timeout.saturating_sub(started.elapsed()).min(poll_interval)
+        });
+        thread::sleep(wait);
+        poll_interval = poll_interval.saturating_mul(2).min(Duration::from_secs(1));
     }
 }
 

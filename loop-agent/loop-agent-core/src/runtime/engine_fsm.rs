@@ -54,6 +54,7 @@ impl ToolSideEffectMode {
 
 #[derive(Clone, Copy, Debug)]
 struct LoopExecutionOptions {
+    capture_output: bool,
     clock: EventClock,
     side_effect_mode: ToolSideEffectMode,
     stub_model_fixture_profile: bool,
@@ -66,10 +67,16 @@ impl LoopExecutionOptions {
         stub_model_fixture_profile: bool,
     ) -> Self {
         Self {
+            capture_output: true,
             clock,
             side_effect_mode,
             stub_model_fixture_profile,
         }
+    }
+
+    fn without_captured_output(mut self) -> Self {
+        self.capture_output = false;
+        self
     }
 }
 
@@ -96,7 +103,9 @@ fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> Prot
 }
 
 struct RuntimeEventBuilder<'a> {
+    capture_output: bool,
     clock: EventClock,
+    context_manifest_count: usize,
     context_manifests: Vec<ContextManifest>,
     events: Vec<EventEnvelope>,
     history: ContextHistory,
@@ -106,12 +115,15 @@ struct RuntimeEventBuilder<'a> {
     session_id: String,
     sink: Option<&'a mut dyn RuntimeEventSink>,
     stream_bytes: usize,
+    pending_context_manifest: Option<ContextManifest>,
 }
 
 impl<'a> RuntimeEventBuilder<'a> {
     fn with_clock(session_id: String, clock: EventClock) -> Self {
         Self {
+            capture_output: true,
             clock,
+            context_manifest_count: 0,
             context_manifests: Vec::new(),
             events: Vec::new(),
             history: ContextHistory::default(),
@@ -121,6 +133,7 @@ impl<'a> RuntimeEventBuilder<'a> {
             session_id,
             sink: None,
             stream_bytes: 0,
+            pending_context_manifest: None,
         }
     }
 
@@ -156,6 +169,14 @@ impl<'a> RuntimeEventBuilder<'a> {
     fn next_message_id(&mut self) -> String {
         self.message_counter += 1;
         format!("msg-{:03}", self.message_counter)
+    }
+
+    fn record_context_manifest(&mut self, manifest: ContextManifest) {
+        self.context_manifest_count += 1;
+        if self.capture_output {
+            self.context_manifests.push(manifest.clone());
+        }
+        self.pending_context_manifest = Some(manifest);
     }
 
     fn emit(
@@ -198,19 +219,19 @@ impl<'a> RuntimeEventBuilder<'a> {
                 "event stream budget exceeded: next event would use {next_stream_bytes} bytes, max {MAX_LOOP_EVENT_STREAM_BYTES}"
             )));
         }
+        let context_manifest = if event.event_type == EventType::MessageCompleted {
+            Some(ContextManifestCheckpoint {
+                manifest: self.pending_context_manifest.take().ok_or_else(|| {
+                    RuntimeError::Protocol(
+                        "message.completed has no compiled context manifest".to_owned(),
+                    )
+                })?,
+                ordinal: self.context_manifest_count,
+            })
+        } else {
+            None
+        };
         if let Some(sink) = self.sink.as_deref_mut() {
-            let context_manifest = if event.event_type == EventType::MessageCompleted {
-                Some(ContextManifestCheckpoint {
-                    manifest: self.context_manifests.last().cloned().ok_or_else(|| {
-                        RuntimeError::Protocol(
-                            "message.completed has no compiled context manifest".to_owned(),
-                        )
-                    })?,
-                    ordinal: self.context_manifests.len(),
-                })
-            } else {
-                None
-            };
             sink.commit(
                 &event,
                 &event_bytes,
@@ -221,8 +242,23 @@ impl<'a> RuntimeEventBuilder<'a> {
         self.sequence = sequence;
         self.stream_bytes = next_stream_bytes;
         self.history.record(&event);
-        self.events.push(event);
+        if self.capture_output {
+            self.events.push(event);
+        }
         Ok(())
+    }
+
+    fn into_execution(
+        self,
+        failed: bool,
+        terminal_error: Option<RuntimeError>,
+    ) -> RuntimeExecution {
+        RuntimeExecution {
+            context_manifests: self.context_manifests,
+            events: self.events,
+            failed,
+            terminal_error,
+        }
     }
 }
 
@@ -252,6 +288,7 @@ fn execute_loop_with_sink(
         Some(sink) => RuntimeEventBuilder::with_sink(session_id.to_owned(), options.clock, sink),
         None => RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock),
     };
+    builder.capture_output = options.capture_output;
     builder.emit(
         None,
         EventType::SessionStarted,
@@ -273,12 +310,7 @@ fn execute_loop_with_sink(
                 EventType::SessionFailed,
                 serde_json::json!({"reason":RUNTIME_ERROR_REASON}),
             )?;
-            return Ok(RuntimeExecution {
-                context_manifests: builder.context_manifests,
-                events: builder.events,
-                failed: true,
-                terminal_error: Some(err),
-            });
+            return Ok(builder.into_execution(true, Some(err)));
         }
         Err(err) => return Err(err),
     };
@@ -288,20 +320,10 @@ fn execute_loop_with_sink(
             EventType::SessionFailed,
             serde_json::json!({"reason":failure.reason}),
         )?;
-        Ok(RuntimeExecution {
-            context_manifests: builder.context_manifests,
-            events: builder.events,
-            failed: true,
-            terminal_error: None,
-        })
+        Ok(builder.into_execution(true, None))
     } else {
         builder.emit(None, EventType::SessionCompleted, serde_json::json!({}))?;
-        Ok(RuntimeExecution {
-            context_manifests: builder.context_manifests,
-            events: builder.events,
-            failed: false,
-            terminal_error: None,
-        })
+        Ok(builder.into_execution(false, None))
     }
 }
 
@@ -564,7 +586,7 @@ fn emit_phase(
                 &builder.history,
             )?;
             let content = stub_message_content(context.registry, phase, &compiled.provider_bytes)?;
-            builder.context_manifests.push(compiled.manifest);
+            builder.record_context_manifest(compiled.manifest);
             let message_id = builder.next_message_id();
             builder.emit(
                 Some(invocation),

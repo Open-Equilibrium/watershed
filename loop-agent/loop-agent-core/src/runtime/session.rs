@@ -61,58 +61,66 @@ fn run_loop_internal(
             config.stub_model_fixture_profile,
         ),
     )?;
-    let planned_events = preflight_session_completion_stream(
+    preflight_session_completion_stream(
         &reservation,
         &expected_session_id,
         &planned_runtime.events,
     )?;
     let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
-    let runtime_result = execute_loop_with_sink(
-        workspace,
-        &registry,
-        &policy,
-        loop_block,
-        &expected_session_id,
-        LoopExecutionOptions::with_stub_model_fixture_profile(
-            config.event_clock,
-            ToolSideEffectMode::ApplyAll,
-            config.stub_model_fixture_profile,
-        ),
-        Some(&mut serial_writer),
-    );
+    let (runtime_result, replay_matches) = {
+        let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut serial_writer));
+        let result = execute_loop_with_sink(
+            workspace,
+            &registry,
+            &policy,
+            loop_block,
+            &expected_session_id,
+            LoopExecutionOptions::with_stub_model_fixture_profile(
+                config.event_clock,
+                ToolSideEffectMode::ApplyAll,
+                config.stub_model_fixture_profile,
+            )
+            .without_captured_output(),
+            Some(&mut matcher),
+        );
+        let matches = result
+            .as_ref()
+            .is_ok_and(|runtime| matcher.matches_execution(runtime));
+        (result, matches)
+    };
     let finish_result = serial_writer.finish();
     let runtime = runtime_result?;
     finish_result?;
     let runtime_failed = runtime.failed;
-    if !runtime_failed
-        && (runtime.events != planned_runtime.events
-            || runtime.context_manifests != planned_runtime.context_manifests)
-    {
+    if !runtime_failed && !replay_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} runtime did not match deterministic replay",
             reservation.session_path.display()
         )));
     }
-    if runtime_failed {
-        let stream = canonical_event_stream(&runtime.events)?;
-        validate_session_log_text(&reservation.session_path, &expected_session_id, &stream)?;
-    } else if runtime.events != planned_events {
-        return Err(RuntimeError::Protocol(format!(
-            "{} committed runtime did not match its validated plan",
-            reservation.session_path.display()
-        )));
-    }
+    let terminal_error = runtime.terminal_error;
+    let (event_count, outcome) = if runtime_failed {
+        drop(planned_runtime);
+        let stream = read_session_log_to_string(&reservation.session_path)?;
+        let events =
+            validate_session_log_text(&reservation.session_path, &expected_session_id, &stream)?;
+        (
+            events.len(),
+            human_failure_status(&events).unwrap_or_else(|| "failed".to_owned()),
+        )
+    } else {
+        (planned_runtime.events.len(), "completed".to_owned())
+    };
     reservation.release_lock()?;
-    if let Some(err) = runtime.terminal_error {
+    if let Some(err) = terminal_error {
         return Err(RuntimeError::session_failed(&expected_session_id, err));
     }
-    let outcome = human_failure_status(&runtime.events).unwrap_or_else(|| "completed".to_owned());
     let status = format!(
         "loop {} (session {expected_session_id}) {outcome}\n",
         loop_block.identity.id
     );
     Ok(RunOutput {
-        event_count: runtime.events.len(),
+        event_count,
         failed: runtime_failed,
         session_id: expected_session_id,
         session_path: reservation.session_path.clone(),

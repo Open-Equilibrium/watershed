@@ -1,4 +1,40 @@
 #[test]
+fn plan_checked_execution_does_not_retain_a_second_event_stream() {
+    let workspace = fixture_dir("hello-loop");
+    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let root_loop = registry
+        .loop_block("hello-loop")
+        .expect("hello-loop fixture exists");
+    let options =
+        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun);
+    let planned = execute_loop(
+        &workspace,
+        &registry,
+        &policy,
+        root_loop,
+        "planchecked001",
+        options,
+    )
+    .expect("runtime plan succeeds");
+    assert!(!planned.context_manifests.is_empty());
+    let mut matcher = PlannedRuntimeSink::new(&planned, None);
+    let checked = execute_loop_with_sink(
+        &workspace,
+        &registry,
+        &policy,
+        root_loop,
+        "planchecked001",
+        options.without_captured_output(),
+        Some(&mut matcher),
+    )
+    .expect("plan-checked runtime succeeds");
+
+    assert!(matcher.matches_execution(&checked));
+    assert!(checked.events.is_empty());
+    assert!(checked.context_manifests.is_empty());
+}
+
+#[test]
 #[ignore = "performance gate"]
 fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();

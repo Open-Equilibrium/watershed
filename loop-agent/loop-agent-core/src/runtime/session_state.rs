@@ -84,6 +84,7 @@ fn resume_session_internal(
     let lock = acquire_session_lock(workspace, session_id)?;
     let before = read_session_log_to_string(&path)?;
     let events = validate_session_log_text(&path, session_id, &before)?;
+    drop(before);
     let prior_event_count = events.len();
     if stream_is_failed(&events) || stream_is_completed(&events) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
@@ -128,21 +129,27 @@ fn resume_session_internal(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
         )));
     }
-    let preflight_runtime = execute_loop(
-        workspace,
-        &registry,
-        &policy,
-        loop_block,
-        session_id,
-        LoopExecutionOptions::with_stub_model_fixture_profile(
-            clock,
-            ToolSideEffectMode::PreflightResume {
-                prefix_event_count: resume_prefix.planned_event_count as u64,
-            },
-            config.stub_model_fixture_profile,
-        ),
-    )?;
-    if preflight_runtime.events != planned_runtime.events {
+    let preflight_matches = {
+        let mut matcher = PlannedRuntimeSink::new(&planned_runtime, None);
+        let runtime = execute_loop_with_sink(
+            workspace,
+            &registry,
+            &policy,
+            loop_block,
+            session_id,
+            LoopExecutionOptions::with_stub_model_fixture_profile(
+                clock,
+                ToolSideEffectMode::PreflightResume {
+                    prefix_event_count: resume_prefix.planned_event_count as u64,
+                },
+                config.stub_model_fixture_profile,
+            )
+            .without_captured_output(),
+            Some(&mut matcher),
+        )?;
+        matcher.matches_execution(&runtime)
+    };
+    if !preflight_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} resume preflight did not match deterministic replay",
             path.display()
@@ -151,7 +158,6 @@ fn resume_session_internal(
     let append_plan = preflight_resume_append_plan(
         &path,
         session_id,
-        &before,
         &events,
         &planned_runtime.events,
         &resume_prefix,
@@ -171,7 +177,7 @@ fn resume_session_internal(
         notifier,
         timings,
     })?;
-    let runtime_result = {
+    let (runtime_result, replay_matches) = {
         let mut resume_sink = ResumeEventSink {
             clock,
             marker_committed: false,
@@ -181,7 +187,8 @@ fn resume_session_internal(
             resume_marker_count: resume_prefix.resume_marker_count,
             writer: &mut serial_writer,
         };
-        execute_loop_with_sink(
+        let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut resume_sink));
+        let result = execute_loop_with_sink(
             workspace,
             &registry,
             &policy,
@@ -193,23 +200,31 @@ fn resume_session_internal(
                     prefix_event_count: resume_prefix.planned_event_count as u64,
                 },
                 config.stub_model_fixture_profile,
-            ),
-            Some(&mut resume_sink),
-        )
+            )
+            .without_captured_output(),
+            Some(&mut matcher),
+        );
+        let matches = result
+            .as_ref()
+            .is_ok_and(|runtime| matcher.matches_execution(runtime));
+        (result, matches)
     };
     let finish_result = serial_writer.finish();
     let resumed_runtime = runtime_result?;
     finish_result?;
     let terminal_error = resumed_runtime.terminal_error;
     let resumed_failed = resumed_runtime.failed;
-    if terminal_error.is_none() && resumed_runtime.events != planned_runtime.events {
+    if terminal_error.is_none() && !replay_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} resumed runtime did not match deterministic replay",
             path.display()
         )));
     }
+    drop(planned_runtime);
+    drop(events);
     let committed = read_session_log_to_string(&path)?;
     let combined_events = validate_session_log_text(&path, session_id, &committed)?;
+    drop(committed);
     lock.release()?;
     if let Some(err) = terminal_error {
         return Err(RuntimeError::session_failed(session_id, err));
@@ -281,7 +296,6 @@ fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock)
 fn preflight_resume_append_plan(
     path: &Path,
     session_id: &str,
-    before: &str,
     events: &[EventEnvelope],
     planned_events: &[EventEnvelope],
     resume_prefix: &ResumeReplayPrefix,
@@ -301,28 +315,28 @@ fn preflight_resume_append_plan(
         "loop-agent-cli",
         serde_json::json!({"reason":"resume"}),
     );
-    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
-    let suffix_events = planned_events[resume_prefix.planned_event_count..]
-        .iter()
-        .cloned()
-        .map(|event| shift_resumed_event(event, resumed_suffix_offset, clock))
-        .collect::<Vec<_>>();
     let marker_stream = canonical_event_stream(std::slice::from_ref(&resume_event))?;
-    let suffix_stream = canonical_event_stream(&suffix_events)?;
-    let appended_stream = format!("{marker_stream}{suffix_stream}");
-    let marker_combined = format!("{before}{marker_stream}");
-    validate_session_log_text(path, session_id, &marker_combined)?;
-    let combined = format!("{before}{appended_stream}");
-    validate_session_log_text(path, session_id, &combined)?;
-    prepare_session_log_append(path, &appended_stream)?;
+    let mut validation = SessionAppendValidationState::from_prior_events(path, session_id, events)?;
+    validation.validate_constructed_event(path, &resume_event, marker_stream.len())?;
+    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
+    let mut appended_bytes = marker_stream.len();
+    for event in &planned_events[resume_prefix.planned_event_count..] {
+        let event = shift_resumed_event(event.clone(), resumed_suffix_offset, clock);
+        let canonical = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize resumed runtime event: {err}"))
+        })?;
+        appended_bytes = appended_bytes.saturating_add(canonical.len());
+        validation.validate_constructed_event(path, &event, canonical.len())?;
+    }
+    prepare_session_log_append(path, appended_bytes)?;
     Ok(ResumeAppendPlan {
         marker_event: resume_event,
         marker_stream,
     })
 }
 
-fn prepare_session_log_append(path: &Path, text: &str) -> Result<(), RuntimeError> {
-    ensure_session_log_growth_within_limit(path, text.len())?;
+fn prepare_session_log_append(path: &Path, appended_bytes: usize) -> Result<(), RuntimeError> {
+    ensure_session_log_growth_within_limit(path, appended_bytes)?;
     append_existing_file(path, b"")
 }
 
@@ -786,10 +800,15 @@ fn preflight_session_completion_stream(
     reservation: &SessionReservation,
     expected_session_id: &str,
     events: &[EventEnvelope],
-) -> Result<Vec<EventEnvelope>, RuntimeError> {
-    let stream = canonical_event_stream(events)?;
-    let validated_events =
-        validate_session_log_text(Path::new("runtime.jsonl"), expected_session_id, &stream)?;
-    ensure_session_log_growth_within_limit(&reservation.session_path, stream.len())?;
-    Ok(validated_events)
+) -> Result<(), RuntimeError> {
+    let path = Path::new("runtime.jsonl");
+    let mut validation = SessionAppendValidationState::empty(expected_session_id);
+    for event in events {
+        let canonical = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
+        })?;
+        validation.validate_constructed_event(path, event, canonical.len())?;
+    }
+    ensure_session_log_growth_within_limit(&reservation.session_path, validation.stream_bytes)?;
+    Ok(())
 }

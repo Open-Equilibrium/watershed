@@ -1,3 +1,6 @@
+const TAIL_POLL_INITIAL: Duration = Duration::from_millis(25);
+const TAIL_POLL_MAX: Duration = Duration::from_secs(1);
+
 /// Replays a persisted terminal or non-terminal session log without modifying it.
 pub fn replay_session(
     workspace: impl AsRef<Path>,
@@ -36,11 +39,16 @@ fn tail_session_with_wait(
     let mut reader = SessionEventReader::open(workspace, session_id)?;
     let started = Instant::now();
     let mut events = Vec::new();
+    let mut poll_interval = TAIL_POLL_INITIAL;
     loop {
         let cursor = events
             .last()
             .map_or(0, |event: &EventEnvelope| event.sequence);
-        events.extend(reader.read_after(cursor)?);
+        let appended = reader.read_after(cursor)?;
+        if !appended.is_empty() {
+            poll_interval = TAIL_POLL_INITIAL;
+        }
+        events.extend(appended);
         if stream_is_failed(&events)
             || stream_is_completed(&events)
             || !options.follow
@@ -50,7 +58,8 @@ fn tail_session_with_wait(
         {
             break;
         }
-        wait(tail_poll_interval(&options, started));
+        wait(tail_poll_interval(&options, started, poll_interval));
+        poll_interval = poll_interval.saturating_mul(2).min(TAIL_POLL_MAX);
     }
     Ok(RunOutput {
         event_count: events.len(),
@@ -64,9 +73,12 @@ fn tail_session_with_wait(
     })
 }
 
-fn tail_poll_interval(options: &TailOptions, started: Instant) -> Duration {
-    let default = Duration::from_millis(25);
-    options.timeout.map_or(default, |timeout| {
-        timeout.saturating_sub(started.elapsed()).min(default)
+fn tail_poll_interval(
+    options: &TailOptions,
+    started: Instant,
+    poll_interval: Duration,
+) -> Duration {
+    options.timeout.map_or(poll_interval, |timeout| {
+        timeout.saturating_sub(started.elapsed()).min(poll_interval)
     })
 }

@@ -23,14 +23,14 @@ docs/         governance, specs, decisions
 
 From the repo root:
 
-```powershell
+```console
 cargo build --workspace
 cargo test --workspace
 ```
 
 Run the checked-in smoke fixture from its workspace directory:
 
-```powershell
+```console
 cd loop-agent/fixtures/smoke-loop
 cargo run -p loop-agent-cli -- run smoke-loop --emit jsonl
 cargo run -p loop-agent-cli -- replay smoke001 --emit jsonl

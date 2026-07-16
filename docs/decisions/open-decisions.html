@@ -53,11 +53,11 @@
         <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
       </article>
       <article id="d-025" class="decision">
-        <h3>D-025 - Multi-Instance Meta-Harness Projection</h3>
-        <p><strong>Status:</strong> Open implementation detail before Liquid integration; instance-owned authority and provenance are accepted invariants.</p>
-        <p><strong>Question:</strong> How should Liquid combine read models from several Meta-Harness instances?</p>
-        <ul><li><strong>A:</strong> Query each instance and merge non-authoritative projections in Liquid, retaining instance id, freshness and command route. Pro: simple ownership. Con: offline caching and cross-instance sorting need care.</li><li><strong>B:</strong> Add a separate federation service that aggregates instances. Pro: central team queries. Con: another service and authority boundary.</li></ul>
-        <p><strong>Recommendation:</strong> A for M3; begin with one primary/local instance and add merged projections without globalizing config or schedules.</p>
+        <h3>D-025 - Showing Several Meta-Harness Instances</h3>
+        <p><strong>Status:</strong> Open implementation detail before Liquid integration; each instance owning its agents remains fixed.</p>
+        <p><strong>Question:</strong> When Liquid shows information from several Meta-Harness instances, where should it combine that information?</p>
+        <ul><li><strong>A:</strong> Liquid asks each instance and combines the answers for display, while remembering the owner, age and command destination of every item. Pro: ownership stays clear. Con: saved offline results and sorting across instances need care.</li><li><strong>B:</strong> Add a separate service that combines the instances. Pro: one place for team-wide queries. Con: another service and another ownership boundary.</li></ul>
+        <p><strong>Recommendation:</strong> A for M3; begin with one primary/local instance, then add combined displays without giving Liquid control of every instance's config or schedules.</p>
       </article>
     </div>
   </section>
@@ -129,10 +129,10 @@
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-033" class="decision">
-        <h3>D-033 - Block SDK Runtime Contract</h3>
+        <h3>D-033 - Block SDK Rules</h3>
         <p><strong>Status:</strong> Open before Block implementation.</p>
-        <p><strong>Question:</strong> What exact state, View, typed-port, action, permission, migration and responsive interfaces form the first Block SDK?</p>
-        <ul><li><strong>A:</strong> A small versioned contract with declared capabilities. Pro: stable, testable and safe. Con: fewer possibilities at first.</li><li><strong>B:</strong> A broad dynamic contract with few restrictions. Pro: expressive. Con: harder to isolate and evolve safely.</li></ul>
+        <p><strong>Question:</strong> What small set of rules should define a Block's saved data, Views, Connections, actions, permissions, upgrades and desktop/mobile behavior?</p>
+        <ul><li><strong>A:</strong> A small set of named versions in which every Block declares what it can do. Pro: stable, testable and safe. Con: fewer possibilities at first.</li><li><strong>B:</strong> Broad rules that allow Blocks to change their behavior freely. Pro: expressive. Con: harder to isolate and upgrade safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-034" class="decision">

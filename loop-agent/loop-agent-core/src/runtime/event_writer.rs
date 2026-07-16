@@ -15,6 +15,77 @@ trait RuntimeEventSink {
     ) -> Result<(), RuntimeError>;
 }
 
+struct PlannedRuntimeSink<'expected, 'inner> {
+    context_manifest_index: usize,
+    event_index: usize,
+    expected: &'expected RuntimeExecution,
+    inner: Option<&'inner mut dyn RuntimeEventSink>,
+    matched: bool,
+}
+
+impl<'expected, 'inner> PlannedRuntimeSink<'expected, 'inner> {
+    fn new(
+        expected: &'expected RuntimeExecution,
+        inner: Option<&'inner mut dyn RuntimeEventSink>,
+    ) -> Self {
+        Self {
+            context_manifest_index: 0,
+            event_index: 0,
+            expected,
+            inner,
+            matched: true,
+        }
+    }
+
+    fn matches_execution(&self, execution: &RuntimeExecution) -> bool {
+        self.matched
+            && self.event_index == self.expected.events.len()
+            && self.context_manifest_index == self.expected.context_manifests.len()
+            && execution.failed == self.expected.failed
+    }
+}
+
+impl RuntimeEventSink for PlannedRuntimeSink<'_, '_> {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        self.inner
+            .as_deref()
+            .and_then(RuntimeEventSink::measurement_started_at)
+    }
+
+    fn commit(
+        &mut self,
+        event: &EventEnvelope,
+        canonical_jsonl: &str,
+        context_manifest: Option<ContextManifestCheckpoint>,
+        measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        self.matched &= self.expected.events.get(self.event_index) == Some(event);
+        self.event_index += 1;
+        match context_manifest.as_ref() {
+            Some(checkpoint) => {
+                self.matched &= event.event_type == EventType::MessageCompleted
+                    && checkpoint.ordinal == self.context_manifest_index + 1
+                    && self
+                        .expected
+                        .context_manifests
+                        .get(self.context_manifest_index)
+                        == Some(&checkpoint.manifest);
+                self.context_manifest_index += 1;
+            }
+            None => self.matched &= event.event_type != EventType::MessageCompleted,
+        }
+        if let Some(inner) = self.inner.as_deref_mut() {
+            inner.commit(
+                event,
+                canonical_jsonl,
+                context_manifest,
+                measurement_started_at,
+            )?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct EventWriterTimings {
     append_nanos: Vec<u128>,
@@ -848,20 +919,22 @@ impl SessionLogAppender {
 
         #[cfg(not(any(unix, windows)))]
         {
-            prepare_session_log_append(path, "")?;
+            prepare_session_log_append(path, 0)?;
             Ok(Self {})
         }
     }
 
     #[cfg(any(unix, windows))]
-    fn append_native_batch_with<F>(
+    fn append_native_batch_with<F, C>(
         &mut self,
         path: &Path,
         events: &[&[u8]],
         write: F,
+        cleanup: C,
     ) -> Result<(), BatchAppendFailure>
     where
         F: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+        C: FnOnce(&mut fs::File, u64) -> io::Result<()>,
     {
         validate_open_session_log_append_file(path, &self.file)
             .map_err(BatchAppendFailure::none_committed)?;
@@ -902,17 +975,15 @@ impl SessionLogAppender {
                 .checked_sub(1)
                 .map_or(0, |index| complete_prefixes[index]);
             let retained_len = original_len.saturating_add(retained_bytes as u64);
-            let rollback = self
-                .file
-                .set_len(retained_len)
-                .and_then(|()| self.file.sync_all());
+            let rollback = cleanup(&mut self.file, retained_len);
             if let Err(rollback) = rollback {
-                return Err(BatchAppendFailure::none_committed(RuntimeError::Protocol(
-                    format!(
+                return Err(BatchAppendFailure {
+                    committed_events,
+                    error: RuntimeError::Protocol(format!(
                         "{} append failed ({source}) and incomplete-suffix cleanup failed ({rollback})",
                         path.display()
-                    ),
-                )));
+                    )),
+                });
             }
             return Err(BatchAppendFailure {
                 committed_events,
@@ -930,8 +1001,13 @@ impl EventLogAppender for SessionLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
         #[cfg(any(unix, windows))]
         {
-            self.append_native_batch_with(path, &[bytes], |file, bytes| file.write_all(bytes))
-                .map_err(|failure| failure.error)
+            self.append_native_batch_with(
+                path,
+                &[bytes],
+                |file, bytes| file.write_all(bytes),
+                cleanup_incomplete_suffix,
+            )
+            .map_err(|failure| failure.error)
         }
 
         #[cfg(not(any(unix, windows)))]
@@ -943,7 +1019,12 @@ impl EventLogAppender for SessionLogAppender {
     fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
         #[cfg(any(unix, windows))]
         {
-            self.append_native_batch_with(path, events, |file, bytes| file.write_all(bytes))
+            self.append_native_batch_with(
+                path,
+                events,
+                |file, bytes| file.write_all(bytes),
+                cleanup_incomplete_suffix,
+            )
         }
 
         #[cfg(not(any(unix, windows)))]
@@ -968,6 +1049,12 @@ impl EventLogAppender for SessionLogAppender {
             sync_session_log(path)
         }
     }
+}
+
+#[cfg(any(unix, windows))]
+fn cleanup_incomplete_suffix(file: &mut fs::File, retained_len: u64) -> io::Result<()> {
+    file.set_len(retained_len)?;
+    file.sync_all()
 }
 
 #[cfg(not(any(unix, windows)))]

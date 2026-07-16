@@ -27,6 +27,62 @@ fn tail_captures_current_prefix_then_appended_terminal_event() {
 }
 
 #[test]
+fn tail_backs_off_while_idle_and_resets_after_progress() {
+    let workspace = empty_workspace("tail-backoff");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailbackoff001.jsonl");
+    let started = session_event_line(
+        "tailbackoff001",
+        "evt-tail-backoff-started",
+        EventType::SessionStarted,
+        1,
+    );
+    let progress = session_event_line(
+        "tailbackoff001",
+        "evt-tail-backoff-progress",
+        EventType::MessageDelta,
+        2,
+    );
+    let completed = session_event_line(
+        "tailbackoff001",
+        "evt-tail-backoff-completed",
+        EventType::SessionCompleted,
+        3,
+    );
+    fs::write(&path, &started).expect("initial event written");
+    let mut waits = Vec::new();
+
+    let output = tail_session_with_wait(
+        &workspace,
+        "tailbackoff001",
+        EmitMode::Jsonl,
+        TailOptions::follow(),
+        |duration| {
+            waits.push(duration);
+            match waits.len() {
+                3 => append_session_log_line(&path, &progress).expect("progress event appended"),
+                5 => append_session_log_line(&path, &completed).expect("terminal event appended"),
+                _ => {}
+            }
+        },
+    )
+    .expect("tail completes");
+
+    assert_eq!(
+        waits,
+        [
+            Duration::from_millis(25),
+            Duration::from_millis(50),
+            Duration::from_millis(100),
+            Duration::from_millis(25),
+            Duration::from_millis(50),
+        ]
+    );
+    assert_eq!(output.stdout, format!("{started}{progress}{completed}"));
+}
+
+#[test]
 fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let workspace = empty_workspace("tail-partial");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);

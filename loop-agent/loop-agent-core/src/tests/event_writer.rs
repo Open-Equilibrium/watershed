@@ -125,6 +125,10 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
                 file.write_all(&bytes[..5])?;
                 Err(io::Error::other("injected context append failure"))
             },
+            |file, retained_len| {
+                file.set_len(retained_len)?;
+                file.sync_all()
+            },
         )
         .expect_err("partial context append fails");
     for manifest in [&manifests[1], &manifests[1]] {
@@ -694,6 +698,10 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
                 continue_append.recv().expect("reader observed prefix");
                 Err(io::Error::other("injected second-event write failure"))
             },
+            |file, retained_len| {
+                file.set_len(retained_len)?;
+                file.sync_all()
+            },
         )
     });
 
@@ -728,6 +736,63 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
             .read_after(1)
             .expect("observed prefix remains authoritative"),
         Vec::new()
+    );
+    reservation.rollback();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn cleanup_failure_still_reports_the_complete_persisted_prefix() {
+    let workspace = empty_workspace("event-writer-cleanup-failure-prefix");
+    let reservation =
+        reserve_session_log(&workspace, "cleanupfailure001").expect("session reserved");
+    let first = test_event(
+        "cleanupfailure001",
+        "evt-cleanup-first",
+        EventType::SessionStarted,
+        1,
+    );
+    let second = test_event(
+        "cleanupfailure001",
+        "evt-cleanup-second",
+        EventType::MessageDelta,
+        2,
+    );
+    let first_jsonl = first.canonical_jsonl().expect("first event serializes");
+    let second_jsonl = second.canonical_jsonl().expect("second event serializes");
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    let failure = appender
+        .append_native_batch_with(
+            &reservation.session_path,
+            &[first_jsonl.as_bytes(), second_jsonl.as_bytes()],
+            |file, bytes| {
+                file.write_all(&bytes[..first_jsonl.len() + 1])?;
+                Err(io::Error::other("injected append failure"))
+            },
+            |file, retained_len| {
+                file.set_len(retained_len)?;
+                Err(io::Error::other("injected cleanup sync failure"))
+            },
+        )
+        .expect_err("partial second event and cleanup sync fail");
+
+    assert_eq!(failure.committed_events, 1);
+    assert!(matches!(
+        failure.error,
+        RuntimeError::Protocol(message)
+            if message.contains("injected append failure")
+                && message.contains("injected cleanup sync failure")
+    ));
+    let mut reader =
+        SessionEventReader::open(&workspace, "cleanupfailure001").expect("prefix reader opens");
+    assert_eq!(
+        reader
+            .read_after(0)
+            .expect("complete prefix remains readable")
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [1]
     );
     reservation.rollback();
 }
