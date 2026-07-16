@@ -714,6 +714,24 @@ fn default_protected_paths_have_behavioral_denial_examples() {
     }
 }
 
+#[test]
+fn protected_path_double_star_handles_deep_valid_paths_without_recursion() {
+    let mut segments = vec!["segment"; 100_000];
+    segments.push("target.key");
+    let path = segments.join("/");
+
+    assert!(protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseSensitive,
+        "**/target.key",
+        &path
+    ));
+    assert!(!protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseSensitive,
+        "**/.env",
+        &path
+    ));
+}
+
 proptest! {
     #[test]
     fn protected_path_double_star_matches_any_depth(

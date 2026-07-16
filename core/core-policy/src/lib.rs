@@ -1029,19 +1029,39 @@ fn protected_path_pattern_matches_normalized(pattern: &str, path: &str) -> bool 
 }
 
 fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
-    match (pattern.split_first(), path.split_first()) {
-        (None, None) => true,
-        (None, Some(_)) => false,
-        (Some((pattern_segment, rest)), _) if *pattern_segment == "**" => {
-            protected_segments_match(rest, path)
-                || (!path.is_empty() && protected_segments_match(pattern, &path[1..]))
+    let mut pattern_index = 0;
+    let mut path_index = 0;
+    let mut globstar = None;
+
+    while path_index < path.len() {
+        if pattern.get(pattern_index).is_some_and(|segment| {
+            *segment != "**" && protected_segment_match(segment, path[path_index])
+        }) {
+            pattern_index += 1;
+            path_index += 1;
+        } else if pattern
+            .get(pattern_index)
+            .is_some_and(|segment| *segment == "**")
+        {
+            globstar = Some((pattern_index, path_index));
+            pattern_index += 1;
+        } else if let Some((globstar_index, matched_path_index)) = globstar {
+            path_index = matched_path_index + 1;
+            globstar = Some((globstar_index, path_index));
+            pattern_index = globstar_index + 1;
+        } else {
+            return false;
         }
-        (Some((pattern_segment, rest_pattern)), Some((path_segment, rest_path))) => {
-            protected_segment_match(pattern_segment, path_segment)
-                && protected_segments_match(rest_pattern, rest_path)
-        }
-        (Some(_), None) => false,
     }
+
+    while pattern
+        .get(pattern_index)
+        .is_some_and(|segment| *segment == "**")
+    {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
 }
 
 fn protected_segment_match(pattern: &str, path: &str) -> bool {
