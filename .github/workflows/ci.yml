@@ -41,7 +41,6 @@ jobs:
       - name: Check formatting
         shell: pwsh
         run: |
-          cargo fmt --all -- --check
           $rustSources = @(git ls-files -- '*.rs')
           rustfmt --edition 2024 --check @rustSources
 
