@@ -119,7 +119,7 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let directory_leaf = session_dir.join("dirleaf001.jsonl");
     fs::create_dir(&directory_leaf).expect("directory session leaf created");
 
-    let err = reserve_session_file(&directory_leaf, "dirleaf001")
+    let err = reserve_session_file(&directory_leaf, "dirleaf001", || {})
         .expect_err("directory session leaf must be rejected");
 
     assert!(matches!(

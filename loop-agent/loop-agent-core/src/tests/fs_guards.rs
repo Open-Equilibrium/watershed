@@ -41,18 +41,29 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
 }
 
 #[test]
-fn reserve_unique_session_log_suffixes_in_progress_base_reservations() {
+fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     let workspace = empty_workspace("reserve-in-progress-collision");
-    let held = reserve_session_log(&workspace, "smoke001").expect("first reservation succeeds");
+    let (session_dir, _) = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {
+        let err = resume_session(&workspace, "publish001", EmitMode::Jsonl)
+            .expect_err("published session must already be locked");
+        assert_active_session(err, "publish001", "publish001.lock");
+    })
+    .expect("session published under lock");
+    published.rollback();
+
+    let held_lock = session_dir.join("smoke001.lock");
+    reserve_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
 
     let second = reserve_unique_session_log(&workspace, "smoke001")
-        .expect("in-progress base reservation must allocate the next suffix");
+        .expect("locked unpublished candidate must allocate the next suffix");
 
-    assert!(held.session_path.exists());
+    assert!(!session_dir.join("smoke001.jsonl").exists());
+    assert!(held_lock.exists());
     assert_eq!(second.session_id, "smoke001-2");
     assert!(second.session_path.exists());
     second.rollback();
-    held.rollback();
+    fs::remove_file(held_lock).expect("held lock removed");
 }
 
 #[test]

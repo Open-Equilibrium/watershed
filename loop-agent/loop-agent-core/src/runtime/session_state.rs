@@ -649,14 +649,23 @@ fn reserve_session_log(
     workspace: &Path,
     session_id: &str,
 ) -> Result<SessionReservation, RuntimeError> {
+    reserve_session_log_with_publish_observer(workspace, session_id, || {})
+}
+
+fn reserve_session_log_with_publish_observer(
+    workspace: &Path,
+    session_id: &str,
+    after_publish: impl FnOnce(),
+) -> Result<SessionReservation, RuntimeError> {
     let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
     let session_path = session_dir.join(format!("{session_id}.jsonl"));
     let log_path = log_dir.join(format!("{session_id}.log"));
     let context_path = log_dir.join(format!("{session_id}.contexts.jsonl"));
     let lock_path = session_lock_path(workspace, session_id)?;
-    reserve_session_file(&session_path, session_id)?;
-    if let Err(err) = reserve_session_lock_file(&lock_path, session_id) {
-        let _ = fs::remove_file(&session_path);
+    ensure_session_file_available(&session_path, session_id)?;
+    reserve_session_lock_file(&lock_path, session_id)?;
+    if let Err(err) = reserve_session_file(&session_path, session_id, after_publish) {
+        let _ = fs::remove_file(&lock_path);
         return Err(err);
     }
     if let Err(err) = reserve_new_file(&log_path) {
@@ -666,8 +675,8 @@ fn reserve_session_log(
     }
     if let Err(err) = reserve_new_file(&context_path) {
         let _ = fs::remove_file(&session_path);
-        let _ = fs::remove_file(&lock_path);
         let _ = fs::remove_file(&log_path);
+        let _ = fs::remove_file(&lock_path);
         return Err(err);
     }
     Ok(SessionReservation {
@@ -693,7 +702,7 @@ fn reserve_unique_session_log(
         };
         match reserve_session_log(workspace, &candidate) {
             Ok(reservation) => return Ok(reservation),
-            Err(RuntimeError::SessionLogExists(_)) => continue,
+            Err(RuntimeError::SessionLogExists(_) | RuntimeError::ActiveSession { .. }) => continue,
             Err(err) => return Err(err),
         }
     }
@@ -716,7 +725,23 @@ fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
     candidate
 }
 
-fn reserve_session_file(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
+fn reserve_session_file(
+    path: &Path,
+    session_id: &str,
+    after_publish: impl FnOnce(),
+) -> Result<(), RuntimeError> {
+    ensure_session_file_available(path, session_id)?;
+    reserve_new_file(path).map_err(|err| match err {
+        RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
+            RuntimeError::SessionLogExists(session_id.to_owned())
+        }
+        other => other,
+    })?;
+    after_publish();
+    Ok(())
+}
+
+fn ensure_session_file_available(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
             "{} must not be a symlink",
@@ -729,16 +754,7 @@ fn reserve_session_file(path: &Path, session_id: &str) -> Result<(), RuntimeErro
             "{} must be a file",
             path.display()
         ))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            reserve_new_file(path).map_err(|err| match err {
-                RuntimeError::Io { source, .. }
-                    if source.kind() == io::ErrorKind::AlreadyExists =>
-                {
-                    RuntimeError::SessionLogExists(session_id.to_owned())
-                }
-                other => other,
-            })
-        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(RuntimeError::Io {
             path: path.to_owned(),
             source,
