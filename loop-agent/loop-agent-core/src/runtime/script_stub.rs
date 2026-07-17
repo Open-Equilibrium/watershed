@@ -406,7 +406,7 @@ fn resolved_workspace_scoped_target(
                         return Err(runtime_denied(
                             core_policy::DenyReasonCode::WriteDenied,
                             format!(
-                                "own-script write target {target:?} has non-directory component {}",
+                                "own-script write target {target:?} component {} must be a directory",
                                 resolved.display()
                             ),
                         ));
