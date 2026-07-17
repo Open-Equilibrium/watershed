@@ -99,7 +99,11 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
                 .lines()
                 .map(|line| line.split_once('=').unwrap().0)
                 .collect::<Vec<_>>(),
-            ["registry_hash", "loop_definition_hash"]
+            [
+                "registry_hash",
+                "loop_definition_hash",
+                "loop_definition_id",
+            ]
         );
     }
 }
