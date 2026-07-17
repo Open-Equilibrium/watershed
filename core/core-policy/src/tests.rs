@@ -795,7 +795,7 @@ proptest! {
 }
 
 #[test]
-fn policy_artifact_rejects_duplicate_command_tool_ids() {
+fn policy_artifact_rejects_duplicate_identities() {
     let mut artifact = valid_policy_artifact("duplicate-tool");
     artifact
         .commands
@@ -806,6 +806,29 @@ fn policy_artifact_rejects_duplicate_command_tool_ids() {
         .expect_err("duplicate command tool_id must fail validation");
 
     assert_eq!(err.to_string(), "duplicate command tool_id duplicate-tool");
+
+    let mut artifact = valid_policy_artifact("duplicate-parameter");
+    artifact.commands[0].allowed_parameters = vec![
+        valid_parameter("--mode", ParameterValueType::None),
+        valid_parameter("--mode", ParameterValueType::Integer),
+    ];
+    let err = artifact
+        .validate()
+        .expect_err("duplicate allowed parameter must fail validation");
+    assert_eq!(
+        err.to_string(),
+        "tool duplicate-parameter allowed parameter --mode is declared more than once"
+    );
+
+    let mut artifact = valid_policy_artifact("duplicate-phase");
+    artifact.phase_scope.push(PhaseScope {
+        phase_id: "inspect".to_owned(),
+        tool_ids: Vec::new(),
+    });
+    let err = artifact
+        .validate()
+        .expect_err("duplicate phase_id must fail validation");
+    assert_eq!(err.to_string(), "duplicate phase_scope phase_id inspect");
 }
 
 #[test]

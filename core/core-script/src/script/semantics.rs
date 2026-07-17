@@ -139,11 +139,21 @@ fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationErr
         }
     }
 
+    let mut parameter_names = BTreeSet::new();
     for parameter in &tool.allowed_parameters {
         if !is_valid_allowed_parameter_name(&parameter.name) {
             return Err(invalid_tool(
                 tool,
                 "allowed_parameters.name must start with -- and contain only letters, digits, _ or -",
+            ));
+        }
+        if !parameter_names.insert(parameter.name.as_str()) {
+            return Err(invalid_tool(
+                tool,
+                &format!(
+                    "allowed parameter {} is declared more than once",
+                    parameter.name
+                ),
             ));
         }
         let has_values = !parameter.allowed_values.is_empty();

@@ -800,6 +800,13 @@ fn parser_enforces_registry_schema() {
             tool.replace("name: \"--file\"", "name: file"),
         ),
         (
+            "duplicate-parameter-name.yaml",
+            tool.replace(
+                "      max_length: 128\n",
+                "      max_length: 128\n    - name: \"--file\"\n      value_type: none\n      required: false\n",
+            ),
+        ),
+        (
             "missing-string-bound.yaml",
             tool.replace("value_type: workspace-relative-path", "value_type: string")
                 .replace("      max_length: 128\n", ""),

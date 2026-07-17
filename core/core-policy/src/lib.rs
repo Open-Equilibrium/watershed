@@ -143,8 +143,15 @@ impl PolicyArtifact {
             }
         }
 
+        let mut phase_ids = BTreeSet::new();
         let mut scoped_tool_ids = BTreeSet::new();
         for phase in &self.phase_scope {
+            if !phase_ids.insert(phase.phase_id.as_str()) {
+                return Err(policy_artifact_error(format!(
+                    "duplicate phase_scope phase_id {}",
+                    phase.phase_id
+                )));
+            }
             for tool_id in &phase.tool_ids {
                 if !command_tool_ids.contains(tool_id.as_str()) {
                     return Err(policy_artifact_error(format!(
@@ -434,8 +441,15 @@ pub struct CommandPolicy {
 impl CommandPolicy {
     fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
         self.validate_command_shape()?;
+        let mut parameter_names = BTreeSet::new();
         for parameter in &self.allowed_parameters {
             parameter.validate(&self.tool_id)?;
+            if !parameter_names.insert(parameter.name.as_str()) {
+                return Err(policy_artifact_error(format!(
+                    "tool {} allowed parameter {} is declared more than once",
+                    self.tool_id, parameter.name
+                )));
+            }
         }
         self.environment.validate(&self.tool_id)?;
         self.filesystem.validate(&self.tool_id)?;
