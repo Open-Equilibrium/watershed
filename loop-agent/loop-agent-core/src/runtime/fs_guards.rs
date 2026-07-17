@@ -226,7 +226,10 @@ fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>,
     loop_dir.child(leaf, false, DirectoryErrorMode::Protocol)
 }
 
-fn open_existing_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
+fn open_existing_runtime_dirs(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<RuntimeDirs, RuntimeError> {
     let workspace_dir = AnchoredDir::workspace(workspace)?;
     let loop_path = workspace.join(".loop");
     let loop_dir = workspace_dir
@@ -243,10 +246,7 @@ fn open_existing_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeEr
         })?;
     let logs = loop_dir
         .child("logs", false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| RuntimeError::Io {
-            path: workspace.join(LOCAL_LOG_DIR),
-            source: io::Error::from(io::ErrorKind::NotFound),
-        })?;
+        .ok_or_else(|| missing_definition_metadata(session_id))?;
     Ok(RuntimeDirs { logs, sessions })
 }
 

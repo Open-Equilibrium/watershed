@@ -72,7 +72,7 @@ fn resume_session_internal(
             "invalid session_id {session_id:?}"
         )));
     }
-    let dirs = open_existing_runtime_dirs(workspace)?;
+    let dirs = open_existing_runtime_dirs(workspace, session_id)?;
     let path = dirs.sessions.file(format!("{session_id}.jsonl"));
     ensure_anchored_non_hardlinked_file(&path)?;
     let lock = acquire_anchored_session_lock(&dirs.sessions, session_id)?;
@@ -650,7 +650,7 @@ fn verify_resume_definition_metadata(
 ) -> Result<(), RuntimeError> {
     // WHY: resume hashes bind a partial session to the registry definitions that produced
     // it; incomplete metadata cannot prove the prefix matches the current registry.
-    let dirs = open_existing_runtime_dirs(workspace)?;
+    let dirs = open_existing_runtime_dirs(workspace, session_id)?;
     let metadata = require_anchored_session_log_metadata(&dirs.logs, session_id)?;
     verify_resume_definition_metadata_values(session_id, &metadata, registry, loop_block)
 }
@@ -694,11 +694,29 @@ fn require_anchored_session_log_metadata(
     session_id: &str,
 ) -> Result<SessionLogMetadata, RuntimeError> {
     let path = logs.file(format!("{session_id}.log"));
-    ensure_anchored_real_file(&path)?;
+    ensure_anchored_real_file(&path)
+        .map_err(|error| map_missing_definition_metadata(error, session_id))?;
     parse_session_log_metadata(&read_anchored_to_string_with_limit(
         &path,
         MAX_SESSION_LOG_BYTES,
     )?)
+}
+
+fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
+    if matches!(
+        &error,
+        RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound
+    ) {
+        missing_definition_metadata(session_id)
+    } else {
+        error
+    }
+}
+
+fn missing_definition_metadata(session_id: &str) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "session {session_id} registry drift: missing definition metadata"
+    ))
 }
 
 fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
