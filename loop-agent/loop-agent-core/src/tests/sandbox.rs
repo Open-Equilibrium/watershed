@@ -186,6 +186,16 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
         ),
     )
     .expect("loop fixture rewritten");
+    let connection_path = workspace.join("registry/connections/out-of-phase-sentinel.yaml");
+    let source = fs::read_to_string(&connection_path).expect("connection fixture readable");
+    fs::write(
+        &connection_path,
+        source.replace(
+            "from_ref: sandbox-negative-tool-out-of-phase",
+            "from_ref: custom-tool-out-of-phase",
+        ),
+    )
+    .expect("connection fixture rewritten");
 
     let output = run_loop(&workspace, "custom-tool-out-of-phase", EmitMode::Jsonl)
         .expect("renamed out-of-phase operation runs");
