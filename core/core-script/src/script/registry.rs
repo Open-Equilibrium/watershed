@@ -1,36 +1,35 @@
 impl ResolvedRegistry {
-    fn load_with_limits(
+    fn load_for_loop_with_limits(
         workspace: &Path,
         registry_root: &Path,
+        loop_reference: &str,
         max_file_bytes: u64,
         max_total_bytes: u64,
+        max_active_bytes: u64,
     ) -> Result<Self, RegistryError> {
-        Self::load_with_all_limits(
+        Self::load_for_loop_with_all_limits(
             workspace,
             registry_root,
-            max_file_bytes,
-            max_total_bytes,
-            MAX_REGISTRY_ENTRIES,
-            MAX_REGISTRY_TRAVERSAL_DEPTH,
+            loop_reference,
+            max_active_bytes,
+            RegistryTraversalLimits {
+                max_file_bytes,
+                max_total_bytes,
+                max_entries: MAX_REGISTRY_ENTRIES,
+                max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
+            },
         )
     }
 
-    fn load_with_all_limits(
+    fn load_for_loop_with_all_limits(
         workspace: &Path,
         registry_root: &Path,
-        max_file_bytes: u64,
-        max_total_bytes: u64,
-        max_entries: usize,
-        max_depth: usize,
+        loop_reference: &str,
+        max_active_bytes: u64,
+        limits: RegistryTraversalLimits,
     ) -> Result<Self, RegistryError> {
         let root = open_registry_root(workspace, registry_root)?;
         let mut paths = Vec::new();
-        let limits = RegistryTraversalLimits {
-            max_file_bytes,
-            max_total_bytes,
-            max_entries,
-            max_depth,
-        };
         let mut state = RegistryTraversalState::default();
         collect_registry_files_with_limits(
             &root,
@@ -42,22 +41,58 @@ impl ResolvedRegistry {
             &mut state,
         )?;
         paths.sort_by(|left, right| left.path.cmp(&right.path));
-        let mut blocks = Vec::new();
+        let mut catalog = RegistryCatalog::default();
         let mut total_bytes = 0u64;
 
-        for file in paths {
-            let source = read_registry_file_to_string(&root, &file, max_file_bytes)?;
+        for file in &paths {
+            let source = read_registry_file_to_string(&root, file, limits.max_file_bytes)?;
             let bytes = u64::try_from(source.len()).unwrap_or(u64::MAX);
             total_bytes = total_bytes.saturating_add(bytes);
-            if total_bytes > max_total_bytes {
+            if total_bytes > limits.max_total_bytes {
                 return Err(RegistryError::ReadLimitExceeded {
                     path: root.path.clone(),
                     bytes: total_bytes,
-                    max: max_total_bytes,
+                    max: limits.max_total_bytes,
                 });
             }
             let source_name = file.path.to_string_lossy().replace('\\', "/");
             let block = parse_registry_block(&source_name, &source)?;
+            catalog.insert(&block, file.clone())?;
+        }
+
+        let root_loop = catalog.require("loop", loop_reference, "registry", "root")?;
+        let mut pending = vec![(root_loop.kind, root_loop.identity.id.clone())];
+        let mut loaded = BTreeSet::new();
+        let mut active_bytes = 0u64;
+        let mut blocks = Vec::new();
+
+        while let Some((kind, id)) = pending.pop() {
+            if !loaded.insert((kind, id.clone())) {
+                continue;
+            }
+            let entry = catalog
+                .resolve(kind, &id)
+                .expect("queued catalog entries remain available");
+            let source = read_registry_file_to_string(&root, &entry.file, limits.max_file_bytes)?;
+            active_bytes = active_bytes
+                .saturating_add(u64::try_from(source.len()).unwrap_or(u64::MAX));
+            if active_bytes > max_active_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: root.path.clone(),
+                    bytes: active_bytes,
+                    max: max_active_bytes,
+                });
+            }
+            let source_name = entry.file.path.to_string_lossy().replace('\\', "/");
+            let block = parse_registry_block(&source_name, &source)?;
+            let (actual_kind, actual_identity) = registry_block_identity(&block);
+            if actual_kind != entry.kind || actual_identity != &entry.identity {
+                return Err(parse_error(
+                    &source_name,
+                    "registry block identity changed while loading".to_owned(),
+                ));
+            }
+            enqueue_dependencies(&catalog, &block, &mut pending)?;
             blocks.push(block);
         }
 

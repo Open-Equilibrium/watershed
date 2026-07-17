@@ -171,7 +171,7 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
 #[test]
 fn typed_connection_inputs_exclude_outbound_step_connections() {
     let workspace = workspace_copy("hello-loop");
-    let registry = load_test_registry(&workspace);
+    let registry = load_test_registry(&workspace, "hello-loop");
     let with_outbound_reference = compile_summarize_turn_context(&registry, "hello-loop#1");
     replace_registry_text(
         &workspace,
@@ -179,7 +179,7 @@ fn typed_connection_inputs_exclude_outbound_step_connections() {
         "connection_refs: [inspect-trigger, summary-refresh]",
         "connection_refs: [inspect-trigger]",
     );
-    let inbound_reference_only = load_test_registry(&workspace);
+    let inbound_reference_only = load_test_registry(&workspace, "hello-loop");
     let without_outbound_reference =
         compile_summarize_turn_context(&inbound_reference_only, "hello-loop#1");
 
@@ -221,7 +221,7 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
         "connection_refs: [inspect-trigger, summary-refresh]",
         "connection_refs: [InspectTrigger, inspect-data, SummaryRefresh]",
     );
-    let registry = load_test_registry(&workspace);
+    let registry = load_test_registry(&workspace, "hello-loop");
     let declared = compile_summarize_turn_context(&registry, "hello-loop#1");
 
     let inputs = context_source_content(&declared, "typed-connection-inputs");
@@ -235,7 +235,7 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
         "connection_refs: [InspectTrigger, inspect-data, SummaryRefresh]",
         "connection_refs: [inspect-data, InspectTrigger, SummaryRefresh]",
     );
-    let registry = load_test_registry(&workspace);
+    let registry = load_test_registry(&workspace, "hello-loop");
     let reordered = compile_summarize_turn_context(&registry, "hello-loop#1");
     let reordered_inputs = context_source_content(&reordered, "typed-connection-inputs");
     assert_eq!(reordered_inputs[0]["connection"]["id"], "inspect-data");
@@ -481,7 +481,7 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         "prompt: \"Read the selected input and report only deterministic facts.\"",
         &format!("prompt: \"{}\"", "x".repeat(STUB_MODEL_CONTEXT_LIMIT)),
     );
-    let registry = load_test_registry(&workspace);
+    let registry = load_test_registry(&workspace, "hello-loop");
     let loop_block = registry
         .loop_block("hello-loop")
         .expect("loop exists")

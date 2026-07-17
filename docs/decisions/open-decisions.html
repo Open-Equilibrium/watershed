@@ -15,25 +15,11 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1">M1</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1">
-    <h2>M1 - Loop Agent</h2>
-    <div class="grid">
-      <article id="d-067" class="decision">
-        <h3>D-067 - Registry Memory Budget</h3>
-        <p><strong>Status:</strong> Open, M1 release blocker.</p>
-        <p><strong>Question:</strong> A valid registry can currently contain enough very large names and definitions to exceed the promised 10 MiB of memory per active loop before model or tool data. Which promise should change?</p>
-        <ul><li><strong>A:</strong> Keep the 10 MiB budget, lower registry limits and reject unusually large names or definitions, with a near-limit memory test in CI. Pro: preserves the ten-loop device target and makes the limit enforceable. Con: exceptionally large registry files become invalid.</li><li><strong>B:</strong> Keep today's registry limits and raise the per-loop memory budget to a measured worst case. Pro: accepts larger registries. Con: each active loop may consume substantially more memory.</li><li><strong>C:</strong> Exclude registry data from the budget. Pro: no implementation limit changes. Con: hides real per-loop memory and no longer protects the product target.</li></ul>
-        <p><strong>Recommendation:</strong> A; derive the smallest practical limits from existing fixtures and a measured near-limit registry.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m2">
     <h2>M2 - Meta-Harness And AgentPulse</h2>

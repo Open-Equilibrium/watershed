@@ -1,16 +1,19 @@
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{ambient_authority, fs::Dir};
 
-/// Loads and validates a workspace-relative registry root from disk.
-pub fn load_registry_from_workspace(
+/// Loads the unique transitive registry closure for one top-level Loop.
+pub fn load_loop_registry_from_workspace(
     workspace: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
+    loop_reference: &str,
 ) -> Result<ResolvedRegistry, RegistryError> {
-    ResolvedRegistry::load_with_limits(
+    ResolvedRegistry::load_for_loop_with_limits(
         workspace.as_ref(),
         registry_root.as_ref(),
+        loop_reference,
         MAX_REGISTRY_FILE_BYTES,
         MAX_REGISTRY_TOTAL_BYTES,
+        MAX_ACTIVE_REGISTRY_BYTES,
     )
 }
 
@@ -31,8 +34,153 @@ struct RegistryRoot {
     path: PathBuf,
 }
 
+#[derive(Clone)]
 struct RegistryFile {
     path: PathBuf,
+}
+
+struct RegistryCatalogEntry {
+    identity: BlockIdentity,
+    kind: &'static str,
+    file: RegistryFile,
+}
+
+#[derive(Default)]
+struct RegistryCatalog {
+    entries: BTreeMap<&'static str, BTreeMap<String, RegistryCatalogEntry>>,
+    name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
+}
+
+impl RegistryCatalog {
+    fn insert(&mut self, block: &RegistryBlock, file: RegistryFile) -> Result<(), RegistryError> {
+        let (kind, identity) = registry_block_identity(block);
+        insert_named_block(
+            kind,
+            identity.clone(),
+            self.entries.entry(kind).or_default(),
+            &mut self.name_ids,
+            RegistryCatalogEntry {
+                identity: identity.clone(),
+                kind,
+                file,
+            },
+        )
+    }
+
+    fn resolve(&self, kind: &'static str, reference: &str) -> Option<&RegistryCatalogEntry> {
+        let entries = self.entries.get(kind)?;
+        entries.get(reference).or_else(|| {
+            self.name_ids
+                .get(kind)
+                .and_then(|names| names.get(&normalize_string(reference)))
+                .and_then(|id| entries.get(id))
+        })
+    }
+
+    fn require(
+        &self,
+        kind: &'static str,
+        reference: &str,
+        from_kind: &'static str,
+        from_id: &str,
+    ) -> Result<&RegistryCatalogEntry, RegistryError> {
+        self.resolve(kind, reference)
+            .ok_or_else(|| RegistryError::MissingReference {
+                from_kind,
+                from_id: from_id.to_owned(),
+                reference_kind: kind,
+                reference: reference.to_owned(),
+            })
+    }
+
+    fn endpoint(
+        &self,
+        reference: &str,
+        connection_id: &str,
+    ) -> Result<&RegistryCatalogEntry, RegistryError> {
+        let matches = ["tool", "instruction", "phase", "loop"]
+            .into_iter()
+            .filter_map(|kind| self.resolve(kind, reference))
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [entry] => return Ok(entry),
+            [] => {}
+            _ => {
+                return Err(RegistryError::AmbiguousReference {
+                    kind: "endpoint",
+                    reference: reference.to_owned(),
+                });
+            }
+        }
+        let phase_reference = reference
+            .split_once('.')
+            .map(|(phase, _)| phase)
+            .unwrap_or(reference);
+        self.require("phase", phase_reference, "connection", connection_id)
+            .map_err(|_| RegistryError::MissingReference {
+                from_kind: "connection",
+                from_id: connection_id.to_owned(),
+                reference_kind: "endpoint",
+                reference: reference.to_owned(),
+            })
+    }
+}
+
+fn registry_block_identity(block: &RegistryBlock) -> (&'static str, &BlockIdentity) {
+    match block {
+        RegistryBlock::Tool(block) => ("tool", &block.identity),
+        RegistryBlock::Instruction(block) => ("instruction", &block.identity),
+        RegistryBlock::Phase(block) => ("phase", &block.identity),
+        RegistryBlock::Connection(block) => ("connection", &block.identity),
+        RegistryBlock::Loop(block) => ("loop", &block.identity),
+    }
+}
+
+fn enqueue_dependencies(
+    catalog: &RegistryCatalog,
+    block: &RegistryBlock,
+    pending: &mut Vec<(&'static str, String)>,
+) -> Result<(), RegistryError> {
+    let mut push = |kind, reference: &str, from_kind, from_id: &str| {
+        let target = catalog.require(kind, reference, from_kind, from_id)?;
+        pending.push((target.kind, target.identity.id.clone()));
+        Ok::<_, RegistryError>(())
+    };
+
+    match block {
+        RegistryBlock::Tool(_) | RegistryBlock::Instruction(_) => {}
+        RegistryBlock::Phase(phase) => {
+            for reference in &phase.instruction_refs {
+                push("instruction", reference, "phase", &phase.identity.id)?;
+            }
+            for reference in &phase.tool_refs {
+                push("tool", reference, "phase", &phase.identity.id)?;
+            }
+            for step in &phase.steps {
+                for reference in &step.connection_refs {
+                    push("connection", reference, "step", &step.id)?;
+                }
+            }
+        }
+        RegistryBlock::Connection(connection) => {
+            for reference in [&connection.from_ref, &connection.to_ref] {
+                let target = catalog.endpoint(reference, &connection.identity.id)?;
+                pending.push((target.kind, target.identity.id.clone()));
+            }
+        }
+        RegistryBlock::Loop(loop_block) => {
+            for reference in &loop_block.phase_refs {
+                push("phase", reference, "loop", &loop_block.identity.id)?;
+            }
+            for reference in &loop_block.subloop_refs {
+                push("loop", reference, "loop", &loop_block.identity.id)?;
+            }
+            for reference in &loop_block.connection_refs {
+                push("connection", reference, "loop", &loop_block.identity.id)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

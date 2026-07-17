@@ -12,11 +12,11 @@ Product target:
 M1 implementation budgets (ADR-0049):
 - FSM transition overhead p95 <= 1 ms per event, excluding model and tool work.
 - Local no-op tool dispatch overhead p95 <= 50 ms per run, excluding the tool's own runtime.
-- Memory overhead <= 10 MiB per active top-level loop before LLM/tool payloads.
+- Memory overhead <= 10 MiB per active top-level loop before LLM/tool payloads, including one unique resolved registry closure shared by that Loop and its subloops (ADR-0067).
 - Log/event append latency p95 <= 5 ms per event for the `hello-loop` canonical serialization and local append path.
 - Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
 - `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
-- Concurrency smoke: 10 fixture top-level loops complete without harness-level deadlock or unbounded memory growth.
+- Concurrency smoke: 10 fixture top-level loops complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 100 MiB aggregate RSS budget.
 
 Tool runs are bounded/headless; the harness itself must not be the bottleneck when local inference is fast.
 

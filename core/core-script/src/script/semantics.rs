@@ -22,10 +22,32 @@ fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
     if identity.name.is_empty() {
         return Err(format!("{kind}.name must be non-empty"));
     }
+    if identity.name.chars().count() > MAX_BLOCK_NAME_CHARS {
+        return Err(format!(
+            "{kind}.name must contain at most {MAX_BLOCK_NAME_CHARS} characters"
+        ));
+    }
 
     match block {
         RegistryBlock::Instruction(block) if block.prompt.is_empty() => {
             Err("instruction.prompt must be non-empty".to_owned())
+        }
+        RegistryBlock::Instruction(block)
+            if block.prompt.len() > MAX_REGISTRY_DEFINITION_BYTES =>
+        {
+            Err(format!(
+                "instruction.prompt exceeds the maximum of {MAX_REGISTRY_DEFINITION_BYTES} bytes"
+            ))
+        }
+        RegistryBlock::Tool(block)
+            if block
+                .script_body
+                .as_ref()
+                .is_some_and(|body| body.len() > MAX_REGISTRY_DEFINITION_BYTES) =>
+        {
+            Err(format!(
+                "tool.script_body exceeds the maximum of {MAX_REGISTRY_DEFINITION_BYTES} bytes"
+            ))
         }
         RegistryBlock::Phase(block) if block.steps.is_empty() => {
             Err("phase.steps must contain at least one item".to_owned())
@@ -37,6 +59,11 @@ fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
                 }
                 if step.name.is_empty() {
                     return Err("phase.steps.name must be non-empty".to_owned());
+                }
+                if step.name.chars().count() > MAX_BLOCK_NAME_CHARS {
+                    return Err(format!(
+                        "phase.steps.name must contain at most {MAX_BLOCK_NAME_CHARS} characters"
+                    ));
                 }
             }
             Ok(())

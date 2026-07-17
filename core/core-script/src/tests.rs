@@ -11,7 +11,7 @@ fn registry_location(root: &Path) -> (&Path, &Path) {
 
 fn load_registry(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
     let (workspace, registry_root) = registry_location(root.as_ref());
-    load_registry_from_workspace(workspace, registry_root)
+    load_loop_registry_from_workspace(workspace, registry_root, "root")
 }
 
 fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile>), RegistryError> {
@@ -97,8 +97,9 @@ proptest! {
 fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
     let workspace =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/hello-loop");
-    let registry = load_registry_from_workspace(&workspace, Path::new("registry"))
-        .expect("hello-loop registry loads");
+    let registry =
+        load_loop_registry_from_workspace(&workspace, Path::new("registry"), "hello-loop")
+            .expect("hello-loop registry loads");
 
     assert!(registry.loop_block("hello-loop").is_some());
     assert!(registry.loop_block("HelloLoop").is_some());
@@ -125,10 +126,147 @@ fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
 }
 
 #[test]
+fn loop_registry_retains_the_unique_transitive_definition_closure() {
+    let root = temp_registry_dir("scoped-registry");
+    for (path, source) in [
+        (
+            "root.yaml",
+            "loop:\n  id: root\n  name: Root\n  phase_refs: [shared-phase]\n  subloop_refs: [child, child]\n  connection_refs: [tool-link]\n",
+        ),
+        (
+            "child.yaml",
+            "loop:\n  id: child\n  name: Child\n  phase_refs: [shared-phase]\n  subloop_refs: []\n  connection_refs: []\n",
+        ),
+        (
+            "phase.yaml",
+            "phase:\n  id: shared-phase\n  name: SharedPhase\n  instruction_refs: [shared-instruction]\n  tool_refs: []\n  steps:\n    - id: run\n      name: Run\n",
+        ),
+        (
+            "instruction.yaml",
+            "instruction:\n  id: shared-instruction\n  name: SharedInstruction\n  prompt: Shared\n",
+        ),
+        (
+            "connection.yaml",
+            "connection:\n  id: tool-link\n  name: ToolLink\n  connection_kind: data\n  from_ref: shared-instruction\n  to_ref: endpoint-tool\n",
+        ),
+        (
+            "tool.yaml",
+            "tool:\n  id: endpoint-tool\n  name: EndpointTool\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+        ),
+        (
+            "unused.yaml",
+            "instruction:\n  id: unused\n  name: Unused\n  prompt: Not retained\n",
+        ),
+    ] {
+        std::fs::write(root.join(path), source).expect("registry block written");
+    }
+    let (workspace, registry_root) = registry_location(&root);
+
+    let registry = load_loop_registry_from_workspace(workspace, registry_root, "Root")
+        .expect("reachable registry loads by root name");
+    let value: Value = serde_json::from_str(
+        &registry
+            .canonical_json()
+            .expect("scoped registry canonicalizes"),
+    )
+    .expect("canonical registry is JSON");
+
+    assert!(registry.loop_block("root").is_some());
+    assert!(registry.loop_block("child").is_some());
+    assert!(registry.tool_block("endpoint-tool").is_some());
+    assert!(registry.instruction_block("unused").is_none());
+    assert_eq!(
+        value["loops"].as_object().map(serde_json::Map::len),
+        Some(2)
+    );
+    assert_eq!(
+        value["instructions"].as_object().map(serde_json::Map::len),
+        Some(1),
+        "one definition is retained when root and repeated subloops share it"
+    );
+}
+
+#[test]
+fn parser_rejects_oversized_names_and_definition_text() {
+    let oversized_name = "x".repeat(MAX_BLOCK_NAME_CHARS + 1);
+    let name_error = parse_registry_block(
+        "long-name.yaml",
+        &format!("instruction:\n  id: long-name\n  name: {oversized_name}\n  prompt: Valid\n"),
+    )
+    .expect_err("oversized block name rejected");
+    assert!(name_error.to_string().contains("name"));
+
+    let oversized_text = "x".repeat(MAX_REGISTRY_DEFINITION_BYTES + 1);
+    for (source_name, source) in [
+        (
+            "long-prompt.yaml",
+            format!(
+                "instruction:\n  id: long-prompt\n  name: LongPrompt\n  prompt: {oversized_text}\n"
+            ),
+        ),
+        (
+            "long-script.yaml",
+            format!(
+                "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n"
+            ),
+        ),
+    ] {
+        let error = parse_registry_block(source_name, &source)
+            .expect_err("oversized definition text rejected");
+        assert!(error.to_string().contains("maximum"), "{error}");
+    }
+
+    let oversized_multibyte = "é".repeat(MAX_REGISTRY_DEFINITION_BYTES / 2 + 1);
+    let error = parse_registry_block(
+        "multibyte-prompt.yaml",
+        &format!(
+            "instruction:\n  id: multibyte-prompt\n  name: MultibytePrompt\n  prompt: {oversized_multibyte}\n"
+        ),
+    )
+    .expect_err("definition limits count UTF-8 bytes");
+    assert!(error.to_string().contains("maximum"), "{error}");
+}
+
+#[test]
+fn loop_registry_rejects_a_definition_closure_above_its_byte_budget() {
+    let root = temp_registry_dir("active-registry-limit");
+    let loop_source = "loop:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subloop_refs: []\n  connection_refs: []\n";
+    let phase_source = "phase:\n  id: phase\n  name: Phase\n  instruction_refs: [instruction]\n  tool_refs: []\n  steps:\n    - id: run\n      name: Run\n";
+    let instruction_source =
+        "instruction:\n  id: instruction\n  name: Instruction\n  prompt: Retained\n";
+    for (path, source) in [
+        ("loop.yaml", loop_source),
+        ("phase.yaml", phase_source),
+        ("instruction.yaml", instruction_source),
+    ] {
+        std::fs::write(root.join(path), source).expect("registry block written");
+    }
+    let (workspace, registry_root) = registry_location(&root);
+    let max_active =
+        u64::try_from(loop_source.len() + phase_source.len()).expect("test sources fit in u64");
+
+    let error = ResolvedRegistry::load_for_loop_with_limits(
+        workspace,
+        registry_root,
+        "root",
+        1024,
+        4096,
+        max_active,
+    )
+    .expect_err("closure above active byte budget rejected");
+
+    assert!(matches!(
+        error,
+        RegistryError::ReadLimitExceeded { path, bytes, max }
+            if path == root && bytes > max && max == max_active
+    ));
+}
+
+#[test]
 fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
     let workspace = temp_registry_dir("registry-workspace-boundary");
     let escaping_root = Path::new("../outside");
-    let err = load_registry_from_workspace(&workspace, escaping_root)
+    let err = load_loop_registry_from_workspace(&workspace, escaping_root, "root")
         .expect_err("registry root must stay within workspace");
     assert!(
         matches!(&err, RegistryError::UnsafePath { path, .. } if path == escaping_root),
@@ -137,7 +275,7 @@ fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
     assert!(err.to_string().contains("stay within the workspace"));
 
     let missing_workspace = workspace.join("missing-workspace");
-    let err = load_registry_from_workspace(&missing_workspace, Path::new("registry"))
+    let err = load_loop_registry_from_workspace(&missing_workspace, Path::new("registry"), "root")
         .expect_err("missing workspace must remain an I/O failure");
     assert!(
         matches!(&err, RegistryError::Io { path, source }
@@ -156,6 +294,16 @@ fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
         "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
     )
     .expect("registry file written");
+    std::fs::write(
+        root.join("phase.yaml"),
+        "phase:\n  id: phase\n  name: Phase\n  instruction_refs: [inspect]\n  tool_refs: []\n  steps:\n    - id: run\n      name: Run\n",
+    )
+    .expect("phase written");
+    std::fs::write(
+        root.join("loop.yaml"),
+        "loop:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subloop_refs: []\n  connection_refs: []\n",
+    )
+    .expect("loop written");
 
     let registry = load_registry(root).expect("nested yml registry loads");
 
@@ -172,8 +320,15 @@ fn registry_loader_rejects_files_above_read_limit() {
     .expect("registry file written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_with_limits(workspace, registry_root, 16, 1024)
-        .expect_err("oversized registry file is rejected before parsing");
+    let err = ResolvedRegistry::load_for_loop_with_limits(
+        workspace,
+        registry_root,
+        "root",
+        16,
+        1024,
+        1024,
+    )
+    .expect_err("oversized registry file is rejected before parsing");
 
     assert!(err.to_string().contains("registry read size"));
     assert!(matches!(
@@ -287,11 +442,13 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
     std::fs::write(root.join("b.yaml"), second).expect("second registry file written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_with_limits(
+    let err = ResolvedRegistry::load_for_loop_with_limits(
         workspace,
         registry_root,
+        "root",
         1024,
         u64::try_from(first.len()).expect("test length fits u64"),
+        1024,
     )
     .expect_err("registry total size is rejected before parsing all files");
 
@@ -316,8 +473,19 @@ fn registry_loader_bounds_all_visited_entries() {
     std::fs::write(root.join("README.txt"), "ignored").expect("non-registry entry written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_with_all_limits(workspace, registry_root, 1024, 1024, 1, 64)
-        .expect_err("all visited entries count toward the traversal budget");
+    let err = ResolvedRegistry::load_for_loop_with_all_limits(
+        workspace,
+        registry_root,
+        "root",
+        1024,
+        RegistryTraversalLimits {
+            max_file_bytes: 1024,
+            max_total_bytes: 1024,
+            max_entries: 1,
+            max_depth: 64,
+        },
+    )
+    .expect_err("all visited entries count toward the traversal budget");
 
     assert!(err.to_string().contains("registry traversal entry count"));
     assert!(matches!(
@@ -342,8 +510,19 @@ fn registry_loader_rejects_directories_above_traversal_depth_limit() {
     .expect("registry file written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_with_all_limits(workspace, registry_root, 1024, 1024, 1024, 0)
-        .expect_err("registry traversal depth is rejected before recursion");
+    let err = ResolvedRegistry::load_for_loop_with_all_limits(
+        workspace,
+        registry_root,
+        "root",
+        1024,
+        RegistryTraversalLimits {
+            max_file_bytes: 1024,
+            max_total_bytes: 1024,
+            max_entries: 1024,
+            max_depth: 0,
+        },
+    )
+    .expect_err("registry traversal depth is rejected before recursion");
 
     assert!(matches!(
         err,
@@ -638,9 +817,10 @@ fn parser_enforces_registry_schema() {
 #[test]
 fn parser_enforces_document_and_depth_budgets() {
     const PREFIX: &str = "instruction:\n  id: inspect\n  name: Inspect\n  prompt: ";
+    let definition = format!("{PREFIX}Inspect\n");
     let at_limit = format!(
-        "{PREFIX}{}\n",
-        "x".repeat(MAX_YAML_BYTES - PREFIX.len() - 1)
+        "{definition}#{}\n",
+        "x".repeat(MAX_YAML_BYTES - definition.len() - 2)
     );
     assert_eq!(at_limit.len(), MAX_YAML_BYTES);
     assert!(parse_registry_block("at-limit.yaml", &at_limit).is_ok());
@@ -717,7 +897,7 @@ fn registry_loader_rejects_linked_registry_root() {
     #[cfg(windows)]
     create_windows_junction(&linked_root, &outside);
 
-    let err = load_registry_from_workspace(&parent, Path::new("linked-root"))
+    let err = load_loop_registry_from_workspace(&parent, Path::new("linked-root"), "root")
         .expect_err("linked registry root must be rejected");
 
     assert!(
@@ -1365,6 +1545,24 @@ fn registry_schema_is_checked_in_json() {
     assert_eq!(
         parsed["$id"],
         "https://open-equilibrium.org/watershed/schemas/script/v0/registry-block.schema.json"
+    );
+}
+
+#[test]
+fn registry_schema_publishes_name_and_definition_limits() {
+    let schema = registry_schema();
+
+    assert_eq!(
+        schema["$defs"]["block_name"]["maxLength"],
+        MAX_BLOCK_NAME_CHARS
+    );
+    assert_eq!(
+        schema["$defs"]["instruction"]["properties"]["prompt"]["maxLength"],
+        MAX_REGISTRY_DEFINITION_BYTES
+    );
+    assert_eq!(
+        schema["$defs"]["tool"]["properties"]["script_body"]["maxLength"],
+        MAX_REGISTRY_DEFINITION_BYTES
     );
 }
 

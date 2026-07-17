@@ -3,4 +3,4 @@ loop:
   name: SandboxNegativeToolOutOfPhase
   phase_refs: [negative-no-tools]
   subloop_refs: []
-  connection_refs: []
+  connection_refs: [out-of-phase-sentinel]

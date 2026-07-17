@@ -10,13 +10,19 @@ use unicode_normalization::UnicodeNormalization;
 /// Maximum allowed recursive loop nesting depth.
 pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
 /// Maximum size for one registry YAML file.
-pub const MAX_REGISTRY_FILE_BYTES: u64 = 1024 * 1024;
+pub const MAX_REGISTRY_FILE_BYTES: u64 = 128 * 1024;
+/// Maximum source bytes retained by one top-level Loop and its dependency closure.
+pub const MAX_ACTIVE_REGISTRY_BYTES: u64 = 1024 * 1024;
 /// Maximum cumulative size for a registry root.
 pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum number of filesystem entries visited under one registry root.
-pub const MAX_REGISTRY_ENTRIES: usize = 4096;
+pub const MAX_REGISTRY_ENTRIES: usize = 1024;
 /// Maximum directory nesting depth walked below one registry root.
 pub const MAX_REGISTRY_TRAVERSAL_DEPTH: usize = 64;
+/// Maximum number of Unicode scalar values in a block name.
+pub const MAX_BLOCK_NAME_CHARS: usize = 256;
+/// Maximum UTF-8 bytes in an Instruction prompt or own-script body.
+pub const MAX_REGISTRY_DEFINITION_BYTES: usize = 64 * 1024;
 
 /// Shared id/name pair for every registry block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -8,18 +8,18 @@ const POLICY_TARGETS: [PolicyTarget; 2] = [
     PolicyTarget::MacosSeatbelt,
 ];
 
-fn fixture_registry(fixture: &str) -> core_script::ResolvedRegistry {
+fn fixture_registry(fixture: &str, loop_ref: &str) -> core_script::ResolvedRegistry {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../loop-agent/fixtures")
         .join(fixture);
-    core_script::load_registry_from_workspace(&workspace, Path::new("registry"))
+    core_script::load_loop_registry_from_workspace(&workspace, Path::new("registry"), loop_ref)
         .expect("fixture registry loads")
 }
 
 #[test]
 fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
     for fixture in ["smoke-loop", "hello-loop"] {
-        let registry = fixture_registry(fixture);
+        let registry = fixture_registry(fixture, fixture);
 
         let expected = fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,7 +52,7 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
 
 #[test]
 fn policy_compiler_reports_a_missing_root_loop() {
-    let registry = fixture_registry("smoke-loop");
+    let registry = fixture_registry("smoke-loop", "smoke-loop");
 
     let err = compile_policy_artifact(
         "smoke-loop",
@@ -71,7 +71,7 @@ fn policy_compiler_reports_a_missing_root_loop() {
 fn smoke_registry_with_tool(
     update: impl FnOnce(&mut core_script::ToolBlock),
 ) -> core_script::ResolvedRegistry {
-    let source = fixture_registry("smoke-loop");
+    let source = fixture_registry("smoke-loop", "smoke-loop");
     let mut tool = source.tool_block("echo").expect("echo tool exists").clone();
     update(&mut tool);
     let mut phase = source
@@ -547,14 +547,13 @@ fn policy_artifact_rejects_commands_missing_from_phase_scope() {
 
 #[test]
 fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
-    let registry = fixture_registry("sandbox-negative");
-
     for path in fixture_files("expected.json") {
         let text = fs::read_to_string(&path).expect("fixture is readable");
         assert!(text.ends_with('\n'), "{} must end with LF", path.display());
 
         let expected: ExpectedDecisionFixture =
             serde_json::from_str(&text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+        let registry = fixture_registry("sandbox-negative", &expected.fixture_name);
         assert_eq!(expected.expected, "deny");
         assert!(!expected.side_effects_allowed);
         let value = serde_json::to_value(&expected).expect("fixture serializes");

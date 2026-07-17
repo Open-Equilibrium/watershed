@@ -92,7 +92,11 @@ fn resume_session_internal(
     let loop_id = resumable_loop_id(&path, session_id, &events)?;
 
     let config = load_workspace_config(workspace)?;
-    let registry = core_script::load_registry_from_workspace(workspace, &config.registry_root)?;
+    let registry = core_script::load_loop_registry_from_workspace(
+        workspace,
+        &config.registry_root,
+        &loop_id,
+    )?;
     let loop_block = registry.loop_block(&loop_id).ok_or_else(|| {
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;

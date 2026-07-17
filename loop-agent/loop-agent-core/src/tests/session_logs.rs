@@ -1218,6 +1218,37 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
 }
 
 #[test]
+fn resume_ignores_unrelated_registry_additions() {
+    let workspace = workspace_copy("hello-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let prefix = prefix_through_tool_progress(
+        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        "write-summary",
+    );
+    let path = session_dir.join("hello001.jsonl");
+    fs::write(&path, &prefix).expect("progress prefix written");
+    write_definition_hash_metadata(&workspace, "hello001", "hello-loop");
+    fs::create_dir_all(workspace.join("out")).expect("output dir created");
+    fs::write(workspace.join("out/summary.txt"), "already-written\n")
+        .expect("sentinel summary written");
+    fs::write(
+        workspace.join("registry/instructions/unrelated.yaml"),
+        "instruction:\n  id: unrelated\n  name: Unrelated\n  prompt: Not used by hello-loop\n",
+    )
+    .expect("unrelated definition written");
+
+    let output = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect("unrelated definition does not change the closure hash");
+
+    assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary remains readable"),
+        "already-written\n"
+    );
+}
+
+#[test]
 fn resume_rejects_registry_drift_before_side_effects() {
     let workspace = workspace_copy("hello-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -1260,7 +1291,7 @@ fn resume_rejects_registry_drift_before_side_effects() {
 #[test]
 fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     let workspace = workspace_copy("hello-loop");
-    let registry = load_test_registry(&workspace);
+    let registry = load_test_registry(&workspace, "hello-loop");
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
     let metadata_path =
         session_log_metadata_path(&workspace, "partial001").expect("metadata path resolves");

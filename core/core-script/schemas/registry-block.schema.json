@@ -122,7 +122,7 @@
       "type": "object"
     },
     "block_id": { "pattern": "^[a-z0-9_-]{1,128}$", "type": "string" },
-    "block_name": { "minLength": 1, "type": "string" },
+    "block_name": { "maxLength": 256, "minLength": 1, "type": "string" },
     "cidr_allow": {
       "additionalProperties": false,
       "properties": {
@@ -157,7 +157,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
-        "prompt": { "minLength": 1, "type": "string" }
+        "prompt": { "maxLength": 65536, "minLength": 1, "type": "string" }
       },
       "required": ["id", "name", "prompt"],
       "type": "object"
@@ -254,7 +254,7 @@
           "then": {
             "properties": {
               "command": { "$ref": "#/$defs/own_script_command" },
-              "script_body": { "minLength": 1, "type": "string" },
+              "script_body": { "maxLength": 65536, "minLength": 1, "type": "string" },
               "script_runtime": { "const": "posix-sh" }
             },
             "required": ["script_runtime", "script_body"]
@@ -274,7 +274,7 @@
         "network": { "$ref": "#/$defs/network" },
         "protected_path_grants": { "items": { "type": "string" }, "type": "array" },
         "read_scope": { "items": { "type": "string" }, "type": "array" },
-        "script_body": { "type": "string" },
+        "script_body": { "maxLength": 65536, "type": "string" },
         "script_runtime": { "const": "posix-sh" },
         "tool_kind": { "enum": ["predefined-command", "own-script"] },
         "write_scope": { "items": { "type": "string" }, "type": "array" }
