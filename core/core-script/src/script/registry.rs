@@ -123,6 +123,10 @@ impl ResolvedRegistry {
                         kind,
                         id: identity.id.clone(),
                     }
+                } else if let RegistryBlock::Phase(phase) = &block
+                    && let Some(step) = phase.steps.iter().find(|step| !is_valid_block_id(&step.id))
+                {
+                    RegistryError::InvalidBlockId(step.id.clone())
                 } else {
                     parse_error("programmatic registry", message)
                 }
