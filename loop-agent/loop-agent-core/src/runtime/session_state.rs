@@ -82,15 +82,21 @@ fn resume_session_internal(
     ensure_existing_session_log_path(workspace, &path)?;
     ensure_non_hardlinked_real_file(&path)?;
     let lock = acquire_session_lock(workspace, session_id)?;
-    let before = read_session_log_to_string(&path)?;
-    let events = validate_session_log_text(&path, session_id, &before)?;
-    drop(before);
-    let prior_event_count = events.len();
-    if stream_is_failed(&events) || stream_is_completed(&events) {
+    let inspection = inspect_resume_session(&path, session_id)?;
+    let prior_event_count = inspection.prior_event_count;
+    if matches!(
+        inspection.last_event_type,
+        EventType::SessionFailed | EventType::SessionCompleted
+    ) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
     let metadata = require_session_log_metadata(workspace, session_id)?;
-    let loop_id = resumable_loop_id(&path, session_id, &events, &metadata)?;
+    let loop_id = resumable_loop_id(
+        &path,
+        session_id,
+        inspection.root_loop_definition_id.as_deref(),
+        &metadata,
+    )?;
 
     let config = load_workspace_config(workspace)?;
     let registry =
@@ -105,8 +111,15 @@ fn resume_session_internal(
         &loop_id,
         runtime_policy_target(),
     )?;
-    let clock = resume_event_clock(&config, &events)?;
-    let planned_runtime = execute_loop(
+    let clock = resume_event_clock(&config, inspection.clock)?;
+    let recorded_context = read_recorded_context_manifest_signature(
+        workspace,
+        session_id,
+        inspection.completed_turns,
+    )?;
+    let mut prefix_sink =
+        RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
+    let planned_runtime = execute_loop_with_sink(
         workspace,
         &registry,
         &policy,
@@ -117,39 +130,62 @@ fn resume_session_internal(
             ToolSideEffectMode::DryRun,
             config.stub_model_fixture_profile,
         ),
+        Some(&mut prefix_sink),
     )?;
-    verify_recorded_context_manifests(
-        workspace,
-        session_id,
-        &events,
-        &planned_runtime.context_manifests,
+    if inspection.completed_turns > planned_runtime.context_manifests.record_count
+        || recorded_context.record_count > planned_runtime.context_manifests.record_count
+        || !prefix_sink.context_prefix_matches()
+    {
+        let context_path = workspace
+            .join(LOCAL_LOG_DIR)
+            .join(format!("{session_id}.contexts.jsonl"));
+        return Err(RuntimeError::Protocol(format!(
+            "{} context manifests do not match deterministic replay",
+            context_path.display()
+        )));
+    }
+    let resume_prefix = validate_resume_replay_prefix(
+        &path,
+        &inspection,
+        &prefix_sink,
+        &planned_runtime,
+        loop_block,
     )?;
-    let resume_prefix =
-        validate_resume_replay_prefix(&path, &events, &planned_runtime.events, loop_block, clock)?;
-    if let Some(tool_id) = started_tool_without_progress(&events) {
+    if let Some(tool_id) = inspection.started_tool_without_progress.as_deref() {
         return Err(RuntimeError::Protocol(format!(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
         )));
     }
+    let append_plan = resume_append_plan(session_id, &inspection.validation, clock)?;
     let preflight_matches = {
-        let mut matcher = PlannedRuntimeSink::new(&planned_runtime, None);
-        let runtime = execute_loop_with_sink(
-            workspace,
-            &registry,
-            &policy,
-            loop_block,
-            session_id,
-            LoopExecutionOptions::with_stub_model_fixture_profile(
-                clock,
-                ToolSideEffectMode::PreflightResume {
-                    prefix_event_count: resume_prefix.planned_event_count as u64,
-                },
-                config.stub_model_fixture_profile,
-            )
-            .without_captured_output(),
-            Some(&mut matcher),
-        )?;
-        matcher.matches_execution(&runtime)
+        let mut preflight_sink = ResumePreflightSink {
+            appended_bytes: append_plan.marker_stream.len(),
+            clock,
+            path: &path,
+            planned_event_count: resume_prefix.planned_event_count,
+            resume_marker_count: resume_prefix.resume_marker_count,
+        };
+        let matches = {
+            let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut preflight_sink));
+            let runtime = execute_loop_with_sink(
+                workspace,
+                &registry,
+                &policy,
+                loop_block,
+                session_id,
+                LoopExecutionOptions::with_stub_model_fixture_profile(
+                    clock,
+                    ToolSideEffectMode::PreflightResume {
+                        prefix_event_count: resume_prefix.planned_event_count as u64,
+                    },
+                    config.stub_model_fixture_profile,
+                ),
+                Some(&mut matcher),
+            )?;
+            matcher.matches_execution(&runtime)
+        };
+        preflight_sink.finish()?;
+        matches
     };
     if !preflight_matches {
         return Err(RuntimeError::Protocol(format!(
@@ -157,24 +193,14 @@ fn resume_session_internal(
             path.display()
         )));
     }
-    let append_plan = preflight_resume_append_plan(
-        &path,
-        session_id,
-        &events,
-        &planned_runtime.events,
-        &resume_prefix,
-        clock,
-    )?;
-
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{session_id}.contexts.jsonl"));
-    let validation = SessionAppendValidationState::from_prior_events(&path, session_id, &events)?;
     let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
         context_path,
         path: path.clone(),
         session_id: session_id.to_owned(),
-        validation,
+        validation: inspection.validation,
         commit_reservation: None,
         notifier,
         timings,
@@ -202,8 +228,7 @@ fn resume_session_internal(
                     prefix_event_count: resume_prefix.planned_event_count as u64,
                 },
                 config.stub_model_fixture_profile,
-            )
-            .without_captured_output(),
+            ),
             Some(&mut matcher),
         );
         let matches = result
@@ -216,17 +241,18 @@ fn resume_session_internal(
     finish_result?;
     let terminal_error = resumed_runtime.terminal_error;
     let resumed_failed = resumed_runtime.failed;
+    let failure_status = resumed_runtime.failure_status;
     if terminal_error.is_none() && !replay_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} resumed runtime did not match deterministic replay",
             path.display()
         )));
     }
-    drop(planned_runtime);
-    drop(events);
-    let committed = read_session_log_to_string(&path)?;
-    let combined_events = validate_session_log_text(&path, session_id, &committed)?;
-    drop(committed);
+    let combined_event_count = planned_runtime
+        .events
+        .record_count
+        .saturating_add(resume_prefix.resume_marker_count)
+        .saturating_add(1);
     lock.release()?;
     if let Some(err) = terminal_error {
         return Err(RuntimeError::session_failed(session_id, err));
@@ -234,11 +260,15 @@ fn resume_session_internal(
 
     Ok((
         RunOutput {
-            event_count: combined_events.len(),
+            event_count: combined_event_count,
             failed: resumed_failed,
             session_id: session_id.to_owned(),
             session_path: path,
-            stdout: human_session_status(session_id, "resumed", &combined_events),
+            stdout: human_session_status_from_failure(
+                session_id,
+                "resumed",
+                failure_status.as_deref(),
+            ),
         },
         prior_event_count,
     ))
@@ -254,36 +284,150 @@ struct ResumeAppendPlan {
     marker_stream: String,
 }
 
+struct ResumeSessionInspection {
+    clock: EventClock,
+    completed_turns: usize,
+    event_prefix: RuntimeStreamSignature,
+    last_event_type: EventType,
+    planned_event_count: usize,
+    prefix_metadata_valid: bool,
+    prior_event_count: usize,
+    resume_marker_count: usize,
+    root_loop_definition_id: Option<String>,
+    started_tool_without_progress: Option<String>,
+    validation: SessionAppendValidationState,
+}
+
+struct ResumeInspectionBuilder {
+    clock: Option<EventClock>,
+    completed_turns: usize,
+    event_prefix: RuntimeStreamSignatureBuilder,
+    last_event_type: Option<EventType>,
+    planned_event_count: usize,
+    prefix_metadata_valid: bool,
+    prior_event_count: usize,
+    resume_marker_count: usize,
+    root_loop_definition_id: Option<String>,
+}
+
+impl ResumeInspectionBuilder {
+    fn new() -> Self {
+        Self {
+            clock: None,
+            completed_turns: 0,
+            event_prefix: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            last_event_type: None,
+            planned_event_count: 0,
+            prefix_metadata_valid: true,
+            prior_event_count: 0,
+            resume_marker_count: 0,
+            root_loop_definition_id: None,
+        }
+    }
+
+    fn observe(&mut self, event: &EventEnvelope) -> Result<(), RuntimeError> {
+        let clock = match self.clock {
+            Some(clock) => clock,
+            None => {
+                let clock = EventClock::from_first_event(event).ok_or_else(|| {
+                    RuntimeError::Protocol(
+                        "session first event timestamp cannot anchor resume".to_owned(),
+                    )
+                })?;
+                self.clock = Some(clock);
+                clock
+            }
+        };
+        self.prior_event_count = self.prior_event_count.saturating_add(1);
+        self.last_event_type = Some(event.event_type);
+        self.completed_turns += usize::from(event.event_type == EventType::MessageCompleted);
+        if self.root_loop_definition_id.is_none()
+            && event.event_type == EventType::LoopStarted
+            && event.parent_loop_id.is_none()
+        {
+            self.root_loop_definition_id =
+                Some(lifecycle_payload_string(event, "loop_definition_id"));
+        }
+        if event.event_type == EventType::SessionResumed {
+            self.resume_marker_count = self.resume_marker_count.saturating_add(1);
+            return Ok(());
+        }
+
+        self.prefix_metadata_valid &= event.event_id == format!("evt-{:03}", event.sequence)
+            && event.timestamp == clock.timestamp(event.sequence);
+        let normalized_sequence = event
+            .sequence
+            .checked_sub(self.resume_marker_count as u64)
+            .filter(|sequence| *sequence > 0)
+            .ok_or_else(|| {
+                RuntimeError::Protocol("resume marker count exceeds event sequence".to_owned())
+            })?;
+        let mut normalized = event.clone();
+        normalized.sequence = normalized_sequence;
+        normalized.event_id = format!("evt-{normalized_sequence:03}");
+        normalized.timestamp = clock.timestamp(normalized_sequence);
+        let canonical = normalized.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!(
+                "failed to serialize normalized resume event: {err}"
+            ))
+        })?;
+        self.event_prefix.push(canonical.as_bytes());
+        self.planned_event_count = self.planned_event_count.saturating_add(1);
+        Ok(())
+    }
+}
+
+fn inspect_resume_session(
+    path: &Path,
+    session_id: &str,
+) -> Result<ResumeSessionInspection, RuntimeError> {
+    let mut validation = SessionAppendValidationState::empty(session_id);
+    let mut inspection = ResumeInspectionBuilder::new();
+    for_each_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
+        validation.validate_appended_with(path, line, |event| inspection.observe(event))
+    })?;
+    let Some(clock) = inspection.clock else {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must contain at least one event",
+            path.display()
+        )));
+    };
+    let Some(last_event_type) = inspection.last_event_type else {
+        unreachable!("a recorded clock requires an event");
+    };
+    let started_tool_without_progress = validation.tool_without_progress().map(str::to_owned);
+    Ok(ResumeSessionInspection {
+        clock,
+        completed_turns: inspection.completed_turns,
+        event_prefix: inspection.event_prefix.signature(),
+        last_event_type,
+        planned_event_count: inspection.planned_event_count,
+        prefix_metadata_valid: inspection.prefix_metadata_valid,
+        prior_event_count: inspection.prior_event_count,
+        resume_marker_count: inspection.resume_marker_count,
+        root_loop_definition_id: inspection.root_loop_definition_id,
+        started_tool_without_progress,
+        validation,
+    })
+}
+
 fn validate_resume_replay_prefix(
     path: &Path,
-    events: &[EventEnvelope],
-    planned_events: &[EventEnvelope],
+    inspection: &ResumeSessionInspection,
+    prefix_sink: &RuntimePrefixSink,
+    planned: &RuntimeExecution,
     loop_block: &core_script::LoopBlock,
-    clock: EventClock,
 ) -> Result<ResumeReplayPrefix, RuntimeError> {
-    let mut planned_event_count = 0usize;
-    let mut resume_marker_count = 0usize;
-
-    for event in events {
-        if event.event_type == EventType::SessionResumed {
-            resume_marker_count += 1;
-            continue;
-        }
-
-        let Some(planned_event) = planned_events.get(planned_event_count) else {
-            return Err(invalid_resume_prefix_error(path, loop_block));
-        };
-        let expected_event =
-            shift_resumed_event(planned_event.clone(), resume_marker_count as u64, clock);
-        if event != &expected_event {
-            return Err(invalid_resume_prefix_error(path, loop_block));
-        }
-        planned_event_count += 1;
+    if !inspection.prefix_metadata_valid
+        || inspection.planned_event_count > planned.events.record_count
+        || !prefix_sink.event_prefix_matches()
+    {
+        return Err(invalid_resume_prefix_error(path, loop_block));
     }
 
     Ok(ResumeReplayPrefix {
-        planned_event_count,
-        resume_marker_count,
+        planned_event_count: inspection.planned_event_count,
+        resume_marker_count: inspection.resume_marker_count,
     })
 }
 
@@ -295,21 +439,22 @@ fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock)
     ))
 }
 
-fn preflight_resume_append_plan(
-    path: &Path,
+fn resume_append_plan(
     session_id: &str,
-    events: &[EventEnvelope],
-    planned_events: &[EventEnvelope],
-    resume_prefix: &ResumeReplayPrefix,
+    validation: &SessionAppendValidationState,
     clock: EventClock,
 ) -> Result<ResumeAppendPlan, RuntimeError> {
-    let sequence = events
-        .last()
-        .expect("validated streams contain at least one event")
-        .sequence
-        + 1;
+    let sequence = validation.previous_sequence.saturating_add(1);
+    let mut candidate_sequence = sequence;
+    let event_id = loop {
+        let candidate = format!("evt-{candidate_sequence:03}");
+        if !validation.event_ids.contains(&candidate) {
+            break candidate;
+        }
+        candidate_sequence = candidate_sequence.saturating_add(1);
+    };
     let resume_event = EventEnvelope::new(
-        next_event_id(sequence, events),
+        event_id,
         EventType::SessionResumed,
         session_id.to_owned(),
         sequence,
@@ -318,19 +463,6 @@ fn preflight_resume_append_plan(
         serde_json::json!({"reason":"resume"}),
     );
     let marker_stream = canonical_event_stream(std::slice::from_ref(&resume_event))?;
-    let mut validation = SessionAppendValidationState::from_prior_events(path, session_id, events)?;
-    validation.validate_constructed_event(path, &resume_event, marker_stream.len())?;
-    let resumed_suffix_offset = resume_prefix.resume_marker_count as u64 + 1;
-    let mut appended_bytes = marker_stream.len();
-    for event in &planned_events[resume_prefix.planned_event_count..] {
-        let event = shift_resumed_event(event.clone(), resumed_suffix_offset, clock);
-        let canonical = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("failed to serialize resumed runtime event: {err}"))
-        })?;
-        appended_bytes = appended_bytes.saturating_add(canonical.len());
-        validation.validate_constructed_event(path, &event, canonical.len())?;
-    }
-    prepare_session_log_append(path, appended_bytes)?;
     Ok(ResumeAppendPlan {
         marker_event: resume_event,
         marker_stream,
@@ -379,7 +511,7 @@ fn shift_resumed_event(
 fn resumable_loop_id(
     path: &Path,
     session_id: &str,
-    events: &[EventEnvelope],
+    event_loop_id: Option<&str>,
     metadata: &SessionLogMetadata,
 ) -> Result<String, RuntimeError> {
     let recorded_loop_id = metadata.loop_definition_id.as_deref().ok_or_else(|| {
@@ -387,14 +519,7 @@ fn resumable_loop_id(
             "session {session_id} registry drift: missing loop_definition_id metadata"
         ))
     })?;
-    let event_loop_id = events
-        .iter()
-        .find(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
-        .map(|event| lifecycle_payload_string(event, "loop_definition_id"));
-    if event_loop_id
-        .as_deref()
-        .is_some_and(|event_loop_id| event_loop_id != recorded_loop_id)
-    {
+    if event_loop_id.is_some_and(|event_loop_id| event_loop_id != recorded_loop_id) {
         return Err(RuntimeError::Protocol(format!(
             "{} session {session_id} loop definition metadata does not match durable events",
             path.display()
@@ -852,21 +977,4 @@ fn session_log_metadata_text(definition_metadata: Option<&SessionDefinitionMetad
         metadata.push('\n');
     }
     metadata
-}
-
-fn preflight_session_completion_stream(
-    reservation: &SessionReservation,
-    expected_session_id: &str,
-    events: &[EventEnvelope],
-) -> Result<(), RuntimeError> {
-    let path = Path::new("runtime.jsonl");
-    let mut validation = SessionAppendValidationState::empty(expected_session_id);
-    for event in events {
-        let canonical = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
-        })?;
-        validation.validate_constructed_event(path, event, canonical.len())?;
-    }
-    ensure_session_log_growth_within_limit(&reservation.session_path, validation.stream_bytes)?;
-    Ok(())
 }

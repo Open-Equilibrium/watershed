@@ -150,7 +150,8 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
         runtime_policy_target(),
     )
     .expect("runtime policy compiles");
-    let planned = execute_loop(
+    let mut captured = CapturedRuntime::default();
+    let planned = execute_loop_with_sink(
         workspace,
         &registry,
         &policy,
@@ -161,10 +162,11 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
             ToolSideEffectMode::DryRun,
             config.stub_model_fixture_profile,
         ),
+        Some(&mut captured),
     )
     .expect("context fixture replay plans");
-    assert!(completed_turns <= planned.context_manifests.len());
-    let context_stream = planned.context_manifests[..completed_turns]
+    assert!(completed_turns <= planned.context_manifests.record_count);
+    let context_stream = captured.context_manifests[..completed_turns]
         .iter()
         .map(|manifest| manifest.line.as_str())
         .collect::<String>();
@@ -371,6 +373,32 @@ struct FsmTransitionTimings {
     nanos: Vec<u128>,
 }
 
+#[derive(Default)]
+struct CapturedRuntime {
+    context_manifests: Vec<ContextManifest>,
+    events: Vec<EventEnvelope>,
+}
+
+impl RuntimeEventSink for CapturedRuntime {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        None
+    }
+
+    fn commit(
+        &mut self,
+        event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        context_manifest: Option<ContextManifestCheckpoint>,
+        _measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        self.events.push(event.clone());
+        if let Some(checkpoint) = context_manifest {
+            self.context_manifests.push(checkpoint.manifest);
+        }
+        Ok(())
+    }
+}
+
 impl FsmTransitionTimings {
     fn new() -> Self {
         Self {
@@ -414,7 +442,7 @@ fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
         LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
         Some(&mut timings),
     )?;
-    if runtime.failed || timings.nanos.len() != runtime.events.len() {
+    if runtime.failed || timings.nanos.len() != runtime.events.record_count {
         return Err(RuntimeError::Protocol(
             "smoke-loop transition timing did not cover a successful runtime".to_owned(),
         ));
@@ -444,8 +472,11 @@ fn emit_noop_dispatch_for_budget(
     policy: RuntimeToolPolicy<'_>,
     invocation: &LoopInvocation,
 ) -> Result<usize, RuntimeError> {
-    let mut builder =
-        RuntimeEventBuilder::with_clock("dispatchprobe001".to_owned(), EventClock::fixed_fixture());
+    let mut builder = RuntimeEventBuilder::with_clock(
+        "dispatchprobe001".to_owned(),
+        EventClock::fixed_fixture(),
+        false,
+    );
     emit_tool(
         workspace,
         tool,
@@ -454,7 +485,7 @@ fn emit_noop_dispatch_for_budget(
         ToolSideEffectMode::ApplyAll,
         &mut builder,
     )?;
-    Ok(builder.events.len())
+    Ok(builder.events.record_count)
 }
 
 fn p95_nanos(mut values: Vec<u128>) -> u128 {

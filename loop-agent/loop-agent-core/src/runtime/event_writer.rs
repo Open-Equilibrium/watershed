@@ -16,11 +16,8 @@ trait RuntimeEventSink {
 }
 
 struct PlannedRuntimeSink<'expected, 'inner> {
-    context_manifest_index: usize,
-    event_index: usize,
     expected: &'expected RuntimeExecution,
     inner: Option<&'inner mut dyn RuntimeEventSink>,
-    matched: bool,
 }
 
 impl<'expected, 'inner> PlannedRuntimeSink<'expected, 'inner> {
@@ -28,20 +25,14 @@ impl<'expected, 'inner> PlannedRuntimeSink<'expected, 'inner> {
         expected: &'expected RuntimeExecution,
         inner: Option<&'inner mut dyn RuntimeEventSink>,
     ) -> Self {
-        Self {
-            context_manifest_index: 0,
-            event_index: 0,
-            expected,
-            inner,
-            matched: true,
-        }
+        Self { expected, inner }
     }
 
     fn matches_execution(&self, execution: &RuntimeExecution) -> bool {
-        self.matched
-            && self.event_index == self.expected.events.len()
-            && self.context_manifest_index == self.expected.context_manifests.len()
+        execution.events == self.expected.events
+            && execution.context_manifests == self.expected.context_manifests
             && execution.failed == self.expected.failed
+            && execution.failure_status == self.expected.failure_status
     }
 }
 
@@ -59,21 +50,6 @@ impl RuntimeEventSink for PlannedRuntimeSink<'_, '_> {
         context_manifest: Option<ContextManifestCheckpoint>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
-        self.matched &= self.expected.events.get(self.event_index) == Some(event);
-        self.event_index += 1;
-        match context_manifest.as_ref() {
-            Some(checkpoint) => {
-                self.matched &= event.event_type == EventType::MessageCompleted
-                    && checkpoint.ordinal == self.context_manifest_index + 1
-                    && self
-                        .expected
-                        .context_manifests
-                        .get(self.context_manifest_index)
-                        == Some(&checkpoint.manifest);
-                self.context_manifest_index += 1;
-            }
-            None => self.matched &= event.event_type != EventType::MessageCompleted,
-        }
         if let Some(inner) = self.inner.as_deref_mut() {
             inner.commit(
                 event,
@@ -81,6 +57,60 @@ impl RuntimeEventSink for PlannedRuntimeSink<'_, '_> {
                 context_manifest,
                 measurement_started_at,
             )?;
+        }
+        Ok(())
+    }
+}
+
+struct RuntimePrefixSink {
+    context_manifests: RuntimeStreamSignatureBuilder,
+    events: RuntimeStreamSignatureBuilder,
+    expected_context_manifests: RuntimeStreamSignature,
+    expected_events: RuntimeStreamSignature,
+}
+
+impl RuntimePrefixSink {
+    fn new(
+        expected_events: RuntimeStreamSignature,
+        expected_context_manifests: RuntimeStreamSignature,
+    ) -> Self {
+        Self {
+            context_manifests: RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN),
+            events: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            expected_context_manifests,
+            expected_events,
+        }
+    }
+
+    fn event_prefix_matches(&self) -> bool {
+        self.events.signature() == self.expected_events
+    }
+
+    fn context_prefix_matches(&self) -> bool {
+        self.context_manifests.signature() == self.expected_context_manifests
+    }
+}
+
+impl RuntimeEventSink for RuntimePrefixSink {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        None
+    }
+
+    fn commit(
+        &mut self,
+        _event: &EventEnvelope,
+        canonical_jsonl: &str,
+        context_manifest: Option<ContextManifestCheckpoint>,
+        _measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        if self.events.record_count < self.expected_events.record_count {
+            self.events.push(canonical_jsonl.as_bytes());
+        }
+        if let Some(checkpoint) = context_manifest
+            && self.context_manifests.record_count < self.expected_context_manifests.record_count
+        {
+            self.context_manifests
+                .push(checkpoint.manifest.line.as_bytes());
         }
         Ok(())
     }
@@ -328,6 +358,48 @@ struct ResumeEventSink<'writer, 'session> {
     writer: &'writer mut SerialSessionWriter<'session>,
 }
 
+struct ResumePreflightSink<'path> {
+    appended_bytes: usize,
+    clock: EventClock,
+    path: &'path Path,
+    planned_event_count: usize,
+    resume_marker_count: usize,
+}
+
+impl ResumePreflightSink<'_> {
+    fn finish(self) -> Result<(), RuntimeError> {
+        prepare_session_log_append(self.path, self.appended_bytes).map(|_| ())
+    }
+}
+
+impl RuntimeEventSink for ResumePreflightSink<'_> {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        None
+    }
+
+    fn commit(
+        &mut self,
+        event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        _context_manifest: Option<ContextManifestCheckpoint>,
+        _measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        if event.sequence <= self.planned_event_count as u64 {
+            return Ok(());
+        }
+        let shifted = shift_resumed_event(
+            event.clone(),
+            self.resume_marker_count as u64 + 1,
+            self.clock,
+        );
+        let canonical = shifted.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize resumed runtime event: {err}"))
+        })?;
+        self.appended_bytes = self.appended_bytes.saturating_add(canonical.len());
+        Ok(())
+    }
+}
+
 impl RuntimeEventSink for ResumeEventSink<'_, '_> {
     fn measurement_started_at(&self) -> Option<Instant> {
         self.writer.measurement_started_at()
@@ -482,19 +554,24 @@ struct ContextManifestWriter {
 
 impl ContextManifestWriter {
     fn open(path: &Path) -> Result<Self, RuntimeError> {
-        let text = read_to_string_with_limit(path, MAX_SESSION_LOG_BYTES)?;
-        if !text.is_empty() && !text.ends_with('\n') {
-            return Err(RuntimeError::Protocol(format!(
-                "{} context manifest stream must end with LF",
-                path.display()
-            )));
-        }
-        let byte_count = u64::try_from(text.len()).unwrap_or(u64::MAX);
+        let mut last_manifest = None;
+        let mut manifest_count = 0usize;
+        let byte_count = for_each_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
+            if !line.ends_with('\n') {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} context manifest stream must end with LF",
+                    path.display()
+                )));
+            }
+            last_manifest = Some(line.to_owned());
+            manifest_count = manifest_count.saturating_add(1);
+            Ok(())
+        })?;
         Ok(Self {
             appender: SessionLogAppender::open(path)?,
             byte_count,
-            last_manifest: text.lines().next_back().map(|line| format!("{line}\n")),
-            manifest_count: text.lines().count(),
+            last_manifest,
+            manifest_count,
         })
     }
 
@@ -525,14 +602,11 @@ impl ContextManifestWriter {
                 "context manifest must be one LF-terminated JSONL record".to_owned(),
             ));
         }
-        let appended_bytes = u64::try_from(checkpoint.manifest.line.len()).unwrap_or(u64::MAX);
-        let total = self.byte_count.saturating_add(appended_bytes);
-        if total > MAX_SESSION_LOG_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "{} context manifest size {total} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
-                path.display()
-            )));
-        }
+        let total = ensure_context_manifest_growth_within_limit(
+            path,
+            self.byte_count,
+            checkpoint.manifest.line.len(),
+        )?;
         let actual = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
         if actual != self.byte_count {
             return Err(RuntimeError::Protocol(format!(
@@ -548,6 +622,23 @@ impl ContextManifestWriter {
         self.manifest_count = checkpoint.ordinal;
         Ok(())
     }
+}
+
+fn ensure_context_manifest_growth_within_limit(
+    path: &Path,
+    current_bytes: impl TryInto<u64>,
+    appended_bytes: usize,
+) -> Result<u64, RuntimeError> {
+    let current_bytes = current_bytes.try_into().unwrap_or(u64::MAX);
+    let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
+    let total = current_bytes.saturating_add(appended_bytes);
+    if total > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} context manifest size {total} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+            path.display()
+        )));
+    }
+    Ok(total)
 }
 
 impl BatchAppendFailure {

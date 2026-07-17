@@ -711,7 +711,7 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
 #[test]
 fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
     let mut builder =
-        RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture());
+        RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture(), false);
     builder.loop_counter = MAX_LOOP_INVOCATIONS;
     assert!(matches!(
         builder.next_loop_invocation(None),
@@ -729,7 +729,7 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
     ));
 
     let mut builder =
-        RuntimeEventBuilder::with_clock("stream001".to_owned(), EventClock::fixed_fixture());
+        RuntimeEventBuilder::with_clock("stream001".to_owned(), EventClock::fixed_fixture(), false);
     builder.stream_bytes = MAX_LOOP_EVENT_STREAM_BYTES;
     assert!(matches!(
         builder.emit(
@@ -1050,11 +1050,13 @@ fn protocol_accepts_optional_step_phase_and_multiple_message_deltas() {
         tool_started_line("evt-005", 5),
     ]
     .concat();
-    assert_eq!(
-        started_tool_without_progress(
-            &validate_protocol_jsonl_text(Path::new("active-tool.jsonl"), &active_tool)
-                .expect("non-terminal stream may leave a started tool")
-        ),
-        Some("tool".to_owned())
-    );
+    let events = validate_protocol_jsonl_text(Path::new("active-tool.jsonl"), &active_tool)
+        .expect("non-terminal stream may leave a started tool");
+    let state = SessionAppendValidationState::from_prior_events(
+        Path::new("active-tool.jsonl"),
+        "meta001",
+        &events,
+    )
+    .expect("active tool state validates");
+    assert_eq!(state.tool_without_progress(), Some("tool"));
 }

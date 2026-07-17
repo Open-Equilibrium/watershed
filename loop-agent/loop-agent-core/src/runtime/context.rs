@@ -442,12 +442,11 @@ fn connection_targets_scoped_step(
         })
 }
 
-fn verify_recorded_context_manifests(
+fn read_recorded_context_manifest_signature(
     workspace: &Path,
     session_id: &str,
-    events: &[EventEnvelope],
-    planned: &[ContextManifest],
-) -> Result<(), RuntimeError> {
+    completed_turns: usize,
+) -> Result<RuntimeStreamSignature, RuntimeError> {
     let path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{session_id}.contexts.jsonl"));
@@ -461,15 +460,14 @@ fn verify_recorded_context_manifests(
         }
         Err(source) => return Err(RuntimeError::Io { path, source }),
     }
-    let text = read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES)?;
-    if !text.is_empty() && !text.ends_with('\n') {
-        return Err(RuntimeError::Protocol(format!(
-            "{} context manifest stream must end with LF",
-            path.display()
-        )));
-    }
-    let mut recorded = Vec::new();
-    for line in text.split_inclusive('\n') {
+    let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
+    for_each_file_line_with_limit(&path, MAX_SESSION_LOG_BYTES, |line| {
+        if !line.ends_with('\n') {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest stream must end with LF",
+                path.display()
+            )));
+        }
         let value: serde_json::Value = serde_json::from_str(line.trim_end_matches('\n'))?;
         if value
             .get("context_profile_id")
@@ -502,23 +500,17 @@ fn verify_recorded_context_manifests(
                 path.display()
             )));
         }
-        recorded.push(ContextManifest { line: canonical });
-    }
-    let completed_turns = events
-        .iter()
-        .filter(|event| event.event_type == EventType::MessageCompleted)
-        .count();
+        recorded.push(canonical.as_bytes());
+        Ok(())
+    })?;
     let recoverable_manifest_count = completed_turns.saturating_add(1);
-    if completed_turns > planned.len()
-        || recorded.len() < completed_turns
-        || recorded.len() > recoverable_manifest_count
-        || recorded.len() > planned.len()
-        || recorded != planned[..recorded.len()]
+    let recorded = recorded.signature();
+    if recorded.record_count < completed_turns || recorded.record_count > recoverable_manifest_count
     {
         return Err(RuntimeError::Protocol(format!(
             "{} context manifests do not match deterministic replay",
             path.display()
         )));
     }
-    Ok(())
+    Ok(recorded)
 }

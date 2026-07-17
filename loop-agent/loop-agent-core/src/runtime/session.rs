@@ -62,11 +62,6 @@ fn run_loop_internal(
             config.stub_model_fixture_profile,
         ),
     )?;
-    preflight_session_completion_stream(
-        &reservation,
-        &expected_session_id,
-        &planned_runtime.events,
-    )?;
     let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
     let (runtime_result, replay_matches) = {
         let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut serial_writer));
@@ -80,8 +75,7 @@ fn run_loop_internal(
                 config.event_clock,
                 ToolSideEffectMode::ApplyAll,
                 config.stub_model_fixture_profile,
-            )
-            .without_captured_output(),
+            ),
             Some(&mut matcher),
         );
         let matches = result
@@ -99,19 +93,16 @@ fn run_loop_internal(
             reservation.session_path.display()
         )));
     }
+    let event_count = runtime.events.record_count;
+    let outcome = runtime.failure_status.unwrap_or_else(|| {
+        if runtime_failed {
+            "failed"
+        } else {
+            "completed"
+        }
+        .to_owned()
+    });
     let terminal_error = runtime.terminal_error;
-    let (event_count, outcome) = if runtime_failed {
-        drop(planned_runtime);
-        let stream = read_session_log_to_string(&reservation.session_path)?;
-        let events =
-            validate_session_log_text(&reservation.session_path, &expected_session_id, &stream)?;
-        (
-            events.len(),
-            human_failure_status(&events).unwrap_or_else(|| "failed".to_owned()),
-        )
-    } else {
-        (planned_runtime.events.len(), "completed".to_owned())
-    };
     reservation.release_lock()?;
     if let Some(err) = terminal_error {
         return Err(RuntimeError::session_failed(&expected_session_id, err));

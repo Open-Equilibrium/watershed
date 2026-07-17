@@ -1,5 +1,5 @@
 #[test]
-fn plan_checked_execution_does_not_retain_a_second_event_stream() {
+fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signatures() {
     let workspace = fixture_dir("hello-loop");
     let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
     let root_loop = registry
@@ -16,7 +16,21 @@ fn plan_checked_execution_does_not_retain_a_second_event_stream() {
         options,
     )
     .expect("runtime plan succeeds");
-    assert!(!planned.context_manifests.is_empty());
+    assert!(planned.events.record_count > 0);
+    assert!(planned.context_manifests.record_count > 0);
+    assert!(std::mem::size_of_val(&planned.events) <= 64);
+    assert!(std::mem::size_of_val(&planned.context_manifests) <= 64);
+    let mut original = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
+    original.push(b"a");
+    original.push(b"bc");
+    let mut mutated = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
+    mutated.push(b"ab");
+    mutated.push(b"c");
+    let mut other_stream = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
+    other_stream.push(b"a");
+    other_stream.push(b"bc");
+    assert_ne!(original.signature(), mutated.signature());
+    assert_ne!(original.signature(), other_stream.signature());
     let mut matcher = PlannedRuntimeSink::new(&planned, None);
     let checked = execute_loop_with_sink(
         &workspace,
@@ -24,14 +38,14 @@ fn plan_checked_execution_does_not_retain_a_second_event_stream() {
         &policy,
         root_loop,
         "planchecked001",
-        options.without_captured_output(),
+        options,
         Some(&mut matcher),
     )
     .expect("plan-checked runtime succeeds");
 
     assert!(matcher.matches_execution(&checked));
-    assert!(checked.events.is_empty());
-    assert!(checked.context_manifests.is_empty());
+    assert_eq!(checked.events, planned.events);
+    assert_eq!(checked.context_manifests, planned.context_manifests);
 }
 
 #[test]

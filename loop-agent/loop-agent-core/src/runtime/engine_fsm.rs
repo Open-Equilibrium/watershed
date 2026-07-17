@@ -1,8 +1,62 @@
 struct RuntimeExecution {
-    context_manifests: Vec<ContextManifest>,
-    events: Vec<EventEnvelope>,
+    context_manifests: RuntimeStreamSignature,
+    events: RuntimeStreamSignature,
     failed: bool,
+    failure_status: Option<String>,
     terminal_error: Option<RuntimeError>,
+}
+
+const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
+const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RuntimeStreamSignature {
+    byte_count: usize,
+    digest: [u8; 32],
+    record_count: usize,
+}
+
+#[derive(Clone)]
+struct RuntimeStreamSignatureBuilder {
+    byte_count: usize,
+    hasher: Sha256,
+    record_count: usize,
+}
+
+impl RuntimeStreamSignatureBuilder {
+    fn new(domain: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(
+            u64::try_from(domain.len())
+                .unwrap_or(u64::MAX)
+                .to_be_bytes(),
+        );
+        hasher.update(domain);
+        Self {
+            byte_count: 0,
+            hasher,
+            record_count: 0,
+        }
+    }
+
+    fn push(&mut self, record: &[u8]) {
+        self.hasher.update(
+            u64::try_from(record.len())
+                .unwrap_or(u64::MAX)
+                .to_be_bytes(),
+        );
+        self.hasher.update(record);
+        self.byte_count = self.byte_count.saturating_add(record.len());
+        self.record_count = self.record_count.saturating_add(1);
+    }
+
+    fn signature(&self) -> RuntimeStreamSignature {
+        RuntimeStreamSignature {
+            byte_count: self.byte_count,
+            digest: self.hasher.clone().finalize().into(),
+            record_count: self.record_count,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -54,7 +108,6 @@ impl ToolSideEffectMode {
 
 #[derive(Clone, Copy, Debug)]
 struct LoopExecutionOptions {
-    capture_output: bool,
     clock: EventClock,
     side_effect_mode: ToolSideEffectMode,
     stub_model_fixture_profile: bool,
@@ -67,16 +120,10 @@ impl LoopExecutionOptions {
         stub_model_fixture_profile: bool,
     ) -> Self {
         Self {
-            capture_output: true,
             clock,
             side_effect_mode,
             stub_model_fixture_profile,
         }
-    }
-
-    fn without_captured_output(mut self) -> Self {
-        self.capture_output = false;
-        self
     }
 }
 
@@ -104,11 +151,12 @@ fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> Prot
 
 struct RuntimeEventBuilder<'a> {
     active_step_payloads: BTreeMap<String, serde_json::Value>,
-    capture_output: bool,
     clock: EventClock,
     context_manifest_count: usize,
-    context_manifests: Vec<ContextManifest>,
-    events: Vec<EventEnvelope>,
+    context_manifests: RuntimeStreamSignatureBuilder,
+    events: RuntimeStreamSignatureBuilder,
+    failure_messages: BTreeMap<String, String>,
+    failure_status: Option<String>,
     history: ContextHistory,
     loop_counter: u64,
     message_counter: u64,
@@ -117,17 +165,20 @@ struct RuntimeEventBuilder<'a> {
     sink: Option<&'a mut dyn RuntimeEventSink>,
     stream_bytes: usize,
     pending_context_manifest: Option<ContextManifest>,
+    validation: Option<SessionAppendValidationState>,
 }
 
 impl<'a> RuntimeEventBuilder<'a> {
-    fn with_clock(session_id: String, clock: EventClock) -> Self {
+    fn with_clock(session_id: String, clock: EventClock, validate_plan: bool) -> Self {
+        let validation = validate_plan.then(|| SessionAppendValidationState::empty(&session_id));
         Self {
             active_step_payloads: BTreeMap::new(),
-            capture_output: true,
             clock,
             context_manifest_count: 0,
-            context_manifests: Vec::new(),
-            events: Vec::new(),
+            context_manifests: RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN),
+            events: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            failure_messages: BTreeMap::new(),
+            failure_status: None,
             history: ContextHistory::default(),
             loop_counter: 0,
             message_counter: 0,
@@ -136,15 +187,17 @@ impl<'a> RuntimeEventBuilder<'a> {
             sink: None,
             stream_bytes: 0,
             pending_context_manifest: None,
+            validation,
         }
     }
 
     fn with_sink(
         session_id: String,
         clock: EventClock,
+        validate_plan: bool,
         sink: &'a mut dyn RuntimeEventSink,
     ) -> Self {
-        let mut builder = Self::with_clock(session_id, clock);
+        let mut builder = Self::with_clock(session_id, clock, validate_plan);
         builder.sink = Some(sink);
         builder
     }
@@ -173,12 +226,15 @@ impl<'a> RuntimeEventBuilder<'a> {
         format!("msg-{:03}", self.message_counter)
     }
 
-    fn record_context_manifest(&mut self, manifest: ContextManifest) {
+    fn record_context_manifest(&mut self, manifest: ContextManifest) -> Result<(), RuntimeError> {
+        ensure_context_manifest_growth_within_limit(
+            Path::new("runtime.contexts.jsonl"),
+            self.context_manifests.byte_count,
+            manifest.line.len(),
+        )?;
         self.context_manifest_count += 1;
-        if self.capture_output {
-            self.context_manifests.push(manifest.clone());
-        }
         self.pending_context_manifest = Some(manifest);
+        Ok(())
     }
 
     fn emit(
@@ -233,6 +289,48 @@ impl<'a> RuntimeEventBuilder<'a> {
         } else {
             None
         };
+        if let Some(validation) = self.validation.as_mut() {
+            validation.validate_constructed_event(
+                Path::new("runtime.jsonl"),
+                &event,
+                event_bytes.len(),
+            )?;
+        }
+        match event.event_type {
+            EventType::Error => {
+                if let (Some(code), Some(message)) = (
+                    event
+                        .payload
+                        .get("code")
+                        .and_then(serde_json::Value::as_str),
+                    event
+                        .payload
+                        .get("message")
+                        .and_then(serde_json::Value::as_str),
+                ) {
+                    self.failure_messages
+                        .insert(code.to_owned(), message.to_owned());
+                }
+            }
+            EventType::SessionFailed => {
+                if let Some(reason) = event
+                    .payload
+                    .get("reason")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    self.failure_status = Some(render_human_failure_status(
+                        reason,
+                        self.failure_messages.get(reason).map(String::as_str),
+                    ));
+                }
+            }
+            _ => {}
+        }
+        self.events.push(event_bytes.as_bytes());
+        if let Some(checkpoint) = context_manifest.as_ref() {
+            self.context_manifests
+                .push(checkpoint.manifest.line.as_bytes());
+        }
         if let Some(sink) = self.sink.as_deref_mut() {
             sink.commit(
                 &event,
@@ -256,9 +354,6 @@ impl<'a> RuntimeEventBuilder<'a> {
                 _ => {}
             }
         }
-        if self.capture_output {
-            self.events.push(event);
-        }
         Ok(())
     }
 
@@ -268,9 +363,10 @@ impl<'a> RuntimeEventBuilder<'a> {
         terminal_error: Option<RuntimeError>,
     ) -> RuntimeExecution {
         RuntimeExecution {
-            context_manifests: self.context_manifests,
-            events: self.events,
+            context_manifests: self.context_manifests.signature(),
+            events: self.events.signature(),
             failed,
+            failure_status: self.failure_status,
             terminal_error,
         }
     }
@@ -298,11 +394,18 @@ fn execute_loop_with_sink(
     options: LoopExecutionOptions,
     sink: Option<&mut dyn RuntimeEventSink>,
 ) -> Result<RuntimeExecution, RuntimeError> {
+    let validate_plan = options.side_effect_mode == ToolSideEffectMode::DryRun;
     let mut builder = match sink {
-        Some(sink) => RuntimeEventBuilder::with_sink(session_id.to_owned(), options.clock, sink),
-        None => RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock),
+        Some(sink) => RuntimeEventBuilder::with_sink(
+            session_id.to_owned(),
+            options.clock,
+            validate_plan,
+            sink,
+        ),
+        None => {
+            RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock, validate_plan)
+        }
     };
-    builder.capture_output = options.capture_output;
     builder.emit(
         None,
         EventType::SessionStarted,
@@ -602,7 +705,7 @@ fn emit_phase(
                 &builder.history,
             )?;
             let content = stub_message_content(context.registry, phase, &compiled.provider_bytes)?;
-            builder.record_context_manifest(compiled.manifest);
+            builder.record_context_manifest(compiled.manifest)?;
             let message_id = builder.next_message_id();
             builder.emit(
                 Some(invocation),

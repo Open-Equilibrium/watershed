@@ -508,13 +508,15 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         .expect("loop exists")
         .clone();
 
-    let runtime = execute_loop(
+    let mut captured = CapturedRuntime::default();
+    let runtime = execute_loop_with_sink(
         &workspace,
         &registry,
         &policy,
         &loop_block,
         "contextbudget001",
         LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        Some(&mut captured),
     )
     .expect("budget failure becomes a deterministic failed stream");
 
@@ -523,11 +525,11 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         runtime.terminal_error,
         Some(RuntimeError::ContextBudgetExceeded { .. })
     ));
-    assert!(runtime.events.iter().any(|event| {
+    assert!(captured.events.iter().any(|event| {
         event.event_type == EventType::Error && event.payload["code"] == "context_budget_exceeded"
     }));
     assert_eq!(
-        runtime.events.last().map(|event| &event.event_type),
+        captured.events.last().map(|event| &event.event_type),
         Some(&EventType::SessionFailed)
     );
 }
@@ -582,13 +584,16 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
         LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
     )
     .expect("deterministic replay plans");
-    verify_recorded_context_manifests(
+    let recorded = read_recorded_context_manifest_signature(
         &workspace,
         &output.session_id,
-        &events,
-        &planned.context_manifests,
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::MessageCompleted)
+            .count(),
     )
     .expect("recorded manifests match replay");
+    assert_eq!(recorded, planned.context_manifests);
 
     let path = workspace
         .join(LOCAL_LOG_DIR)
@@ -606,11 +611,13 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
     }
     fs::write(&path, tampered).expect("manifest tampered");
 
-    let err = verify_recorded_context_manifests(
+    let err = read_recorded_context_manifest_signature(
         &workspace,
         &output.session_id,
-        &events,
-        &planned.context_manifests,
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::MessageCompleted)
+            .count(),
     )
     .expect_err("profile drift must block resume");
     assert!(matches!(

@@ -73,17 +73,12 @@ fn workspace_stub_model_fixture_profile(
 
 fn resume_event_clock(
     config: &WorkspaceConfig,
-    events: &[EventEnvelope],
+    recorded_clock: EventClock,
 ) -> Result<EventClock, RuntimeError> {
     if config.event_clock == EventClock::fixed_fixture() {
         return Ok(config.event_clock);
     }
-    let first_event = events
-        .first()
-        .expect("validated streams contain at least one event");
-    EventClock::from_first_event(first_event).ok_or_else(|| {
-        RuntimeError::Protocol("session first event timestamp cannot anchor resume".to_owned())
-    })
+    Ok(recorded_clock)
 }
 
 fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
@@ -159,6 +154,44 @@ fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
 fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
     let bytes = read_file_with_limit(path, max_bytes)?;
     decode_utf8(path, bytes)
+}
+
+fn for_each_file_line_with_limit(
+    path: &Path,
+    max_bytes: u64,
+    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+) -> Result<u64, RuntimeError> {
+    let (file, metadata) = open_real_file_for_read(path)?;
+    if metadata.len() > max_bytes {
+        return Err(RuntimeError::Protocol(format!(
+            "{} read size {} bytes exceeds max {max_bytes}",
+            path.display(),
+            metadata.len()
+        )));
+    }
+    let mut reader = io::BufReader::new(file);
+    let mut line = Vec::new();
+    let mut total = 0u64;
+    loop {
+        line.clear();
+        let read = io::BufRead::read_until(&mut reader, b'\n', &mut line)
+            .map_err(|source| path_io_error(path, source))?;
+        if read == 0 {
+            break;
+        }
+        total = total.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
+        if total > max_bytes {
+            return Err(RuntimeError::Protocol(format!(
+                "{} read size {total} bytes exceeds max {max_bytes}",
+                path.display()
+            )));
+        }
+        let line = std::str::from_utf8(&line).map_err(|source| {
+            RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
+        })?;
+        visit(line)?;
+    }
+    Ok(total)
 }
 
 fn decode_utf8(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {

@@ -118,15 +118,27 @@ fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
                 .get("message")
                 .and_then(serde_json::Value::as_str)
         });
+    Some(render_human_failure_status(reason, message))
+}
+
+fn render_human_failure_status(reason: &str, message: Option<&str>) -> String {
     let reason = escape_human_failure_text(reason);
-    Some(message.map_or_else(
+    message.map_or_else(
         || format!("failed ({reason})"),
         |message| format!("failed ({reason}): {}", escape_human_failure_text(message)),
-    ))
+    )
 }
 
 fn human_session_status(session_id: &str, action: &str, events: &[EventEnvelope]) -> String {
-    human_failure_status(events).map_or_else(
+    human_session_status_from_failure(session_id, action, human_failure_status(events).as_deref())
+}
+
+fn human_session_status_from_failure(
+    session_id: &str,
+    action: &str,
+    failure: Option<&str>,
+) -> String {
+    failure.map_or_else(
         || format!("session {session_id} {action}\n"),
         |failure| format!("session {session_id} {action}: {failure}\n"),
     )

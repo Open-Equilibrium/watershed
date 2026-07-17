@@ -98,17 +98,19 @@ fn runtime_executes_subloops_after_all_parent_phases() {
         .loop_block("hello-loop")
         .expect("hello loop exists");
 
-    let runtime = execute_loop(
+    let mut captured = CapturedRuntime::default();
+    execute_loop_with_sink(
         Path::new("."),
         &registry,
         &policy,
         loop_block,
         "ordering001",
         LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        Some(&mut captured),
     )
     .expect("hello loop executes");
-    let root_loop_id = loop_id_for_definition(&runtime.events, "hello-loop");
-    let summarize_completed = runtime
+    let root_loop_id = loop_id_for_definition(&captured.events, "hello-loop");
+    let summarize_completed = captured
         .events
         .iter()
         .position(|event| {
@@ -121,7 +123,7 @@ fn runtime_executes_subloops_after_all_parent_phases() {
                     == Some("summarize")
         })
         .expect("parent summarize phase completes");
-    let first_subloop_started = runtime
+    let first_subloop_started = captured
         .events
         .iter()
         .position(|event| {

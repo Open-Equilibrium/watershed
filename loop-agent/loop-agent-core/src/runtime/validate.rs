@@ -347,6 +347,10 @@ impl SessionAppendValidationState {
         }
     }
 
+    fn tool_without_progress(&self) -> Option<&str> {
+        self.lifecycle.tool_without_progress()
+    }
+
     fn from_prior_events(
         path: &Path,
         expected_session_id: &str,
@@ -387,8 +391,22 @@ impl SessionAppendValidationState {
         path: &Path,
         text: &str,
     ) -> Result<Vec<EventEnvelope>, RuntimeError> {
+        let mut appended_events = Vec::new();
+        self.validate_appended_with(path, text, |event| {
+            appended_events.push(event.clone());
+            Ok(())
+        })?;
+        Ok(appended_events)
+    }
+
+    fn validate_appended_with(
+        &mut self,
+        path: &Path,
+        text: &str,
+        mut visit: impl FnMut(&EventEnvelope) -> Result<(), RuntimeError>,
+    ) -> Result<(), RuntimeError> {
         if text.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         if !text.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
@@ -397,7 +415,6 @@ impl SessionAppendValidationState {
             )));
         }
 
-        let mut appended_events = Vec::new();
         for line in text.split_terminator('\n') {
             let line_number = self.line_count + 1;
             let canonical_bytes = line.len().saturating_add(1);
@@ -416,9 +433,9 @@ impl SessionAppendValidationState {
             let event = parse_canonical_event(path, line_number, line)?;
             self.validate_budget(path, line_number, &event.event_type, canonical_bytes)?;
             self.validate_event(path, line_number, &event)?;
-            appended_events.push(event);
+            visit(&event)?;
         }
-        Ok(appended_events)
+        Ok(())
     }
 
     fn validate_constructed_event(
@@ -601,6 +618,7 @@ struct SessionLifecycleState {
     active_message_roles: BTreeMap<MessageLifecycleKey, String>,
     active_phases: BTreeMap<String, String>,
     active_steps: BTreeMap<String, StepLifecycleKey>,
+    tools_without_progress: BTreeMap<ToolLifecycleKey, String>,
 }
 
 impl SessionLifecycleState {
@@ -759,6 +777,8 @@ impl SessionLifecycleState {
                         terminal_line,
                     ));
                 }
+                self.tools_without_progress
+                    .insert(tool.clone(), tool.tool_id.clone());
                 self.tools.start(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
@@ -785,8 +805,9 @@ impl SessionLifecycleState {
                     event.event_type,
                     EventType::ToolCompleted | EventType::ToolTimedOut
                 ) {
-                    self.tools.finish(tool, line_number);
+                    self.tools.finish(tool.clone(), line_number);
                 }
+                self.tools_without_progress.remove(&tool);
             }
             EventType::ToolFailed => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
@@ -807,6 +828,7 @@ impl SessionLifecycleState {
                         path.display()
                     )));
                 }
+                self.tools_without_progress.remove(&tool);
                 self.tools.finish(tool, line_number);
             }
             EventType::MessageDelta => {
@@ -920,6 +942,13 @@ impl SessionLifecycleState {
         }
         Ok(())
     }
+
+    fn tool_without_progress(&self) -> Option<&str> {
+        self.tools_without_progress
+            .values()
+            .next()
+            .map(String::as_str)
+    }
 }
 
 fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
@@ -967,61 +996,6 @@ impl<K: Ord> LifecycleTracker<K> {
     fn started_keys(&self) -> impl Iterator<Item = &K> {
         self.started.iter()
     }
-}
-
-fn started_tool_without_progress(events: &[EventEnvelope]) -> Option<String> {
-    let mut active_phases = BTreeMap::new();
-    let mut active_steps = BTreeMap::new();
-    let mut started_without_progress = BTreeMap::new();
-
-    for event in events {
-        match event.event_type {
-            EventType::PhaseEntered => {
-                if let Some(loop_id) = &event.loop_id {
-                    active_phases
-                        .insert(loop_id.clone(), lifecycle_payload_string(event, "phase_id"));
-                    active_steps.remove(loop_id);
-                }
-            }
-            EventType::StepStarted => {
-                if let Some(loop_id) = &event.loop_id {
-                    active_steps.insert(loop_id.clone(), lifecycle_step_key(event, &active_phases));
-                }
-            }
-            EventType::StepCompleted => {
-                if let Some(loop_id) = &event.loop_id {
-                    active_steps.remove(loop_id);
-                }
-            }
-            EventType::ToolStarted => {
-                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                started_without_progress.insert(tool.clone(), tool.tool_id);
-            }
-            EventType::ToolProgress
-            | EventType::ToolCompleted
-            | EventType::ToolFailed
-            | EventType::ToolTimedOut => {
-                let tool = lifecycle_tool_key(event, &active_phases, &active_steps);
-                started_without_progress.remove(&tool);
-            }
-            EventType::SessionStarted
-            | EventType::SessionPaused
-            | EventType::SessionResumed
-            | EventType::SessionCompleted
-            | EventType::SessionFailed
-            | EventType::LoopStarted
-            | EventType::LoopCompleted
-            | EventType::LoopFailed
-            | EventType::MessageDelta
-            | EventType::MessageCompleted
-            | EventType::ArtifactLogged
-            | EventType::AttentionRequested
-            | EventType::MetricSample
-            | EventType::Error => {}
-        }
-    }
-
-    started_without_progress.into_values().next()
 }
 
 fn terminal_lifecycle_error(
@@ -1238,21 +1212,6 @@ fn stream_is_completed(events: &[EventEnvelope]) -> bool {
     events
         .last()
         .is_some_and(|event| event.event_type == EventType::SessionCompleted)
-}
-
-fn next_event_id(sequence: u64, events: &[EventEnvelope]) -> String {
-    let existing = events
-        .iter()
-        .map(|event| event.event_id.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut candidate_sequence = sequence;
-    loop {
-        let candidate = format!("evt-{candidate_sequence:03}");
-        if !existing.contains(candidate.as_str()) {
-            return candidate;
-        }
-        candidate_sequence += 1;
-    }
 }
 
 fn format_unix_timestamp(seconds: i64) -> String {

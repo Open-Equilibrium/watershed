@@ -810,3 +810,17 @@ fn later_events_do_not_extend_the_dirty_sync_deadline() {
     );
     assert!(state.is_due(first_append + EVENT_WRITER_DIRTY_SYNC_INTERVAL));
 }
+
+#[test]
+fn context_manifest_stream_enforces_its_aggregate_limit() {
+    let limit = usize::try_from(MAX_SESSION_LOG_BYTES).expect("manifest limit fits usize");
+    assert_eq!(
+        ensure_context_manifest_growth_within_limit(Path::new("contexts.jsonl"), limit - 1, 1)
+            .expect("the exact limit is accepted"),
+        MAX_SESSION_LOG_BYTES
+    );
+    assert!(matches!(
+        ensure_context_manifest_growth_within_limit(Path::new("contexts.jsonl"), limit, 1),
+        Err(RuntimeError::Protocol(message)) if message.contains("context manifest size")
+    ));
+}
