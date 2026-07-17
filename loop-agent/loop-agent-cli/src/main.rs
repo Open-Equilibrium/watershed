@@ -4,6 +4,7 @@ use loop_agent_core::{
     EmitMode, LiveEventNotifier, LiveEventReceiveError, RunOutput, RuntimeError,
     SessionEventReader, TailOptions,
 };
+use proto::EventEnvelope;
 use std::{
     env,
     ffi::OsString,
@@ -257,16 +258,12 @@ fn write_new_events(
     cursor: &mut u64,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
-    for event in reader.read_incremental_after(*cursor)? {
-        let jsonl = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
-        })?;
-        if !write_output(writer, jsonl.as_bytes())? {
-            return Ok(false);
-        }
-        *cursor = event.sequence;
-    }
-    Ok(true)
+    write_events(
+        reader.read_incremental_after(*cursor)?,
+        cursor,
+        writer,
+        |_| {},
+    )
 }
 
 fn write_verified_events(
@@ -274,7 +271,16 @@ fn write_verified_events(
     cursor: &mut u64,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
-    for event in reader.read_after(*cursor)? {
+    write_events(reader.read_after(*cursor)?, cursor, writer, |_| {})
+}
+
+fn write_events(
+    events: Vec<EventEnvelope>,
+    cursor: &mut u64,
+    writer: &mut impl Write,
+    mut observe: impl FnMut(&EventEnvelope),
+) -> Result<bool, RuntimeError> {
+    for event in events {
         let jsonl = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
         })?;
@@ -282,6 +288,7 @@ fn write_verified_events(
             return Ok(false);
         }
         *cursor = event.sequence;
+        observe(&event);
     }
     Ok(true)
 }
@@ -310,17 +317,12 @@ fn tail_command(
         if !events.is_empty() {
             poll_interval = Duration::from_millis(25);
         }
-        for event in events {
+        if !write_events(events, &mut cursor, &mut stdout, |event| {
             let event_type = event.event_type.as_str();
-            let jsonl = event.canonical_jsonl().map_err(|err| {
-                RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
-            })?;
-            if !write_output(&mut stdout, jsonl.as_bytes())? {
-                return Ok(failed);
-            }
-            cursor = event.sequence;
             failed = event_type == "session.failed";
             terminal = failed || event_type == "session.completed";
+        })? {
+            return Ok(failed);
         }
         if terminal
             || !options.follow
@@ -328,15 +330,11 @@ fn tail_command(
                 .timeout
                 .is_some_and(|timeout| started.elapsed() >= timeout)
         {
-            for event in reader.read_after(cursor)? {
-                let event_type = event.event_type.as_str();
-                let jsonl = event.canonical_jsonl().map_err(|err| {
-                    RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
-                })?;
-                if !write_output(&mut stdout, jsonl.as_bytes())? {
-                    return Ok(failed);
-                }
-                failed = event_type == "session.failed";
+            let events = reader.read_after(cursor)?;
+            if !write_events(events, &mut cursor, &mut stdout, |event| {
+                failed = event.event_type.as_str() == "session.failed";
+            })? {
+                return Ok(failed);
             }
             return Ok(failed);
         }

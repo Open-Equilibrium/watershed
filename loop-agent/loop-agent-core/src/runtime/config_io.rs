@@ -129,43 +129,16 @@ fn path_io_error(path: &Path, source: io::Error) -> RuntimeError {
     }
 }
 
-fn read_session_log_to_string(path: &Path) -> Result<String, RuntimeError> {
-    read_to_string_with_limit(path, MAX_SESSION_LOG_BYTES)
-}
-
-fn session_log_len(path: &Path) -> Result<usize, RuntimeError> {
-    let (_file, metadata) = open_real_file_for_read(path)?;
-    let len = metadata.len();
-    if len > MAX_SESSION_LOG_BYTES {
-        return Err(RuntimeError::Protocol(format!(
-            "{} read size {len} bytes exceeds max {}",
-            path.display(),
-            MAX_SESSION_LOG_BYTES
-        )));
-    }
-    usize::try_from(len).map_err(|_| {
-        RuntimeError::Protocol(format!(
-            "{} read size {len} bytes exceeds addressable memory",
-            path.display()
-        ))
-    })
-}
-
-fn read_to_string_with_limit(path: &Path, max_bytes: u64) -> Result<String, RuntimeError> {
-    let bytes = read_file_with_limit(path, max_bytes)?;
-    decode_utf8(path, bytes)
-}
-
-fn for_each_file_line_with_limit(
-    path: &Path,
+fn for_each_anchored_file_line_with_limit(
+    path: &AnchoredFile,
     max_bytes: u64,
     mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
 ) -> Result<u64, RuntimeError> {
-    let (file, metadata) = open_real_file_for_read(path)?;
+    let (file, metadata) = open_anchored_file_for_read(path)?;
     if metadata.len() > max_bytes {
         return Err(RuntimeError::Protocol(format!(
             "{} read size {} bytes exceeds max {max_bytes}",
-            path.display(),
+            path.diagnostic_path().display(),
             metadata.len()
         )));
     }
@@ -175,7 +148,7 @@ fn for_each_file_line_with_limit(
     loop {
         line.clear();
         let read = io::BufRead::read_until(&mut reader, b'\n', &mut line)
-            .map_err(|source| path_io_error(path, source))?;
+            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
         if read == 0 {
             break;
         }
@@ -183,11 +156,14 @@ fn for_each_file_line_with_limit(
         if total > max_bytes {
             return Err(RuntimeError::Protocol(format!(
                 "{} read size {total} bytes exceeds max {max_bytes}",
-                path.display()
+                path.diagnostic_path().display()
             )));
         }
         let line = std::str::from_utf8(&line).map_err(|source| {
-            RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
+            RuntimeError::Protocol(format!(
+                "{} is not valid UTF-8: {source}",
+                path.diagnostic_path().display()
+            ))
         })?;
         visit(line)?;
     }
@@ -198,88 +174,6 @@ fn decode_utf8(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {
     String::from_utf8(bytes).map_err(|source| {
         RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
     })
-}
-
-fn open_real_file_for_read(path: &Path) -> Result<(fs::File, fs::Metadata), RuntimeError> {
-    let expected_metadata =
-        fs::symlink_metadata(path).map_err(|source| path_io_error(path, source))?;
-    validate_real_file(path, &expected_metadata)?;
-    let file = open_file_for_read_without_following_reparse(path)
-        .map_err(|source| path_io_error(path, source))?;
-    let file_metadata =
-        ensure_opened_real_file_for_read_matches_path(path, &expected_metadata, &file)?;
-    Ok((file, file_metadata))
-}
-
-#[cfg(windows)]
-fn open_file_for_read_without_following_reparse(path: &Path) -> io::Result<fs::File> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(not(windows))]
-fn open_file_for_read_without_following_reparse(path: &Path) -> io::Result<fs::File> {
-    fs::File::open(path)
-}
-
-fn ensure_opened_real_file_for_read_matches_path(
-    path: &Path,
-    expected_metadata: &fs::Metadata,
-    file: &fs::File,
-) -> Result<fs::Metadata, RuntimeError> {
-    #[cfg(not(unix))]
-    let _ = expected_metadata;
-
-    let current_metadata =
-        fs::symlink_metadata(path).map_err(|source| path_io_error(path, source))?;
-    validate_real_file(path, &current_metadata)?;
-
-    let file_metadata = file
-        .metadata()
-        .map_err(|source| path_io_error(path, source))?;
-    validate_real_file(path, &file_metadata)?;
-
-    #[cfg(unix)]
-    if !same_file_metadata(expected_metadata, &current_metadata)
-        || !same_file_metadata(&current_metadata, &file_metadata)
-    {
-        return Err(RuntimeError::Protocol(format!(
-            "{} changed before read",
-            path.display()
-        )));
-    }
-
-    #[cfg(windows)]
-    {
-        let current_file = open_file_for_read_without_following_reparse(path)
-            .map_err(|source| path_io_error(path, source))?;
-        let current_file_metadata = current_file
-            .metadata()
-            .map_err(|source| path_io_error(path, source))?;
-        validate_real_file(path, &current_file_metadata)?;
-        let opened = windows_open_file_information(path, file)?;
-        let current = windows_open_file_information(path, &current_file)?;
-        if (opened.volume_serial_number, opened.file_index)
-            != (current.volume_serial_number, current.file_index)
-        {
-            return Err(RuntimeError::Protocol(format!(
-                "{} changed before read",
-                path.display()
-            )));
-        }
-    }
-
-    Ok(file_metadata)
-}
-
-fn read_file_with_limit(path: &Path, max_bytes: u64) -> Result<Vec<u8>, RuntimeError> {
-    let (file, metadata) = open_real_file_for_read(path)?;
-    read_opened_file_with_limit(file, metadata.len(), path, max_bytes)
 }
 
 fn read_opened_file_with_limit(

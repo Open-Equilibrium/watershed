@@ -53,9 +53,9 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
         err,
         RuntimeError::SessionLogExists(session_id) if session_id == "reserve001"
     ));
-    assert!(first.session_path.exists());
-    assert!(first.log_path.exists());
-    assert!(first.lock_path.exists());
+    assert!(first.session_path.diagnostic_path().exists());
+    assert!(first.log_path.diagnostic_path().exists());
+    assert!(first.lock_path.diagnostic_path().exists());
     first.rollback();
 }
 
@@ -64,9 +64,9 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
     let workspace = empty_workspace("reservation-drop");
     let (session_path, log_path, lock_path) = {
         let reservation = reserve_session_log(&workspace, "drop001").expect("reservation succeeds");
-        assert!(reservation.session_path.exists());
-        assert!(reservation.log_path.exists());
-        assert!(reservation.lock_path.exists());
+        assert!(reservation.session_path.diagnostic_path().exists());
+        assert!(reservation.log_path.diagnostic_path().exists());
+        assert!(reservation.lock_path.diagnostic_path().exists());
         (
             reservation.session_path.clone(),
             reservation.log_path.clone(),
@@ -74,23 +74,16 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
         )
     };
 
-    assert!(!session_path.exists());
-    assert!(!log_path.exists());
-    assert!(!lock_path.exists());
+    assert!(!session_path.diagnostic_path().exists());
+    assert!(!log_path.diagnostic_path().exists());
+    assert!(!lock_path.diagnostic_path().exists());
 }
 
 #[test]
 fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let workspace = empty_workspace("reservation-helper-edges");
-    let missing_lock = SessionReservation {
-        context_path: workspace.join(".loop/logs/missing.contexts.jsonl"),
-        log_path: workspace.join(".loop/logs/missing.log"),
-        lock_path: workspace.join(".loop/sessions/missing.lock"),
-        session_path: workspace.join(".loop/sessions/missing.jsonl"),
-        session_id: "missing001".to_owned(),
-        cleanup_on_drop: std::cell::Cell::new(true),
-        committed: std::cell::Cell::new(false),
-    };
+    let missing_lock = reserve_session_log(&workspace, "missing001").expect("reservation succeeds");
+    missing_lock.lock_path.remove().expect("lock removed");
 
     let err = missing_lock
         .release_lock()
@@ -103,7 +96,10 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     missing_lock.rollback();
 
     let missing_guard = SessionLockGuard {
-        path: workspace.join(".loop/sessions/missing-resume.lock"),
+        path: ensure_runtime_dirs(&workspace)
+            .expect("runtime dirs")
+            .sessions
+            .file("missing-resume.lock"),
         cleanup_on_drop: std::cell::Cell::new(true),
     };
     let err = missing_guard
@@ -114,22 +110,19 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         RuntimeError::Io { path, .. } if path.ends_with("missing-resume.lock")
     ));
 
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir created");
+    let session_dir = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs created")
+        .sessions
+        .path;
     let directory_leaf = session_dir.join("dirleaf001.jsonl");
     fs::create_dir(&directory_leaf).expect("directory session leaf created");
 
-    let err = reserve_session_file(&directory_leaf, "dirleaf001", || {})
+    let err = reserve_session_log(&workspace, "dirleaf001")
         .expect_err("directory session leaf must be rejected");
 
     assert!(matches!(
         err,
         RuntimeError::Protocol(message) if message.contains("must be a file")
-    ));
-
-    assert!(matches!(
-        session_lock_path(&workspace, "../bad"),
-        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
     ));
 }
 
@@ -138,14 +131,15 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
 fn append_rejects_hardlinked_leaf_without_changing_target() {
     let workspace = empty_workspace("session-hardlink");
     let outside = empty_workspace("outside-session-hardlink");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
+    let session_dir = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
     let outside_target = outside.join("victim.jsonl");
     fs::write(&outside_target, "outside\n").expect("outside target written");
-    let session_path = session_dir.join("race001.jsonl");
-    fs::hard_link(&outside_target, &session_path).expect("session hard link");
+    let session_path = session_dir.file("race001.jsonl");
+    fs::hard_link(&outside_target, session_path.diagnostic_path()).expect("session hard link");
 
-    let err = append_existing_file(&session_path, b"appended\n")
+    let err = open_anchored_session_log_append_file(&session_path)
         .expect_err("hard-linked session leaf must reject before append");
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
     assert_eq!(
@@ -1331,8 +1325,7 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     let workspace = workspace_copy("hello-loop");
     let registry = load_test_registry(&workspace, "hello-loop");
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
-    let metadata_path =
-        session_log_metadata_path(&workspace, "partial001").expect("metadata path resolves");
+    let metadata_path = workspace.join(LOCAL_LOG_DIR).join("partial001.log");
     fs::create_dir_all(metadata_path.parent().expect("metadata parent")).expect("metadata dir");
 
     fs::write(&metadata_path, "").expect("empty metadata writes");
@@ -1390,11 +1383,6 @@ fn session_metadata_and_resume_paths_reject_malformed_inputs() {
         parse_session_log_metadata("not key value\n"),
         Err(RuntimeError::Protocol(message)) if message.contains("key=value")
     ));
-    assert!(matches!(
-        session_log_metadata_path(Path::new("."), "../bad"),
-        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
-    ));
-
     let workspace = empty_workspace("resume-unsafe-session-id");
     assert!(matches!(
         resume_session(&workspace, "../outside", EmitMode::Jsonl),

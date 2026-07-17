@@ -33,7 +33,9 @@ fn write_initial_session_log_with_clock(
     )
     .canonical_jsonl()
     .map_err(|err| RuntimeError::Protocol(format!("failed to serialize initial event: {err}")))?;
-    append_existing_file(&reservation.session_path, stream.as_bytes())
+    let mut file = open_anchored_session_log_append_file(&reservation.session_path)?;
+    file.write_all(stream.as_bytes())
+        .map_err(|source| path_io_error(reservation.session_path.diagnostic_path(), source))
 }
 
 fn validate_appended_session_log_text(
@@ -57,7 +59,11 @@ fn write_initial_session_log(
 }
 
 fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
-    append_session_log_bytes(path, line.as_bytes())
+    fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(line.as_bytes()))
+        .map_err(|source| path_io_error(path, source))
 }
 
 fn event_timestamp(sequence: u64) -> String {

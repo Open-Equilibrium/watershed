@@ -503,14 +503,34 @@ fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
         ])
     );
 
-    let failure = runtime_failure_for_unhandled_error(&RuntimeError::Io {
-        path: PathBuf::from("private/workspace/secret"),
-        source: io::Error::new(io::ErrorKind::StorageFull, "private failure detail"),
-    });
-    assert_eq!(
-        failure.data,
-        serde_json::Map::from_iter([("io_kind".to_owned(), serde_json::json!("storage_full"))])
-    );
+    for (kind, expected) in [
+        (io::ErrorKind::NotFound, "not_found"),
+        (io::ErrorKind::PermissionDenied, "permission_denied"),
+        (io::ErrorKind::AlreadyExists, "already_exists"),
+        (io::ErrorKind::InvalidInput, "invalid_input"),
+        (io::ErrorKind::InvalidData, "invalid_data"),
+        (io::ErrorKind::TimedOut, "timed_out"),
+        (io::ErrorKind::WriteZero, "write_zero"),
+        (io::ErrorKind::StorageFull, "storage_full"),
+        (io::ErrorKind::ReadOnlyFilesystem, "read_only_filesystem"),
+        (io::ErrorKind::FileTooLarge, "file_too_large"),
+        (io::ErrorKind::ResourceBusy, "resource_busy"),
+        (io::ErrorKind::Interrupted, "interrupted"),
+        (io::ErrorKind::UnexpectedEof, "unexpected_eof"),
+        (io::ErrorKind::OutOfMemory, "out_of_memory"),
+        (io::ErrorKind::Other, "other"),
+    ] {
+        let failure = runtime_failure_for_unhandled_error(&RuntimeError::Io {
+            path: PathBuf::from("private/workspace/secret"),
+            source: io::Error::new(kind, "private failure detail"),
+        });
+        assert_eq!(failure.data["io_kind"], expected);
+        assert!(
+            !serde_json::Value::Object(failure.data)
+                .to_string()
+                .contains("private")
+        );
+    }
 }
 
 #[test]
@@ -573,8 +593,10 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
             .starts_with("session hello001 failed: context_budget_exceeded:"),
         "{err}"
     );
-    let path = workspace.join(".loop/sessions/hello001.jsonl");
-    let stream = read_session_log_to_string(&path).expect("failed session log is readable");
+    let output = read_existing_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect("failed session log is readable");
+    let path = output.session_path;
+    let stream = output.stdout;
     let events = validate_session_log_text(&path, "hello001", &stream)
         .expect("failed session log remains authoritative");
     let error = events

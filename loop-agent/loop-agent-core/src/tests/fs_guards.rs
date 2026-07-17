@@ -43,7 +43,10 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
 #[test]
 fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     let workspace = empty_workspace("reserve-in-progress-collision");
-    let (session_dir, _) = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let session_dir = sessions.path.clone();
     let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {
         let err = resume_session(&workspace, "publish001", EmitMode::Jsonl)
             .expect_err("published session must already be locked");
@@ -52,298 +55,120 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     .expect("session published under lock");
     published.rollback();
 
-    let held_lock = session_dir.join("smoke001.lock");
-    reserve_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
+    let held_lock = sessions.file("smoke001.lock");
+    reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
 
     let second = reserve_unique_session_log(&workspace, "smoke001")
         .expect("locked unpublished candidate must allocate the next suffix");
 
     assert!(!session_dir.join("smoke001.jsonl").exists());
-    assert!(held_lock.exists());
+    assert!(held_lock.diagnostic_path().exists());
     assert_eq!(second.session_id, "smoke001-2");
-    assert!(second.session_path.exists());
+    assert!(second.session_path.diagnostic_path().exists());
     second.rollback();
-    fs::remove_file(held_lock).expect("held lock removed");
-}
-
-#[test]
-fn filesystem_guards_reject_unexpected_leaf_shapes() {
-    let workspace = empty_workspace("filesystem-guards");
-    let file_path = workspace.join("file.txt");
-    let dir_path = workspace.join("dir");
-    let created_dir = workspace.join("created");
-    let missing_file = workspace.join("missing.txt");
-    fs::write(&file_path, "x").expect("file written");
-    fs::create_dir(&dir_path).expect("dir written");
-
-    ensure_created_real_directory(&created_dir).expect("missing directory is created");
-    assert!(created_dir.is_dir());
-    assert!(matches!(
-        ensure_existing_real_directory(&missing_file),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
-    ));
-    assert!(
-        !ensure_optional_real_directory(&workspace.join("optional-missing"))
-            .expect("missing optional dir is false")
-    );
-    assert!(matches!(
-        ensure_new_leaf_available(&file_path),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not already exist")
-    ));
-    ensure_new_leaf_available(&missing_file).expect("missing leaf is available");
-    assert!(matches!(
-        ensure_real_file(&dir_path),
-        Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
-    ));
-    assert!(matches!(
-        ensure_real_file(&missing_file),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
-    ));
-    assert!(matches!(
-        ensure_created_real_directory(&file_path),
-        Err(RuntimeError::Protocol(message)) if message.contains("must be a directory")
-    ));
-    assert!(matches!(
-        ensure_optional_real_directory(&file_path),
-        Err(RuntimeError::Protocol(message)) if message.contains("must be a directory")
-    ));
-    assert!(matches!(
-        ensure_parent_real_directory(&workspace.join("missing-parent/file.txt")),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
-    ));
-    assert_eq!(fs::read(&file_path).expect("file bytes are readable"), b"x");
-    assert!(matches!(
-        fs::read(&missing_file),
-        Err(source) if source.kind() == io::ErrorKind::NotFound
-    ));
-    assert_eq!(
-        read_to_string_with_limit(&file_path, 1).expect("limited file text is readable"),
-        "x"
-    );
-    fs::write(&file_path, "too long").expect("oversized file written");
-    assert!(matches!(
-        read_to_string_with_limit(&file_path, 3),
-        Err(RuntimeError::Protocol(message)) if message.contains("read size 8 bytes exceeds max 3")
-    ));
+    held_lock.remove().expect("held lock removed");
 }
 
 #[cfg(unix)]
 #[test]
-fn filesystem_guards_reject_symlink_leaves_directly() {
+fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
     use std::os::unix::fs::symlink;
 
-    let workspace = empty_workspace("filesystem-symlink-guards");
-    let target = workspace.join("target.txt");
-    let link = workspace.join("link.txt");
-    fs::write(&target, "target").expect("target file written");
-    symlink(&target, &link).expect("leaf symlink created");
+    let workspace = empty_workspace("reservation-directory-swap");
+    let outside = empty_workspace("reservation-directory-swap-outside");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    let moved_session_dir = workspace.join(".loop/sessions-opened");
+    let outside_session = outside.join("swap001.jsonl");
+    fs::write(&outside_session, "outside").expect("outside session fixture written");
 
-    assert!(matches!(
-        ensure_new_leaf_available(&link),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
-    ));
-    assert!(matches!(
-        ensure_real_file(&link),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
-    ));
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn file_readers_reject_symlink_leaves_directly() {
-    let workspace = empty_workspace("file-reader-symlink-guards");
-    let target = workspace.join("target.txt");
-    let link = workspace.join("link.txt");
-    fs::write(&target, "target").expect("target file written");
-
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&target, &link).expect("leaf symlink created");
-    #[cfg(windows)]
-    match std::os::windows::fs::symlink_file(&target, &link) {
-        Ok(()) => {}
-        Err(err)
-            if err.kind() == io::ErrorKind::PermissionDenied
-                || err.raw_os_error() == Some(1314) =>
-        {
-            return;
-        }
-        Err(err) => panic!("leaf symlink created: {err}"),
-    }
-
-    assert!(matches!(
-        read_to_string_with_limit(&link, MAX_SESSION_LOG_BYTES),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
-    ));
-    assert!(matches!(
-        session_log_len(&link),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
-    ));
-    assert!(matches!(
-        read_file_with_limit(&link, MAX_SESSION_LOG_BYTES),
-        Err(RuntimeError::Protocol(message)) if message.contains("must not be a symlink")
-    ));
-}
-
-#[test]
-fn fallback_file_replacement_helpers_preserve_regular_file_contracts() {
-    let workspace = empty_workspace("fallback-file-replacement");
-    let path = workspace.join("file.txt");
-    fs::write(&path, "old").expect("file written");
-
-    append_existing_file_without_link_count(&path, b"+append").expect("fallback append succeeds");
-    assert_eq!(
-        fs::read_to_string(&path).expect("appended file readable"),
-        "old+append"
-    );
-    replace_existing_file_without_link_count(&path, b"new").expect("fallback replace succeeds");
-    assert_eq!(
-        fs::read_to_string(&path).expect("replaced file readable"),
-        "new"
-    );
-    let oversized = workspace.join("oversized.log");
-    fs::File::create(&oversized)
-        .expect("oversized file created")
-        .set_len(MAX_SESSION_LOG_BYTES)
-        .expect("oversized file length set");
-    let err = append_existing_file_without_link_count(&oversized, b"x")
-        .expect_err("fallback append must enforce session log budget");
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message.contains("session log")
-    ));
-    assert_eq!(
-        fs::metadata(&oversized)
-            .expect("oversized file metadata")
-            .len(),
-        MAX_SESSION_LOG_BYTES
-    );
-
-    assert!(
-        replacement_temp_path(&path, 7)
-            .expect("temp path derives from file name")
-            .to_string_lossy()
-            .contains(".watershed-")
-    );
-    assert!(matches!(
-        replacement_temp_path(Path::new(""), 0),
-        Err(RuntimeError::Protocol(message)) if message.contains("file name")
-    ));
-
-    let err = with_replacement_temp(&path, None, |temp_path, _file| {
-        assert!(temp_path.exists());
-        Err::<(), _>(RuntimeError::Protocol("replacement failed".to_owned()))
+    let reservation = reserve_session_log_with_publish_observer(&workspace, "swap001", || {
+        fs::rename(&session_dir, &moved_session_dir).expect("session directory moved");
+        symlink(&outside, &session_dir).expect("replacement session symlink created");
     })
-    .expect_err("failed replacement must clean up its temporary file");
-    assert!(matches!(err, RuntimeError::Protocol(message) if message == "replacement failed"));
-    assert!(!replacement_temp_path(&path, 0).expect("temp path").exists());
+    .expect("reservation survives directory rename");
+    reservation.rollback();
 
-    for attempt in 0..100 {
-        let temp_path = replacement_temp_path(&path, attempt).expect("temp path");
-        fs::write(temp_path, "held").expect("temp collision file written");
-    }
-    assert!(matches!(
-        create_replacement_temp(&path, None),
-        Err(RuntimeError::Protocol(message)) if message.contains("could not allocate")
-    ));
-    let missing_parent_temp = workspace.join("missing-temp-dir").join("file.txt");
-    assert!(matches!(
-        create_replacement_temp(&missing_parent_temp, None),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
-    ));
-    let dir_leaf = workspace.join("dir-leaf");
-    fs::create_dir(&dir_leaf).expect("dir leaf written");
-    assert_denied(
-        ensure_writable_regular_leaf(&dir_leaf).expect_err("directory leaf must reject"),
-        core_policy::DenyReasonCode::WriteDenied,
-        "must be a file",
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn windows_file_replacement_does_not_require_backup_names() {
-    let workspace = empty_workspace("windows-replacement-with-backup-names");
-    let path = workspace.join("file.txt");
-    fs::write(&path, "old").expect("file written");
-    for attempt in 0..100 {
-        let mut name = path.file_name().expect("file name").to_os_string();
-        name.push(format!(".watershed-{}-{attempt}.bak", std::process::id()));
-        fs::write(path.with_file_name(name), "unrelated").expect("backup name occupied");
-    }
-
-    replace_existing_file_atomically(&path, b"new")
-        .expect("unrelated backup names cannot block replacement");
     assert_eq!(
-        fs::read_to_string(path).expect("replacement readable"),
-        "new"
+        fs::read_to_string(outside_session).expect("outside session remains readable"),
+        "outside"
     );
-}
-
-#[test]
-fn existing_leaf_replacement_preserves_original_when_rename_fails() {
-    let workspace = empty_workspace("existing-leaf-replacement-restore");
-    let path = workspace.join("file.txt");
-    let missing_temp_path = replacement_temp_path(&path, 0).expect("temp path");
-    fs::write(&path, "old").expect("file written");
-
-    assert!(matches!(
-        replace_existing_leaf_from_temp(&path, &missing_temp_path),
-        Err(RuntimeError::Io { path: failed_path, .. }) if failed_path == path
-    ));
-    assert_eq!(
-        fs::read_to_string(&path).expect("original file restored"),
-        "old"
-    );
+    assert!(!moved_session_dir.join("swap001.jsonl").exists());
+    assert!(!moved_session_dir.join("swap001.lock").exists());
 }
 
 #[cfg(unix)]
 #[test]
-fn opened_file_identity_guard_detects_symlink_directory_and_replaced_paths() {
+fn live_reader_stays_bound_to_the_opened_session_directory() {
     use std::os::unix::fs::symlink;
 
-    let workspace = empty_workspace("opened-file-identity");
-    let target = workspace.join("target.txt");
-    let link = workspace.join("link.txt");
-    fs::write(&target, "target").expect("target written");
-    symlink(&target, &link).expect("file symlink created");
-    let target_file = fs::File::open(&target).expect("target opens");
-    assert!(matches!(
-        ensure_opened_regular_leaf_matches_path(&link, &target_file),
-        Err(RuntimeError::Protocol(message)) if message.contains("symlink")
-    ));
+    let workspace = empty_workspace("reader-directory-swap");
+    let outside = empty_workspace("reader-directory-swap-outside");
+    let reservation = reserve_session_log(&workspace, "reader001").expect("session reserved");
+    let event = EventEnvelope::new(
+        "evt-original",
+        EventType::SessionStarted,
+        "reader001",
+        1,
+        EventClock::fixed_fixture().timestamp(1),
+        "loop-agent-cli",
+        serde_json::json!({"loop_definition_id":"hello-loop"}),
+    );
+    fs::write(
+        reservation.session_path.diagnostic_path(),
+        event.canonical_jsonl().expect("event serializes"),
+    )
+    .expect("session event written");
+    let mut reader = SessionEventReader::open(&workspace, "reader001").expect("reader opens");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    let moved_session_dir = workspace.join(".loop/sessions-opened");
+    fs::rename(&session_dir, &moved_session_dir).expect("session directory moved");
+    symlink(&outside, &session_dir).expect("replacement session symlink created");
+    let mut outside_event = event.clone();
+    outside_event.payload = serde_json::json!({"loop_definition_id":"outside"});
+    fs::write(
+        outside.join("reader001.jsonl"),
+        outside_event
+            .canonical_jsonl()
+            .expect("outside event serializes"),
+    )
+    .expect("outside event written");
 
-    let dir = workspace.join("dir");
-    fs::create_dir(&dir).expect("dir created");
-    let dir_file = fs::File::open(&dir).expect("dir opens on unix");
-    assert!(matches!(
-        ensure_opened_regular_leaf_matches_path(&dir, &dir_file),
-        Err(RuntimeError::Protocol(message)) if message.contains("must be a file")
-    ));
+    let observed = reader.read_after(0).expect("anchored session reads");
 
-    let changing = workspace.join("changing.txt");
-    fs::write(&changing, "old").expect("changing file written");
-    let old_file = fs::File::open(&changing).expect("changing file opens");
-    fs::remove_file(&changing).expect("changing file removed");
-    fs::write(&changing, "new").expect("replacement file written");
-    assert!(matches!(
-        ensure_opened_regular_leaf_matches_path(&changing, &old_file),
-        Err(RuntimeError::Protocol(message)) if message.contains("changed before write")
-    ));
+    assert_eq!(observed, vec![event]);
+    reservation.rollback();
 }
 
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 #[test]
-fn opened_file_read_identity_guard_rejects_replaced_path() {
-    let workspace = empty_workspace("opened-file-read-identity");
-    let path = workspace.join("changing.txt");
-    fs::write(&path, "old").expect("file written");
-    let expected_metadata = fs::symlink_metadata(&path).expect("file metadata");
-    let old_file = open_file_for_read_without_following_reparse(&path).expect("file opens");
-    fs::remove_file(&path).expect("old path removed");
-    fs::write(&path, "new").expect("replacement written");
+fn script_publish_stays_bound_to_the_opened_target_directory() {
+    use std::os::unix::fs::symlink;
 
-    assert!(matches!(
-        ensure_opened_real_file_for_read_matches_path(&path, &expected_metadata, &old_file),
-        Err(RuntimeError::Protocol(message)) if message.contains("changed before read")
-    ));
+    let workspace = empty_workspace("script-directory-swap");
+    let outside = empty_workspace("script-directory-swap-outside");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    fs::write(workspace.join("out/result.txt"), "old").expect("original output written");
+    fs::write(outside.join("result.txt"), "outside").expect("outside output written");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+    let moved_output = workspace.join("out-opened");
+
+    with_anchored_replacement_temp(&target, None, |temp, mut file| {
+        file.write_all(b"new").expect("temp output written");
+        drop(file);
+        fs::rename(workspace.join("out"), &moved_output).expect("output directory moved");
+        symlink(&outside, workspace.join("out")).expect("replacement output symlink created");
+        temp.rename_to(&target)
+    })
+    .expect("anchored replacement succeeds");
+
+    assert_eq!(
+        fs::read_to_string(outside.join("result.txt")).expect("outside output readable"),
+        "outside"
+    );
+    assert_eq!(
+        fs::read_to_string(moved_output.join("result.txt")).expect("output readable"),
+        "new"
+    );
 }

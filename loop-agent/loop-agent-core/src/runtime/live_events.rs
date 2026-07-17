@@ -129,7 +129,7 @@ pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
 pub struct SessionEventReader {
     observed: Vec<EventEnvelope>,
     observed_signature: RuntimeStreamSignatureBuilder,
-    path: PathBuf,
+    path: AnchoredFile,
     validation: SessionAppendValidationState,
 }
 
@@ -137,8 +137,18 @@ impl SessionEventReader {
     /// Opens a session's validated log boundary without reading event payloads yet.
     pub fn open(workspace: impl AsRef<Path>, session_id: &str) -> Result<Self, RuntimeError> {
         let workspace = workspace.as_ref();
-        let path = session_path(workspace, session_id)?;
-        ensure_existing_session_log_path(workspace, &path)?;
+        if !proto::is_valid_session_id(session_id) {
+            return Err(RuntimeError::Usage(format!(
+                "invalid session_id {session_id:?}"
+            )));
+        }
+        let sessions =
+            open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+                path: workspace.join(LOCAL_SESSION_DIR),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            })?;
+        let path = sessions.file(format!("{session_id}.jsonl"));
+        ensure_anchored_real_file(&path)?;
         Ok(Self {
             observed: Vec::new(),
             observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
@@ -152,7 +162,7 @@ impl SessionEventReader {
     /// The caller must advance `cursor` only after successfully processing each returned
     /// event. Repeating this call is safe after a processing failure.
     pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
-        let bytes = read_file_with_limit(&self.path, MAX_SESSION_LOG_BYTES)?;
+        let bytes = read_anchored_file_with_limit(&self.path, MAX_SESSION_LOG_BYTES)?;
         let complete_len = complete_jsonl_prefix_len(&bytes);
         let has_partial_line = complete_len != bytes.len();
         let complete = &bytes[..complete_len];
@@ -162,15 +172,12 @@ impl SessionEventReader {
             stream_signature(&complete[..prefix_len]).signature()
                 != self.observed_signature.signature()
         }) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} changed outside append-only session semantics",
-                self.path.display()
-            )));
+            return Err(self.changed_outside_append_only());
         }
         let complete_text = std::str::from_utf8(complete).map_err(|source| {
             RuntimeError::Protocol(format!(
                 "{} is not valid UTF-8: {source}",
-                self.path.display()
+                self.path.diagnostic_path().display()
             ))
         })?;
         let session_id = self
@@ -179,11 +186,11 @@ impl SessionEventReader {
             .as_deref()
             .expect("session readers always validate one session");
         let mut validation = SessionAppendValidationState::empty(session_id);
-        let events = validation.validate_appended(&self.path, complete_text)?;
+        let events = validation.validate_appended(self.path.diagnostic_path(), complete_text)?;
         if has_partial_line && validation.terminal_line.is_some() {
             return Err(RuntimeError::Protocol(format!(
                 "{} contains a partial line after a terminal event",
-                self.path.display()
+                self.path.diagnostic_path().display()
             )));
         }
         self.ensure_cursor(cursor, validation.previous_sequence)?;
@@ -207,21 +214,21 @@ impl SessionEventReader {
         }
         let observed_len = self.observed_signature.byte_count;
         let observed_len_u64 = u64::try_from(observed_len).unwrap_or(u64::MAX);
-        let (mut file, metadata) = open_real_file_for_read(&self.path)?;
+        let (mut file, metadata) = open_anchored_file_for_read(&self.path)?;
         if metadata.len() < observed_len_u64 {
             return Err(self.changed_outside_append_only());
         }
         file.seek(SeekFrom::Start(observed_len_u64))
-            .map_err(|source| path_io_error(&self.path, source))?;
+            .map_err(|source| path_io_error(self.path.diagnostic_path(), source))?;
         let remaining_limit = MAX_SESSION_LOG_BYTES.saturating_sub(observed_len_u64);
         let mut suffix = Vec::new();
         file.take(remaining_limit.saturating_add(1))
             .read_to_end(&mut suffix)
-            .map_err(|source| path_io_error(&self.path, source))?;
+            .map_err(|source| path_io_error(self.path.diagnostic_path(), source))?;
         if u64::try_from(suffix.len()).unwrap_or(u64::MAX) > remaining_limit {
             return Err(RuntimeError::Protocol(format!(
                 "{} read size exceeds max {MAX_SESSION_LOG_BYTES}",
-                self.path.display()
+                self.path.diagnostic_path().display()
             )));
         }
         let complete_len = complete_jsonl_prefix_len(&suffix);
@@ -230,25 +237,26 @@ impl SessionEventReader {
         let appended_text = std::str::from_utf8(appended_bytes).map_err(|source| {
             RuntimeError::Protocol(format!(
                 "{} is not valid UTF-8: {source}",
-                self.path.display()
+                self.path.diagnostic_path().display()
             ))
         })?;
         let mut validation = std::mem::replace(
             &mut self.validation,
             SessionAppendValidationState::unscoped(),
         );
-        let appended = match validation.validate_appended(&self.path, appended_text) {
-            Ok(appended) => appended,
-            Err(error) => {
-                self.restore_validation(&validation);
-                return Err(error);
-            }
-        };
+        let appended =
+            match validation.validate_appended(self.path.diagnostic_path(), appended_text) {
+                Ok(appended) => appended,
+                Err(error) => {
+                    self.restore_validation(&validation);
+                    return Err(error);
+                }
+            };
         if has_partial_line && validation.terminal_line.is_some() {
             self.restore_validation(&validation);
             return Err(RuntimeError::Protocol(format!(
                 "{} contains a partial line after a terminal event",
-                self.path.display()
+                self.path.diagnostic_path().display()
             )));
         }
         if let Err(error) = self.ensure_cursor(cursor, validation.previous_sequence) {
@@ -268,9 +276,12 @@ impl SessionEventReader {
             .expected_session_id
             .as_deref()
             .expect("session readers always validate one session");
-        self.validation =
-            SessionAppendValidationState::from_prior_events(&self.path, session_id, &self.observed)
-                .expect("cached observed events remain valid");
+        self.validation = SessionAppendValidationState::from_prior_events(
+            self.path.diagnostic_path(),
+            session_id,
+            &self.observed,
+        )
+        .expect("cached observed events remain valid");
     }
 
     fn ensure_cursor(&self, cursor: u64, latest_sequence: u64) -> Result<(), RuntimeError> {
@@ -279,14 +290,14 @@ impl SessionEventReader {
         }
         Err(RuntimeError::Protocol(format!(
             "{} no longer contains processed sequence {cursor}",
-            self.path.display()
+            self.path.diagnostic_path().display()
         )))
     }
 
     fn changed_outside_append_only(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} changed outside append-only session semantics",
-            self.path.display()
+            self.path.diagnostic_path().display()
         ))
     }
 }

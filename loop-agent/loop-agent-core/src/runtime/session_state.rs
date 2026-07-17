@@ -1,24 +1,18 @@
 /// Lists valid persisted session ids in canonical order.
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
     let workspace = workspace.as_ref();
-    let loop_dir = workspace.join(".loop");
-    if !ensure_optional_real_directory(&loop_dir)? {
+    let Some(dir) = open_runtime_dir(workspace, "sessions")? else {
         return Ok(Vec::new());
-    }
-    let dir = workspace.join(LOCAL_SESSION_DIR);
-    if !ensure_optional_real_directory(&dir)? {
-        return Ok(Vec::new());
-    }
+    };
     let mut sessions = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|source| RuntimeError::Io {
-        path: dir.clone(),
-        source,
-    })? {
-        let entry = entry.map_err(|source| RuntimeError::Io {
-            path: dir.clone(),
-            source,
-        })?;
-        let path = entry.path();
+    for entry in dir
+        .dir
+        .entries()
+        .map_err(|source| path_io_error(&dir.path, source))?
+    {
+        let entry = entry.map_err(|source| path_io_error(&dir.path, source))?;
+        let name = entry.file_name();
+        let path = Path::new(&name);
         if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
             continue;
         }
@@ -26,11 +20,10 @@ pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, Runtime
             continue;
         };
         if proto::is_valid_session_id(stem) {
-            let metadata = fs::symlink_metadata(&path).map_err(|source| RuntimeError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            if has_windows_reparse_point(&metadata) || !metadata.is_file() {
+            let file_type = entry
+                .file_type()
+                .map_err(|source| path_io_error(&dir.path.join(path), source))?;
+            if file_type.is_symlink() || !file_type.is_file() {
                 continue;
             }
             sessions.push(stem.to_owned());
@@ -47,14 +40,8 @@ pub fn resume_session(
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
-    let (mut output, prior_event_count) =
-        resume_session_internal(workspace, session_id, None, None)?;
-    if emit == EmitMode::Jsonl {
-        let stream = read_session_log_to_string(&output.session_path)?;
-        let events = validate_session_log_text(&output.session_path, session_id, &stream)?;
-        output.stdout = canonical_event_stream(&events[prior_event_count..])?;
-    }
-    Ok(output)
+    resume_session_internal(workspace, session_id, None, None, emit == EmitMode::Jsonl)
+        .map(|(output, _)| output)
 }
 
 /// Resumes a session with bounded, non-blocking committed-event notifications.
@@ -66,7 +53,8 @@ pub fn resume_session_with_live_events(
     session_id: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let (mut output, _) = resume_session_internal(workspace, session_id, Some(notifier), None)?;
+    let (mut output, _) =
+        resume_session_internal(workspace, session_id, Some(notifier), None, false)?;
     output.stdout.clear();
     Ok(output)
 }
@@ -76,12 +64,18 @@ fn resume_session_internal(
     session_id: &str,
     notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
+    capture_jsonl: bool,
 ) -> Result<(RunOutput, usize), RuntimeError> {
     let workspace = workspace.as_ref();
-    let path = session_path(workspace, session_id)?;
-    ensure_existing_session_log_path(workspace, &path)?;
-    ensure_non_hardlinked_real_file(&path)?;
-    let lock = acquire_session_lock(workspace, session_id)?;
+    if !proto::is_valid_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    let dirs = open_existing_runtime_dirs(workspace)?;
+    let path = dirs.sessions.file(format!("{session_id}.jsonl"));
+    ensure_anchored_non_hardlinked_file(&path)?;
+    let lock = acquire_anchored_session_lock(&dirs.sessions, session_id)?;
     let inspection = inspect_resume_session(&path, session_id)?;
     let prior_event_count = inspection.prior_event_count;
     if matches!(
@@ -90,9 +84,9 @@ fn resume_session_internal(
     ) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
-    let metadata = require_session_log_metadata(workspace, session_id)?;
+    let metadata = require_anchored_session_log_metadata(&dirs.logs, session_id)?;
     let loop_id = resumable_loop_id(
-        &path,
+        path.diagnostic_path(),
         session_id,
         inspection.root_loop_definition_id.as_deref(),
         &metadata,
@@ -112,8 +106,8 @@ fn resume_session_internal(
         runtime_policy_target(),
     )?;
     let clock = resume_event_clock(&config, inspection.clock)?;
-    let recorded_context = read_recorded_context_manifest_signature(
-        workspace,
+    let recorded_context = read_anchored_context_manifest_signature(
+        &dirs.logs,
         session_id,
         inspection.completed_turns,
     )?;
@@ -145,7 +139,7 @@ fn resume_session_internal(
         )));
     }
     let resume_prefix = validate_resume_replay_prefix(
-        &path,
+        path.diagnostic_path(),
         &inspection,
         &prefix_sink,
         &planned_runtime,
@@ -187,12 +181,10 @@ fn resume_session_internal(
     if !preflight_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} resume preflight did not match deterministic replay",
-            path.display()
+            path.diagnostic_path().display()
         )));
     }
-    let context_path = workspace
-        .join(LOCAL_LOG_DIR)
-        .join(format!("{session_id}.contexts.jsonl"));
+    let context_path = dirs.logs.file(format!("{session_id}.contexts.jsonl"));
     let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
         context_path,
         path: path.clone(),
@@ -241,7 +233,7 @@ fn resume_session_internal(
     if terminal_error.is_none() && !replay_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} resumed runtime did not match deterministic replay",
-            path.display()
+            path.diagnostic_path().display()
         )));
     }
     let combined_event_count = planned_runtime
@@ -249,6 +241,13 @@ fn resume_session_internal(
         .record_count
         .saturating_add(resume_prefix.resume_marker_count)
         .saturating_add(1);
+    let stdout = if capture_jsonl {
+        let stream = read_anchored_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES)?;
+        let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
+        canonical_event_stream(&events[prior_event_count..])?
+    } else {
+        human_session_status_from_failure(session_id, "resumed", failure_status.as_deref())
+    };
     lock.release()?;
     if let Some(err) = terminal_error {
         return Err(RuntimeError::session_failed(session_id, err));
@@ -259,12 +258,8 @@ fn resume_session_internal(
             event_count: combined_event_count,
             failed: resumed_failed,
             session_id: session_id.to_owned(),
-            session_path: path,
-            stdout: human_session_status_from_failure(
-                session_id,
-                "resumed",
-                failure_status.as_deref(),
-            ),
+            session_path: path.diagnostic_path().to_owned(),
+            stdout,
         },
         prior_event_count,
     ))
@@ -373,18 +368,20 @@ impl ResumeInspectionBuilder {
 }
 
 fn inspect_resume_session(
-    path: &Path,
+    path: &AnchoredFile,
     session_id: &str,
 ) -> Result<ResumeSessionInspection, RuntimeError> {
     let mut validation = SessionAppendValidationState::empty(session_id);
     let mut inspection = ResumeInspectionBuilder::new();
-    for_each_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
-        validation.validate_appended_with(path, line, |event| inspection.observe(event))
+    for_each_anchored_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
+        validation.validate_appended_with(path.diagnostic_path(), line, |event| {
+            inspection.observe(event)
+        })
     })?;
     let Some(clock) = inspection.clock else {
         return Err(RuntimeError::Protocol(format!(
             "{} must contain at least one event",
-            path.display()
+            path.diagnostic_path().display()
         )));
     };
     let Some(last_event_type) = inspection.last_event_type else {
@@ -462,28 +459,26 @@ fn resume_append_plan(
     })
 }
 
-fn prepare_session_log_append(path: &Path, appended_bytes: usize) -> Result<(), RuntimeError> {
-    ensure_session_log_growth_within_limit(path, appended_bytes)?;
-    append_existing_file(path, b"")
+fn prepare_session_log_append(
+    path: &AnchoredFile,
+    appended_bytes: usize,
+) -> Result<(), RuntimeError> {
+    ensure_anchored_session_log_growth_within_limit(path, appended_bytes)?;
+    open_anchored_session_log_append_file(path).map(|_| ())
 }
 
-#[cfg(any(not(any(unix, windows)), test))]
-fn append_session_log_bytes(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    ensure_session_log_growth_within_limit(path, contents.len())?;
-    append_existing_file(path, contents)
-}
-
-fn ensure_session_log_growth_within_limit(
-    path: &Path,
+fn ensure_anchored_session_log_growth_within_limit(
+    path: &AnchoredFile,
     appended_bytes: usize,
 ) -> Result<u64, RuntimeError> {
-    let existing_bytes = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
+    let (_, metadata) = open_anchored_file_for_read(path)?;
+    let existing_bytes = metadata.len();
     let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     let total = existing_bytes.saturating_add(appended_bytes);
     if total > MAX_SESSION_LOG_BYTES {
         return Err(RuntimeError::Protocol(format!(
             "{} session log size {total} bytes exceeds max {}",
-            path.display(),
+            path.diagnostic_path().display(),
             MAX_SESSION_LOG_BYTES
         )));
     }
@@ -526,9 +521,18 @@ fn read_existing_session(
     session_id: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let path = session_path(workspace, session_id)?;
-    ensure_existing_session_log_path(workspace, &path)?;
-    let stream = read_session_log_to_string(&path)?;
+    if !proto::is_valid_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    let sessions = open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+        path: workspace.join(LOCAL_SESSION_DIR),
+        source: io::Error::from(io::ErrorKind::NotFound),
+    })?;
+    let file = sessions.file(format!("{session_id}.jsonl"));
+    let path = file.diagnostic_path().to_owned();
+    let stream = read_anchored_to_string_with_limit(&file, MAX_SESSION_LOG_BYTES)?;
     let events = validate_session_log_text(&path, session_id, &stream)?;
     Ok(RunOutput {
         event_count: events.len(),
@@ -542,23 +546,12 @@ fn read_existing_session(
     })
 }
 
-fn session_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
-    if !proto::is_valid_session_id(session_id) {
-        return Err(RuntimeError::Usage(format!(
-            "invalid session_id {session_id:?}"
-        )));
-    }
-    Ok(workspace
-        .join(LOCAL_SESSION_DIR)
-        .join(format!("{session_id}.jsonl")))
-}
-
 #[derive(Debug)]
 struct SessionReservation {
-    context_path: PathBuf,
-    log_path: PathBuf,
-    lock_path: PathBuf,
-    session_path: PathBuf,
+    context_path: AnchoredFile,
+    log_path: AnchoredFile,
+    lock_path: AnchoredFile,
+    session_path: AnchoredFile,
     session_id: String,
     cleanup_on_drop: Cell<bool>,
     committed: Cell<bool>,
@@ -567,19 +560,16 @@ struct SessionReservation {
 impl SessionReservation {
     fn rollback(&self) {
         if !self.committed.get() {
-            let _ = fs::remove_file(&self.session_path);
-            let _ = fs::remove_file(&self.log_path);
-            let _ = fs::remove_file(&self.context_path);
+            let _ = self.session_path.remove();
+            let _ = self.log_path.remove();
+            let _ = self.context_path.remove();
         }
-        let _ = fs::remove_file(&self.lock_path);
+        let _ = self.lock_path.remove();
         self.cleanup_on_drop.set(false);
     }
 
     fn release_lock(&self) -> Result<(), RuntimeError> {
-        fs::remove_file(&self.lock_path).map_err(|source| RuntimeError::Io {
-            path: self.lock_path.clone(),
-            source,
-        })?;
+        self.lock_path.remove()?;
         self.cleanup_on_drop.set(false);
         Ok(())
     }
@@ -598,16 +588,13 @@ impl Drop for SessionReservation {
 }
 
 struct SessionLockGuard {
-    path: PathBuf,
+    path: AnchoredFile,
     cleanup_on_drop: Cell<bool>,
 }
 
 impl SessionLockGuard {
     fn release(&self) -> Result<(), RuntimeError> {
-        fs::remove_file(&self.path).map_err(|source| RuntimeError::Io {
-            path: self.path.clone(),
-            source,
-        })?;
+        self.path.remove()?;
         self.cleanup_on_drop.set(false);
         Ok(())
     }
@@ -616,7 +603,7 @@ impl SessionLockGuard {
 impl Drop for SessionLockGuard {
     fn drop(&mut self) {
         if self.cleanup_on_drop.get() {
-            let _ = fs::remove_file(&self.path);
+            let _ = self.path.remove();
         }
     }
 }
@@ -663,7 +650,8 @@ fn verify_resume_definition_metadata(
 ) -> Result<(), RuntimeError> {
     // WHY: resume hashes bind a partial session to the registry definitions that produced
     // it; incomplete metadata cannot prove the prefix matches the current registry.
-    let metadata = require_session_log_metadata(workspace, session_id)?;
+    let dirs = open_existing_runtime_dirs(workspace)?;
+    let metadata = require_anchored_session_log_metadata(&dirs.logs, session_id)?;
     verify_resume_definition_metadata_values(session_id, &metadata, registry, loop_block)
 }
 
@@ -701,36 +689,16 @@ fn verify_resume_definition_metadata_values(
     Ok(())
 }
 
-fn require_session_log_metadata(
-    workspace: &Path,
+fn require_anchored_session_log_metadata(
+    logs: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLogMetadata, RuntimeError> {
-    read_session_log_metadata(workspace, session_id)?.ok_or_else(|| {
-        RuntimeError::Protocol(format!(
-            "session {session_id} registry drift: missing definition metadata"
-        ))
-    })
-}
-
-fn read_session_log_metadata(
-    workspace: &Path,
-    session_id: &str,
-) -> Result<Option<SessionLogMetadata>, RuntimeError> {
-    let path = session_log_metadata_path(workspace, session_id)?;
-    let log_dir = path.parent().ok_or_else(|| {
-        RuntimeError::Protocol(format!("{} must have a parent directory", path.display()))
-    })?;
-    if !ensure_optional_real_directory(log_dir)? {
-        return Ok(None);
-    }
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) => validate_real_file(&path, &metadata)?,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => {
-            return Err(RuntimeError::Io { path, source });
-        }
-    }
-    parse_session_log_metadata(&read_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES)?).map(Some)
+    let path = logs.file(format!("{session_id}.log"));
+    ensure_anchored_real_file(&path)?;
+    parse_session_log_metadata(&read_anchored_to_string_with_limit(
+        &path,
+        MAX_SESSION_LOG_BYTES,
+    )?)
 }
 
 fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
@@ -752,17 +720,6 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
     Ok(metadata)
 }
 
-fn session_log_metadata_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
-    if !proto::is_valid_session_id(session_id) {
-        return Err(RuntimeError::Usage(format!(
-            "invalid session_id {session_id:?}"
-        )));
-    }
-    Ok(workspace
-        .join(LOCAL_LOG_DIR)
-        .join(format!("{session_id}.log")))
-}
-
 fn reserve_session_log(
     workspace: &Path,
     session_id: &str,
@@ -775,26 +732,31 @@ fn reserve_session_log_with_publish_observer(
     session_id: &str,
     after_publish: impl FnOnce(),
 ) -> Result<SessionReservation, RuntimeError> {
-    let (session_dir, log_dir) = ensure_runtime_dirs(workspace)?;
-    let session_path = session_dir.join(format!("{session_id}.jsonl"));
-    let log_path = log_dir.join(format!("{session_id}.log"));
-    let context_path = log_dir.join(format!("{session_id}.contexts.jsonl"));
-    let lock_path = session_lock_path(workspace, session_id)?;
-    ensure_session_file_available(&session_path, session_id)?;
-    reserve_session_lock_file(&lock_path, session_id)?;
-    if let Err(err) = reserve_session_file(&session_path, session_id, after_publish) {
-        let _ = fs::remove_file(&lock_path);
+    if !proto::is_valid_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    let dirs = ensure_runtime_dirs(workspace)?;
+    let session_path = dirs.sessions.file(format!("{session_id}.jsonl"));
+    let log_path = dirs.logs.file(format!("{session_id}.log"));
+    let context_path = dirs.logs.file(format!("{session_id}.contexts.jsonl"));
+    let lock_path = dirs.sessions.file(format!("{session_id}.lock"));
+    ensure_anchored_session_file_available(&session_path, session_id)?;
+    reserve_anchored_session_lock_file(&lock_path, session_id)?;
+    if let Err(err) = reserve_anchored_session_file(&session_path, session_id, after_publish) {
+        let _ = lock_path.remove();
         return Err(err);
     }
-    if let Err(err) = reserve_new_file(&log_path) {
-        let _ = fs::remove_file(&session_path);
-        let _ = fs::remove_file(&lock_path);
+    if let Err(err) = reserve_new_anchored_file(&log_path) {
+        let _ = session_path.remove();
+        let _ = lock_path.remove();
         return Err(err);
     }
-    if let Err(err) = reserve_new_file(&context_path) {
-        let _ = fs::remove_file(&session_path);
-        let _ = fs::remove_file(&log_path);
-        let _ = fs::remove_file(&lock_path);
+    if let Err(err) = reserve_new_anchored_file(&context_path) {
+        let _ = session_path.remove();
+        let _ = log_path.remove();
+        let _ = lock_path.remove();
         return Err(err);
     }
     Ok(SessionReservation {
@@ -843,13 +805,13 @@ fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
     candidate
 }
 
-fn reserve_session_file(
-    path: &Path,
+fn reserve_anchored_session_file(
+    path: &AnchoredFile,
     session_id: &str,
     after_publish: impl FnOnce(),
 ) -> Result<(), RuntimeError> {
-    ensure_session_file_available(path, session_id)?;
-    reserve_new_file(path).map_err(|err| match err {
+    ensure_anchored_session_file_available(path, session_id)?;
+    reserve_new_anchored_file(path).map_err(|err| match err {
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
             RuntimeError::SessionLogExists(session_id.to_owned())
         }
@@ -859,68 +821,44 @@ fn reserve_session_file(
     Ok(())
 }
 
-fn ensure_session_file_available(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
-    match fs::symlink_metadata(path) {
+fn ensure_anchored_session_file_available(
+    path: &AnchoredFile,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    match path.metadata() {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
-            path.display()
+            "{} must not be a symlink or reparse point",
+            path.diagnostic_path().display()
         ))),
         Ok(metadata) if metadata.is_file() => {
             Err(RuntimeError::SessionLogExists(session_id.to_owned()))
         }
         Ok(_) => Err(RuntimeError::Protocol(format!(
             "{} must be a file",
-            path.display()
+            path.diagnostic_path().display()
         ))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
-fn reserve_new_file(path: &Path) -> Result<(), RuntimeError> {
-    ensure_new_leaf_available(path)?;
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map(|_| ())
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })
+fn reserve_new_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError> {
+    create_anchored_file(path).map(|_| ())
 }
 
-fn session_lock_path(workspace: &Path, session_id: &str) -> Result<PathBuf, RuntimeError> {
-    if !proto::is_valid_session_id(session_id) {
-        return Err(RuntimeError::Usage(format!(
-            "invalid session_id {session_id:?}"
-        )));
-    }
-    Ok(workspace
-        .join(LOCAL_SESSION_DIR)
-        .join(format!("{session_id}.lock")))
-}
-
-fn reserve_session_lock_file(path: &Path, session_id: &str) -> Result<(), RuntimeError> {
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
+fn reserve_anchored_session_lock_file(
+    path: &AnchoredFile,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    match create_anchored_file(path) {
         Ok(_) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
             Err(RuntimeError::ActiveSession {
                 session_id: session_id.to_owned(),
-                lock_path: path.to_owned(),
+                lock_path: path.diagnostic_path().to_owned(),
             })
         }
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
+        Err(error) => Err(error),
     }
 }
 
@@ -933,13 +871,12 @@ fn active_session_lock_message(path: &Path, session_id: &str) -> String {
     )
 }
 
-fn acquire_session_lock(
-    workspace: &Path,
+fn acquire_anchored_session_lock(
+    sessions: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLockGuard, RuntimeError> {
-    let path = session_lock_path(workspace, session_id)?;
-    ensure_existing_real_directory(&workspace.join(LOCAL_SESSION_DIR))?;
-    reserve_session_lock_file(&path, session_id)?;
+    let path = sessions.file(format!("{session_id}.lock"));
+    reserve_anchored_session_lock_file(&path, session_id)?;
     Ok(SessionLockGuard {
         path,
         cleanup_on_drop: Cell::new(true),
@@ -950,10 +887,29 @@ fn write_reserved_session_metadata(
     reservation: &SessionReservation,
     definition_metadata: Option<&SessionDefinitionMetadata>,
 ) -> Result<(), RuntimeError> {
-    replace_existing_file_atomically(
+    replace_anchored_existing_file_atomically(
         &reservation.log_path,
         session_log_metadata_text(definition_metadata).as_bytes(),
     )
+}
+
+fn replace_anchored_existing_file_atomically(
+    path: &AnchoredFile,
+    contents: &[u8],
+) -> Result<(), RuntimeError> {
+    ensure_anchored_non_hardlinked_file(path)?;
+    with_anchored_replacement_temp(path, None, |temp_path, mut temp_file| {
+        temp_file
+            .write_all(contents)
+            .map_err(|source| path_io_error(temp_path.diagnostic_path(), source))?;
+        temp_file
+            .sync_all()
+            .map_err(|source| path_io_error(temp_path.diagnostic_path(), source))?;
+        // Keep the created file open through the capability-relative rename. A peer with
+        // write access to this exact directory can already replace the destination itself.
+        ensure_anchored_non_hardlinked_file(path)?;
+        temp_path.rename_to(path)
+    })
 }
 
 fn session_log_metadata_text(definition_metadata: Option<&SessionDefinitionMetadata>) -> String {

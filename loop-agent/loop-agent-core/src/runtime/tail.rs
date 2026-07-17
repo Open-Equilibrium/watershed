@@ -69,7 +69,7 @@ fn tail_session_with_wait(
         event_count: events.len(),
         failed: stream_is_failed(&events),
         session_id: session_id.to_owned(),
-        session_path: reader.path,
+        session_path: reader.path.diagnostic_path().to_owned(),
         stdout: match emit {
             EmitMode::Jsonl => canonical_event_stream(&events)?,
             EmitMode::Human => human_session_status(session_id, "tailed", &events),

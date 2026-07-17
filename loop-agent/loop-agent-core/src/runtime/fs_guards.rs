@@ -1,116 +1,291 @@
-fn ensure_runtime_dirs(workspace: &Path) -> Result<(PathBuf, PathBuf), RuntimeError> {
-    let loop_dir = workspace.join(".loop");
-    ensure_created_real_directory(&loop_dir)?;
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    ensure_created_real_directory(&session_dir)?;
-    let log_dir = workspace.join(LOCAL_LOG_DIR);
-    ensure_created_real_directory(&log_dir)?;
-    Ok((session_dir, log_dir))
+#[derive(Clone, Debug)]
+struct AnchoredDir {
+    dir: std::sync::Arc<Dir>,
+    path: PathBuf,
 }
 
-fn ensure_existing_session_log_path(workspace: &Path, path: &Path) -> Result<(), RuntimeError> {
-    ensure_existing_real_directory(&workspace.join(".loop"))?;
-    ensure_existing_real_directory(&workspace.join(LOCAL_SESSION_DIR))?;
-    ensure_real_file(path)
+#[derive(Clone, Debug)]
+struct AnchoredFile {
+    parent: AnchoredDir,
+    leaf: PathBuf,
+    path: PathBuf,
 }
 
-fn ensure_existing_real_directory(path: &Path) -> Result<(), RuntimeError> {
-    let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    validate_real_directory_with(path, &metadata, DirectoryErrorMode::Protocol)
+impl AnchoredDir {
+    fn workspace(path: &Path) -> Result<Self, RuntimeError> {
+        let dir = Dir::open_ambient_dir(path, ambient_authority())
+            .map_err(|source| path_io_error(path, source))?;
+        Ok(Self {
+            dir: std::sync::Arc::new(dir),
+            path: path.to_owned(),
+        })
+    }
+
+    fn child(
+        &self,
+        leaf: &str,
+        create: bool,
+        error_mode: DirectoryErrorMode,
+    ) -> Result<Option<Self>, RuntimeError> {
+        let path = self.path.join(leaf);
+        match self.dir.symlink_metadata(leaf) {
+            Ok(metadata) => validate_anchored_directory(&path, &metadata, error_mode)?,
+            Err(err) if err.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => match self.dir.create_dir(leaf) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(source) => return Err(path_io_error(&path, source)),
+            },
+            Err(source) => return Err(path_io_error(&path, source)),
+        }
+        let dir = self
+            .dir
+            .open_dir_nofollow(leaf)
+            .map_err(|source| unsafe_anchored_directory(path.clone(), source, error_mode))?;
+        Ok(Some(Self {
+            dir: std::sync::Arc::new(dir),
+            path,
+        }))
+    }
+
+    fn file(&self, leaf: impl Into<PathBuf>) -> AnchoredFile {
+        let leaf = leaf.into();
+        AnchoredFile {
+            path: self.path.join(&leaf),
+            parent: self.clone(),
+            leaf,
+        }
+    }
 }
 
-fn ensure_optional_real_directory(path: &Path) -> Result<bool, RuntimeError> {
-    ensure_optional_directory_with(path, DirectoryErrorMode::Protocol)
+impl AnchoredFile {
+    fn diagnostic_path(&self) -> &Path {
+        &self.path
+    }
+
+    fn metadata(&self) -> Result<cap_std::fs::Metadata, RuntimeError> {
+        self.parent
+            .dir
+            .symlink_metadata(&self.leaf)
+            .map_err(|source| path_io_error(&self.path, source))
+    }
+
+    fn open(&self, options: &cap_std::fs::OpenOptions) -> Result<fs::File, RuntimeError> {
+        self.parent
+            .dir
+            .open_with(&self.leaf, options)
+            .map(cap_std::fs::File::into_std)
+            .map_err(|source| path_io_error(&self.path, source))
+    }
+
+    fn remove(&self) -> Result<(), RuntimeError> {
+        self.parent
+            .dir
+            .remove_file(&self.leaf)
+            .map_err(|source| path_io_error(&self.path, source))
+    }
+
+    fn rename_to(&self, target: &Self) -> Result<(), RuntimeError> {
+        self.parent
+            .dir
+            .rename(&self.leaf, &target.parent.dir, &target.leaf)
+            .map_err(|source| path_io_error(&target.path, source))
+    }
 }
 
-fn ensure_created_real_directory(path: &Path) -> Result<bool, RuntimeError> {
-    ensure_created_directory_with(path, DirectoryErrorMode::Protocol)
+fn ensure_anchored_new_leaf_available(file: &AnchoredFile) -> Result<(), RuntimeError> {
+    match file.metadata() {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink or reparse point",
+            file.path.display()
+        ))),
+        Ok(_) => Err(RuntimeError::Protocol(format!(
+            "{} must not already exist",
+            file.path.display()
+        ))),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn ensure_anchored_real_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
+    let metadata = file.metadata()?;
+    if metadata.file_type().is_symlink() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be a symlink or reparse point",
+            file.path.display()
+        )));
+    }
+    if !metadata.is_file() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a file",
+            file.path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn open_anchored_file_for_read(
+    file: &AnchoredFile,
+) -> Result<(fs::File, fs::Metadata), RuntimeError> {
+    ensure_anchored_real_file(file)?;
+    let mut options = cap_std::fs::OpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    let opened = file.open(&options)?;
+    let metadata = opened
+        .metadata()
+        .map_err(|source| path_io_error(&file.path, source))?;
+    validate_real_file(&file.path, &metadata)?;
+    Ok((opened, metadata))
+}
+
+fn read_anchored_file_with_limit(
+    file: &AnchoredFile,
+    max_bytes: u64,
+) -> Result<Vec<u8>, RuntimeError> {
+    let (opened, metadata) = open_anchored_file_for_read(file)?;
+    read_opened_file_with_limit(opened, metadata.len(), &file.path, max_bytes)
+}
+
+fn read_anchored_to_string_with_limit(
+    file: &AnchoredFile,
+    max_bytes: u64,
+) -> Result<String, RuntimeError> {
+    decode_utf8(&file.path, read_anchored_file_with_limit(file, max_bytes)?)
+}
+
+fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
+    ensure_anchored_new_leaf_available(file)?;
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
+    file.open(&options)
+}
+
+fn ensure_anchored_non_hardlinked_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
+    let (opened, metadata) = open_anchored_file_for_read(file)?;
+    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)
+}
+
+#[cfg(any(unix, windows))]
+fn ensure_not_hardlinked_open_file(
+    path: &Path,
+    file: &fs::File,
+    _metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
+    #[cfg(unix)]
+    let _ = file;
+    #[cfg(unix)]
+    let links = hard_link_count(path, _metadata)?;
+    #[cfg(windows)]
+    let links = hard_link_count_for_open_file(path, file)?;
+    if links > 1 {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not be hard-linked",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn ensure_not_hardlinked_open_file(
+    _path: &Path,
+    _file: &fs::File,
+    _metadata: &fs::Metadata,
+) -> Result<(), RuntimeError> {
+    Ok(())
+}
+
+struct RuntimeDirs {
+    logs: AnchoredDir,
+    sessions: AnchoredDir,
+}
+
+fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
+    let workspace = AnchoredDir::workspace(workspace)?;
+    let loop_dir = workspace
+        .child(".loop", true, DirectoryErrorMode::Protocol)?
+        .expect("created runtime directory is present");
+    let sessions = loop_dir
+        .child("sessions", true, DirectoryErrorMode::Protocol)?
+        .expect("created session directory is present");
+    let logs = loop_dir
+        .child("logs", true, DirectoryErrorMode::Protocol)?
+        .expect("created log directory is present");
+    Ok(RuntimeDirs { logs, sessions })
+}
+
+fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let workspace = AnchoredDir::workspace(workspace)?;
+    let Some(loop_dir) = workspace.child(".loop", false, DirectoryErrorMode::Protocol)? else {
+        return Ok(None);
+    };
+    loop_dir.child(leaf, false, DirectoryErrorMode::Protocol)
+}
+
+fn open_existing_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
+    let workspace_dir = AnchoredDir::workspace(workspace)?;
+    let loop_path = workspace.join(".loop");
+    let loop_dir = workspace_dir
+        .child(".loop", false, DirectoryErrorMode::Protocol)?
+        .ok_or_else(|| RuntimeError::Io {
+            path: loop_path,
+            source: io::Error::from(io::ErrorKind::NotFound),
+        })?;
+    let sessions = loop_dir
+        .child("sessions", false, DirectoryErrorMode::Protocol)?
+        .ok_or_else(|| RuntimeError::Io {
+            path: workspace.join(LOCAL_SESSION_DIR),
+            source: io::Error::from(io::ErrorKind::NotFound),
+        })?;
+    let logs = loop_dir
+        .child("logs", false, DirectoryErrorMode::Protocol)?
+        .ok_or_else(|| RuntimeError::Io {
+            path: workspace.join(LOCAL_LOG_DIR),
+            source: io::Error::from(io::ErrorKind::NotFound),
+        })?;
+    Ok(RuntimeDirs { logs, sessions })
+}
+
+fn validate_anchored_directory(
+    path: &Path,
+    metadata: &cap_std::fs::Metadata,
+    error_mode: DirectoryErrorMode,
+) -> Result<(), RuntimeError> {
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(unsafe_anchored_directory(
+            path.to_owned(),
+            io::Error::other("not a real directory"),
+            error_mode,
+        ));
+    }
+    Ok(())
+}
+
+fn unsafe_anchored_directory(
+    path: PathBuf,
+    source: io::Error,
+    error_mode: DirectoryErrorMode,
+) -> RuntimeError {
+    let message = format!(
+        "{} must not be a symlink or reparse point and must be a directory: {source}",
+        path.display()
+    );
+    match error_mode {
+        DirectoryErrorMode::Protocol => RuntimeError::Protocol(message),
+        DirectoryErrorMode::ScriptWrite => {
+            runtime_denied(core_policy::DenyReasonCode::SymlinkEscapeDenied, message)
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
 enum DirectoryErrorMode {
     Protocol,
     ScriptWrite,
-}
-
-fn ensure_optional_directory_with(
-    path: &Path,
-    error_mode: DirectoryErrorMode,
-) -> Result<bool, RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            validate_real_directory_with(path, &metadata, error_mode)?;
-            Ok(true)
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
-}
-
-fn ensure_created_directory_with(
-    path: &Path,
-    error_mode: DirectoryErrorMode,
-) -> Result<bool, RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            validate_real_directory_with(path, &metadata, error_mode)?;
-            Ok(false)
-        }
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            match fs::create_dir(path) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(source) => {
-                    return Err(RuntimeError::Io {
-                        path: path.to_owned(),
-                        source,
-                    });
-                }
-            }
-            let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })?;
-            validate_real_directory_with(path, &metadata, error_mode)?;
-            Ok(true)
-        }
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
-}
-
-fn validate_real_directory_with(
-    path: &Path,
-    metadata: &fs::Metadata,
-    error_mode: DirectoryErrorMode,
-) -> Result<(), RuntimeError> {
-    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
-        let message = format!("{} must not be a symlink or reparse point", path.display());
-        return Err(match error_mode {
-            DirectoryErrorMode::Protocol => RuntimeError::Protocol(message),
-            DirectoryErrorMode::ScriptWrite => {
-                runtime_denied(core_policy::DenyReasonCode::SymlinkEscapeDenied, message)
-            }
-        });
-    }
-    if !metadata.is_dir() {
-        let message = format!("{} must be a directory", path.display());
-        return Err(match error_mode {
-            DirectoryErrorMode::Protocol => RuntimeError::Protocol(message),
-            DirectoryErrorMode::ScriptWrite => {
-                runtime_denied(core_policy::DenyReasonCode::WriteDenied, message)
-            }
-        });
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -126,184 +301,28 @@ fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
 }
 
-fn replace_existing_file_atomically(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    replace_existing_file(path, contents, true)
-}
-
-fn replace_existing_file(
-    path: &Path,
-    contents: &[u8],
-    sync_temp: bool,
-) -> Result<(), RuntimeError> {
-    ensure_parent_real_directory(path)?;
-    ensure_non_hardlinked_real_file(path)?;
-    with_replacement_temp(path, None, |temp_path, mut temp_file| {
-        temp_file
-            .write_all(contents)
-            .map_err(|source| RuntimeError::Io {
-                path: temp_path.to_owned(),
-                source,
-            })?;
-        if sync_temp {
-            temp_file.sync_all().map_err(|source| RuntimeError::Io {
-                path: temp_path.to_owned(),
-                source,
-            })?;
-        }
-        drop(temp_file);
-
-        ensure_parent_real_directory(path)?;
-        ensure_non_hardlinked_real_file(path)?;
-        replace_existing_leaf_from_temp(path, temp_path)
-    })
-}
-
-#[cfg(any(unix, windows))]
-fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    let mut file = open_session_log_append_file(path)?;
-    file.seek(SeekFrom::End(0))
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    file.write_all(contents).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })
-}
-
-#[cfg(unix)]
-fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
-    ensure_non_hardlinked_real_file(path)?;
-    let file = fs::OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    validate_open_session_log_append_file(path, &file)?;
-    Ok(file)
-}
-
-#[cfg(windows)]
-fn open_session_log_append_file(path: &Path) -> Result<fs::File, RuntimeError> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    const FILE_SHARE_READ: u32 = 0x0000_0001;
-    ensure_parent_real_directory(path)?;
-    // WHY: a no-follow handle without write/delete sharing makes the checked file the file
-    // we append to for the writer lifetime while still allowing replay/tail readers;
-    // rewriting the full log per event misses the M1 latency budget on Windows.
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .share_mode(FILE_SHARE_READ)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    validate_open_session_log_append_file(path, &file)?;
-    Ok(file)
-}
-
-#[cfg(any(unix, windows))]
-fn validate_open_session_log_append_file(path: &Path, file: &fs::File) -> Result<(), RuntimeError> {
-    #[cfg(unix)]
-    ensure_opened_regular_leaf_matches_path(path, file)?;
-
+fn open_anchored_session_log_append_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
+    let mut options = cap_std::fs::OpenOptions::new();
+    #[cfg(not(windows))]
+    options.append(true);
     #[cfg(windows)]
     {
-        let metadata = file.metadata().map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-        validate_real_file(path, &metadata)?;
-        if hard_link_count_for_open_file(path, file)? > 1 {
-            return Err(RuntimeError::Protocol(format!(
-                "{} must not be hard-linked",
-                path.display()
-            )));
-        }
+        use cap_std::fs::OpenOptionsExt as _;
+
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        options.read(true).write(true).share_mode(FILE_SHARE_READ);
     }
-    Ok(())
+    options.follow(FollowSymlinks::No);
+    let file = path.open(&options)?;
+    validate_open_session_log_append_file(&path.path, &file)?;
+    Ok(file)
 }
-
-#[cfg(not(any(unix, windows)))]
-fn append_existing_file(path: &Path, contents: &[u8]) -> Result<(), RuntimeError> {
-    append_existing_file_without_link_count(path, contents)
-}
-
-#[cfg(any(not(any(unix, windows)), test))]
-fn append_existing_file_without_link_count(
-    path: &Path,
-    contents: &[u8],
-) -> Result<(), RuntimeError> {
-    let mut appended = read_existing_file_for_session_log_append(path, contents.len())?;
-    appended.extend_from_slice(contents);
-    replace_existing_file_without_link_count(path, &appended)
-}
-
-#[cfg(any(not(any(unix, windows)), test))]
-fn read_existing_file_for_session_log_append(
-    path: &Path,
-    appended_bytes: usize,
-) -> Result<Vec<u8>, RuntimeError> {
-    let existing_bytes = ensure_session_log_growth_within_limit(path, appended_bytes)?;
-    let bytes = read_file_with_limit(path, existing_bytes)?;
-    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) != existing_bytes {
-        return Err(RuntimeError::Protocol(format!(
-            "{} changed outside append-only tail semantics",
-            path.display()
-        )));
-    }
-    Ok(bytes)
-}
-
-#[cfg(any(not(any(unix, windows)), test))]
-fn replace_existing_file_without_link_count(
-    path: &Path,
-    contents: &[u8],
-) -> Result<(), RuntimeError> {
-    replace_existing_file(path, contents, false)
-}
-
-fn ensure_new_leaf_available(path: &Path) -> Result<(), RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
-            path.display()
-        ))),
-        Ok(_) => Err(RuntimeError::Protocol(format!(
-            "{} must not already exist",
-            path.display()
-        ))),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
-    }
-}
-
-fn ensure_real_file(path: &Path) -> Result<(), RuntimeError> {
-    let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    validate_real_file(path, &metadata)
-}
-
-fn ensure_non_hardlinked_real_file(path: &Path) -> Result<(), RuntimeError> {
-    let metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
+fn validate_open_session_log_append_file(path: &Path, file: &fs::File) -> Result<(), RuntimeError> {
+    let metadata = file
+        .metadata()
+        .map_err(|source| path_io_error(path, source))?;
     validate_real_file(path, &metadata)?;
-    ensure_not_hardlinked_file(path, &metadata)
+    ensure_not_hardlinked_open_file(path, file, &metadata)
 }
 
 fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
@@ -320,27 +339,4 @@ fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), Runtim
         )));
     }
     Ok(())
-}
-
-#[cfg(any(unix, windows))]
-fn ensure_not_hardlinked_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if hard_link_count(path, metadata)? > 1 {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be hard-linked",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn ensure_not_hardlinked_file(_path: &Path, _metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    Ok(())
-}
-
-fn ensure_parent_real_directory(path: &Path) -> Result<(), RuntimeError> {
-    let parent = path.parent().ok_or_else(|| {
-        RuntimeError::Protocol(format!("{} must have a parent directory", path.display()))
-    })?;
-    ensure_existing_real_directory(parent)
 }

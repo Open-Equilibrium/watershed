@@ -114,12 +114,13 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
     writer
         .persist(&reservation.context_path, &manifests[0])
         .expect("first manifest persists");
-    let mut observed = fs::File::open(&reservation.context_path).expect("manifest stream opens");
+    let mut observed =
+        fs::File::open(reservation.context_path.diagnostic_path()).expect("manifest stream opens");
 
     writer
         .appender
         .append_native_batch_with(
-            &reservation.context_path,
+            reservation.context_path.diagnostic_path(),
             &[manifests[1].manifest.line.as_bytes()],
             |file, bytes| {
                 file.write_all(&bytes[..5])?;
@@ -142,6 +143,48 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
         .read_to_string(&mut text)
         .expect("existing file remains readable");
     assert_eq!(text, "{\"turn\":1}\n{\"turn\":2}\n");
+    reservation.rollback();
+}
+
+#[cfg(unix)]
+#[test]
+fn context_writer_stays_bound_to_the_opened_log_directory() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace("context-writer-directory-swap");
+    let outside = empty_workspace("context-writer-directory-swap-outside");
+    let reservation =
+        reserve_session_log(&workspace, "manifestanchor001").expect("session reserved");
+    let mut writer = ContextManifestWriter::open(&reservation.context_path)
+        .expect("context manifest writer opens");
+    let logs = workspace.join(LOCAL_LOG_DIR);
+    let moved_logs = workspace.join(".loop/logs-opened");
+    let outside_context = outside.join("manifestanchor001.contexts.jsonl");
+    fs::write(&outside_context, "outside\n").expect("outside context written");
+    fs::rename(&logs, &moved_logs).expect("log directory moved");
+    symlink(&outside, &logs).expect("replacement log symlink created");
+
+    writer
+        .persist(
+            &reservation.context_path,
+            &ContextManifestCheckpoint {
+                manifest: ContextManifest {
+                    line: "{\"turn\":1}\n".to_owned(),
+                },
+                ordinal: 1,
+            },
+        )
+        .expect("manifest persists through opened handle");
+
+    assert_eq!(
+        fs::read_to_string(outside_context).expect("outside context readable"),
+        "outside\n"
+    );
+    assert_eq!(
+        fs::read_to_string(moved_logs.join("manifestanchor001.contexts.jsonl"))
+            .expect("anchored context readable"),
+        "{\"turn\":1}\n"
+    );
     reservation.rollback();
 }
 
@@ -305,7 +348,10 @@ fn validation_failure_closes_the_writer_without_notifying() {
         receiver.recv_timeout(Duration::ZERO),
         Err(LiveEventReceiveError::Closed)
     );
-    assert_eq!(fs::read(&reservation.session_path).expect("log reads"), b"");
+    assert_eq!(
+        fs::read(reservation.session_path.diagnostic_path()).expect("log reads"),
+        b""
+    );
     reservation.rollback();
 }
 
@@ -419,7 +465,8 @@ fn progress_writer<'a>(
     fail_after: Option<usize>,
     notification_probe: Option<Arc<Mutex<LiveEventReceiver>>>,
 ) -> (SerialSessionWriter<'a>, Vec<EventEnvelope>, EventEnvelope) {
-    let (validation, progress, terminal) = progress_batch(&reservation.session_path, count);
+    let (validation, progress, terminal) =
+        progress_batch(reservation.session_path.diagnostic_path(), count);
     let writer = SerialSessionWriter::start_with_appender(
         SerialWriterStart {
             context_path: reservation.context_path.clone(),
@@ -699,7 +746,7 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
     let append = thread::spawn(move || {
         let mut appender = SessionLogAppender::open(&append_path).expect("appender opens");
         appender.append_native_batch_with(
-            &append_path,
+            append_path.diagnostic_path(),
             &[first_jsonl.as_bytes(), second_jsonl.as_bytes()],
             |file, bytes| {
                 file.write_all(&bytes[..first_len + 1])?;
@@ -773,7 +820,7 @@ fn cleanup_failure_still_reports_the_complete_persisted_prefix() {
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     let failure = appender
         .append_native_batch_with(
-            &reservation.session_path,
+            reservation.session_path.diagnostic_path(),
             &[first_jsonl.as_bytes(), second_jsonl.as_bytes()],
             |file, bytes| {
                 file.write_all(&bytes[..first_jsonl.len() + 1])?;

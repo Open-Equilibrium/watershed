@@ -442,6 +442,7 @@ fn connection_targets_scoped_step(
         })
 }
 
+#[cfg(test)]
 fn read_recorded_context_manifest_signature(
     workspace: &Path,
     session_id: &str,
@@ -450,31 +451,46 @@ fn read_recorded_context_manifest_signature(
     let path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{session_id}.contexts.jsonl"));
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) => validate_real_file(&path, &metadata)?,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+    let logs = open_runtime_dir(workspace, "logs")?.ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "{} context manifest stream is missing",
+            path.display()
+        ))
+    })?;
+    read_anchored_context_manifest_signature(&logs, session_id, completed_turns)
+}
+
+fn read_anchored_context_manifest_signature(
+    logs: &AnchoredDir,
+    session_id: &str,
+    completed_turns: usize,
+) -> Result<RuntimeStreamSignature, RuntimeError> {
+    let path = logs.file(format!("{session_id}.contexts.jsonl"));
+    match ensure_anchored_real_file(&path) {
+        Ok(()) => {}
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
             return Err(RuntimeError::Protocol(format!(
                 "{} context manifest stream is missing",
-                path.display()
+                path.diagnostic_path().display()
             )));
         }
-        Err(source) => return Err(RuntimeError::Io { path, source }),
+        Err(error) => return Err(error),
     }
     let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
     let mut line_number = 0usize;
-    for_each_file_line_with_limit(&path, MAX_SESSION_LOG_BYTES, |line| {
+    for_each_anchored_file_line_with_limit(&path, MAX_SESSION_LOG_BYTES, |line| {
         line_number = line_number.saturating_add(1);
         if !line.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
                 "{} context manifest stream must end with LF",
-                path.display()
+                path.diagnostic_path().display()
             )));
         }
         let value: serde_json::Value =
             serde_json::from_str(line.trim_end_matches('\n')).map_err(|err| {
                 RuntimeError::Protocol(format!(
                     "{} line {line_number}: invalid context manifest JSON: {err}",
-                    path.display()
+                    path.diagnostic_path().display()
                 ))
             })?;
         if value
@@ -492,20 +508,20 @@ fn read_recorded_context_manifest_signature(
         {
             return Err(RuntimeError::Protocol(format!(
                 "{} context profile does not match the recorded M1 compiler",
-                path.display()
+                path.diagnostic_path().display()
             )));
         }
         let mut canonical = proto::canonical_json(&value).map_err(|err| {
             RuntimeError::Protocol(format!(
                 "{} context manifest is not canonicalizable: {err}",
-                path.display()
+                path.diagnostic_path().display()
             ))
         })?;
         canonical.push('\n');
         if canonical != line {
             return Err(RuntimeError::Protocol(format!(
                 "{} context manifest is not canonical JSONL",
-                path.display()
+                path.diagnostic_path().display()
             )));
         }
         recorded.push(canonical.as_bytes());
@@ -517,7 +533,7 @@ fn read_recorded_context_manifest_signature(
     {
         return Err(RuntimeError::Protocol(format!(
             "{} context manifests do not match deterministic replay",
-            path.display()
+            path.diagnostic_path().display()
         )));
     }
     Ok(recorded)

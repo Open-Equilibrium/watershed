@@ -4,11 +4,7 @@ pub fn run_loop(
     loop_ref: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut output = run_loop_internal(workspace, loop_ref, None, None)?;
-    if emit == EmitMode::Jsonl {
-        output.stdout = read_session_log_to_string(&output.session_path)?;
-    }
-    Ok(output)
+    run_loop_internal(workspace, loop_ref, None, None, emit == EmitMode::Jsonl)
 }
 
 /// Runs a loop with bounded, non-blocking committed-event notifications.
@@ -20,7 +16,7 @@ pub fn run_loop_with_live_events(
     loop_ref: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut output = run_loop_internal(workspace, loop_ref, Some(notifier), None)?;
+    let mut output = run_loop_internal(workspace, loop_ref, Some(notifier), None, false)?;
     output.stdout.clear();
     Ok(output)
 }
@@ -30,6 +26,7 @@ fn run_loop_internal(
     loop_ref: &str,
     notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
+    capture_jsonl: bool,
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
@@ -89,7 +86,7 @@ fn run_loop_internal(
     if !runtime_failed && !replay_matches {
         return Err(RuntimeError::Protocol(format!(
             "{} runtime did not match deterministic replay",
-            reservation.session_path.display()
+            reservation.session_path.diagnostic_path().display()
         )));
     }
     let event_count = runtime.events.record_count;
@@ -106,15 +103,19 @@ fn run_loop_internal(
     if let Some(err) = terminal_error {
         return Err(RuntimeError::session_failed(&expected_session_id, err));
     }
-    let status = format!(
-        "loop {} (session {expected_session_id}) {outcome}\n",
-        loop_block.identity.id
-    );
+    let stdout = if capture_jsonl {
+        read_anchored_to_string_with_limit(&reservation.session_path, MAX_SESSION_LOG_BYTES)?
+    } else {
+        format!(
+            "loop {} (session {expected_session_id}) {outcome}\n",
+            loop_block.identity.id
+        )
+    };
     Ok(RunOutput {
         event_count,
         failed: runtime_failed,
         session_id: expected_session_id,
-        session_path: reservation.session_path.clone(),
-        stdout: status,
+        session_path: reservation.session_path.diagnostic_path().to_owned(),
+        stdout,
     })
 }

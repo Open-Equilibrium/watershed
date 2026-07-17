@@ -117,8 +117,8 @@ struct SerialSessionWriter<'a> {
 }
 
 struct SerialWriterStart<'a> {
-    context_path: PathBuf,
-    path: PathBuf,
+    context_path: AnchoredFile,
+    path: AnchoredFile,
     session_id: String,
     validation: SessionAppendValidationState,
     commit_reservation: Option<&'a SessionReservation>,
@@ -314,7 +314,7 @@ struct ResumeEventSink<'writer, 'session> {
 struct ResumePreflightSink<'path> {
     appended_bytes: usize,
     clock: EventClock,
-    path: &'path Path,
+    path: &'path AnchoredFile,
     planned_event_count: usize,
     resume_marker_count: usize,
 }
@@ -506,20 +506,21 @@ struct ContextManifestWriter {
 }
 
 impl ContextManifestWriter {
-    fn open(path: &Path) -> Result<Self, RuntimeError> {
+    fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
         let mut last_manifest = None;
         let mut manifest_count = 0usize;
-        let byte_count = for_each_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
-            if !line.ends_with('\n') {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} context manifest stream must end with LF",
-                    path.display()
-                )));
-            }
-            last_manifest = Some(line.to_owned());
-            manifest_count = manifest_count.saturating_add(1);
-            Ok(())
-        })?;
+        let byte_count =
+            for_each_anchored_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
+                if !line.ends_with('\n') {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} context manifest stream must end with LF",
+                        path.diagnostic_path().display()
+                    )));
+                }
+                last_manifest = Some(line.to_owned());
+                manifest_count = manifest_count.saturating_add(1);
+                Ok(())
+            })?;
         Ok(Self {
             appender: SessionLogAppender::open(path)?,
             byte_count,
@@ -530,9 +531,10 @@ impl ContextManifestWriter {
 
     fn persist(
         &mut self,
-        path: &Path,
+        path: &AnchoredFile,
         checkpoint: &ContextManifestCheckpoint,
     ) -> Result<(), RuntimeError> {
+        let path = path.diagnostic_path();
         if checkpoint.ordinal == self.manifest_count {
             if self.last_manifest.as_deref() == Some(&checkpoint.manifest.line) {
                 return self.appender.sync(path);
@@ -560,7 +562,7 @@ impl ContextManifestWriter {
             self.byte_count,
             checkpoint.manifest.line.len(),
         )?;
-        let actual = u64::try_from(session_log_len(path)?).unwrap_or(u64::MAX);
+        let actual = self.appender.len(path)?;
         if actual != self.byte_count {
             return Err(RuntimeError::Protocol(format!(
                 "{} changed outside context manifest append semantics",
@@ -606,11 +608,11 @@ impl BatchAppendFailure {
 struct WriterWorker<'a, A> {
     appender: A,
     batch: PendingEventBatch,
-    context_path: &'a Path,
+    context_path: &'a AnchoredFile,
     context_writer: ContextManifestWriter,
     dirty: DirtySyncState,
     notifier: Option<LiveEventNotifier>,
-    path: &'a Path,
+    path: &'a AnchoredFile,
     pending_error: Option<RuntimeError>,
     stopped: bool,
     validation: SessionAppendValidationState,
@@ -628,7 +630,9 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
             return;
         }
         let append_started_at = Instant::now();
-        if let Err(error) = validate_batch(self.path, &mut self.validation, &pending) {
+        if let Err(error) =
+            validate_batch(self.path.diagnostic_path(), &mut self.validation, &pending)
+        {
             reject_batch(pending, error);
             self.stopped = true;
             return;
@@ -638,7 +642,10 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
             .map(|event| event.canonical_jsonl.as_bytes())
             .collect::<Vec<_>>();
         let batch_len = pending.len();
-        match self.appender.append_batch(self.path, &jsonl) {
+        match self
+            .appender
+            .append_batch(self.path.diagnostic_path(), &jsonl)
+        {
             Ok(()) => {}
             Err(failure) if failure.committed_events <= pending.len() => {
                 let committed_events = failure.committed_events;
@@ -686,7 +693,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
         } else {
             commit_session_event(
                 SessionEventCommit {
-                    path: self.path,
+                    path: self.path.diagnostic_path(),
                     context_path: self.context_path,
                     event: &event.event,
                     canonical_jsonl: &event.canonical_jsonl,
@@ -713,7 +720,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
             self.flush_batch();
         }
         if self.dirty.is_due(now) && !self.stopped && self.pending_error.is_none() {
-            self.pending_error = self.appender.sync(self.path).err();
+            self.pending_error = self.appender.sync(self.path.diagnostic_path()).err();
             self.dirty.mark_synced();
         }
     }
@@ -730,7 +737,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
         self.flush_batch();
         let error = self.pending_error.take().or_else(|| {
             if self.dirty.is_dirty() && !self.stopped {
-                self.appender.sync(self.path).err()
+                self.appender.sync(self.path.diagnostic_path()).err()
             } else {
                 None
             }
@@ -745,8 +752,8 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
 }
 
 fn session_writer_worker<A>(
-    path: &Path,
-    context_path: &Path,
+    path: &AnchoredFile,
+    context_path: &AnchoredFile,
     validation: SessionAppendValidationState,
     appender: A,
     context_writer: ContextManifestWriter,
@@ -779,7 +786,7 @@ fn session_writer_worker<A>(
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 worker.flush_batch();
                 if worker.dirty.is_dirty() && !worker.stopped {
-                    let _ = worker.appender.sync(path);
+                    let _ = worker.appender.sync(path.diagnostic_path());
                 }
                 break;
             }
@@ -856,7 +863,7 @@ fn discarded_after_writer_failure() -> RuntimeError {
 
 struct SessionEventCommit<'a> {
     path: &'a Path,
-    context_path: &'a Path,
+    context_path: &'a AnchoredFile,
     event: &'a EventEnvelope,
     canonical_jsonl: &'a str,
     context_manifest: Option<ContextManifestCheckpoint>,
@@ -948,27 +955,23 @@ fn is_event_sync_checkpoint(event_type: &EventType) -> bool {
 }
 
 struct SessionLogAppender {
-    #[cfg(any(unix, windows))]
     file: fs::File,
 }
 
 impl SessionLogAppender {
-    fn open(path: &Path) -> Result<Self, RuntimeError> {
-        #[cfg(any(unix, windows))]
-        {
-            Ok(Self {
-                file: open_session_log_append_file(path)?,
-            })
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            prepare_session_log_append(path, 0)?;
-            Ok(Self {})
-        }
+    fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
+        Ok(Self {
+            file: open_anchored_session_log_append_file(path)?,
+        })
     }
 
-    #[cfg(any(unix, windows))]
+    fn len(&self, path: &Path) -> Result<u64, RuntimeError> {
+        self.file
+            .metadata()
+            .map(|metadata| metadata.len())
+            .map_err(|source| path_io_error(path, source))
+    }
+
     fn append_native_batch_with<F, C>(
         &mut self,
         path: &Path,
@@ -1043,87 +1046,36 @@ impl SessionLogAppender {
 
 impl EventLogAppender for SessionLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        #[cfg(any(unix, windows))]
-        {
-            self.append_native_batch_with(
-                path,
-                &[bytes],
-                |file, bytes| file.write_all(bytes),
-                cleanup_incomplete_suffix,
-            )
-            .map_err(|failure| failure.error)
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            append_session_log_bytes(path, bytes)
-        }
+        self.append_native_batch_with(
+            path,
+            &[bytes],
+            |file, bytes| file.write_all(bytes),
+            cleanup_incomplete_suffix,
+        )
+        .map_err(|failure| failure.error)
     }
 
     fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
-        #[cfg(any(unix, windows))]
-        {
-            self.append_native_batch_with(
-                path,
-                events,
-                |file, bytes| file.write_all(bytes),
-                cleanup_incomplete_suffix,
-            )
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            self.append(path, &events.concat())
-                .map_err(BatchAppendFailure::none_committed)
-        }
+        self.append_native_batch_with(
+            path,
+            events,
+            |file, bytes| file.write_all(bytes),
+            cleanup_incomplete_suffix,
+        )
     }
 
     fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
-        #[cfg(any(unix, windows))]
-        {
-            validate_open_session_log_append_file(path, &self.file)?;
-            self.file.sync_all().map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            sync_session_log(path)
-        }
+        validate_open_session_log_append_file(path, &self.file)?;
+        self.file.sync_all().map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })
     }
 }
 
-#[cfg(any(unix, windows))]
 fn cleanup_incomplete_suffix(file: &mut fs::File, retained_len: u64) -> io::Result<()> {
     file.set_len(retained_len)?;
     file.sync_all()
-}
-
-#[cfg(not(any(unix, windows)))]
-fn sync_session_log(path: &Path) -> Result<(), RuntimeError> {
-    ensure_non_hardlinked_real_file(path)?;
-    let expected_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    validate_real_file(path, &expected_metadata)?;
-    let file =
-        open_file_for_sync_without_following_reparse(path).map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    ensure_opened_real_file_for_read_matches_path(path, &expected_metadata, &file)?;
-    file.sync_all().map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_file_for_sync_without_following_reparse(path: &Path) -> io::Result<fs::File> {
-    fs::OpenOptions::new().read(true).write(true).open(path)
 }
 
 fn writer_channel_closed_error() -> RuntimeError {

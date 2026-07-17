@@ -248,6 +248,7 @@ name = "loop-agent-cli"
 version = "0.0.0"
 dependencies = [
  "loop-agent-core",
+ "proto",
 ]
 
 [[package]]

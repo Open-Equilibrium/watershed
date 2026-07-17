@@ -196,8 +196,9 @@ fn write_script_output(
         protected_path_match_mode,
         policy,
     )?;
-    let path = ensure_real_workspace_write_path(workspace, target)?;
-    replace_script_output_atomically(workspace, target, &path, contents)
+    let path = anchored_workspace_write_path(workspace, target, true)?
+        .expect("created script target parent is present");
+    replace_script_output_atomically(&path, contents)
 }
 
 fn preflight_own_script_outputs(
@@ -207,101 +208,110 @@ fn preflight_own_script_outputs(
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
     if let Some(write) = write {
-        let path = preflight_real_workspace_write_path(workspace, &write.target)?;
         ensure_resolved_script_target_not_protected(
             workspace,
             &write.target,
             protected_path_match_mode,
             policy,
         )?;
-        ensure_writable_regular_leaf(&path)?;
+        if let Some(path) = anchored_workspace_write_path(workspace, &write.target, false)? {
+            ensure_anchored_writable_regular_leaf(&path)?;
+        }
     }
     Ok(())
 }
 
 fn replace_script_output_atomically(
-    workspace: &Path,
-    target: &str,
-    path: &Path,
+    path: &AnchoredFile,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
-    ensure_real_workspace_write_path(workspace, target)?;
-    let initial_leaf_existed = ensure_writable_regular_leaf(path)?;
-    with_replacement_temp(
+    let initial_leaf_existed = ensure_anchored_writable_regular_leaf(path)?;
+    with_anchored_replacement_temp(
         path,
         Some(core_policy::DenyReasonCode::WriteDenied),
         |temp_path, mut temp_file| {
             temp_file
                 .write_all(contents)
                 .map_err(|source| RuntimeError::Io {
-                    path: temp_path.to_owned(),
+                    path: temp_path.diagnostic_path().to_owned(),
                     source,
                 })?;
-            drop(temp_file);
+            // Keep the created file open through the capability-relative rename. A peer with
+            // write access to this exact directory can already replace the destination itself.
 
-            ensure_real_workspace_write_path(workspace, target)?;
             if initial_leaf_existed {
-                if ensure_writable_regular_leaf(path)? {
-                    return replace_existing_leaf_from_temp(path, temp_path);
+                if ensure_anchored_writable_regular_leaf(path)? {
+                    return temp_path.rename_to(path);
                 }
             } else {
-                ensure_new_leaf_available(path)?;
+                ensure_anchored_new_leaf_available(path)?;
             }
-            ensure_real_workspace_write_path(workspace, target)?;
-            fs::rename(temp_path, path).map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })
+            temp_path.rename_to(path)
         },
     )
 }
 
-fn replace_existing_leaf_from_temp(path: &Path, temp_path: &Path) -> Result<(), RuntimeError> {
-    fs::rename(temp_path, path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })
+fn anchored_workspace_write_path(
+    workspace: &Path,
+    target: &str,
+    create: bool,
+) -> Result<Option<AnchoredFile>, RuntimeError> {
+    let mut parts = target.split('/').peekable();
+    let mut parent = AnchoredDir::workspace(workspace)?;
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            return Ok(Some(parent.file(part)));
+        }
+        let Some(child) = parent.child(part, create, DirectoryErrorMode::ScriptWrite)? else {
+            return Ok(None);
+        };
+        parent = child;
+    }
+    Err(RuntimeError::Protocol(
+        "own-script write target must name a file".to_owned(),
+    ))
 }
 
-fn with_replacement_temp<T>(
-    path: &Path,
+fn with_anchored_replacement_temp<T>(
+    path: &AnchoredFile,
     denied_reason: Option<core_policy::DenyReasonCode>,
-    operation: impl FnOnce(&Path, fs::File) -> Result<T, RuntimeError>,
+    operation: impl FnOnce(&AnchoredFile, fs::File) -> Result<T, RuntimeError>,
 ) -> Result<T, RuntimeError> {
-    let (temp_path, temp_file) = create_replacement_temp(path, denied_reason)?;
+    let (temp_path, temp_file) = create_anchored_replacement_temp(path, denied_reason)?;
     let result = operation(&temp_path, temp_file);
     if result.is_err() {
-        let _ = fs::remove_file(temp_path);
+        let _ = temp_path.remove();
     }
     result
 }
 
-fn create_replacement_temp(
-    path: &Path,
+fn create_anchored_replacement_temp(
+    path: &AnchoredFile,
     denied_reason: Option<core_policy::DenyReasonCode>,
-) -> Result<(PathBuf, fs::File), RuntimeError> {
+) -> Result<(AnchoredFile, fs::File), RuntimeError> {
     for attempt in 0..100 {
-        let temp_path = replacement_temp_path(path, attempt)?;
-        match fs::OpenOptions::new()
+        let temp_path = path.parent.file(
+            replacement_temp_path(path.diagnostic_path(), attempt)?
+                .file_name()
+                .expect("replacement temp path has a file name"),
+        );
+        let mut options = cap_std::fs::OpenOptions::new();
+        options
             .create_new(true)
             .write(true)
-            .open(&temp_path)
-        {
+            .follow(FollowSymlinks::No);
+        match temp_path.open(&options) {
             Ok(file) => return Ok((temp_path, file)),
-            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(source) => {
-                return Err(RuntimeError::Io {
-                    path: temp_path,
-                    source,
-                });
-            }
+            Err(RuntimeError::Io { source, .. })
+                if source.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
         }
     }
     Err(runtime_protocol_or_denied(
         denied_reason,
         format!(
             "could not allocate temporary replacement path for {}",
-            path.display()
+            path.diagnostic_path().display()
         ),
     ))
 }
@@ -434,109 +444,11 @@ fn resolved_workspace_scoped_target(
     Ok(format!("workspace/{relative}"))
 }
 
-fn ensure_real_workspace_write_path(
-    workspace: &Path,
-    target: &str,
-) -> Result<PathBuf, RuntimeError> {
-    let mut parts = target.split('/').peekable();
-    let mut path = workspace.to_path_buf();
-    while let Some(part) = parts.next() {
-        path.push(part);
-        if parts.peek().is_some() {
-            ensure_created_script_real_directory(&path)?;
-        }
-    }
-    Ok(path)
-}
-
-fn preflight_real_workspace_write_path(
-    workspace: &Path,
-    target: &str,
-) -> Result<PathBuf, RuntimeError> {
-    let mut parts = target.split('/').peekable();
-    let mut path = workspace.to_path_buf();
-    while let Some(part) = parts.next() {
-        path.push(part);
-        if parts.peek().is_some() {
-            ensure_optional_script_real_directory(&path)?;
-        }
-    }
-    Ok(path)
-}
-
-fn ensure_optional_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
-    ensure_optional_directory_with(path, DirectoryErrorMode::ScriptWrite)
-}
-
-fn ensure_created_script_real_directory(path: &Path) -> Result<bool, RuntimeError> {
-    ensure_created_directory_with(path, DirectoryErrorMode::ScriptWrite)
-}
-
-#[cfg(unix)]
-fn ensure_opened_regular_leaf_matches_path(
-    path: &Path,
-    file: &fs::File,
-) -> Result<(), RuntimeError> {
-    let path_metadata = fs::symlink_metadata(path).map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    if path_metadata.file_type().is_symlink() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink",
-            path.display()
-        )));
-    }
-    if !path_metadata.is_file() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must be a file",
-            path.display()
-        )));
-    }
-
-    let file_metadata = file.metadata().map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    if !file_metadata.is_file() || !same_file_metadata(&path_metadata, &file_metadata) {
-        return Err(RuntimeError::Protocol(format!(
-            "{} changed before write",
-            path.display()
-        )));
-    }
-    ensure_not_hardlinked_file(path, &file_metadata)?;
-
-    Ok(())
-}
-
-#[cfg(unix)]
-fn same_file_metadata(left: &fs::Metadata, right: &fs::Metadata) -> bool {
-    use std::os::unix::fs::MetadataExt;
-
-    left.dev() == right.dev() && left.ino() == right.ino()
-}
-
 #[cfg(unix)]
 fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
     use std::os::unix::fs::MetadataExt;
 
     Ok(metadata.nlink())
-}
-
-#[cfg(windows)]
-fn hard_link_count(path: &Path, _metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-    let file = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-        .map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-    hard_link_count_for_open_file(path, &file)
 }
 
 #[cfg(windows)]
@@ -706,46 +618,40 @@ fn emit_tool_progress(
     )
 }
 
-fn ensure_writable_regular_leaf(path: &Path) -> Result<bool, RuntimeError> {
-    match fs::symlink_metadata(path) {
+fn ensure_anchored_writable_regular_leaf(path: &AnchoredFile) -> Result<bool, RuntimeError> {
+    match path.metadata() {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(runtime_denied(
             core_policy::DenyReasonCode::SymlinkEscapeDenied,
-            format!("{} must not be a symlink", path.display()),
+            format!(
+                "{} must not be a symlink or reparse point",
+                path.diagnostic_path().display()
+            ),
         )),
         Ok(metadata) if metadata.is_file() => {
-            ensure_script_leaf_not_hardlinked(path, &metadata)?;
+            let (file, metadata) = open_anchored_file_for_read(path)?;
+            if let Err(error) =
+                ensure_not_hardlinked_open_file(path.diagnostic_path(), &file, &metadata)
+            {
+                return match error {
+                    RuntimeError::Protocol(_) => Err(runtime_denied(
+                        core_policy::DenyReasonCode::WriteDenied,
+                        format!(
+                            "{} must not be hard-linked",
+                            path.diagnostic_path().display()
+                        ),
+                    )),
+                    other => Err(other),
+                };
+            }
             Ok(true)
         }
         Ok(_) => Err(runtime_denied(
             core_policy::DenyReasonCode::WriteDenied,
-            format!("{} must be a file", path.display()),
+            format!("{} must be a file", path.diagnostic_path().display()),
         )),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(source) => Err(RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        }),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            Ok(false)
+        }
+        Err(error) => Err(error),
     }
-}
-
-#[cfg(any(unix, windows))]
-fn ensure_script_leaf_not_hardlinked(
-    path: &Path,
-    metadata: &fs::Metadata,
-) -> Result<(), RuntimeError> {
-    if hard_link_count(path, metadata)? > 1 {
-        return Err(runtime_denied(
-            core_policy::DenyReasonCode::WriteDenied,
-            format!("{} must not be hard-linked", path.display()),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn ensure_script_leaf_not_hardlinked(
-    _path: &Path,
-    _metadata: &fs::Metadata,
-) -> Result<(), RuntimeError> {
-    Ok(())
 }

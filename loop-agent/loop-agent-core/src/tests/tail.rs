@@ -119,13 +119,69 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let prefix = reader.read_after(0).expect("prefix reads");
     assert_eq!(prefix.len(), 1);
     assert_eq!(reader.read_after(0).expect("prefix retries"), prefix);
-    append_session_log_bytes(&path, &completed.as_bytes()[split..])
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .expect("session log opens for append");
+    file.write_all(&completed.as_bytes()[split..])
         .expect("remaining bytes append");
     let appended = reader
         .read_incremental_after(1)
         .expect("completed suffix reads without replaying the prefix");
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
+}
+
+#[test]
+fn incremental_reader_recovers_atomically_after_a_malformed_append() {
+    let workspace = empty_workspace("tail-invalid-append-recovery");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailrecovery001.jsonl");
+    let started = session_event_line(
+        "tailrecovery001",
+        "evt-recovery-started",
+        EventType::SessionStarted,
+        1,
+    );
+    let completed = session_event_line(
+        "tailrecovery001",
+        "evt-recovery-completed",
+        EventType::SessionCompleted,
+        2,
+    );
+    fs::write(&path, &started).expect("initial event written");
+    let mut reader = SessionEventReader::open(&workspace, "tailrecovery001").expect("reader opens");
+    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+
+    append_session_log_line(&path, &format!("{completed}not-json\n"))
+        .expect("mixed suffix appended");
+    reader
+        .read_incremental_after(1)
+        .expect_err("malformed suffix rejects atomically");
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .expect("session log opens for repair")
+        .set_len(u64::try_from(started.len() + completed.len()).expect("fixture length fits"))
+        .expect("malformed record removed");
+
+    let recovered = reader
+        .read_incremental_after(1)
+        .expect("valid appended event remains readable");
+    assert_eq!(
+        recovered
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [2]
+    );
+    assert!(
+        reader
+            .read_incremental_after(2)
+            .expect("processed event is not replayed")
+            .is_empty()
+    );
 }
 
 #[test]

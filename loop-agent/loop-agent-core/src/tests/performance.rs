@@ -56,9 +56,14 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
         let workspace = workspace_copy("hello-loop");
         let mut timings = EventWriterTimings::default();
         let (notifier, _receiver) = live_event_channel();
-        let output =
-            run_loop_internal(&workspace, "hello-loop", Some(notifier), Some(&mut timings))
-                .expect("measured runtime emit succeeds");
+        let output = run_loop_internal(
+            &workspace,
+            "hello-loop",
+            Some(notifier),
+            Some(&mut timings),
+            false,
+        )
+        .expect("measured runtime emit succeeds");
         assert!(!output.failed);
         assert_eq!(timings.append_nanos.len(), output.event_count);
         assert_eq!(timings.notification_nanos.len(), output.event_count);
@@ -92,6 +97,7 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
             &completed.session_id,
             Some(notifier),
             Some(&mut timings),
+            false,
         )
         .expect("measured resume succeeds");
         let appended_events = output.event_count - prefix_events;
