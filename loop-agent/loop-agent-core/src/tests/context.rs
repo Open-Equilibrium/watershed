@@ -70,6 +70,32 @@ fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str
     fs::write(path, text.replacen(before, after, 1)).expect("registry fixture updates");
 }
 
+fn exceed_context_budget_with_valid_instructions(workspace: &Path) {
+    const PROMPT_BYTES: usize = core_script::MAX_REGISTRY_DEFINITION_BYTES - 4 * 1024;
+    let instructions = [
+        ("context-load-a", "ContextLoadA"),
+        ("context-load-b", "ContextLoadB"),
+    ];
+    for (id, name) in instructions {
+        fs::write(
+            workspace
+                .join("registry/instructions")
+                .join(format!("{id}.yaml")),
+            format!(
+                "instruction:\n  id: {id}\n  name: {name}\n  prompt: \"{}\"\n",
+                "x".repeat(PROMPT_BYTES)
+            ),
+        )
+        .expect("valid large instruction writes");
+    }
+    replace_registry_text(
+        workspace,
+        "phases/inspect.yaml",
+        "instruction_refs: [inspect-input]",
+        "instruction_refs: [context-load-a, context-load-b]",
+    );
+}
+
 fn prefix_before_message_completed(stream: &str) -> String {
     let mut prefix = String::new();
     for line in stream.lines() {
@@ -475,12 +501,7 @@ fn context_budget_error_maps_to_the_typed_runtime_failure_code() {
 fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
     let workspace = workspace_copy("hello-loop");
     let (_, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    replace_registry_text(
-        &workspace,
-        "instructions/inspect-input.yaml",
-        "prompt: \"Read the selected input and report only deterministic facts.\"",
-        &format!("prompt: \"{}\"", "x".repeat(STUB_MODEL_CONTEXT_LIMIT)),
-    );
+    exceed_context_budget_with_valid_instructions(&workspace);
     let registry = load_test_registry(&workspace, "hello-loop");
     let loop_block = registry
         .loop_block("hello-loop")
@@ -514,12 +535,7 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
 #[test]
 fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let workspace = workspace_copy("hello-loop");
-    replace_registry_text(
-        &workspace,
-        "instructions/inspect-input.yaml",
-        "prompt: \"Read the selected input and report only deterministic facts.\"",
-        &format!("prompt: \"{}\"", "x".repeat(STUB_MODEL_CONTEXT_LIMIT)),
-    );
+    exceed_context_budget_with_valid_instructions(&workspace);
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Human)
         .expect_err("the committed context failure must be returned");
