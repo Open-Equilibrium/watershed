@@ -1566,7 +1566,21 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
     assert!(!resumed.contains("\"event_type\":\"session.completed\""));
     let events =
         validate_session_log_text(&path, "hello001", &resumed).expect("marker log remains valid");
-    assert!(!stream_is_completed(&events));
+    let denial = core_policy::DenyReasonCode::WriteDenied.as_str();
+    for (event_type, field) in [
+        (EventType::Error, "code"),
+        (EventType::LoopFailed, "error"),
+        (EventType::SessionFailed, "reason"),
+    ] {
+        assert!(events.iter().any(|event| {
+            event.event_type == event_type
+                && event.payload.get(field).and_then(serde_json::Value::as_str) == Some(denial)
+        }));
+    }
+    assert_eq!(
+        human_failure_status(&events).as_deref(),
+        Some("failed (write_denied): write outside declared roots denied")
+    );
 }
 
 #[test]

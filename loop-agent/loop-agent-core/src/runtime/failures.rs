@@ -94,14 +94,6 @@ fn complete_active_step(
     }
 }
 
-fn emit_propagated_runtime_error_failure(
-    loop_block: &core_script::LoopBlock,
-    invocation: &LoopInvocation,
-    builder: &mut RuntimeEventBuilder<'_>,
-) -> Result<(), RuntimeError> {
-    emit_runtime_loop_failure(loop_block, invocation, RUNTIME_ERROR_REASON, builder)
-}
-
 fn sandbox_tool_dispatch_failure(
     tool: &core_script::ToolBlock,
     stub_model_fixture_profile: bool,
@@ -242,6 +234,7 @@ fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
             "context_budget_exceeded",
             "mandatory context exceeds the model input budget",
         ),
+        RuntimeError::Denied { reason, .. } => (reason.as_str(), denial_message(reason.clone())),
         _ => (RUNTIME_ERROR_REASON, "runtime execution failed"),
     };
     RuntimeFailure {

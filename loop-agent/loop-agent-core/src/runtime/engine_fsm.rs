@@ -319,10 +319,11 @@ fn execute_loop_with_sink(
     let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
         Ok(failed) => failed,
         Err(err) if should_terminalize_error(options.side_effect_mode, &err) => {
+            let reason = runtime_failure_for_unhandled_error(&err).reason;
             builder.emit(
                 None,
                 EventType::SessionFailed,
-                serde_json::json!({"reason":RUNTIME_ERROR_REASON}),
+                serde_json::json!({"reason":reason}),
             )?;
             return Ok(builder.into_execution(true, Some(err)));
         }
@@ -517,7 +518,8 @@ fn emit_loop_block_at_depth(
             }
             Ok(None) => {}
             Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
-                emit_propagated_runtime_error_failure(loop_block, &invocation, builder)?;
+                let reason = runtime_failure_for_unhandled_error(&err).reason;
+                emit_runtime_loop_failure(loop_block, &invocation, &reason, builder)?;
                 return Err(err);
             }
             Err(err) => return Err(err),
