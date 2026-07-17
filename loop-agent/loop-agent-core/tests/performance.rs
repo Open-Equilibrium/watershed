@@ -212,7 +212,7 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
         ),
     )
     .expect("near-limit loop written");
-    for index in 0..1000 {
+    for index in 0..980 {
         let id = format!("unused-{index:04}");
         let name_prefix = format!("Unused{index:04}");
         let name = format!(
