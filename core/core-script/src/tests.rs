@@ -1290,37 +1290,39 @@ fn registry_rejects_normalized_duplicate_names() {
 }
 
 #[test]
-fn registry_rejects_programmatic_invalid_identity_ids() {
-    let err = ResolvedRegistry::from_blocks([RegistryBlock::Instruction(InstructionBlock {
-        identity: BlockIdentity {
-            id: "../bad".to_owned(),
-            name: "Bad".to_owned(),
-        },
-        prompt: "Inspect".to_owned(),
-    })])
-    .expect_err("programmatic block ids must follow registry id rules");
+fn registry_rejects_programmatic_invalid_shapes() {
+    let instruction = |id: &str, name: &str| {
+        RegistryBlock::Instruction(InstructionBlock {
+            identity: BlockIdentity {
+                id: id.to_owned(),
+                name: name.to_owned(),
+            },
+            prompt: "Inspect".to_owned(),
+        })
+    };
+    let mut empty_phase = test_phase();
+    empty_phase.steps.clear();
+    let cases: [(RegistryBlock, fn(RegistryError) -> bool); 3] = [
+        (
+            instruction("../bad", "Bad"),
+            |err| matches!(err, RegistryError::InvalidBlockId(id) if id == "../bad"),
+        ),
+        (
+            instruction("empty-name", ""),
+            |err| matches!(err, RegistryError::InvalidBlockName { kind: "instruction", id } if id == "empty-name"),
+        ),
+        (RegistryBlock::Phase(empty_phase), |err| {
+            matches!(err, RegistryError::Parse { source_name, message }
+                if source_name == "programmatic registry"
+                    && message == "phase.steps must contain at least one item")
+        }),
+    ];
 
-    assert!(matches!(
-        err,
-        RegistryError::InvalidBlockId(id) if id == "../bad"
-    ));
-}
-
-#[test]
-fn registry_rejects_programmatic_empty_identity_names() {
-    let err = ResolvedRegistry::from_blocks([RegistryBlock::Instruction(InstructionBlock {
-        identity: BlockIdentity {
-            id: "empty-name".to_owned(),
-            name: String::new(),
-        },
-        prompt: "Inspect".to_owned(),
-    })])
-    .expect_err("programmatic block names must be non-empty");
-
-    assert_eq!(
-        err.to_string(),
-        "instruction empty-name name must be non-empty"
-    );
+    for (block, matches_expected_error) in cases {
+        let err = ResolvedRegistry::from_blocks([block])
+            .expect_err("programmatic blocks must follow registry shape rules");
+        assert!(matches_expected_error(err));
+    }
 }
 
 #[test]
@@ -1340,7 +1342,7 @@ fn registry_resolves_normalized_name_references() {
             },
             instruction_refs: vec!["Cafe\u{301}".to_owned()],
             tool_refs: Vec::new(),
-            steps: Vec::new(),
+            steps: test_phase().steps,
         }),
     ])
     .expect("canonically equivalent name reference resolves");
@@ -1399,7 +1401,7 @@ fn registry_rejects_duplicate_phase_tool_refs() {
             },
             instruction_refs: Vec::new(),
             tool_refs: vec!["echo".to_owned(), "echo".to_owned()],
-            steps: Vec::new(),
+            steps: test_phase().steps,
         }),
     ])
     .expect_err("duplicate phase tool references must fail");

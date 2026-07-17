@@ -114,6 +114,19 @@ impl ResolvedRegistry {
         let mut name_ids: BTreeMap<&'static str, BTreeMap<String, String>> = BTreeMap::new();
 
         for block in blocks {
+            validate_registry_block_shape(&block).map_err(|message| {
+                let (kind, identity) = registry_block_identity(&block);
+                if !is_valid_block_id(&identity.id) {
+                    RegistryError::InvalidBlockId(identity.id.clone())
+                } else if identity.name.is_empty() {
+                    RegistryError::InvalidBlockName {
+                        kind,
+                        id: identity.id.clone(),
+                    }
+                } else {
+                    parse_error("programmatic registry", message)
+                }
+            })?;
             registry.insert(block, &mut name_ids)?;
         }
         registry.name_ids = name_ids;
