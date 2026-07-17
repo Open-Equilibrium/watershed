@@ -74,8 +74,8 @@ impl ResolvedRegistry {
                 .resolve(kind, &id)
                 .expect("queued catalog entries remain available");
             let source = read_registry_file_to_string(&root, &entry.file, limits.max_file_bytes)?;
-            active_bytes = active_bytes
-                .saturating_add(u64::try_from(source.len()).unwrap_or(u64::MAX));
+            active_bytes =
+                active_bytes.saturating_add(u64::try_from(source.len()).unwrap_or(u64::MAX));
             if active_bytes > max_active_bytes {
                 return Err(RegistryError::ReadLimitExceeded {
                     path: root.path.clone(),

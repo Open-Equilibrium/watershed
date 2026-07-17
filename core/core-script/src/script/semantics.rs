@@ -32,9 +32,7 @@ fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
         RegistryBlock::Instruction(block) if block.prompt.is_empty() => {
             Err("instruction.prompt must be non-empty".to_owned())
         }
-        RegistryBlock::Instruction(block)
-            if block.prompt.len() > MAX_REGISTRY_DEFINITION_BYTES =>
-        {
+        RegistryBlock::Instruction(block) if block.prompt.len() > MAX_REGISTRY_DEFINITION_BYTES => {
             Err(format!(
                 "instruction.prompt exceeds the maximum of {MAX_REGISTRY_DEFINITION_BYTES} bytes"
             ))

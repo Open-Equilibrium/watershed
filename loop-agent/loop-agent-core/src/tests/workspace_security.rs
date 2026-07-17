@@ -124,8 +124,7 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
     ));
 
-    let oversized_len =
-        usize::try_from(MAX_WORKSPACE_CONFIG_BYTES).expect("limit fits usize") + 1;
+    let oversized_len = usize::try_from(MAX_WORKSPACE_CONFIG_BYTES).expect("limit fits usize") + 1;
     fs::write(
         workspace.join(".loop/config.yaml"),
         format!("registry_root: registry\n{}", "x".repeat(oversized_len)),

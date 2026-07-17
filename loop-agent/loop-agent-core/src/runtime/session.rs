@@ -33,11 +33,8 @@ fn run_loop_internal(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
-    let registry = core_script::load_loop_registry_from_workspace(
-        workspace,
-        &config.registry_root,
-        loop_ref,
-    )?;
+    let registry =
+        core_script::load_loop_registry_from_workspace(workspace, &config.registry_root, loop_ref)?;
     let loop_block = registry
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
