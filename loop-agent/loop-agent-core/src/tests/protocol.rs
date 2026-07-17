@@ -96,6 +96,16 @@ fn protocol_validator_rejects_nulls_recursively_but_keeps_additive_values() {
         text
     );
 
+    envelope["future"] = serde_json::json!({"values": [true, null]});
+    let mut text = proto::canonical_json(&envelope).expect("null extension canonicalizes");
+    text.push('\n');
+    let err = validate_protocol_jsonl_text(Path::new("null-envelope-extension.jsonl"), &text)
+        .expect_err("top-level extensions must follow the v0 null contract");
+    assert!(
+        err.to_string()
+            .contains("future.values[1] must not be null")
+    );
+
     let mut root_null = base_event();
     root_null.payload = serde_json::json!({"future": null, "reason": "fixture-start"});
     assert_invalid_event(

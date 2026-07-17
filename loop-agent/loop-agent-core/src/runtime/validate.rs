@@ -53,6 +53,9 @@ fn validate_event_payload(
         payload,
     };
     validator.reject_nulls(&event.payload, "payload")?;
+    for (field, value) in &event.additional_fields {
+        validator.reject_nulls(value, field)?;
+    }
 
     match event.event_type {
         EventType::SessionStarted
