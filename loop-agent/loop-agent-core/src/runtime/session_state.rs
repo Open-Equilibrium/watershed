@@ -72,10 +72,14 @@ fn resume_session_internal(
             "invalid session_id {session_id:?}"
         )));
     }
-    let dirs = open_existing_runtime_dirs(workspace, session_id)?;
-    let path = dirs.sessions.file(format!("{session_id}.jsonl"));
+    let sessions =
+        open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+            path: workspace.join(LOCAL_SESSION_DIR),
+            source: io::Error::from(io::ErrorKind::NotFound),
+        })?;
+    let path = sessions.file(format!("{session_id}.jsonl"));
     ensure_anchored_non_hardlinked_file(&path)?;
-    let lock = acquire_anchored_session_lock(&dirs.sessions, session_id)?;
+    let lock = acquire_anchored_session_lock(&sessions, session_id)?;
     let inspection = inspect_resume_session(&path, session_id)?;
     let prior_event_count = inspection.prior_event_count;
     if matches!(
@@ -84,7 +88,9 @@ fn resume_session_internal(
     ) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
-    let metadata = require_anchored_session_log_metadata(&dirs.logs, session_id)?;
+    let logs = open_runtime_dir(workspace, "logs")?
+        .ok_or_else(|| missing_definition_metadata(session_id))?;
+    let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
     let loop_id = resumable_loop_id(
         path.diagnostic_path(),
         session_id,
@@ -106,11 +112,8 @@ fn resume_session_internal(
         runtime_policy_target(),
     )?;
     let clock = resume_event_clock(&config, inspection.clock)?;
-    let recorded_context = read_anchored_context_manifest_signature(
-        &dirs.logs,
-        session_id,
-        inspection.completed_turns,
-    )?;
+    let recorded_context =
+        read_anchored_context_manifest_signature(&logs, session_id, inspection.completed_turns)?;
     let mut prefix_sink =
         RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
     let planned_runtime = execute_loop_with_sink(
@@ -184,7 +187,7 @@ fn resume_session_internal(
             path.diagnostic_path().display()
         )));
     }
-    let context_path = dirs.logs.file(format!("{session_id}.contexts.jsonl"));
+    let context_path = logs.file(format!("{session_id}.contexts.jsonl"));
     let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
         context_path,
         path: path.clone(),
@@ -650,8 +653,9 @@ fn verify_resume_definition_metadata(
 ) -> Result<(), RuntimeError> {
     // WHY: resume hashes bind a partial session to the registry definitions that produced
     // it; incomplete metadata cannot prove the prefix matches the current registry.
-    let dirs = open_existing_runtime_dirs(workspace, session_id)?;
-    let metadata = require_anchored_session_log_metadata(&dirs.logs, session_id)?;
+    let logs = open_runtime_dir(workspace, "logs")?
+        .ok_or_else(|| missing_definition_metadata(session_id))?;
+    let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
     verify_resume_definition_metadata_values(session_id, &metadata, registry, loop_block)
 }
 

@@ -226,30 +226,6 @@ fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>,
     loop_dir.child(leaf, false, DirectoryErrorMode::Protocol)
 }
 
-fn open_existing_runtime_dirs(
-    workspace: &Path,
-    session_id: &str,
-) -> Result<RuntimeDirs, RuntimeError> {
-    let workspace_dir = AnchoredDir::workspace(workspace)?;
-    let loop_path = workspace.join(".loop");
-    let loop_dir = workspace_dir
-        .child(".loop", false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| RuntimeError::Io {
-            path: loop_path,
-            source: io::Error::from(io::ErrorKind::NotFound),
-        })?;
-    let sessions = loop_dir
-        .child("sessions", false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| RuntimeError::Io {
-            path: workspace.join(LOCAL_SESSION_DIR),
-            source: io::Error::from(io::ErrorKind::NotFound),
-        })?;
-    let logs = loop_dir
-        .child("logs", false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| missing_definition_metadata(session_id))?;
-    Ok(RuntimeDirs { logs, sessions })
-}
-
 fn validate_anchored_directory(
     path: &Path,
     metadata: &cap_std::fs::Metadata,

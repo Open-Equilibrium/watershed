@@ -1326,7 +1326,6 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     let registry = load_test_registry(&workspace, "hello-loop");
     let loop_block = registry.loop_block("hello-loop").expect("loop exists");
     let metadata_path = workspace.join(LOCAL_LOG_DIR).join("partial001.log");
-    fs::create_dir_all(workspace.join(LOCAL_SESSION_DIR)).expect("session dir");
     fs::create_dir_all(metadata_path.parent().expect("metadata parent")).expect("metadata dir");
 
     fs::write(&metadata_path, "").expect("empty metadata writes");
