@@ -677,16 +677,8 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
             "missing" => fs::remove_file(&context_path).expect("context stream removed"),
             "missing-lf" => fs::write(&context_path, context_stream.trim_end_matches('\n'))
                 .expect("unframed context stream written"),
-            "malformed-json" => {
-                let mut records = context_stream.lines();
-                let first = records.next().expect("first context manifest exists");
-                records.next().expect("second context manifest exists");
-                let suffix = records
-                    .map(|record| format!("{record}\n"))
-                    .collect::<String>();
-                fs::write(&context_path, format!("{first}\n{{\n{suffix}"))
-                    .expect("malformed context stream written");
-            }
+            "malformed-json" => fs::write(&context_path, format!("{context_stream}{{\n"))
+                .expect("malformed context stream written"),
             "whitespace" => fs::write(&context_path, context_stream.replacen('{', "{ ", 1))
                 .expect("noncanonical context stream written"),
             _ => unreachable!(),
