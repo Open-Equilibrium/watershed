@@ -1,11 +1,17 @@
 #[test]
 fn protocol_validation_rejects_oversized_stream_before_json_parse() {
-    let oversized = format!("{}\n", "x".repeat(10 * 1024 * 1024 + 1));
+    let session_limit = usize::try_from(MAX_SESSION_LOG_BYTES).expect("session limit fits usize");
+    for (stream_bytes, expected) in [
+        (MAX_LOOP_EVENT_STREAM_BYTES + 1, "event stream budget"),
+        (session_limit + 1, "session log size"),
+    ] {
+        let oversized = format!("{}\n", "x".repeat(stream_bytes - 1));
 
-    let err = validate_protocol_jsonl_text(Path::new("oversized.jsonl"), &oversized)
-        .expect_err("oversized streams must be rejected by budget");
+        let err = validate_protocol_jsonl_text(Path::new("oversized.jsonl"), &oversized)
+            .expect_err("oversized streams must be rejected by budget");
 
-    assert!(err.to_string().contains("event stream budget"), "{err}");
+        assert!(err.to_string().contains(expected), "{err}");
+    }
 }
 
 #[test]
