@@ -1302,10 +1302,11 @@ fn registry_rejects_programmatic_invalid_shapes() {
     };
     let mut empty_phase = test_phase();
     empty_phase.steps.clear();
-    let cases: [(RegistryBlock, fn(RegistryError) -> bool); 3] = [
+    let cases = [
         (
             instruction("../bad", "Bad"),
-            |err| matches!(err, RegistryError::InvalidBlockId(id) if id == "../bad"),
+            (|err| matches!(err, RegistryError::InvalidBlockId(id) if id == "../bad"))
+                as fn(RegistryError) -> bool,
         ),
         (
             instruction("empty-name", ""),
