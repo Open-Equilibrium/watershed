@@ -362,15 +362,21 @@ fn protocol_validator_rejects_jsonl_encoding_edges() {
         "canonical JSONL",
     );
     let mut metric = base_event();
+    metric.event_id = "evt-002".to_owned();
     metric.event_type = EventType::MetricSample;
+    metric.sequence = 2;
     metric.payload = serde_json::json!({"metric_name":"fsm.p95","value":1e-7});
     let canonical_metric = metric.canonical_jsonl().expect("metric serializes");
     assert!(canonical_metric.contains("\"value\":1e-7"));
-    validate_protocol_jsonl_text(Path::new("canonical-number.jsonl"), &canonical_metric)
-        .expect("shortest numeric form is canonical");
+    let canonical_number_stream = format!("{canonical}{canonical_metric}");
+    validate_protocol_jsonl_text(
+        Path::new("canonical-number.jsonl"),
+        &canonical_number_stream,
+    )
+    .expect("shortest numeric form is canonical");
     assert_invalid_stream(
         "long-number.jsonl",
-        &canonical_metric.replace("1e-7", "0.0000001"),
+        &canonical_number_stream.replace("1e-7", "0.0000001"),
         "canonical JSONL",
     );
     let err = validate_protocol_jsonl_text(
