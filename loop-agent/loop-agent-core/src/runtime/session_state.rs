@@ -72,11 +72,10 @@ fn resume_session_internal(
             "invalid session_id {session_id:?}"
         )));
     }
-    let sessions =
-        open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
-            path: workspace.join(LOCAL_SESSION_DIR),
-            source: io::Error::from(io::ErrorKind::NotFound),
-        })?;
+    let sessions = open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+        path: workspace.join(LOCAL_SESSION_DIR),
+        source: io::Error::from(io::ErrorKind::NotFound),
+    })?;
     let path = sessions.file(format!("{session_id}.jsonl"));
     ensure_anchored_non_hardlinked_file(&path)?;
     let lock = acquire_anchored_session_lock(&sessions, session_id)?;
