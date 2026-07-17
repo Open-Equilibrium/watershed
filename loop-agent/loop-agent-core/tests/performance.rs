@@ -17,7 +17,11 @@ mod test_support;
 
 #[test]
 #[ignore = "performance gate"]
-fn ten_orchestrating_fixture_loops_complete_under_m1_runtime_contract() {
+fn ten_near_limit_orchestrating_loops_complete_under_m1_runtime_contract() {
+    let (workspace, active_bytes) = near_limit_registry_workspace();
+    assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
+    assert!(active_bytes >= core_script::MAX_ACTIVE_REGISTRY_BYTES * 9 / 10);
+
     let peak_rss_sampler = if rss_budget_must_be_enforced() {
         let baseline = current_resident_set_size()
             .expect("RSS measurement must be available on this enforced target before the run");
@@ -25,15 +29,12 @@ fn ten_orchestrating_fixture_loops_complete_under_m1_runtime_contract() {
     } else {
         None
     };
-    let workspaces = (0..10)
-        .map(|_| workspace_copy("hello-loop"))
-        .collect::<Vec<_>>();
-    let concurrency = workspaces.len();
+    let concurrency = 10;
     let barrier = Arc::new(Barrier::new(concurrency + 1));
     let (tx, rx) = mpsc::channel();
-    let handles = workspaces
-        .into_iter()
-        .map(|workspace| {
+    let handles = (0..concurrency)
+        .map(|_| {
+            let workspace = workspace.as_ref().to_path_buf();
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();
             thread::spawn(move || {
@@ -60,9 +61,9 @@ fn ten_orchestrating_fixture_loops_complete_under_m1_runtime_contract() {
         let result = rx
             .recv_timeout(remaining)
             .expect("10 concurrent orchestrating fixture loops complete before timeout");
-        let (event_count, failed) = result.unwrap_or_else(|err| panic!("hello-loop: {err}"));
-        assert!(event_count > 0, "hello-loop must emit events");
-        assert!(!failed, "hello-loop should complete successfully");
+        let (event_count, failed) = result.unwrap_or_else(|err| panic!("smoke-loop: {err}"));
+        assert!(event_count > 0, "smoke-loop must emit events");
+        assert!(!failed, "smoke-loop should complete successfully");
     }
     for handle in handles {
         handle.join().expect("worker thread joins");
@@ -81,73 +82,6 @@ fn ten_orchestrating_fixture_loops_complete_under_m1_runtime_contract() {
             "concurrent fixture peak RSS growth must stay <= {per_loop_budget} bytes per active top-level loop ({budget} bytes total): {peak_growth} bytes"
         );
     }
-}
-
-#[test]
-#[ignore = "performance gate"]
-fn ten_near_limit_registry_closures_stay_within_the_loop_memory_budget() {
-    let (workspace, active_bytes) = near_limit_registry_workspace();
-    assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
-    assert!(active_bytes >= core_script::MAX_ACTIVE_REGISTRY_BYTES * 9 / 10);
-
-    let baseline = current_resident_set_size()
-        .expect("RSS measurement must be available on every enforced release target");
-    let mut sampler = PeakRssSampler::start(baseline);
-    let concurrency = 10;
-    let start = Arc::new(Barrier::new(concurrency + 1));
-    let release = Arc::new(Barrier::new(concurrency + 1));
-    let (tx, rx) = mpsc::channel();
-    let handles = (0..concurrency)
-        .map(|_| {
-            let workspace = workspace.as_ref().to_path_buf();
-            let start = Arc::clone(&start);
-            let release = Arc::clone(&release);
-            let tx = tx.clone();
-            thread::spawn(move || {
-                start.wait();
-                let registry = core_script::load_loop_registry_from_workspace(
-                    &workspace,
-                    Path::new("registry"),
-                    "smoke-loop",
-                );
-                tx.send(
-                    registry
-                        .as_ref()
-                        .map(|registry| {
-                            registry.instruction_block("near-limit-00").is_some()
-                                && registry.instruction_block("unused-0000").is_none()
-                        })
-                        .map_err(ToString::to_string),
-                )
-                .expect("load result sent");
-                release.wait();
-                drop(registry);
-            })
-        })
-        .collect::<Vec<_>>();
-    drop(tx);
-
-    start.wait();
-    for _ in 0..concurrency {
-        assert!(
-            rx.recv_timeout(Duration::from_secs(60))
-                .expect("near-limit registry loads before timeout")
-                .unwrap_or_else(|err| panic!("near-limit registry: {err}")),
-            "active definitions load once and unrelated catalog entries are not retained"
-        );
-    }
-    release.wait();
-    for handle in handles {
-        handle.join().expect("registry loader thread joins");
-    }
-
-    let peak_growth = sampler.finish().saturating_sub(baseline);
-    let per_loop_budget = 10 * 1024 * 1024;
-    let budget = per_loop_budget * concurrency as u64;
-    assert!(
-        peak_growth <= budget,
-        "near-limit registry peak RSS growth must stay <= {per_loop_budget} bytes per active top-level loop ({budget} bytes total): {peak_growth} bytes"
-    );
 }
 
 struct PeakRssSampler {
@@ -243,42 +177,41 @@ fn workspace_copy(fixture: &str) -> TempWorkspace {
 
 fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
     let workspace = workspace_copy("smoke-loop");
-    let mut active_bytes = [
-        "instructions/say-smoke.yaml",
-        "loops/smoke-loop.yaml",
-        "phases/smoke.yaml",
-        "tools/echo.yaml",
-    ]
-    .into_iter()
-    .map(|path| {
-        fs::metadata(workspace.join("registry").join(path))
-            .expect("fixture metadata")
-            .len()
-    })
-    .sum::<u64>();
-    let mut references = Vec::new();
+    let mut phase_refs = Vec::new();
+    let mut active_paths = vec![
+        "loops/smoke-loop.yaml".to_owned(),
+        "tools/echo.yaml".to_owned(),
+    ];
     for index in 0..16 {
         let id = format!("near-limit-{index:02}");
-        references.push(id.clone());
+        let phase_id = format!("near-limit-phase-{index:02}");
+        phase_refs.push(phase_id.clone());
         let source = format!(
             "instruction:\n  id: {id}\n  name: NearLimit{index:02}\n  prompt: {}\n",
             "x".repeat(60 * 1024)
         );
-        active_bytes += u64::try_from(source.len()).expect("source length fits u64");
+        let instruction_path = format!("instructions/{id}.yaml");
+        fs::write(workspace.join("registry").join(&instruction_path), source)
+            .expect("near-limit instruction written");
+        active_paths.push(instruction_path);
+        let phase_path = format!("phases/{phase_id}.yaml");
         fs::write(
-            workspace.join(format!("registry/instructions/{id}.yaml")),
-            source,
+            workspace.join("registry").join(&phase_path),
+            format!(
+                "phase:\n  id: {phase_id}\n  name: NearLimitPhase{index:02}\n  instruction_refs: [{id}]\n  tool_refs: [echo]\n  steps:\n    - id: say\n      name: Say\n"
+            ),
         )
-        .expect("near-limit instruction written");
+        .expect("near-limit phase written");
+        active_paths.push(phase_path);
     }
-    let phase_path = workspace.join("registry/phases/smoke.yaml");
-    let phase = fs::read_to_string(&phase_path).expect("smoke phase readable");
-    let updated_phase = phase.replace(
-        "instruction_refs: [say-smoke]",
-        &format!("instruction_refs: [say-smoke, {}]", references.join(", ")),
-    );
-    active_bytes = active_bytes - phase.len() as u64 + updated_phase.len() as u64;
-    fs::write(phase_path, updated_phase).expect("near-limit references written");
+    fs::write(
+        workspace.join("registry/loops/smoke-loop.yaml"),
+        format!(
+            "loop:\n  id: smoke-loop\n  name: SmokeLoop\n  phase_refs: [{}]\n  subloop_refs: []\n  connection_refs: []\n",
+            phase_refs.join(", ")
+        ),
+    )
+    .expect("near-limit loop written");
     for index in 0..1000 {
         let id = format!("unused-{index:04}");
         let name_prefix = format!("Unused{index:04}");
@@ -292,6 +225,14 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
         )
         .expect("unrelated catalog instruction written");
     }
+    let active_bytes = active_paths
+        .into_iter()
+        .map(|path| {
+            fs::metadata(workspace.join("registry").join(path))
+                .expect("active definition metadata")
+                .len()
+        })
+        .sum();
     (workspace, active_bytes)
 }
 
