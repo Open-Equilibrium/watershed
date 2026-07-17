@@ -91,7 +91,7 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
 
     assert!(matches!(
         err,
-        RuntimeError::Io { path, .. } if path.ends_with("missing.lock")
+        RuntimeError::Io { path, .. } if path.ends_with("missing001.lock")
     ));
     missing_lock.rollback();
 
