@@ -9,7 +9,7 @@ fn protocol_validation_rejects_oversized_stream_before_json_parse() {
 }
 
 #[test]
-fn appended_session_log_validation_rejects_combined_stream_over_budget() {
+fn appended_session_log_validation_separates_runtime_and_resume_budgets() {
     let session_id = "tailbudget001";
     let empty_started = event_line(
         "evt-001",
@@ -19,18 +19,10 @@ fn appended_session_log_validation_rejects_combined_stream_over_budget() {
         None,
         serde_json::json!({"reason":""}),
     );
-    let completed = event_line(
-        "evt-002",
-        EventType::SessionCompleted,
-        session_id,
-        2,
-        None,
-        serde_json::json!({}),
-    );
+    let resumed = session_event_line(session_id, "evt-002", EventType::SessionResumed, 2);
+    let completed = session_event_line(session_id, "evt-003", EventType::SessionCompleted, 3);
     let reason_len = MAX_LOOP_EVENT_STREAM_BYTES
-        .checked_sub(completed.len())
-        .and_then(|remaining| remaining.checked_add(1))
-        .and_then(|target_prior_len| target_prior_len.checked_sub(empty_started.len()))
+        .checked_sub(empty_started.len())
         .expect("budget fixture fits");
     let started = event_line(
         "evt-001",
@@ -40,14 +32,17 @@ fn appended_session_log_validation_rejects_combined_stream_over_budget() {
         None,
         serde_json::json!({"reason":"x".repeat(reason_len)}),
     );
-    assert!(started.len() <= MAX_LOOP_EVENT_STREAM_BYTES);
-    assert!(started.len() + completed.len() > MAX_LOOP_EVENT_STREAM_BYTES);
+    assert_eq!(started.len(), MAX_LOOP_EVENT_STREAM_BYTES);
     let path = Path::new("tailbudget001.jsonl");
-    let prior_events =
+    let mut prior_events =
         validate_session_log_text(path, session_id, &started).expect("prior stream is in budget");
+    prior_events.extend(
+        validate_appended_session_log_text(path, session_id, &prior_events, &resumed)
+            .expect("resume marker does not consume the runtime stream budget"),
+    );
 
     let err = validate_appended_session_log_text(path, session_id, &prior_events, &completed)
-        .expect_err("combined appended stream over budget must fail");
+        .expect_err("runtime events still consume the runtime stream budget");
 
     assert!(err.to_string().contains("event stream budget"), "{err}");
 }

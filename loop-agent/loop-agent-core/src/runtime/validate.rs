@@ -4,6 +4,13 @@ pub fn validate_protocol_jsonl_text(
     path: &Path,
     text: &str,
 ) -> Result<Vec<EventEnvelope>, RuntimeError> {
+    let text_bytes = u64::try_from(text.len()).unwrap_or(u64::MAX);
+    if text_bytes > MAX_SESSION_LOG_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} session log size {text_bytes} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+            path.display()
+        )));
+    }
     if !text.ends_with('\n') {
         return Err(RuntimeError::Protocol(format!(
             "{} must end with LF",
@@ -311,6 +318,7 @@ struct SessionAppendValidationState {
     loop_started_ids: BTreeSet<String>,
     terminal_line: Option<usize>,
     stream_bytes: usize,
+    runtime_event_count: u64,
     line_count: usize,
     lifecycle: SessionLifecycleState,
 }
@@ -333,6 +341,7 @@ impl SessionAppendValidationState {
             loop_started_ids: BTreeSet::new(),
             terminal_line: None,
             stream_bytes: 0,
+            runtime_event_count: 0,
             line_count: 0,
             lifecycle: SessionLifecycleState::default(),
         }
@@ -390,7 +399,14 @@ impl SessionAppendValidationState {
 
         let mut appended_events = Vec::new();
         for line in text.split_terminator('\n') {
-            let line_number = self.validate_budget(path, line.len().saturating_add(1))?;
+            let line_number = self.line_count + 1;
+            let canonical_bytes = line.len().saturating_add(1);
+            if canonical_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} event stream budget exceeded at line {line_number}: {canonical_bytes} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
+                    path.display()
+                )));
+            }
             if line.ends_with('\r') {
                 return Err(RuntimeError::Protocol(format!(
                     "{} line {line_number} must use LF-only line endings",
@@ -398,6 +414,7 @@ impl SessionAppendValidationState {
                 )));
             }
             let event = parse_canonical_event(path, line_number, line)?;
+            self.validate_budget(path, line_number, &event.event_type, canonical_bytes)?;
             self.validate_event(path, line_number, &event)?;
             appended_events.push(event);
         }
@@ -410,33 +427,39 @@ impl SessionAppendValidationState {
         event: &EventEnvelope,
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
-        let line_number = self.validate_budget(path, canonical_bytes)?;
+        let line_number = self.line_count + 1;
+        self.validate_budget(path, line_number, &event.event_type, canonical_bytes)?;
         self.validate_event(path, line_number, event)
     }
 
     fn validate_budget(
         &mut self,
         path: &Path,
+        line_number: usize,
+        event_type: &EventType,
         canonical_bytes: usize,
-    ) -> Result<usize, RuntimeError> {
-        let line_number = self.line_count + 1;
-        // WHY: reject oversized input before JSON parsing and preserve one cumulative
-        // budget for full validation, incremental tails and live commits.
-        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
+    ) -> Result<(), RuntimeError> {
+        if event_type == &EventType::SessionResumed {
+            return Ok(());
+        }
+        let event_count = self.runtime_event_count.saturating_add(1);
+        if event_count > MAX_LOOP_EVENTS {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
                 path.display()
             )));
         }
-        self.stream_bytes = self.stream_bytes.saturating_add(canonical_bytes);
-        if self.stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+        let stream_bytes = self.stream_bytes.saturating_add(canonical_bytes);
+        if stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
             return Err(RuntimeError::Protocol(format!(
                 "{} event stream budget exceeded at line {line_number}: {} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
                 path.display(),
-                self.stream_bytes
+                stream_bytes
             )));
         }
-        Ok(line_number)
+        self.runtime_event_count = event_count;
+        self.stream_bytes = stream_bytes;
+        Ok(())
     }
 
     fn validate_event(

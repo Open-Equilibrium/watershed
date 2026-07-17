@@ -739,6 +739,33 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("event stream budget")
     ));
+
+    let path = Path::new("resume-budget.jsonl");
+    let mut validation = SessionAppendValidationState::empty("budget001");
+    validation.previous_sequence = MAX_LOOP_EVENTS;
+    validation.line_count = MAX_LOOP_EVENTS as usize;
+    validation.runtime_event_count = MAX_LOOP_EVENTS;
+    validation.stream_bytes = MAX_LOOP_EVENT_STREAM_BYTES;
+    let event = |event_id, event_type, sequence| {
+        let line = session_event_line("budget001", event_id, event_type, sequence);
+        (
+            serde_json::from_str::<EventEnvelope>(&line).expect("event parses"),
+            line.len(),
+        )
+    };
+    let (resumed, resumed_bytes) = event(
+        "evt-resumed",
+        EventType::SessionResumed,
+        MAX_LOOP_EVENTS + 1,
+    );
+    validation
+        .validate_constructed_event(path, &resumed, resumed_bytes)
+        .expect("resume markers do not consume runtime budgets");
+    let (paused, bytes) = event("evt-paused", EventType::SessionPaused, MAX_LOOP_EVENTS + 2);
+    assert!(matches!(
+        validation.validate_constructed_event(path, &paused, bytes),
+        Err(RuntimeError::Protocol(message)) if message.contains("runtime event budget")
+    ));
 }
 
 #[test]
