@@ -39,7 +39,7 @@ fn ten_near_limit_orchestrating_loops_complete_under_m1_runtime_contract() {
             let tx = tx.clone();
             thread::spawn(move || {
                 barrier.wait();
-                let result = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+                let result = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
                     .map(|output| (output.event_count, output.failed))
                     .map_err(|err| err.to_string());
                 tx.send(result).expect("result sent");
