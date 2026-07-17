@@ -125,7 +125,7 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
     fs::write(
         log_dir.join(format!("{session_id}.log")),
         format!(
-            "registry_hash=sha256:{}\nloop_definition_hash=sha256:{}\n",
+            "registry_hash=sha256:{}\nloop_definition_hash=sha256:{}\nloop_definition_id={loop_ref}\n",
             sha256_hex(registry_json.as_bytes()),
             sha256_hex(loop_json.as_bytes())
         ),

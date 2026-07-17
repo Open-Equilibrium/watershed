@@ -89,7 +89,8 @@ fn resume_session_internal(
     if stream_is_failed(&events) || stream_is_completed(&events) {
         return Err(RuntimeError::TerminalSession(session_id.to_owned()));
     }
-    let loop_id = resumable_loop_id(&path, session_id, &events)?;
+    let metadata = require_session_log_metadata(workspace, session_id)?;
+    let loop_id = resumable_loop_id(&path, session_id, &events, &metadata)?;
 
     let config = load_workspace_config(workspace)?;
     let registry =
@@ -97,7 +98,7 @@ fn resume_session_internal(
     let loop_block = registry.loop_block(&loop_id).ok_or_else(|| {
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;
-    verify_resume_definition_metadata(workspace, session_id, &registry, loop_block)?;
+    verify_resume_definition_metadata_values(session_id, &metadata, &registry, loop_block)?;
     let policy = core_policy::compile_policy_artifact(
         &loop_block.identity.id,
         &registry,
@@ -379,17 +380,27 @@ fn resumable_loop_id(
     path: &Path,
     session_id: &str,
     events: &[EventEnvelope],
+    metadata: &SessionLogMetadata,
 ) -> Result<String, RuntimeError> {
-    let event = events
+    let recorded_loop_id = metadata.loop_definition_id.as_deref().ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: missing loop_definition_id metadata"
+        ))
+    })?;
+    let event_loop_id = events
         .iter()
         .find(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
-        .ok_or_else(|| {
-            RuntimeError::Protocol(format!(
-                "{} cannot resume session {session_id} before durable loop progress",
-                path.display()
-            ))
-        })?;
-    Ok(lifecycle_payload_string(event, "loop_definition_id"))
+        .map(|event| lifecycle_payload_string(event, "loop_definition_id"));
+    if event_loop_id
+        .as_deref()
+        .is_some_and(|event_loop_id| event_loop_id != recorded_loop_id)
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "{} session {session_id} loop definition metadata does not match durable events",
+            path.display()
+        )));
+    }
+    Ok(recorded_loop_id.to_owned())
 }
 
 fn read_existing_session(
@@ -493,26 +504,29 @@ impl Drop for SessionLockGuard {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct SessionDefinitionHashes {
+struct SessionDefinitionMetadata {
+    loop_definition_id: String,
     registry_hash: String,
     loop_definition_hash: String,
 }
 
 #[derive(Default, Debug, Eq, PartialEq)]
 struct SessionLogMetadata {
+    loop_definition_id: Option<String>,
     registry_hash: Option<String>,
     loop_definition_hash: Option<String>,
 }
 
-fn session_definition_hashes(
+fn session_definition_metadata(
     registry: &core_script::ResolvedRegistry,
     loop_block: &core_script::LoopBlock,
-) -> Result<SessionDefinitionHashes, RuntimeError> {
+) -> Result<SessionDefinitionMetadata, RuntimeError> {
     let registry_json = registry.canonical_json()?;
     let loop_json = proto::canonical_json(&serde_json::to_value(loop_block)?).map_err(|err| {
         RuntimeError::Protocol(format!("failed to serialize loop definition hash: {err}"))
     })?;
-    Ok(SessionDefinitionHashes {
+    Ok(SessionDefinitionMetadata {
+        loop_definition_id: loop_block.identity.id.clone(),
         registry_hash: sha256_hash_text(registry_json.as_bytes()),
         loop_definition_hash: sha256_hash_text(loop_json.as_bytes()),
     })
@@ -522,6 +536,7 @@ fn sha256_hash_text(bytes: &[u8]) -> String {
     format!("sha256:{}", sha256_hex(bytes))
 }
 
+#[cfg(test)]
 fn verify_resume_definition_metadata(
     workspace: &Path,
     session_id: &str,
@@ -530,24 +545,35 @@ fn verify_resume_definition_metadata(
 ) -> Result<(), RuntimeError> {
     // WHY: resume hashes bind a partial session to the registry definitions that produced
     // it; incomplete metadata cannot prove the prefix matches the current registry.
-    let Some(metadata) = read_session_log_metadata(workspace, session_id)? else {
-        return Err(RuntimeError::Protocol(format!(
-            "session {session_id} registry drift: missing definition metadata"
-        )));
-    };
-    let Some(recorded_registry_hash) = metadata.registry_hash else {
+    let metadata = require_session_log_metadata(workspace, session_id)?;
+    verify_resume_definition_metadata_values(session_id, &metadata, registry, loop_block)
+}
+
+fn verify_resume_definition_metadata_values(
+    session_id: &str,
+    metadata: &SessionLogMetadata,
+    registry: &core_script::ResolvedRegistry,
+    loop_block: &core_script::LoopBlock,
+) -> Result<(), RuntimeError> {
+    let Some(recorded_registry_hash) = metadata.registry_hash.as_deref() else {
         return Err(RuntimeError::Protocol(format!(
             "session {session_id} registry drift: missing registry_hash metadata"
         )));
     };
-    let Some(recorded_loop_definition_hash) = metadata.loop_definition_hash else {
+    let Some(recorded_loop_definition_hash) = metadata.loop_definition_hash.as_deref() else {
         return Err(RuntimeError::Protocol(format!(
             "session {session_id} registry drift: missing loop_definition_hash metadata"
         )));
     };
+    let Some(recorded_loop_definition_id) = metadata.loop_definition_id.as_deref() else {
+        return Err(RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: missing loop_definition_id metadata"
+        )));
+    };
 
-    let expected = session_definition_hashes(registry, loop_block)?;
-    if recorded_registry_hash != expected.registry_hash
+    let expected = session_definition_metadata(registry, loop_block)?;
+    if recorded_loop_definition_id != expected.loop_definition_id
+        || recorded_registry_hash != expected.registry_hash
         || recorded_loop_definition_hash != expected.loop_definition_hash
     {
         return Err(RuntimeError::Protocol(format!(
@@ -555,6 +581,17 @@ fn verify_resume_definition_metadata(
         )));
     }
     Ok(())
+}
+
+fn require_session_log_metadata(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<SessionLogMetadata, RuntimeError> {
+    read_session_log_metadata(workspace, session_id)?.ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "session {session_id} registry drift: missing definition metadata"
+        ))
+    })
 }
 
 fn read_session_log_metadata(
@@ -588,6 +625,7 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
             )));
         };
         match key {
+            "loop_definition_id" => metadata.loop_definition_id = Some(value.to_owned()),
             "registry_hash" => metadata.registry_hash = Some(value.to_owned()),
             "loop_definition_hash" => metadata.loop_definition_hash = Some(value.to_owned()),
             _ => {}
@@ -776,22 +814,25 @@ fn acquire_session_lock(
 
 fn write_reserved_session_metadata(
     reservation: &SessionReservation,
-    definition_hashes: Option<&SessionDefinitionHashes>,
+    definition_metadata: Option<&SessionDefinitionMetadata>,
 ) -> Result<(), RuntimeError> {
     replace_existing_file_atomically(
         &reservation.log_path,
-        session_log_metadata_text(definition_hashes).as_bytes(),
+        session_log_metadata_text(definition_metadata).as_bytes(),
     )
 }
 
-fn session_log_metadata_text(definition_hashes: Option<&SessionDefinitionHashes>) -> String {
+fn session_log_metadata_text(definition_metadata: Option<&SessionDefinitionMetadata>) -> String {
     let mut metadata = String::new();
-    if let Some(hashes) = definition_hashes {
+    if let Some(definition) = definition_metadata {
         metadata.push_str("registry_hash=");
-        metadata.push_str(&hashes.registry_hash);
+        metadata.push_str(&definition.registry_hash);
         metadata.push('\n');
         metadata.push_str("loop_definition_hash=");
-        metadata.push_str(&hashes.loop_definition_hash);
+        metadata.push_str(&definition.loop_definition_hash);
+        metadata.push('\n');
+        metadata.push_str("loop_definition_id=");
+        metadata.push_str(&definition.loop_definition_id);
         metadata.push('\n');
     }
     metadata

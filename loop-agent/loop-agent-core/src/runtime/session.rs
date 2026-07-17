@@ -38,7 +38,7 @@ fn run_loop_internal(
     let loop_block = registry
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
-    let definition_hashes = session_definition_hashes(&registry, loop_block)?;
+    let definition_metadata = session_definition_metadata(&registry, loop_block)?;
     let policy = core_policy::compile_policy_artifact(
         &loop_block.identity.id,
         &registry,
@@ -49,7 +49,7 @@ fn run_loop_internal(
     let base_session_id = session_id_for_loop(&loop_block.identity.id);
     let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
-    write_reserved_session_metadata(&reservation, Some(&definition_hashes))?;
+    write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
     let planned_runtime = execute_loop(
         workspace,
         &registry,

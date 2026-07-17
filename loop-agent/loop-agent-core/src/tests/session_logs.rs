@@ -1119,7 +1119,7 @@ fn resume_rejects_placeholder_prefix_without_rerunning_tool() {
 
     assert!(matches!(
         err,
-        RuntimeError::Protocol(message) if message.contains("before durable loop progress")
+        RuntimeError::Protocol(message) if message.contains("missing definition metadata")
     ));
     assert_eq!(
         fs::read_to_string(&path).expect("placeholder log remains readable"),
@@ -1128,6 +1128,44 @@ fn resume_rejects_placeholder_prefix_without_rerunning_tool() {
     assert_eq!(
         fs::read_to_string(workspace.join("out/summary.txt")).expect("summary remains readable"),
         "already-written\n"
+    );
+}
+
+#[test]
+fn resume_recovers_session_started_only_crash_prefix_from_metadata() {
+    let workspace = workspace_copy("smoke-loop");
+    let completed =
+        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("seed session completes");
+    let prefix = completed
+        .stdout
+        .lines()
+        .next()
+        .map(|line| format!("{line}\n"))
+        .expect("seed stream has session.started");
+    fs::write(&completed.session_path, &prefix).expect("crash prefix replaces completed log");
+    fs::write(
+        workspace
+            .join(LOCAL_LOG_DIR)
+            .join(format!("{}.contexts.jsonl", completed.session_id)),
+        "",
+    )
+    .expect("crash precedes the first context checkpoint");
+
+    let resumed = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
+        .expect("definition metadata identifies the selected loop");
+
+    assert!(
+        resumed
+            .stdout
+            .contains("\"event_type\":\"session.resumed\"")
+    );
+    let stream = fs::read_to_string(&completed.session_path).expect("resumed log is readable");
+    let events = validate_session_log_text(&completed.session_path, &completed.session_id, &stream)
+        .expect("resumed crash prefix remains canonical");
+    assert_eq!(events[0].event_type, EventType::SessionStarted);
+    assert_eq!(
+        events.last().map(|event| event.event_type),
+        Some(EventType::SessionCompleted)
     );
 }
 
@@ -1305,12 +1343,28 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
         RuntimeError::Protocol(message) if message.contains("missing registry_hash")
     ));
 
-    fs::write(&metadata_path, "registry_hash=sha256:partial\n").expect("partial metadata writes");
+    fs::write(
+        &metadata_path,
+        "loop_definition_id=hello-loop\nregistry_hash=sha256:partial\n",
+    )
+    .expect("partial metadata writes");
     let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
         .expect_err("metadata without loop hash must fail closed");
     assert!(matches!(
         err,
         RuntimeError::Protocol(message) if message.contains("missing loop_definition_hash")
+    ));
+
+    fs::write(
+        &metadata_path,
+        "registry_hash=sha256:partial\nloop_definition_hash=sha256:partial\n",
+    )
+    .expect("metadata without loop id writes");
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
+        .expect_err("metadata without loop id must fail closed");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message.contains("missing loop_definition_id")
     ));
 
     fs::remove_file(&metadata_path).expect("metadata removed");
