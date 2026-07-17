@@ -725,6 +725,10 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
             format!("{INSTRUCTION}---\n{INSTRUCTION}"),
         ),
         (
+            "unknown-block-kind.yaml",
+            "unknown:\n  id: inspect\n  name: Inspect\n".to_owned(),
+        ),
+        (
             "unknown-field.yaml",
             INSTRUCTION.replace("  prompt:", "  extra: true\n  prompt:"),
         ),
