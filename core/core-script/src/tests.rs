@@ -187,6 +187,28 @@ fn loop_registry_retains_the_unique_transitive_definition_closure() {
 }
 
 #[test]
+fn loop_registry_reports_a_missing_reachable_definition_from_its_owner() {
+    let root = temp_registry_dir("scoped-registry-missing-reference");
+    std::fs::write(
+        root.join("root.yaml"),
+        "loop:\n  id: root\n  name: Root\n  phase_refs: [missing]\n  subloop_refs: []\n  connection_refs: []\n",
+    )
+    .expect("root loop written");
+
+    let error = load_registry(&root).expect_err("missing reachable phase is rejected");
+
+    assert!(matches!(
+        error,
+        RegistryError::MissingReference {
+            from_kind: "loop",
+            from_id,
+            reference_kind: "phase",
+            reference,
+        } if from_id == "root" && reference == "missing"
+    ));
+}
+
+#[test]
 fn parser_rejects_oversized_names_and_definition_text() {
     let oversized_name = "x".repeat(MAX_BLOCK_NAME_CHARS + 1);
     let name_error = parse_registry_block(
