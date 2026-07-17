@@ -163,7 +163,10 @@ fn replay_then_live_drain_has_no_sequence_gap() {
                     SessionEventReader::open(&workspace, &notification.session_id)
                         .expect("notified session opens")
                 });
-                for event in reader.read_after(cursor).expect("catch-up validates") {
+                for event in reader
+                    .read_incremental_after(cursor)
+                    .expect("live suffix validates")
+                {
                     sequences.push(event.sequence);
                     cursor = event.sequence;
                 }
@@ -176,6 +179,13 @@ fn replay_then_live_drain_has_no_sequence_gap() {
         .join()
         .expect("run thread joins")
         .expect("run completes");
+    let mut reader = reader.expect("at least one committed event was notified");
+    for event in reader
+        .read_after(cursor)
+        .expect("closed producer permits final authoritative verification")
+    {
+        sequences.push(event.sequence);
+    }
 
     assert_eq!(
         sequences,

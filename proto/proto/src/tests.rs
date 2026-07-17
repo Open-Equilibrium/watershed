@@ -183,6 +183,7 @@ fn canonical_json_serializes_scalars_in_shortest_form() {
         ("1.0", "1"),
         ("-2.0", "-2"),
         ("1.50", "1.5"),
+        ("1e-7", "1e-7"),
     ] {
         let value: Value = serde_json::from_str(input).expect("valid JSON scalar");
         assert_eq!(

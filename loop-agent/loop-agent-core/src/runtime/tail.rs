@@ -44,7 +44,7 @@ fn tail_session_with_wait(
         let cursor = events
             .last()
             .map_or(0, |event: &EventEnvelope| event.sequence);
-        let appended = reader.read_after(cursor)?;
+        let appended = reader.read_incremental_after(cursor)?;
         if !appended.is_empty() {
             poll_interval = TAIL_POLL_INITIAL;
         }
@@ -56,6 +56,10 @@ fn tail_session_with_wait(
                 .timeout
                 .is_some_and(|timeout| started.elapsed() >= timeout)
         {
+            let cursor = events
+                .last()
+                .map_or(0, |event: &EventEnvelope| event.sequence);
+            events.extend(reader.read_after(cursor)?);
             break;
         }
         wait(tail_poll_interval(&options, started, poll_interval));

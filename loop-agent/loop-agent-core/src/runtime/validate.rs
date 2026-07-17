@@ -576,7 +576,12 @@ fn parse_canonical_event(
     line_number: usize,
     line: &str,
 ) -> Result<EventEnvelope, RuntimeError> {
-    let value: serde_json::Value = serde_json::from_str(line)?;
+    let value: serde_json::Value = serde_json::from_str(line).map_err(|err| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number}: invalid JSON: {err}",
+            path.display()
+        ))
+    })?;
     let canonical = proto::canonical_json(&value).map_err(|err| {
         RuntimeError::Protocol(format!("{} line {line_number}: {err}", path.display()))
     })?;
@@ -586,7 +591,12 @@ fn parse_canonical_event(
             path.display()
         )));
     }
-    Ok(serde_json::from_value(value)?)
+    serde_json::from_value(value).map_err(|err| {
+        RuntimeError::Protocol(format!(
+            "{} line {line_number}: invalid event: {err}",
+            path.display()
+        ))
+    })
 }
 
 fn validate_session_log_text(

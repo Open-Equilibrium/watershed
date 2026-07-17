@@ -157,7 +157,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
-        "prompt": { "maxLength": 65536, "minLength": 1, "type": "string" }
+        "prompt": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "minLength": 1, "type": "string" }
       },
       "required": ["id", "name", "prompt"],
       "type": "object"
@@ -254,7 +254,7 @@
           "then": {
             "properties": {
               "command": { "$ref": "#/$defs/own_script_command" },
-              "script_body": { "maxLength": 65536, "minLength": 1, "type": "string" },
+              "script_body": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "minLength": 1, "type": "string" },
               "script_runtime": { "const": "posix-sh" }
             },
             "required": ["script_runtime", "script_body"]
@@ -274,7 +274,7 @@
         "network": { "$ref": "#/$defs/network" },
         "protected_path_grants": { "items": { "type": "string" }, "type": "array" },
         "read_scope": { "items": { "type": "string" }, "type": "array" },
-        "script_body": { "maxLength": 65536, "type": "string" },
+        "script_body": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "type": "string" },
         "script_runtime": { "const": "posix-sh" },
         "tool_kind": { "enum": ["predefined-command", "own-script"] },
         "write_scope": { "items": { "type": "string" }, "type": "array" }

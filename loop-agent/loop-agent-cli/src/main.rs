@@ -237,6 +237,12 @@ where
         }
     }
     drop(receiver);
+    if output_error.is_none()
+        && let Some(reader) = &mut reader
+        && let Err(err) = write_verified_events(reader, &mut cursor, &mut stdout)
+    {
+        output_error = Some(err);
+    }
     let result = worker
         .join()
         .map_err(|_| RuntimeError::Protocol("CLI run worker panicked".to_owned()))?;
@@ -247,6 +253,23 @@ where
 }
 
 fn write_new_events(
+    reader: &mut SessionEventReader,
+    cursor: &mut u64,
+    writer: &mut impl Write,
+) -> Result<bool, RuntimeError> {
+    for event in reader.read_incremental_after(*cursor)? {
+        let jsonl = event.canonical_jsonl().map_err(|err| {
+            RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
+        })?;
+        if !write_output(writer, jsonl.as_bytes())? {
+            return Ok(false);
+        }
+        *cursor = event.sequence;
+    }
+    Ok(true)
+}
+
+fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     writer: &mut impl Write,
@@ -283,7 +306,7 @@ fn tail_command(
     let mut poll_interval = Duration::from_millis(25);
     let mut stdout = io::stdout().lock();
     loop {
-        let events = reader.read_after(cursor)?;
+        let events = reader.read_incremental_after(cursor)?;
         if !events.is_empty() {
             poll_interval = Duration::from_millis(25);
         }
@@ -305,6 +328,16 @@ fn tail_command(
                 .timeout
                 .is_some_and(|timeout| started.elapsed() >= timeout)
         {
+            for event in reader.read_after(cursor)? {
+                let event_type = event.event_type.as_str();
+                let jsonl = event.canonical_jsonl().map_err(|err| {
+                    RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
+                })?;
+                if !write_output(&mut stdout, jsonl.as_bytes())? {
+                    return Ok(failed);
+                }
+                failed = event_type == "session.failed";
+            }
             return Ok(failed);
         }
         let wait = options.timeout.map_or(poll_interval, |timeout| {

@@ -238,7 +238,20 @@ fn parser_rejects_oversized_names_and_definition_text() {
         assert!(error.to_string().contains("maximum"), "{error}");
     }
 
-    let oversized_multibyte = "é".repeat(MAX_REGISTRY_DEFINITION_BYTES / 2 + 1);
+    let boundary_multibyte = "é".repeat(MAX_REGISTRY_DEFINITION_BYTES / "é".len());
+    let RegistryBlock::Instruction(instruction) = parse_registry_block(
+        "multibyte-boundary-prompt.yaml",
+        &format!(
+            "instruction:\n  id: multibyte-boundary-prompt\n  name: MultibyteBoundaryPrompt\n  prompt: {boundary_multibyte}\n"
+        ),
+    )
+    .expect("definition limit counts UTF-8 bytes")
+    else {
+        panic!("expected instruction block");
+    };
+    assert_eq!(instruction.prompt.len(), MAX_REGISTRY_DEFINITION_BYTES);
+
+    let oversized_multibyte = format!("{boundary_multibyte}é");
     let error = parse_registry_block(
         "multibyte-prompt.yaml",
         &format!(
@@ -1585,21 +1598,24 @@ fn registry_schema_is_checked_in_json() {
 }
 
 #[test]
-fn registry_schema_publishes_name_and_definition_limits() {
+fn registry_schema_distinguishes_character_and_runtime_byte_limits() {
     let schema = registry_schema();
 
     assert_eq!(
         schema["$defs"]["block_name"]["maxLength"],
         MAX_BLOCK_NAME_CHARS
     );
-    assert_eq!(
-        schema["$defs"]["instruction"]["properties"]["prompt"]["maxLength"],
-        MAX_REGISTRY_DEFINITION_BYTES
-    );
-    assert_eq!(
-        schema["$defs"]["tool"]["properties"]["script_body"]["maxLength"],
-        MAX_REGISTRY_DEFINITION_BYTES
-    );
+    for definition in [
+        &schema["$defs"]["instruction"]["properties"]["prompt"],
+        &schema["$defs"]["tool"]["properties"]["script_body"],
+        &schema["$defs"]["tool"]["allOf"][1]["then"]["properties"]["script_body"],
+    ] {
+        assert!(definition["maxLength"].is_null());
+        assert_eq!(
+            definition["description"],
+            "Maximum 65,536 UTF-8 bytes enforced when loaded."
+        );
+    }
 }
 
 #[test]

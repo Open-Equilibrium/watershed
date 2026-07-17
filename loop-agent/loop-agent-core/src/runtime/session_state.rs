@@ -151,7 +151,7 @@ fn resume_session_internal(
         &planned_runtime,
         loop_block,
     )?;
-    if let Some(tool_id) = inspection.started_tool_without_progress.as_deref() {
+    if let Some(tool_id) = inspection.validation.tool_without_progress() {
         return Err(RuntimeError::Protocol(format!(
             "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
         )));
@@ -165,25 +165,22 @@ fn resume_session_internal(
             planned_event_count: resume_prefix.planned_event_count,
             resume_marker_count: resume_prefix.resume_marker_count,
         };
-        let matches = {
-            let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut preflight_sink));
-            let runtime = execute_loop_with_sink(
-                workspace,
-                &registry,
-                &policy,
-                loop_block,
-                session_id,
-                LoopExecutionOptions::with_stub_model_fixture_profile(
-                    clock,
-                    ToolSideEffectMode::PreflightResume {
-                        prefix_event_count: resume_prefix.planned_event_count as u64,
-                    },
-                    config.stub_model_fixture_profile,
-                ),
-                Some(&mut matcher),
-            )?;
-            matcher.matches_execution(&runtime)
-        };
+        let runtime = execute_loop_with_sink(
+            workspace,
+            &registry,
+            &policy,
+            loop_block,
+            session_id,
+            LoopExecutionOptions::with_stub_model_fixture_profile(
+                clock,
+                ToolSideEffectMode::PreflightResume {
+                    prefix_event_count: resume_prefix.planned_event_count as u64,
+                },
+                config.stub_model_fixture_profile,
+            ),
+            Some(&mut preflight_sink),
+        )?;
+        let matches = runtime.matches_plan(&planned_runtime);
         preflight_sink.finish()?;
         matches
     };
@@ -215,7 +212,6 @@ fn resume_session_internal(
             resume_marker_count: resume_prefix.resume_marker_count,
             writer: &mut serial_writer,
         };
-        let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut resume_sink));
         let result = execute_loop_with_sink(
             workspace,
             &registry,
@@ -229,11 +225,11 @@ fn resume_session_internal(
                 },
                 config.stub_model_fixture_profile,
             ),
-            Some(&mut matcher),
+            Some(&mut resume_sink),
         );
         let matches = result
             .as_ref()
-            .is_ok_and(|runtime| matcher.matches_execution(runtime));
+            .is_ok_and(|runtime| runtime.matches_plan(&planned_runtime));
         (result, matches)
     };
     let finish_result = serial_writer.finish();
@@ -294,7 +290,6 @@ struct ResumeSessionInspection {
     prior_event_count: usize,
     resume_marker_count: usize,
     root_loop_definition_id: Option<String>,
-    started_tool_without_progress: Option<String>,
     validation: SessionAppendValidationState,
 }
 
@@ -395,7 +390,6 @@ fn inspect_resume_session(
     let Some(last_event_type) = inspection.last_event_type else {
         unreachable!("a recorded clock requires an event");
     };
-    let started_tool_without_progress = validation.tool_without_progress().map(str::to_owned);
     Ok(ResumeSessionInspection {
         clock,
         completed_turns: inspection.completed_turns,
@@ -406,7 +400,6 @@ fn inspect_resume_session(
         prior_event_count: inspection.prior_event_count,
         resume_marker_count: inspection.resume_marker_count,
         root_loop_definition_id: inspection.root_loop_definition_id,
-        started_tool_without_progress,
         validation,
     })
 }

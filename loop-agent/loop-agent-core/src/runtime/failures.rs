@@ -20,12 +20,14 @@ fn emit_runtime_error(
         "code": failure.reason,
         "message": failure.message,
     });
+    let mut error_data = failure.data.clone();
     if let Some(phase_id) = &failure.phase_id {
-        let mut error_data = serde_json::Map::new();
         error_data.insert("phase_id".to_owned(), serde_json::json!(phase_id));
         if let Some(tool_id) = &failure.tool_id {
             error_data.insert("tool_id".to_owned(), serde_json::json!(tool_id));
         }
+    }
+    if !error_data.is_empty() {
         let object = error_payload
             .as_object_mut()
             .expect("error payload is constructed as an object");
@@ -222,6 +224,7 @@ fn runtime_failure_for_reason(
     RuntimeFailure {
         reason: reason_code.as_str().to_owned(),
         message: denial_message(reason_code),
+        data: serde_json::Map::new(),
         tool_id,
         phase_id: None,
         emit_tool_failed,
@@ -229,17 +232,44 @@ fn runtime_failure_for_reason(
 }
 
 fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
-    let (reason, message) = match err {
-        RuntimeError::ContextBudgetExceeded { .. } => (
+    let (reason, message, data) = match err {
+        RuntimeError::ContextBudgetExceeded {
+            input_budget_tokens,
+            required_bytes,
+        } => (
             "context_budget_exceeded",
             "mandatory context exceeds the model input budget",
+            serde_json::Map::from_iter([
+                (
+                    "input_budget_tokens".to_owned(),
+                    (*input_budget_tokens).into(),
+                ),
+                ("required_bytes".to_owned(), (*required_bytes).into()),
+            ]),
         ),
-        RuntimeError::Denied { reason, .. } => (reason.as_str(), denial_message(reason.clone())),
-        _ => (RUNTIME_ERROR_REASON, "runtime execution failed"),
+        RuntimeError::Io { source, .. } => (
+            RUNTIME_ERROR_REASON,
+            "runtime execution failed",
+            serde_json::Map::from_iter([(
+                "io_kind".to_owned(),
+                serde_json::json!(runtime_io_error_kind(source.kind())),
+            )]),
+        ),
+        RuntimeError::Denied { reason, .. } => (
+            reason.as_str(),
+            denial_message(reason.clone()),
+            serde_json::Map::new(),
+        ),
+        _ => (
+            RUNTIME_ERROR_REASON,
+            "runtime execution failed",
+            serde_json::Map::new(),
+        ),
     };
     RuntimeFailure {
         reason: reason.to_owned(),
         message,
+        data,
         tool_id: None,
         phase_id: None,
         emit_tool_failed: false,
@@ -276,9 +306,30 @@ fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFai
             .as_str()
             .to_owned(),
         message: denial_message(core_policy::DenyReasonCode::ToolOutOfPhase),
+        data: serde_json::Map::new(),
         tool_id: Some(tool_id),
         phase_id: Some(phase_id),
         emit_tool_failed: false,
+    }
+}
+
+fn runtime_io_error_kind(kind: io::ErrorKind) -> &'static str {
+    match kind {
+        io::ErrorKind::NotFound => "not_found",
+        io::ErrorKind::PermissionDenied => "permission_denied",
+        io::ErrorKind::AlreadyExists => "already_exists",
+        io::ErrorKind::InvalidInput => "invalid_input",
+        io::ErrorKind::InvalidData => "invalid_data",
+        io::ErrorKind::TimedOut => "timed_out",
+        io::ErrorKind::WriteZero => "write_zero",
+        io::ErrorKind::StorageFull => "storage_full",
+        io::ErrorKind::ReadOnlyFilesystem => "read_only_filesystem",
+        io::ErrorKind::FileTooLarge => "file_too_large",
+        io::ErrorKind::ResourceBusy => "resource_busy",
+        io::ErrorKind::Interrupted => "interrupted",
+        io::ErrorKind::UnexpectedEof => "unexpected_eof",
+        io::ErrorKind::OutOfMemory => "out_of_memory",
+        _ => "other",
     }
 }
 

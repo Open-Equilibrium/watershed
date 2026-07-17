@@ -64,7 +64,6 @@ fn run_loop_internal(
     )?;
     let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
     let (runtime_result, replay_matches) = {
-        let mut matcher = PlannedRuntimeSink::new(&planned_runtime, Some(&mut serial_writer));
         let result = execute_loop_with_sink(
             workspace,
             &registry,
@@ -76,11 +75,11 @@ fn run_loop_internal(
                 ToolSideEffectMode::ApplyAll,
                 config.stub_model_fixture_profile,
             ),
-            Some(&mut matcher),
+            Some(&mut serial_writer),
         );
         let matches = result
             .as_ref()
-            .is_ok_and(|runtime| matcher.matches_execution(runtime));
+            .is_ok_and(|runtime| runtime.matches_plan(&planned_runtime));
         (result, matches)
     };
     let finish_result = serial_writer.finish();

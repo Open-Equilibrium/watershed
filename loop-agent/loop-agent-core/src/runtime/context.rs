@@ -461,14 +461,23 @@ fn read_recorded_context_manifest_signature(
         Err(source) => return Err(RuntimeError::Io { path, source }),
     }
     let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
+    let mut line_number = 0usize;
     for_each_file_line_with_limit(&path, MAX_SESSION_LOG_BYTES, |line| {
+        line_number = line_number.saturating_add(1);
         if !line.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
                 "{} context manifest stream must end with LF",
                 path.display()
             )));
         }
-        let value: serde_json::Value = serde_json::from_str(line.trim_end_matches('\n'))?;
+        let value: serde_json::Value = serde_json::from_str(line.trim_end_matches('\n')).map_err(
+            |err| {
+                RuntimeError::Protocol(format!(
+                    "{} line {line_number}: invalid context manifest JSON: {err}",
+                    path.display()
+                ))
+            },
+        )?;
         if value
             .get("context_profile_id")
             .and_then(serde_json::Value::as_str)

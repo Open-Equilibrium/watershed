@@ -6,6 +6,15 @@ struct RuntimeExecution {
     terminal_error: Option<RuntimeError>,
 }
 
+impl RuntimeExecution {
+    fn matches_plan(&self, planned: &Self) -> bool {
+        self.events == planned.events
+            && self.context_manifests == planned.context_manifests
+            && self.failed == planned.failed
+            && self.failure_status == planned.failure_status
+    }
+}
+
 const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
 const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
 
@@ -68,6 +77,7 @@ struct LoopInvocation {
 struct RuntimeFailure {
     reason: String,
     message: &'static str,
+    data: serde_json::Map<String, serde_json::Value>,
     tool_id: Option<String>,
     phase_id: Option<String>,
     emit_tool_failed: bool,
@@ -163,7 +173,6 @@ struct RuntimeEventBuilder<'a> {
     sequence: u64,
     session_id: String,
     sink: Option<&'a mut dyn RuntimeEventSink>,
-    stream_bytes: usize,
     pending_context_manifest: Option<ContextManifest>,
     validation: Option<SessionAppendValidationState>,
 }
@@ -185,7 +194,6 @@ impl<'a> RuntimeEventBuilder<'a> {
             sequence: 0,
             session_id,
             sink: None,
-            stream_bytes: 0,
             pending_context_manifest: None,
             validation,
         }
@@ -271,7 +279,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         let event_bytes = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
         })?;
-        let next_stream_bytes = self.stream_bytes.saturating_add(event_bytes.len());
+        let next_stream_bytes = self.events.byte_count.saturating_add(event_bytes.len());
         if next_stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
             return Err(RuntimeError::Protocol(format!(
                 "event stream budget exceeded: next event would use {next_stream_bytes} bytes, max {MAX_LOOP_EVENT_STREAM_BYTES}"
@@ -340,7 +348,6 @@ impl<'a> RuntimeEventBuilder<'a> {
             )?;
         }
         self.sequence = sequence;
-        self.stream_bytes = next_stream_bytes;
         self.history.record(&event);
         if let Some(invocation) = invocation {
             match event.event_type {

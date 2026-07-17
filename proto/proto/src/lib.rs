@@ -549,7 +549,13 @@ fn canonical_number(value: &Number) -> String {
         return "0".to_owned();
     }
 
-    value.to_string()
+    let decimal = value.to_string();
+    let scientific = format!("{value:e}");
+    if scientific.len() < decimal.len() {
+        scientific
+    } else {
+        decimal
+    }
 }
 
 #[cfg(test)]

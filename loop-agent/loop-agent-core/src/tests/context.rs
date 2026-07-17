@@ -484,7 +484,7 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
 }
 
 #[test]
-fn context_budget_error_maps_to_the_typed_runtime_failure_code() {
+fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
     let failure = runtime_failure_for_unhandled_error(&RuntimeError::ContextBudgetExceeded {
         input_budget_tokens: 5,
         required_bytes: 6,
@@ -494,6 +494,22 @@ fn context_budget_error_maps_to_the_typed_runtime_failure_code() {
     assert_eq!(
         failure.message,
         "mandatory context exceeds the model input budget"
+    );
+    assert_eq!(
+        failure.data,
+        serde_json::Map::from_iter([
+            ("input_budget_tokens".to_owned(), serde_json::json!(5)),
+            ("required_bytes".to_owned(), serde_json::json!(6)),
+        ])
+    );
+
+    let failure = runtime_failure_for_unhandled_error(&RuntimeError::Io {
+        path: PathBuf::from("private/workspace/secret"),
+        source: io::Error::new(io::ErrorKind::StorageFull, "private failure detail"),
+    });
+    assert_eq!(
+        failure.data,
+        serde_json::Map::from_iter([("io_kind".to_owned(), serde_json::json!("storage_full"))])
     );
 }
 
@@ -541,15 +557,17 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Human)
         .expect_err("the committed context failure must be returned");
-    assert!(
-        matches!(
-            &err,
-            RuntimeError::SessionFailed { session_id, source }
-                if session_id == "hello001"
-                    && matches!(source.as_ref(), RuntimeError::ContextBudgetExceeded { .. })
-        ),
-        "{err:?}"
-    );
+    let RuntimeError::SessionFailed { session_id, source } = &err else {
+        panic!("expected identified session failure, got {err:?}");
+    };
+    assert_eq!(session_id, "hello001");
+    let RuntimeError::ContextBudgetExceeded {
+        input_budget_tokens,
+        required_bytes,
+    } = source.as_ref()
+    else {
+        panic!("expected typed context budget cause, got {source:?}");
+    };
     assert!(
         err.to_string()
             .starts_with("session hello001 failed: context_budget_exceeded:"),
@@ -559,6 +577,17 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let stream = read_session_log_to_string(&path).expect("failed session log is readable");
     let events = validate_session_log_text(&path, "hello001", &stream)
         .expect("failed session log remains authoritative");
+    let error = events
+        .iter()
+        .find(|event| event.event_type == EventType::Error)
+        .expect("persisted failure includes an error event");
+    assert_eq!(
+        error.payload["data"],
+        serde_json::json!({
+            "input_budget_tokens": input_budget_tokens,
+            "required_bytes": required_bytes,
+        })
+    );
     assert_eq!(
         events.last().map(|event| &event.event_type),
         Some(&EventType::SessionFailed)
@@ -631,6 +660,7 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
     for (tamper, expected) in [
         ("missing", "context manifest stream is missing"),
         ("missing-lf", "context manifest stream must end with LF"),
+        ("malformed-json", "line 2: invalid context manifest JSON"),
         ("whitespace", "context manifest is not canonical JSONL"),
     ] {
         let workspace = workspace_copy("hello-loop");
@@ -647,6 +677,14 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
             "missing" => fs::remove_file(&context_path).expect("context stream removed"),
             "missing-lf" => fs::write(&context_path, context_stream.trim_end_matches('\n'))
                 .expect("unframed context stream written"),
+            "malformed-json" => {
+                let mut records = context_stream.lines();
+                let first = records.next().expect("first context manifest exists");
+                records.next().expect("second context manifest exists");
+                let suffix = records.map(|record| format!("{record}\n")).collect::<String>();
+                fs::write(&context_path, format!("{first}\n{{\n{suffix}"))
+                    .expect("malformed context stream written");
+            }
             "whitespace" => fs::write(&context_path, context_stream.replacen('{', "{ ", 1))
                 .expect("noncanonical context stream written"),
             _ => unreachable!(),
@@ -656,7 +694,12 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
         let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
             .expect_err("invalid context audit evidence must block resume");
 
-        assert!(matches!(err, RuntimeError::Protocol(message) if message.contains(expected)));
+        assert!(matches!(
+            err,
+            RuntimeError::Protocol(message)
+                if message.contains(expected)
+                    && message.contains(&context_path.display().to_string())
+        ));
         assert_eq!(
             fs::read_to_string(&output.session_path).expect("session remains readable"),
             before

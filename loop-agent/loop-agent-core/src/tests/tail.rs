@@ -121,7 +121,9 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     assert_eq!(reader.read_after(0).expect("prefix retries"), prefix);
     append_session_log_bytes(&path, &completed.as_bytes()[split..])
         .expect("remaining bytes append");
-    let appended = reader.read_after(1).expect("completed line reads");
+    let appended = reader
+        .read_incremental_after(1)
+        .expect("completed suffix reads without replaying the prefix");
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
 }
@@ -143,7 +145,7 @@ fn tail_preserves_extensions_and_reader_rejects_their_mutation() {
     );
     event
         .additional_fields
-        .insert("future".to_owned(), serde_json::json!({"enabled": true}));
+        .insert("future".to_owned(), serde_json::json!({"mode": "alpha"}));
     let started = event.canonical_jsonl().expect("event serializes");
     fs::write(&path, &started).expect("initial event written");
     let tailed = tail_session_with_options(
@@ -162,16 +164,22 @@ fn tail_preserves_extensions_and_reader_rejects_their_mutation() {
     let mut changed: EventEnvelope = serde_json::from_str(started.trim()).expect("event parses");
     changed
         .additional_fields
-        .insert("future".to_owned(), serde_json::json!({"enabled": false}));
+        .insert("future".to_owned(), serde_json::json!({"mode": "bravo"}));
     fs::write(
         &path,
         changed.canonical_jsonl().expect("changed event serializes"),
     )
     .expect("event replaced");
 
+    assert!(
+        reader
+            .read_incremental_after(1)
+            .expect("live suffix read does not replay an unchanged-length prefix")
+            .is_empty()
+    );
     let err = reader
         .read_after(1)
-        .expect_err("observed event mutation is rejected");
+        .expect_err("final authoritative verification rejects the mutation");
     assert!(matches!(
         err,
         RuntimeError::Protocol(message) if message.contains("append-only")

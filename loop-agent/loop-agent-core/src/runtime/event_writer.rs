@@ -15,53 +15,6 @@ trait RuntimeEventSink {
     ) -> Result<(), RuntimeError>;
 }
 
-struct PlannedRuntimeSink<'expected, 'inner> {
-    expected: &'expected RuntimeExecution,
-    inner: Option<&'inner mut dyn RuntimeEventSink>,
-}
-
-impl<'expected, 'inner> PlannedRuntimeSink<'expected, 'inner> {
-    fn new(
-        expected: &'expected RuntimeExecution,
-        inner: Option<&'inner mut dyn RuntimeEventSink>,
-    ) -> Self {
-        Self { expected, inner }
-    }
-
-    fn matches_execution(&self, execution: &RuntimeExecution) -> bool {
-        execution.events == self.expected.events
-            && execution.context_manifests == self.expected.context_manifests
-            && execution.failed == self.expected.failed
-            && execution.failure_status == self.expected.failure_status
-    }
-}
-
-impl RuntimeEventSink for PlannedRuntimeSink<'_, '_> {
-    fn measurement_started_at(&self) -> Option<Instant> {
-        self.inner
-            .as_deref()
-            .and_then(RuntimeEventSink::measurement_started_at)
-    }
-
-    fn commit(
-        &mut self,
-        event: &EventEnvelope,
-        canonical_jsonl: &str,
-        context_manifest: Option<ContextManifestCheckpoint>,
-        measurement_started_at: Option<Instant>,
-    ) -> Result<(), RuntimeError> {
-        if let Some(inner) = self.inner.as_deref_mut() {
-            inner.commit(
-                event,
-                canonical_jsonl,
-                context_manifest,
-                measurement_started_at,
-            )?;
-        }
-        Ok(())
-    }
-}
-
 struct RuntimePrefixSink {
     context_manifests: RuntimeStreamSignatureBuilder,
     events: RuntimeStreamSignatureBuilder,

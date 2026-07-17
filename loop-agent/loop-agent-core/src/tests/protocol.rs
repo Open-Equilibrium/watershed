@@ -361,6 +361,37 @@ fn protocol_validator_rejects_jsonl_encoding_edges() {
         &canonical.replacen('{', "{ ", 1),
         "canonical JSONL",
     );
+    let mut metric = base_event();
+    metric.event_type = EventType::MetricSample;
+    metric.payload = serde_json::json!({"metric_name":"fsm.p95","value":1e-7});
+    let canonical_metric = metric.canonical_jsonl().expect("metric serializes");
+    assert!(canonical_metric.contains("\"value\":1e-7"));
+    validate_protocol_jsonl_text(Path::new("canonical-number.jsonl"), &canonical_metric)
+        .expect("shortest numeric form is canonical");
+    assert_invalid_stream(
+        "long-number.jsonl",
+        &canonical_metric.replace("1e-7", "0.0000001"),
+        "canonical JSONL",
+    );
+    let err = validate_protocol_jsonl_text(
+        Path::new("malformed-middle.jsonl"),
+        &format!("{canonical}{{\"event_type\":\n"),
+    )
+    .expect_err("malformed second record must fail");
+    let message = err.to_string();
+    assert!(message.contains("malformed-middle.jsonl line 2"), "{message}");
+    assert!(message.contains("column"), "{message}");
+    let err = validate_protocol_jsonl_text(
+        Path::new("invalid-event-middle.jsonl"),
+        &format!("{canonical}{{\"event_id\":\"evt-002\"}}\n"),
+    )
+    .expect_err("invalid second event must fail");
+    let message = err.to_string();
+    assert!(
+        message.contains("invalid-event-middle.jsonl line 2: invalid event"),
+        "{message}"
+    );
+    assert!(message.contains("missing field"), "{message}");
 }
 
 #[test]
@@ -730,7 +761,7 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
 
     let mut builder =
         RuntimeEventBuilder::with_clock("stream001".to_owned(), EventClock::fixed_fixture(), false);
-    builder.stream_bytes = MAX_LOOP_EVENT_STREAM_BYTES;
+    builder.events.byte_count = MAX_LOOP_EVENT_STREAM_BYTES;
     assert!(matches!(
         builder.emit(
             None,
