@@ -146,15 +146,11 @@ fn invalid_command_arguments_print_usage_errors() {
 #[test]
 fn registry_diagnostics_escape_terminal_controls() {
     let workspace = workspace_copy("smoke-loop");
-    fs::write(
-        workspace.join("registry/loops/smoke-loop.yaml"),
-        "loop:\n  id: \"bad\\u001b]0;owned\\u0007\"\n  name: SmokeLoop\n  phase_refs: [smoke]\n  subloop_refs: []\n  connection_refs: []\n",
-    )
-    .expect("hostile registry fixture written");
+    let hostile_loop_ref = "missing\u{1b}]0;owned\u{7}";
 
     let output = loop_command()
         .current_dir(&workspace)
-        .args(["run", "smoke-loop"])
+        .args(["run", hostile_loop_ref])
         .output()
         .expect("loop binary should run");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
@@ -163,7 +159,10 @@ fn registry_diagnostics_escape_terminal_controls() {
     assert!(output.stdout.is_empty());
     assert!(!stderr.contains('\u{1b}'), "{stderr:?}");
     assert!(!stderr.contains('\u{7}'), "{stderr:?}");
-    assert!(stderr.contains("bad\\u{1b}]0;owned\\u{7}"), "{stderr:?}");
+    assert!(
+        stderr.contains("missing\\u{1b}]0;owned\\u{7}"),
+        "{stderr:?}"
+    );
     assert_eq!(stderr.lines().count(), 1, "{stderr:?}");
 }
 
