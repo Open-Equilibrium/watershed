@@ -22,7 +22,7 @@ fn main() -> ExitCode {
     {
         Ok(args) => args,
         Err(err) => {
-            eprintln!("error: {err}");
+            print_error(&err);
             return ExitCode::from(64);
         }
     };
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
         return match write_stdout(&output) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
-                eprintln!("error: {err}");
+                print_error(&err);
                 ExitCode::from(err.exit_code() as u8)
             }
         };
@@ -45,10 +45,19 @@ fn main() -> ExitCode {
     match dispatch(&args) {
         Ok(code) => code,
         Err(err) => {
-            eprintln!("error: {err}");
+            print_error(&err);
             ExitCode::from(err.exit_code() as u8)
         }
     }
+}
+
+fn print_error(error: &impl std::fmt::Display) {
+    let escaped = error
+        .to_string()
+        .chars()
+        .flat_map(char::escape_debug)
+        .collect::<String>();
+    eprintln!("error: {escaped}");
 }
 
 fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
