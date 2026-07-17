@@ -204,10 +204,17 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
         .expect("near-limit phase written");
         active_paths.push(phase_path);
     }
+    let child_path = "loops/near-limit-child.yaml";
+    fs::write(
+        workspace.join("registry").join(child_path),
+        "loop:\n  id: near-limit-child\n  name: NearLimitChild\n  phase_refs: [near-limit-phase-00]\n  subloop_refs: []\n  connection_refs: []\n",
+    )
+    .expect("near-limit child loop written");
+    active_paths.push(child_path.to_owned());
     fs::write(
         workspace.join("registry/loops/smoke-loop.yaml"),
         format!(
-            "loop:\n  id: smoke-loop\n  name: SmokeLoop\n  phase_refs: [{}]\n  subloop_refs: []\n  connection_refs: []\n",
+            "loop:\n  id: smoke-loop\n  name: SmokeLoop\n  phase_refs: [{}]\n  subloop_refs: [near-limit-child]\n  connection_refs: []\n",
             phase_refs.join(", ")
         ),
     )
