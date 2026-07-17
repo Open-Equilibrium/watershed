@@ -379,7 +379,10 @@ fn protocol_validator_rejects_jsonl_encoding_edges() {
     )
     .expect_err("malformed second record must fail");
     let message = err.to_string();
-    assert!(message.contains("malformed-middle.jsonl line 2"), "{message}");
+    assert!(
+        message.contains("malformed-middle.jsonl line 2"),
+        "{message}"
+    );
     assert!(message.contains("column"), "{message}");
     let err = validate_protocol_jsonl_text(
         Path::new("invalid-event-middle.jsonl"),

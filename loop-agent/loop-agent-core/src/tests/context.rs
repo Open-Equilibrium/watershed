@@ -681,7 +681,9 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
                 let mut records = context_stream.lines();
                 let first = records.next().expect("first context manifest exists");
                 records.next().expect("second context manifest exists");
-                let suffix = records.map(|record| format!("{record}\n")).collect::<String>();
+                let suffix = records
+                    .map(|record| format!("{record}\n"))
+                    .collect::<String>();
                 fs::write(&context_path, format!("{first}\n{{\n{suffix}"))
                     .expect("malformed context stream written");
             }

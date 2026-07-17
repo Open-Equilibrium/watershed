@@ -470,14 +470,13 @@ fn read_recorded_context_manifest_signature(
                 path.display()
             )));
         }
-        let value: serde_json::Value = serde_json::from_str(line.trim_end_matches('\n')).map_err(
-            |err| {
+        let value: serde_json::Value =
+            serde_json::from_str(line.trim_end_matches('\n')).map_err(|err| {
                 RuntimeError::Protocol(format!(
                     "{} line {line_number}: invalid context manifest JSON: {err}",
                     path.display()
                 ))
-            },
-        )?;
+            })?;
         if value
             .get("context_profile_id")
             .and_then(serde_json::Value::as_str)
