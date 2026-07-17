@@ -99,10 +99,10 @@ fn ensure_anchored_new_leaf_available(file: &AnchoredFile) -> Result<(), Runtime
             "{} must not be a symlink or reparse point",
             file.path.display()
         ))),
-        Ok(_) => Err(RuntimeError::Protocol(format!(
-            "{} must not already exist",
-            file.path.display()
-        ))),
+        Ok(_) => Err(path_io_error(
+            &file.path,
+            io::Error::new(io::ErrorKind::AlreadyExists, "file already exists"),
+        )),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
