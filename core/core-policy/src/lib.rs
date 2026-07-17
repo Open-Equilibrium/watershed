@@ -790,7 +790,7 @@ fn policy_artifact_error(message: String) -> PolicyArtifactValidationError {
 /// Filesystem access policy for a command.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct FilesystemPolicy {
-    /// Exact protected paths this command may access.
+    /// Exact or glob-pattern protected paths this command may access.
     pub protected_path_grants: Vec<String>,
     /// Default protected path patterns.
     pub protected_paths: Vec<String>,
@@ -811,20 +811,17 @@ impl FilesystemPolicy {
         let declared_scopes = self.validate_roots(tool_id)?;
 
         for grant in &self.protected_path_grants {
-            if protected_path_grant_has_wildcard(grant) {
+            let Some(normalized_grant) =
+                normalize_protected_path_match_input(ProtectedPathMatchMode::CaseSensitive, grant)
+            else {
                 return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must be an exact safe relative path"
-                )));
-            }
-            let Some(normalized_grant) = core_script::normalize_safe_relative_path(grant) else {
-                return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path"
+                    "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path or pattern"
                 )));
             };
 
             if !declared_scopes
                 .iter()
-                .any(|scope| core_script::relative_path_is_inside_scope(&normalized_grant, scope))
+                .any(|scope| protected_path_grant_overlaps_scope(&normalized_grant, scope))
             {
                 return Err(policy_artifact_error(format!(
                     "tool {tool_id} protected_path_grant {grant:?} must stay inside read_roots or write_roots"
@@ -867,8 +864,15 @@ fn matches_default_protected_paths(paths: &[String]) -> bool {
             .eq(DEFAULT_PROTECTED_PATHS.iter().copied())
 }
 
-fn protected_path_grant_has_wildcard(value: &str) -> bool {
-    value.contains('*') || value.contains('?')
+fn protected_path_grant_overlaps_scope(grant: &str, scope: &str) -> bool {
+    let literal_prefix = grant.find(['*', '?']).map_or(grant, |wildcard| {
+        grant[..wildcard]
+            .rsplit_once('/')
+            .map_or("", |(prefix, _)| prefix)
+    });
+    literal_prefix.is_empty()
+        || core_script::relative_path_is_inside_scope(literal_prefix, scope)
+        || core_script::relative_path_is_inside_scope(scope, literal_prefix)
 }
 
 /// Network access policy for a command.

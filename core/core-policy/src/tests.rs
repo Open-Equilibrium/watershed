@@ -412,16 +412,15 @@ fn policy_artifact_rejects_protected_path_grants_outside_write_scope() {
     let mut artifact = valid_policy_artifact("filesystem-tool");
     artifact.commands[0].filesystem.read_roots = vec!["workspace/in".to_owned()];
     artifact.commands[0].filesystem.write_roots = vec!["workspace/out".to_owned()];
-    artifact.commands[0].filesystem.protected_path_grants =
-        vec!["workspace/secrets/.env".to_owned()];
+    artifact.commands[0].filesystem.protected_path_grants = vec!["workspace/secrets/**".to_owned()];
 
     let err = artifact
         .validate()
-        .expect_err("protected path grants must stay inside declared scopes");
+        .expect_err("protected path patterns must overlap declared scopes");
 
     assert_eq!(
         err.to_string(),
-        "tool filesystem-tool protected_path_grant \"workspace/secrets/.env\" must stay inside read_roots or write_roots"
+        "tool filesystem-tool protected_path_grant \"workspace/secrets/**\" must stay inside read_roots or write_roots"
     );
 }
 
@@ -439,27 +438,23 @@ fn policy_artifact_accepts_read_only_protected_path_grants() {
 }
 
 #[test]
-fn policy_artifact_rejects_wildcard_protected_path_grants() {
-    for grant in ["workspace/**", "workspace/*.env", "workspace/.env?"] {
-        let mut artifact = valid_policy_artifact("filesystem-tool");
-        artifact.commands[0].filesystem.protected_path_grants = vec![grant.to_owned()];
+fn policy_artifact_accepts_safe_wildcard_protected_path_grants() {
+    let mut artifact = valid_policy_artifact("filesystem-tool");
+    artifact.commands[0].filesystem.protected_path_grants = vec!["workspace/**".to_owned()];
 
-        let err = artifact
-            .validate()
-            .expect_err("protected path grants must be exact paths");
-
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "tool filesystem-tool protected_path_grant {grant:?} must be an exact safe relative path"
-            )
-        );
-    }
+    artifact
+        .validate()
+        .expect("a safe protected path pattern inside declared scopes is valid");
 }
 
 #[test]
 fn policy_artifact_rejects_unsafe_protected_path_grants() {
-    for grant in ["workspace/../.env", "/workspace/.env", "C:/workspace/.env"] {
+    for grant in [
+        "workspace/../.env",
+        "workspace/**suffix",
+        "/workspace/.env",
+        "C:/workspace/.env",
+    ] {
         let mut artifact = valid_policy_artifact("filesystem-tool");
         artifact.commands[0].filesystem.protected_path_grants = vec![grant.to_owned()];
 
@@ -470,7 +465,7 @@ fn policy_artifact_rejects_unsafe_protected_path_grants() {
         assert_eq!(
             err.to_string(),
             format!(
-                "tool filesystem-tool protected_path_grant {grant:?} must be a safe relative path"
+                "tool filesystem-tool protected_path_grant {grant:?} must be a safe relative path or pattern"
             )
         );
     }
