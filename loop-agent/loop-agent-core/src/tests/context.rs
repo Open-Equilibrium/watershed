@@ -694,6 +694,7 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
         let context_path = workspace
             .join(LOCAL_LOG_DIR)
             .join(format!("{}.contexts.jsonl", output.session_id));
+        let diagnostic_path = context_path.components().collect::<PathBuf>();
         let context_stream = fs::read_to_string(&context_path).expect("context manifests read");
         match tamper {
             "missing" => fs::remove_file(&context_path).expect("context stream removed"),
@@ -714,7 +715,7 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
             err,
             RuntimeError::Protocol(message)
                 if message.contains(expected)
-                    && message.contains(&context_path.display().to_string())
+                    && message.contains(&diagnostic_path.display().to_string())
         ));
         assert_eq!(
             fs::read_to_string(&output.session_path).expect("session remains readable"),
