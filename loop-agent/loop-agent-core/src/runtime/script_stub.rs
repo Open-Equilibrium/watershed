@@ -317,9 +317,9 @@ fn create_anchored_replacement_temp(
 }
 
 fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| RuntimeError::Protocol("replacement path must have a file name".to_owned()))?;
+    let file_name = path.file_name().ok_or_else(|| {
+        RuntimeError::Protocol("replacement path must have a file name".to_owned())
+    })?;
     let digest = sha256_hex(file_name.as_encoded_bytes());
     Ok(path.with_file_name(format!(
         ".watershed-{digest}-{}-{attempt}.tmp",
