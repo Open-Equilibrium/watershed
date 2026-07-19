@@ -9,7 +9,7 @@ Rationale for the Rust core: low per-agent memory footprint, true multi-core par
 Product target:
 - **10 parallel top-level loops** on a laptop-class device with at least 4 logical cores, 16 GiB RAM and SSD storage. Their roots and subloops share the process-wide limit of 32 live invocations. Model/provider processes, tool processes, network latency and caller-owned output buffers are excluded.
 
-### D-068 safety envelope
+### ADR-0068 safety envelope
 
 These hard limits always apply and are not multiplied into one promised workload:
 
@@ -54,7 +54,7 @@ M1 implementation budgets (ADR-0049):
 - Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
 - `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
 - Concurrency smoke: 10 fixture top-level loops complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 100 MiB aggregate RSS budget.
-- Initial full-session replay <= 10 s and full-session inspection <= 15 s at the D-068 event cap, with <= 256 MiB RSS growth.
+- Initial full-session replay <= 10 s and full-session inspection <= 15 s at the ADR-0068 event cap, with <= 256 MiB RSS growth.
 - Incremental tail read p95 <= 100 ms for one newly committed event up to 320 KiB, with <= 64 MiB retained-reader RSS growth.
 - The representative ten-session and ten-full-cap event-storage/replay gates each complete <= 120 s; they are not end-to-end runtime gates.
 

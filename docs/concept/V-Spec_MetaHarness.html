@@ -236,24 +236,8 @@ liquid integration
       <p>All sensitive commands go through the permission/policy gates in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 
-    <section id="m2" class="section"><h2>12. M2 implementation packet</h2><div class="body">
-      <p>M2 defines Meta-Harness as a self-contained headless control plane (see <a href="../../PLAN.md">PLAN.md</a> M2). It should define or implement:</p>
-      <ul>
-        <li>Meta-Harness CLI;</li>
-        <li>local service/daemon shape;</li>
-        <li>host-local executor invariant and cross-host control rejection;</li>
-        <li>API/protocol surface for Liquid/BYOA;</li>
-        <li>session registry;</li>
-        <li>Loop Agent adapter + at least one external CLI adapter;</li>
-        <li>central config resolver;</li>
-        <li>event/transcript ingestion;</li>
-        <li>artifact/log/handoff indexing;</li>
-        <li>AgentPulse v0 (after formulas are decided);</li>
-        <li>schedule/automation skeleton;</li>
-        <li>approval/audit model for config writes;</li>
-        <li><strong>no rich standalone GUI.</strong></li>
-      </ul>
-      <p><strong>M2 pass/fail</strong> includes: Meta-Harness runs without Liquid; local or remote clients use the same public API/protocol; Loop Agent integration uses public runtime surfaces; at least two host-local agents share one normalized session/event model; cross-host process-control attempts fail; config resolution avoids duplicate per-agent config directories; AgentPulse metrics remain instance-owned and queryable; sensitive config writes create review/audit records.</p>
+    <section id="m2" class="section"><h2>12. M2 implementation reference</h2><div class="body">
+      <p>See the canonical M2 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a>; <a href="../decisions/open-decisions.html#d-023">D-023</a> selects the service/API bindings. This V-Spec defines the product and runtime shape without moving agent-process ownership across hosts.</p>
     </div></section>
 
     <section id="open" class="section"><h2>13. Open decisions</h2><div class="body">

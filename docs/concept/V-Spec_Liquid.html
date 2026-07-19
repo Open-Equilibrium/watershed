@@ -283,26 +283,8 @@ Liquid AI (via the mutation pipeline):
       <p>Canonical test strategy: <a href="../../TESTING.md">TESTING.md</a>. Canonical budgets and scale constraints: <a href="../../PERFORMANCE.md">PERFORMANCE.md</a>.</p>
     </div></section>
 
-    <section id="m3" class="section"><h2>13. M3 implementation packet</h2><div class="body">
-      <p>M3 delivers Liquid as a <strong>self-contained local-first product</strong> (see <a href="../../PLAN.md">PLAN.md</a> M3). The working scope pending the cited open decisions:</p>
-      <ul>
-        <li>native Rust + Dart app shell (after <a href="../decisions/open-decisions.html#d-009">D-009</a> closes);</li>
-        <li>local workspace replica and optional resumable sync client;</li>
-        <li>internal action-history / workspace-VCS model;</li>
-        <li>Workspace/Page/Block/View model and Block SDK contract;</li>
-        <li>deterministic first-action creation, text formatting shortcuts and <code>/</code> Block chooser;</li>
-        <li>content flow, Arrange mode and responsive/mobile behavior;</li>
-        <li>PowerBar;</li>
-        <li>trusted built-in Text, Database, Chart, Code, Formula, Script, Media/Embed and agent-session Blocks;</li>
-        <li>typed Block Connection model;</li>
-        <li>Liquid CLI for workspace read/edit;</li>
-        <li>local API/service for external agents/tools;</li>
-        <li>action-history UI and CLI commands;</li>
-        <li>Liquid AI assistant skeleton;</li>
-        <li>Script Block runtime (local sandbox recommended; <a href="../decisions/open-decisions.html#d-034">D-034</a>);</li>
-        <li>optional multi-instance Meta-Harness client projections with provenance, freshness and authority.</li>
-      </ul>
-      <p><strong>Provisional M3 pass/fail (pending D-026, D-028, D-031, D-034 and D-035):</strong> offline, a user can start a blank Page by acting immediately, edit/connect multi-View Blocks, arrange them responsively and run a Script Block over local data; every human, AI, CLI/API and sync mutation uses the action-history pipeline and can be reviewed/reverted as permitted; interrupted sync resumes without blocking local work. Optional agent integration projects multiple Meta-Harness instances without losing provenance and rejects live commands while the owning instance is unreachable.</p>
+    <section id="m3" class="section"><h2>13. M3 implementation reference</h2><div class="body">
+      <p>See the canonical provisional M3 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a>. This V-Spec defines Liquid's product and interaction model; live implementation choices remain in the <a href="../decisions/open-decisions.html">open-decisions dashboard</a>.</p>
     </div></section>
 
     <section id="open" class="section"><h2>14. Open decisions</h2><div class="body">
