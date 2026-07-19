@@ -37,8 +37,6 @@ pub const MAX_LOOP_EVENTS: u64 = 155_750;
 pub const MAX_LOOP_INVOCATIONS: u64 = 512;
 /// Maximum live Loop invocations across all active sessions in one process.
 pub const MAX_LIVE_LOOP_INVOCATIONS: usize = 32;
-/// Worst-case terminal events that a future dynamic planner must keep available.
-pub const MAX_TERMINAL_EVENT_RESERVE: u64 = 20;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = 1024 * 1024;
 const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 const RUNTIME_ERROR_REASON: &str = "runtime_error";

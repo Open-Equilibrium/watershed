@@ -49,16 +49,6 @@ impl LiveInvocationCounter {
             }
         }
     }
-
-    fn acquire_for(
-        &self,
-        mode: ToolSideEffectMode,
-        terminal_in_prefix: bool,
-    ) -> Result<Option<LiveInvocationGuard<'_>>, RuntimeError> {
-        mode.occupies_live_invocation_slot(terminal_in_prefix)
-            .then(|| self.acquire())
-            .transpose()
-    }
 }
 
 struct LiveInvocationGuard<'a> {
@@ -654,10 +644,11 @@ fn emit_loop_block_at_depth(
     let invocation = builder.next_loop_invocation(parent_loop_id)?;
     // A parent remains live while it waits for a nested invocation; queued but not started,
     // terminal and fully paused invocations do not hold this process-wide slot.
-    let _live_invocation = LIVE_LOOP_INVOCATIONS.acquire_for(
-        context.side_effect_mode,
-        context.terminal_loop_ids.contains(&invocation.loop_id),
-    )?;
+    let _live_invocation = context
+        .side_effect_mode
+        .occupies_live_invocation_slot(context.terminal_loop_ids.contains(&invocation.loop_id))
+        .then(|| LIVE_LOOP_INVOCATIONS.acquire())
+        .transpose()?;
     builder.emit(
         Some(&invocation),
         EventType::LoopStarted,
