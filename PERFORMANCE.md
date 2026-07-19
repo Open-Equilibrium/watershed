@@ -20,7 +20,7 @@ These hard limits always apply and are not multiplied into one promised workload
 - Canonical events: 155,750 per session across all segments, resumes, errors and future event families.
 - Canonical storage: 320 KiB per event including LF, 16 MiB per event segment or context-manifest segment, 48 MiB total event data, 48 MiB total context-manifest data, 16 MiB per immutable object and 5.5 GiB for the complete logical session bundle. Object data may use at most 5,520 MiB, reserving the other 112 MiB for the two JSONL streams and metadata. The former 10 MiB event-stream limit is removed.
 
-The 155,750-event sizing model is `2 session + 1,024 Loop lifecycle + 1,024 phase + 102,400 model-cycle + 100 non-model-turn + 51,200 tool lifecycle`. It assumes 25,600 model cycles and 25,600 tool calls. Four model-cycle events mean one enclosing `step.started`/`step.completed` pair plus `message.delta`/`message.completed`; a non-model turn needs only the step pair. These are capacity assumptions, not independent product limits.
+The 155,750-event sizing model is `2 session + 1,024 Loop lifecycle + 1,024 phase + 102,400 model-cycle + 100 non-model step-lifecycle + 51,200 tool lifecycle`. It assumes 25,600 model cycles and 25,600 tool calls. Four model-cycle events mean one enclosing `step.started`/`step.completed` pair plus `message.delta`/`message.completed`; the 100 non-model step-lifecycle events represent 50 turns. These are capacity assumptions, not independent product limits.
 
 M1 plans the complete deterministic stream before side effects. A future dynamic planner must keep 20 event slots free until clean termination: one active tool/message terminal event, one `step.completed`, up to 16 `loop.failed` events, one `error` and one `session.failed`.
 

@@ -381,6 +381,7 @@ fn sandbox_negative_runtime_matches_non_write_denial_fixtures() {
         "sandbox-negative-network",
         "sandbox-negative-protected-path",
         "sandbox-negative-symlink",
+        "sandbox-negative-tool-out-of-phase",
     ] {
         let workspace = workspace_copy("sandbox-negative");
         let output = run_loop(&workspace, loop_id, EmitMode::Jsonl)
