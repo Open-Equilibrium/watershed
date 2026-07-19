@@ -595,6 +595,11 @@ fn protected_path_matcher_covers_normalization_and_pattern_edges() {
     ));
     assert!(protected_path_pattern_matches(
         ProtectedPathMatchMode::CaseSensitive,
+        r"workspace\.ssh\**",
+        "workspace/.ssh/id_rsa"
+    ));
+    assert!(protected_path_pattern_matches(
+        ProtectedPathMatchMode::CaseSensitive,
         "**/.ssh/**",
         "workspace/home/user/.ssh/config"
     ));

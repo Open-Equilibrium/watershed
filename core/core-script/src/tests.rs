@@ -56,6 +56,7 @@ proptest! {
         let sibling = format!("{}x/leaf", path);
 
         prop_assert_eq!(normalized, Some(path.clone()));
+        prop_assert!(relative_path_is_inside_scope(&path, &path));
         prop_assert!(relative_path_is_inside_scope(&child, &path));
         prop_assert!(!relative_path_is_inside_scope(&sibling, &path));
     }

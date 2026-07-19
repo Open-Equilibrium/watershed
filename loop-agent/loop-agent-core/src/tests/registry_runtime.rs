@@ -546,39 +546,6 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
         core_policy::DenyReasonCode::ProtectedPathDenied,
         "protected path",
     );
-
-    assert!(core_script::relative_path_is_inside_scope(
-        "workspace/out",
-        "workspace/out"
-    ));
-    assert!(core_script::relative_path_is_inside_scope(
-        "workspace/out/summary.txt",
-        "workspace/out"
-    ));
-    assert!(!core_script::relative_path_is_inside_scope(
-        "workspace/output/summary.txt",
-        "workspace/out"
-    ));
-    assert!(protected_path_pattern_matches(
-        match_mode,
-        r"workspace\.ssh\**",
-        "workspace/.ssh/id_rsa"
-    ));
-    assert!(protected_path_pattern_matches(
-        match_mode,
-        "workspace/*/id_???",
-        "workspace/.ssh/id_rsa"
-    ));
-    assert!(protected_path_pattern_matches(
-        match_mode,
-        "workspace/**/secrets/*",
-        "workspace/a/b/secrets/token"
-    ));
-    assert!(!protected_path_pattern_matches(
-        match_mode,
-        "workspace/.ssh/**",
-        "workspace/.config/id_rsa"
-    ));
 }
 
 #[test]

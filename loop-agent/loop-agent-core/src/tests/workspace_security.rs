@@ -269,18 +269,7 @@ fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
     );
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]
@@ -315,18 +304,7 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     );
     assert!(!workspace.join("out/partial.txt").exists());
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]
@@ -349,18 +327,7 @@ fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
             .expect_err("non-file declared write path must fail preflight");
 
         assert_denied(err, core_policy::DenyReasonCode::WriteDenied, expected);
-        assert!(
-            !workspace
-                .join(LOCAL_SESSION_DIR)
-                .join("hello-loop.jsonl")
-                .exists()
-        );
-        assert!(
-            !workspace
-                .join(LOCAL_LOG_DIR)
-                .join("hello-loop.log")
-                .exists()
-        );
+        assert_no_session_artifacts(&workspace, "hello-loop");
     }
 }
 
@@ -485,18 +452,7 @@ fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
         "symlink",
     );
     assert!(!outside.join("summary.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[cfg(windows)]
@@ -516,18 +472,7 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
         "reparse",
     );
     assert!(!outside.join("summary.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[cfg(any(unix, windows))]
@@ -548,18 +493,7 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
     );
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[cfg(not(any(unix, windows)))]

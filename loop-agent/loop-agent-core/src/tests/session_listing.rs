@@ -236,18 +236,7 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
 
     assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "write scope");
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]
@@ -271,18 +260,7 @@ fn run_loop_rejects_unsupported_own_script_before_side_effects() {
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]
@@ -349,18 +327,7 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]
@@ -418,18 +385,7 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
         "must be a file",
     );
     assert!(!workspace.join("out/partial.txt").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]
@@ -545,18 +501,7 @@ fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
     );
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("smoke-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("smoke-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "smoke-loop");
 }
 
 #[test]
@@ -587,18 +532,7 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
         "protected path",
     );
     assert!(!workspace.join(".env").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[cfg(target_os = "linux")]
@@ -660,18 +594,7 @@ fn run_loop_rejects_case_variant_of_protected_path_pattern() {
         "protected path",
     );
     assert!(!workspace.join(".ENV").exists());
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-loop.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
-            .exists()
-    );
+    assert_no_session_artifacts(&workspace, "hello-loop");
 }
 
 #[test]

@@ -16,6 +16,19 @@ fn empty_workspace(label: &str) -> TempWorkspace {
     target
 }
 
+fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
+    for (directory, extension) in [(LOCAL_SESSION_DIR, "jsonl"), (LOCAL_LOG_DIR, "log")] {
+        let path = workspace
+            .join(directory)
+            .join(format!("{session_id}.{extension}"));
+        assert!(
+            !path.exists(),
+            "unexpected session artifact: {}",
+            path.display()
+        );
+    }
+}
+
 #[test]
 fn temp_workspace_survives_until_the_last_thread_owner_drops() {
     let workspace = empty_workspace("temp-workspace-owner");
