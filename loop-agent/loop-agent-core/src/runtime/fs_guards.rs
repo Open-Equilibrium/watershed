@@ -183,11 +183,18 @@ fn segmented_jsonl_stem(base: &AnchoredFile) -> Result<&str, RuntimeError> {
         })
 }
 
-fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFile)>, RuntimeError> {
+enum SegmentedJsonlMember {
+    Canonical(u64, AnchoredFile),
+    Alias(AnchoredFile),
+}
+
+fn for_each_segmented_jsonl_member(
+    base: &AnchoredFile,
+    mut visit: impl FnMut(SegmentedJsonlMember) -> Result<(), RuntimeError>,
+) -> Result<(), RuntimeError> {
     let leaf = segmented_jsonl_stem(base)?;
     let base_name = format!("{leaf}.jsonl");
     let prefix = format!("{leaf}.");
-    let mut siblings = Vec::new();
     for entry in base
         .parent
         .dir
@@ -200,11 +207,11 @@ fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFil
             continue;
         };
         let candidate = name.to_ascii_lowercase();
-        if candidate == base_name && name != base_name {
-            return Err(RuntimeError::Protocol(format!(
-                "{} contains non-canonical segmented JSONL name {name}",
-                base.parent.path.display()
-            )));
+        if candidate == base_name {
+            if name != base_name {
+                visit(SegmentedJsonlMember::Alias(base.parent.file(name)))?;
+            }
+            continue;
         }
         let Some(ordinal) = candidate
             .strip_prefix(&prefix)
@@ -216,16 +223,28 @@ fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFil
         else {
             continue;
         };
-        if candidate != name {
-            return Err(RuntimeError::Protocol(format!(
-                "{} contains non-canonical segmented JSONL name {name}",
-                base.parent.path.display()
-            )));
-        }
-        siblings.push((ordinal, base.parent.file(name)));
+        let file = base.parent.file(name);
+        visit(if candidate == name {
+            SegmentedJsonlMember::Canonical(ordinal, file)
+        } else {
+            SegmentedJsonlMember::Alias(file)
+        })?;
     }
-    siblings.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-    Ok(siblings)
+    Ok(())
+}
+
+fn canonical_segmented_jsonl_sibling(
+    base: &AnchoredFile,
+    member: SegmentedJsonlMember,
+) -> Result<(u64, AnchoredFile), RuntimeError> {
+    match member {
+        SegmentedJsonlMember::Canonical(ordinal, file) => Ok((ordinal, file)),
+        SegmentedJsonlMember::Alias(file) => Err(RuntimeError::Protocol(format!(
+            "{} contains non-canonical segmented JSONL name {}",
+            base.parent.path.display(),
+            file.leaf.display()
+        ))),
+    }
 }
 
 fn segmented_jsonl_files(
@@ -234,20 +253,35 @@ fn segmented_jsonl_files(
 ) -> Result<Vec<AnchoredFile>, RuntimeError> {
     ensure_anchored_real_file(base)?;
     let mut files = vec![base.clone()];
-    for (expected, (ordinal, candidate)) in (2..).zip(segmented_jsonl_siblings(base)?) {
+    let mut siblings = Vec::new();
+    let mut invalid_ordinal = None;
+    let mut exceeds_limit = false;
+    for_each_segmented_jsonl_member(base, |member| {
+        let (ordinal, candidate) = canonical_segmented_jsonl_sibling(base, member)?;
         if ordinal < 2 {
-            return Err(RuntimeError::Protocol(format!(
-                "{} has invalid segmented JSONL ordinal {ordinal:06}",
-                base.diagnostic_path().display()
-            )));
+            invalid_ordinal = Some(invalid_ordinal.map_or(ordinal, |old: u64| old.min(ordinal)));
+        } else if ordinal > limits.max_segments {
+            exceeds_limit = true;
+        } else {
+            siblings.push((ordinal, candidate));
         }
-        if ordinal > limits.max_segments {
-            return Err(RuntimeError::Protocol(format!(
-                "{} segment count exceeds max {}",
-                base.diagnostic_path().display(),
-                limits.max_segments
-            )));
-        }
+        Ok(())
+    })?;
+    if let Some(ordinal) = invalid_ordinal {
+        return Err(RuntimeError::Protocol(format!(
+            "{} has invalid segmented JSONL ordinal {ordinal:06}",
+            base.diagnostic_path().display()
+        )));
+    }
+    if exceeds_limit {
+        return Err(RuntimeError::Protocol(format!(
+            "{} segment count exceeds max {}",
+            base.diagnostic_path().display(),
+            limits.max_segments
+        )));
+    }
+    siblings.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+    for (expected, (ordinal, candidate)) in (2..).zip(siblings) {
         if ordinal != expected {
             return Err(RuntimeError::Protocol(format!(
                 "{} has non-contiguous segmented JSONL ordinals",
@@ -311,11 +345,13 @@ fn for_each_segmented_jsonl_line(
 }
 
 fn remove_segmented_jsonl(base: &AnchoredFile) {
-    if let Ok(siblings) = segmented_jsonl_siblings(base) {
-        for (_, file) in siblings.into_iter().rev() {
-            let _ = file.remove();
-        }
-    }
+    let _ = for_each_segmented_jsonl_member(base, |member| {
+        let file = match member {
+            SegmentedJsonlMember::Canonical(_, file) | SegmentedJsonlMember::Alias(file) => file,
+        };
+        let _ = file.remove();
+        Ok(())
+    });
     let _ = base.remove();
 }
 

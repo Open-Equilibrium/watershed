@@ -232,11 +232,17 @@ fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
             assert!(err.to_string().contains("segment count"), "{label}: {err}");
         }
 
+        let alias = segmented_jsonl_path(base, 3)
+            .expect("alias path resolves")
+            .diagnostic_path()
+            .with_extension("JSONL");
+        fs::write(&alias, b"\n").expect("case-aliased segment fixture writes");
         reservation.rollback();
         assert!(
             !high.diagnostic_path().exists(),
             "{label} high segment must be cleaned up"
         );
+        assert!(!alias.exists(), "{label} alias must be cleaned up");
     }
 }
 

@@ -712,32 +712,49 @@ fn require_anchored_session_log_metadata(
     logs: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLogMetadata, RuntimeError> {
-    let expected = format!("{session_id}.log");
-    for entry in logs
-        .dir
-        .entries()
-        .map_err(|source| path_io_error(&logs.path, source))?
-    {
-        let entry = entry.map_err(|source| path_io_error(&logs.path, source))?;
-        if entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name != expected && name.eq_ignore_ascii_case(&expected))
-        {
-            return Err(RuntimeError::Protocol(format!(
-                "{} contains non-canonical session metadata name {}",
-                logs.path.display(),
-                entry.file_name().to_string_lossy()
-            )));
-        }
+    let path = logs.file(format!("{session_id}.log"));
+    if let Some(alias) = ascii_case_alias(&path)? {
+        return Err(RuntimeError::Protocol(format!(
+            "{} contains non-canonical session metadata name {}",
+            logs.path.display(),
+            alias.leaf.display()
+        )));
     }
-    let path = logs.file(expected);
     ensure_anchored_real_file(&path)
         .map_err(|error| map_missing_definition_metadata(error, session_id))?;
     parse_session_log_metadata(&read_anchored_to_string_with_limit(
         &path,
         MAX_SESSION_METADATA_BYTES,
     )?)
+}
+
+fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, RuntimeError> {
+    let expected = path
+        .leaf
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "{} must have a UTF-8 filename",
+                path.diagnostic_path().display()
+            ))
+        })?;
+    for entry in path
+        .parent
+        .dir
+        .entries()
+        .map_err(|source| path_io_error(&path.parent.path, source))?
+    {
+        let entry = entry.map_err(|source| path_io_error(&path.parent.path, source))?;
+        let name = entry.file_name();
+        if name
+            .to_str()
+            .is_some_and(|name| name != expected && name.eq_ignore_ascii_case(expected))
+        {
+            return Ok(Some(path.parent.file(name)));
+        }
+    }
+    Ok(None)
 }
 
 fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
@@ -805,6 +822,7 @@ fn reserve_session_log_with_publish_observer(
         &session_path,
         &log_path,
         &context_path,
+        &lock_path,
         session_id,
     ) {
         let _ = lock_path.remove();
@@ -892,15 +910,32 @@ fn ensure_session_bundle_namespace_available(
     session_path: &AnchoredFile,
     log_path: &AnchoredFile,
     context_path: &AnchoredFile,
+    lock_path: &AnchoredFile,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
     for path in [log_path, context_path] {
         ensure_anchored_bundle_leaf_available(path, session_id)?;
     }
     for path in [session_path, context_path] {
-        for (_, segment) in segmented_jsonl_siblings(path)? {
-            ensure_anchored_bundle_leaf_available(&segment, session_id)?;
+        let mut occupied = false;
+        for_each_segmented_jsonl_member(path, |member| {
+            canonical_segmented_jsonl_sibling(path, member)?;
+            occupied = true;
+            Ok(())
+        })?;
+        if occupied {
+            return Err(RuntimeError::SessionLogExists(session_id.to_owned()));
         }
+    }
+
+    if ascii_case_alias(log_path)?.is_some() {
+        return Err(RuntimeError::SessionLogExists(session_id.to_owned()));
+    }
+    if let Some(alias) = ascii_case_alias(lock_path)? {
+        return Err(RuntimeError::ActiveSession {
+            session_id: session_id.to_owned(),
+            lock_path: alias.path,
+        });
     }
 
     let object_prefix = format!("{session_id}.object.sha256-");
@@ -998,10 +1033,17 @@ fn acquire_anchored_session_lock(
 ) -> Result<SessionLockGuard, RuntimeError> {
     let path = sessions.file(format!("{session_id}.lock"));
     reserve_anchored_session_lock_file(&path, session_id)?;
-    Ok(SessionLockGuard {
+    let guard = SessionLockGuard {
         path,
         cleanup_on_drop: Cell::new(true),
-    })
+    };
+    if let Some(alias) = ascii_case_alias(&guard.path)? {
+        return Err(RuntimeError::ActiveSession {
+            session_id: session_id.to_owned(),
+            lock_path: alias.path,
+        });
+    }
+    Ok(guard)
 }
 
 fn write_reserved_session_metadata(

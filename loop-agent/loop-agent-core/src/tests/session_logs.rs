@@ -110,6 +110,8 @@ fn unique_reservation_skips_complete_orphan_bundle_namespace() {
             "bundle001.contexts.000007.jsonl",
         ),
         ("metadata sidecar", LOCAL_LOG_DIR, "bundle001.log"),
+        ("metadata case alias", LOCAL_LOG_DIR, "BUNDLE001.LOG"),
+        ("lock case alias", LOCAL_SESSION_DIR, "BUNDLE001.LOCK"),
         (
             "object prefix",
             LOCAL_SESSION_DIR,
@@ -1259,6 +1261,26 @@ fn resume_rejects_active_session_lock_without_side_effects() {
 
     assert_active_session(err, "hello001", "hello001.lock");
     assert!(!workspace.join("out/summary.txt").exists());
+    reservation.rollback();
+}
+
+#[test]
+fn resume_rejects_case_aliased_session_lock_without_side_effects() {
+    let workspace = workspace_copy("hello-loop");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("reservation succeeds");
+    write_initial_session_log(&reservation, "hello001").expect("initial log writes");
+    let alias = workspace.join(LOCAL_SESSION_DIR).join("HELLO001.LOCK");
+    fs::rename(reservation.lock_path.diagnostic_path(), &alias).expect("lock alias installed");
+
+    let err = resume_session(&workspace, "hello001", EmitMode::Jsonl)
+        .expect_err("a case-aliased lock must preserve active ownership");
+
+    assert!(
+        matches!(err, RuntimeError::ActiveSession { ref session_id, .. } if session_id == "hello001"),
+        "{err}"
+    );
+    assert!(!workspace.join("out/summary.txt").exists());
+    fs::remove_file(alias).expect("lock alias removed");
     reservation.rollback();
 }
 
