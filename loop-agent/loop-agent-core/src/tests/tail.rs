@@ -1,3 +1,53 @@
+fn reader_fixture(
+    workspace_name: &str,
+    session_id: &str,
+) -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    String,
+    String,
+    SessionEventReader,
+) {
+    let workspace = empty_workspace(workspace_name);
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join(format!("{session_id}.jsonl"));
+    let started = session_event_line(session_id, "evt-started", EventType::SessionStarted, 1);
+    let completed = session_event_line(session_id, "evt-completed", EventType::SessionCompleted, 2);
+    fs::write(&path, &started).expect("initial event written");
+    let reader = SessionEventReader::open(&workspace, session_id).expect("reader opens");
+    (workspace, path, started, completed, reader)
+}
+
+fn assert_protocol_contains(result: Result<Vec<EventEnvelope>, RuntimeError>, expected: &str) {
+    assert!(matches!(
+        result.expect_err("reader must reject invalid authoritative state"),
+        RuntimeError::Protocol(message) if message.contains(expected)
+    ));
+}
+
+fn sequences(events: &[EventEnvelope]) -> Vec<u64> {
+    events.iter().map(|event| event.sequence).collect()
+}
+
+#[test]
+fn reader_open_rejects_invalid_ids_and_missing_authoritative_logs() {
+    let workspace = empty_workspace("tail-open-boundary");
+    assert!(matches!(
+        SessionEventReader::open(&workspace, "../escape"),
+        Err(RuntimeError::Usage(_))
+    ));
+    assert!(matches!(
+        SessionEventReader::open(&workspace, "missing001"),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+    fs::create_dir_all(workspace.join(LOCAL_SESSION_DIR)).expect("session dir");
+    assert!(matches!(
+        SessionEventReader::open(&workspace, "missing001"),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
+    ));
+}
+
 #[test]
 fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let workspace = empty_workspace("tail-partial");
@@ -190,6 +240,86 @@ fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() 
 }
 
 #[test]
+fn reader_rejects_partial_non_final_segments_and_recovers() {
+    let (_workspace, path, started, completed, mut reader) =
+        reader_fixture("tail-partial-segment", "tailsegment001");
+    let session_dir = path.parent().expect("session path has parent");
+    let second_path = session_dir.join("tailsegment001.000002.jsonl");
+    let third_path = session_dir.join("tailsegment001.000003.jsonl");
+    fs::write(&path, started.trim_end_matches('\n')).expect("partial first segment written");
+    fs::write(&second_path, "").expect("second segment written");
+    assert_protocol_contains(
+        reader.read_after(0),
+        "non-final segment must end with LF",
+    );
+
+    fs::write(&path, &started).expect("first segment repaired");
+    fs::remove_file(&second_path).expect("empty second segment removed");
+    assert_eq!(reader.read_after(0).expect("repaired prefix reads").len(), 1);
+    fs::write(&second_path, completed.trim_end_matches('\n'))
+        .expect("partial second segment written");
+    fs::write(&third_path, "").expect("third segment written");
+    assert_protocol_contains(
+        reader.read_incremental_after(1),
+        "non-final segment must end with LF",
+    );
+    fs::write(&second_path, &completed).expect("second segment repaired");
+    let recovered = reader
+        .read_incremental_after(1)
+        .expect("repaired segment reads");
+    assert_eq!(sequences(&recovered), [2]);
+}
+
+#[test]
+fn reader_rejects_invalid_utf8_in_full_and_incremental_reads() {
+    let (_workspace, path, started, completed, mut reader) =
+        reader_fixture("tail-invalid-utf8", "tailutf8001");
+    let mut invalid_stream = started.as_bytes().to_vec();
+    invalid_stream.extend_from_slice(&[0xff, b'\n']);
+    fs::write(&path, &invalid_stream).expect("invalid UTF-8 stream written");
+    assert_protocol_contains(reader.read_after(0), "not valid UTF-8");
+    fs::write(&path, &started).expect("invalid full stream repaired");
+    assert_eq!(reader.read_after(0).expect("repaired prefix reads").len(), 1);
+
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .expect("session log opens for append");
+    file.write_all(&[0xff, b'\n'])
+        .expect("invalid UTF-8 suffix written");
+    assert_protocol_contains(reader.read_incremental_after(1), "not valid UTF-8");
+    file.set_len(u64::try_from(started.len()).expect("fixture length fits"))
+        .expect("invalid suffix removed");
+    drop(file);
+    append_session_log_line(&path, &completed).expect("valid terminal event appended");
+    let recovered = reader
+        .read_incremental_after(1)
+        .expect("reader recovers after invalid UTF-8 is removed");
+    assert_eq!(sequences(&recovered), [2]);
+}
+
+#[test]
+fn reader_rejects_cursors_ahead_of_authoritative_history_and_recovers() {
+    let (_workspace, path, _started, completed, mut reader) =
+        reader_fixture("tail-cursor-ahead", "tailcursorahead001");
+    assert_protocol_contains(
+        reader.read_after(2),
+        "no longer contains processed sequence 2",
+    );
+    assert_eq!(reader.read_after(0).expect("valid cursor recovers").len(), 1);
+
+    append_session_log_line(&path, &completed).expect("terminal event appended");
+    assert_protocol_contains(
+        reader.read_incremental_after(3),
+        "no longer contains processed sequence 3",
+    );
+    let recovered = reader
+        .read_incremental_after(1)
+        .expect("valid cursor recovers");
+    assert_eq!(sequences(&recovered), [2]);
+}
+
+#[test]
 fn reader_rejects_an_incomplete_suffix_after_the_session_lock_disappears() {
     let workspace = empty_workspace("tail-inactive-partial");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -280,44 +410,36 @@ fn reader_preserves_extensions_and_rejects_their_mutation() {
         err,
         RuntimeError::Protocol(message) if message.contains("append-only")
     ));
+    fs::write(&path, "").expect("observed session log truncated");
+    assert_protocol_contains(reader.read_incremental_after(1), "append-only");
 }
 
 #[test]
 fn reader_rejects_partial_bytes_after_a_terminal_event() {
-    let workspace = empty_workspace("tail-terminal-partial");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailterminalpartial001.jsonl");
-    let started = session_event_line(
-        "tailterminalpartial001",
-        "evt-001",
-        EventType::SessionStarted,
-        1,
-    );
-    let completed = session_event_line(
-        "tailterminalpartial001",
-        "evt-002",
-        EventType::SessionCompleted,
-        2,
-    );
-    fs::write(&path, format!("{started}{completed}partial"))
-        .expect("terminal partial stream written");
-    let mut reader =
-        SessionEventReader::open(&workspace, "tailterminalpartial001").expect("reader opens");
+    let (workspace, path, started, completed, mut reader) =
+        reader_fixture("tail-terminal-partial", "tailterminalpartial001");
+    fs::write(path.with_extension("lock"), b"")
+        .expect("session lock written");
+    assert_eq!(reader.read_after(0).expect("initial event reads").len(), 1);
+    append_session_log_line(&path, &format!("{completed}partial"))
+        .expect("terminal partial suffix written");
 
-    let err = reader
-        .read_after(0)
-        .expect_err("terminal partial suffix is rejected");
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message.contains("partial line after a terminal event")
-    ));
+    assert_protocol_contains(
+        reader.read_incremental_after(1),
+        "partial line after a terminal event",
+    );
+    let mut fresh_reader =
+        SessionEventReader::open(&workspace, "tailterminalpartial001").expect("reader opens");
+    assert_protocol_contains(
+        fresh_reader.read_after(0),
+        "partial line after a terminal event",
+    );
     fs::write(&path, format!("{started}{completed}")).expect("uncommitted partial suffix removed");
     assert_eq!(
         reader
-            .read_after(0)
+            .read_incremental_after(1)
             .expect("reader recovers after uncommitted suffix removal")
             .len(),
-        2
+        1
     );
 }
