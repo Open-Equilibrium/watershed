@@ -273,6 +273,26 @@ fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
 }
 
 #[test]
+fn run_loop_writes_portable_near_limit_output_leaf() {
+    let workspace = workspace_copy("hello-loop");
+    let leaf = "a".repeat(240);
+    let target = format!("out/{leaf}");
+    let tool_path = workspace.join("registry/tools/write-summary.yaml");
+    let source = fs::read_to_string(&tool_path).expect("write-summary fixture readable");
+    fs::write(&tool_path, source.replace("out/summary.txt", &target))
+        .expect("long output target written");
+
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        .expect("portable near-limit output leaf runs");
+
+    assert!(!output.failed, "{}", output.stdout);
+    assert_eq!(
+        fs::read_to_string(workspace.join(target)).expect("long output leaf readable"),
+        "hello\n"
+    );
+}
+
+#[test]
 fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     let workspace = workspace_copy("hello-loop");
     fs::write(
