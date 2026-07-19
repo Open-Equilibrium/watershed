@@ -147,7 +147,7 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 - **Versioned & additive.** Breaking changes bump the protocol version; clients negotiate.
 - **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes.
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
-- **Deterministic ordering within a session.** A participant must emit monotonically increasing `sequence` values per session.
+- **Deterministic ordering within a session.** A participant must follow the event envelope's `sequence` rule per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
 - **No private-store or implicit co-location coupling.** A protocol client must not infer shared filesystem/process access from API reachability. All cross-tool state is addressed by IDs and public surfaces; a tool never reads another tool's local store directly. The only deliberate process co-location is a Meta-Harness executor owning CLI agents on the same host. Remote Liquid/Meta-Harness clients remain possible without remote agent-process ownership (ADR-0038).
 

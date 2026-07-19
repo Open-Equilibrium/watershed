@@ -100,7 +100,7 @@ pub enum EmitMode {
     Jsonl,
 }
 
-/// Result of a run, replay, tail or resume operation.
+/// Result of a run, replay or resume operation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RunOutput {
     /// Number of validated session events observed when the operation returned.
@@ -109,7 +109,8 @@ pub struct RunOutput {
     pub failed: bool,
     /// Session id.
     pub session_id: String,
-    /// Path to the persisted session log.
+    /// Path to the first persisted session segment; use [`replay_session`] or
+    /// [`SessionEventReader`] for the complete history.
     pub session_path: PathBuf,
     /// Rendered status or event output; empty for live-event operations.
     pub stdout: String,
