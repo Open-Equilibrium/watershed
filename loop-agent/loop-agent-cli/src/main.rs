@@ -2,10 +2,11 @@
 
 use loop_agent_core::{
     EmitMode, LiveEventNotifier, LiveEventReceiveError, RunOutput, RuntimeError,
-    SessionEventReader, TailOptions,
+    SessionEventReader, render_human_failure_status,
 };
 use proto::EventEnvelope;
 use std::{
+    collections::BTreeMap,
     env,
     ffi::OsString,
     io::{self, BufRead, Write},
@@ -14,6 +15,24 @@ use std::{
     thread,
     time::Duration,
 };
+
+const TAIL_POLL_INITIAL: Duration = Duration::from_millis(25);
+const TAIL_POLL_MAX: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TailOptions {
+    follow: bool,
+    timeout: Option<Duration>,
+}
+
+impl TailOptions {
+    fn follow() -> Self {
+        Self {
+            follow: true,
+            timeout: None,
+        }
+    }
+}
 
 fn main() -> ExitCode {
     let args = match env::args_os()
@@ -266,6 +285,7 @@ fn write_new_events(
         reader.read_incremental_after(*cursor)?,
         cursor,
         writer,
+        true,
         |_| {},
     )
 }
@@ -281,6 +301,7 @@ fn write_verified_events(
         committed_events_through(events, through_sequence),
         cursor,
         writer,
+        true,
         |_| {},
     )
 }
@@ -298,14 +319,17 @@ fn write_events(
     events: impl IntoIterator<Item = EventEnvelope>,
     cursor: &mut u64,
     writer: &mut impl Write,
+    emit_jsonl: bool,
     mut observe: impl FnMut(&EventEnvelope),
 ) -> Result<bool, RuntimeError> {
     for event in events {
-        let jsonl = event.canonical_jsonl().map_err(|err| {
-            RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
-        })?;
-        if !write_output(writer, jsonl.as_bytes())? {
-            return Ok(false);
+        if emit_jsonl {
+            let jsonl = event.canonical_jsonl().map_err(|err| {
+                RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
+            })?;
+            if !write_output(writer, jsonl.as_bytes())? {
+                return Ok(false);
+            }
         }
         *cursor = event.sequence;
         observe(&event);
@@ -319,50 +343,105 @@ fn tail_command(
     emit: EmitMode,
     options: TailOptions,
 ) -> Result<bool, RuntimeError> {
-    if emit == EmitMode::Human {
-        let output =
-            loop_agent_core::tail_session_with_options(workspace, session_id, emit, options)?;
-        write_stdout(&output.stdout)?;
-        return Ok(output.failed);
-    }
     let mut reader = SessionEventReader::open(workspace, session_id)?;
     let mut cursor = 0;
-    let mut failed = false;
-    let mut terminal = false;
+    let mut observation = TailObservation::default();
     let started = std::time::Instant::now();
-    let mut poll_interval = Duration::from_millis(25);
+    let mut poll_interval = TAIL_POLL_INITIAL;
     let mut stdout = io::stdout().lock();
     loop {
         let events = reader.read_incremental_after(cursor)?;
         if !events.is_empty() {
-            poll_interval = Duration::from_millis(25);
+            poll_interval = TAIL_POLL_INITIAL;
         }
-        if !write_events(events, &mut cursor, &mut stdout, |event| {
-            let event_type = event.event_type.as_str();
-            failed = event_type == "session.failed";
-            terminal = failed || event_type == "session.completed";
-        })? {
-            return Ok(failed);
+        if !write_events(
+            events,
+            &mut cursor,
+            &mut stdout,
+            emit == EmitMode::Jsonl,
+            |event| observation.observe(event),
+        )? {
+            return Ok(observation.failed);
         }
-        if terminal
+        if observation.terminal
             || !options.follow
             || options
                 .timeout
                 .is_some_and(|timeout| started.elapsed() >= timeout)
         {
             let events = reader.read_after(cursor)?;
-            if !write_events(events, &mut cursor, &mut stdout, |event| {
-                failed = event.event_type.as_str() == "session.failed";
-            })? {
-                return Ok(failed);
+            if !write_events(
+                events,
+                &mut cursor,
+                &mut stdout,
+                emit == EmitMode::Jsonl,
+                |event| observation.observe(event),
+            )? {
+                return Ok(observation.failed);
             }
-            return Ok(failed);
+            drop(stdout);
+            if emit == EmitMode::Human {
+                write_stdout(&observation.human_status(session_id))?;
+            }
+            return Ok(observation.failed);
         }
         let wait = options.timeout.map_or(poll_interval, |timeout| {
             timeout.saturating_sub(started.elapsed()).min(poll_interval)
         });
         thread::sleep(wait);
-        poll_interval = poll_interval.saturating_mul(2).min(Duration::from_secs(1));
+        poll_interval = poll_interval.saturating_mul(2).min(TAIL_POLL_MAX);
+    }
+}
+
+#[derive(Default)]
+struct TailObservation {
+    error_messages: BTreeMap<String, String>,
+    failed: bool,
+    failure_reason: Option<String>,
+    terminal: bool,
+}
+
+impl TailObservation {
+    fn observe(&mut self, event: &EventEnvelope) {
+        if event.event_type == proto::EventType::Error
+            && let (Some(code), Some(message)) = (
+                event.payload.get("code").and_then(|value| value.as_str()),
+                event
+                    .payload
+                    .get("message")
+                    .and_then(|value| value.as_str()),
+            )
+        {
+            self.error_messages
+                .insert(code.to_owned(), message.to_owned());
+        }
+        if event.event_type == proto::EventType::SessionFailed {
+            self.failed = true;
+            self.failure_reason = event
+                .payload
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+        }
+        self.terminal |= matches!(
+            event.event_type,
+            proto::EventType::SessionCompleted | proto::EventType::SessionFailed
+        );
+    }
+
+    fn human_status(&self, session_id: &str) -> String {
+        self.failure_reason.as_deref().map_or_else(
+            || format!("session {session_id} tailed\n"),
+            |reason| {
+                format!(
+                    "session {session_id} tailed: {}\n",
+                    render_human_failure_status(
+                        reason,
+                        self.error_messages.get(reason).map(String::as_str),
+                    )
+                )
+            },
+        )
     }
 }
 

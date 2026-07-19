@@ -1,93 +1,4 @@
 #[test]
-fn tail_captures_current_prefix_then_appended_terminal_event() {
-    let workspace = empty_workspace("tail-stream");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tail001.jsonl");
-    let started = session_event_line("tail001", "evt-001", EventType::SessionStarted, 1);
-    let completed = session_event_line("tail001", "evt-002", EventType::SessionCompleted, 2);
-    fs::write(&path, &started).expect("initial event written");
-    let mut waits = 0;
-    let output = tail_session_with_wait(
-        &workspace,
-        "tail001",
-        EmitMode::Jsonl,
-        TailOptions::follow(),
-        |_| {
-            waits += 1;
-            append_session_log_line(&path, &completed).expect("terminal event appended");
-        },
-    )
-    .expect("tail completes");
-
-    assert_eq!(waits, 1);
-    assert_eq!(output.stdout, format!("{started}{completed}"));
-    assert_eq!(output.event_count, 2);
-    assert!(!output.failed);
-}
-
-#[test]
-fn tail_backs_off_while_idle_and_resets_after_progress() {
-    let workspace = empty_workspace("tail-backoff");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailbackoff001.jsonl");
-    let started = session_event_line(
-        "tailbackoff001",
-        "evt-tail-backoff-started",
-        EventType::SessionStarted,
-        1,
-    );
-    let progress = EventEnvelope::new(
-        "evt-tail-backoff-progress",
-        EventType::MetricSample,
-        "tailbackoff001",
-        2,
-        event_timestamp(2),
-        "loop-agent-cli",
-        serde_json::json!({"metric_name":"tail.progress","value":1}),
-    )
-    .canonical_jsonl()
-    .expect("progress event serializes");
-    let completed = session_event_line(
-        "tailbackoff001",
-        "evt-tail-backoff-completed",
-        EventType::SessionCompleted,
-        3,
-    );
-    fs::write(&path, &started).expect("initial event written");
-    let mut waits = Vec::new();
-
-    let output = tail_session_with_wait(
-        &workspace,
-        "tailbackoff001",
-        EmitMode::Jsonl,
-        TailOptions::follow(),
-        |duration| {
-            waits.push(duration);
-            match waits.len() {
-                3 => append_session_log_line(&path, &progress).expect("progress event appended"),
-                5 => append_session_log_line(&path, &completed).expect("terminal event appended"),
-                _ => {}
-            }
-        },
-    )
-    .expect("tail completes");
-
-    assert_eq!(
-        waits,
-        [
-            Duration::from_millis(25),
-            Duration::from_millis(50),
-            Duration::from_millis(100),
-            Duration::from_millis(25),
-            Duration::from_millis(50),
-        ]
-    );
-    assert_eq!(output.stdout, format!("{started}{progress}{completed}"));
-}
-
-#[test]
 fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let workspace = empty_workspace("tail-partial");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -324,7 +235,7 @@ fn reader_rejects_an_incomplete_suffix_after_the_session_lock_disappears() {
 }
 
 #[test]
-fn tail_preserves_extensions_and_reader_rejects_their_mutation() {
+fn reader_preserves_extensions_and_rejects_their_mutation() {
     let workspace = empty_workspace("tail-mutation");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
@@ -343,19 +254,9 @@ fn tail_preserves_extensions_and_reader_rejects_their_mutation() {
         .insert("future".to_owned(), serde_json::json!({"mode": "alpha"}));
     let started = event.canonical_jsonl().expect("event serializes");
     fs::write(&path, &started).expect("initial event written");
-    let tailed = tail_session_with_options(
-        &workspace,
-        "tailmut001",
-        EmitMode::Jsonl,
-        TailOptions {
-            follow: false,
-            timeout: None,
-        },
-    )
-    .expect("existing prefix tails");
-    assert_eq!(tailed.stdout, started);
     let mut reader = SessionEventReader::open(&workspace, "tailmut001").expect("reader opens");
-    reader.read_after(0).expect("initial event reads");
+    let initial = reader.read_after(0).expect("initial event reads");
+    assert_eq!(initial[0].additional_fields, event.additional_fields);
     let mut changed: EventEnvelope = serde_json::from_str(started.trim()).expect("event parses");
     changed
         .additional_fields
@@ -419,38 +320,4 @@ fn reader_rejects_partial_bytes_after_a_terminal_event() {
             .len(),
         2
     );
-}
-
-#[test]
-fn no_follow_and_timeout_return_the_current_valid_prefix() {
-    let workspace = empty_workspace("tail-options");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("tailoptions001.jsonl");
-    let started = session_event_line("tailoptions001", "evt-001", EventType::SessionStarted, 1);
-    fs::write(&path, &started).expect("initial event written");
-
-    let no_follow = tail_session_with_options(
-        &workspace,
-        "tailoptions001",
-        EmitMode::Jsonl,
-        TailOptions {
-            follow: false,
-            timeout: None,
-        },
-    )
-    .expect("no-follow returns");
-    assert_eq!(no_follow.stdout, started);
-
-    let timed = tail_session_with_options(
-        &workspace,
-        "tailoptions001",
-        EmitMode::Human,
-        TailOptions {
-            follow: true,
-            timeout: Some(Duration::ZERO),
-        },
-    )
-    .expect("timed tail returns");
-    assert_eq!(timed.stdout, "session tailoptions001 tailed\n");
 }

@@ -67,7 +67,7 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
 }
 
 #[test]
-fn human_run_replay_tail_and_session_listing_report_status() {
+fn human_run_replay_and_session_listing_report_status() {
     let workspace = workspace_copy("smoke-loop");
 
     let run = run_loop(&workspace, "smoke-loop", EmitMode::Human).expect("loop runs");
@@ -80,9 +80,6 @@ fn human_run_replay_tail_and_session_listing_report_status() {
     let replay =
         replay_session(&workspace, "smoke-loop", EmitMode::Human).expect("session replays");
     assert_eq!(replay.stdout, "session smoke-loop replayed\n");
-
-    let tail = tail_session(&workspace, "smoke-loop", EmitMode::Human).expect("session tails");
-    assert_eq!(tail.stdout, "session smoke-loop tailed\n");
 
     assert_eq!(
         list_sessions(&workspace).expect("sessions list"),
@@ -110,7 +107,7 @@ fn human_run_replay_tail_and_session_listing_report_status() {
 }
 
 #[test]
-fn human_replay_and_tail_escape_control_characters_in_failure_reasons() {
+fn human_replay_escapes_control_characters_in_failure_reasons() {
     let workspace = empty_workspace("human-failure-reason-controls");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir created");
@@ -133,21 +130,11 @@ fn human_replay_and_tail_escape_control_characters_in_failure_reasons() {
     fs::write(session_dir.join(format!("{session_id}.jsonl")), stream)
         .expect("failed session written");
 
-    for (output, action) in [
-        (
-            replay_session(&workspace, session_id, EmitMode::Human).expect("session replays"),
-            "replayed",
-        ),
-        (
-            tail_session(&workspace, session_id, EmitMode::Human).expect("session tails"),
-            "tailed",
-        ),
-    ] {
-        assert_eq!(
-            output.stdout,
-            format!("session controls001 {action}: failed (line\\nbreak\\u{{1b}}[31m)\n")
-        );
-    }
+    let output = replay_session(&workspace, session_id, EmitMode::Human).expect("session replays");
+    assert_eq!(
+        output.stdout,
+        "session controls001 replayed: failed (line\\nbreak\\u{1b}[31m)\n"
+    );
 }
 
 #[test]

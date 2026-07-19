@@ -134,7 +134,8 @@ fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
     Some(render_human_failure_status(reason, message))
 }
 
-fn render_human_failure_status(reason: &str, message: Option<&str>) -> String {
+/// Formats a validated terminal failure for human-facing adapters.
+pub fn render_human_failure_status(reason: &str, message: Option<&str>) -> String {
     let reason = escape_human_failure_text(reason);
     message.map_or_else(
         || format!("failed ({reason})"),
@@ -155,25 +156,6 @@ fn human_session_status_from_failure(
         || format!("session {session_id} {action}\n"),
         |failure| format!("session {session_id} {action}: {failure}\n"),
     )
-}
-
-/// Tail behavior options.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TailOptions {
-    /// Whether to wait for appended events until a terminal event or timeout.
-    pub follow: bool,
-    /// Optional maximum follow duration.
-    pub timeout: Option<Duration>,
-}
-
-impl TailOptions {
-    /// Follows until the session reaches a terminal event.
-    pub fn follow() -> Self {
-        Self {
-            follow: true,
-            timeout: None,
-        }
-    }
 }
 
 /// Error returned by Loop Agent runtime operations.
