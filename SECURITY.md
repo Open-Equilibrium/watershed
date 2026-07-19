@@ -105,7 +105,7 @@ Network allow entries are CIDR objects, not strings:
 
 V0 network policy grammar is IP/CIDR based. A sandboxed tool may not rely on the policy compiler to resolve hostnames. For M1 Linux-target policy, non-empty allowlists are rejected (ADR-0051); direct DNS, DoH and DoT traffic is therefore denied in deterministic in-process runs. If a future CIDR/port grant is enforceable, it is reviewed as general network egress, not hostname-scoped access.
 
-Negative expected-decision artifacts use the same canonical JSON serialization and contain `{ fixture_name, target, attempt, expected, reason_code, side_effects_allowed }`. `expected` is `deny`; `side_effects_allowed` is `false`; `reason_code` is one of `write_denied`, `network_denied`, `environment_denied`, `tool_out_of_phase`, `protected_path_denied`, `symlink_escape_denied` or `interpreter_escape_denied`.
+Negative expected-decision artifacts use the same canonical JSON serialization and contain `{ fixture_name, attempt, expected, reason_code, side_effects_allowed }`. `expected` is `deny`; `side_effects_allowed` is `false`; `reason_code` is one of `write_denied`, `network_denied`, `environment_denied`, `tool_out_of_phase`, `protected_path_denied`, `symlink_escape_denied` or `interpreter_escape_denied`.
 
 `attempt` is a discriminated object. No additional attempt fields are allowed in v0:
 

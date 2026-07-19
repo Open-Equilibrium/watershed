@@ -78,7 +78,7 @@ M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequ
 
 ## M1 local session storage
 
-The ordered append-only event segments are authoritative for replay and catch-up. The first is `.loop/sessions/<session_id>.jsonl`; later segments are `<session_id>.<six-digit-ordinal>.jsonl`, beginning at `000002`. Rotation occurs before an event would make a segment exceed 16 MiB canonical uncompressed bytes; one event is never split, sequence and all session budgets continue unchanged, and prior segments become immutable.
+The ordered append-only event segments are authoritative for replay and catch-up. The first is `.loop/sessions/<session_id>.jsonl`; later segments are `<session_id>.<six-digit-ordinal>.jsonl`, beginning at `000002`. Rotation occurs before an event would make a segment exceed 16 MiB canonical uncompressed bytes; one event is never split, sequence and all session budgets continue unchanged, and prior segments become immutable. Context manifests follow the same rotation and ordinal rules from `<session_id>.contexts.jsonl`; one manifest record is never split.
 
 Hard safety limits are 320 KiB per canonical event including LF, 48 MiB canonical event data, 48 MiB context-manifest data and 155,750 events cumulatively per session. The removed 10 MiB aggregate stream cap is not a second limit. A session bundle may occupy at most 5.5 GiB, any immutable object chunk at most 16 MiB and all object data at most 5,520 MiB; the remaining 112 MiB is reserved for both JSONL streams and metadata.
 
