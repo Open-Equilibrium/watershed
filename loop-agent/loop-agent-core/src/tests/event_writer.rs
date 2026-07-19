@@ -197,6 +197,8 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
 
         let result = match kind {
             "event" => {
+                fs::write(reservation.session_path.diagnostic_path(), b"{}\n")
+                    .expect("base event segment completed");
                 let segment = segmented_jsonl_path(&reservation.session_path, 2)
                     .expect("segment path resolves");
                 fs::hard_link(&target, segment.diagnostic_path()).expect("event segment linked");
