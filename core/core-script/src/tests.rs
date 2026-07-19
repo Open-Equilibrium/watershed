@@ -1204,7 +1204,7 @@ fn registry_reference_validation_counts_shared_subloop_tails_per_path() {
 
 #[test]
 fn registry_accepts_duplicate_subloop_tails_within_depth() {
-    ResolvedRegistry::from_blocks(duplicated_subloop_tail_blocks(25))
+    ResolvedRegistry::from_blocks(duplicated_subloop_tail_blocks(MAX_LOOP_NESTING_DEPTH))
         .expect("duplicated acyclic subloop tail validates");
 }
 
