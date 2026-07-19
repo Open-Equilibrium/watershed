@@ -172,6 +172,7 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
             "{kind} hardlink was not rejected"
         );
         reservation.rollback();
+        drop(reservation);
         fs::remove_dir_all(workspace).expect("workspace removed");
     }
 }

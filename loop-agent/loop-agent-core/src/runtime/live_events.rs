@@ -242,7 +242,7 @@ impl SessionEventReader {
             self.observed_segment_count = segments.len();
             self.observed_signature = stream_signature(complete);
             self.validation = validation;
-            return Ok(events_after(&events, cursor));
+            return Ok(events_after(events, cursor));
         }
     }
 
@@ -255,6 +255,14 @@ impl SessionEventReader {
         &mut self,
         cursor: u64,
     ) -> Result<Vec<EventEnvelope>, RuntimeError> {
+        self.read_incremental_after_with(cursor, &mut || {})
+    }
+
+    fn read_incremental_after_with(
+        &mut self,
+        cursor: u64,
+        after_read: &mut impl FnMut(),
+    ) -> Result<Vec<EventEnvelope>, RuntimeError> {
         if self.validation.line_count == 0 || cursor < self.validation.previous_sequence {
             return self.read_after(cursor);
         }
@@ -265,6 +273,7 @@ impl SessionEventReader {
                 return Err(self.changed_outside_append_only());
             }
             let mut suffix = Vec::new();
+            let mut final_complete_bytes = 0u64;
             let prior_final_index = self.observed_segment_count - 1;
             for (index, segment) in segments.iter().enumerate().skip(prior_final_index) {
                 let (mut file, metadata) = open_anchored_file_for_read(segment)?;
@@ -284,21 +293,25 @@ impl SessionEventReader {
                     .read_to_end(&mut suffix)
                     .map_err(|source| path_io_error(segment.diagnostic_path(), source))?;
                 let segment_suffix = &suffix[start..];
+                let segment_complete_len = complete_jsonl_prefix_len(segment_suffix);
                 if u64::try_from(segment_suffix.len()).unwrap_or(u64::MAX) > remaining_limit {
                     return Err(RuntimeError::Protocol(format!(
                         "{} read size exceeds max {MAX_SESSION_LOG_BYTES}",
                         segment.diagnostic_path().display()
                     )));
                 }
-                if index + 1 != segments.len()
-                    && complete_jsonl_prefix_len(segment_suffix) != segment_suffix.len()
-                {
+                if index + 1 != segments.len() && segment_complete_len != segment_suffix.len() {
                     return Err(RuntimeError::Protocol(format!(
                         "{} non-final segment must end with LF",
                         segment.diagnostic_path().display()
                     )));
                 }
+                if index + 1 == segments.len() {
+                    final_complete_bytes = offset
+                        .saturating_add(u64::try_from(segment_complete_len).unwrap_or(u64::MAX));
+                }
             }
+            after_read();
             let complete_len = complete_jsonl_prefix_len(&suffix);
             let has_partial_line = complete_len != suffix.len();
             let inactive_partial = has_partial_line && !self.session_lock_present()?;
@@ -342,24 +355,9 @@ impl SessionEventReader {
                 self.observed_signature.push(record);
             }
             self.observed_record_count = self.validation.line_count;
-            if segments.len() == self.observed_segment_count {
-                self.observed_current_segment_bytes = self
-                    .observed_current_segment_bytes
-                    .saturating_add(u64::try_from(complete_len).unwrap_or(u64::MAX));
-            } else {
-                let final_segment = segments.last().expect("session has a base segment");
-                let final_len = final_segment.metadata()?.len();
-                self.observed_current_segment_bytes = if has_partial_line {
-                    final_len.saturating_sub(
-                        u64::try_from(suffix.len().saturating_sub(complete_len))
-                            .unwrap_or(u64::MAX),
-                    )
-                } else {
-                    final_len
-                };
-            }
+            self.observed_current_segment_bytes = final_complete_bytes;
             self.observed_segment_count = segments.len();
-            return Ok(events_after(&appended, cursor));
+            return Ok(events_after(appended, cursor));
         }
     }
 
@@ -428,8 +426,10 @@ fn jsonl_record_prefix_len(bytes: &[u8], record_count: usize) -> Option<usize> {
         .map(|(index, _)| index + 1)
 }
 
-fn events_after(events: &[EventEnvelope], cursor: u64) -> Vec<EventEnvelope> {
-    events[events.partition_point(|event| event.sequence <= cursor)..].to_vec()
+fn events_after(mut events: Vec<EventEnvelope>, cursor: u64) -> Vec<EventEnvelope> {
+    let first = events.partition_point(|event| event.sequence <= cursor);
+    events.drain(..first);
+    events
 }
 
 fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {

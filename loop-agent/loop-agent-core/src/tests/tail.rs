@@ -134,6 +134,40 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
 }
 
 #[test]
+fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
+    let workspace = workspace_copy("smoke-loop");
+    let reservation = reserve_session_log(&workspace, "smoke-loop").expect("session reserved");
+    let stream = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let without_trailing_lf = stream.strip_suffix('\n').expect("fixture ends with LF");
+    let (prefix, terminal) = without_trailing_lf
+        .rsplit_once('\n')
+        .map(|(prefix, terminal)| (format!("{prefix}\n"), format!("{terminal}\n")))
+        .expect("fixture has a terminal event");
+    fs::write(reservation.session_path.diagnostic_path(), prefix).expect("prefix written");
+    let mut reader = SessionEventReader::open(&workspace, "smoke-loop").expect("reader opens");
+    let initial = reader.read_after(0).expect("prefix reads");
+    let cursor = initial.last().expect("prefix has events").sequence;
+    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path");
+    fs::write(second.diagnostic_path(), "").expect("new segment reserved");
+
+    let mut append_after_read =
+        || fs::write(second.diagnostic_path(), &terminal).expect("terminal event appended");
+    assert!(
+        reader
+            .read_incremental_after_with(cursor, &mut append_after_read)
+            .expect("empty segment snapshot reads")
+            .is_empty()
+    );
+    let appended = reader
+        .read_incremental_after(cursor)
+        .expect("post-snapshot append reads");
+
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].event_type, EventType::SessionCompleted);
+    reservation.rollback();
+}
+
+#[test]
 fn incremental_reader_replays_an_unprocessed_suffix_from_the_caller_cursor() {
     let workspace = empty_workspace("tail-cursor-retry");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
