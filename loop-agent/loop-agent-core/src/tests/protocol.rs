@@ -844,21 +844,32 @@ fn live_invocation_counter_rejects_only_the_thirty_third_started_loop() {
 }
 
 #[test]
-fn only_side_effectful_execution_occupies_a_live_invocation_slot() {
-    assert!(ToolSideEffectMode::ApplyAll.occupies_live_invocation_slot());
+fn resume_slots_exclude_terminal_history_at_the_process_limit() {
+    let counter = LiveInvocationCounter::new();
+    let guards = (1..MAX_LIVE_LOOP_INVOCATIONS)
+        .map(|_| counter.acquire().expect("first 31 live loops fit"))
+        .collect::<Vec<_>>();
+    let root = counter
+        .acquire_for(ToolSideEffectMode::Resume { prefix_event_count: 1 }, false)
+        .expect("active resumed root fits")
+        .expect("active resumed root occupies a slot");
+
     assert!(
-        ToolSideEffectMode::Resume {
-            prefix_event_count: 1,
-        }
-        .occupies_live_invocation_slot()
+        counter
+            .acquire_for(ToolSideEffectMode::Resume { prefix_event_count: 1 }, true)
+            .expect("terminal replay does not consume a live slot")
+            .is_none()
     );
-    assert!(!ToolSideEffectMode::DryRun.occupies_live_invocation_slot());
+    assert!(counter.acquire().is_err(), "a genuinely live 33rd loop fails");
     assert!(
-        !ToolSideEffectMode::PreflightResume {
-            prefix_event_count: 1,
-        }
-        .occupies_live_invocation_slot()
+        counter
+            .acquire_for(ToolSideEffectMode::DryRun, false)
+            .expect("dry run does not consume a live slot")
+            .is_none()
     );
+
+    drop(root);
+    drop(guards);
 }
 
 #[test]

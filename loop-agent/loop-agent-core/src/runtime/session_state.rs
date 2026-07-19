@@ -190,6 +190,7 @@ fn resume_session_internal(
             path.diagnostic_path().display()
         )));
     }
+    let terminal_loop_ids = inspection.validation.terminal_loop_ids();
     let context_path = logs.file(format!("{session_id}.contexts.jsonl"));
     let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
         context_path,
@@ -222,7 +223,8 @@ fn resume_session_internal(
                     prefix_event_count: resume_prefix.planned_event_count as u64,
                 },
                 config.stub_model_fixture_profile,
-            ),
+            )
+            .with_terminal_loop_ids(terminal_loop_ids),
             Some(&mut resume_sink),
         );
         let matches = result

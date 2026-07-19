@@ -13,7 +13,7 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
         &policy,
         root_loop,
         "planchecked001",
-        options,
+        options.clone(),
     )
     .expect("runtime plan succeeds");
     assert!(planned.events.record_count > 0);

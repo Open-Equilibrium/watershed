@@ -351,6 +351,10 @@ impl SessionAppendValidationState {
         self.lifecycle.tool_without_progress()
     }
 
+    fn terminal_loop_ids(&self) -> BTreeSet<String> {
+        self.lifecycle.loops.terminal.keys().cloned().collect()
+    }
+
     #[cfg(test)]
     fn from_prior_events(
         path: &Path,

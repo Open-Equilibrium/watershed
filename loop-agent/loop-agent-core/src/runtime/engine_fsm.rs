@@ -49,6 +49,16 @@ impl LiveInvocationCounter {
             }
         }
     }
+
+    fn acquire_for(
+        &self,
+        mode: ToolSideEffectMode,
+        terminal_in_prefix: bool,
+    ) -> Result<Option<LiveInvocationGuard<'_>>, RuntimeError> {
+        mode.occupies_live_invocation_slot(terminal_in_prefix)
+            .then(|| self.acquire())
+            .transpose()
+    }
 }
 
 struct LiveInvocationGuard<'a> {
@@ -144,8 +154,9 @@ enum ToolSideEffectMode {
 }
 
 impl ToolSideEffectMode {
-    fn occupies_live_invocation_slot(self) -> bool {
-        matches!(self, Self::ApplyAll | Self::Resume { .. })
+    fn occupies_live_invocation_slot(self, terminal_in_prefix: bool) -> bool {
+        matches!(self, Self::ApplyAll)
+            || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
     }
 
     fn should_execute_tool(self, completed_sequence: u64) -> bool {
@@ -165,11 +176,12 @@ impl ToolSideEffectMode {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct LoopExecutionOptions {
     clock: EventClock,
     side_effect_mode: ToolSideEffectMode,
     stub_model_fixture_profile: bool,
+    terminal_loop_ids: BTreeSet<String>,
 }
 
 impl LoopExecutionOptions {
@@ -182,7 +194,13 @@ impl LoopExecutionOptions {
             clock,
             side_effect_mode,
             stub_model_fixture_profile,
+            terminal_loop_ids: BTreeSet::new(),
         }
+    }
+
+    fn with_terminal_loop_ids(mut self, terminal_loop_ids: BTreeSet<String>) -> Self {
+        self.terminal_loop_ids = terminal_loop_ids;
+        self
     }
 }
 
@@ -474,6 +492,7 @@ fn execute_loop_with_sink(
         policy,
         side_effect_mode: options.side_effect_mode,
         stub_model_fixture_profile: options.stub_model_fixture_profile,
+        terminal_loop_ids: &options.terminal_loop_ids,
     };
     let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
         Ok(failed) => failed,
@@ -615,6 +634,7 @@ struct LoopEmitContext<'a> {
     policy: &'a core_policy::PolicyArtifact,
     side_effect_mode: ToolSideEffectMode,
     stub_model_fixture_profile: bool,
+    terminal_loop_ids: &'a BTreeSet<String>,
 }
 
 fn emit_loop_block_at_depth(
@@ -632,14 +652,13 @@ fn emit_loop_block_at_depth(
         )));
     }
 
+    let invocation = builder.next_loop_invocation(parent_loop_id)?;
     // A parent remains live while it waits for a nested invocation; queued but not started,
     // terminal and fully paused invocations do not hold this process-wide slot.
-    let _live_invocation = context
-        .side_effect_mode
-        .occupies_live_invocation_slot()
-        .then(|| LIVE_LOOP_INVOCATIONS.acquire())
-        .transpose()?;
-    let invocation = builder.next_loop_invocation(parent_loop_id)?;
+    let _live_invocation = LIVE_LOOP_INVOCATIONS.acquire_for(
+        context.side_effect_mode,
+        context.terminal_loop_ids.contains(&invocation.loop_id),
+    )?;
     builder.emit(
         Some(&invocation),
         EventType::LoopStarted,
