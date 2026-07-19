@@ -50,7 +50,7 @@ pub struct EventEnvelope {
     pub session_id: String,
     /// Producing runtime or adapter name.
     pub source: String,
-    /// RFC 3339 timestamp string for the event.
+    /// Canonical RFC 3339 UTC timestamp ending in literal `Z`.
     pub timestamp: String,
 }
 
@@ -131,7 +131,10 @@ impl EventEnvelope {
         } else if self.source.is_empty() {
             Some(("source", "must be non-empty"))
         } else if parse_rfc3339_utc_timestamp(&self.timestamp).is_none() {
-            Some(("timestamp", "must be an RFC 3339 UTC timestamp"))
+            Some((
+                "timestamp",
+                "must be a canonical RFC 3339 UTC timestamp ending in `Z`",
+            ))
         } else if self
             .correlation_id
             .as_ref()
@@ -365,7 +368,7 @@ pub fn is_valid_session_id(value: &str) -> bool {
         })
 }
 
-/// Parses the protocol's RFC 3339 UTC timestamp shape to Unix seconds.
+/// Parses the protocol's canonical RFC 3339 UTC `Z` form to Unix seconds.
 pub fn parse_rfc3339_utc_timestamp(value: &str) -> Option<i64> {
     let value = value.strip_suffix('Z')?;
     let (date, time) = value.split_once('T')?;

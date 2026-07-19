@@ -580,7 +580,7 @@ fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
 }
 
 #[test]
-fn timestamp_parser_rejects_non_rfc3339_utc_shapes() {
+fn timestamp_parser_accepts_only_the_canonical_utc_z_form() {
     assert!(proto::parse_rfc3339_utc_timestamp("2026-02-28T23:59:59Z").is_some());
     assert!(proto::parse_rfc3339_utc_timestamp("2028-02-29T00:00:00.123Z").is_some());
     assert_eq!(event_timestamp(61), "2026-01-01T00:01:00Z");

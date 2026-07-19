@@ -38,6 +38,14 @@ Runtime events use the v0 Loop Agent short-form name set decided in ADR-0036. `m
 
 M1 Loop Agent emits the families exercised by the ADR-0034 fixtures and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
 
+### v0 lifecycle ordering
+
+- `session.started` is the first event. `session.completed` or `session.failed` is last and requires every started loop, step, tool and message to be terminal.
+- A loop-scoped event follows its unique `loop.started` and precedes that loop's `loop.completed` or `loop.failed`. A subloop's `parent_loop_id` identifies its unchanged, active parent.
+- `phase.entered` requires no active step and selects that loop's current phase. Each `step.started` belongs to the current phase; a loop has at most one active step, closed by the matching `step.completed`.
+- `tool.started` belongs to the active step. Its progress and terminal event use the same loop, phase, step and tool identity. A pre-phase `tool.failed` may omit `tool.started` to record a failure during preflight; after `phase.entered`, it may not.
+- `message.delta` belongs to the active step and starts a message identity; further deltas and the matching `message.completed` retain its role. Completed lifecycle identities cannot be reused.
+
 Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029); ADR-0055 selects the initial method set as `loop.start`, `loop.status`, `loop.cancel`, `loop.tail` and `loop.export`. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
 
 ## Required v0 event-envelope fields
@@ -53,7 +61,7 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the sessio
 | `loop_id` | optional runtime loop invocation id when loop-scoped; unique within the session |
 | `parent_loop_id` | optional parent runtime loop invocation id for subloop events |
 | `sequence` | unsigned integer, starts at 1 and increases by exactly 1 per `session_id` |
-| `timestamp` | RFC 3339 UTC timestamp string |
+| `timestamp` | canonical RFC 3339 UTC form ending in literal `Z`; numeric zero offsets are not accepted |
 | `source` | non-empty opaque string identifying the emitter, e.g. `loop-agent-cli` |
 | `payload` | JSON object; event-specific fields below |
 | `correlation_id` | optional non-empty opaque string linking request/result events |
