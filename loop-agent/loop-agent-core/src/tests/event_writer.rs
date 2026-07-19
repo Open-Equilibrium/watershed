@@ -147,6 +147,25 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
     }
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn segmented_stream_rejects_case_aliased_ordinals() {
+    let workspace = empty_workspace("event-segment-case-alias");
+    let reservation = reserve_session_log(&workspace, "segmentcase001").expect("session reserved");
+    fs::write(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("segmentcase001.000002.JSONL"),
+        b"\n",
+    )
+    .expect("case-aliased segment written");
+
+    let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
+        .expect_err("case-aliased segment must be rejected");
+    assert!(err.to_string().contains("non-canonical"), "{err}");
+    reservation.rollback();
+}
+
 #[test]
 fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
     for (label, context) in [("event", false), ("context", true)] {

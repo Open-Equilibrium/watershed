@@ -198,7 +198,9 @@ fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFil
         let Some(name) = name.to_str() else {
             continue;
         };
-        let Some(ordinal) = name
+        let folded = cfg!(any(windows, target_os = "macos")).then(|| name.to_ascii_lowercase());
+        let candidate = folded.as_deref().unwrap_or(name);
+        let Some(ordinal) = candidate
             .strip_prefix(&prefix)
             .and_then(|suffix| suffix.strip_suffix(".jsonl"))
             .filter(|ordinal| {
@@ -208,6 +210,12 @@ fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFil
         else {
             continue;
         };
+        if candidate != name {
+            return Err(RuntimeError::Protocol(format!(
+                "{} contains non-canonical segmented JSONL name {name}",
+                base.parent.path.display()
+            )));
+        }
         siblings.push((ordinal, base.parent.file(name)));
     }
     siblings.sort_unstable_by_key(|(ordinal, _)| *ordinal);
