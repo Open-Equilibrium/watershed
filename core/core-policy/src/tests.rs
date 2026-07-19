@@ -623,6 +623,16 @@ fn protected_path_matcher_covers_normalization_and_pattern_edges() {
         "**/.SSH/**",
         "workspace/home/user/.ssh/config"
     ));
+    for (pattern, path, expected) in [
+        ("workspace/?.pem", "workspace/é.pem", true),
+        ("workspace/??.pem", "workspace/é.pem", false),
+        ("workspace/??.pem", "workspace/éa.pem", true),
+    ] {
+        assert_eq!(
+            protected_path_pattern_matches(ProtectedPathMatchMode::CaseSensitive, pattern, path),
+            expected
+        );
+    }
 
     for (pattern, path) in [
         ("", "workspace/app/.env"),

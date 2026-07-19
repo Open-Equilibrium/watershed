@@ -489,6 +489,14 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
             .expect("explicit protected grant accepted"),
         ".ssh/id_rsa"
     );
+    broad_policy.filesystem.protected_paths = vec!["workspace/*.pem".to_owned()];
+    broad_policy.filesystem.protected_path_grants = vec!["workspace/??.pem".to_owned()];
+    assert_denied(
+        validate_script_write_target(match_mode, &broad_policy, "é.pem")
+            .expect_err("two-character grant must not authorize one Unicode scalar"),
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        "protected path",
+    );
 
     assert!(core_script::relative_path_is_inside_scope(
         "workspace/out",

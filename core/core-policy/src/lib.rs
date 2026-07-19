@@ -1043,33 +1043,38 @@ fn protected_segments_match(pattern: &[&str], path: &[&str]) -> bool {
 }
 
 fn protected_segment_match(pattern: &str, path: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let path = path.as_bytes();
     let mut pattern_index = 0;
     let mut path_index = 0;
     let mut star_pattern_index = None;
     let mut star_path_index = 0;
 
     while path_index < path.len() {
-        if pattern_index < pattern.len()
-            && (pattern[pattern_index] == b'?' || pattern[pattern_index] == path[path_index])
-        {
-            pattern_index += 1;
-            path_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        let pattern_char = pattern[pattern_index..].chars().next();
+        let path_char = path[path_index..]
+            .chars()
+            .next()
+            .expect("path index remains on a character boundary");
+        if pattern_char.is_some_and(|ch| ch == '?' || ch == path_char) {
+            pattern_index += pattern_char.expect("matched pattern character").len_utf8();
+            path_index += path_char.len_utf8();
+        } else if pattern_char == Some('*') {
             star_pattern_index = Some(pattern_index);
             pattern_index += 1;
             star_path_index = path_index;
         } else if let Some(star_index) = star_pattern_index {
             pattern_index = star_index + 1;
-            star_path_index += 1;
+            star_path_index += path[star_path_index..]
+                .chars()
+                .next()
+                .expect("star backtracking remains within the path")
+                .len_utf8();
             path_index = star_path_index;
         } else {
             return false;
         }
     }
 
-    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+    while pattern[pattern_index..].starts_with('*') {
         pattern_index += 1;
     }
 
