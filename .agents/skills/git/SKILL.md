@@ -22,7 +22,7 @@ No long-lived integration branches: a single target (`main`) minimizes overhead,
 
 ## When to commit
 
-Commit every stable state: code compiles, `cargo fmt --check` and `cargo clippy` are clean, affected tests are green, docs are in sync (AGENTS.md Definition of Done). Never commit a broken state; never batch unrelated changes into one commit.
+Commit every stable state: code compiles, affected `TESTING.md` gates are green, and docs are in sync (AGENTS.md Definition of Done). Never commit a broken state; never batch unrelated changes into one commit.
 
 ## How to commit
 

@@ -19,4 +19,4 @@ Before starting a change, **orient by delegation** to keep the main thread lean:
 - Never weaken, skip or delete a test to get green; that is a maintainer decision (AGENTS.md rules).
 - Deterministic inputs only: LLM/tool outputs are mocked fixtures; no real time, network or randomness in assertions.
 - Tests assert documented contracts (`PROTOCOL.md`, V-Specs, ADRs). If a contract is unclear, delegate the lookup to `docs_scout` first; if the docs do not decide it, stop per AGENTS.md rule 7.
-- Closeout: `cargo fmt`, `cargo clippy`, `cargo nextest run` (affected tests) — then apply the `git` skill.
+- Closeout: run the affected gates from `TESTING.md`, then apply the `git` skill.
