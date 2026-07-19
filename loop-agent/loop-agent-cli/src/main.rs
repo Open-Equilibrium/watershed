@@ -16,6 +16,10 @@ use std::{
     time::Duration,
 };
 
+#[cfg(test)]
+#[path = "../../tests/support.rs"]
+mod test_support;
+
 const TAIL_POLL_INITIAL: Duration = Duration::from_millis(25);
 const TAIL_POLL_MAX: Duration = Duration::from_secs(1);
 
@@ -545,9 +549,6 @@ fn usage() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[path = "../../../tests/support.rs"]
-    mod test_support;
 
     #[test]
     fn live_drains_stop_at_the_operations_observed_high_watermark() {
