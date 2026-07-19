@@ -122,6 +122,7 @@ fn segmented_stream_rejects_gaps_and_more_than_five_segments() {
             .expect_err("invalid segment layout is rejected");
         assert!(err.to_string().contains(expected), "{err}");
         reservation.rollback();
+        drop(reservation);
         fs::remove_dir_all(workspace).expect("invalid segment workspace removed");
     }
 }
