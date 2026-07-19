@@ -215,7 +215,11 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
             serde_json::json!({"loop_definition_id":"smoke-loop"}),
         )
     };
-    persisted.push_str(&over_budget.canonical_jsonl().expect("over-budget event serializes"));
+    persisted.push_str(
+        &over_budget
+            .canonical_jsonl()
+            .expect("over-budget event serializes"),
+    );
     assert_invalid_stream(
         "invocation-budget.jsonl",
         &persisted,
