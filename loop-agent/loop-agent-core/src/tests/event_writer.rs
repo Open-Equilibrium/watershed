@@ -315,6 +315,34 @@ fn partial_new_session_object_is_removed_before_retry() {
 }
 
 #[test]
+fn session_object_limits_accept_exact_values_and_reject_excess() {
+    for (label, result, accepted) in [
+        (
+            "object exact",
+            ensure_session_object_size("digest", MAX_SESSION_OBJECT_BYTES),
+            true,
+        ),
+        (
+            "object excess",
+            ensure_session_object_size("digest", MAX_SESSION_OBJECT_BYTES + 1),
+            false,
+        ),
+        (
+            "aggregate exact",
+            ensure_session_object_total(MAX_SESSION_OBJECT_TOTAL_BYTES),
+            true,
+        ),
+        (
+            "aggregate excess",
+            ensure_session_object_total(MAX_SESSION_OBJECT_TOTAL_BYTES + 1),
+            false,
+        ),
+    ] {
+        assert_eq!(result.is_ok(), accepted, "{label}: {result:?}");
+    }
+}
+
+#[test]
 fn twenty_runs_finish_and_catch_up_with_permanently_lagging_receivers() {
     for run in 0..20 {
         let workspace = workspace_copy("smoke-loop");

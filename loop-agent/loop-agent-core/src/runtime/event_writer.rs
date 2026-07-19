@@ -642,18 +642,9 @@ impl SessionObjectWriter {
             let path = object_parent.file(name);
             ensure_anchored_real_file(&path)?;
             let bytes = path.metadata()?.len();
-            if bytes > MAX_SESSION_OBJECT_BYTES {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} session object is {bytes} bytes; max {MAX_SESSION_OBJECT_BYTES}",
-                    path.diagnostic_path().display()
-                )));
-            }
+            ensure_session_object_size(path.diagnostic_path().display(), bytes)?;
             accounted_bytes = accounted_bytes.saturating_add(bytes);
-            if accounted_bytes > MAX_SESSION_OBJECT_TOTAL_BYTES {
-                return Err(RuntimeError::Protocol(format!(
-                    "session bundle object data size {accounted_bytes} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
-                )));
-            }
+            ensure_session_object_total(accounted_bytes)?;
             seen.insert(digest.to_owned());
         }
         Ok(Self {
@@ -688,12 +679,7 @@ impl SessionObjectWriter {
         write_new: impl FnOnce(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
         let object_bytes = u64::try_from(object.bytes.len()).unwrap_or(u64::MAX);
-        if object_bytes > MAX_SESSION_OBJECT_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "session object {} is {object_bytes} bytes; max {MAX_SESSION_OBJECT_BYTES}",
-                object.digest
-            )));
-        }
+        ensure_session_object_size(&object.digest, object_bytes)?;
         if sha256_hex(&object.bytes) != object.digest {
             return Err(RuntimeError::Protocol(format!(
                 "session object {} does not match its content hash",
@@ -709,11 +695,7 @@ impl SessionObjectWriter {
         } else {
             self.accounted_bytes
         };
-        if total > MAX_SESSION_OBJECT_TOTAL_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "session bundle object data size {total} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
-            )));
-        }
+        ensure_session_object_total(total)?;
         let path = self.object_parent.file(format!(
             "{}.object.sha256-{}",
             self.session_id, object.digest
@@ -744,6 +726,24 @@ impl SessionObjectWriter {
         self.verified.insert(object.digest.clone());
         Ok(())
     }
+}
+
+fn ensure_session_object_size(label: impl fmt::Display, bytes: u64) -> Result<(), RuntimeError> {
+    if bytes > MAX_SESSION_OBJECT_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{label} session object is {bytes} bytes; max {MAX_SESSION_OBJECT_BYTES}"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_session_object_total(bytes: u64) -> Result<(), RuntimeError> {
+    if bytes > MAX_SESSION_OBJECT_TOTAL_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "session bundle object data size {bytes} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
+        )));
+    }
+    Ok(())
 }
 
 fn ensure_context_manifest_growth_within_limit(
