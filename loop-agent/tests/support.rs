@@ -163,12 +163,17 @@ impl Drop for PeakRssSampler {
 #[allow(dead_code)]
 #[cfg(target_os = "linux")]
 pub(crate) fn current_resident_set_size() -> Option<u64> {
-    let status = fs::read_to_string("/proc/self/status").ok()?;
-    status.lines().find_map(|line| {
-        let value = line.strip_prefix("VmRSS:")?.trim();
-        let kilobytes = value.strip_suffix(" kB")?.trim().parse::<u64>().ok()?;
-        kilobytes.checked_mul(1024)
-    })
+    let status = fs::read_to_string("/proc/self/status")
+        .expect("Linux RSS performance gates require readable /proc/self/status");
+    let rss_bytes = status
+        .lines()
+        .find_map(|line| {
+            let value = line.strip_prefix("VmRSS:")?.trim();
+            let kilobytes = value.strip_suffix(" kB")?.trim().parse::<u64>().ok()?;
+            kilobytes.checked_mul(1024)
+        })
+        .expect("Linux RSS performance gates require a valid VmRSS byte value");
+    Some(rss_bytes)
 }
 
 #[allow(dead_code)]
