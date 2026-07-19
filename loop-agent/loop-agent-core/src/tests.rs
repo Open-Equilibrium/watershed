@@ -1,6 +1,9 @@
 #[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::{TempWorkspace, copy_dir, expected_stream, fixture_dir, workspace_copy};
+use test_support::{
+    PeakRssSampler, TempWorkspace, copy_dir, current_resident_set_size, expected_stream,
+    fixture_dir, workspace_copy,
+};
 
 include!("tests/support.rs");
 include!("tests/helpers.rs");

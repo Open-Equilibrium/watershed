@@ -1,18 +1,14 @@
 use loop_agent_core::{EmitMode, run_loop};
 use std::{
     fs,
-    sync::{
-        Arc, Barrier,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc,
-    },
+    sync::{Arc, Barrier, mpsc},
     thread,
     time::{Duration, Instant},
 };
 
 #[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::{TempWorkspace, workspace_copy};
+use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
 
 #[test]
 #[ignore = "performance gate"]
@@ -21,13 +17,7 @@ fn ten_near_limit_orchestrating_loops_complete_under_m1_runtime_contract() {
     assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
     assert!(active_bytes >= core_script::MAX_ACTIVE_REGISTRY_BYTES * 9 / 10);
 
-    let peak_rss_sampler = if rss_budget_must_be_enforced() {
-        let baseline = current_resident_set_size()
-            .expect("RSS measurement must be available on this enforced target before the run");
-        Some(PeakRssSampler::start(baseline))
-    } else {
-        None
-    };
+    let peak_rss_sampler = PeakRssSampler::start();
     let concurrency = 10;
     let barrier = Arc::new(Barrier::new(concurrency + 1));
     let (tx, rx) = mpsc::channel();
@@ -80,63 +70,6 @@ fn ten_near_limit_orchestrating_loops_complete_under_m1_runtime_contract() {
             peak_growth <= budget,
             "concurrent fixture peak RSS growth must stay <= {per_loop_budget} bytes per active top-level loop ({budget} bytes total): {peak_growth} bytes"
         );
-    }
-}
-
-struct PeakRssSampler {
-    baseline: u64,
-    peak: Arc<AtomicU64>,
-    running: Arc<AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
-}
-
-impl PeakRssSampler {
-    fn start(baseline: u64) -> Self {
-        let peak = Arc::new(AtomicU64::new(baseline));
-        let running = Arc::new(AtomicBool::new(true));
-        let sampler_peak = Arc::clone(&peak);
-        let sampler_running = Arc::clone(&running);
-        let handle = thread::spawn(move || {
-            // Sample while workers are live: post-join RSS deltas can miss transient peaks.
-            while sampler_running.load(Ordering::Acquire) {
-                if let Some(current) = current_resident_set_size() {
-                    sampler_peak.fetch_max(current, Ordering::AcqRel);
-                }
-                thread::sleep(Duration::from_millis(1));
-            }
-            if let Some(current) = current_resident_set_size() {
-                sampler_peak.fetch_max(current, Ordering::AcqRel);
-            }
-        });
-
-        Self {
-            baseline,
-            peak,
-            running,
-            handle: Some(handle),
-        }
-    }
-
-    fn baseline(&self) -> u64 {
-        self.baseline
-    }
-
-    fn finish(&mut self) -> u64 {
-        self.stop();
-        self.peak.load(Ordering::Acquire)
-    }
-
-    fn stop(&mut self) {
-        self.running.store(false, Ordering::Release);
-        if let Some(handle) = self.handle.take() {
-            handle.join().expect("RSS sampler joins");
-        }
-    }
-}
-
-impl Drop for PeakRssSampler {
-    fn drop(&mut self) {
-        self.stop();
     }
 }
 
@@ -206,23 +139,4 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
         })
         .sum();
     (workspace, active_bytes)
-}
-
-fn rss_budget_must_be_enforced() -> bool {
-    cfg!(target_os = "linux")
-}
-
-#[cfg(target_os = "linux")]
-fn current_resident_set_size() -> Option<u64> {
-    let status = fs::read_to_string("/proc/self/status").ok()?;
-    status.lines().find_map(|line| {
-        let value = line.strip_prefix("VmRSS:")?.trim();
-        let kilobytes = value.strip_suffix(" kB")?.trim().parse::<u64>().ok()?;
-        Some(kilobytes * 1024)
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn current_resident_set_size() -> Option<u64> {
-    None
 }

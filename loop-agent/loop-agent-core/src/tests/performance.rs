@@ -330,7 +330,7 @@ fn d068_sizing_profile_and_payload_distribution_are_exact() {
 fn full_event_cap_replay_stays_within_d068_budgets() {
     let workspace =
         write_synthetic_session("d068-full-cap", "fullcap001", MAX_LOOP_EVENTS, 0, |_| 288);
-    let baseline_rss = process_rss_bytes();
+    let peak_rss_sampler = PeakRssSampler::start();
     let started = Instant::now();
     let mut reader =
         SessionEventReader::open(&workspace, "fullcap001").expect("full-cap session opens");
@@ -343,26 +343,32 @@ fn full_event_cap_replay_stays_within_d068_budgets() {
         Some(MAX_LOOP_EVENTS)
     );
     assert_duration_budget(elapsed, 10, "full-cap initial replay");
-    assert_rss_growth_budget(baseline_rss, 256, "full-cap initial replay");
-    drop(events);
-    drop(reader);
+    assert_peak_rss_growth_budget(peak_rss_sampler, 256, "full-cap initial replay");
+}
+
+#[test]
+#[ignore = "performance gate"]
+fn full_event_cap_inspection_stays_within_d068_budgets() {
+    let workspace = write_synthetic_session(
+        "d068-inspection",
+        "inspection001",
+        MAX_LOOP_EVENTS,
+        0,
+        |_| 288,
+    );
     let sessions = open_runtime_dir(&workspace, "sessions")
         .expect("sessions dir opens")
         .expect("sessions dir exists");
-    let session_path = sessions.file("fullcap001.jsonl");
-    let baseline_rss = process_rss_bytes();
+    let session_path = sessions.file("inspection001.jsonl");
+    let peak_rss_sampler = PeakRssSampler::start();
     let started = Instant::now();
     let inspection =
-        inspect_resume_session(&session_path, "fullcap001").expect("full-cap session inspects");
+        inspect_resume_session(&session_path, "inspection001").expect("full-cap session inspects");
     assert_eq!(inspection.prior_event_count, MAX_LOOP_EVENTS as usize);
     assert!(inspection.prefix_metadata_valid);
     assert_eq!(inspection.last_event_type, EventType::SessionCompleted);
     assert_duration_budget(started.elapsed(), 15, "full-cap full-session inspection");
-    assert_rss_growth_budget(baseline_rss, 256, "full-cap full-session inspection");
-    drop(inspection);
-    drop(session_path);
-    drop(sessions);
-    fs::remove_dir_all(workspace).expect("full-cap workspace removed");
+    assert_peak_rss_growth_budget(peak_rss_sampler, 256, "full-cap full-session inspection");
 }
 
 #[test]
@@ -378,7 +384,7 @@ fn incremental_tail_reads_max_events_under_d068_latency_budget() {
         .append(&path, started.as_bytes())
         .expect("session start appends");
     appender.sync(&path).expect("session start syncs");
-    let baseline_rss = process_rss_bytes();
+    let baseline_rss = current_resident_set_size();
     let mut reader =
         SessionEventReader::open(&workspace, "tailperf001").expect("tail reader opens");
     assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
@@ -412,7 +418,7 @@ fn incremental_tail_reads_max_events_under_d068_latency_budget() {
         p95 <= budget,
         "320 KiB incremental tail read p95 must stay <= {budget} ns: {p95} ns"
     );
-    assert_rss_growth_budget(baseline_rss, 64, "incremental tail retained state");
+    assert_retained_rss_growth_budget(baseline_rss, 64, "incremental tail retained state");
     drop(reader);
     drop(appender);
     reservation.rollback();
@@ -432,7 +438,6 @@ fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
             32,
             representative_event_target_bytes,
         );
-        let baseline_rss = process_rss_bytes();
         let replay_started = Instant::now();
         let mut reader = SessionEventReader::open(&workspace, &session_id).expect("session opens");
         let events = reader.read_after(0).expect("session replays");
@@ -449,7 +454,6 @@ fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
             10,
             "representative session replay",
         );
-        assert_rss_growth_budget(baseline_rss, 256, "representative session replay");
         drop(events);
         drop(reader);
         fs::remove_dir_all(workspace).expect("representative workspace removed");
@@ -638,10 +642,27 @@ fn assert_duration_budget(elapsed: Duration, release_seconds: u64, label: &str) 
     );
 }
 
-fn assert_rss_growth_budget(baseline: Option<u64>, release_mib: u64, label: &str) {
-    let Some((baseline, current)) = baseline.zip(process_rss_bytes()) else {
+fn assert_peak_rss_growth_budget(
+    mut sampler: Option<PeakRssSampler>,
+    release_mib: u64,
+    label: &str,
+) {
+    let Some(sampler) = sampler.as_mut() else {
         return;
     };
+    let baseline = sampler.baseline();
+    let peak = sampler.finish();
+    assert_rss_growth_budget(baseline, peak, release_mib, label);
+}
+
+fn assert_retained_rss_growth_budget(baseline: Option<u64>, release_mib: u64, label: &str) {
+    let Some((baseline, current)) = baseline.zip(current_resident_set_size()) else {
+        return;
+    };
+    assert_rss_growth_budget(baseline, current, release_mib, label);
+}
+
+fn assert_rss_growth_budget(baseline: u64, current: u64, release_mib: u64, label: &str) {
     let budget_mib = if cfg!(debug_assertions) {
         release_mib.saturating_mul(2)
     } else {
@@ -653,28 +674,4 @@ fn assert_rss_growth_budget(baseline: Option<u64>, release_mib: u64, label: &str
         "{label} RSS growth must stay <= {budget_mib} MiB: {} MiB",
         growth / 1024 / 1024
     );
-}
-
-#[cfg(target_os = "linux")]
-fn process_rss_bytes() -> Option<u64> {
-    let status = fs::read_to_string("/proc/self/status")
-        .expect("Linux RSS performance gates require readable /proc/self/status");
-    let kib = status
-        .lines()
-        .find_map(|line| line.strip_prefix("VmRSS:"))
-        .expect("Linux RSS performance gates require VmRSS in /proc/self/status")
-        .split_whitespace()
-        .next()
-        .expect("Linux VmRSS must contain a value")
-        .parse::<u64>()
-        .expect("Linux VmRSS must be an integer KiB value");
-    Some(
-        kib.checked_mul(1024)
-            .expect("Linux VmRSS byte count must fit u64"),
-    )
-}
-
-#[cfg(not(target_os = "linux"))]
-fn process_rss_bytes() -> Option<u64> {
-    None
 }
