@@ -667,6 +667,27 @@ impl SessionLifecycleState {
                         event.event_type.as_str()
                     )));
                 }
+                if let Some(step) = self.active_steps.get(&loop_id) {
+                    return Err(open_child_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "step",
+                        &step.step_id,
+                    ));
+                }
+                if let Some(child) = self.loops.active_keys().find(|child| {
+                    self.loop_parents.get(*child).and_then(Option::as_deref)
+                        == Some(loop_id.as_str())
+                }) {
+                    return Err(open_child_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "child loop",
+                        child,
+                    ));
+                }
                 self.loops.finish(loop_id, line_number);
             }
             EventType::PhaseEntered => {
@@ -753,6 +774,32 @@ impl SessionLifecycleState {
                             step.step_id
                         )));
                     }
+                }
+                if let Some(tool) = self
+                    .tools
+                    .active_keys()
+                    .find(|tool| tool.loop_id.as_deref() == Some(loop_id.as_str()))
+                {
+                    return Err(open_child_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "tool",
+                        &tool.tool_id,
+                    ));
+                }
+                if let Some(message) = self
+                    .messages
+                    .active_keys()
+                    .find(|message| message.loop_id == loop_id)
+                {
+                    return Err(open_child_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "message",
+                        &message.message_id,
+                    ));
                 }
                 self.active_steps.remove(&loop_id);
                 self.steps.finish(step, line_number);
@@ -885,6 +932,7 @@ impl SessionLifecycleState {
                         message.message_id
                     )));
                 }
+                self.active_message_roles.remove(&message);
                 self.messages.finish(message, line_number);
             }
             EventType::SessionStarted
@@ -913,25 +961,17 @@ impl SessionLifecycleState {
         }) {
             return Ok(());
         }
-        for loop_id in self.loops.started_keys() {
-            if !self.loops.is_terminal(loop_id) {
-                return Err(open_lifecycle_error(path, "loop", loop_id));
-            }
+        if let Some(loop_id) = self.loops.active_keys().next() {
+            return Err(open_lifecycle_error(path, "loop", loop_id));
         }
-        for step in self.steps.started_keys() {
-            if !self.steps.is_terminal(step) {
-                return Err(open_lifecycle_error(path, "step", &step.step_id));
-            }
+        if let Some(step) = self.steps.active_keys().next() {
+            return Err(open_lifecycle_error(path, "step", &step.step_id));
         }
-        for tool in self.tools.started_keys() {
-            if !self.tools.is_terminal(tool) {
-                return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
-            }
+        if let Some(tool) = self.tools.active_keys().next() {
+            return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
         }
-        for message in self.messages.started_keys() {
-            if !self.messages.is_terminal(message) {
-                return Err(open_lifecycle_error(path, "message", &message.message_id));
-            }
+        if let Some(message) = self.messages.active_keys().next() {
+            return Err(open_lifecycle_error(path, "message", &message.message_id));
         }
         Ok(())
     }
@@ -952,14 +992,14 @@ fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
 }
 
 struct LifecycleTracker<K: Ord> {
-    started: BTreeSet<K>,
+    active: BTreeSet<K>,
     terminal: BTreeMap<K, usize>,
 }
 
 impl<K: Ord> Default for LifecycleTracker<K> {
     fn default() -> Self {
         Self {
-            started: BTreeSet::new(),
+            active: BTreeSet::new(),
             terminal: BTreeMap::new(),
         }
     }
@@ -967,28 +1007,39 @@ impl<K: Ord> Default for LifecycleTracker<K> {
 
 impl<K: Ord> LifecycleTracker<K> {
     fn start(&mut self, key: K) {
-        self.started.insert(key);
+        self.active.insert(key);
     }
 
     fn finish(&mut self, key: K, line_number: usize) {
+        self.active.remove(&key);
         self.terminal.insert(key, line_number);
     }
 
     fn is_started(&self, key: &K) -> bool {
-        self.started.contains(key)
-    }
-
-    fn is_terminal(&self, key: &K) -> bool {
-        self.terminal.contains_key(key)
+        self.active.contains(key) || self.terminal.contains_key(key)
     }
 
     fn terminal_line(&self, key: &K) -> Option<usize> {
         self.terminal.get(key).copied()
     }
 
-    fn started_keys(&self) -> impl Iterator<Item = &K> {
-        self.started.iter()
+    fn active_keys(&self) -> impl Iterator<Item = &K> {
+        self.active.iter()
     }
+}
+
+fn open_child_lifecycle_error(
+    path: &Path,
+    line_number: usize,
+    event: &EventEnvelope,
+    child_kind: &str,
+    child_id: &str,
+) -> RuntimeError {
+    RuntimeError::Protocol(format!(
+        "{} line {line_number} {} requires no active {child_kind} {child_id:?}",
+        path.display(),
+        event.event_type.as_str()
+    ))
 }
 
 fn terminal_lifecycle_error(

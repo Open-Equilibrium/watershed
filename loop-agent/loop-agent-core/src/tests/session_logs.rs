@@ -1033,15 +1033,6 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
         serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
     );
 
-    let loop_completed = loop_completed_line("evt-005", 5);
-    let session_completed = event_line(
-        "evt-006",
-        EventType::SessionCompleted,
-        "meta001",
-        6,
-        None,
-        serde_json::json!({}),
-    );
     assert_invalid_session_log(
         "terminal-with-open-loop.jsonl",
         "meta001",
@@ -1055,25 +1046,16 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
     assert_invalid_session_log(
         "terminal-with-open-step.jsonl",
         "meta001",
-        &format!("{active_step_prefix}{loop_completed}{session_completed}"),
-        "open step",
+        &format!("{active_step_prefix}{}", loop_completed_line("evt-005", 5)),
+        "active step",
     );
     assert_invalid_session_log(
         "terminal-with-open-tool.jsonl",
         "meta001",
         &format!(
-            "{active_step_prefix}{}{}{}{}",
+            "{active_step_prefix}{}{}",
             tool_started_line("evt-005", 5),
             step_completed_line("evt-006", 6),
-            loop_completed_line("evt-007", 7),
-            event_line(
-                "evt-008",
-                EventType::SessionCompleted,
-                "meta001",
-                8,
-                None,
-                serde_json::json!({})
-            )
         ),
         "open tool",
     );
@@ -1081,19 +1063,29 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
         "terminal-with-open-message.jsonl",
         "meta001",
         &format!(
-            "{active_step_prefix}{message_delta}{}{}{}",
+            "{active_step_prefix}{message_delta}{}",
             step_completed_line("evt-006", 6),
-            loop_completed_line("evt-007", 7),
-            event_line(
-                "evt-008",
-                EventType::SessionCompleted,
-                "meta001",
-                8,
-                None,
-                serde_json::json!({})
-            )
         ),
         "open message",
+    );
+    assert_invalid_session_log(
+        "terminal-with-active-child-loop.jsonl",
+        "meta001",
+        &format!(
+            "{started}{}{}{}",
+            loop_started_line("evt-002", 2),
+            event_line_with_parent(
+                "evt-003",
+                EventType::LoopStarted,
+                "meta001",
+                3,
+                Some("loop-002"),
+                Some("loop-001"),
+                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            ),
+            loop_completed_line("evt-004", 4),
+        ),
+        "active child loop",
     );
 }
 
