@@ -563,12 +563,7 @@ fn read_anchored_context_manifest_signature(
                 path.diagnostic_path().display()
             )));
         }
-        verify_context_manifest_objects(
-            sessions,
-            session_id,
-            &value,
-            &mut verified_objects,
-        )?;
+        verify_context_manifest_objects(sessions, session_id, &value, &mut verified_objects)?;
         recorded.push(canonical.as_bytes());
         Ok(())
     })?;

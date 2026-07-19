@@ -111,7 +111,10 @@ impl TailCapture {
             }
             if event.event_type == EventType::Error
                 && let (Some(code), Some(message)) = (
-                    event.payload.get("code").and_then(serde_json::Value::as_str),
+                    event
+                        .payload
+                        .get("code")
+                        .and_then(serde_json::Value::as_str),
                     event
                         .payload
                         .get("message")

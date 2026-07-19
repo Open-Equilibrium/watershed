@@ -29,9 +29,8 @@ pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum stored content bytes in one complete self-contained session bundle.
 pub const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
 /// Object-data share after reserving the event, manifest and metadata maxima.
-const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
-    - (2 * MAX_SESSION_EVENT_BYTES)
-    - MAX_SESSION_LOG_BYTES;
+const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 =
+    MAX_SESSION_BUNDLE_BYTES - (2 * MAX_SESSION_EVENT_BYTES) - MAX_SESSION_LOG_BYTES;
 /// Maximum canonical events accumulated by one session, including resume events.
 pub const MAX_LOOP_EVENTS: u64 = 155_750;
 /// Maximum runtime Loop invocations accumulated by one session, including the root.

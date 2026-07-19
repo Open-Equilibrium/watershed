@@ -36,11 +36,8 @@ fn run_loop_internal(
         .loop_block(loop_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
     let definition_metadata = session_definition_metadata(&registry, loop_block)?;
-    let policy = core_policy::compile_policy_artifact(
-        &registry,
-        loop_ref,
-        runtime_policy_target(),
-    )?;
+    let policy =
+        core_policy::compile_policy_artifact(&registry, loop_ref, runtime_policy_target())?;
     preflight_loop_tools(workspace, &registry, &policy, loop_block)?;
     let base_session_id = &loop_block.identity.id;
     let reservation = reserve_unique_session_log(workspace, base_session_id)?;

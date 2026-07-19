@@ -104,11 +104,8 @@ fn resume_session_internal(
         RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
     })?;
     verify_resume_definition_metadata_values(session_id, &metadata, &registry, loop_block)?;
-    let policy = core_policy::compile_policy_artifact(
-        &registry,
-        &loop_id,
-        runtime_policy_target(),
-    )?;
+    let policy =
+        core_policy::compile_policy_artifact(&registry, &loop_id, runtime_policy_target())?;
     let clock = resume_event_clock(&config, inspection.clock)?;
     let recorded_context = read_anchored_context_manifest_signature(
         &logs,
@@ -920,10 +917,7 @@ fn ensure_anchored_bundle_leaf_available(
     }
 }
 
-fn reserve_anchored_bundle_file(
-    path: &AnchoredFile,
-    session_id: &str,
-) -> Result<(), RuntimeError> {
+fn reserve_anchored_bundle_file(path: &AnchoredFile, session_id: &str) -> Result<(), RuntimeError> {
     reserve_new_anchored_file(path).map_err(|err| match err {
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
             RuntimeError::SessionLogExists(session_id.to_owned())

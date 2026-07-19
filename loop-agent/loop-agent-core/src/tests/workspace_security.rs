@@ -230,15 +230,19 @@ fn run_loop_rejects_symlinked_session_leaf_without_side_effects() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let outside_target = outside.join("victim.jsonl");
-    symlink(&outside_target, session_dir.join("smoke-loop.jsonl"))
-        .expect("session leaf symlink");
+    symlink(&outside_target, session_dir.join("smoke-loop.jsonl")).expect("session leaf symlink");
 
     let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect_err("symlinked session leaf must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside_target.exists());
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke-loop.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("smoke-loop.log")
+            .exists()
+    );
 }
 
 #[cfg(unix)]
@@ -271,7 +275,12 @@ fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
             .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -312,7 +321,12 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
             .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -341,7 +355,12 @@ fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
                 .join("hello-loop.jsonl")
                 .exists()
         );
-        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+        assert!(
+            !workspace
+                .join(LOCAL_LOG_DIR)
+                .join("hello-loop.log")
+                .exists()
+        );
     }
 }
 
@@ -381,7 +400,12 @@ fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
         fs::read_to_string(&output.session_path).expect("session log readable"),
         output.stdout
     );
-    assert!(workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+    assert!(
+        workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -467,7 +491,12 @@ fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
             .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[cfg(windows)]
@@ -493,7 +522,12 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
             .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[cfg(any(unix, windows))]
@@ -520,7 +554,12 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
             .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[cfg(not(any(unix, windows)))]

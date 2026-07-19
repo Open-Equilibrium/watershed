@@ -143,12 +143,8 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
         .filter(|line| line.contains("\"event_type\":\"message.completed\""))
         .count();
     let config = load_workspace_config(workspace).expect("workspace config loads");
-    let policy = core_policy::compile_policy_artifact(
-        &registry,
-        loop_ref,
-        runtime_policy_target(),
-    )
-    .expect("runtime policy compiles");
+    let policy = core_policy::compile_policy_artifact(&registry, loop_ref, runtime_policy_target())
+        .expect("runtime policy compiles");
     let mut captured = CapturedRuntime::default();
     let planned = execute_loop_with_sink(
         workspace,
