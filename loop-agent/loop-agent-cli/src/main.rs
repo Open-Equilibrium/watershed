@@ -246,7 +246,7 @@ where
                         }
                     }
                 };
-                match write_new_events(reader, &mut cursor, &mut stdout) {
+                match write_new_events(reader, &mut cursor, observed_high_watermark, &mut stdout) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(err) => {
@@ -279,10 +279,11 @@ where
 fn write_new_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
+    through_sequence: u64,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
     write_events(
-        reader.read_incremental_after(*cursor)?,
+        committed_events_through(reader.read_incremental_after(*cursor)?, through_sequence),
         cursor,
         writer,
         true,
@@ -544,32 +545,36 @@ fn usage() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proto::EventType;
+
+    #[path = "../../../tests/support.rs"]
+    mod test_support;
 
     #[test]
-    fn final_live_drain_stops_at_the_operations_observed_high_watermark() {
-        let (notifier, receiver) = loop_agent_core::live_event_channel();
-        notifier.try_notify("resume001", 2);
-        let through_sequence = receiver
-            .recv_timeout(Duration::ZERO)
-            .expect("operation notification is available")
-            .highest_committed_sequence;
-        let events = [2, 3].map(|sequence| {
-            EventEnvelope::new(
-                format!("evt-{sequence}"),
-                EventType::MessageDelta,
-                "resume001",
-                sequence,
-                "2025-01-01T00:00:00Z",
-                "loop-agent",
-                Default::default(),
-            )
-        });
+    fn live_drains_stop_at_the_operations_observed_high_watermark() {
+        let workspace = test_support::workspace_copy("smoke-loop");
+        let output = loop_agent_core::run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+            .expect("fixture session runs");
+        let mut reader = SessionEventReader::open(&workspace, &output.session_id)
+            .expect("fixture session reader opens");
+        let mut cursor = 0;
+        let mut emitted = Vec::new();
 
-        let drained_sequences = committed_events_through(events, through_sequence)
-            .map(|event| event.sequence)
-            .collect::<Vec<_>>();
+        write_new_events(&mut reader, &mut cursor, 2, &mut emitted)
+            .expect("bounded live drain succeeds");
 
-        assert_eq!(drained_sequences, vec![2]);
+        assert_eq!(cursor, 2);
+        assert_eq!(emitted.iter().filter(|byte| **byte == b'\n').count(), 2);
+
+        let mut verified_reader = SessionEventReader::open(&workspace, &output.session_id)
+            .expect("verified fixture session reader opens");
+        let mut verified_cursor = 0;
+        let mut verified = Vec::new();
+        write_verified_events(&mut verified_reader, &mut verified_cursor, 2, &mut verified)
+            .expect("bounded verified drain succeeds");
+        assert_eq!((verified_cursor, verified), (cursor, emitted));
+
+        drop(reader);
+        drop(verified_reader);
+        std::fs::remove_dir_all(workspace).expect("temporary workspace removed");
     }
 }
