@@ -1161,14 +1161,14 @@ fn registry_reference_validation_rejects_more_than_32_direct_subloops() {
     let RegistryBlock::Loop(root) = &mut blocks[1] else {
         panic!("second chain block must be a loop");
     };
-    root.subloop_refs = vec!["loop-000".to_owned(); 32];
+    root.subloop_refs = vec!["loop-001".to_owned(); MAX_LOOP_FANOUT];
     ResolvedRegistry::from_blocks(blocks).expect("32 direct subloop references are accepted");
 
     let mut blocks = loop_chain_blocks(2);
     let RegistryBlock::Loop(root) = &mut blocks[1] else {
         panic!("second chain block must be a loop");
     };
-    root.subloop_refs = vec!["loop-000".to_owned(); 33];
+    root.subloop_refs = vec!["loop-001".to_owned(); MAX_LOOP_FANOUT + 1];
 
     let err = ResolvedRegistry::from_blocks(blocks)
         .expect_err("more than 32 direct subloop invocations are rejected");
