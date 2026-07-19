@@ -272,7 +272,7 @@ impl SessionEventReader {
         }
         let mut retried_inactive_partial = false;
         loop {
-            let segments = segmented_jsonl_files(&self.path)?;
+            let segments = self.incremental_segments()?;
             if segments.len() < self.observed_segment_count || self.observed_segment_count == 0 {
                 return Err(self.changed_outside_append_only());
             }
@@ -379,6 +379,30 @@ impl SessionEventReader {
             self.observed_segment_count = segments.len();
             return Ok(events_after(appended, cursor));
         }
+    }
+
+    fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
+        let observed = u64::try_from(self.observed_segment_count).unwrap_or(u64::MAX);
+        let mut segments = Vec::new();
+        for ordinal in 1..=observed {
+            let segment = segmented_jsonl_path(&self.path, ordinal)?;
+            ensure_anchored_real_file(&segment)?;
+            segments.push(segment);
+        }
+        for ordinal in observed.saturating_add(1)..=MAX_SESSION_STREAM_SEGMENTS {
+            let segment = segmented_jsonl_path(&self.path, ordinal)?;
+            match segment.metadata() {
+                Ok(_) => ensure_anchored_real_file(&segment)?,
+                Err(RuntimeError::Io { source, .. })
+                    if source.kind() == io::ErrorKind::NotFound =>
+                {
+                    break;
+                }
+                Err(error) => return Err(error),
+            }
+            segments.push(segment);
+        }
+        Ok(segments)
     }
 
     fn session_lock_present(&self) -> Result<bool, RuntimeError> {

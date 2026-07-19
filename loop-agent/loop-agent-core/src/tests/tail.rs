@@ -129,6 +129,26 @@ fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
 }
 
 #[test]
+fn incremental_reader_defers_unverified_segment_layout_to_final_replay() {
+    let (_workspace, path, _started, completed, mut reader) =
+        reader_fixture("tail-deferred-segments", "taildeferredsegments001");
+    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+    fs::write(
+        path.with_file_name("taildeferredsegments001.000005.jsonl"),
+        b"",
+    )
+    .expect("unverified high segment written");
+    append_session_log_line(&path, &completed).expect("terminal event appends");
+
+    let appended = reader
+        .read_incremental_after(1)
+        .expect("incremental delivery reads only contiguous committed paths");
+    assert_eq!(appended.len(), 1);
+    assert_eq!(appended[0].event_type, EventType::SessionCompleted);
+    assert_protocol_contains(reader.read_after(2), "non-contiguous");
+}
+
+#[test]
 fn incremental_reader_enforces_the_event_data_limits() {
     let (_workspace, path, _started, _completed, mut reader) =
         reader_fixture("tail-aggregate-limit", "tailaggregatelimit001");
