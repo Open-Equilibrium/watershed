@@ -176,6 +176,51 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
             .count(),
         usize::try_from(MAX_LOOP_INVOCATIONS).expect("invocation limit fits usize")
     );
+    let root_loop_id = events
+        .iter()
+        .find(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
+        .and_then(|event| event.loop_id.clone())
+        .expect("root invocation exists");
+    let persisted_events = events
+        .iter()
+        .take_while(|event| {
+            event.event_type != EventType::LoopCompleted
+                || event.loop_id.as_deref() != Some(root_loop_id.as_str())
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let sequence = persisted_events
+        .last()
+        .expect("stream before root completion is non-empty")
+        .sequence
+        + 1;
+    let mut persisted =
+        canonical_event_stream(&persisted_events).expect("pre-terminal events serialize");
+    validate_session_log_text(
+        Path::new("invocation-budget-prefix.jsonl"),
+        &output.session_id,
+        &persisted,
+    )
+    .expect("512-invocation prefix with only the root active validates");
+    let over_budget = EventEnvelope {
+        loop_id: Some("loop-over-budget".to_owned()),
+        parent_loop_id: Some(root_loop_id),
+        ..EventEnvelope::new(
+            "evt-over-budget",
+            EventType::LoopStarted,
+            &output.session_id,
+            sequence,
+            event_timestamp(sequence),
+            "loop-agent-cli",
+            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        )
+    };
+    persisted.push_str(&over_budget.canonical_jsonl().expect("over-budget event serializes"));
+    assert_invalid_stream(
+        "invocation-budget.jsonl",
+        &persisted,
+        "loop invocation budget exceeded",
+    );
     let sessions = list_sessions(&workspace).expect("sessions list before rejection");
 
     root_refs.push("smoke-loop");

@@ -508,12 +508,21 @@ impl SessionAppendValidationState {
                     path.display()
                 ))
             })?;
-            if !self.loop_started_ids.insert(loop_id.to_owned()) {
+            if self.loop_started_ids.contains(loop_id) {
                 return Err(RuntimeError::Protocol(format!(
                     "{} line {line_number} must use a unique loop_id for loop.started",
                     path.display()
                 )));
             }
+            if u64::try_from(self.loop_started_ids.len()).unwrap_or(u64::MAX)
+                >= MAX_LOOP_INVOCATIONS
+            {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} loop invocation budget exceeded at line {line_number}: max {MAX_LOOP_INVOCATIONS}",
+                    path.display()
+                )));
+            }
+            self.loop_started_ids.insert(loop_id.to_owned());
         }
         match &self.stream_session_id {
             Some(existing) if existing != &event.session_id => {
@@ -614,6 +623,7 @@ fn validate_session_log_text(
 #[derive(Default)]
 struct SessionLifecycleState {
     loops: LifecycleTracker<String>,
+    loop_definition_ids: BTreeMap<String, String>,
     loop_parents: BTreeMap<String, Option<String>>,
     steps: LifecycleTracker<StepLifecycleKey>,
     tools: LifecycleTracker<ToolLifecycleKey>,
@@ -664,6 +674,10 @@ impl SessionLifecycleState {
         match event.event_type {
             EventType::LoopStarted => {
                 let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                self.loop_definition_ids.insert(
+                    loop_id.clone(),
+                    lifecycle_payload_string(event, "loop_definition_id"),
+                );
                 self.loop_parents
                     .insert(loop_id.clone(), event.parent_loop_id.clone());
                 self.loops.start(loop_id);
@@ -673,6 +687,14 @@ impl SessionLifecycleState {
                 if !self.loops.is_started(&loop_id) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
+                        path.display(),
+                        event.event_type.as_str()
+                    )));
+                }
+                let loop_definition_id = lifecycle_payload_string(event, "loop_definition_id");
+                if self.loop_definition_ids.get(&loop_id) != Some(&loop_definition_id) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} {} loop_definition_id must match loop.started for loop_id {loop_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
@@ -826,6 +848,13 @@ impl SessionLifecycleState {
                         &tool.tool_id,
                         terminal_line,
                     ));
+                }
+                if self.tools.is_started(&tool) {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} line {line_number} duplicate active tool.started for tool_id {:?}",
+                        path.display(),
+                        tool.tool_id
+                    )));
                 }
                 self.tools_without_progress
                     .insert(tool.clone(), tool.tool_id.clone());

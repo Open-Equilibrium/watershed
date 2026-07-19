@@ -26,6 +26,36 @@ fn corrupted_session_log_is_rejected_without_rewrite() {
 }
 
 #[test]
+fn replay_rejects_a_record_split_across_segments_without_rewrite() {
+    let workspace = workspace_copy("smoke-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let stream = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let final_line_start = stream[..stream.len() - 1]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let split = final_line_start + (stream.len() - final_line_start) / 2;
+    let base_path = session_dir.join("smoke-loop.jsonl");
+    let second_path = session_dir.join("smoke-loop.000002.jsonl");
+    fs::write(&base_path, &stream.as_bytes()[..split]).expect("partial base segment written");
+    fs::write(&second_path, &stream.as_bytes()[split..]).expect("second segment written");
+    let before_base = fs::read(&base_path).expect("base segment reads");
+    let before_second = fs::read(&second_path).expect("second segment reads");
+
+    let err = replay_session(&workspace, "smoke-loop", EmitMode::Jsonl)
+        .expect_err("replay must reject a record split across segments");
+
+    assert!(
+        matches!(err, RuntimeError::Protocol(message) if message.contains("non-final segment must end with LF"))
+    );
+    assert_eq!(fs::read(&base_path).expect("base remains"), before_base);
+    assert_eq!(
+        fs::read(&second_path).expect("second remains"),
+        before_second
+    );
+}
+
+#[test]
 fn run_loop_allocates_next_session_id_when_base_log_is_corrupt() {
     let workspace = workspace_copy("smoke-loop");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);

@@ -278,7 +278,7 @@ fn context_sources_are_session_owned_hash_addressed_and_deduplicated() {
 }
 
 #[test]
-fn partial_new_session_object_is_removed_before_retry() {
+fn partial_session_object_is_never_published_before_retry() {
     let workspace = empty_workspace("session-object-partial-write");
     let reservation =
         reserve_session_log(&workspace, "objectpartial001").expect("session reserved");
@@ -302,6 +302,10 @@ fn partial_new_session_object_is_removed_before_retry() {
             let mut file = open_anchored_session_log_append_file(path)?;
             file.write_all(&bytes[..5])
                 .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            assert!(
+                !object_path.exists(),
+                "partial bytes must not appear at the final hash-named path"
+            );
             Err(path_io_error(
                 path.diagnostic_path(),
                 io::Error::other("injected object write failure"),

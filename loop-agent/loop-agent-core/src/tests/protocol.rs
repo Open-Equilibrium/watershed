@@ -1017,6 +1017,57 @@ fn protocol_validation_covers_envelope_and_stream_edges() {
     );
 }
 
+#[test]
+fn loop_terminal_definition_must_match_loop_start() {
+    for (event_type, payload) in [
+        (
+            EventType::LoopCompleted,
+            serde_json::json!({"loop_definition_id":"other-loop"}),
+        ),
+        (
+            EventType::LoopFailed,
+            serde_json::json!({"error":"failed","loop_definition_id":"other-loop"}),
+        ),
+    ] {
+        assert_invalid_session_log(
+            &format!("mismatched-{}.jsonl", event_type.as_str()),
+            "meta001",
+            &[
+                session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+                loop_started_line("evt-002", 2),
+                event_line(
+                    "evt-003",
+                    event_type,
+                    "meta001",
+                    3,
+                    Some("loop-001"),
+                    payload,
+                ),
+            ]
+            .concat(),
+            "loop_definition_id must match loop.started",
+        );
+    }
+}
+
+#[test]
+fn duplicate_active_tool_start_is_rejected() {
+    assert_invalid_session_log(
+        "duplicate-active-tool.jsonl",
+        "meta001",
+        &[
+            session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
+            loop_started_line("evt-002", 2),
+            phase_entered_line("evt-003", 3),
+            step_started_line("evt-004", 4),
+            tool_started_line("evt-005", 5),
+            tool_started_line("evt-006", 6),
+        ]
+        .concat(),
+        "duplicate active tool.started",
+    );
+}
+
 fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) -> String {
     match event_type {
         EventType::StepStarted => step_started_line(event_id, sequence),

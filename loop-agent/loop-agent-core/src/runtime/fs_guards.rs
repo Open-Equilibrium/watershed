@@ -251,8 +251,15 @@ fn read_segmented_jsonl(
     limits: SessionStreamLimits,
 ) -> Result<String, RuntimeError> {
     let mut bytes = Vec::new();
-    for file in segmented_jsonl_files(base, limits)? {
-        let segment = read_anchored_file_with_limit(&file, MAX_SESSION_SEGMENT_BYTES)?;
+    let files = segmented_jsonl_files(base, limits)?;
+    for (index, file) in files.iter().enumerate() {
+        let segment = read_anchored_file_with_limit(file, MAX_SESSION_SEGMENT_BYTES)?;
+        if index + 1 != files.len() && !segment.ends_with(b"\n") {
+            return Err(RuntimeError::Protocol(format!(
+                "{} non-final segment must end with LF",
+                file.diagnostic_path().display()
+            )));
+        }
         let total = u64::try_from(bytes.len().saturating_add(segment.len())).unwrap_or(u64::MAX);
         if total > limits.max_total_bytes {
             return Err(RuntimeError::Protocol(format!(

@@ -708,11 +708,12 @@ impl SessionObjectWriter {
                 }
             }
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                reserve_new_anchored_file(&path)?;
-                if let Err(error) = write_new(&path, &object.bytes) {
-                    let _ = path.remove();
-                    return Err(error);
-                }
+                with_anchored_replacement_temp(&path, None, |temp_path, temp_file| {
+                    drop(temp_file);
+                    write_new(temp_path, &object.bytes)?;
+                    ensure_anchored_new_leaf_available(&path)?;
+                    temp_path.rename_to(&path)
+                })?;
             }
             Err(error) => return Err(error),
         }
