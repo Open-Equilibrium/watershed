@@ -1594,11 +1594,12 @@ fn parser_rejects_malformed_or_quoted_typed_scalars() {
 
 #[test]
 fn ids_follow_v0_token_rules() {
-    assert!(is_valid_block_id("hello-loop"));
-    assert!(is_valid_block_id("read_file_1"));
-    assert!(!is_valid_block_id(""));
-    assert!(!is_valid_block_id("HelloLoop"));
-    assert!(!is_valid_block_id("../hello"));
+    for value in ["hello-loop", "read_file_1", "com0", "com10"] {
+        assert!(is_valid_block_id(value), "{value}");
+    }
+    for value in ["", "HelloLoop", "../hello", "nul", "com1", "lpt9"] {
+        assert!(!is_valid_block_id(value), "{value}");
+    }
 
     assert!(is_valid_command_id("agent-read"));
     assert!(!is_valid_command_id("1-agent-read"));
@@ -1616,6 +1617,10 @@ fn registry_schema_is_checked_in_json() {
     assert_eq!(
         parsed["$id"],
         "https://open-equilibrium.org/watershed/schemas/script/v0/registry-block.schema.json"
+    );
+    assert_eq!(
+        parsed["$defs"]["block_id"]["not"]["pattern"],
+        "^(con|prn|aux|nul|com[1-9]|lpt[1-9])$"
     );
 }
 

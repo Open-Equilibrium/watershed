@@ -64,12 +64,26 @@ fn unknown_event_type_reports_rejected_name() {
 
 #[test]
 fn session_id_is_lowercase_path_safe_token() {
-    assert!(is_valid_session_id("session_001-a"));
-    assert!(!is_valid_session_id(""));
-    assert!(!is_valid_session_id("Session"));
-    assert!(!is_valid_session_id("../session"));
-    assert!(!is_valid_session_id("session.jsonl"));
-    assert!(!is_valid_session_id("c:\\session"));
+    for value in ["session_001-a", "com0", "com10"] {
+        assert!(is_valid_session_id(value), "{value}");
+    }
+    for value in [
+        "",
+        "Session",
+        "../session",
+        "session.jsonl",
+        "c:\\session",
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        "com1",
+        "com9",
+        "lpt1",
+        "lpt9",
+    ] {
+        assert!(!is_valid_session_id(value), "{value}");
+    }
 }
 
 #[test]

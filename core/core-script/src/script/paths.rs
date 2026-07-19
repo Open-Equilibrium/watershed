@@ -1,6 +1,6 @@
 /// Returns whether `value` is a valid v0 block id.
 pub fn is_valid_block_id(value: &str) -> bool {
-    matches_lower_token(value, 1, 128)
+    proto::is_valid_session_id(value)
 }
 
 /// Returns whether `value` is a valid predefined command id.

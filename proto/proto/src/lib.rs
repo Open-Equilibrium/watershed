@@ -366,6 +366,15 @@ pub fn is_valid_session_id(value: &str) -> bool {
         && value.bytes().all(|byte| {
             byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_' || byte == b'-'
         })
+        && !is_windows_dos_device_basename(value)
+}
+
+fn is_windows_dos_device_basename(value: &str) -> bool {
+    matches!(value, "con" | "prn" | "aux" | "nul")
+        || value
+            .strip_prefix("com")
+            .or_else(|| value.strip_prefix("lpt"))
+            .is_some_and(|suffix| matches!(suffix.as_bytes(), [b'1'..=b'9']))
 }
 
 /// Parses the protocol's canonical RFC 3339 UTC `Z` form to Unix seconds.

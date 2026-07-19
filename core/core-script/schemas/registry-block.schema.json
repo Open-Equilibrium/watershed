@@ -121,7 +121,11 @@
       "required": ["name", "value_type", "required"],
       "type": "object"
     },
-    "block_id": { "pattern": "^[a-z0-9_-]{1,128}$", "type": "string" },
+    "block_id": {
+      "not": { "pattern": "^(con|prn|aux|nul|com[1-9]|lpt[1-9])$" },
+      "pattern": "^[a-z0-9_-]{1,128}$",
+      "type": "string"
+    },
     "block_name": { "maxLength": 256, "minLength": 1, "type": "string" },
     "cidr_allow": {
       "additionalProperties": false,
