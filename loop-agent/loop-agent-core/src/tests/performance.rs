@@ -326,6 +326,45 @@ fn d068_sizing_profile_and_payload_distribution_are_exact() {
 }
 
 #[test]
+fn protocol_validation_accepts_exact_event_data_limit_and_rejects_next_byte() {
+    const EVENT_COUNT: u64 = 154;
+    const FINAL_EVENT_BYTES: usize = 192 * 1024;
+    let session_limit =
+        usize::try_from(MAX_SESSION_EVENT_BYTES).expect("session event limit fits usize");
+    let mut text = String::with_capacity(session_limit + 1);
+    for sequence in 1..=EVENT_COUNT {
+        let (event_type, _, _) = synthetic_event_shape(sequence, EVENT_COUNT, 0);
+        let target_bytes = if sequence == EVENT_COUNT {
+            FINAL_EVENT_BYTES
+        } else {
+            MAX_CANONICAL_EVENT_BYTES
+        };
+        text.push_str(&sized_synthetic_event_line(
+            "event-limit",
+            sequence,
+            event_type,
+            target_bytes,
+        ));
+    }
+
+    assert_eq!(text.len(), session_limit);
+    let events = validate_protocol_jsonl_text(Path::new("event-limit.jsonl"), &text)
+        .expect("exact event-data limit remains valid");
+    assert_eq!(events.len(), EVENT_COUNT as usize);
+
+    text.push('x');
+    let err = validate_protocol_jsonl_text(Path::new("event-limit.jsonl"), &text)
+        .expect_err("one byte over the event-data limit must fail");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "event-limit.jsonl session event data size {} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
+            session_limit + 1
+        )
+    );
+}
+
+#[test]
 #[ignore = "performance gate"]
 fn full_event_cap_replay_stays_within_d068_budgets() {
     let workspace =

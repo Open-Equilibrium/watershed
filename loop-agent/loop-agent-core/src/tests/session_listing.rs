@@ -1,16 +1,4 @@
 #[test]
-fn protocol_validation_rejects_oversized_event_data_before_json_parse() {
-    let session_limit =
-        usize::try_from(MAX_SESSION_EVENT_BYTES).expect("session event limit fits usize");
-    let oversized = format!("{}\n", "x".repeat(session_limit));
-
-    let err = validate_protocol_jsonl_text(Path::new("oversized.jsonl"), &oversized)
-        .expect_err("oversized segments must be rejected by budget");
-
-    assert!(err.to_string().contains("session event data size"), "{err}");
-}
-
-#[test]
 fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
     let workspace = workspace_copy("smoke-loop");
 
