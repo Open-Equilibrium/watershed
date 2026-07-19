@@ -33,7 +33,7 @@ Loop Agent runs inside normal Git projects in the MVP, but it does not own proje
 2. **Network egress deny-by-default**. M1 Linux-target policy rejects non-empty CIDR allow entries and emulates deny-all network decisions for sandbox-negative tests (ADR-0051, ADR-0052). CIDR allow entries remain part of the policy artifact/schema so reviewed capabilities are explicit, but they are not silently treated as enforced by Landlock/seccomp until a post-M1 egress backend exists.
 3. Filesystem **read/write confined** to declared roots; protect the default protected paths below unless explicitly granted.
 4. **Blast-radius control** via least-capability tools, isolated workspaces when configured, deterministic logs and short-lived bounded runs.
-5. Bounded/headless/timeout execution + `.loop/logs` — for stability, **not** a security boundary by itself.
+5. `.loop/logs` now; post-M1 subprocesses must be bounded, headless and timed out — for stability, **not** as a security boundary.
 6. Post-M1 optional **container/microVM per loop** for loops touching untrusted content (web, foreign repos).
 
 ## Meta-Agent configuration writes

@@ -32,7 +32,7 @@
     </header>
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
-      <p>Loop Agent is a <strong>standalone CLI agent product first</strong>: a local harness that runs deterministic, script-defined AI-native processes. It exists for agentic engineers who need control, repeatability, bounded tool execution and measurable loop quality. It is usable on its own — by humans at a terminal, headlessly by scripts/CI/automation, and later embeddable as a core library.</p>
+      <p>Loop Agent is a <strong>standalone CLI agent product first</strong>: a local harness that runs deterministic, script-defined AI-native processes. It exists for agentic engineers who need control, repeatability, bounded tool execution and measurable loop quality. It is usable on its own by humans at a terminal and headlessly by scripts, CI and automation. Direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">D-020</a>.</p>
       <p><strong>A Meta-Harness on the same host may integrate through Loop Agent's public runtime surfaces; neither Meta-Harness nor Liquid is required to run Loop Agent.</strong> Loop Agent exposes only its CLI and public event stream. Liquid reaches agent sessions through Meta-Harness and owns the optional UI.</p>
       <p>Loop Agent is the Watershed platform's <strong>execution layer</strong> and its developer/open-source credibility wedge (see <a href="../../PLAN.md">PLAN.md</a> wedge sequencing and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>run repeatable, auditable AI-agent workflows from my CLI.</em> It is a <strong>deterministic, auditable, reusable agent-loop runtime — not another generic coding agent.</strong></p>
     </div></section>
@@ -54,7 +54,7 @@
           <p class="muted"><b>Liquid responsibilities:</b> local-first Pages, Blocks, Views, responsive desktop/mobile UI, workspace data, action history and workspace CLI/API. Liquid may render Loop Agent sessions through Meta-Harness-backed Blocks; neither layer reads Loop Agent storage directly, and Liquid edits use Liquid's mutation pipeline.</p>
         </div>
       </div>
-      <p>Meta-Harness consumes Loop Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own the runtime internals. M1 ships the human CLI plus machine-readable event stream; local machine control and embedding are designed-for seams (ADR-0035).</p>
+      <p>Meta-Harness consumes Loop Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own the runtime internals. M1 ships the human CLI plus machine-readable event stream. Local machine control is a designed-for seam (ADR-0035); direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">open</a>.</p>
     </div></section>
 
     <section id="surfaces" class="section"><h2>3. Standalone runtime surfaces</h2><div class="body">
@@ -71,13 +71,7 @@ loop tail &lt;session-id&gt;</code></pre><p>Direct human use; nice terminal rend
 loop run hello-loop --emit jsonl</code></pre><p>The CLI owns stdout and streams newline-delimited committed events for automation, CI, custom terminal UIs and same-host Meta-Harness ingestion. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
         <div class="card"><h3>C. Local machine-control surface (designed-for)</h3><pre><code>loop --mode rpc
 # or: loop rpc</code></pre><p>Bidirectional external control is a post-M1 seam. ADR-0055 selects local JSON-RPC over stdio (ADR-0029) with a minimal <code>loop.start</code>, <code>loop.status</code>, <code>loop.cancel</code>, <code>loop.tail</code> and <code>loop.export</code> command set; it carries the same runtime events instead of adding <code>cmd.*</code> event types.</p></div>
-        <div class="card"><h3>D. Embedded core API (future)</h3><pre><code>let session = create_agent_session(config).await?;
-let loop_def = load_loop_definition(config).await?;
-let mut events = session.subscribe();
-session.start(loop_def).await?;
-while let Some(event) = events.next().await {
-    handle_event(event);
-}</code></pre><p>A future Rust-first embedding surface, analogous in concept to <code>pi-agent-core</code>. M1 implements only the bounded notification and sequence-replay boundary in <a href="../../PROTOCOL.md">PROTOCOL.md</a>; the stabilized session API remains <a href="../decisions/open-decisions.html#d-020">D-020</a>.</p></div>
+        <div class="card"><h3>D. Rust integration (open)</h3><p><a href="../decisions/open-decisions.html#d-020">D-020</a> will decide whether other Rust programs call Loop Agent in-process or through its command and protocol surfaces. M1 makes no external embedding commitment.</p></div>
       </div>
       <h3>E. Local session/transcript persistence</h3>
       <p>Loop Agent owns its own local session store, independent of Meta-Harness, mirroring the public event stream:</p>
@@ -127,12 +121,12 @@ while let Some(event) = events.next().await {
         <li><strong>Protocol adapter:</strong> emits normalized events per <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</li>
       </ul>
       <h3>Crate boundaries (ADR-0033)</h3>
-      <p>The runtime engine and the CLI front-end are separate crates so the engine can be headlessly tested and later embedded (§3D):</p>
+      <p>The runtime engine and CLI front-end are separate crates so the engine can be tested headlessly and reused by the CLI. Any external embedding contract remains D-020:</p>
       <ul>
         <li><code>core/core-script</code> — building-block model, parser, registry and composition rules.</li>
         <li><code>core/core-policy</code> — capability model and policy→sandbox compiler.</li>
         <li><code>proto/</code> — <code>proto</code>: event schema and serialization.</li>
-        <li><code>loop-agent/loop-agent-core</code> — FSM engine, runtime kernel, session manager, local log, bounded live notification and embeddable entry.</li>
+        <li><code>loop-agent/loop-agent-core</code> — FSM engine, runtime kernel, session manager, local log, bounded live notification and runtime entry.</li>
         <li><code>loop-agent/loop-agent-cli</code> — interactive terminal, slash commands, machine-readable mode, <code>loop run</code>, tail/replay/resume.</li>
       </ul>
       <p>The building-block model lives in <code>core-script</code> and is serializable over <code>proto</code>. Same-host Meta-Harness consumes it through <code>core-script</code> as a config resolver; Liquid renders derived state through Meta-Harness-backed Blocks. Neither consumes Loop Agent internals.</p>

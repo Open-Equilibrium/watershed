@@ -164,8 +164,8 @@
       <article id="d-020" class="decision">
         <h3>D-020 - Loop Agent Embedded Core API</h3>
         <p><strong>Status:</strong> Open before external Rust embedding; not an M1 blocker.</p>
-        <p><strong>Question:</strong> Watershed already has <a href="../adr/ADR-LOG.md">ADR-0062</a>'s narrow internal live-notification and replay building blocks. Should other Rust programs receive a small, stable higher-level interface, or integrate through command and protocol surfaces?</p>
-        <ul><li><strong>A:</strong> Stabilize a small high-level session interface after M1. Pro: direct integration with clear ownership. Con: creates a compatibility commitment.</li><li><strong>B:</strong> Keep the existing building blocks internal to Watershed. Pro: less API maintenance. Con: Rust hosts need an adapter or process boundary.</li></ul>
+        <p><strong>Question:</strong> Should another Rust application run Loop Agent inside the same program, or start the <code>loop</code> command and communicate through its documented input and output?</p>
+        <ul><li><strong>A:</strong> Add a small supported Rust library interface after M1. Pro: direct calls without managing another process. Con: Watershed must keep that interface compatible and tightly couples both programs.</li><li><strong>B:</strong> Keep the current Rust building blocks internal and use the command/protocol boundary. Pro: a smaller public surface and independent crashes/upgrades. Con: the caller must manage a process and adapter.</li></ul>
         <p><strong>Recommendation:</strong> A only when a concrete post-M1 consumer proves the smallest useful interface; see <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
       </article>
       <article id="d-046" class="decision">
