@@ -248,14 +248,14 @@ fn reader_rejects_partial_non_final_segments_and_recovers() {
     let third_path = session_dir.join("tailsegment001.000003.jsonl");
     fs::write(&path, started.trim_end_matches('\n')).expect("partial first segment written");
     fs::write(&second_path, "").expect("second segment written");
-    assert_protocol_contains(
-        reader.read_after(0),
-        "non-final segment must end with LF",
-    );
+    assert_protocol_contains(reader.read_after(0), "non-final segment must end with LF");
 
     fs::write(&path, &started).expect("first segment repaired");
     fs::remove_file(&second_path).expect("empty second segment removed");
-    assert_eq!(reader.read_after(0).expect("repaired prefix reads").len(), 1);
+    assert_eq!(
+        reader.read_after(0).expect("repaired prefix reads").len(),
+        1
+    );
     fs::write(&second_path, completed.trim_end_matches('\n'))
         .expect("partial second segment written");
     fs::write(&third_path, "").expect("third segment written");
@@ -279,7 +279,10 @@ fn reader_rejects_invalid_utf8_in_full_and_incremental_reads() {
     fs::write(&path, &invalid_stream).expect("invalid UTF-8 stream written");
     assert_protocol_contains(reader.read_after(0), "not valid UTF-8");
     fs::write(&path, &started).expect("invalid full stream repaired");
-    assert_eq!(reader.read_after(0).expect("repaired prefix reads").len(), 1);
+    assert_eq!(
+        reader.read_after(0).expect("repaired prefix reads").len(),
+        1
+    );
 
     let mut file = fs::OpenOptions::new()
         .append(true)
@@ -306,7 +309,10 @@ fn reader_rejects_cursors_ahead_of_authoritative_history_and_recovers() {
         reader.read_after(2),
         "no longer contains processed sequence 2",
     );
-    assert_eq!(reader.read_after(0).expect("valid cursor recovers").len(), 1);
+    assert_eq!(
+        reader.read_after(0).expect("valid cursor recovers").len(),
+        1
+    );
 
     append_session_log_line(&path, &completed).expect("terminal event appended");
     assert_protocol_contains(
@@ -418,8 +424,7 @@ fn reader_preserves_extensions_and_rejects_their_mutation() {
 fn reader_rejects_partial_bytes_after_a_terminal_event() {
     let (workspace, path, started, completed, mut reader) =
         reader_fixture("tail-terminal-partial", "tailterminalpartial001");
-    fs::write(path.with_extension("lock"), b"")
-        .expect("session lock written");
+    fs::write(path.with_extension("lock"), b"").expect("session lock written");
     assert_eq!(reader.read_after(0).expect("initial event reads").len(), 1);
     append_session_log_line(&path, &format!("{completed}partial"))
         .expect("terminal partial suffix written");

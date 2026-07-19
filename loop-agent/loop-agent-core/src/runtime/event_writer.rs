@@ -1316,8 +1316,7 @@ impl EventLogAppender for SessionLogAppender {
                 let event_bytes = u64::try_from(events[batch_end].len()).unwrap_or(u64::MAX);
                 let candidate_batch_bytes = batch_bytes.saturating_add(event_bytes);
                 if candidate_batch_bytes > available_segment_bytes
-                    || self.total_bytes.saturating_add(candidate_batch_bytes)
-                        > self.max_total_bytes
+                    || self.total_bytes.saturating_add(candidate_batch_bytes) > self.max_total_bytes
                 {
                     break;
                 }
