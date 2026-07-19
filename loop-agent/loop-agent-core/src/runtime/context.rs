@@ -517,6 +517,7 @@ fn read_anchored_context_manifest_signature(
     let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
     let mut line_number = 0usize;
     let mut verified_objects = BTreeSet::new();
+    let mut verified_object_bytes = 0u64;
     for_each_segmented_jsonl_line(&path, CONTEXT_MANIFEST_STREAM_LIMITS, |line| {
         line_number = line_number.saturating_add(1);
         if !line.ends_with('\n') {
@@ -563,7 +564,13 @@ fn read_anchored_context_manifest_signature(
                 path.diagnostic_path().display()
             )));
         }
-        verify_context_manifest_objects(sessions, session_id, &value, &mut verified_objects)?;
+        verify_context_manifest_objects(
+            sessions,
+            session_id,
+            &value,
+            &mut verified_objects,
+            &mut verified_object_bytes,
+        )?;
         recorded.push(canonical.as_bytes());
         Ok(())
     })?;
@@ -584,6 +591,7 @@ fn verify_context_manifest_objects(
     session_id: &str,
     manifest: &serde_json::Value,
     verified: &mut BTreeSet<String>,
+    verified_bytes: &mut u64,
 ) -> Result<(), RuntimeError> {
     let sources = manifest
         .get("ordered_sources")
@@ -624,6 +632,11 @@ fn verify_context_manifest_objects(
                     path.diagnostic_path().display()
                 ))
             })?;
+        let total = verified_bytes
+            .checked_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+            .unwrap_or(u64::MAX);
+        ensure_session_object_total(total)?;
+        *verified_bytes = total;
         if sha256_hex(&bytes) != digest {
             return Err(RuntimeError::Protocol(format!(
                 "{} referenced context object hash does not match",

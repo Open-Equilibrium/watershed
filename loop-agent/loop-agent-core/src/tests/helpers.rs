@@ -16,6 +16,17 @@ fn empty_workspace(label: &str) -> TempWorkspace {
     target
 }
 
+fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
+    let path = workspace.join("registry").join(path);
+    let text = fs::read_to_string(&path).expect("registry fixture reads");
+    assert_eq!(
+        text.matches(before).count(),
+        1,
+        "registry fixture contains one target fragment"
+    );
+    fs::write(path, text.replacen(before, after, 1)).expect("registry fixture updates");
+}
+
 fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
     for (directory, extension) in [(LOCAL_SESSION_DIR, "jsonl"), (LOCAL_LOG_DIR, "log")] {
         let path = workspace
@@ -50,16 +61,12 @@ fn temp_workspace_survives_until_the_last_thread_owner_drops() {
 
 fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "printf 'partial\\n' > out/partial.txt",
-        ),
-    )
-    .expect("first tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf 'partial\\n' > out/partial.txt",
+    );
     fs::write(
         workspace.join("registry/tools/bad-write.yaml"),
         r#"tool:
@@ -78,16 +85,12 @@ fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
 "#,
     )
     .expect("bad tool fixture written");
-    let phase_path = workspace.join("registry/phases/summarize.yaml");
-    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        source.replace(
-            "tool_refs: [write-summary]",
-            "tool_refs: [write-summary, bad-write]",
-        ),
-    )
-    .expect("phase fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "tool_refs: [write-summary]",
+        "tool_refs: [write-summary, bad-write]",
+    );
     fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
     workspace
 }

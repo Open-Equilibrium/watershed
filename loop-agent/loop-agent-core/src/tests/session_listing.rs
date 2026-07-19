@@ -211,13 +211,12 @@ fn run_loop_emits_resolved_ids_for_name_references() {
 #[test]
 fn run_loop_rejects_write_summary_without_declared_write_scope() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(r#"write_scope: ["workspace/out"]"#, "write_scope: []"),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        r#"write_scope: ["workspace/out"]"#,
+        "write_scope: []",
+    );
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("undeclared write scope must fail");
@@ -230,16 +229,12 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
 #[test]
 fn run_loop_rejects_unsupported_own_script_before_side_effects() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-            &tool_path,
-            source.replace(
-                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-                "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n    cat ../outside.txt",
-            ),
-        )
-        .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n    cat ../outside.txt",
+    );
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("unsupported own-script command must reject");
@@ -254,16 +249,12 @@ fn run_loop_rejects_unsupported_own_script_before_side_effects() {
 #[test]
 fn run_loop_writes_quoted_own_script_target_with_spaces() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "printf '%s\\n' \"$SUMMARY\" > \"out/quoted summary.txt\"",
-        ),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf '%s\\n' \"$SUMMARY\" > \"out/quoted summary.txt\"",
+    );
 
     let output =
         run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("quoted own-script target runs");
@@ -297,16 +288,12 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
 "#,
     )
     .expect("bad tool fixture written");
-    let phase_path = workspace.join("registry/phases/summarize.yaml");
-    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        source.replace(
-            "tool_refs: [write-summary]",
-            "tool_refs: [write-summary, bad-write]",
-        ),
-    )
-    .expect("phase fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "tool_refs: [write-summary]",
+        "tool_refs: [write-summary, bad-write]",
+    );
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("later invalid tool must reject before earlier write");
@@ -321,16 +308,12 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
 #[test]
 fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     let workspace = workspace_copy("hello-loop");
-    let loop_path = workspace.join("registry/loops/hello-loop.yaml");
-    let loop_source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        loop_source.replace(
-            "phase_refs: [inspect, summarize]",
-            "phase_refs: [inspect, summarize, negative-no-tools]",
-        ),
-    )
-    .expect("loop fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "loops/hello-loop.yaml",
+        "phase_refs: [inspect, summarize]",
+        "phase_refs: [inspect, summarize, negative-no-tools]",
+    );
     fs::write(
         workspace.join("registry/instructions/deny-attempt.yaml"),
         "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: Attempt the sandbox-negative action selected by the fixture.\n",
@@ -379,16 +362,12 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
 #[test]
 fn run_loop_keeps_started_audit_after_partial_apply_failure() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "printf 'partial\\n' > out/blocker",
-        ),
-    )
-    .expect("first tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf 'partial\\n' > out/blocker",
+    );
     fs::write(
         workspace.join("registry/tools/bad-write.yaml"),
         r#"tool:
@@ -407,16 +386,12 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
 "#,
     )
     .expect("bad tool fixture written");
-    let phase_path = workspace.join("registry/phases/summarize.yaml");
-    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        source.replace(
-            "tool_refs: [write-summary]",
-            "tool_refs: [write-summary, bad-write]",
-        ),
-    )
-    .expect("phase fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "tool_refs: [write-summary]",
+        "tool_refs: [write-summary, bad-write]",
+    );
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("later apply-time write is recorded as a failed run");
@@ -475,13 +450,12 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
 #[test]
 fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
     let workspace = workspace_copy("smoke-loop");
-    let loop_path = workspace.join("registry/loops/smoke-loop.yaml");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        source.replace("phase_refs: [smoke]", "phase_refs: [smoke, smoke]"),
-    )
-    .expect("loop fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "loops/smoke-loop.yaml",
+        "phase_refs: [smoke]",
+        "phase_refs: [smoke, smoke]",
+    );
 
     let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect_err("lifecycle-invalid runtime output must reject");
@@ -588,16 +562,12 @@ fn run_loop_rejects_case_variant_of_protected_path_pattern() {
 #[test]
 fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            r#"write_scope: ["workspace/out"]"#,
-            r#"write_scope: ["workspace"]"#,
-        ),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        r#"write_scope: ["workspace/out"]"#,
+        r#"write_scope: ["workspace"]"#,
+    );
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("enclosing write scope permits summary artifact");
@@ -612,16 +582,12 @@ fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
 #[test]
 fn phase_scoped_tools_run_once_for_multi_step_phase() {
     let workspace = workspace_copy("hello-loop");
-    let phase_path = workspace.join("registry/phases/summarize.yaml");
-    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        source.replace(
-            "steps:\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n",
-            "steps:\n    - id: prepare\n      name: Prepare\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n",
-        ),
-    )
-    .expect("phase fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "steps:\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n",
+        "steps:\n    - id: prepare\n      name: Prepare\n    - id: write\n      name: Write\n      connection_refs: [inspect-trigger, summary-refresh]\n",
+    );
 
     let output =
         run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("multi-step phase executes");

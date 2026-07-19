@@ -147,23 +147,59 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
     }
 }
 
-#[cfg(any(windows, target_os = "macos"))]
 #[test]
-fn segmented_stream_rejects_case_aliased_ordinals() {
-    let workspace = empty_workspace("event-segment-case-alias");
-    let reservation = reserve_session_log(&workspace, "segmentcase001").expect("session reserved");
-    fs::write(
-        workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("segmentcase001.000002.JSONL"),
-        b"\n",
-    )
-    .expect("case-aliased segment written");
+fn segmented_stream_rejects_case_aliased_names() {
+    for base_alias in [true, false] {
+        let workspace = empty_workspace(&format!("segment-case-alias-{base_alias}"));
+        let reservation =
+            reserve_session_log(&workspace, "segmentcase001").expect("session reserved");
+        let canonical = if base_alias {
+            reservation.session_path.clone()
+        } else {
+            segmented_jsonl_path(&reservation.session_path, 2).expect("segment path")
+        };
+        let alias = canonical.diagnostic_path().with_file_name(
+            canonical
+                .diagnostic_path()
+                .file_name()
+                .expect("stream name")
+                .to_string_lossy()
+                .to_ascii_uppercase(),
+        );
+        if base_alias && cfg!(any(windows, target_os = "macos")) {
+            fs::rename(canonical.diagnostic_path(), &alias).expect("case-aliased base renamed");
+        } else {
+            fs::write(&alias, b"\n").expect("case-aliased stream file written");
+        }
 
-    let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
-        .expect_err("case-aliased segment must be rejected");
+        let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
+            .expect_err("case-aliased stream file must be rejected");
+        assert!(
+            err.to_string().contains("non-canonical"),
+            "base_alias={base_alias}: {err}"
+        );
+        reservation.rollback();
+    }
+}
+
+#[test]
+fn session_object_namespace_rejects_case_aliases() {
+    let workspace = empty_workspace("session-object-case-alias");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let session_id = "objectcase001";
+    let alias = format!("{session_id}.object.sha256-{}", "0".repeat(64)).to_ascii_uppercase();
+    fs::write(sessions.path.join(alias), b"x").expect("case-aliased object written");
+
+    let err = SessionObjectWriter::open(sessions.clone(), session_id)
+        .err()
+        .expect("case-aliased object must not be counted");
     assert!(err.to_string().contains("non-canonical"), "{err}");
-    reservation.rollback();
+    assert!(matches!(
+        reserve_session_log(&workspace, session_id),
+        Err(RuntimeError::SessionLogExists(id)) if id == session_id
+    ));
 }
 
 #[test]

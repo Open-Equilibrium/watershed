@@ -277,10 +277,12 @@ fn run_loop_writes_portable_near_limit_output_leaf() {
     let workspace = workspace_copy("hello-loop");
     let leaf = "a".repeat(240);
     let target = format!("out/{leaf}");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("write-summary fixture readable");
-    fs::write(&tool_path, source.replace("out/summary.txt", &target))
-        .expect("long output target written");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "out/summary.txt",
+        &target,
+    );
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("portable near-limit output leaf runs");

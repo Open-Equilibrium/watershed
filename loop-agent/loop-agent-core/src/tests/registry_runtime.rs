@@ -74,15 +74,12 @@ fn registry_root_rejects_junction_path_components() {
 #[test]
 fn run_loop_accepts_reviewed_macos_network_allowlist() {
     let workspace = workspace_copy("smoke-loop");
-    let tool_path = workspace.join("registry/tools/echo.yaml");
-    let source = fs::read_to_string(&tool_path)
-        .expect("tool reads")
-        .replace(
-            "  network: deny\n",
-            "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
-        );
-    assert!(source.contains("cidr: 192.0.2.0/24"));
-    fs::write(tool_path, source).expect("reviewed allowlist writes");
+    replace_registry_text(
+        &workspace,
+        "tools/echo.yaml",
+        "  network: deny\n",
+        "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
+    );
 
     let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect("macOS runtime compiles its target policy");
@@ -243,13 +240,12 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
 #[test]
 fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     let workspace = workspace_copy("smoke-loop");
-    let tool_path = workspace.join("registry/tools/echo.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace("command_id: agent-echo", "command_id: agent-custom"),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/echo.yaml",
+        "command_id: agent-echo",
+        "command_id: agent-custom",
+    );
 
     let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect_err("unknown predefined command must fail closed");
@@ -274,16 +270,12 @@ fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
 #[test]
 fn run_loop_executes_own_script_without_exact_fixture_body() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "script_body: |\n    # Explain the reviewed deterministic write.\n\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
-        ),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "script_body: |\n    # Explain the reviewed deterministic write.\n\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
+    );
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("own-script comments and body execute through M1 runner");
@@ -299,16 +291,12 @@ fn run_loop_executes_own_script_without_exact_fixture_body() {
 #[test]
 fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
     let workspace = workspace_copy("hello-loop");
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "script_body: |\n    printf '%s > done\\n' \"$SUMMARY\" > out/summary.txt",
-        ),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "script_body: |\n    printf '%s > done\\n' \"$SUMMARY\" > out/summary.txt",
+    );
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("quoted redirection marker stays in output");

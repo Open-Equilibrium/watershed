@@ -90,12 +90,12 @@ M3 delivers Liquid as a **self-contained local-first native workspace/app-buildi
 - Native Rust + Dart app shell (after the UI framework decision D-009 closes).
 - Local workspace replica as the only interactive read/write store (D-029); an optional sync host exchanges committed actions resumably, never replaces the local workspace mode (D-035).
 - Recommended internal action-history / workspace-VCS model pending D-028: append-only action log + snapshots/checkpoints; actor/origin attribution; diff; revert semantics remain open in D-031. This is a workspace VCS over Liquid's own data, **not** a project-code VCS.
-- Workspace → Page → Block model. A Block owns one or more Views over the same state; typed Connections link Blocks independently of active View (D-033).
+- Workspace → Page → Block model. A Block owns one or more Views over the same state; typed Connections link Blocks independently of active View (ADR-0066).
 - Blank Page with deterministic first-action Block creation: typing creates a Text Block, `/` opens the Block chooser, and text shortcuts format within the Text Block (a toggle is formatting, not a Block).
 - Content-first ordered flow plus explicit Arrange mode for responsive grid resize/reorder. Canonical Block order survives responsive layout changes.
 - PowerBar (incl. commands that start/steer sessions via Meta-Harness).
 - Built-in Blocks: text, database, chart, code, formula, script, media/link/embed and agent session/status. Database and Script Blocks demonstrate multiple Views.
-- Block SDK contract for state/migrations, Views, connections/ports/actions, permissions and responsive behavior; ADR-0040 keeps third-party executable/custom UI loading outside the MVP.
+- Block SDK contract for state/migrations, Views, connections/ports/actions, permissions and responsive behavior (D-033); ADR-0040 keeps third-party executable/custom UI loading outside the MVP.
 - Liquid CLI for workspace read/edit and action-history commands; local API/service for external agents/tools (D-027). Every UI/CLI/API mutation goes through one permissioned pipeline and records an action; no hidden writes (D-032).
 - Script Block runtime (D-034); a local sandbox is the current recommendation.
 - Liquid AI assistant skeleton, using the same mutation/action-history pipeline.

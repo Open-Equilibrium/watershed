@@ -60,16 +60,6 @@ fn context_source_content(compiled: &CompiledContext, source_id: &str) -> serde_
         .clone()
 }
 
-fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
-    let path = workspace.join("registry").join(path);
-    let text = fs::read_to_string(&path).expect("registry fixture reads");
-    assert!(
-        text.contains(before),
-        "registry fixture contains target text"
-    );
-    fs::write(path, text.replacen(before, after, 1)).expect("registry fixture updates");
-}
-
 fn exceed_context_budget_with_valid_instructions(workspace: &Path) {
     const PROMPT_BYTES: usize = core_script::MAX_REGISTRY_DEFINITION_BYTES - 4 * 1024;
     let instructions = [
@@ -804,6 +794,41 @@ fn resume_rejects_missing_modified_or_invalid_session_context_objects() {
         ));
         assert!(!workspace.join("out/summary.txt").exists());
     }
+}
+
+#[test]
+fn context_object_verification_checks_the_aggregate_before_hashing() {
+    let workspace = empty_workspace("context-object-aggregate");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let session_id = "contextaggregate001";
+    let digest = "0".repeat(64);
+    fs::write(
+        sessions
+            .file(format!("{session_id}.object.sha256-{digest}"))
+            .diagnostic_path(),
+        b"x",
+    )
+    .expect("context object written");
+    let manifest = serde_json::json!({
+        "ordered_sources": [{
+            "object_uri": format!("session-object:sha256:{digest}"),
+            "projection_hash": digest,
+        }],
+    });
+    let mut verified = BTreeSet::new();
+    let mut verified_bytes = MAX_SESSION_OBJECT_TOTAL_BYTES;
+
+    let err = verify_context_manifest_objects(
+        &sessions,
+        session_id,
+        &manifest,
+        &mut verified,
+        &mut verified_bytes,
+    )
+    .expect_err("aggregate overflow must precede hash validation");
+    assert!(err.to_string().contains("object data size"), "{err}");
 }
 
 #[test]

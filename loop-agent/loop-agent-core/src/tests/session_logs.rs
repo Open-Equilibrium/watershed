@@ -1296,13 +1296,12 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
 #[test]
 fn resume_accepts_canonical_names_and_equivalent_references() {
     let workspace = workspace_copy("hello-loop");
-    let loop_path = workspace.join("registry/loops/hello-loop.yaml");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        source.replace("name: HelloLoop", "name: Cafe\u{301}Loop"),
-    )
-    .expect("loop fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "loops/hello-loop.yaml",
+        "name: HelloLoop",
+        "name: Cafe\u{301}Loop",
+    );
 
     let completed =
         run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("initial run completes");
@@ -1310,15 +1309,12 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
     fs::write(&completed.session_path, &prefix).expect("partial canonical prefix written");
     write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop");
     fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture remains readable");
-    fs::write(
-        &loop_path,
-        source.replace(
-            "phase_refs: [inspect, summarize]",
-            "phase_refs: [Inspect, Summarize]",
-        ),
-    )
-    .expect("equivalent phase references written");
+    replace_registry_text(
+        &workspace,
+        "loops/hello-loop.yaml",
+        "phase_refs: [inspect, summarize]",
+        "phase_refs: [Inspect, Summarize]",
+    );
 
     let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
         .expect("canonical names and equivalent references preserve resume hashes");
@@ -1333,6 +1329,27 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
         validate_session_log_text(&completed.session_path, &completed.session_id, &resumed)
             .expect("resumed log validates");
     assert!(stream_is_completed(&events));
+}
+
+#[test]
+fn session_metadata_rejects_case_aliased_names() {
+    let workspace = empty_workspace("session-metadata-case-alias");
+    let logs = ensure_runtime_dirs(&workspace).expect("runtime dirs").logs;
+    let session_id = "metadataalias001";
+    let canonical = logs.file(format!("{session_id}.log"));
+    fs::write(canonical.diagnostic_path(), b"").expect("canonical metadata written");
+    let alias = canonical
+        .diagnostic_path()
+        .with_file_name(format!("{session_id}.log").to_ascii_uppercase());
+    if cfg!(any(windows, target_os = "macos")) {
+        fs::rename(canonical.diagnostic_path(), alias).expect("case-aliased metadata renamed");
+    } else {
+        fs::write(alias, b"").expect("case-aliased metadata written");
+    }
+
+    let err = require_anchored_session_log_metadata(&logs, session_id)
+        .expect_err("case-aliased metadata must be rejected");
+    assert!(err.to_string().contains("non-canonical"), "{err}");
 }
 
 #[test]
@@ -1382,16 +1399,12 @@ fn resume_rejects_registry_drift_before_side_effects() {
     fs::write(workspace.join("out/summary.txt"), "already-written\n")
         .expect("sentinel summary written");
 
-    let tool_path = workspace.join("registry/tools/write-summary.yaml");
-    let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
-    fs::write(
-        &tool_path,
-        source.replace(
-            "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-            "printf 'drift\\n' > out/summary.txt",
-        ),
-    )
-    .expect("tool fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf 'drift\\n' > out/summary.txt",
+    );
 
     let err = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("registry drift must reject resume");

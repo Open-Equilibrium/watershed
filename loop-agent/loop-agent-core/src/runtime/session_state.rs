@@ -712,7 +712,26 @@ fn require_anchored_session_log_metadata(
     logs: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLogMetadata, RuntimeError> {
-    let path = logs.file(format!("{session_id}.log"));
+    let expected = format!("{session_id}.log");
+    for entry in logs
+        .dir
+        .entries()
+        .map_err(|source| path_io_error(&logs.path, source))?
+    {
+        let entry = entry.map_err(|source| path_io_error(&logs.path, source))?;
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name != expected && name.eq_ignore_ascii_case(&expected))
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} contains non-canonical session metadata name {}",
+                logs.path.display(),
+                entry.file_name().to_string_lossy()
+            )));
+        }
+    }
+    let path = logs.file(expected);
     ensure_anchored_real_file(&path)
         .map_err(|error| map_missing_definition_metadata(error, session_id))?;
     parse_session_log_metadata(&read_anchored_to_string_with_limit(
@@ -895,7 +914,7 @@ fn ensure_session_bundle_namespace_available(
         if entry
             .file_name()
             .to_str()
-            .is_some_and(|name| name.starts_with(&object_prefix))
+            .is_some_and(|name| name.to_ascii_lowercase().starts_with(&object_prefix))
         {
             return Err(RuntimeError::SessionLogExists(session_id.to_owned()));
         }

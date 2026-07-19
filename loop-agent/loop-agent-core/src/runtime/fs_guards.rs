@@ -185,6 +185,7 @@ fn segmented_jsonl_stem(base: &AnchoredFile) -> Result<&str, RuntimeError> {
 
 fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFile)>, RuntimeError> {
     let leaf = segmented_jsonl_stem(base)?;
+    let base_name = format!("{leaf}.jsonl");
     let prefix = format!("{leaf}.");
     let mut siblings = Vec::new();
     for entry in base
@@ -198,8 +199,13 @@ fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFil
         let Some(name) = name.to_str() else {
             continue;
         };
-        let folded = cfg!(any(windows, target_os = "macos")).then(|| name.to_ascii_lowercase());
-        let candidate = folded.as_deref().unwrap_or(name);
+        let candidate = name.to_ascii_lowercase();
+        if candidate == base_name && name != base_name {
+            return Err(RuntimeError::Protocol(format!(
+                "{} contains non-canonical segmented JSONL name {name}",
+                base.parent.path.display()
+            )));
+        }
         let Some(ordinal) = candidate
             .strip_prefix(&prefix)
             .and_then(|suffix| suffix.strip_suffix(".jsonl"))

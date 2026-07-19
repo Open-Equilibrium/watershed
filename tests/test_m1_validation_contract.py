@@ -18,18 +18,15 @@ class M1ValidationContractTest(unittest.TestCase):
         self.assertEqual(result.returncode == 0, ignored, path)
 
     def test_gitignore_keeps_loop_workspace_config_trackable(self) -> None:
-        self.assert_git_ignore(
-            "loop-agent/fixtures/new-fixture/.loop/config.yaml",
-            ignored=False,
-        )
-        self.assert_git_ignore(
-            "loop-agent/fixtures/new-fixture/.loop/sessions/session.jsonl",
-            ignored=True,
-        )
-        self.assert_git_ignore(
-            "loop-agent/fixtures/new-fixture/.loop/logs/session.log",
-            ignored=True,
-        )
+        for path, ignored in [
+            ("loop-agent/fixtures/new-fixture/.loop/config.yaml", False),
+            ("loop-agent/fixtures/new-fixture/.loop/sessions/session.jsonl", True),
+            ("loop-agent/fixtures/new-fixture/.loop/logs/session.log", True),
+            ("loop-agent/fixtures/new-fixture/out/result.txt", True),
+            ("docs/out/example.md", False),
+        ]:
+            with self.subTest(path=path):
+                self.assert_git_ignore(path, ignored=ignored)
 
 if __name__ == "__main__":
     unittest.main()

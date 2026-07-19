@@ -180,26 +180,18 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
 #[test]
 fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
     let workspace = workspace_copy("sandbox-negative");
-    let loop_path = workspace.join("registry/loops/sandbox-negative-tool-out-of-phase.yaml");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        source.replace(
-            "id: sandbox-negative-tool-out-of-phase",
-            "id: custom-tool-out-of-phase",
-        ),
-    )
-    .expect("loop fixture rewritten");
-    let connection_path = workspace.join("registry/connections/out-of-phase-sentinel.yaml");
-    let source = fs::read_to_string(&connection_path).expect("connection fixture readable");
-    fs::write(
-        &connection_path,
-        source.replace(
-            "from_ref: sandbox-negative-tool-out-of-phase",
-            "from_ref: custom-tool-out-of-phase",
-        ),
-    )
-    .expect("connection fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "loops/sandbox-negative-tool-out-of-phase.yaml",
+        "id: sandbox-negative-tool-out-of-phase",
+        "id: custom-tool-out-of-phase",
+    );
+    replace_registry_text(
+        &workspace,
+        "connections/out-of-phase-sentinel.yaml",
+        "from_ref: sandbox-negative-tool-out-of-phase",
+        "from_ref: custom-tool-out-of-phase",
+    );
 
     let output = run_loop(&workspace, "custom-tool-out-of-phase", EmitMode::Jsonl)
         .expect("renamed out-of-phase operation runs");
@@ -313,13 +305,12 @@ fn sandbox_out_of_phase_denial_ignores_instruction_prompt_text() {
 #[test]
 fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
     let workspace = workspace_copy("sandbox-negative");
-    let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        source.replace("phase_refs: [negative-write]", "phase_refs: [benign]"),
-    )
-    .expect("loop fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "loops/sandbox-negative-write.yaml",
+        "phase_refs: [negative-write]",
+        "phase_refs: [benign]",
+    );
     fs::write(
             workspace.join("registry/phases/benign.yaml"),
             "phase:\n  id: benign\n  name: Benign\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  steps:\n    - id: attempt\n      name: Attempt\n",
@@ -346,20 +337,18 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
         "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
     )
     .expect("unrelated sentinel tool written");
-    let loop_path = workspace.join("registry/loops/smoke-loop.yaml");
-    let loop_source = fs::read_to_string(&loop_path).expect("loop fixture readable");
-    fs::write(
-        &loop_path,
-        loop_source.replace("phase_refs: [smoke]", "phase_refs: [negative-no-tools]"),
-    )
-    .expect("loop fixture rewritten");
-    let phase_path = workspace.join("registry/phases/smoke.yaml");
-    let phase_source = fs::read_to_string(&phase_path).expect("phase fixture readable");
-    fs::write(
-        &phase_path,
-        phase_source.replace("id: smoke", "id: negative-no-tools"),
-    )
-    .expect("phase fixture rewritten");
+    replace_registry_text(
+        &workspace,
+        "loops/smoke-loop.yaml",
+        "phase_refs: [smoke]",
+        "phase_refs: [negative-no-tools]",
+    );
+    replace_registry_text(
+        &workspace,
+        "phases/smoke.yaml",
+        "id: smoke",
+        "id: negative-no-tools",
+    );
 
     let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect("normal loop can reuse fixture phase id");

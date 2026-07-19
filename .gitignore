@@ -4,7 +4,7 @@
 # Loop Agent runtime state & logs (see docs/concept/V-Spec_LoopAgent.html, SECURITY.md)
 **/.loop/sessions/
 **/.loop/logs/
-**/out/
+loop-agent/fixtures/**/out/
 # Node is dev tooling only (clawpatch via package.json); the product has no Node runtime (ADR-0001)
 node_modules/
 .pnpm-store/

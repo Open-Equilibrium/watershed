@@ -627,14 +627,21 @@ impl SessionObjectWriter {
         {
             let entry = entry.map_err(|source| path_io_error(&object_parent.path, source))?;
             let name = entry.file_name();
-            let Some((name, digest)) = name
-                .to_str()
-                .and_then(|name| name.strip_prefix(&prefix).map(|digest| (name, digest)))
-            else {
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let candidate = name.to_ascii_lowercase();
+            let Some(digest) = candidate.strip_prefix(&prefix) else {
                 continue;
             };
             if !is_lowercase_sha256_hex(digest) {
                 continue;
+            }
+            if candidate != name {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} contains non-canonical session object name {name}",
+                    object_parent.path.display()
+                )));
             }
             let path = object_parent.file(name);
             ensure_anchored_real_file(&path)?;
