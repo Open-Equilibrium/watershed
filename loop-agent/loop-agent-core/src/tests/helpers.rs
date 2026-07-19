@@ -161,15 +161,28 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
     )
     .expect("context fixture replay plans");
     assert!(completed_turns <= planned.context_manifests.record_count);
-    let context_stream = captured.context_manifests[..completed_turns]
+    let checkpoints = &captured.context_checkpoints[..completed_turns];
+    let context_stream = checkpoints
         .iter()
-        .map(|manifest| manifest.line.as_str())
+        .map(|checkpoint| checkpoint.manifest.line.as_str())
         .collect::<String>();
     fs::write(
         log_dir.join(format!("{session_id}.contexts.jsonl")),
         context_stream,
     )
     .expect("context fixture manifests written");
+    let mut object_writer = SessionObjectWriter::open(
+        ensure_runtime_dirs(workspace)
+            .expect("runtime dirs remain available")
+            .sessions,
+        session_id,
+    )
+    .expect("context fixture object writer opens");
+    for checkpoint in checkpoints {
+        object_writer
+            .persist_all(&checkpoint.objects)
+            .expect("context fixture objects written");
+    }
 }
 
 fn first_event_line(fixture: &str, stream: &str) -> String {
@@ -370,7 +383,7 @@ struct FsmTransitionTimings {
 
 #[derive(Default)]
 struct CapturedRuntime {
-    context_manifests: Vec<ContextManifest>,
+    context_checkpoints: Vec<ContextManifestCheckpoint>,
     events: Vec<EventEnvelope>,
 }
 
@@ -388,7 +401,7 @@ impl RuntimeEventSink for CapturedRuntime {
     ) -> Result<(), RuntimeError> {
         self.events.push(event.clone());
         if let Some(checkpoint) = context_manifest {
-            self.context_manifests.push(checkpoint.manifest);
+            self.context_checkpoints.push(checkpoint);
         }
         Ok(())
     }

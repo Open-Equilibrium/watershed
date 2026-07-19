@@ -258,6 +258,7 @@ fn partial_new_session_object_is_removed_before_retry() {
     );
     drop(writer);
     reservation.rollback();
+    drop(reservation);
     fs::remove_dir_all(workspace).expect("workspace removed");
 }
 
