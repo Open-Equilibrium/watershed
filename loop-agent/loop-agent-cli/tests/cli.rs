@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     fs,
-    io::Write,
+    io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Command, Output, Stdio},
 };
@@ -349,6 +349,64 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         prefix
     );
+}
+
+#[test]
+fn tail_follows_a_growing_session_through_its_terminal_event() {
+    let fixture = workspace_copy("smoke-loop");
+    let session_dir = fixture.join(".loop/sessions");
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    let expected = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let split = expected.find('\n').expect("golden has a first event") + 1;
+    let session_path = session_dir.join("smoke-loop.jsonl");
+    let lock_path = session_dir.join("smoke-loop.lock");
+    fs::write(&session_path, &expected[..split]).expect("initial prefix written");
+    fs::write(&lock_path, "").expect("active-session lock written");
+    let mut child = loop_command()
+        .current_dir(&fixture)
+        .args([
+            "tail",
+            "smoke-loop",
+            "--emit",
+            "jsonl",
+            "--timeout-ms",
+            "5000",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+    let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let mut actual = String::new();
+    stdout
+        .read_line(&mut actual)
+        .expect("tail emits the committed prefix");
+
+    let mut session = fs::OpenOptions::new()
+        .append(true)
+        .open(&session_path)
+        .expect("session opens for append");
+    session
+        .write_all(&expected.as_bytes()[split..])
+        .expect("remaining events appended");
+    session.flush().expect("remaining events flushed");
+    drop(session);
+    fs::remove_file(lock_path).expect("active-session lock removed");
+    stdout
+        .read_to_string(&mut actual)
+        .expect("tail emits appended events");
+    let status = child.wait().expect("loop binary should exit");
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .expect("stderr is piped")
+        .read_to_string(&mut stderr)
+        .expect("stderr reads");
+
+    assert!(status.success(), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
+    assert_eq!(actual, expected);
 }
 
 #[test]
