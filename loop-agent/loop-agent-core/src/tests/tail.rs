@@ -145,7 +145,7 @@ fn incremental_reader_defers_unverified_segment_layout_to_final_replay() {
         .expect("incremental delivery reads only contiguous committed paths");
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
-    assert_protocol_contains(reader.read_after(2), "non-contiguous");
+    assert_protocol_contains(reader.read_after(2), "segment count");
 }
 
 #[test]
