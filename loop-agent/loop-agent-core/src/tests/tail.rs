@@ -129,6 +129,27 @@ fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
 }
 
 #[test]
+fn incremental_reader_enforces_the_aggregate_event_data_limit() {
+    let (_workspace, path, _started, _completed, mut reader) =
+        reader_fixture("tail-aggregate-limit", "tailaggregatelimit001");
+    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+
+    for ordinal in 2..=4 {
+        let segment = path.with_file_name(format!("tailaggregatelimit001.{ordinal:06}.jsonl"));
+        let mut file = fs::File::create(segment).expect("segment created");
+        file.set_len(MAX_SESSION_SEGMENT_BYTES)
+            .expect("sparse segment sized");
+        file.seek(SeekFrom::End(-1)).expect("segment end seeks");
+        file.write_all(b"\n").expect("segment ends with LF");
+    }
+
+    assert_protocol_contains(
+        reader.read_incremental_after(1),
+        "session event data exceeds max",
+    );
+}
+
+#[test]
 fn incremental_reader_replays_an_unprocessed_suffix_from_the_caller_cursor() {
     let workspace = empty_workspace("tail-cursor-retry");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -291,9 +312,8 @@ fn reader_rejects_invalid_utf8_in_full_and_incremental_reads() {
     file.write_all(&[0xff, b'\n'])
         .expect("invalid UTF-8 suffix written");
     assert_protocol_contains(reader.read_incremental_after(1), "not valid UTF-8");
-    file.set_len(u64::try_from(started.len()).expect("fixture length fits"))
-        .expect("invalid suffix removed");
     drop(file);
+    fs::write(&path, &started).expect("invalid suffix removed");
     append_session_log_line(&path, &completed).expect("valid terminal event appended");
     let recovered = reader
         .read_incremental_after(1)
