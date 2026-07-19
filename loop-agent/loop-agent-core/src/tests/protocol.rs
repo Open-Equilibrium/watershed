@@ -849,18 +849,24 @@ fn resume_slots_exclude_terminal_history_at_the_process_limit() {
     let guards = (1..MAX_LIVE_LOOP_INVOCATIONS)
         .map(|_| counter.acquire().expect("first 31 live loops fit"))
         .collect::<Vec<_>>();
+    let resume = ToolSideEffectMode::Resume {
+        prefix_event_count: 1,
+    };
     let root = counter
-        .acquire_for(ToolSideEffectMode::Resume { prefix_event_count: 1 }, false)
+        .acquire_for(resume, false)
         .expect("active resumed root fits")
         .expect("active resumed root occupies a slot");
 
     assert!(
         counter
-            .acquire_for(ToolSideEffectMode::Resume { prefix_event_count: 1 }, true)
+            .acquire_for(resume, true)
             .expect("terminal replay does not consume a live slot")
             .is_none()
     );
-    assert!(counter.acquire().is_err(), "a genuinely live 33rd loop fails");
+    assert!(
+        counter.acquire().is_err(),
+        "a genuinely live 33rd loop fails"
+    );
     assert!(
         counter
             .acquire_for(ToolSideEffectMode::DryRun, false)

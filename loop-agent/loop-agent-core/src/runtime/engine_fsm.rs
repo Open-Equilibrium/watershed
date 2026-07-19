@@ -155,8 +155,7 @@ enum ToolSideEffectMode {
 
 impl ToolSideEffectMode {
     fn occupies_live_invocation_slot(self, terminal_in_prefix: bool) -> bool {
-        matches!(self, Self::ApplyAll)
-            || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
+        matches!(self, Self::ApplyAll) || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
     }
 
     fn should_execute_tool(self, completed_sequence: u64) -> bool {
