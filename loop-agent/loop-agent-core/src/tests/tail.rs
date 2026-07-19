@@ -289,6 +289,27 @@ fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() 
 }
 
 #[test]
+fn replay_and_reader_reject_lossy_null_envelope_metadata() {
+    let (workspace, path, started, completed, mut reader) =
+        reader_fixture("tail-null-envelope", "tailnull001");
+    let mut started: serde_json::Value =
+        serde_json::from_str(started.trim_end()).expect("start event parses");
+    started["correlation_id"] = serde_json::Value::Null;
+    let started = format!(
+        "{}\n",
+        proto::canonical_json(&started).expect("null event canonicalizes")
+    );
+    fs::write(&path, format!("{started}{completed}")).expect("null stream written");
+
+    for result in [
+        replay_session(&workspace, "tailnull001", EmitMode::Jsonl).map(|_| Vec::new()),
+        reader.read_after(0),
+    ] {
+        assert_protocol_contains(result, "event.correlation_id must not be null");
+    }
+}
+
+#[test]
 fn reader_rejects_partial_non_final_segments_and_recovers() {
     let (_workspace, path, started, completed, mut reader) =
         reader_fixture("tail-partial-segment", "tailsegment001");

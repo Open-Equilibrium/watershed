@@ -187,26 +187,25 @@ struct PayloadValidator<'a> {
     payload: &'a serde_json::Map<String, serde_json::Value>,
 }
 
+fn null_location(value: &serde_json::Value, location: &str) -> Option<String> {
+    match value {
+        serde_json::Value::Null => Some(location.to_owned()),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .enumerate()
+            .find_map(|(index, value)| null_location(value, &format!("{location}[{index}]"))),
+        serde_json::Value::Object(values) => values
+            .iter()
+            .find_map(|(field, value)| null_location(value, &format!("{location}.{field}"))),
+        _ => None,
+    }
+}
+
 impl PayloadValidator<'_> {
     fn reject_nulls(&self, value: &serde_json::Value, location: &str) -> Result<(), RuntimeError> {
-        match value {
-            serde_json::Value::Null => {
-                Err(self.error(&format!("{location} must not be null in protocol v0")))
-            }
-            serde_json::Value::Array(values) => {
-                for (index, value) in values.iter().enumerate() {
-                    self.reject_nulls(value, &format!("{location}[{index}]"))?;
-                }
-                Ok(())
-            }
-            serde_json::Value::Object(values) => {
-                for (field, value) in values {
-                    self.reject_nulls(value, &format!("{location}.{field}"))?;
-                }
-                Ok(())
-            }
-            _ => Ok(()),
-        }
+        null_location(value, location)
+            .map(|location| self.error(&format!("{location} must not be null in protocol v0")))
+            .map_or(Ok(()), Err)
     }
 
     fn require_string(&self, field: &str) -> Result<&str, RuntimeError> {
@@ -590,6 +589,12 @@ fn parse_canonical_event(
     if canonical != line {
         return Err(RuntimeError::Protocol(format!(
             "{} line {line_number} must use canonical JSONL bytes",
+            path.display()
+        )));
+    }
+    if let Some(location) = null_location(&value, "event") {
+        return Err(RuntimeError::Protocol(format!(
+            "{} line {line_number} {location} must not be null in protocol v0",
             path.display()
         )));
     }
