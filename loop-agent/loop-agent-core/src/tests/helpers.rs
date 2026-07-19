@@ -3,12 +3,12 @@ fn load_test_registry(workspace: &Path, loop_ref: &str) -> core_script::Resolved
         .expect("fixture registry loads")
 }
 
-fn empty_workspace(label: &str) -> PathBuf {
+fn empty_workspace(label: &str) -> TempWorkspace {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let target = std::env::temp_dir().join(format!(
+    let target = TempWorkspace::new(std::env::temp_dir().join(format!(
         "watershed-loop-agent-core-{label}-{}-{id}",
         std::process::id()
-    ));
+    )));
     if target.exists() {
         fs::remove_dir_all(&target).expect("stale temp workspace removed");
     }
@@ -16,7 +16,26 @@ fn empty_workspace(label: &str) -> PathBuf {
     target
 }
 
-fn workspace_with_later_invalid_own_script_path() -> PathBuf {
+#[test]
+fn temp_workspace_survives_until_the_last_thread_owner_drops() {
+    let workspace = empty_workspace("temp-workspace-owner");
+    let path = workspace.to_path_buf();
+    fs::write(workspace.join("marker"), "retained").expect("marker written");
+    let retained = workspace.clone();
+    let (release, released) = std::sync::mpsc::channel();
+    let owner = std::thread::spawn(move || {
+        released.recv().expect("owner released");
+        assert!(retained.join("marker").is_file());
+    });
+
+    drop(workspace);
+    assert!(path.is_dir());
+    release.send(()).expect("owner release sent");
+    owner.join().expect("owner joins");
+    assert!(!path.exists());
+}
+
+fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
     let workspace = workspace_copy("hello-loop");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");

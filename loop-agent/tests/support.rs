@@ -1,7 +1,11 @@
 use std::{
     fs,
+    ops::Deref,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -13,10 +17,42 @@ pub(crate) fn fixture_dir(name: &str) -> PathBuf {
         .join(name)
 }
 
-pub(crate) fn workspace_copy(fixture: &str) -> PathBuf {
+#[derive(Clone)]
+pub(crate) struct TempWorkspace(Arc<OwnedTempWorkspace>);
+
+struct OwnedTempWorkspace(PathBuf);
+
+impl TempWorkspace {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        Self(Arc::new(OwnedTempWorkspace(path)))
+    }
+}
+
+impl Deref for TempWorkspace {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.0
+    }
+}
+
+impl AsRef<Path> for TempWorkspace {
+    fn as_ref(&self) -> &Path {
+        &self.0.0
+    }
+}
+
+impl Drop for OwnedTempWorkspace {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+pub(crate) fn workspace_copy(fixture: &str) -> TempWorkspace {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let target =
-        std::env::temp_dir().join(format!("watershed-loop-agent-{}-{id}", std::process::id()));
+    let target = TempWorkspace::new(
+        std::env::temp_dir().join(format!("watershed-loop-agent-{}-{id}", std::process::id())),
+    );
     if target.exists() {
         fs::remove_dir_all(&target).expect("stale temp workspace removed");
     }

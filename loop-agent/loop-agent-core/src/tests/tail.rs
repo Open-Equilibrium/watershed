@@ -2,7 +2,7 @@ fn reader_fixture(
     workspace_name: &str,
     session_id: &str,
 ) -> (
-    std::path::PathBuf,
+    TempWorkspace,
     std::path::PathBuf,
     String,
     String,

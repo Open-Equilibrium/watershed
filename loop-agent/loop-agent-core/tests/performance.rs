@@ -1,8 +1,6 @@
 use loop_agent_core::{EmitMode, run_loop};
 use std::{
     fs,
-    ops::Deref,
-    path::{Path, PathBuf},
     sync::{
         Arc, Barrier,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -14,6 +12,7 @@ use std::{
 
 #[path = "../../tests/support.rs"]
 mod test_support;
+use test_support::{TempWorkspace, workspace_copy};
 
 #[test]
 #[ignore = "performance gate"]
@@ -34,7 +33,7 @@ fn ten_near_limit_orchestrating_loops_complete_under_m1_runtime_contract() {
     let (tx, rx) = mpsc::channel();
     let handles = (0..concurrency)
         .map(|_| {
-            let workspace = workspace.as_ref().to_path_buf();
+            let workspace = workspace.clone();
             let barrier = Arc::clone(&barrier);
             let tx = tx.clone();
             thread::spawn(move || {
@@ -139,40 +138,6 @@ impl Drop for PeakRssSampler {
     fn drop(&mut self) {
         self.stop();
     }
-}
-
-struct TempWorkspace {
-    path: PathBuf,
-}
-
-impl TempWorkspace {
-    fn new(path: PathBuf) -> Self {
-        Self { path }
-    }
-}
-
-impl Deref for TempWorkspace {
-    type Target = Path;
-
-    fn deref(&self) -> &Self::Target {
-        &self.path
-    }
-}
-
-impl AsRef<Path> for TempWorkspace {
-    fn as_ref(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for TempWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-fn workspace_copy(fixture: &str) -> TempWorkspace {
-    TempWorkspace::new(test_support::workspace_copy(fixture))
 }
 
 fn near_limit_registry_workspace() -> (TempWorkspace, u64) {

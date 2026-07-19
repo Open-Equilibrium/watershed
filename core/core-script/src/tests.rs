@@ -1,6 +1,9 @@
 use super::*;
 use proptest::prelude::*;
-use std::path::Path;
+use std::{
+    ops::Deref,
+    path::{Path, PathBuf},
+};
 
 fn registry_location(root: &Path) -> (&Path, &Path) {
     (
@@ -293,7 +296,7 @@ fn loop_registry_rejects_a_definition_closure_above_its_byte_budget() {
     assert!(matches!(
         error,
         RegistryError::ReadLimitExceeded { path, bytes, max }
-            if path == root && bytes > max && max == max_active
+            if path.as_path() == root.as_ref() && bytes > max && max == max_active
     ));
 }
 
@@ -493,7 +496,7 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
             path,
             bytes,
             max,
-        } if path == root && bytes > max
+        } if path.as_path() == root.as_ref() && bytes > max
     ));
 }
 
@@ -2022,11 +2025,44 @@ fn schema_rule_forbids_required_field(rule: &Value, field: &str) -> bool {
     })
 }
 
-fn temp_registry_dir(label: &str) -> std::path::PathBuf {
-    let target = std::env::temp_dir().join(format!(
+#[test]
+fn temp_registry_dir_removes_its_tree_on_drop() {
+    let path = {
+        let root = temp_registry_dir("temp-registry-cleanup");
+        std::fs::write(root.join("marker"), "cleanup").expect("marker written");
+        root.to_path_buf()
+    };
+
+    assert!(!path.exists());
+}
+
+struct TempRegistryDir(PathBuf);
+
+impl Deref for TempRegistryDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TempRegistryDir {
+    fn as_ref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempRegistryDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn temp_registry_dir(label: &str) -> TempRegistryDir {
+    let target = TempRegistryDir(std::env::temp_dir().join(format!(
         "watershed-core-script-{label}-{}",
         std::process::id()
-    ));
+    )));
     if target.exists() {
         std::fs::remove_dir_all(&target).expect("stale temp registry removed");
     }

@@ -547,7 +547,7 @@ fn failed_jsonl_resume_exits_with_failed_status() {
 fn unsafe_session_id_is_rejected_before_filesystem_access() {
     let workspace = workspace_copy("smoke-loop");
     let output = loop_command()
-        .current_dir(workspace)
+        .current_dir(&workspace)
         .args(["replay", "../smoke001", "--emit", "jsonl"])
         .output()
         .expect("loop binary should run");

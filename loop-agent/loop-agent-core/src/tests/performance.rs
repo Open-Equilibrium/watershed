@@ -235,16 +235,15 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
         .expect("loop fixture written");
     }
 
-    let workspace = Arc::new(workspace);
     let barrier = Arc::new(Barrier::new(10));
     let handles = (0..10)
         .map(|index| {
-            let workspace = Arc::clone(&workspace);
+            let workspace = workspace.clone();
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 barrier.wait();
                 run_loop(
-                    workspace.as_path(),
+                    workspace.as_ref(),
                     &format!("hello-loop-{index}"),
                     EmitMode::Jsonl,
                 )
@@ -501,7 +500,7 @@ fn write_synthetic_session(
     event_count: u64,
     loop_invocations: u64,
     target_bytes: impl Fn(u64) -> usize,
-) -> PathBuf {
+) -> TempWorkspace {
     let workspace = empty_workspace(label);
     let reservation = reserve_session_log(&workspace, session_id).expect("session reserved");
     {
