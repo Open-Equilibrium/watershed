@@ -375,15 +375,11 @@ fn inspect_resume_session(
 ) -> Result<ResumeSessionInspection, RuntimeError> {
     let mut validation = SessionAppendValidationState::empty(session_id);
     let mut inspection = ResumeInspectionBuilder::new();
-    for_each_segmented_jsonl_line(
-        path,
-        EVENT_STREAM_LIMITS,
-        |line| {
-            validation.validate_appended_with(path.diagnostic_path(), line, |event| {
-                inspection.observe(event)
-            })
-        },
-    )?;
+    for_each_segmented_jsonl_line(path, EVENT_STREAM_LIMITS, |line| {
+        validation.validate_appended_with(path.diagnostic_path(), line, |event| {
+            inspection.observe(event)
+        })
+    })?;
     let Some(clock) = inspection.clock else {
         return Err(RuntimeError::Protocol(format!(
             "{} must contain at least one event",

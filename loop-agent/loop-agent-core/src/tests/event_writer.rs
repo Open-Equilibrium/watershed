@@ -138,10 +138,7 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
             fs::write(segment.diagnostic_path(), b"\n").expect("invalid segment fixture writes");
         }
 
-        let err = segmented_jsonl_files(
-            &reservation.session_path,
-            EVENT_STREAM_LIMITS,
-        )
+        let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
             .expect_err("invalid segment layout is rejected");
         assert!(err.to_string().contains(expected), "{err}");
         reservation.rollback();
@@ -166,12 +163,8 @@ fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
 
         let results = if context {
             vec![
-                for_each_segmented_jsonl_line(
-                    base,
-                    CONTEXT_MANIFEST_STREAM_LIMITS,
-                    |_| Ok(()),
-                )
-                .map(|_| ()),
+                for_each_segmented_jsonl_line(base, CONTEXT_MANIFEST_STREAM_LIMITS, |_| Ok(()))
+                    .map(|_| ()),
             ]
         } else {
             vec![

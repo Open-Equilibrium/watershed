@@ -534,26 +534,19 @@ impl ContextManifestWriter {
         let mut last_manifest = None;
         let mut manifest_count = 0usize;
         let byte_count =
-            for_each_segmented_jsonl_line(
-                path,
-                CONTEXT_MANIFEST_STREAM_LIMITS,
-                |line| {
-                    if !line.ends_with('\n') {
-                        return Err(RuntimeError::Protocol(format!(
-                            "{} context manifest stream must end with LF",
-                            path.diagnostic_path().display()
-                        )));
-                    }
-                    last_manifest = Some(line.to_owned());
-                    manifest_count = manifest_count.saturating_add(1);
-                    Ok(())
-                },
-            )?;
+            for_each_segmented_jsonl_line(path, CONTEXT_MANIFEST_STREAM_LIMITS, |line| {
+                if !line.ends_with('\n') {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} context manifest stream must end with LF",
+                        path.diagnostic_path().display()
+                    )));
+                }
+                last_manifest = Some(line.to_owned());
+                manifest_count = manifest_count.saturating_add(1);
+                Ok(())
+            })?;
         Ok(Self {
-            appender: SessionLogAppender::open_with_limits(
-                path,
-                CONTEXT_MANIFEST_STREAM_LIMITS,
-            )?,
+            appender: SessionLogAppender::open_with_limits(path, CONTEXT_MANIFEST_STREAM_LIMITS)?,
             byte_count,
             last_manifest,
             manifest_count,
