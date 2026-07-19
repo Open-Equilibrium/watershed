@@ -129,10 +129,18 @@ fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
 }
 
 #[test]
-fn incremental_reader_enforces_the_aggregate_event_data_limit() {
+fn incremental_reader_enforces_the_event_data_limits() {
     let (_workspace, path, _started, _completed, mut reader) =
         reader_fixture("tail-aggregate-limit", "tailaggregatelimit001");
     assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+
+    let second = path.with_file_name("tailaggregatelimit001.000002.jsonl");
+    let oversized = fs::File::create(&second).expect("oversized segment created");
+    oversized
+        .set_len(MAX_SESSION_SEGMENT_BYTES + 1)
+        .expect("oversized sparse segment sized");
+    assert_protocol_contains(reader.read_incremental_after(1), "read size exceeds max");
+    fs::remove_file(second).expect("oversized segment removed");
 
     for ordinal in 2..=4 {
         let segment = path.with_file_name(format!("tailaggregatelimit001.{ordinal:06}.jsonl"));
