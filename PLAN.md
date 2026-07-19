@@ -3,7 +3,6 @@
 Implementation milestones with deliverables and a Definition of Done (DoD). Performance targets are canonical in `PERFORMANCE.md`.
 
 Created: 2026-06-05
-Updated: 2026-07-16
 
 ## MVP boundary
 
@@ -76,7 +75,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - AgentPulse v0 metrics: rework ratio, first-attempt success and cost-per-productive-outcome using formulas decided before M2 implementation; computed and stored by Meta-Harness and queryable through CLI/API.
 - Policy-gated configuration writes with audit trail and review flow.
-- **No rich standalone GUI** (a minimal admin/status UI is out of M2 scope and must not duplicate Liquid; packaging: D-021).
+- **No rich standalone GUI**; M2 packaging, including whether it adds a small status screen after the headless controller works, remains D-021.
 
 **DoD:** monitor, steer and configure at least two different CLI agents on the Meta-Harness host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol through the bindings selected by D-023; integrate Loop Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; report decided AgentPulse v0 metrics through CLI/API; and require approval plus an audit record for every sensitive config change.
 

@@ -34,10 +34,10 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0025 / ADR-0046 / ADR-0047 / ADR-0048** | 2026-06-16 / 2026-06-22 | Accepted | Protected-main topic-branch and GitHub CLI PR workflow rules are canonical in `AGENTS.md`.
 - **ADR-0028** | 2026-06-18 | Accepted | Build Loop Agent orchestration in-house; reuse general plumbing crates; integrate Codex CLI as a Meta-Harness adapter, not a Loop Agent base — Loop Agent V-Spec, Meta-Harness V-Spec.
 - **ADR-0029** | 2026-06-19 | Accepted | Designed control transport is local JSON-RPC over stdio; M1 implemented runtime stream is bare JSONL — `PROTOCOL.md`.
-- **ADR-0030** | 2026-06-19 | Accepted | `PLAN.md` M0 pass/fail checklist is the M0 bar — `PLAN.md`.
+- **ADR-0030** | 2026-06-19 | Accepted | The M0 acceptance bar is the milestone DoD and its referenced gates — `PLAN.md`, `TESTING.md`, `SECURITY.md`, `.github/workflows/ci.yml`.
 - **ADR-0031 / ADR-0061** | 2026-06-19 / 2026-07-14 | Accepted | Building-block scripts use strict YAML 1.2 through exact-pinned `noyalib` 0.0.15, typed semantic validation, explicit references and canonical resolved JSON; no fallback parser — `SECURITY.md`, Loop Agent V-Spec.
 - **ADR-0032 / ADR-0052** | 2026-06-19 / 2026-06-30 | Accepted | M0 has policy artifacts and escape tests; M1 uses deterministic in-process policy enforcement/emulation; Linux Landlock/seccomp is deferred and macOS parity remains planned — `SECURITY.md`, `PLAN.md`.
-- **ADR-0033** | 2026-06-19 | Accepted | Crate layout is `core/core-script`, `core/core-policy`, `proto/proto`, `loop-agent/loop-agent-core`, `loop-agent/loop-agent-cli` — `PLAN.md`.
+- **ADR-0033** | 2026-06-19 | Accepted | Keep shared contract crates separate from Loop Agent runtime and CLI crates — Loop Agent V-Spec.
 - **ADR-0034** | 2026-06-19 | Accepted | Fixture suite is `smoke-loop`, `hello-loop` and sandbox-negative fixtures using a stub model — `TESTING.md`.
 - **ADR-0035** | 2026-06-19 | Accepted | M1 ships human CLI and JSONL event stream; RPC and embedded core are designed-for seams — Loop Agent V-Spec.
 - **ADR-0036** | 2026-06-19 | Accepted | Runtime event names and envelope shape are the v0 public event contract — `PROTOCOL.md`.

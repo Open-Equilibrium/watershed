@@ -57,29 +57,6 @@ Watershed is a monorepo, **not** a monolith. The tools share `core` (building-bl
 
 Mental model: editor + Language Server Protocol. Liquid is the local-first editor; each Meta-Harness is a host-scoped server; `proto` is the seam. This yields one UX without hiding ownership or coupling the tools.
 
-## Platform integration model
-
-The layers integrate through **public surfaces and protocol/event contracts**, not through hidden internal coupling, so each can be tested and used independently:
-
-```text
-Loop Agent (host-local CLI)
-  emits structured runtime events
-  persists local session/transcript logs
-  exposes CLI/JSONL run-replay-tail-resume surfaces and future export/RPC/SDK seams
-
-Meta-Harness (one host)
-  launches/consumes only host-local CLI agents through adapters
-  normalizes sessions, transcripts, artifacts, metrics
-  exposes a local-or-remote client API while process ownership stays host-local
-
-Liquid
-  always reads/writes its local workspace replica
-  optionally syncs committed changes through an independent sync host
-  consumes one or more Meta-Harness APIs as optional integrations
-  exposes workspace CLI/API to agents/tools
-  records all workspace mutations in internal action history
-```
-
 Watershed's defensible trust model is the combination:
 
 ```text
