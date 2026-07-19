@@ -825,6 +825,15 @@ fn canonical_event_size_has_an_independent_hard_limit() {
         .expect_err("oversized canonical event is rejected");
 
     assert!(err.to_string().contains("canonical event"), "{err}");
+
+    let oversized_invalid = format!(
+        "[{}]\n",
+        "null,".repeat(MAX_CANONICAL_EVENT_BYTES / "null,".len())
+    );
+    let err = SessionAppendValidationState::empty("meta001")
+        .validate_appended(Path::new("event.jsonl"), &oversized_invalid)
+        .expect_err("raw event size must be checked before JSON parsing");
+    assert!(err.to_string().contains("canonical event"), "{err}");
 }
 
 #[test]

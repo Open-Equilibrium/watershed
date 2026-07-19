@@ -412,6 +412,7 @@ impl SessionAppendValidationState {
                     path.display()
                 )));
             }
+            validate_event_size(path, line_number, canonical_bytes)?;
             let event = parse_canonical_event(path, line_number, line)?;
             self.validate_budget(path, line_number, canonical_bytes)?;
             self.validate_event(path, line_number, &event)?;
@@ -427,6 +428,7 @@ impl SessionAppendValidationState {
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
         let line_number = self.line_count + 1;
+        validate_event_size(path, line_number, canonical_bytes)?;
         self.validate_budget(path, line_number, canonical_bytes)?;
         self.validate_event(path, line_number, event)
     }
@@ -437,12 +439,6 @@ impl SessionAppendValidationState {
         line_number: usize,
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
-        if canonical_bytes > MAX_CANONICAL_EVENT_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "{} canonical event at line {line_number} is {canonical_bytes} bytes; max {MAX_CANONICAL_EVENT_BYTES}",
-                path.display()
-            )));
-        }
         let event_count = self.runtime_event_count.saturating_add(1);
         if event_count > MAX_LOOP_EVENTS {
             return Err(RuntimeError::Protocol(format!(
@@ -552,6 +548,20 @@ impl SessionAppendValidationState {
         }
         Ok(())
     }
+}
+
+fn validate_event_size(
+    path: &Path,
+    line_number: usize,
+    canonical_bytes: usize,
+) -> Result<(), RuntimeError> {
+    if canonical_bytes <= MAX_CANONICAL_EVENT_BYTES {
+        return Ok(());
+    }
+    Err(RuntimeError::Protocol(format!(
+        "{} canonical event at line {line_number} is {canonical_bytes} bytes; max {MAX_CANONICAL_EVENT_BYTES}",
+        path.display()
+    )))
 }
 
 fn parse_canonical_event(
