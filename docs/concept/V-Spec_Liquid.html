@@ -92,10 +92,10 @@ Liquid        = standalone native workspace / app-building product</code></pre>
             → host-local CLI agents</code></pre>
           <p class="muted">Default agent-enabled setup. Meta-Harness owns the local CLI processes; Liquid renders their sessions, metrics, approvals and automations.</p>
         </div>
-        <div class="card"><h3>Mode D — one or more Meta-Harness APIs</h3>
-          <pre><code>Liquid → Meta A (this host)
-       → Meta B (server host)
-       → Meta C (edge host)</code></pre>
+        <div class="card"><h3>Mode D — projections from one or more Meta-Harness instances</h3>
+          <pre><code>Meta A (this host)   ┐
+Meta B (server host) ├→ D-025 projection boundary → Liquid
+Meta C (edge host)   ┘</code></pre>
           <p class="muted">One pane of glass, not one fictional controller. Every projection retains instance identity, freshness and authority; commands return to the owning instance.</p>
         </div>
       </div>
@@ -105,7 +105,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
     <section id="principles" class="section"><h2>3. Differentiators / core principles</h2><div class="body grid">
       <div class="card"><h3>Self-contained workspace product</h3><p>Workspace → Page → Block is enough to build custom functionality inside Liquid: for example, a Database Block connected to a Script Block, with no agents installed.</p></div>
       <div class="card"><h3>Agent-editable workspace</h3><p>Liquid exposes a workspace CLI/API so external agents and tools can read and edit workspace data through a permissioned, fully-recorded mutation pipeline.</p></div>
-      <div class="card"><h3>Workspace history is first-class</h3><p>Every mutation is appended to an internal action history/VCS with actor and origin, so changes are auditable and revertible.</p></div>
+      <div class="card"><h3>Workspace history is first-class</h3><p>Every mutation produces an entry in an internal action history/VCS with actor and origin, so changes are auditable and revertible.</p></div>
       <div class="card"><h3>Native cross-device app</h3><p>Desktop/mobile native across Linux, Windows, macOS and mobile. Users should not need separate provider apps on each device.</p></div>
       <div class="card"><h3>LLMs build functionality in place</h3><p>Describe a Page, Block or automation; Liquid AI proposes it through the same mutation pipeline and the user reviews/runs it without per-platform build/deploy flows.</p></div>
       <div class="card"><h3>Optional protocol-native integrations</h3><p>Meta-Harness instances integrate through public APIs, not compiled-in UI modules, and are never prerequisites.</p></div>
@@ -197,7 +197,7 @@ integrations
   correlation_id
   revert metadata</code></pre>
       <h3>History / VCS capabilities</h3>
-      <pre><code>append action            list actions             show action
+      <pre><code>record action            list actions             show action
 diff actions/states      undo recent action       revert selected action
 revert action range      create checkpoint/snapshot   restore checkpoint
 attribute action to actor/origin       mark external-agent changes
@@ -238,7 +238,7 @@ Liquid returns permitted workspace data
 external agent proposes mutation
 Liquid validates schema and permissions
 Liquid shows diff or applies if policy allows
-Liquid appends action-history entry
+Liquid records action-history entry
 Liquid emits workspace event
 user or agent can revert via action-history API</code></pre>
       <p>The permission model for external agents is <a href="../decisions/open-decisions.html#d-030">D-030</a> (recommended: scoped grants with explicit approval for sensitive writes).</p>
@@ -262,7 +262,7 @@ Liquid AI (via the mutation pipeline):
   - adds a Chart Block
   - connects an AgentPulse Source to the Chart Block
   - asks before enabling scheduled refresh
-  -> every applied step appends an action-history entry and is revertible</code></pre>
+  -> every applied step records an action-history entry and is revertible</code></pre>
       <p>Security-sensitive automations and external data access go through explicit capability prompts and policy gates (see §11).</p>
     </div></section>
 

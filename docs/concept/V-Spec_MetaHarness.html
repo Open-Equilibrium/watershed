@@ -100,7 +100,7 @@ Liquid
   native UI / workspace
   Pages, Blocks, Views, PowerBar
   visual session / config / metric / approval surfaces</code></pre>
-      <p>Liquid may consume one or more Meta-Harness APIs for live sessions/transcripts, artifacts, approvals, central config, AgentPulse, schedules, automations and PowerBar commands. It may merge those projections visually, but every record retains instance identity, freshness and authority; every live command routes back to the owning instance.</p>
+      <p>Projections from one or more Meta-Harness instances may be combined visually, but every record retains instance identity, freshness and authority; every live command routes back to the owning instance.</p>
       <p>Liquid <strong>must not duplicate</strong> a Meta-Harness session registry, adapter logic, config resolution, AgentPulse engine or scheduling engine, and it must not invent global cross-instance authority. Projection detail is <a href="../decisions/open-decisions.html#d-025">D-025</a>.</p>
       <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
     </div></section>
