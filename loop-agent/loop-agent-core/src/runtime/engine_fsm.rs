@@ -469,11 +469,12 @@ fn execute_loop_with_sink(
             RuntimeEventBuilder::with_clock(session_id.to_owned(), options.clock, validate_plan)
         }
     };
-    builder.emit(
-        None,
-        EventType::SessionStarted,
-        serde_json::json!({"reason":"fixture-start"}),
-    )?;
+    let start_payload = if options.stub_model_fixture_profile {
+        serde_json::json!({"reason":"fixture-start"})
+    } else {
+        serde_json::json!({})
+    };
+    builder.emit(None, EventType::SessionStarted, start_payload)?;
 
     let context = LoopEmitContext {
         workspace,

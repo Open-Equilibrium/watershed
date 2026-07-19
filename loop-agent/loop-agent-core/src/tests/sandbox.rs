@@ -90,6 +90,10 @@ fn sandbox_negative_dispatch_requires_stub_model_fixture_profile() {
     let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
         .expect("non-fixture workspace runs");
 
+    let events =
+        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
+            .expect("non-fixture stream validates");
+    assert_eq!(events[0].payload, serde_json::json!({}));
     assert!(!output.failed);
     assert!(
         output
