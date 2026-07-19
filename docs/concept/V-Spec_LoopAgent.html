@@ -32,13 +32,13 @@
     </header>
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
-      <p>Loop Agent is a <strong>standalone CLI agent product first</strong>: a local harness that runs deterministic, script-defined AI-native processes. It exists for agentic engineers who need control, repeatability, bounded tool execution and measurable loop quality. It is usable on its own — by humans at a terminal, headlessly by scripts/CI/automation, and later embeddable as a core library — with Pi-style runtime integration surfaces.</p>
+      <p>Loop Agent is a <strong>standalone CLI agent product first</strong>: a local harness that runs deterministic, script-defined AI-native processes. It exists for agentic engineers who need control, repeatability, bounded tool execution and measurable loop quality. It is usable on its own — by humans at a terminal, headlessly by scripts/CI/automation, and later embeddable as a core library.</p>
       <p><strong>A Meta-Harness on the same host may integrate through Loop Agent's public runtime surfaces; neither Meta-Harness nor Liquid is required to run Loop Agent.</strong> Loop Agent exposes only its CLI and public event stream. Liquid reaches agent sessions through Meta-Harness and owns the optional UI.</p>
       <p>Loop Agent is the Watershed platform's <strong>execution layer</strong> and its developer/open-source credibility wedge (see <a href="../../PLAN.md">PLAN.md</a> wedge sequencing and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>run repeatable, auditable AI-agent workflows from my CLI.</em> It is a <strong>deterministic, auditable, reusable agent-loop runtime — not another generic coding agent.</strong></p>
     </div></section>
 
     <section id="boundary" class="section"><h2>2. Product boundary</h2><div class="body">
-      <p>Loop Agent is a standalone host-local CLI agent product, similar in product boundary to a Pi-style CLI agent. Meta-Harness is an optional same-host consumer; Liquid is an optional client of Meta-Harness. Neither is a prerequisite.</p>
+      <p>Loop Agent is a standalone host-local CLI agent product. Meta-Harness is an optional same-host consumer; Liquid is an optional client of Meta-Harness. Neither is a prerequisite.</p>
       <div class="grid">
         <div class="card"><h3 class="good">Loop Agent owns</h3><ul>
           <li>local execution;</li>
