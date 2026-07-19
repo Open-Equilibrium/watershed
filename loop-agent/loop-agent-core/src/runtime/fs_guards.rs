@@ -166,8 +166,12 @@ fn segmented_jsonl_path(base: &AnchoredFile, ordinal: u64) -> Result<AnchoredFil
     if ordinal == 1 {
         return Ok(base.clone());
     }
-    let leaf = base
-        .leaf
+    let leaf = segmented_jsonl_stem(base)?;
+    Ok(base.parent.file(format!("{leaf}.{ordinal:06}.jsonl")))
+}
+
+fn segmented_jsonl_stem(base: &AnchoredFile) -> Result<&str, RuntimeError> {
+    base.leaf
         .file_name()
         .and_then(std::ffi::OsStr::to_str)
         .and_then(|leaf| leaf.strip_suffix(".jsonl"))
@@ -176,38 +180,64 @@ fn segmented_jsonl_path(base: &AnchoredFile, ordinal: u64) -> Result<AnchoredFil
                 "{} segmented JSONL path must end in .jsonl",
                 base.diagnostic_path().display()
             ))
-        })?;
-    Ok(base.parent.file(format!("{leaf}.{ordinal:06}.jsonl")))
+        })
+}
+
+fn segmented_jsonl_siblings(base: &AnchoredFile) -> Result<Vec<(u64, AnchoredFile)>, RuntimeError> {
+    let leaf = segmented_jsonl_stem(base)?;
+    let prefix = format!("{leaf}.");
+    let mut siblings = Vec::new();
+    for entry in base
+        .parent
+        .dir
+        .entries()
+        .map_err(|source| path_io_error(&base.parent.path, source))?
+    {
+        let entry = entry.map_err(|source| path_io_error(&base.parent.path, source))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(ordinal) = name
+            .strip_prefix(&prefix)
+            .and_then(|suffix| suffix.strip_suffix(".jsonl"))
+            .filter(|ordinal| {
+                ordinal.len() == 6 && ordinal.bytes().all(|byte| byte.is_ascii_digit())
+            })
+            .and_then(|ordinal| ordinal.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        siblings.push((ordinal, base.parent.file(name)));
+    }
+    siblings.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+    Ok(siblings)
 }
 
 fn segmented_jsonl_files(base: &AnchoredFile) -> Result<Vec<AnchoredFile>, RuntimeError> {
     ensure_anchored_real_file(base)?;
     let mut files = vec![base.clone()];
-    let mut missing_prior_segment = false;
-    for ordinal in 2..=MAX_SESSION_LOG_SEGMENTS + 1 {
-        let candidate = segmented_jsonl_path(base, ordinal)?;
-        match candidate.metadata() {
-            Ok(_) => {
-                if ordinal > MAX_SESSION_LOG_SEGMENTS {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} segment count exceeds max {MAX_SESSION_LOG_SEGMENTS}",
-                        base.diagnostic_path().display()
-                    )));
-                }
-                if missing_prior_segment {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} has non-contiguous segmented JSONL ordinals",
-                        base.diagnostic_path().display()
-                    )));
-                }
-                ensure_anchored_real_file(&candidate)?;
-                files.push(candidate);
-            }
-            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                missing_prior_segment = true;
-            }
-            Err(error) => return Err(error),
+    for (expected, (ordinal, candidate)) in (2..).zip(segmented_jsonl_siblings(base)?) {
+        if ordinal < 2 {
+            return Err(RuntimeError::Protocol(format!(
+                "{} has invalid segmented JSONL ordinal {ordinal:06}",
+                base.diagnostic_path().display()
+            )));
         }
+        if ordinal > MAX_SESSION_LOG_SEGMENTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segment count exceeds max {MAX_SESSION_LOG_SEGMENTS}",
+                base.diagnostic_path().display()
+            )));
+        }
+        if ordinal != expected {
+            return Err(RuntimeError::Protocol(format!(
+                "{} has non-contiguous segmented JSONL ordinals",
+                base.diagnostic_path().display()
+            )));
+        }
+        ensure_anchored_real_file(&candidate)?;
+        files.push(candidate);
     }
     Ok(files)
 }
@@ -251,12 +281,12 @@ fn for_each_segmented_jsonl_line(
 }
 
 fn remove_segmented_jsonl(base: &AnchoredFile) {
-    if let Ok(mut files) = segmented_jsonl_files(base) {
-        files.reverse();
-        for file in files {
+    if let Ok(siblings) = segmented_jsonl_siblings(base) {
+        for (_, file) in siblings.into_iter().rev() {
             let _ = file.remove();
         }
     }
+    let _ = base.remove();
 }
 
 fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {

@@ -100,8 +100,18 @@ fn event_appender_refuses_to_reserve_a_sixth_segment() {
 }
 
 #[test]
-fn segmented_stream_rejects_gaps_and_more_than_five_segments() {
+fn segmented_stream_rejects_invalid_ordinal_layouts() {
     for (label, ordinals, expected) in [
+        (
+            "event-segment-invalid-ordinal",
+            vec![0],
+            "invalid segmented JSONL ordinal",
+        ),
+        (
+            "event-segment-base-ordinal",
+            vec![1],
+            "invalid segmented JSONL ordinal",
+        ),
         ("event-segment-gap", vec![3], "non-contiguous"),
         (
             "event-segment-count",
@@ -113,8 +123,10 @@ fn segmented_stream_rejects_gaps_and_more_than_five_segments() {
         let reservation =
             reserve_session_log(&workspace, "segmentinvalid001").expect("session reserved");
         for ordinal in ordinals {
-            let segment = segmented_jsonl_path(&reservation.session_path, ordinal)
-                .expect("segment path resolves");
+            let segment = reservation
+                .session_path
+                .parent
+                .file(format!("segmentinvalid001.{ordinal:06}.jsonl"));
             fs::write(segment.diagnostic_path(), b"\n").expect("invalid segment fixture writes");
         }
 
@@ -124,6 +136,44 @@ fn segmented_stream_rejects_gaps_and_more_than_five_segments() {
         reservation.rollback();
         drop(reservation);
         fs::remove_dir_all(workspace).expect("invalid segment workspace removed");
+    }
+}
+
+#[test]
+fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
+    for (label, context) in [("event", false), ("context", true)] {
+        let workspace = empty_workspace(&format!("high-ordinal-{label}"));
+        let reservation =
+            reserve_session_log(&workspace, "segmenthigh001").expect("session reserved");
+        let base = if context {
+            &reservation.context_path
+        } else {
+            &reservation.session_path
+        };
+        let high = segmented_jsonl_path(base, 7).expect("high segment path resolves");
+        fs::write(high.diagnostic_path(), b"\n").expect("high segment fixture writes");
+
+        let results = if context {
+            vec![
+                for_each_segmented_jsonl_line(base, MAX_SESSION_EVENT_BYTES, |_| Ok(()))
+                    .map(|_| ()),
+            ]
+        } else {
+            vec![
+                read_segmented_jsonl(base, MAX_SESSION_EVENT_BYTES).map(|_| ()),
+                SessionLogAppender::open(base).map(|_| ()),
+            ]
+        };
+        for result in results {
+            let err = result.expect_err("high ordinal must not be omitted");
+            assert!(err.to_string().contains("segment count"), "{label}: {err}");
+        }
+
+        reservation.rollback();
+        assert!(
+            !high.diagnostic_path().exists(),
+            "{label} high segment must be cleaned up"
+        );
     }
 }
 

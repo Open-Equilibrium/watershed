@@ -7,9 +7,14 @@ fn corrupted_session_log_is_rejected_without_rewrite() {
     fs::write(&path, "{\"not\":\"an event\"}\n").expect("corrupt log written");
     let before = fs::read_to_string(&path).expect("corrupt log readable");
 
+    let mut reader = SessionEventReader::open(&workspace, "bad001").expect("reader opens");
+    assert!(reader.read_after(0).is_err());
+    assert_eq!(
+        fs::read_to_string(&path).expect("corrupt log remains readable"),
+        before
+    );
     for action in [
         replay_session(&workspace, "bad001", EmitMode::Jsonl),
-        tail_session(&workspace, "bad001", EmitMode::Jsonl),
         resume_session(&workspace, "bad001", EmitMode::Jsonl),
     ] {
         assert!(action.is_err());
@@ -61,7 +66,7 @@ fn unique_reservation_skips_complete_orphan_bundle_namespace() {
         (
             "event overflow sentinel",
             LOCAL_SESSION_DIR,
-            "bundle001.000006.jsonl",
+            "bundle001.000007.jsonl",
         ),
         ("context base", LOCAL_LOG_DIR, "bundle001.contexts.jsonl"),
         (
@@ -72,7 +77,7 @@ fn unique_reservation_skips_complete_orphan_bundle_namespace() {
         (
             "context overflow sentinel",
             LOCAL_LOG_DIR,
-            "bundle001.contexts.000006.jsonl",
+            "bundle001.contexts.000007.jsonl",
         ),
         ("metadata sidecar", LOCAL_LOG_DIR, "bundle001.log"),
         (

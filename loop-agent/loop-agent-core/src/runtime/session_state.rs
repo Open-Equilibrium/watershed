@@ -878,15 +878,10 @@ fn ensure_session_bundle_namespace_available(
     for path in [log_path, context_path] {
         ensure_anchored_bundle_leaf_available(path, session_id)?;
     }
-    for ordinal in 2..=MAX_SESSION_LOG_SEGMENTS + 1 {
-        ensure_anchored_bundle_leaf_available(
-            &segmented_jsonl_path(session_path, ordinal)?,
-            session_id,
-        )?;
-        ensure_anchored_bundle_leaf_available(
-            &segmented_jsonl_path(context_path, ordinal)?,
-            session_id,
-        )?;
+    for path in [session_path, context_path] {
+        for (_, segment) in segmented_jsonl_siblings(path)? {
+            ensure_anchored_bundle_leaf_available(&segment, session_id)?;
+        }
     }
 
     let object_prefix = format!("{session_id}.object.sha256-");
