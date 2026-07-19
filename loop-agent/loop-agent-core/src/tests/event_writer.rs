@@ -34,7 +34,7 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
     let record = vec![b'x'; MAX_CANONICAL_EVENT_BYTES];
     let records_in_first_segment =
-        usize::try_from(MAX_SESSION_LOG_BYTES).expect("segment size fits usize") / record.len();
+        usize::try_from(MAX_SESSION_SEGMENT_BYTES).expect("segment size fits usize") / record.len();
     let batch = vec![record.as_slice(); records_in_first_segment + 1];
 
     if let Err(failure) = appender.append_batch(reservation.session_path.diagnostic_path(), &batch)
@@ -74,11 +74,11 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
 fn event_appender_refuses_to_reserve_a_sixth_segment() {
     let workspace = empty_workspace("event-segment-sixth");
     let reservation = reserve_session_log(&workspace, "segmentsixth001").expect("session reserved");
-    for ordinal in 1..=MAX_SESSION_LOG_SEGMENTS {
+    for ordinal in 1..=MAX_SESSION_STREAM_SEGMENTS {
         let path = segmented_jsonl_path(&reservation.session_path, ordinal)
             .expect("segment path resolves");
-        let bytes = if ordinal == MAX_SESSION_LOG_SEGMENTS {
-            vec![b'x'; usize::try_from(MAX_SESSION_LOG_BYTES - 1).expect("size fits")]
+        let bytes = if ordinal == MAX_SESSION_STREAM_SEGMENTS {
+            vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES - 1).expect("size fits")]
         } else {
             vec![b'x']
         };
@@ -1134,11 +1134,12 @@ fn later_events_do_not_extend_the_dirty_sync_deadline() {
 
 #[test]
 fn context_manifest_stream_enforces_its_aggregate_limit() {
-    let limit = usize::try_from(MAX_SESSION_EVENT_BYTES).expect("manifest limit fits usize");
+    let limit = usize::try_from(MAX_SESSION_CONTEXT_MANIFEST_BYTES)
+        .expect("manifest limit fits usize");
     assert_eq!(
         ensure_context_manifest_growth_within_limit(Path::new("contexts.jsonl"), limit - 1, 1)
             .expect("the exact limit is accepted"),
-        MAX_SESSION_EVENT_BYTES
+        MAX_SESSION_CONTEXT_MANIFEST_BYTES
     );
     assert!(matches!(
         ensure_context_manifest_growth_within_limit(Path::new("contexts.jsonl"), limit, 1),

@@ -17,20 +17,25 @@ pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 /// Workspace-relative directory containing structured sidecar run logs.
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
 /// Maximum canonical uncompressed bytes stored in one event or manifest segment.
-pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_SESSION_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum segments needed when records are not split under the 48 MiB stream limit.
-const MAX_SESSION_LOG_SEGMENTS: u64 = 5;
+const MAX_SESSION_STREAM_SEGMENTS: u64 = 5;
 /// Maximum canonical bytes stored for one event, including its trailing LF.
 pub const MAX_CANONICAL_EVENT_BYTES: usize = 320 * 1024;
 /// Maximum canonical event bytes accumulated by one session across all segments.
 pub const MAX_SESSION_EVENT_BYTES: u64 = 48 * 1024 * 1024;
+/// Maximum canonical context-manifest bytes accumulated across all segments.
+pub const MAX_SESSION_CONTEXT_MANIFEST_BYTES: u64 = 48 * 1024 * 1024;
 /// Maximum bytes stored in one immutable session-owned object chunk.
 pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum stored content bytes in one complete self-contained session bundle.
 pub const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
+const MAX_SESSION_METADATA_BYTES: u64 = 16 * 1024 * 1024;
 /// Object-data share after reserving the event, manifest and metadata maxima.
-const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 =
-    MAX_SESSION_BUNDLE_BYTES - (2 * MAX_SESSION_EVENT_BYTES) - MAX_SESSION_LOG_BYTES;
+const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
+    - MAX_SESSION_EVENT_BYTES
+    - MAX_SESSION_CONTEXT_MANIFEST_BYTES
+    - MAX_SESSION_METADATA_BYTES;
 /// Maximum canonical events accumulated by one session, including resume events.
 pub const MAX_LOOP_EVENTS: u64 = 155_750;
 /// Maximum runtime Loop invocations accumulated by one session, including the root.

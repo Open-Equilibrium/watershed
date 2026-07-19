@@ -224,9 +224,9 @@ fn segmented_jsonl_files(base: &AnchoredFile) -> Result<Vec<AnchoredFile>, Runti
                 base.diagnostic_path().display()
             )));
         }
-        if ordinal > MAX_SESSION_LOG_SEGMENTS {
+        if ordinal > MAX_SESSION_STREAM_SEGMENTS {
             return Err(RuntimeError::Protocol(format!(
-                "{} segment count exceeds max {MAX_SESSION_LOG_SEGMENTS}",
+                "{} segment count exceeds max {MAX_SESSION_STREAM_SEGMENTS}",
                 base.diagnostic_path().display()
             )));
         }
@@ -245,7 +245,7 @@ fn segmented_jsonl_files(base: &AnchoredFile) -> Result<Vec<AnchoredFile>, Runti
 fn read_segmented_jsonl(base: &AnchoredFile, max_total_bytes: u64) -> Result<String, RuntimeError> {
     let mut bytes = Vec::new();
     for file in segmented_jsonl_files(base)? {
-        let segment = read_anchored_file_with_limit(&file, MAX_SESSION_LOG_BYTES)?;
+        let segment = read_anchored_file_with_limit(&file, MAX_SESSION_SEGMENT_BYTES)?;
         let total = u64::try_from(bytes.len().saturating_add(segment.len())).unwrap_or(u64::MAX);
         if total > max_total_bytes {
             return Err(RuntimeError::Protocol(format!(
@@ -266,7 +266,7 @@ fn for_each_segmented_jsonl_line(
     let mut total = 0u64;
     for file in segmented_jsonl_files(base)? {
         let segment_bytes =
-            for_each_anchored_file_line_with_limit(&file, MAX_SESSION_LOG_BYTES, |line| {
+            for_each_anchored_file_line_with_limit(&file, MAX_SESSION_SEGMENT_BYTES, |line| {
                 visit(line)
             })?;
         total = total.saturating_add(segment_bytes);

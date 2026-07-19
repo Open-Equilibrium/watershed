@@ -533,19 +533,23 @@ impl ContextManifestWriter {
     ) -> Result<Self, RuntimeError> {
         let mut last_manifest = None;
         let mut manifest_count = 0usize;
-        let byte_count = for_each_segmented_jsonl_line(path, MAX_SESSION_EVENT_BYTES, |line| {
-            if !line.ends_with('\n') {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} context manifest stream must end with LF",
-                    path.diagnostic_path().display()
-                )));
-            }
-            last_manifest = Some(line.to_owned());
-            manifest_count = manifest_count.saturating_add(1);
-            Ok(())
-        })?;
+        let byte_count =
+            for_each_segmented_jsonl_line(path, MAX_SESSION_CONTEXT_MANIFEST_BYTES, |line| {
+                if !line.ends_with('\n') {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} context manifest stream must end with LF",
+                        path.diagnostic_path().display()
+                    )));
+                }
+                last_manifest = Some(line.to_owned());
+                manifest_count = manifest_count.saturating_add(1);
+                Ok(())
+            })?;
         Ok(Self {
-            appender: SessionLogAppender::open(path)?,
+            appender: SessionLogAppender::open_with_limit(
+                path,
+                MAX_SESSION_CONTEXT_MANIFEST_BYTES,
+            )?,
             byte_count,
             last_manifest,
             manifest_count,
@@ -750,9 +754,9 @@ fn ensure_context_manifest_growth_within_limit(
     let current_bytes = current_bytes.try_into().unwrap_or(u64::MAX);
     let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     let total = current_bytes.saturating_add(appended_bytes);
-    if total > MAX_SESSION_EVENT_BYTES {
+    if total > MAX_SESSION_CONTEXT_MANIFEST_BYTES {
         return Err(RuntimeError::Protocol(format!(
-            "{} context manifest size {total} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
+            "{} context manifest size {total} bytes exceeds max {MAX_SESSION_CONTEXT_MANIFEST_BYTES}",
             path.display()
         )));
     }
@@ -1122,26 +1126,31 @@ struct SessionLogAppender {
     current_bytes: u64,
     current_ordinal: u64,
     file: fs::File,
+    max_total_bytes: u64,
     total_bytes: u64,
 }
 
 impl SessionLogAppender {
     fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
+        Self::open_with_limit(path, MAX_SESSION_EVENT_BYTES)
+    }
+
+    fn open_with_limit(path: &AnchoredFile, max_total_bytes: u64) -> Result<Self, RuntimeError> {
         let segments = segmented_jsonl_files(path)?;
         let mut total_bytes = 0u64;
         for segment in &segments {
             let bytes = segment.metadata()?.len();
-            if bytes > MAX_SESSION_LOG_BYTES {
+            if bytes > MAX_SESSION_SEGMENT_BYTES {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} segment size {bytes} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+                    "{} segment size {bytes} bytes exceeds max {MAX_SESSION_SEGMENT_BYTES}",
                     segment.diagnostic_path().display()
                 )));
             }
             total_bytes = total_bytes.saturating_add(bytes);
         }
-        if total_bytes > MAX_SESSION_EVENT_BYTES {
+        if total_bytes > max_total_bytes {
             return Err(RuntimeError::Protocol(format!(
-                "{} segmented JSONL size {total_bytes} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
+                "{} segmented JSONL size {total_bytes} bytes exceeds max {max_total_bytes}",
                 path.diagnostic_path().display()
             )));
         }
@@ -1155,6 +1164,7 @@ impl SessionLogAppender {
             current_bytes,
             current_ordinal,
             file: open_anchored_session_log_append_file(current_path)?,
+            max_total_bytes,
             total_bytes,
         })
     }
@@ -1169,27 +1179,28 @@ impl SessionLogAppender {
 
     fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
         let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
-        if appended_bytes > MAX_SESSION_LOG_BYTES {
+        if appended_bytes > MAX_SESSION_SEGMENT_BYTES {
             return Err(RuntimeError::Protocol(format!(
-                "{} JSONL record is {appended_bytes} bytes; max segment size is {MAX_SESSION_LOG_BYTES}",
+                "{} JSONL record is {appended_bytes} bytes; max segment size is {MAX_SESSION_SEGMENT_BYTES}",
                 self.base_path.diagnostic_path().display()
             )));
         }
         let total = self.total_bytes.saturating_add(appended_bytes);
-        if total > MAX_SESSION_EVENT_BYTES {
+        if total > self.max_total_bytes {
             return Err(RuntimeError::Protocol(format!(
-                "{} segmented JSONL size {total} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
-                self.base_path.diagnostic_path().display()
+                "{} segmented JSONL size {total} bytes exceeds max {}",
+                self.base_path.diagnostic_path().display(),
+                self.max_total_bytes
             )));
         }
         if self.current_bytes == 0
-            || self.current_bytes.saturating_add(appended_bytes) <= MAX_SESSION_LOG_BYTES
+            || self.current_bytes.saturating_add(appended_bytes) <= MAX_SESSION_SEGMENT_BYTES
         {
             return Ok(());
         }
-        if self.current_ordinal >= MAX_SESSION_LOG_SEGMENTS {
+        if self.current_ordinal >= MAX_SESSION_STREAM_SEGMENTS {
             return Err(RuntimeError::Protocol(format!(
-                "{} segment count exceeds max {MAX_SESSION_LOG_SEGMENTS}",
+                "{} segment count exceeds max {MAX_SESSION_STREAM_SEGMENTS}",
                 self.base_path.diagnostic_path().display()
             )));
         }
@@ -1298,7 +1309,7 @@ impl EventLogAppender for SessionLogAppender {
                     error,
                 })?;
 
-            let available_segment_bytes = MAX_SESSION_LOG_BYTES - self.current_bytes;
+            let available_segment_bytes = MAX_SESSION_SEGMENT_BYTES - self.current_bytes;
             let mut batch_bytes = 0u64;
             let mut batch_end = committed_events;
             while batch_end < events.len() {
@@ -1306,7 +1317,7 @@ impl EventLogAppender for SessionLogAppender {
                 let candidate_batch_bytes = batch_bytes.saturating_add(event_bytes);
                 if candidate_batch_bytes > available_segment_bytes
                     || self.total_bytes.saturating_add(candidate_batch_bytes)
-                        > MAX_SESSION_EVENT_BYTES
+                        > self.max_total_bytes
                 {
                     break;
                 }

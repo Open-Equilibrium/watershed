@@ -717,7 +717,7 @@ fn require_anchored_session_log_metadata(
         .map_err(|error| map_missing_definition_metadata(error, session_id))?;
     parse_session_log_metadata(&read_anchored_to_string_with_limit(
         &path,
-        MAX_SESSION_LOG_BYTES,
+        MAX_SESSION_METADATA_BYTES,
     )?)
 }
 

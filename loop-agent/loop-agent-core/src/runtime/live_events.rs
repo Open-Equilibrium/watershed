@@ -174,7 +174,8 @@ impl SessionEventReader {
             let mut bytes = Vec::new();
             let mut final_complete_bytes = 0u64;
             for (index, segment) in segments.iter().enumerate() {
-                let segment_bytes = read_anchored_file_with_limit(segment, MAX_SESSION_LOG_BYTES)?;
+                let segment_bytes =
+                    read_anchored_file_with_limit(segment, MAX_SESSION_SEGMENT_BYTES)?;
                 if index + 1 != segments.len()
                     && complete_jsonl_prefix_len(&segment_bytes) != segment_bytes.len()
                 {
@@ -287,7 +288,7 @@ impl SessionEventReader {
                 }
                 file.seek(SeekFrom::Start(offset))
                     .map_err(|source| path_io_error(segment.diagnostic_path(), source))?;
-                let remaining_limit = MAX_SESSION_LOG_BYTES.saturating_sub(offset);
+                let remaining_limit = MAX_SESSION_SEGMENT_BYTES.saturating_sub(offset);
                 let start = suffix.len();
                 file.take(remaining_limit.saturating_add(1))
                     .read_to_end(&mut suffix)
@@ -296,7 +297,7 @@ impl SessionEventReader {
                 let segment_complete_len = complete_jsonl_prefix_len(segment_suffix);
                 if u64::try_from(segment_suffix.len()).unwrap_or(u64::MAX) > remaining_limit {
                     return Err(RuntimeError::Protocol(format!(
-                        "{} read size exceeds max {MAX_SESSION_LOG_BYTES}",
+                        "{} read size exceeds max {MAX_SESSION_SEGMENT_BYTES}",
                         segment.diagnostic_path().display()
                     )));
                 }

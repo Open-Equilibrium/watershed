@@ -517,7 +517,7 @@ fn read_anchored_context_manifest_signature(
     let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
     let mut line_number = 0usize;
     let mut verified_objects = BTreeSet::new();
-    for_each_segmented_jsonl_line(&path, MAX_SESSION_EVENT_BYTES, |line| {
+    for_each_segmented_jsonl_line(&path, MAX_SESSION_CONTEXT_MANIFEST_BYTES, |line| {
         line_number = line_number.saturating_add(1);
         if !line.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
