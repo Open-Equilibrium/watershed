@@ -139,6 +139,59 @@ fn runtime_executes_subloops_after_all_parent_phases() {
 }
 
 #[test]
+fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
+    let workspace = workspace_copy("smoke-loop");
+    fs::write(
+        workspace.join("registry/phases/smoke.yaml"),
+        "phase:\n  id: smoke\n  name: Smoke\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: noop\n      name: Noop\n",
+    )
+    .expect("tool-free phase written");
+    let loops = workspace.join("registry/loops");
+    let write_loop = |id: &str, refs: &[&str]| {
+        fs::write(
+            loops.join(format!("{id}.yaml")),
+            format!(
+                "loop:\n  id: {id}\n  name: {id}\n  phase_refs: [smoke]\n  subloop_refs: [{}]\n  connection_refs: []\n",
+                refs.join(", ")
+            ),
+        )
+        .expect("loop written");
+    };
+
+    write_loop("branch", &vec!["smoke-loop"; 29]);
+    let mut root_refs = vec!["branch"; 17];
+    root_refs.push("smoke-loop");
+    write_loop("budget-root", &root_refs);
+
+    let output = run_loop(&workspace, "budget-root", EmitMode::Jsonl)
+        .expect("512 cumulative invocations are accepted");
+    assert!(!output.failed);
+    let events =
+        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
+            .expect("512-invocation stream validates");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.event_type == EventType::LoopStarted)
+            .count(),
+        usize::try_from(MAX_LOOP_INVOCATIONS).expect("invocation limit fits usize")
+    );
+    let sessions = list_sessions(&workspace).expect("sessions list before rejection");
+
+    root_refs.push("smoke-loop");
+    write_loop("budget-root", &root_refs);
+    assert!(matches!(
+        run_loop(&workspace, "budget-root", EmitMode::Jsonl),
+        Err(RuntimeError::Protocol(message)) if message.contains("loop invocation budget")
+    ));
+    assert_eq!(
+        list_sessions(&workspace).expect("sessions list after rejection"),
+        sessions,
+        "preflight rejection must not create a session"
+    );
+}
+
+#[test]
 fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     let workspace = workspace_copy("smoke-loop");
     let tool_path = workspace.join("registry/tools/echo.yaml");
