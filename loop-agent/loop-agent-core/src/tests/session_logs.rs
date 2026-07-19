@@ -1057,7 +1057,7 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
             tool_started_line("evt-005", 5),
             step_completed_line("evt-006", 6),
         ),
-        "open tool",
+        "active tool",
     );
     assert_invalid_session_log(
         "terminal-with-open-message.jsonl",
@@ -1066,7 +1066,7 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
             "{active_step_prefix}{message_delta}{}",
             step_completed_line("evt-006", 6),
         ),
-        "open message",
+        "active message",
     );
     assert_invalid_session_log(
         "terminal-with-active-child-loop.jsonl",
