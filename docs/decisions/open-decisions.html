@@ -24,15 +24,7 @@
 
   <section id="m1">
     <h2>M1 - Loop Agent</h2>
-    <div class="grid">
-      <article id="d-068" class="decision">
-        <h3>D-068 - Per-Run Workload Limits</h3>
-        <p><strong>Status:</strong> Open, M1 blocker.</p>
-        <p><strong>Question:</strong> How should Watershed choose the maximum work one run may perform? The current branch stops after 8,192 Loop/Subloop invocations, 65,536 events, or 10 MiB of canonical event data. These values bound work before side effects, but were not approved or measured; the 10 MiB value also overlaps the approved 16 MiB session-log limit.</p>
-        <ul><li><strong>A:</strong> Approve the current fixed values. Pro: already bounded and tested. Con: the thresholds remain unmeasured and may reject valid work.</li><li><strong>B:</strong> Measure representative near-limit Loops, derive the smallest necessary fixed safeguards from the approved performance budgets, and remove overlapping limits. Pro: evidence-based and minimal. Con: requires measurement and may change the current values.</li><li><strong>C:</strong> Make the limits configurable below hard safety ceilings. Pro: adaptable to different workloads. Con: adds configuration, compatibility and test overhead before the first release.</li></ul>
-        <p><strong>Recommendation:</strong> B; retain only distinct, measured safeguards.</p>
-      </article>
-    </div>
+    <p class="muted">No open M1 decisions.</p>
   </section>
 
   <section id="m2">

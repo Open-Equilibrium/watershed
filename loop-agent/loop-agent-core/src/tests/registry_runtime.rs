@@ -158,10 +158,15 @@ fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke001.jsonl")
+            .join("smoke-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("smoke-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -229,7 +234,7 @@ fn run_loop_replaces_existing_own_script_output_on_repeat_run() {
     let second = run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("second run succeeds");
 
     assert!(!second.failed);
-    assert_eq!(second.session_id, "hello001-2");
+    assert_eq!(second.session_id, "hello-loop-2");
     assert_eq!(
         fs::read_to_string(summary_path).expect("summary is replaced"),
         "hello\n"

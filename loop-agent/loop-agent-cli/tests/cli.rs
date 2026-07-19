@@ -217,7 +217,7 @@ fn tail_timeout_argument_is_accepted() {
 
     let output = loop_command()
         .current_dir(&workspace)
-        .args(["tail", "smoke001", "--timeout-ms", "1"])
+        .args(["tail", "smoke-loop", "--timeout-ms", "1"])
         .output()
         .expect("loop binary should run");
 
@@ -225,7 +225,7 @@ fn tail_timeout_argument_is_accepted() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        "session smoke001 tailed\n"
+        "session smoke-loop tailed\n"
     );
 }
 
@@ -247,12 +247,12 @@ fn run_loop_emits_golden_jsonl_and_persists_session_log() {
         expected
     );
     assert_eq!(
-        fs::read_to_string(workspace.join(".loop/sessions/smoke001.jsonl"))
+        fs::read_to_string(workspace.join(".loop/sessions/smoke-loop.jsonl"))
             .expect("session log is written"),
         expected
     );
     assert!(
-        workspace.join(".loop/logs/smoke001.log").is_file(),
+        workspace.join(".loop/logs/smoke-loop.log").is_file(),
         "structured run log should be written"
     );
 }
@@ -290,7 +290,7 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
     for command in ["replay", "tail"] {
         let output = loop_command()
             .current_dir(&fixture)
-            .args([command, "smoke001", "--emit", "jsonl"])
+            .args([command, "smoke-loop", "--emit", "jsonl"])
             .output()
             .expect("loop binary should run");
 
@@ -312,7 +312,7 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
     assert!(sessions.status.success());
     assert_eq!(
         String::from_utf8(sessions.stdout).expect("stdout should be UTF-8"),
-        "smoke001\n"
+        "smoke-loop\n"
     );
 }
 
@@ -327,13 +327,13 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
         .expect("golden has session.started")
         .to_owned()
         + "\n";
-    fs::write(session_dir.join("smoke001.jsonl"), &prefix).expect("partial session written");
+    fs::write(session_dir.join("smoke-loop.jsonl"), &prefix).expect("partial session written");
 
     let output = loop_command()
         .current_dir(&fixture)
         .args([
             "tail",
-            "smoke001",
+            "smoke-loop",
             "--emit",
             "jsonl",
             "--no-follow",
@@ -363,7 +363,7 @@ fn closed_stdout_pipe_does_not_fail_for_jsonl_tail() {
 
     let mut child = loop_command()
         .current_dir(&workspace)
-        .args(["tail", "smoke001", "--emit", "jsonl"])
+        .args(["tail", "smoke-loop", "--emit", "jsonl"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -387,12 +387,12 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
         .output()
         .expect("loop binary should run");
     assert!(run.status.success());
-    let before = fs::read_to_string(fixture.join(".loop/sessions/smoke001.jsonl"))
+    let before = fs::read_to_string(fixture.join(".loop/sessions/smoke-loop.jsonl"))
         .expect("session log exists");
 
     let output = loop_command()
         .current_dir(&fixture)
-        .args(["resume", "smoke001", "--emit", "jsonl"])
+        .args(["resume", "smoke-loop", "--emit", "jsonl"])
         .output()
         .expect("loop binary should run");
 
@@ -404,7 +404,7 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
     );
     assert!(output.stdout.is_empty());
     assert_eq!(
-        fs::read_to_string(fixture.join(".loop/sessions/smoke001.jsonl"))
+        fs::read_to_string(fixture.join(".loop/sessions/smoke-loop.jsonl"))
             .expect("session log exists"),
         before
     );
@@ -429,11 +429,11 @@ fn resume_partial_session_prints_human_status() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    replace_seeded_session_with_prefix(&workspace, "smoke001", &prefix);
+    replace_seeded_session_with_prefix(&workspace, "smoke-loop", &prefix);
 
     let output = loop_command()
         .current_dir(&workspace)
-        .args(["resume", "smoke001"])
+        .args(["resume", "smoke-loop"])
         .output()
         .expect("loop binary should run");
 
@@ -441,10 +441,10 @@ fn resume_partial_session_prints_human_status() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        "session smoke001 resumed\n"
+        "session smoke-loop resumed\n"
     );
     assert!(
-        fs::read_to_string(session_dir.join("smoke001.jsonl"))
+        fs::read_to_string(session_dir.join("smoke-loop.jsonl"))
             .expect("resumed log readable")
             .contains("\"event_type\":\"session.completed\"")
     );
@@ -469,11 +469,11 @@ fn failed_jsonl_resume_exits_with_failed_status() {
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    replace_seeded_session_with_prefix(&workspace, "negwrite001", &prefix);
+    replace_seeded_session_with_prefix(&workspace, "sandbox-negative-write", &prefix);
 
     let output = loop_command()
         .current_dir(&workspace)
-        .args(["resume", "negwrite001", "--emit", "jsonl"])
+        .args(["resume", "sandbox-negative-write", "--emit", "jsonl"])
         .output()
         .expect("loop binary should run");
 
@@ -589,7 +589,7 @@ fn replay_and_tail_failed_sessions_exit_with_failed_status() {
     for command in ["replay", "tail"] {
         let output = loop_command()
             .current_dir(&workspace)
-            .args([command, "negwrite001", "--emit", "jsonl"])
+            .args([command, "sandbox-negative-write", "--emit", "jsonl"])
             .output()
             .expect("loop binary should run");
 
@@ -617,7 +617,7 @@ fn failed_human_commands_report_the_terminal_reason() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     assert_eq!(
         stdout,
-        "loop sandbox-negative-write (session negwrite001) failed (write_denied): write outside declared roots denied\n"
+        "loop sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
     );
     assert!(!stdout.contains("completed"));
     assert!(
@@ -628,16 +628,16 @@ fn failed_human_commands_report_the_terminal_reason() {
     for (command, expected) in [
         (
             "replay",
-            "session negwrite001 replayed: failed (write_denied): write outside declared roots denied\n",
+            "session sandbox-negative-write replayed: failed (write_denied): write outside declared roots denied\n",
         ),
         (
             "tail",
-            "session negwrite001 tailed: failed (write_denied): write outside declared roots denied\n",
+            "session sandbox-negative-write tailed: failed (write_denied): write outside declared roots denied\n",
         ),
     ] {
         let output = loop_command()
             .current_dir(&workspace)
-            .args([command, "negwrite001"])
+            .args([command, "sandbox-negative-write"])
             .output()
             .expect("loop binary should run");
 

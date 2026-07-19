@@ -79,7 +79,14 @@ struct ContextManifest {
 #[derive(Clone)]
 struct ContextManifestCheckpoint {
     manifest: ContextManifest,
+    objects: Vec<ContextObject>,
     ordinal: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ContextObject {
+    bytes: Vec<u8>,
+    digest: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,6 +94,7 @@ struct CompiledContext {
     cache_prefix_bytes: usize,
     context_hash: String,
     manifest: ContextManifest,
+    objects: Vec<ContextObject>,
     provider_bytes: Vec<u8>,
 }
 
@@ -145,6 +153,19 @@ fn compile_context(
     ) {
         included_sources.push(context_source_manifest_value(source, bytes));
     }
+    let mut objects = tier_zero_bytes
+        .iter()
+        .map(|bytes| ContextObject {
+            bytes: bytes.clone(),
+            digest: sha256_hex(bytes),
+        })
+        .collect::<Vec<_>>();
+    if let Some(bytes) = recent_bytes.as_ref().filter(|_| include_recent) {
+        objects.push(ContextObject {
+            bytes: bytes.clone(),
+            digest: sha256_hex(bytes),
+        });
+    }
     let manifest_value = serde_json::json!({
         "cache_boundaries": [{
             "after_source_id": tier_zero[CACHE_STABLE_TIER_ZERO_SOURCES - 1].source_id,
@@ -173,6 +194,7 @@ fn compile_context(
         cache_prefix_bytes,
         context_hash,
         manifest: ContextManifest { line },
+        objects,
         provider_bytes,
     })
 }
@@ -226,8 +248,10 @@ fn bounded_context_array_source(
 }
 
 fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_json::Value {
+    let digest = sha256_hex(bytes);
     serde_json::json!({
-        "projection_hash": sha256_hex(bytes),
+        "object_uri": format!("session-object:sha256:{digest}"),
+        "projection_hash": digest,
         "source_id": source.source_id,
     })
 }
@@ -241,6 +265,13 @@ fn sha256_hex(bytes: &[u8]) -> String {
         encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
     encoded
+}
+
+fn is_lowercase_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[derive(Default)]
@@ -457,11 +488,18 @@ fn read_recorded_context_manifest_signature(
             path.display()
         ))
     })?;
-    read_anchored_context_manifest_signature(&logs, session_id, completed_turns)
+    let sessions = open_runtime_dir(workspace, "sessions")?.ok_or_else(|| {
+        RuntimeError::Protocol(format!(
+            "{} session object store is missing",
+            workspace.join(LOCAL_SESSION_DIR).display()
+        ))
+    })?;
+    read_anchored_context_manifest_signature(&logs, &sessions, session_id, completed_turns)
 }
 
 fn read_anchored_context_manifest_signature(
     logs: &AnchoredDir,
+    sessions: &AnchoredDir,
     session_id: &str,
     completed_turns: usize,
 ) -> Result<RuntimeStreamSignature, RuntimeError> {
@@ -478,7 +516,8 @@ fn read_anchored_context_manifest_signature(
     }
     let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
     let mut line_number = 0usize;
-    for_each_anchored_file_line_with_limit(&path, MAX_SESSION_LOG_BYTES, |line| {
+    let mut verified_objects = BTreeSet::new();
+    for_each_segmented_jsonl_line(&path, MAX_SESSION_EVENT_BYTES, |line| {
         line_number = line_number.saturating_add(1);
         if !line.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
@@ -524,6 +563,12 @@ fn read_anchored_context_manifest_signature(
                 path.diagnostic_path().display()
             )));
         }
+        verify_context_manifest_objects(
+            sessions,
+            session_id,
+            &value,
+            &mut verified_objects,
+        )?;
         recorded.push(canonical.as_bytes());
         Ok(())
     })?;
@@ -537,4 +582,60 @@ fn read_anchored_context_manifest_signature(
         )));
     }
     Ok(recorded)
+}
+
+fn verify_context_manifest_objects(
+    sessions: &AnchoredDir,
+    session_id: &str,
+    manifest: &serde_json::Value,
+    verified: &mut BTreeSet<String>,
+) -> Result<(), RuntimeError> {
+    let sources = manifest
+        .get("ordered_sources")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| {
+            RuntimeError::Protocol("context manifest ordered_sources is missing".to_owned())
+        })?;
+    for source in sources {
+        let digest = source
+            .get("object_uri")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|uri| uri.strip_prefix("session-object:sha256:"))
+            .ok_or_else(|| {
+                RuntimeError::Protocol("context manifest object_uri is invalid".to_owned())
+            })?;
+        if !is_lowercase_sha256_hex(digest) {
+            return Err(RuntimeError::Protocol(
+                "context manifest object_uri is invalid".to_owned(),
+            ));
+        }
+        if source
+            .get("projection_hash")
+            .and_then(serde_json::Value::as_str)
+            != Some(digest)
+        {
+            return Err(RuntimeError::Protocol(
+                "context manifest projection_hash does not match object_uri".to_owned(),
+            ));
+        }
+        if verified.contains(digest) {
+            continue;
+        }
+        let path = sessions.file(format!("{session_id}.object.sha256-{digest}"));
+        let bytes =
+            read_anchored_file_with_limit(&path, MAX_SESSION_OBJECT_BYTES).map_err(|err| {
+                RuntimeError::Protocol(format!(
+                    "{} referenced context object is unavailable: {err}",
+                    path.diagnostic_path().display()
+                ))
+            })?;
+        if sha256_hex(&bytes) != digest {
+            return Err(RuntimeError::Protocol(format!(
+                "{} referenced context object hash does not match",
+                path.diagnostic_path().display()
+            )));
+        }
+        verified.insert(digest.to_owned());
+    }
+    Ok(())
 }

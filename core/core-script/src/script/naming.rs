@@ -148,6 +148,15 @@ pub enum RegistryError {
         /// Maximum allowed nesting depth.
         max: usize,
     },
+    /// One Loop declares more direct runtime subloop invocations than allowed.
+    LoopFanoutExceeded {
+        /// Loop whose direct subloop list exceeded the cap.
+        loop_id: String,
+        /// Observed direct subloop invocation count.
+        count: usize,
+        /// Maximum allowed direct subloop invocation count.
+        max: usize,
+    },
     /// Semantic validation failed.
     Semantic(SemanticValidationError),
     /// Canonical JSON serialization failed.
@@ -208,6 +217,14 @@ impl fmt::Display for RegistryError {
                 f,
                 "loop nesting depth {depth} for {loop_id} exceeds max {max}"
             ),
+            Self::LoopFanoutExceeded {
+                loop_id,
+                count,
+                max,
+            } => write!(
+                f,
+                "loop subloop fan-out {count} for {loop_id} exceeds max {max}"
+            ),
             Self::Semantic(err) => write!(f, "{err}"),
             Self::CanonicalJson(err) => {
                 write!(f, "failed to serialize canonical registry JSON: {err}")
@@ -235,7 +252,8 @@ impl std::error::Error for RegistryError {
             | Self::AmbiguousReference { .. }
             | Self::MissingReference { .. }
             | Self::LoopCycle { .. }
-            | Self::LoopDepthExceeded { .. } => None,
+            | Self::LoopDepthExceeded { .. }
+            | Self::LoopFanoutExceeded { .. } => None,
         }
     }
 }

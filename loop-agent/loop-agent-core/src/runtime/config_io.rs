@@ -5,19 +5,13 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
             .map_err(|error| RuntimeError::Usage(error.to_string()))?;
     let stub_model_fixture_profile =
         workspace_stub_model_fixture_profile(&source.fixture_profile, &source.stub_model)?;
-    let registry_root = PathBuf::from(source.registry_root);
-    if registry_root.components().any(|component| {
-        matches!(
-            component,
-            std::path::Component::ParentDir
-                | std::path::Component::Prefix(_)
-                | std::path::Component::RootDir
-        )
-    }) {
-        return Err(RuntimeError::Usage(
-            ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
-        ));
-    }
+    let registry_root = core_script::normalize_safe_relative_path(&source.registry_root)
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            RuntimeError::Usage(
+                ".loop/config.yaml registry_root must stay within the workspace".to_owned(),
+            )
+        })?;
     let event_clock = if stub_model_fixture_profile {
         EventClock::fixed_fixture()
     } else {

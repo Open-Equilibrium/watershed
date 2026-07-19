@@ -5,11 +5,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import validate_codex_harness as validator
+
+sys.path.insert(0, str(ROOT / ".codex" / "hooks"))
+import stop_closeout_check as stop_hook
 
 
 def write_valid_harness(root: Path) -> None:
@@ -261,6 +265,21 @@ class CodexHarnessValidatorTest(unittest.TestCase):
 
                 self.assertEqual(0, result.returncode)
                 self.assertIn('"permissionDecision": "deny"', result.stdout)
+
+    def test_stop_hook_reports_only_ten_conflict_markers(self) -> None:
+        stdout = "\n".join(
+            [f"file-{index}: leftover conflict marker" for index in range(12)]
+            + ["file: trailing whitespace"]
+        )
+        with mock.patch.object(
+            stop_hook.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 2, stdout, "ignored"),
+        ) as run:
+            self.assertEqual(10, len(stop_hook.conflict_diagnostics()))
+
+        self.assertIn("diff", run.call_args.args[0])
+        self.assertIn("--check", run.call_args.args[0])
 
 
 if __name__ == "__main__":

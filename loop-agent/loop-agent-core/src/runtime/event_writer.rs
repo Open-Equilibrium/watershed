@@ -164,7 +164,11 @@ impl<'a> SerialSessionWriter<'a> {
             notifier,
             timings,
         } = start;
-        let context_writer = ContextManifestWriter::open(&context_path)?;
+        let context_writer = ContextManifestWriter::open_for_session(
+            &context_path,
+            path.parent.clone(),
+            &session_id,
+        )?;
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()
             .name(format!("loop-event-writer-{session_id}"))
@@ -503,29 +507,49 @@ struct ContextManifestWriter {
     byte_count: u64,
     last_manifest: Option<String>,
     manifest_count: usize,
+    object_writer: Option<SessionObjectWriter>,
 }
 
 impl ContextManifestWriter {
+    #[cfg(test)]
     fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
+        Self::open_with_object_writer(path, None)
+    }
+
+    fn open_for_session(
+        path: &AnchoredFile,
+        object_parent: AnchoredDir,
+        session_id: &str,
+    ) -> Result<Self, RuntimeError> {
+        Self::open_with_object_writer(
+            path,
+            Some(SessionObjectWriter::open(object_parent, session_id)?),
+        )
+    }
+
+    fn open_with_object_writer(
+        path: &AnchoredFile,
+        object_writer: Option<SessionObjectWriter>,
+    ) -> Result<Self, RuntimeError> {
         let mut last_manifest = None;
         let mut manifest_count = 0usize;
-        let byte_count =
-            for_each_anchored_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
-                if !line.ends_with('\n') {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} context manifest stream must end with LF",
-                        path.diagnostic_path().display()
-                    )));
-                }
-                last_manifest = Some(line.to_owned());
-                manifest_count = manifest_count.saturating_add(1);
-                Ok(())
-            })?;
+        let byte_count = for_each_segmented_jsonl_line(path, MAX_SESSION_EVENT_BYTES, |line| {
+            if !line.ends_with('\n') {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} context manifest stream must end with LF",
+                    path.diagnostic_path().display()
+                )));
+            }
+            last_manifest = Some(line.to_owned());
+            manifest_count = manifest_count.saturating_add(1);
+            Ok(())
+        })?;
         Ok(Self {
             appender: SessionLogAppender::open(path)?,
             byte_count,
             last_manifest,
             manifest_count,
+            object_writer,
         })
     }
 
@@ -535,6 +559,9 @@ impl ContextManifestWriter {
         checkpoint: &ContextManifestCheckpoint,
     ) -> Result<(), RuntimeError> {
         let path = path.diagnostic_path();
+        if let Some(object_writer) = self.object_writer.as_mut() {
+            object_writer.persist_all(&checkpoint.objects)?;
+        }
         if checkpoint.ordinal == self.manifest_count {
             if self.last_manifest.as_deref() == Some(&checkpoint.manifest.line) {
                 return self.appender.sync(path);
@@ -579,6 +606,142 @@ impl ContextManifestWriter {
     }
 }
 
+struct SessionObjectWriter {
+    accounted_bytes: u64,
+    object_parent: AnchoredDir,
+    seen: BTreeSet<String>,
+    session_id: String,
+    verified: BTreeSet<String>,
+}
+
+impl SessionObjectWriter {
+    fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
+        let prefix = format!("{session_id}.object.sha256-");
+        let mut accounted_bytes = 0u64;
+        let mut seen = BTreeSet::new();
+        for entry in object_parent
+            .dir
+            .entries()
+            .map_err(|source| path_io_error(&object_parent.path, source))?
+        {
+            let entry = entry.map_err(|source| path_io_error(&object_parent.path, source))?;
+            let name = entry.file_name();
+            let Some((name, digest)) = name
+                .to_str()
+                .and_then(|name| name.strip_prefix(&prefix).map(|digest| (name, digest)))
+            else {
+                continue;
+            };
+            if !is_lowercase_sha256_hex(digest) {
+                continue;
+            }
+            let path = object_parent.file(name);
+            ensure_anchored_real_file(&path)?;
+            let bytes = path.metadata()?.len();
+            if bytes > MAX_SESSION_OBJECT_BYTES {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} session object is {bytes} bytes; max {MAX_SESSION_OBJECT_BYTES}",
+                    path.diagnostic_path().display()
+                )));
+            }
+            accounted_bytes = accounted_bytes.saturating_add(bytes);
+            if accounted_bytes > MAX_SESSION_OBJECT_TOTAL_BYTES {
+                return Err(RuntimeError::Protocol(format!(
+                    "session bundle object data size {accounted_bytes} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
+                )));
+            }
+            seen.insert(digest.to_owned());
+        }
+        Ok(Self {
+            accounted_bytes,
+            object_parent,
+            seen,
+            session_id: session_id.to_owned(),
+            verified: BTreeSet::new(),
+        })
+    }
+
+    fn persist_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
+        for object in objects {
+            self.persist(object)?;
+        }
+        Ok(())
+    }
+
+    fn persist(&mut self, object: &ContextObject) -> Result<(), RuntimeError> {
+        self.persist_with(object, |path, bytes| {
+            let mut file = open_anchored_session_log_append_file(path)?;
+            file.write_all(bytes)
+                .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            file.sync_all()
+                .map_err(|source| path_io_error(path.diagnostic_path(), source))
+        })
+    }
+
+    fn persist_with(
+        &mut self,
+        object: &ContextObject,
+        write_new: impl FnOnce(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
+    ) -> Result<(), RuntimeError> {
+        let object_bytes = u64::try_from(object.bytes.len()).unwrap_or(u64::MAX);
+        if object_bytes > MAX_SESSION_OBJECT_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "session object {} is {object_bytes} bytes; max {MAX_SESSION_OBJECT_BYTES}",
+                object.digest
+            )));
+        }
+        if sha256_hex(&object.bytes) != object.digest {
+            return Err(RuntimeError::Protocol(format!(
+                "session object {} does not match its content hash",
+                object.digest
+            )));
+        }
+        if self.verified.contains(&object.digest) {
+            return Ok(());
+        }
+        let newly_accounted = !self.seen.contains(&object.digest);
+        let total = if newly_accounted {
+            self.accounted_bytes.saturating_add(object_bytes)
+        } else {
+            self.accounted_bytes
+        };
+        if total > MAX_SESSION_OBJECT_TOTAL_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "session bundle object data size {total} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
+            )));
+        }
+        let path = self.object_parent.file(format!(
+            "{}.object.sha256-{}",
+            self.session_id, object.digest
+        ));
+        match path.metadata() {
+            Ok(_) => {
+                let existing = read_anchored_file_with_limit(&path, MAX_SESSION_OBJECT_BYTES)?;
+                if existing != object.bytes {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} does not match referenced session object bytes",
+                        path.diagnostic_path().display()
+                    )));
+                }
+            }
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                reserve_new_anchored_file(&path)?;
+                if let Err(error) = write_new(&path, &object.bytes) {
+                    let _ = path.remove();
+                    return Err(error);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+        if newly_accounted {
+            self.seen.insert(object.digest.clone());
+            self.accounted_bytes = total;
+        }
+        self.verified.insert(object.digest.clone());
+        Ok(())
+    }
+}
+
 fn ensure_context_manifest_growth_within_limit(
     path: &Path,
     current_bytes: impl TryInto<u64>,
@@ -587,9 +750,9 @@ fn ensure_context_manifest_growth_within_limit(
     let current_bytes = current_bytes.try_into().unwrap_or(u64::MAX);
     let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     let total = current_bytes.saturating_add(appended_bytes);
-    if total > MAX_SESSION_LOG_BYTES {
+    if total > MAX_SESSION_EVENT_BYTES {
         return Err(RuntimeError::Protocol(format!(
-            "{} context manifest size {total} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+            "{} context manifest size {total} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
             path.display()
         )));
     }
@@ -955,26 +1118,98 @@ fn is_event_sync_checkpoint(event_type: &EventType) -> bool {
 }
 
 struct SessionLogAppender {
+    base_path: AnchoredFile,
+    current_bytes: u64,
+    current_ordinal: u64,
     file: fs::File,
+    total_bytes: u64,
 }
 
 impl SessionLogAppender {
     fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
+        let segments = segmented_jsonl_files(path)?;
+        let mut total_bytes = 0u64;
+        for segment in &segments {
+            let bytes = segment.metadata()?.len();
+            if bytes > MAX_SESSION_LOG_BYTES {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} segment size {bytes} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+                    segment.diagnostic_path().display()
+                )));
+            }
+            total_bytes = total_bytes.saturating_add(bytes);
+        }
+        if total_bytes > MAX_SESSION_EVENT_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segmented JSONL size {total_bytes} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
+                path.diagnostic_path().display()
+            )));
+        }
+        let current_ordinal = u64::try_from(segments.len()).unwrap_or(u64::MAX);
+        let current_path = segments
+            .last()
+            .expect("segmented streams contain their base file");
+        let current_bytes = current_path.metadata()?.len();
         Ok(Self {
-            file: open_anchored_session_log_append_file(path)?,
+            base_path: path.clone(),
+            current_bytes,
+            current_ordinal,
+            file: open_anchored_session_log_append_file(current_path)?,
+            total_bytes,
         })
     }
 
-    fn len(&self, path: &Path) -> Result<u64, RuntimeError> {
-        self.file
-            .metadata()
-            .map(|metadata| metadata.len())
-            .map_err(|source| path_io_error(path, source))
+    fn len(&self, _path: &Path) -> Result<u64, RuntimeError> {
+        Ok(self.total_bytes)
+    }
+
+    fn current_path(&self) -> Result<AnchoredFile, RuntimeError> {
+        segmented_jsonl_path(&self.base_path, self.current_ordinal)
+    }
+
+    fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
+        let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
+        if appended_bytes > MAX_SESSION_LOG_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} JSONL record is {appended_bytes} bytes; max segment size is {MAX_SESSION_LOG_BYTES}",
+                self.base_path.diagnostic_path().display()
+            )));
+        }
+        let total = self.total_bytes.saturating_add(appended_bytes);
+        if total > MAX_SESSION_EVENT_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segmented JSONL size {total} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
+                self.base_path.diagnostic_path().display()
+            )));
+        }
+        if self.current_bytes == 0
+            || self.current_bytes.saturating_add(appended_bytes) <= MAX_SESSION_LOG_BYTES
+        {
+            return Ok(());
+        }
+        if self.current_ordinal >= MAX_SESSION_LOG_SEGMENTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segment count exceeds max {MAX_SESSION_LOG_SEGMENTS}",
+                self.base_path.diagnostic_path().display()
+            )));
+        }
+        let current_path = self.current_path()?;
+        self.file.sync_all().map_err(|source| RuntimeError::Io {
+            path: current_path.diagnostic_path().to_owned(),
+            source,
+        })?;
+        let next_ordinal = self.current_ordinal.saturating_add(1);
+        let next = segmented_jsonl_path(&self.base_path, next_ordinal)?;
+        reserve_new_anchored_file(&next)?;
+        self.file = open_anchored_session_log_append_file(&next)?;
+        self.current_ordinal = next_ordinal;
+        self.current_bytes = 0;
+        Ok(())
     }
 
     fn append_native_batch_with<F, C>(
         &mut self,
-        path: &Path,
+        _path: &Path,
         events: &[&[u8]],
         write: F,
         cleanup: C,
@@ -983,6 +1218,10 @@ impl SessionLogAppender {
         F: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
         C: FnOnce(&mut fs::File, u64) -> io::Result<()>,
     {
+        let current_path = self
+            .current_path()
+            .map_err(BatchAppendFailure::none_committed)?;
+        let path = current_path.diagnostic_path();
         validate_open_session_log_append_file(path, &self.file)
             .map_err(BatchAppendFailure::none_committed)?;
 
@@ -1046,25 +1285,65 @@ impl SessionLogAppender {
 
 impl EventLogAppender for SessionLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        self.append_native_batch_with(
-            path,
-            &[bytes],
-            |file, bytes| file.write_all(bytes),
-            cleanup_incomplete_suffix,
-        )
-        .map_err(|failure| failure.error)
+        self.append_batch(path, &[bytes])
+            .map_err(|failure| failure.error)
     }
 
     fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
-        self.append_native_batch_with(
-            path,
-            events,
-            |file, bytes| file.write_all(bytes),
-            cleanup_incomplete_suffix,
-        )
+        let mut committed_events = 0;
+        while committed_events < events.len() {
+            self.rotate_before(events[committed_events].len())
+                .map_err(|error| BatchAppendFailure {
+                    committed_events,
+                    error,
+                })?;
+
+            let available_segment_bytes = MAX_SESSION_LOG_BYTES - self.current_bytes;
+            let mut batch_bytes = 0u64;
+            let mut batch_end = committed_events;
+            while batch_end < events.len() {
+                let event_bytes =
+                    u64::try_from(events[batch_end].len()).unwrap_or(u64::MAX);
+                let candidate_batch_bytes = batch_bytes.saturating_add(event_bytes);
+                if candidate_batch_bytes > available_segment_bytes
+                    || self.total_bytes.saturating_add(candidate_batch_bytes)
+                        > MAX_SESSION_EVENT_BYTES
+                {
+                    break;
+                }
+                batch_bytes = candidate_batch_bytes;
+                batch_end += 1;
+            }
+
+            debug_assert!(batch_end > committed_events);
+            let batch = &events[committed_events..batch_end];
+            if let Err(failure) = self.append_native_batch_with(
+                path,
+                batch,
+                |file, bytes| file.write_all(bytes),
+                cleanup_incomplete_suffix,
+            ) {
+                let retained_bytes = batch[..failure.committed_events]
+                    .iter()
+                    .map(|event| u64::try_from(event.len()).unwrap_or(u64::MAX))
+                    .fold(0u64, u64::saturating_add);
+                self.current_bytes = self.current_bytes.saturating_add(retained_bytes);
+                self.total_bytes = self.total_bytes.saturating_add(retained_bytes);
+                return Err(BatchAppendFailure {
+                    committed_events: committed_events + failure.committed_events,
+                    error: failure.error,
+                });
+            }
+            self.current_bytes = self.current_bytes.saturating_add(batch_bytes);
+            self.total_bytes = self.total_bytes.saturating_add(batch_bytes);
+            committed_events = batch_end;
+        }
+        Ok(())
     }
 
-    fn sync(&mut self, path: &Path) -> Result<(), RuntimeError> {
+    fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
+        let current = self.current_path()?;
+        let path = current.diagnostic_path();
         validate_open_session_log_append_file(path, &self.file)?;
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: path.to_owned(),

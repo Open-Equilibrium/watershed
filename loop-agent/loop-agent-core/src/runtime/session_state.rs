@@ -105,14 +105,17 @@ fn resume_session_internal(
     })?;
     verify_resume_definition_metadata_values(session_id, &metadata, &registry, loop_block)?;
     let policy = core_policy::compile_policy_artifact(
-        &loop_block.identity.id,
         &registry,
         &loop_id,
         runtime_policy_target(),
     )?;
     let clock = resume_event_clock(&config, inspection.clock)?;
-    let recorded_context =
-        read_anchored_context_manifest_signature(&logs, session_id, inspection.completed_turns)?;
+    let recorded_context = read_anchored_context_manifest_signature(
+        &logs,
+        &sessions,
+        session_id,
+        inspection.completed_turns,
+    )?;
     let mut prefix_sink =
         RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
     let planned_runtime = execute_loop_with_sink(
@@ -146,6 +149,10 @@ fn resume_session_internal(
         &prefix_sink,
         &planned_runtime,
         loop_block,
+    )?;
+    let combined_event_count = checked_resume_event_count(
+        planned_runtime.events.record_count,
+        resume_prefix.resume_marker_count,
     )?;
     if let Some(tool_id) = inspection.validation.tool_without_progress() {
         return Err(RuntimeError::Protocol(format!(
@@ -238,13 +245,8 @@ fn resume_session_internal(
             path.diagnostic_path().display()
         )));
     }
-    let combined_event_count = planned_runtime
-        .events
-        .record_count
-        .saturating_add(resume_prefix.resume_marker_count)
-        .saturating_add(1);
     let stdout = if capture_jsonl {
-        let stream = read_anchored_to_string_with_limit(&path, MAX_SESSION_LOG_BYTES)?;
+        let stream = read_segmented_jsonl(&path, MAX_SESSION_EVENT_BYTES)?;
         let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
         canonical_event_stream(&events[prior_event_count..])?
     } else {
@@ -340,13 +342,12 @@ impl ResumeInspectionBuilder {
             self.root_loop_definition_id =
                 Some(lifecycle_payload_string(event, "loop_definition_id"));
         }
+        self.prefix_metadata_valid &= event.event_id == format!("evt-{:03}", event.sequence)
+            && event.timestamp == clock.timestamp(event.sequence);
         if event.event_type == EventType::SessionResumed {
             self.resume_marker_count = self.resume_marker_count.saturating_add(1);
             return Ok(());
         }
-
-        self.prefix_metadata_valid &= event.event_id == format!("evt-{:03}", event.sequence)
-            && event.timestamp == clock.timestamp(event.sequence);
         let normalized_sequence = event
             .sequence
             .checked_sub(self.resume_marker_count as u64)
@@ -375,7 +376,7 @@ fn inspect_resume_session(
 ) -> Result<ResumeSessionInspection, RuntimeError> {
     let mut validation = SessionAppendValidationState::empty(session_id);
     let mut inspection = ResumeInspectionBuilder::new();
-    for_each_anchored_file_line_with_limit(path, MAX_SESSION_LOG_BYTES, |line| {
+    for_each_segmented_jsonl_line(path, MAX_SESSION_EVENT_BYTES, |line| {
         validation.validate_appended_with(path.diagnostic_path(), line, |event| {
             inspection.observe(event)
         })
@@ -421,6 +422,19 @@ fn validate_resume_replay_prefix(
         planned_event_count: inspection.planned_event_count,
         resume_marker_count: inspection.resume_marker_count,
     })
+}
+
+fn checked_resume_event_count(
+    planned_event_count: usize,
+    resume_marker_count: usize,
+) -> Result<usize, RuntimeError> {
+    let total = (planned_event_count as u128) + (resume_marker_count as u128) + 1;
+    if total > u128::from(MAX_LOOP_EVENTS) {
+        return Err(RuntimeError::Protocol(format!(
+            "runtime event budget exceeded: resume requires {total} events; max {MAX_LOOP_EVENTS}"
+        )));
+    }
+    Ok(usize::try_from(total).expect("event limit fits usize"))
 }
 
 fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock) -> RuntimeError {
@@ -473,15 +487,18 @@ fn ensure_anchored_session_log_growth_within_limit(
     path: &AnchoredFile,
     appended_bytes: usize,
 ) -> Result<u64, RuntimeError> {
-    let (_, metadata) = open_anchored_file_for_read(path)?;
-    let existing_bytes = metadata.len();
+    let existing_bytes = segmented_jsonl_files(path)?
+        .into_iter()
+        .try_fold(0u64, |total, segment| {
+            Ok::<_, RuntimeError>(total.saturating_add(segment.metadata()?.len()))
+        })?;
     let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
     let total = existing_bytes.saturating_add(appended_bytes);
-    if total > MAX_SESSION_LOG_BYTES {
+    if total > MAX_SESSION_EVENT_BYTES {
         return Err(RuntimeError::Protocol(format!(
             "{} session log size {total} bytes exceeds max {}",
             path.diagnostic_path().display(),
-            MAX_SESSION_LOG_BYTES
+            MAX_SESSION_EVENT_BYTES
         )));
     }
     Ok(existing_bytes)
@@ -534,7 +551,7 @@ fn read_existing_session(
     })?;
     let file = sessions.file(format!("{session_id}.jsonl"));
     let path = file.diagnostic_path().to_owned();
-    let stream = read_anchored_to_string_with_limit(&file, MAX_SESSION_LOG_BYTES)?;
+    let stream = read_segmented_jsonl(&file, MAX_SESSION_EVENT_BYTES)?;
     let events = validate_session_log_text(&path, session_id, &stream)?;
     Ok(RunOutput {
         event_count: events.len(),
@@ -562,9 +579,9 @@ struct SessionReservation {
 impl SessionReservation {
     fn rollback(&self) {
         if !self.committed.get() {
-            let _ = self.session_path.remove();
+            remove_segmented_jsonl(&self.session_path);
             let _ = self.log_path.remove();
-            let _ = self.context_path.remove();
+            remove_segmented_jsonl(&self.context_path);
         }
         let _ = self.lock_path.remove();
         self.cleanup_on_drop.set(false);
@@ -765,16 +782,26 @@ fn reserve_session_log_with_publish_observer(
     let lock_path = dirs.sessions.file(format!("{session_id}.lock"));
     ensure_anchored_session_file_available(&session_path, session_id)?;
     reserve_anchored_session_lock_file(&lock_path, session_id)?;
+    if let Err(err) = ensure_session_bundle_namespace_available(
+        &dirs,
+        &session_path,
+        &log_path,
+        &context_path,
+        session_id,
+    ) {
+        let _ = lock_path.remove();
+        return Err(err);
+    }
     if let Err(err) = reserve_anchored_session_file(&session_path, session_id, after_publish) {
         let _ = lock_path.remove();
         return Err(err);
     }
-    if let Err(err) = reserve_new_anchored_file(&log_path) {
+    if let Err(err) = reserve_anchored_bundle_file(&log_path, session_id) {
         let _ = session_path.remove();
         let _ = lock_path.remove();
         return Err(err);
     }
-    if let Err(err) = reserve_new_anchored_file(&context_path) {
+    if let Err(err) = reserve_anchored_bundle_file(&context_path, session_id) {
         let _ = session_path.remove();
         let _ = log_path.remove();
         let _ = lock_path.remove();
@@ -840,6 +867,69 @@ fn reserve_anchored_session_file(
     })?;
     after_publish();
     Ok(())
+}
+
+fn ensure_session_bundle_namespace_available(
+    dirs: &RuntimeDirs,
+    session_path: &AnchoredFile,
+    log_path: &AnchoredFile,
+    context_path: &AnchoredFile,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    for path in [log_path, context_path] {
+        ensure_anchored_bundle_leaf_available(path, session_id)?;
+    }
+    for ordinal in 2..=MAX_SESSION_LOG_SEGMENTS + 1 {
+        ensure_anchored_bundle_leaf_available(
+            &segmented_jsonl_path(session_path, ordinal)?,
+            session_id,
+        )?;
+        ensure_anchored_bundle_leaf_available(
+            &segmented_jsonl_path(context_path, ordinal)?,
+            session_id,
+        )?;
+    }
+
+    let object_prefix = format!("{session_id}.object.sha256-");
+    for entry in dirs
+        .sessions
+        .dir
+        .entries()
+        .map_err(|source| path_io_error(&dirs.sessions.path, source))?
+    {
+        let entry = entry.map_err(|source| path_io_error(&dirs.sessions.path, source))?;
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with(&object_prefix))
+        {
+            return Err(RuntimeError::SessionLogExists(session_id.to_owned()));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_anchored_bundle_leaf_available(
+    path: &AnchoredFile,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    match path.metadata() {
+        Ok(_) => Err(RuntimeError::SessionLogExists(session_id.to_owned())),
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+fn reserve_anchored_bundle_file(
+    path: &AnchoredFile,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
+    reserve_new_anchored_file(path).map_err(|err| match err {
+        RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
+            RuntimeError::SessionLogExists(session_id.to_owned())
+        }
+        other => other,
+    })
 }
 
 fn ensure_anchored_session_file_available(

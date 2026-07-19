@@ -114,6 +114,7 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let mut initial = started.as_bytes().to_vec();
     initial.extend_from_slice(&completed.as_bytes()[..split]);
     fs::write(&path, initial).expect("partial stream written");
+    fs::write(session_dir.join("tailpartial001.lock"), b"").expect("session lock written");
     let mut reader = SessionEventReader::open(&workspace, "tailpartial001").expect("reader opens");
 
     let prefix = reader.read_after(0).expect("prefix reads");
@@ -133,7 +134,50 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
 }
 
 #[test]
-fn incremental_reader_recovers_atomically_after_a_malformed_append() {
+fn incremental_reader_replays_an_unprocessed_suffix_from_the_caller_cursor() {
+    let workspace = empty_workspace("tail-cursor-retry");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailcursor001.jsonl");
+    let started = session_event_line(
+        "tailcursor001",
+        "evt-cursor-started",
+        EventType::SessionStarted,
+        1,
+    );
+    let completed = session_event_line(
+        "tailcursor001",
+        "evt-cursor-completed",
+        EventType::SessionCompleted,
+        2,
+    );
+    fs::write(&path, &started).expect("initial event written");
+    let mut reader = SessionEventReader::open(&workspace, "tailcursor001").expect("reader opens");
+    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+
+    append_session_log_line(&path, &completed).expect("terminal event appended");
+    assert_eq!(
+        reader
+            .read_incremental_after(1)
+            .expect("new suffix reads")
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [2]
+    );
+    assert_eq!(
+        reader
+            .read_incremental_after(1)
+            .expect("unprocessed suffix retries from caller cursor")
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        [2]
+    );
+}
+
+#[test]
+fn incremental_reader_recovers_atomically_after_a_semantically_invalid_append() {
     let workspace = empty_workspace("tail-invalid-append-recovery");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
@@ -144,27 +188,43 @@ fn incremental_reader_recovers_atomically_after_a_malformed_append() {
         EventType::SessionStarted,
         1,
     );
-    let completed = session_event_line(
+    let progress = EventEnvelope::new(
+        "evt-recovery-progress",
+        EventType::MetricSample,
         "tailrecovery001",
-        "evt-recovery-completed",
-        EventType::SessionCompleted,
         2,
-    );
+        event_timestamp(2),
+        "loop-agent-cli",
+        serde_json::json!({"metric_name":"recovery.progress","value":1}),
+    )
+    .canonical_jsonl()
+    .expect("progress event serializes");
+    let duplicate_sequence = EventEnvelope::new(
+        "evt-recovery-duplicate",
+        EventType::MetricSample,
+        "tailrecovery001",
+        2,
+        event_timestamp(3),
+        "loop-agent-cli",
+        serde_json::json!({"metric_name":"recovery.duplicate","value":2}),
+    )
+    .canonical_jsonl()
+    .expect("duplicate event serializes canonically");
     fs::write(&path, &started).expect("initial event written");
     let mut reader = SessionEventReader::open(&workspace, "tailrecovery001").expect("reader opens");
     assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
 
-    append_session_log_line(&path, &format!("{completed}not-json\n"))
+    append_session_log_line(&path, &format!("{progress}{duplicate_sequence}"))
         .expect("mixed suffix appended");
     reader
         .read_incremental_after(1)
-        .expect_err("malformed suffix rejects atomically");
+        .expect_err("semantically invalid suffix rejects atomically");
     fs::OpenOptions::new()
         .write(true)
         .open(&path)
         .expect("session log opens for repair")
-        .set_len(u64::try_from(started.len() + completed.len()).expect("fixture length fits"))
-        .expect("malformed record removed");
+        .set_len(u64::try_from(started.len() + progress.len()).expect("fixture length fits"))
+        .expect("invalid duplicate removed");
 
     let recovered = reader
         .read_incremental_after(1)
@@ -182,6 +242,51 @@ fn incremental_reader_recovers_atomically_after_a_malformed_append() {
             .expect("processed event is not replayed")
             .is_empty()
     );
+}
+
+#[test]
+fn reader_rejects_an_incomplete_suffix_after_the_session_lock_disappears() {
+    let workspace = empty_workspace("tail-inactive-partial");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let path = session_dir.join("tailinactivepartial001.jsonl");
+    let lock_path = session_dir.join("tailinactivepartial001.lock");
+    let started = session_event_line(
+        "tailinactivepartial001",
+        "evt-inactive-partial-started",
+        EventType::SessionStarted,
+        1,
+    );
+    fs::write(&path, format!("{started}{{\"event_id\":")).expect("incomplete stream written");
+    fs::write(&lock_path, b"").expect("session lock written");
+    let mut reader =
+        SessionEventReader::open(&workspace, "tailinactivepartial001").expect("reader opens");
+    assert_eq!(
+        reader
+            .read_after(0)
+            .expect("active incomplete suffix is buffered")
+            .len(),
+        1
+    );
+
+    fs::remove_file(&lock_path).expect("session lock removed");
+    let existing_err = reader
+        .read_incremental_after(1)
+        .expect_err("existing reader rejects inactive incomplete suffix");
+    assert!(matches!(
+        existing_err,
+        RuntimeError::Protocol(message) if message.contains("incomplete final JSONL line")
+    ));
+
+    let mut fresh_reader =
+        SessionEventReader::open(&workspace, "tailinactivepartial001").expect("fresh reader opens");
+    let fresh_err = fresh_reader
+        .read_after(0)
+        .expect_err("fresh reader rejects inactive incomplete suffix");
+    assert!(matches!(
+        fresh_err,
+        RuntimeError::Protocol(message) if message.contains("incomplete final JSONL line")
+    ));
 }
 
 #[test]

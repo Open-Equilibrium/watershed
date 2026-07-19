@@ -628,7 +628,7 @@ fn ensure_anchored_writable_regular_leaf(path: &AnchoredFile) -> Result<bool, Ru
             ),
         )),
         Ok(metadata) if metadata.is_file() => {
-            let (file, metadata) = open_anchored_file_for_read(path)?;
+            let (file, metadata) = open_anchored_real_file_for_read(path)?;
             if let Err(error) =
                 ensure_not_hardlinked_open_file(path.diagnostic_path(), &file, &metadata)
             {

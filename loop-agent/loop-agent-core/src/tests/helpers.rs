@@ -144,7 +144,6 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
         .count();
     let config = load_workspace_config(workspace).expect("workspace config loads");
     let policy = core_policy::compile_policy_artifact(
-        loop_ref,
         &registry,
         loop_ref,
         runtime_policy_target(),
@@ -501,9 +500,8 @@ fn fixture_runtime_policy(
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
     let workspace = fixture_dir(fixture);
     let registry = load_test_registry(&workspace, loop_id);
-    let policy =
-        core_policy::compile_policy_artifact(loop_id, &registry, loop_id, runtime_policy_target())
-            .expect("fixture policy compiles");
+    let policy = core_policy::compile_policy_artifact(&registry, loop_id, runtime_policy_target())
+        .expect("fixture policy compiles");
     (registry, policy)
 }
 

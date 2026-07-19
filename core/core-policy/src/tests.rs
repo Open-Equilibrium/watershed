@@ -32,7 +32,7 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
             serde_json::from_str(&expected).expect("expected policy fixture parses");
 
         for target in POLICY_TARGETS {
-            let artifact = compile_policy_artifact(fixture, &registry, fixture, target)
+            let artifact = compile_policy_artifact(&registry, fixture, target)
                 .expect("policy artifact compiles");
             let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
             let mut expected_artifact = expected_artifact.clone();
@@ -55,7 +55,6 @@ fn policy_compiler_reports_a_missing_root_loop() {
     let registry = fixture_registry("smoke-loop", "smoke-loop");
 
     let err = compile_policy_artifact(
-        "smoke-loop",
         &registry,
         "missing-loop",
         PolicyTarget::LinuxLandlockSeccomp,
@@ -106,13 +105,8 @@ fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
         };
     });
 
-    let err = compile_policy_artifact(
-        "smoke-loop",
-        &registry,
-        "smoke-loop",
-        PolicyTarget::LinuxLandlockSeccomp,
-    )
-    .expect_err("network allowlist is rejected");
+    let err = compile_policy_artifact(&registry, "smoke-loop", PolicyTarget::LinuxLandlockSeccomp)
+        .expect_err("network allowlist is rejected");
 
     assert!(matches!(
         err,
@@ -134,13 +128,8 @@ fn policy_compiler_preserves_macos_network_allowlists() {
         };
     });
 
-    let artifact = compile_policy_artifact(
-        "smoke-loop",
-        &registry,
-        "smoke-loop",
-        PolicyTarget::MacosSeatbelt,
-    )
-    .expect("macOS policy artifacts may carry reviewed CIDR allowlists");
+    let artifact = compile_policy_artifact(&registry, "smoke-loop", PolicyTarget::MacosSeatbelt)
+        .expect("macOS policy artifacts may carry reviewed CIDR allowlists");
 
     assert_eq!(artifact.target, PolicyTarget::MacosSeatbelt);
     assert_eq!(artifact.commands[0].network.default, NetworkDefault::Deny);
@@ -164,13 +153,8 @@ fn policy_compiler_rejects_unknown_predefined_commands() {
         };
     });
 
-    let err = compile_policy_artifact(
-        "smoke-loop",
-        &registry,
-        "smoke-loop",
-        PolicyTarget::LinuxLandlockSeccomp,
-    )
-    .expect_err("unknown predefined command must fail closed");
+    let err = compile_policy_artifact(&registry, "smoke-loop", PolicyTarget::LinuxLandlockSeccomp)
+        .expect_err("unknown predefined command must fail closed");
 
     assert!(err.to_string().contains("unknown trusted command"), "{err}");
 }
@@ -310,6 +294,27 @@ fn policy_artifact_rejects_mismatched_command_shapes() {
         err.to_string(),
         "predefined-command tool read-file command_id \"1-agent-read\" must match ^[a-z][a-z0-9_-]{0,63}$"
     );
+
+    for (command_id, executable, expected) in [
+        (
+            "agent-custom",
+            "registry:agent-custom",
+            "predefined-command tool read-file references unknown trusted command \"agent-custom\"",
+        ),
+        (
+            "agent-read",
+            "registry:agent-echo",
+            "predefined-command tool read-file executable must be registry:agent-read",
+        ),
+    ] {
+        let mut artifact = valid_policy_artifact("read-file");
+        artifact.commands[0].command_id = command_id.to_owned();
+        artifact.commands[0].executable = executable.to_owned();
+        let err = artifact
+            .validate()
+            .expect_err("invalid predefined command binding must fail validation");
+        assert_eq!(err.to_string(), expected);
+    }
 
     let mut own_script_command_id = own_script_policy_artifact("write-summary");
     own_script_command_id.commands[0].command_id = "script:other-tool".to_owned();
@@ -564,14 +569,9 @@ fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
         assert_attempt_shape(kind, attempt);
 
         for target in POLICY_TARGETS {
-            let artifact = compile_policy_artifact(
-                &expected.fixture_name,
-                &registry,
-                &expected.fixture_name,
-                target.clone(),
-            )
-            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            assert_eq!(artifact.fixture_name, expected.fixture_name);
+            let artifact =
+                compile_policy_artifact(&registry, &expected.fixture_name, target.clone())
+                    .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
             assert_eq!(artifact.source_loop_definition_id, expected.fixture_name);
             assert_eq!(artifact.target, target);
             assert_attempt_denied(&artifact, attempt);
@@ -958,7 +958,6 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
                 vec!["workspace/b", "workspace/a"],
             ),
         ],
-        fixture_name: "sort-contract".to_owned(),
         phase_scope: vec![
             PhaseScope {
                 phase_id: "phase-z".to_owned(),
@@ -1121,7 +1120,6 @@ fn policy_artifact_with_network_allow(cidr: &str, port: u16) -> PolicyArtifact {
 fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
     PolicyArtifact {
         commands: vec![valid_command_policy(tool_id)],
-        fixture_name: format!("{tool_id}-fixture"),
         phase_scope: vec![PhaseScope {
             phase_id: "inspect".to_owned(),
             tool_ids: vec![tool_id.to_owned()],
@@ -1138,6 +1136,8 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
 
 fn valid_command_policy(tool_id: &str) -> CommandPolicy {
     let mut command = command_policy(tool_id, vec!["a"], vec!["workspace"]);
+    command.command_id = "agent-echo".to_owned();
+    command.executable = "registry:agent-echo".to_owned();
     command.filesystem.write_roots = vec!["workspace".to_owned()];
     command.filesystem.protected_paths = DEFAULT_PROTECTED_PATHS
         .iter()

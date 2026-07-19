@@ -7,8 +7,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
-/// Maximum allowed recursive loop nesting depth.
-pub const MAX_LOOP_NESTING_DEPTH: usize = 64;
+/// Maximum allowed recursive loop nesting depth, counting the root as depth one.
+pub const MAX_LOOP_NESTING_DEPTH: usize = 16;
+/// Maximum direct runtime subloop invocations declared by one Loop.
+pub const MAX_LOOP_FANOUT: usize = 32;
 /// Maximum size for one registry YAML file.
 pub const MAX_REGISTRY_FILE_BYTES: u64 = 128 * 1024;
 /// Maximum source bytes retained by one top-level Loop and its dependency closure.

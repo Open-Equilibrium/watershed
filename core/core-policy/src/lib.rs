@@ -74,8 +74,6 @@ pub fn is_trusted_predefined_command_id(command_id: &str) -> bool {
 pub struct PolicyArtifact {
     /// Command policies keyed by tool id in canonical output.
     pub commands: Vec<CommandPolicy>,
-    /// Fixture or workspace profile name that produced the artifact.
-    pub fixture_name: String,
     /// Phase-to-tool availability scope.
     pub phase_scope: Vec<PhaseScope>,
     /// Policy version. v0 artifacts use [`POLICY_VERSION_V0`].
@@ -225,7 +223,6 @@ impl std::error::Error for PolicyCompileError {
 
 /// Compiles a policy artifact for one sandbox target.
 pub fn compile_policy_artifact(
-    fixture_name: &str,
     registry: &core_script::ResolvedRegistry,
     loop_ref: &str,
     target: PolicyTarget,
@@ -254,7 +251,6 @@ pub fn compile_policy_artifact(
 
     let artifact = PolicyArtifact {
         commands,
-        fixture_name: fixture_name.to_owned(),
         phase_scope: phase_tools
             .into_iter()
             .map(|(phase_id, tool_ids)| PhaseScope {
@@ -465,6 +461,19 @@ impl CommandPolicy {
                     return Err(policy_artifact_error(format!(
                         "predefined-command tool {} command_id {:?} must match ^[a-z][a-z0-9_-]{{0,63}}$",
                         self.tool_id, self.command_id
+                    )));
+                }
+                if !is_trusted_predefined_command_id(&self.command_id) {
+                    return Err(policy_artifact_error(format!(
+                        "predefined-command tool {} references unknown trusted command {:?}",
+                        self.tool_id, self.command_id
+                    )));
+                }
+                let expected_executable = format!("registry:{}", self.command_id);
+                if self.executable != expected_executable {
+                    return Err(policy_artifact_error(format!(
+                        "predefined-command tool {} executable must be {}",
+                        self.tool_id, expected_executable
                     )));
                 }
                 if self.script_runtime.is_some() {

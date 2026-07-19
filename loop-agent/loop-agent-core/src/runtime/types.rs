@@ -16,14 +16,30 @@ use std::{
 pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 /// Workspace-relative directory containing structured sidecar run logs.
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
-/// Maximum bytes accepted for one persisted session log.
+/// Maximum canonical uncompressed bytes stored in one event or manifest segment.
 pub const MAX_SESSION_LOG_BYTES: u64 = 16 * 1024 * 1024;
-/// Maximum canonical JSONL bytes emitted by one loop run.
-pub const MAX_LOOP_EVENT_STREAM_BYTES: usize = 10 * 1024 * 1024;
-/// Maximum events emitted by one loop run.
-pub const MAX_LOOP_EVENTS: u64 = 64 * 1024;
-/// Maximum loop invocations executed by one loop run.
-pub const MAX_LOOP_INVOCATIONS: u64 = 8 * 1024;
+/// Maximum segments needed when records are not split under the 48 MiB stream limit.
+const MAX_SESSION_LOG_SEGMENTS: u64 = 5;
+/// Maximum canonical bytes stored for one event, including its trailing LF.
+pub const MAX_CANONICAL_EVENT_BYTES: usize = 320 * 1024;
+/// Maximum canonical event bytes accumulated by one session across all segments.
+pub const MAX_SESSION_EVENT_BYTES: u64 = 48 * 1024 * 1024;
+/// Maximum bytes stored in one immutable session-owned object chunk.
+pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
+/// Maximum stored content bytes in one complete self-contained session bundle.
+pub const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
+/// Object-data share after reserving the event, manifest and metadata maxima.
+const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
+    - (2 * MAX_SESSION_EVENT_BYTES)
+    - MAX_SESSION_LOG_BYTES;
+/// Maximum canonical events accumulated by one session, including resume events.
+pub const MAX_LOOP_EVENTS: u64 = 155_750;
+/// Maximum runtime Loop invocations accumulated by one session, including the root.
+pub const MAX_LOOP_INVOCATIONS: u64 = 512;
+/// Maximum live Loop invocations across all active sessions in one process.
+pub const MAX_LIVE_LOOP_INVOCATIONS: usize = 32;
+/// Worst-case terminal events that a future dynamic planner must keep available.
+pub const MAX_TERMINAL_EVENT_RESERVE: u64 = 20;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = 1024 * 1024;
 const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 const RUNTIME_ERROR_REASON: &str = "runtime_error";

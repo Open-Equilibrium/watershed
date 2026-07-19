@@ -33,8 +33,8 @@ Run the checked-in smoke fixture from its workspace directory:
 ```console
 cd loop-agent/fixtures/smoke-loop
 cargo run -p loop-agent-cli -- run smoke-loop --emit jsonl
-cargo run -p loop-agent-cli -- replay smoke001 --emit jsonl
-cargo run -p loop-agent-cli -- tail smoke001 --emit jsonl --no-follow
+cargo run -p loop-agent-cli -- replay smoke-loop --emit jsonl
+cargo run -p loop-agent-cli -- tail smoke-loop --emit jsonl --no-follow
 cargo run -p loop-agent-cli -- sessions
 ```
 

@@ -566,6 +566,13 @@ impl ResolvedRegistry {
         }
 
         let loop_block = self.require_loop(loop_id, "loop", loop_id)?;
+        if loop_block.subloop_refs.len() > MAX_LOOP_FANOUT {
+            return Err(RegistryError::LoopFanoutExceeded {
+                loop_id: loop_id.to_owned(),
+                count: loop_block.subloop_refs.len(),
+                max: MAX_LOOP_FANOUT,
+            });
+        }
         let mut tail = LoopTailDepth {
             deepest_loop_id: loop_id.to_owned(),
             depth: 1,

@@ -263,3 +263,419 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
         );
     }
 }
+
+#[test]
+fn d068_sizing_profile_and_payload_distribution_are_exact() {
+    const SESSIONS: u64 = 10;
+    const INVOCATIONS_PER_SESSION: u64 = 32;
+    const EVENTS_PER_SESSION: u64 = 16_000;
+    const MODEL_CYCLES: u64 = 25_600;
+    const TOOL_CALLS: u64 = 25_600;
+
+    assert_eq!(
+        2 + (2 * MAX_LOOP_INVOCATIONS) + 1_024 + (4 * MODEL_CYCLES) + 100 + (2 * TOOL_CALLS),
+        MAX_LOOP_EVENTS
+    );
+    assert_eq!(SESSIONS * INVOCATIONS_PER_SESSION, 320);
+    assert_eq!(SESSIONS * EVENTS_PER_SESSION, 160_000);
+    assert_eq!(
+        (1..=EVENTS_PER_SESSION)
+            .filter(|sequence| {
+                synthetic_event_shape(*sequence, EVENTS_PER_SESSION, INVOCATIONS_PER_SESSION).0
+                    == EventType::LoopStarted
+            })
+            .count(),
+        INVOCATIONS_PER_SESSION as usize
+    );
+    assert_eq!(representative_event_target_bytes(0), 768);
+    assert_eq!(representative_event_target_bytes(14_400), 12 * 1024);
+    assert_eq!(representative_event_target_bytes(15_840), 96 * 1024);
+    assert_eq!(representative_event_target_bytes(15_984), 320 * 1024);
+    assert_eq!(
+        (0..EVENTS_PER_SESSION)
+            .map(representative_event_target_bytes)
+            .sum::<usize>(),
+        48_152_576
+    );
+
+    for (sequence, event_type) in [
+        (1, EventType::SessionStarted),
+        (8_000, EventType::MetricSample),
+        (16_000, EventType::SessionCompleted),
+    ] {
+        let line = sized_synthetic_event_line(
+            "profile001",
+            sequence,
+            event_type,
+            representative_event_target_bytes(sequence - 1),
+        );
+        assert_eq!(line.len(), representative_event_target_bytes(sequence - 1));
+        let event: serde_json::Value =
+            serde_json::from_str(line.trim_end()).expect("synthetic event parses");
+        let expected_event_id = format!("evt-{sequence:03}");
+        assert_eq!(event["event_id"].as_str(), Some(expected_event_id.as_str()));
+    }
+    let loop_line = sized_synthetic_event_line_with_loop(
+        "profile001",
+        2,
+        EventType::LoopStarted,
+        768,
+        Some("loop-001"),
+        None,
+    );
+    assert_eq!(loop_line.len(), 768);
+}
+
+#[test]
+#[ignore = "performance gate"]
+fn full_event_cap_replay_stays_within_d068_budgets() {
+    let workspace =
+        write_synthetic_session("d068-full-cap", "fullcap001", MAX_LOOP_EVENTS, 0, |_| 288);
+    let baseline_rss = process_rss_bytes();
+    let started = Instant::now();
+    let mut reader =
+        SessionEventReader::open(&workspace, "fullcap001").expect("full-cap session opens");
+    let events = reader.read_after(0).expect("full-cap session replays");
+    let elapsed = started.elapsed();
+
+    assert_eq!(events.len(), MAX_LOOP_EVENTS as usize);
+    assert_eq!(
+        events.last().map(|event| event.sequence),
+        Some(MAX_LOOP_EVENTS)
+    );
+    assert_duration_budget(elapsed, 10, "full-cap initial replay");
+    assert_rss_growth_budget(baseline_rss, 256, "full-cap initial replay");
+    drop(events);
+    drop(reader);
+    let sessions = open_runtime_dir(&workspace, "sessions")
+        .expect("sessions dir opens")
+        .expect("sessions dir exists");
+    let session_path = sessions.file("fullcap001.jsonl");
+    let baseline_rss = process_rss_bytes();
+    let started = Instant::now();
+    let inspection =
+        inspect_resume_session(&session_path, "fullcap001").expect("full-cap session inspects");
+    assert_eq!(inspection.prior_event_count, MAX_LOOP_EVENTS as usize);
+    assert!(inspection.prefix_metadata_valid);
+    assert_eq!(inspection.last_event_type, EventType::SessionCompleted);
+    assert_duration_budget(started.elapsed(), 15, "full-cap full-session inspection");
+    assert_rss_growth_budget(baseline_rss, 256, "full-cap full-session inspection");
+    drop(inspection);
+    drop(session_path);
+    drop(sessions);
+    fs::remove_dir_all(workspace).expect("full-cap workspace removed");
+}
+
+#[test]
+#[ignore = "performance gate"]
+fn incremental_tail_reads_max_events_under_d068_latency_budget() {
+    let workspace = empty_workspace("d068-incremental-tail");
+    let reservation = reserve_session_log(&workspace, "tailperf001").expect("session reserved");
+    let path = reservation.session_path.diagnostic_path().to_owned();
+    let mut appender =
+        SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
+    let started = sized_synthetic_event_line("tailperf001", 1, EventType::SessionStarted, 768);
+    appender
+        .append(&path, started.as_bytes())
+        .expect("session start appends");
+    appender.sync(&path).expect("session start syncs");
+    let baseline_rss = process_rss_bytes();
+    let mut reader =
+        SessionEventReader::open(&workspace, "tailperf001").expect("tail reader opens");
+    assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+    let mut read_nanos = Vec::new();
+    for sequence in 2..=51 {
+        let line = sized_synthetic_event_line(
+            "tailperf001",
+            sequence,
+            EventType::MetricSample,
+            MAX_CANONICAL_EVENT_BYTES,
+        );
+        appender
+            .append(&path, line.as_bytes())
+            .expect("metric appends");
+        appender.sync(&path).expect("metric syncs");
+        let read_started = Instant::now();
+        let appended = reader
+            .read_incremental_after(sequence - 1)
+            .expect("tail suffix reads");
+        read_nanos.push(read_started.elapsed().as_nanos());
+        assert_eq!(appended.len(), 1);
+        assert_eq!(appended[0].sequence, sequence);
+    }
+    let p95 = p95_nanos(read_nanos);
+    let budget = if cfg!(debug_assertions) {
+        500_000_000
+    } else {
+        100_000_000
+    };
+    assert!(
+        p95 <= budget,
+        "320 KiB incremental tail read p95 must stay <= {budget} ns: {p95} ns"
+    );
+    assert_rss_growth_budget(baseline_rss, 64, "incremental tail retained state");
+    drop(reader);
+    drop(appender);
+    reservation.rollback();
+    fs::remove_dir_all(workspace).expect("tail workspace removed");
+}
+
+#[test]
+#[ignore = "performance gate"]
+fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
+    let workload_started = Instant::now();
+    for index in 0..10 {
+        let session_id = format!("representative{index:02}");
+        let workspace = write_synthetic_session(
+            &format!("d068-representative-{index}"),
+            &session_id,
+            16_000,
+            32,
+            representative_event_target_bytes,
+        );
+        let baseline_rss = process_rss_bytes();
+        let replay_started = Instant::now();
+        let mut reader = SessionEventReader::open(&workspace, &session_id).expect("session opens");
+        let events = reader.read_after(0).expect("session replays");
+        assert_eq!(events.len(), 16_000);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.event_type == EventType::LoopStarted)
+                .count(),
+            32
+        );
+        assert_duration_budget(
+            replay_started.elapsed(),
+            10,
+            "representative session replay",
+        );
+        assert_rss_growth_budget(baseline_rss, 256, "representative session replay");
+        drop(events);
+        drop(reader);
+        fs::remove_dir_all(workspace).expect("representative workspace removed");
+    }
+    assert_duration_budget(
+        workload_started.elapsed(),
+        120,
+        "representative ten-session workload",
+    );
+}
+
+#[test]
+#[ignore = "performance gate"]
+fn ten_full_event_cap_sessions_are_stable_with_small_payloads() {
+    let started = Instant::now();
+    for index in 0..10 {
+        let session_id = format!("stability{index:02}");
+        let workspace = write_synthetic_session(
+            &format!("d068-stability-{index}"),
+            &session_id,
+            MAX_LOOP_EVENTS,
+            0,
+            |_| 288,
+        );
+        let mut reader = SessionEventReader::open(&workspace, &session_id).expect("session opens");
+        assert_eq!(
+            reader.read_after(0).expect("session replays").len(),
+            MAX_LOOP_EVENTS as usize
+        );
+        drop(reader);
+        fs::remove_dir_all(workspace).expect("stability workspace removed");
+    }
+    assert_duration_budget(started.elapsed(), 120, "ten full-cap stability workload");
+}
+
+fn representative_event_target_bytes(index: u64) -> usize {
+    match index {
+        0..=14_399 => 768,
+        14_400..=15_839 => 12 * 1024,
+        15_840..=15_983 => 96 * 1024,
+        _ => 320 * 1024,
+    }
+}
+
+fn write_synthetic_session(
+    label: &str,
+    session_id: &str,
+    event_count: u64,
+    loop_invocations: u64,
+    target_bytes: impl Fn(u64) -> usize,
+) -> PathBuf {
+    let workspace = empty_workspace(label);
+    let reservation = reserve_session_log(&workspace, session_id).expect("session reserved");
+    {
+        let path = reservation.session_path.diagnostic_path().to_owned();
+        let mut appender =
+            SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
+        for index in 0..event_count {
+            let sequence = index + 1;
+            let (event_type, loop_number, parent_loop_number) =
+                synthetic_event_shape(sequence, event_count, loop_invocations);
+            let loop_id = loop_number.map(|number| format!("loop-{number:03}"));
+            let parent_loop_id = parent_loop_number.map(|number| format!("loop-{number:03}"));
+            let line = sized_synthetic_event_line_with_loop(
+                session_id,
+                sequence,
+                event_type,
+                target_bytes(index),
+                loop_id.as_deref(),
+                parent_loop_id.as_deref(),
+            );
+            appender
+                .append(&path, line.as_bytes())
+                .expect("synthetic event appends");
+        }
+        appender.sync(&path).expect("synthetic session syncs");
+    }
+    reservation.mark_committed();
+    reservation.release_lock().expect("session lock releases");
+    workspace
+}
+
+fn synthetic_event_shape(
+    sequence: u64,
+    event_count: u64,
+    loop_invocations: u64,
+) -> (EventType, Option<u64>, Option<u64>) {
+    assert!(
+        loop_invocations == 0 || event_count > 2 * loop_invocations + 1,
+        "synthetic session must leave room for its Loop lifecycles and terminal event"
+    );
+    if sequence == 1 {
+        return (EventType::SessionStarted, None, None);
+    }
+    if sequence == event_count {
+        return (EventType::SessionCompleted, None, None);
+    }
+    if loop_invocations == 0 {
+        return (EventType::MetricSample, None, None);
+    }
+    if sequence == 2 {
+        return (EventType::LoopStarted, Some(1), None);
+    }
+    if sequence <= 2 * loop_invocations {
+        let child = ((sequence - 3) / 2) + 2;
+        let event_type = if sequence % 2 == 1 {
+            EventType::LoopStarted
+        } else {
+            EventType::LoopCompleted
+        };
+        return (event_type, Some(child), Some(1));
+    }
+    if sequence == 2 * loop_invocations + 1 {
+        return (EventType::LoopCompleted, Some(1), None);
+    }
+    (EventType::MetricSample, None, None)
+}
+
+fn sized_synthetic_event_line(
+    session_id: &str,
+    sequence: u64,
+    event_type: EventType,
+    target_bytes: usize,
+) -> String {
+    sized_synthetic_event_line_with_loop(session_id, sequence, event_type, target_bytes, None, None)
+}
+
+fn sized_synthetic_event_line_with_loop(
+    session_id: &str,
+    sequence: u64,
+    event_type: EventType,
+    target_bytes: usize,
+    loop_id: Option<&str>,
+    parent_loop_id: Option<&str>,
+) -> String {
+    let payload = match event_type {
+        EventType::MetricSample => serde_json::json!({
+            "metric_name": "d068.synthetic",
+            "padding": "",
+            "value": sequence,
+        }),
+        EventType::SessionStarted | EventType::SessionCompleted => {
+            serde_json::json!({"padding":""})
+        }
+        EventType::LoopStarted | EventType::LoopCompleted => serde_json::json!({
+            "loop_definition_id": "d068-synthetic-loop",
+            "loop_name": "D068SyntheticLoop",
+            "padding": "",
+        }),
+        _ => unreachable!("synthetic profiles use only session, Loop, and metric events"),
+    };
+    let mut event = EventEnvelope::new(
+        format!("evt-{sequence:03}"),
+        event_type,
+        session_id,
+        sequence,
+        EventClock::fixed_fixture().timestamp(sequence),
+        "loop-agent-perf",
+        payload,
+    );
+    event.loop_id = loop_id.map(str::to_owned);
+    event.parent_loop_id = parent_loop_id.map(str::to_owned);
+    let base = event.canonical_jsonl().expect("synthetic event serializes");
+    assert!(
+        base.len() <= target_bytes,
+        "target {target_bytes} is smaller than the {}-byte envelope",
+        base.len()
+    );
+    event.payload["padding"] = serde_json::Value::String("x".repeat(target_bytes - base.len()));
+    let line = event
+        .canonical_jsonl()
+        .expect("sized synthetic event serializes");
+    assert_eq!(line.len(), target_bytes);
+    line
+}
+
+fn assert_duration_budget(elapsed: Duration, release_seconds: u64, label: &str) {
+    let budget = if cfg!(debug_assertions) {
+        Duration::from_secs(release_seconds.saturating_mul(6))
+    } else {
+        Duration::from_secs(release_seconds)
+    };
+    assert!(
+        elapsed <= budget,
+        "{label} must stay <= {budget:?}: {elapsed:?}"
+    );
+}
+
+fn assert_rss_growth_budget(baseline: Option<u64>, release_mib: u64, label: &str) {
+    let Some((baseline, current)) = baseline.zip(process_rss_bytes()) else {
+        return;
+    };
+    let budget_mib = if cfg!(debug_assertions) {
+        release_mib.saturating_mul(2)
+    } else {
+        release_mib
+    };
+    let growth = current.saturating_sub(baseline);
+    assert!(
+        growth <= budget_mib * 1024 * 1024,
+        "{label} RSS growth must stay <= {budget_mib} MiB: {} MiB",
+        growth / 1024 / 1024
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn process_rss_bytes() -> Option<u64> {
+    let status = fs::read_to_string("/proc/self/status")
+        .expect("Linux RSS performance gates require readable /proc/self/status");
+    let kib = status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmRSS:"))
+        .expect("Linux RSS performance gates require VmRSS in /proc/self/status")
+        .split_whitespace()
+        .next()
+        .expect("Linux VmRSS must contain a value")
+        .parse::<u64>()
+        .expect("Linux VmRSS must be an integer KiB value");
+    Some(
+        kib.checked_mul(1024)
+            .expect("Linux VmRSS byte count must fit u64"),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_rss_bytes() -> Option<u64> {
+    None
+}

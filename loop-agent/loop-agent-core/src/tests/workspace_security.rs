@@ -46,14 +46,22 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         Err(RuntimeError::Usage(message)) if message.contains("missing")
     ));
 
-    fs::write(
-        workspace.join(".loop/config.yaml"),
-        "registry_root: registry\n",
-    )
-    .expect("valid config");
-    let config = load_workspace_config(&workspace).expect("config loads");
-    assert_ne!(config.event_clock, EventClock::fixed_fixture());
-    assert_eq!(config.registry_root, PathBuf::from("registry"));
+    for registry_root in ["registry", "nested/registry", "répertoire/注册表"] {
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            format!("registry_root: {registry_root}\n"),
+        )
+        .expect("valid config");
+        let config = load_workspace_config(&workspace).expect("config loads");
+        let expected = registry_root
+            .split('/')
+            .fold(PathBuf::new(), |mut path, component| {
+                path.push(component);
+                path
+            });
+        assert_ne!(config.event_clock, EventClock::fixed_fixture());
+        assert_eq!(config.registry_root, expected, "{registry_root}");
+    }
     fs::write(
         workspace.join(".loop/config.yaml"),
         "registry_root: registry # fixture registry\n",
@@ -110,15 +118,29 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         Err(RuntimeError::Usage(message)) if message.contains("unsupported .loop/config.yaml stub_model")
     ));
 
-    fs::write(
-        workspace.join(".loop/config.yaml"),
-        "registry_root: ../registry\n",
-    )
-    .expect("unsafe config");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("within the workspace")
-    ));
+    for registry_root in [
+        ".",
+        "../registry",
+        "registry/./nested",
+        "registry/../nested",
+        r"registry\nested",
+        "C:/registry",
+        "NUL/registry",
+        "bad:name",
+    ] {
+        fs::write(
+            workspace.join(".loop/config.yaml"),
+            format!("registry_root: {registry_root}\n"),
+        )
+        .expect("unsafe config");
+        assert!(
+            matches!(
+                load_workspace_config(&workspace),
+                Err(RuntimeError::Usage(message)) if message.contains("within the workspace")
+            ),
+            "{registry_root}"
+        );
+    }
     assert!(matches!(
         read_workspace_config_to_string(&workspace.join("missing-workspace")),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
@@ -189,11 +211,11 @@ fn run_loop_rejects_symlinked_log_dir_without_side_effects() {
         .expect_err("symlinked log dir must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
-    assert!(!outside.join("smoke001.log").exists());
+    assert!(!outside.join("smoke-loop.log").exists());
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke001.jsonl")
+            .join("smoke-loop.jsonl")
             .exists()
     );
 }
@@ -208,14 +230,15 @@ fn run_loop_rejects_symlinked_session_leaf_without_side_effects() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let outside_target = outside.join("victim.jsonl");
-    symlink(&outside_target, session_dir.join("smoke001.jsonl")).expect("session leaf symlink");
+    symlink(&outside_target, session_dir.join("smoke-loop.jsonl"))
+        .expect("session leaf symlink");
 
     let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect_err("symlinked session leaf must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside_target.exists());
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke-loop.log").exists());
 }
 
 #[cfg(unix)]
@@ -245,10 +268,10 @@ fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
 }
 
 #[test]
@@ -286,10 +309,10 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
 }
 
 #[test]
@@ -315,10 +338,10 @@ fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
         assert!(
             !workspace
                 .join(LOCAL_SESSION_DIR)
-                .join("hello001.jsonl")
+                .join("hello-loop.jsonl")
                 .exists()
         );
-        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+        assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
     }
 }
 
@@ -358,7 +381,7 @@ fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
         fs::read_to_string(&output.session_path).expect("session log readable"),
         output.stdout
     );
-    assert!(workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
 }
 
 #[test]
@@ -441,10 +464,10 @@ fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
 }
 
 #[cfg(windows)]
@@ -467,10 +490,10 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
 }
 
 #[cfg(any(unix, windows))]
@@ -494,10 +517,10 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello-loop.log").exists());
 }
 
 #[cfg(not(any(unix, windows)))]

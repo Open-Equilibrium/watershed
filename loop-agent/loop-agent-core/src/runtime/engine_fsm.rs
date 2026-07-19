@@ -17,6 +17,51 @@ impl RuntimeExecution {
 
 const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
 const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
+static LIVE_LOOP_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
+
+struct LiveInvocationCounter {
+    count: std::sync::atomic::AtomicUsize,
+}
+
+impl LiveInvocationCounter {
+    const fn new() -> Self {
+        Self {
+            count: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn acquire(&self) -> Result<LiveInvocationGuard<'_>, RuntimeError> {
+        let mut observed = self.count.load(std::sync::atomic::Ordering::Acquire);
+        loop {
+            if observed >= MAX_LIVE_LOOP_INVOCATIONS {
+                return Err(RuntimeError::Protocol(format!(
+                    "global live loop invocation limit reached: max {MAX_LIVE_LOOP_INVOCATIONS}"
+                )));
+            }
+            match self.count.compare_exchange_weak(
+                observed,
+                observed + 1,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(LiveInvocationGuard { counter: self }),
+                Err(actual) => observed = actual,
+            }
+        }
+    }
+}
+
+struct LiveInvocationGuard<'a> {
+    counter: &'a LiveInvocationCounter,
+}
+
+impl Drop for LiveInvocationGuard<'_> {
+    fn drop(&mut self) {
+        self.counter
+            .count
+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct RuntimeStreamSignature {
@@ -99,6 +144,10 @@ enum ToolSideEffectMode {
 }
 
 impl ToolSideEffectMode {
+    fn occupies_live_invocation_slot(self) -> bool {
+        matches!(self, Self::ApplyAll | Self::Resume { .. })
+    }
+
     fn should_execute_tool(self, completed_sequence: u64) -> bool {
         match self {
             Self::ApplyAll => true,
@@ -173,7 +222,7 @@ struct RuntimeEventBuilder<'a> {
     sequence: u64,
     session_id: String,
     sink: Option<&'a mut dyn RuntimeEventSink>,
-    pending_context_manifest: Option<ContextManifest>,
+    pending_context_manifest: Option<(ContextManifest, Vec<ContextObject>)>,
     validation: Option<SessionAppendValidationState>,
 }
 
@@ -234,14 +283,18 @@ impl<'a> RuntimeEventBuilder<'a> {
         format!("msg-{:03}", self.message_counter)
     }
 
-    fn record_context_manifest(&mut self, manifest: ContextManifest) -> Result<(), RuntimeError> {
+    fn record_context_manifest(
+        &mut self,
+        manifest: ContextManifest,
+        objects: Vec<ContextObject>,
+    ) -> Result<(), RuntimeError> {
         ensure_context_manifest_growth_within_limit(
             Path::new("runtime.contexts.jsonl"),
             self.context_manifests.byte_count,
             manifest.line.len(),
         )?;
         self.context_manifest_count += 1;
-        self.pending_context_manifest = Some(manifest);
+        self.pending_context_manifest = Some((manifest, objects));
         Ok(())
     }
 
@@ -279,19 +332,15 @@ impl<'a> RuntimeEventBuilder<'a> {
         let event_bytes = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
         })?;
-        let next_stream_bytes = self.events.byte_count.saturating_add(event_bytes.len());
-        if next_stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "event stream budget exceeded: next event would use {next_stream_bytes} bytes, max {MAX_LOOP_EVENT_STREAM_BYTES}"
-            )));
-        }
         let context_manifest = if event.event_type == EventType::MessageCompleted {
+            let (manifest, objects) = self.pending_context_manifest.take().ok_or_else(|| {
+                RuntimeError::Protocol(
+                    "message.completed has no compiled context manifest".to_owned(),
+                )
+            })?;
             Some(ContextManifestCheckpoint {
-                manifest: self.pending_context_manifest.take().ok_or_else(|| {
-                    RuntimeError::Protocol(
-                        "message.completed has no compiled context manifest".to_owned(),
-                    )
-                })?,
+                manifest,
+                objects,
                 ordinal: self.context_manifest_count,
             })
         } else {
@@ -583,6 +632,13 @@ fn emit_loop_block_at_depth(
         )));
     }
 
+    // A parent remains live while it waits for a nested invocation; queued but not started,
+    // terminal and fully paused invocations do not hold this process-wide slot.
+    let _live_invocation = context
+        .side_effect_mode
+        .occupies_live_invocation_slot()
+        .then(|| LIVE_LOOP_INVOCATIONS.acquire())
+        .transpose()?;
     let invocation = builder.next_loop_invocation(parent_loop_id)?;
     builder.emit(
         Some(&invocation),
@@ -712,7 +768,7 @@ fn emit_phase(
                 &builder.history,
             )?;
             let content = stub_message_content(context.registry, phase, &compiled.provider_bytes)?;
-            builder.record_context_manifest(compiled.manifest)?;
+            builder.record_context_manifest(compiled.manifest, compiled.objects)?;
             let message_id = builder.next_message_id();
             builder.emit(
                 Some(invocation),

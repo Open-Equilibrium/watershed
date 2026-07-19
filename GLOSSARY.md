@@ -55,7 +55,9 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 - **Session** — One Loop Agent run, identified by a lowercase path-safe `session_id` token per `PROTOCOL.md`; the unit that is started, resumed, tailed and persisted.
 - **Transcript** — The ordered record of a session's messages and runtime events; part of durable session history and reconstructable by replay.
-- **Durable session history** — The complete append-only session event history plus referenced source artifacts; authoritative for resume, replay, audit, debugging and future retrieval, and never deleted by provider-context optimization.
+- **Durable session history** — The complete append-only session event history plus referenced source artifacts; its events are authoritative for replay, while the full history is authoritative for resume, audit, debugging and future retrieval. Provider-context optimization never deletes either.
+- **Session bundle** — All session-owned event and context-manifest segments, immutable hash-addressed objects and definition metadata; export and deletion treat them as one unit.
+- **Event segment** — One append-only canonical JSONL file within a session bundle; segment rotation bounds individual I/O without starting a new session or resetting sequence/budgets.
 - **Resolved loop state** — The current loop invocation, phase, step, active instructions/tools, connections and runtime state, plus values exposed by defined runtime interfaces.
 - **Provider context** — The deterministic, bounded projection compiled from resolved loop state and narrowly selected durable history for one model turn; not the full transcript.
 - **Context profile** — A versioned deterministic contract for provider-context ordering, budgeting, tokenization/estimation, projections, hashing and cache boundaries; M1 exposes only `loop-context-v0`.

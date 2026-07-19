@@ -182,8 +182,10 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
         .iter()
         .zip(expected_ids)
         .map(|(line, source_id)| {
+            let digest = sha256_hex(format!("{line}\n").as_bytes());
             serde_json::json!({
-                "projection_hash": sha256_hex(format!("{line}\n").as_bytes()),
+                "object_uri": format!("session-object:sha256:{digest}"),
+                "projection_hash": digest,
                 "source_id": source_id,
             })
         })
@@ -580,7 +582,7 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let RuntimeError::SessionFailed { session_id, source } = &err else {
         panic!("expected identified session failure, got {err:?}");
     };
-    assert_eq!(session_id, "hello001");
+    assert_eq!(session_id, "hello-loop");
     let RuntimeError::ContextBudgetExceeded {
         input_budget_tokens,
         required_bytes,
@@ -590,14 +592,14 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     };
     assert!(
         err.to_string()
-            .starts_with("session hello001 failed: context_budget_exceeded:"),
+            .starts_with("session hello-loop failed: context_budget_exceeded:"),
         "{err}"
     );
-    let output = read_existing_session(&workspace, "hello001", EmitMode::Jsonl)
+    let output = read_existing_session(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("failed session log is readable");
     let path = output.session_path;
     let stream = output.stdout;
-    let events = validate_session_log_text(&path, "hello001", &stream)
+    let events = validate_session_log_text(&path, "hello-loop", &stream)
         .expect("failed session log remains authoritative");
     let error = events
         .iter()
@@ -617,7 +619,7 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
 }
 
 #[test]
-fn recorded_context_profile_is_verified_before_resume_replay() {
+fn recorded_context_profile_is_verified_before_object_io_and_resume_replay() {
     let workspace = workspace_copy("hello-loop");
     let output =
         run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
@@ -653,6 +655,11 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
     let mut lines = text.lines().collect::<Vec<_>>();
     let mut first: serde_json::Value =
         serde_json::from_str(lines[0]).expect("first manifest parses");
+    let digest = first["ordered_sources"][0]["object_uri"]
+        .as_str()
+        .and_then(|uri| uri.strip_prefix("session-object:sha256:"))
+        .expect("context object URI")
+        .to_owned();
     first["context_profile_id"] = serde_json::json!("different-profile");
     let mut tampered = proto::canonical_json(&first).expect("tampered manifest canonicalizes");
     tampered.push('\n');
@@ -661,6 +668,12 @@ fn recorded_context_profile_is_verified_before_resume_replay() {
         tampered.push('\n');
     }
     fs::write(&path, tampered).expect("manifest tampered");
+    fs::remove_file(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join(format!("{}.object.sha256-{digest}", output.session_id)),
+    )
+    .expect("context object removed");
 
     let err = read_recorded_context_manifest_signature(
         &workspace,
@@ -721,6 +734,74 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
             fs::read_to_string(&output.session_path).expect("session remains readable"),
             before
         );
+        assert!(!workspace.join("out/summary.txt").exists());
+    }
+}
+
+#[test]
+fn resume_rejects_missing_modified_or_invalid_session_context_objects() {
+    for (tamper, expected) in [
+        ("missing", "referenced context object is unavailable"),
+        ("modified", "referenced context object hash does not match"),
+        ("invalid-digest", "context manifest object_uri is invalid"),
+    ] {
+        let workspace = workspace_copy("hello-loop");
+        let output =
+            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+        let before = prefix_before_tool_started(&output.stdout, "write-summary");
+        fs::write(&output.session_path, &before).expect("partial session prefix written");
+        write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
+        let context_path = workspace
+            .join(LOCAL_LOG_DIR)
+            .join(format!("{}.contexts.jsonl", output.session_id));
+        let mut first: serde_json::Value = serde_json::from_str(
+            fs::read_to_string(&context_path)
+                .expect("context manifests read")
+                .lines()
+                .next()
+                .expect("context manifest exists"),
+        )
+        .expect("context manifest parses");
+        let digest = first["ordered_sources"][0]["object_uri"]
+            .as_str()
+            .and_then(|uri| uri.strip_prefix("session-object:sha256:"))
+            .expect("context object URI")
+            .to_owned();
+        let object_path = workspace
+            .join(LOCAL_SESSION_DIR)
+            .join(format!("{}.object.sha256-{digest}", output.session_id));
+        match tamper {
+            "missing" => fs::remove_file(&object_path).expect("context object removed"),
+            "modified" => fs::write(&object_path, b"modified").expect("context object modified"),
+            "invalid-digest" => {
+                let invalid = format!("A{}", &digest[1..]);
+                first["ordered_sources"][0]["object_uri"] =
+                    serde_json::json!(format!("session-object:sha256:{invalid}"));
+                first["ordered_sources"][0]["projection_hash"] = serde_json::json!(invalid);
+                let mut lines = fs::read_to_string(&context_path)
+                    .expect("context manifests read")
+                    .lines()
+                    .skip(1)
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                lines.insert(
+                    0,
+                    proto::canonical_json(&first).expect("tampered manifest canonicalizes"),
+                );
+                fs::write(&context_path, format!("{}\n", lines.join("\n")))
+                    .expect("invalid object URI written");
+            }
+            _ => unreachable!(),
+        }
+        fs::remove_file(workspace.join("out/summary.txt")).expect("side effect removed");
+
+        let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
+            .expect_err("invalid context object must block resume");
+
+        assert!(matches!(
+            err,
+            RuntimeError::Protocol(message) if message.contains(expected)
+        ));
         assert!(!workspace.join("out/summary.txt").exists());
     }
 }

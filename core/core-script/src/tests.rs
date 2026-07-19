@@ -1134,6 +1134,7 @@ fn registry_reference_validation_rejects_loop_cycles() {
 
 #[test]
 fn registry_reference_validation_rejects_deep_loop_chains() {
+    assert_eq!(MAX_LOOP_NESTING_DEPTH, 16);
     ResolvedRegistry::from_blocks(loop_chain_blocks(MAX_LOOP_NESTING_DEPTH))
         .expect("max loop nesting depth is accepted");
 
@@ -1152,6 +1153,27 @@ fn registry_reference_validation_rejects_deep_loop_chains() {
             && depth == MAX_LOOP_NESTING_DEPTH + 1
             && max == MAX_LOOP_NESTING_DEPTH
     ));
+}
+
+#[test]
+fn registry_reference_validation_rejects_more_than_32_direct_subloops() {
+    let mut blocks = loop_chain_blocks(2);
+    let RegistryBlock::Loop(root) = &mut blocks[1] else {
+        panic!("second chain block must be a loop");
+    };
+    root.subloop_refs = vec!["loop-000".to_owned(); 32];
+    ResolvedRegistry::from_blocks(blocks).expect("32 direct subloop references are accepted");
+
+    let mut blocks = loop_chain_blocks(2);
+    let RegistryBlock::Loop(root) = &mut blocks[1] else {
+        panic!("second chain block must be a loop");
+    };
+    root.subloop_refs = vec!["loop-000".to_owned(); 33];
+
+    let err = ResolvedRegistry::from_blocks(blocks)
+        .expect_err("more than 32 direct subloop invocations are rejected");
+
+    assert!(err.to_string().contains("subloop fan-out"));
 }
 
 #[test]

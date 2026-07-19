@@ -1,56 +1,13 @@
 #[test]
-fn protocol_validation_rejects_oversized_stream_before_json_parse() {
-    let session_limit = usize::try_from(MAX_SESSION_LOG_BYTES).expect("session limit fits usize");
-    for (stream_bytes, expected) in [
-        (MAX_LOOP_EVENT_STREAM_BYTES + 1, "event stream budget"),
-        (session_limit + 1, "session log size"),
-    ] {
-        let oversized = format!("{}\n", "x".repeat(stream_bytes - 1));
+fn protocol_validation_rejects_oversized_event_data_before_json_parse() {
+    let session_limit =
+        usize::try_from(MAX_SESSION_EVENT_BYTES).expect("session event limit fits usize");
+    let oversized = format!("{}\n", "x".repeat(session_limit));
 
-        let err = validate_protocol_jsonl_text(Path::new("oversized.jsonl"), &oversized)
-            .expect_err("oversized streams must be rejected by budget");
+    let err = validate_protocol_jsonl_text(Path::new("oversized.jsonl"), &oversized)
+        .expect_err("oversized segments must be rejected by budget");
 
-        assert!(err.to_string().contains(expected), "{err}");
-    }
-}
-
-#[test]
-fn appended_session_log_validation_separates_runtime_and_resume_budgets() {
-    let session_id = "tailbudget001";
-    let empty_started = event_line(
-        "evt-001",
-        EventType::SessionStarted,
-        session_id,
-        1,
-        None,
-        serde_json::json!({"reason":""}),
-    );
-    let resumed = session_event_line(session_id, "evt-002", EventType::SessionResumed, 2);
-    let completed = session_event_line(session_id, "evt-003", EventType::SessionCompleted, 3);
-    let reason_len = MAX_LOOP_EVENT_STREAM_BYTES
-        .checked_sub(empty_started.len())
-        .expect("budget fixture fits");
-    let started = event_line(
-        "evt-001",
-        EventType::SessionStarted,
-        session_id,
-        1,
-        None,
-        serde_json::json!({"reason":"x".repeat(reason_len)}),
-    );
-    assert_eq!(started.len(), MAX_LOOP_EVENT_STREAM_BYTES);
-    let path = Path::new("tailbudget001.jsonl");
-    let mut prior_events =
-        validate_session_log_text(path, session_id, &started).expect("prior stream is in budget");
-    prior_events.extend(
-        validate_appended_session_log_text(path, session_id, &prior_events, &resumed)
-            .expect("resume marker does not consume the runtime stream budget"),
-    );
-
-    let err = validate_appended_session_log_text(path, session_id, &prior_events, &completed)
-        .expect_err("runtime events still consume the runtime stream budget");
-
-    assert!(err.to_string().contains("event stream budget"), "{err}");
+    assert!(err.to_string().contains("session event data size"), "{err}");
 }
 
 #[test]
@@ -62,13 +19,13 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
     let second = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
         .expect("second loop run gets a unique session id");
 
-    assert_eq!(first.session_id, "smoke001");
+    assert_eq!(first.session_id, "smoke-loop");
     assert_eq!(
         first.stdout,
         expected_stream("smoke-loop", "smoke-loop.jsonl")
     );
-    assert_eq!(second.session_id, "smoke001-2");
-    assert!(second.stdout.contains("\"session_id\":\"smoke001-2\""));
+    assert_eq!(second.session_id, "smoke-loop-2");
+    assert!(second.stdout.contains("\"session_id\":\"smoke-loop-2\""));
     assert_eq!(
         validate_protocol_jsonl_text(Path::new("second-run.jsonl"), &second.stdout)
             .expect("second run stream remains protocol-valid")
@@ -78,13 +35,13 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
     assert!(
         workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke001.jsonl")
+            .join("smoke-loop.jsonl")
             .is_file()
     );
     assert!(
         workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke001-2.jsonl")
+            .join("smoke-loop-2.jsonl")
             .is_file()
     );
     for session_id in [&first.session_id, &second.session_id] {
@@ -115,17 +72,21 @@ fn human_run_replay_tail_and_session_listing_report_status() {
 
     let run = run_loop(&workspace, "smoke-loop", EmitMode::Human).expect("loop runs");
     assert!(!run.failed);
-    assert_eq!(run.stdout, "loop smoke-loop (session smoke001) completed\n");
+    assert_eq!(
+        run.stdout,
+        "loop smoke-loop (session smoke-loop) completed\n"
+    );
 
-    let replay = replay_session(&workspace, "smoke001", EmitMode::Human).expect("session replays");
-    assert_eq!(replay.stdout, "session smoke001 replayed\n");
+    let replay =
+        replay_session(&workspace, "smoke-loop", EmitMode::Human).expect("session replays");
+    assert_eq!(replay.stdout, "session smoke-loop replayed\n");
 
-    let tail = tail_session(&workspace, "smoke001", EmitMode::Human).expect("session tails");
-    assert_eq!(tail.stdout, "session smoke001 tailed\n");
+    let tail = tail_session(&workspace, "smoke-loop", EmitMode::Human).expect("session tails");
+    assert_eq!(tail.stdout, "session smoke-loop tailed\n");
 
     assert_eq!(
         list_sessions(&workspace).expect("sessions list"),
-        vec!["smoke001"]
+        vec!["smoke-loop"]
     );
 
     let before = fs::read_to_string(&run.session_path).expect("terminal session readable");
@@ -144,7 +105,7 @@ fn human_run_replay_tail_and_session_listing_report_status() {
     assert!(failed.failed);
     assert_eq!(
         failed.stdout,
-        "loop sandbox-negative-write (session negwrite001) failed (write_denied): write outside declared roots denied\n"
+        "loop sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
     );
 }
 
@@ -291,10 +252,15 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -321,10 +287,15 @@ fn run_loop_rejects_unsupported_own_script_before_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -394,10 +365,15 @@ fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -458,10 +434,15 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -541,7 +522,10 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
         "committed session log must match emitted failure stream"
     );
     assert!(
-        workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists(),
+        workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists(),
         "partial side effects must keep the run log"
     );
     let manifests = fs::read_to_string(
@@ -577,10 +561,15 @@ fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke001.jsonl")
+            .join("smoke-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("smoke001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("smoke-loop.log")
+            .exists()
+    );
 }
 
 #[test]
@@ -614,10 +603,15 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -650,9 +644,9 @@ fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
     );
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[test]
-fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
+fn run_loop_rejects_case_variant_of_protected_path_pattern() {
     let workspace = workspace_copy("hello-loop");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
@@ -671,7 +665,7 @@ fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
     .expect("tool fixture rewritten");
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
-        .expect_err("windows runtime protected-path matching is case-insensitive");
+        .expect_err("runtime protected-path matching is case-insensitive");
 
     assert_denied(
         err,
@@ -682,10 +676,15 @@ fn run_loop_rejects_windows_case_variant_of_protected_path_pattern() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("hello001.jsonl")
+            .join("hello-loop.jsonl")
             .exists()
     );
-    assert!(!workspace.join(LOCAL_LOG_DIR).join("hello001.log").exists());
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-loop.log")
+            .exists()
+    );
 }
 
 #[test]

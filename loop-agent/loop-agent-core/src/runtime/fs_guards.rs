@@ -125,7 +125,7 @@ fn ensure_anchored_real_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-fn open_anchored_file_for_read(
+fn open_anchored_real_file_for_read(
     file: &AnchoredFile,
 ) -> Result<(fs::File, fs::Metadata), RuntimeError> {
     ensure_anchored_real_file(file)?;
@@ -136,6 +136,14 @@ fn open_anchored_file_for_read(
         .metadata()
         .map_err(|source| path_io_error(&file.path, source))?;
     validate_real_file(&file.path, &metadata)?;
+    Ok((opened, metadata))
+}
+
+fn open_anchored_file_for_read(
+    file: &AnchoredFile,
+) -> Result<(fs::File, fs::Metadata), RuntimeError> {
+    let (opened, metadata) = open_anchored_real_file_for_read(file)?;
+    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)?;
     Ok((opened, metadata))
 }
 
@@ -154,6 +162,103 @@ fn read_anchored_to_string_with_limit(
     decode_utf8(&file.path, read_anchored_file_with_limit(file, max_bytes)?)
 }
 
+fn segmented_jsonl_path(base: &AnchoredFile, ordinal: u64) -> Result<AnchoredFile, RuntimeError> {
+    if ordinal == 1 {
+        return Ok(base.clone());
+    }
+    let leaf = base
+        .leaf
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(|leaf| leaf.strip_suffix(".jsonl"))
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!(
+                "{} segmented JSONL path must end in .jsonl",
+                base.diagnostic_path().display()
+            ))
+        })?;
+    Ok(base.parent.file(format!("{leaf}.{ordinal:06}.jsonl")))
+}
+
+fn segmented_jsonl_files(base: &AnchoredFile) -> Result<Vec<AnchoredFile>, RuntimeError> {
+    ensure_anchored_real_file(base)?;
+    let mut files = vec![base.clone()];
+    let mut missing_prior_segment = false;
+    for ordinal in 2..=MAX_SESSION_LOG_SEGMENTS + 1 {
+        let candidate = segmented_jsonl_path(base, ordinal)?;
+        match candidate.metadata() {
+            Ok(_) => {
+                if ordinal > MAX_SESSION_LOG_SEGMENTS {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} segment count exceeds max {MAX_SESSION_LOG_SEGMENTS}",
+                        base.diagnostic_path().display()
+                    )));
+                }
+                if missing_prior_segment {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} has non-contiguous segmented JSONL ordinals",
+                        base.diagnostic_path().display()
+                    )));
+                }
+                ensure_anchored_real_file(&candidate)?;
+                files.push(candidate);
+            }
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                missing_prior_segment = true;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(files)
+}
+
+fn read_segmented_jsonl(base: &AnchoredFile, max_total_bytes: u64) -> Result<String, RuntimeError> {
+    let mut bytes = Vec::new();
+    for file in segmented_jsonl_files(base)? {
+        let segment = read_anchored_file_with_limit(&file, MAX_SESSION_LOG_BYTES)?;
+        let total = u64::try_from(bytes.len().saturating_add(segment.len())).unwrap_or(u64::MAX);
+        if total > max_total_bytes {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segmented JSONL size {total} bytes exceeds max {max_total_bytes}",
+                base.diagnostic_path().display()
+            )));
+        }
+        bytes.extend_from_slice(&segment);
+    }
+    decode_utf8(base.diagnostic_path(), bytes)
+}
+
+fn for_each_segmented_jsonl_line(
+    base: &AnchoredFile,
+    max_total_bytes: u64,
+    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+) -> Result<u64, RuntimeError> {
+    let mut total = 0u64;
+    for file in segmented_jsonl_files(base)? {
+        let segment_bytes =
+            for_each_anchored_file_line_with_limit(&file, MAX_SESSION_LOG_BYTES, |line| {
+                visit(line)
+            })?;
+        total = total.saturating_add(segment_bytes);
+        if total > max_total_bytes {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segmented JSONL size {total} bytes exceeds max {max_total_bytes}",
+                base.diagnostic_path().display()
+            )));
+        }
+    }
+    Ok(total)
+}
+
+fn remove_segmented_jsonl(base: &AnchoredFile) {
+    if let Ok(mut files) = segmented_jsonl_files(base) {
+        files.reverse();
+        for file in files {
+            let _ = file.remove();
+        }
+    }
+}
+
 fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
     ensure_anchored_new_leaf_available(file)?;
     let mut options = cap_std::fs::OpenOptions::new();
@@ -165,8 +270,7 @@ fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
 }
 
 fn ensure_anchored_non_hardlinked_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
-    let (opened, metadata) = open_anchored_file_for_read(file)?;
-    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)
+    open_anchored_file_for_read(file).map(|_| ())
 }
 
 #[cfg(any(unix, windows))]

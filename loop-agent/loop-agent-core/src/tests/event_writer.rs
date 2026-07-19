@@ -27,6 +27,241 @@ fn live_notification_is_bounded_coalesced_and_non_blocking() {
 }
 
 #[test]
+fn event_appender_rotates_before_crossing_the_segment_limit() {
+    let workspace = empty_workspace("event-segment-rotation");
+    let reservation =
+        reserve_session_log(&workspace, "segmentrotation001").expect("session reserved");
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    let record = vec![b'x'; MAX_CANONICAL_EVENT_BYTES];
+    let records_in_first_segment =
+        usize::try_from(MAX_SESSION_LOG_BYTES).expect("segment size fits usize") / record.len();
+    let batch = vec![record.as_slice(); records_in_first_segment + 1];
+
+    if let Err(failure) = appender.append_batch(reservation.session_path.diagnostic_path(), &batch)
+    {
+        panic!(
+            "bounded batch failed after {} events: {}",
+            failure.committed_events, failure.error
+        );
+    }
+    appender
+        .sync(reservation.session_path.diagnostic_path())
+        .expect("segments sync");
+
+    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path");
+    assert_eq!(
+        reservation
+            .session_path
+            .metadata()
+            .expect("first segment metadata")
+            .len(),
+        u64::try_from(records_in_first_segment * record.len()).expect("size fits")
+    );
+    assert_eq!(
+        second.metadata().expect("second segment metadata").len(),
+        u64::try_from(record.len()).expect("size fits")
+    );
+    assert_eq!(
+        segmented_jsonl_files(&reservation.session_path)
+            .unwrap()
+            .len(),
+        2
+    );
+    reservation.rollback();
+}
+
+#[test]
+fn event_appender_refuses_to_reserve_a_sixth_segment() {
+    let workspace = empty_workspace("event-segment-sixth");
+    let reservation = reserve_session_log(&workspace, "segmentsixth001").expect("session reserved");
+    for ordinal in 1..=MAX_SESSION_LOG_SEGMENTS {
+        let path = segmented_jsonl_path(&reservation.session_path, ordinal)
+            .expect("segment path resolves");
+        let bytes = if ordinal == MAX_SESSION_LOG_SEGMENTS {
+            vec![b'x'; usize::try_from(MAX_SESSION_LOG_BYTES - 1).expect("size fits")]
+        } else {
+            vec![b'x']
+        };
+        fs::write(path.diagnostic_path(), bytes).expect("underfilled segment written");
+    }
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+
+    let err = appender
+        .append(reservation.session_path.diagnostic_path(), b"xx")
+        .expect_err("crossing append must not create a sixth segment");
+
+    assert!(
+        err.to_string().contains("segment count exceeds max 5"),
+        "{err}"
+    );
+    let sixth = segmented_jsonl_path(&reservation.session_path, 6).expect("segment path resolves");
+    assert!(!sixth.diagnostic_path().exists());
+    reservation.rollback();
+}
+
+#[test]
+fn segmented_stream_rejects_gaps_and_more_than_five_segments() {
+    for (label, ordinals, expected) in [
+        ("event-segment-gap", vec![3], "non-contiguous"),
+        (
+            "event-segment-count",
+            (2..=6).collect::<Vec<_>>(),
+            "segment count",
+        ),
+    ] {
+        let workspace = empty_workspace(label);
+        let reservation =
+            reserve_session_log(&workspace, "segmentinvalid001").expect("session reserved");
+        for ordinal in ordinals {
+            let segment = segmented_jsonl_path(&reservation.session_path, ordinal)
+                .expect("segment path resolves");
+            fs::write(segment.diagnostic_path(), b"\n").expect("invalid segment fixture writes");
+        }
+
+        let err = segmented_jsonl_files(&reservation.session_path)
+            .expect_err("invalid segment layout is rejected");
+        assert!(err.to_string().contains(expected), "{err}");
+        reservation.rollback();
+        fs::remove_dir_all(workspace).expect("invalid segment workspace removed");
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn rotated_stream_segments_and_objects_reject_hardlinks() {
+    for kind in ["event", "context", "object"] {
+        let workspace = empty_workspace(&format!("hardlinked-{kind}-read"));
+        let reservation =
+            reserve_session_log(&workspace, "hardlinkedread001").expect("session reserved");
+        let target = workspace.join("hardlink-target");
+        fs::write(&target, b"linked bytes\n").expect("hardlink target written");
+
+        let result = match kind {
+            "event" => {
+                let segment = segmented_jsonl_path(&reservation.session_path, 2)
+                    .expect("segment path resolves");
+                fs::hard_link(&target, segment.diagnostic_path()).expect("event segment linked");
+                read_segmented_jsonl(&reservation.session_path, MAX_SESSION_EVENT_BYTES).map(|_| ())
+            }
+            "context" => {
+                let segment = segmented_jsonl_path(&reservation.context_path, 2)
+                    .expect("segment path resolves");
+                fs::hard_link(&target, segment.diagnostic_path()).expect("context segment linked");
+                for_each_segmented_jsonl_line(
+                    &reservation.context_path,
+                    MAX_SESSION_EVENT_BYTES,
+                    |_| Ok(()),
+                )
+                .map(|_| ())
+            }
+            "object" => {
+                let sessions = open_runtime_dir(&workspace, "sessions")
+                    .expect("session object directory opens")
+                    .expect("session object directory exists");
+                let digest = sha256_hex(b"linked bytes\n");
+                let object =
+                    sessions.file(format!("{}.object.sha256-{digest}", reservation.session_id));
+                fs::hard_link(&target, object.diagnostic_path()).expect("object linked");
+                read_anchored_file_with_limit(&object, MAX_SESSION_OBJECT_BYTES).map(|_| ())
+            }
+            _ => unreachable!(),
+        };
+        let err = result.expect_err("hard-linked read must fail");
+        assert!(
+            matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")),
+            "{kind} hardlink was not rejected"
+        );
+        reservation.rollback();
+        fs::remove_dir_all(workspace).expect("workspace removed");
+    }
+}
+
+#[test]
+fn context_sources_are_session_owned_hash_addressed_and_deduplicated() {
+    let workspace = workspace_copy("hello-loop");
+    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("loop runs");
+    let manifest_path = workspace
+        .join(LOCAL_LOG_DIR)
+        .join(format!("{}.contexts.jsonl", output.session_id));
+    let manifests = fs::read_to_string(manifest_path).expect("context manifests read");
+    let mut referenced = 0usize;
+    let mut digests = BTreeSet::new();
+
+    for line in manifests.lines() {
+        let manifest: serde_json::Value = serde_json::from_str(line).expect("manifest parses");
+        for source in manifest["ordered_sources"]
+            .as_array()
+            .expect("ordered sources")
+        {
+            referenced += 1;
+            let digest = source["object_uri"]
+                .as_str()
+                .and_then(|uri| uri.strip_prefix("session-object:sha256:"))
+                .expect("session object URI");
+            digests.insert(digest.to_owned());
+            let object_path = workspace
+                .join(LOCAL_SESSION_DIR)
+                .join(format!("{}.object.sha256-{digest}", output.session_id));
+            let bytes = fs::read(object_path).expect("referenced object exists");
+            assert_eq!(sha256_hex(&bytes), digest);
+            assert!(
+                u64::try_from(bytes.len()).unwrap() <= MAX_SESSION_OBJECT_BYTES,
+                "context object is independently bounded"
+            );
+        }
+    }
+
+    assert!(
+        referenced > digests.len(),
+        "repeated context sources deduplicate"
+    );
+}
+
+#[test]
+fn partial_new_session_object_is_removed_before_retry() {
+    let workspace = empty_workspace("session-object-partial-write");
+    let reservation =
+        reserve_session_log(&workspace, "objectpartial001").expect("session reserved");
+    let mut writer = SessionObjectWriter::open(
+        reservation.session_path.parent.clone(),
+        &reservation.session_id,
+    )
+    .expect("object writer opens");
+    let bytes = b"canonical context object".to_vec();
+    let object = ContextObject {
+        digest: sha256_hex(&bytes),
+        bytes,
+    };
+    let object_path = workspace.join(LOCAL_SESSION_DIR).join(format!(
+        "{}.object.sha256-{}",
+        reservation.session_id, object.digest
+    ));
+
+    writer
+        .persist_with(&object, |path, bytes| {
+            let mut file = open_anchored_session_log_append_file(path)?;
+            file.write_all(&bytes[..5])
+                .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            Err(path_io_error(
+                path.diagnostic_path(),
+                io::Error::other("injected object write failure"),
+            ))
+        })
+        .expect_err("partial object write fails");
+
+    assert!(!object_path.exists(), "failed reservation is removed");
+    writer.persist(&object).expect("clean retry succeeds");
+    assert_eq!(fs::read(&object_path).expect("object reads"), object.bytes);
+    assert_eq!(
+        writer.accounted_bytes,
+        u64::try_from(object.bytes.len()).expect("size fits")
+    );
+    drop(writer);
+    reservation.rollback();
+    fs::remove_dir_all(workspace).expect("workspace removed");
+}
+
+#[test]
 fn twenty_runs_finish_and_catch_up_with_permanently_lagging_receivers() {
     for run in 0..20 {
         let workspace = workspace_copy("smoke-loop");
@@ -107,6 +342,7 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
         manifest: ContextManifest {
             line: format!("{{\"turn\":{turn}}}\n"),
         },
+        objects: Vec::new(),
         ordinal: turn,
     });
     let mut writer = ContextManifestWriter::open(&reservation.context_path)
@@ -171,6 +407,7 @@ fn context_writer_stays_bound_to_the_opened_log_directory() {
                 manifest: ContextManifest {
                     line: "{\"turn\":1}\n".to_owned(),
                 },
+                objects: Vec::new(),
                 ordinal: 1,
             },
         )
@@ -286,17 +523,17 @@ fn resumed_notifications_replay_exactly_the_appended_suffix() {
         .join("\n")
         + "\n";
     let prefix_events = prefix.lines().count() as u64;
-    fs::write(session_dir.join("smoke001.jsonl"), &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "smoke001", "smoke-loop");
+    fs::write(session_dir.join("smoke-loop.jsonl"), &prefix).expect("partial log written");
+    write_definition_hash_metadata(&workspace, "smoke-loop", "smoke-loop");
     let (notifier, receiver) = live_event_channel();
 
-    let output = resume_session_with_live_events(&workspace, "smoke001", notifier)
+    let output = resume_session_with_live_events(&workspace, "smoke-loop", notifier)
         .expect("resume completes");
     let notification = receiver
         .recv_timeout(Duration::from_millis(50))
         .expect("resumed suffix wakes receiver");
     let mut reader =
-        SessionEventReader::open(&workspace, "smoke001").expect("resumed session opens");
+        SessionEventReader::open(&workspace, "smoke-loop").expect("resumed session opens");
     let appended = reader
         .read_after(prefix_events)
         .expect("resumed suffix replays");
@@ -437,7 +674,7 @@ fn progress_batch(
         .map(|line| serde_json::from_str::<EventEnvelope>(line).expect("fixture event parses"))
         .collect::<Vec<_>>();
     let validation =
-        SessionAppendValidationState::from_prior_events(path, "hello001", &fixture[..7])
+        SessionAppendValidationState::from_prior_events(path, "hello-loop", &fixture[..7])
             .expect("fixture prefix validates");
     let progress = (0..count)
         .map(|index| {
@@ -649,18 +886,7 @@ fn appended_checkpoint_notifies_but_sync_failure_remains_visible() {
         },
     )
     .expect("writer starts");
-    let started = test_event(
-        "syncfail001",
-        "evt-sync-started",
-        EventType::SessionStarted,
-        1,
-    );
-    let completed = test_event(
-        "syncfail001",
-        "evt-sync-completed",
-        EventType::SessionCompleted,
-        2,
-    );
+    let [started, completed] = test_event_pair("syncfail001", EventType::SessionCompleted);
     let started_jsonl = started.canonical_jsonl().expect("started serializes");
     let completed_jsonl = completed.canonical_jsonl().expect("completed serializes");
 
@@ -718,24 +944,20 @@ fn test_event(
     )
 }
 
+fn test_event_pair(session_id: &str, second_type: EventType) -> [EventEnvelope; 2] {
+    [
+        test_event(session_id, "evt-first", EventType::SessionStarted, 1),
+        test_event(session_id, "evt-second", second_type, 2),
+    ]
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
     let workspace = empty_workspace("event-writer-visible-batch-prefix");
     let reservation =
         reserve_session_log(&workspace, "visibleprefix001").expect("session reserved");
-    let first = test_event(
-        "visibleprefix001",
-        "evt-visible-first",
-        EventType::SessionStarted,
-        1,
-    );
-    let second = test_event(
-        "visibleprefix001",
-        "evt-visible-second",
-        EventType::MessageDelta,
-        2,
-    );
+    let [first, second] = test_event_pair("visibleprefix001", EventType::MessageDelta);
     let first_jsonl = first.canonical_jsonl().expect("first event serializes");
     let second_jsonl = second.canonical_jsonl().expect("second event serializes");
     let path = reservation.session_path.clone();
@@ -803,18 +1025,7 @@ fn cleanup_failure_still_reports_the_complete_persisted_prefix() {
     let workspace = empty_workspace("event-writer-cleanup-failure-prefix");
     let reservation =
         reserve_session_log(&workspace, "cleanupfailure001").expect("session reserved");
-    let first = test_event(
-        "cleanupfailure001",
-        "evt-cleanup-first",
-        EventType::SessionStarted,
-        1,
-    );
-    let second = test_event(
-        "cleanupfailure001",
-        "evt-cleanup-second",
-        EventType::MessageDelta,
-        2,
-    );
+    let [first, second] = test_event_pair("cleanupfailure001", EventType::MessageDelta);
     let first_jsonl = first.canonical_jsonl().expect("first event serializes");
     let second_jsonl = second.canonical_jsonl().expect("second event serializes");
     let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
@@ -870,11 +1081,11 @@ fn later_events_do_not_extend_the_dirty_sync_deadline() {
 
 #[test]
 fn context_manifest_stream_enforces_its_aggregate_limit() {
-    let limit = usize::try_from(MAX_SESSION_LOG_BYTES).expect("manifest limit fits usize");
+    let limit = usize::try_from(MAX_SESSION_EVENT_BYTES).expect("manifest limit fits usize");
     assert_eq!(
         ensure_context_manifest_growth_within_limit(Path::new("contexts.jsonl"), limit - 1, 1)
             .expect("the exact limit is accepted"),
-        MAX_SESSION_LOG_BYTES
+        MAX_SESSION_EVENT_BYTES
     );
     assert!(matches!(
         ensure_context_manifest_growth_within_limit(Path::new("contexts.jsonl"), limit, 1),

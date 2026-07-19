@@ -42,7 +42,7 @@ Command/request messages are not runtime event types. The future RPC/control sur
 
 ## Required v0 event-envelope fields
 
-The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/sessions/<session_id>.jsonl` store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads.
+The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the session's ordered event segments store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads.
 
 | Field | Type / rule |
 | --- | --- |
@@ -64,13 +64,17 @@ M1 Loop Agent derives timestamps from its event clock: `timestamp = base + (sequ
 
 ## v0 ID safety and loop identity
 
-- `session_id` is a token, not a path. V0 session IDs match `^[a-z0-9_-]{1,128}$`; lowercase-only IDs avoid filename aliasing on case-insensitive targets. Producers reject externally supplied values outside that grammar before reading or writing `.loop/sessions/<session_id>.jsonl`. Reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..` and empty strings before filesystem access. If a future protocol accepts broader external session IDs, it must specify a canonical filename encoding instead of joining raw IDs into paths.
+- `session_id` is a token, not a path. V0 session IDs match `^[a-z0-9_-]{1,128}$`; lowercase-only IDs avoid filename aliasing on case-insensitive targets. Producers reject externally supplied values outside that grammar before reading or writing a session bundle. Reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..` and empty strings before filesystem access. If a future protocol accepts broader external session IDs, it must specify a canonical filename encoding instead of joining raw IDs into paths.
 - `loop_id` is a runtime invocation id, not the registry/definition id. The root loop and every subloop invocation get distinct `loop_id` values within the session. Reusing one subloop definition twice therefore emits two different `loop_id` values, each with `parent_loop_id` equal to the containing runtime loop invocation id.
 - Loop definition identity travels in payload fields, not in `loop_id`. `loop.*` events carry `loop_definition_id`; `loop_name` is optional display metadata.
 
 ## M1 local session storage
 
-The append-only session event log is authoritative for replay and catch-up. Local paths, locks, recovery and replay/resume behavior are defined in the [Loop Agent V-Spec](docs/concept/V-Spec_LoopAgent.html#surfaces); other tools consume public surfaces, never this store directly (see the topology invariants below).
+The ordered append-only event segments are authoritative for replay and catch-up. The first is `.loop/sessions/<session_id>.jsonl`; later segments are `<session_id>.<six-digit-ordinal>.jsonl`, beginning at `000002`. Rotation occurs before an event would make a segment exceed 16 MiB canonical uncompressed bytes; one event is never split, sequence and all session budgets continue unchanged, and prior segments become immutable.
+
+Hard safety limits are 320 KiB per canonical event including LF, 48 MiB canonical event data, 48 MiB context-manifest data and 155,750 events cumulatively per session. The removed 10 MiB aggregate stream cap is not a second limit. A session bundle may occupy at most 5.5 GiB, any immutable object chunk at most 16 MiB and all object data at most 5,520 MiB; the remaining 112 MiB is reserved for both JSONL streams and metadata.
+
+Context manifests reference the exact canonical source bytes through `session-object:sha256:<digest>`. Loop Agent stores those session-owned immutable objects once per digest, accounts existing objects again on resume and verifies availability and content before use. Larger future artifacts must be chunked; no reference needed to validate or reconstruct recorded canonical history and provider context may point only to mutable or externally owned storage. Export and deletion operate on the complete bundle. The bundle preserves canonical history but cannot reproduce an external provider, tool, compatible registry for continuation, mutable environment or undeclared side effect. Local paths, locks, recovery and replay/resume behavior are defined in the [Loop Agent V-Spec](docs/concept/V-Spec_LoopAgent.html#surfaces); other tools consume public surfaces, never this store directly.
 
 ## M1 local append and live delivery (ADR-0059, ADR-0062)
 

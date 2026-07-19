@@ -750,6 +750,9 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
 
 #[test]
 fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
+    assert_eq!(MAX_LOOP_INVOCATIONS, 512);
+    assert_eq!(MAX_LOOP_EVENTS, 155_750);
+
     let mut builder =
         RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture(), false);
     builder.loop_counter = MAX_LOOP_INVOCATIONS;
@@ -770,22 +773,21 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
 
     let mut builder =
         RuntimeEventBuilder::with_clock("stream001".to_owned(), EventClock::fixed_fixture(), false);
-    builder.events.byte_count = MAX_LOOP_EVENT_STREAM_BYTES;
-    assert!(matches!(
-        builder.emit(
+    builder.events.byte_count = 10 * 1024 * 1024;
+    builder
+        .emit(
             None,
             EventType::SessionPaused,
-            serde_json::json!({"reason":"budget"})
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("event stream budget")
-    ));
+            serde_json::json!({"reason":"budget"}),
+        )
+        .expect("canonical event bytes no longer have a 10 MiB aggregate cap");
 
     let path = Path::new("resume-budget.jsonl");
     let mut validation = SessionAppendValidationState::empty("budget001");
-    validation.previous_sequence = MAX_LOOP_EVENTS;
-    validation.line_count = MAX_LOOP_EVENTS as usize;
-    validation.runtime_event_count = MAX_LOOP_EVENTS;
-    validation.stream_bytes = MAX_LOOP_EVENT_STREAM_BYTES;
+    validation.previous_sequence = MAX_LOOP_EVENTS - 1;
+    validation.line_count = (MAX_LOOP_EVENTS - 1) as usize;
+    validation.runtime_event_count = MAX_LOOP_EVENTS - 1;
+    validation.stream_bytes = 10 * 1024 * 1024;
     let event = |event_id, event_type, sequence| {
         let line = session_event_line("budget001", event_id, event_type, sequence);
         (
@@ -793,19 +795,70 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
             line.len(),
         )
     };
-    let (resumed, resumed_bytes) = event(
-        "evt-resumed",
-        EventType::SessionResumed,
-        MAX_LOOP_EVENTS + 1,
-    );
+    let (resumed, resumed_bytes) = event("evt-resumed", EventType::SessionResumed, MAX_LOOP_EVENTS);
     validation
         .validate_constructed_event(path, &resumed, resumed_bytes)
-        .expect("resume markers do not consume runtime budgets");
-    let (paused, bytes) = event("evt-paused", EventType::SessionPaused, MAX_LOOP_EVENTS + 2);
+        .expect("the final event slot accepts a resume marker");
+    let (paused, bytes) = event("evt-paused", EventType::SessionPaused, MAX_LOOP_EVENTS + 1);
     assert!(matches!(
         validation.validate_constructed_event(path, &paused, bytes),
         Err(RuntimeError::Protocol(message)) if message.contains("runtime event budget")
     ));
+}
+
+#[test]
+fn canonical_event_size_has_an_independent_hard_limit() {
+    let event = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "eventbytes001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "loop-agent-cli",
+        serde_json::json!({"reason":"x".repeat(MAX_CANONICAL_EVENT_BYTES)}),
+    );
+    let canonical = event.canonical_jsonl().expect("event serializes");
+    let mut validation = SessionAppendValidationState::empty("eventbytes001");
+
+    let err = validation
+        .validate_constructed_event(Path::new("event.jsonl"), &event, canonical.len())
+        .expect_err("oversized canonical event is rejected");
+
+    assert!(err.to_string().contains("canonical event"), "{err}");
+}
+
+#[test]
+fn live_invocation_counter_rejects_only_the_thirty_third_started_loop() {
+    let counter = LiveInvocationCounter::new();
+    let guards = (0..MAX_LIVE_LOOP_INVOCATIONS)
+        .map(|_| counter.acquire().expect("first 32 live loops fit"))
+        .collect::<Vec<_>>();
+
+    let err = counter
+        .acquire()
+        .err()
+        .expect("thirty-third live loop is rejected");
+    assert!(err.to_string().contains("max 32"), "{err}");
+    drop(guards);
+    assert!(counter.acquire().is_ok());
+}
+
+#[test]
+fn only_side_effectful_execution_occupies_a_live_invocation_slot() {
+    assert!(ToolSideEffectMode::ApplyAll.occupies_live_invocation_slot());
+    assert!(
+        ToolSideEffectMode::Resume {
+            prefix_event_count: 1,
+        }
+        .occupies_live_invocation_slot()
+    );
+    assert!(!ToolSideEffectMode::DryRun.occupies_live_invocation_slot());
+    assert!(
+        !ToolSideEffectMode::PreflightResume {
+            prefix_event_count: 1,
+        }
+        .occupies_live_invocation_slot()
+    );
 }
 
 #[test]

@@ -199,6 +199,7 @@ where
     } else {
         0
     };
+    let mut observed_high_watermark = cursor;
     let worker = thread::Builder::new()
         .name("loop-cli-run".to_owned())
         .spawn(move || operation(notifier))
@@ -212,6 +213,8 @@ where
     loop {
         match receiver.recv_timeout(Duration::from_millis(25)) {
             Ok(notification) => {
+                observed_high_watermark =
+                    observed_high_watermark.max(notification.highest_committed_sequence);
                 let reader = match &mut reader {
                     Some(reader) => reader,
                     slot @ None => {
@@ -240,7 +243,8 @@ where
     drop(receiver);
     if output_error.is_none()
         && let Some(reader) = &mut reader
-        && let Err(err) = write_verified_events(reader, &mut cursor, &mut stdout)
+        && let Err(err) =
+            write_verified_events(reader, &mut cursor, observed_high_watermark, &mut stdout)
     {
         output_error = Some(err);
     }
@@ -269,13 +273,29 @@ fn write_new_events(
 fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
+    through_sequence: u64,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
-    write_events(reader.read_after(*cursor)?, cursor, writer, |_| {})
+    let events = reader.read_after(*cursor)?;
+    write_events(
+        committed_events_through(events, through_sequence),
+        cursor,
+        writer,
+        |_| {},
+    )
+}
+
+fn committed_events_through(
+    events: impl IntoIterator<Item = EventEnvelope>,
+    through_sequence: u64,
+) -> impl Iterator<Item = EventEnvelope> {
+    events
+        .into_iter()
+        .take_while(move |event| event.sequence <= through_sequence)
 }
 
 fn write_events(
-    events: Vec<EventEnvelope>,
+    events: impl IntoIterator<Item = EventEnvelope>,
     cursor: &mut u64,
     writer: &mut impl Write,
     mut observe: impl FnMut(&EventEnvelope),
@@ -440,4 +460,37 @@ fn os_string_to_string(value: OsString) -> Result<String, &'static str> {
 
 fn usage() -> String {
     "usage: loop run <loop> [--emit jsonl] | loop replay <session_id> [--emit jsonl] | loop tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | loop resume <session_id> [--emit jsonl] | loop sessions | loop chat".to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proto::EventType;
+
+    #[test]
+    fn final_live_drain_stops_at_the_operations_observed_high_watermark() {
+        let (notifier, receiver) = loop_agent_core::live_event_channel();
+        notifier.try_notify("resume001", 2);
+        let through_sequence = receiver
+            .recv_timeout(Duration::ZERO)
+            .expect("operation notification is available")
+            .highest_committed_sequence;
+        let events = [2, 3].map(|sequence| {
+            EventEnvelope::new(
+                format!("evt-{sequence}"),
+                EventType::MessageDelta,
+                "resume001",
+                sequence,
+                "2025-01-01T00:00:00Z",
+                "loop-agent",
+                Default::default(),
+            )
+        });
+
+        let drained_sequences = committed_events_through(events, through_sequence)
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>();
+
+        assert_eq!(drained_sequences, vec![2]);
+    }
 }

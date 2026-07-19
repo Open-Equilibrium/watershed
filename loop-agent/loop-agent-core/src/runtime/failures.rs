@@ -145,17 +145,7 @@ fn sandbox_out_of_phase_failure(
 }
 
 fn sandbox_negative_operation_for_tool(tool: &core_script::ToolBlock) -> Option<&str> {
-    let (
-        core_script::ToolKind::PredefinedCommand,
-        core_script::ToolCommand::Predefined { command_id, argv },
-    ) = (&tool.tool_kind, &tool.command)
-    else {
-        return None;
-    };
-    if command_id != "agent-negative" {
-        return None;
-    }
-    let [operation] = argv.as_slice() else {
+    let [operation] = sandbox_negative_arguments(tool)? else {
         return None;
     };
     sandbox_negative_reason_for_operation(operation).map(|_| operation.as_str())
@@ -164,17 +154,10 @@ fn sandbox_negative_operation_for_tool(tool: &core_script::ToolBlock) -> Option<
 fn sandbox_negative_reason_for_tool(
     tool: &core_script::ToolBlock,
 ) -> Result<Option<core_policy::DenyReasonCode>, RuntimeError> {
-    let (
-        core_script::ToolKind::PredefinedCommand,
-        core_script::ToolCommand::Predefined { command_id, argv },
-    ) = (&tool.tool_kind, &tool.command)
-    else {
+    let Some(arguments) = sandbox_negative_arguments(tool) else {
         return Ok(None);
     };
-    if command_id != "agent-negative" {
-        return Ok(None);
-    }
-    let [operation] = argv.as_slice() else {
+    let [operation] = arguments else {
         return Err(RuntimeError::Protocol(format!(
             "tool {} agent-negative command must declare one denied operation",
             tool.identity.id
@@ -188,6 +171,16 @@ fn sandbox_negative_reason_for_tool(
                 tool.identity.id
             ))
         })
+}
+
+fn sandbox_negative_arguments(tool: &core_script::ToolBlock) -> Option<&[String]> {
+    match (&tool.tool_kind, &tool.command) {
+        (
+            core_script::ToolKind::PredefinedCommand,
+            core_script::ToolCommand::Predefined { command_id, argv },
+        ) if command_id == "agent-negative" => Some(argv),
+        _ => None,
+    }
 }
 
 fn sandbox_negative_reason_for_operation(operation: &str) -> Option<core_policy::DenyReasonCode> {
@@ -364,60 +357,6 @@ fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeErr
         })?);
     }
     Ok(stream)
-}
-
-fn session_id_for_loop(loop_id: &str) -> String {
-    if matches!(loop_id, "smoke-loop" | "hello-loop") {
-        let base = loop_id
-            .strip_suffix("-loop")
-            .expect("fixture loop id ends with -loop");
-        return session_id_from_token(base, loop_id);
-    }
-    if let Some(operation) = loop_id.strip_prefix("sandbox-negative-") {
-        return session_id_from_token(&sandbox_negative_session_token(operation), loop_id);
-    }
-    session_id_from_token(loop_id, loop_id)
-}
-
-fn sandbox_negative_session_token(operation: &str) -> String {
-    let mut token = String::from("neg");
-    for word in operation.split('-') {
-        match word {
-            "environment" => token.push_str("env"),
-            "interpreter" => token.push_str("interp"),
-            "network" => token.push_str("net"),
-            "path" | "symlink" | "write" => token.push_str(word),
-            "phase" => token.push_str("phase"),
-            "of" | "out" | "protected" | "tool" => {}
-            other => token.push_str(other),
-        }
-    }
-    token
-}
-
-fn session_id_from_token(token: &str, stable_source: &str) -> String {
-    let mut token = token.to_ascii_lowercase();
-    token.retain(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '-');
-    if token.is_empty() {
-        token.push_str("session");
-    }
-    let suffix = if token.len() <= 125 {
-        "001".to_owned()
-    } else {
-        format!("-{:016x}001", stable_hash64(stable_source.as_bytes()))
-    };
-    token.truncate(128 - suffix.len());
-    token.push_str(&suffix);
-    token
-}
-
-fn stable_hash64(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
 }
 
 fn policy_tool_kind_name(kind: &core_policy::ToolKind) -> &'static str {

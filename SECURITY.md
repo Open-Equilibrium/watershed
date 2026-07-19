@@ -85,7 +85,6 @@ Policy artifact arrays are ordered after registry resolution and path normalizat
 Top-level policy fields:
 
 - `policy_version`: fixed string `"0"`.
-- `fixture_name`: fixture registry name, e.g. `hello-loop`.
 - `target`: `linux-landlock-seccomp` or `macos-seatbelt`.
 - `source_loop_definition_id`: resolved Loop definition id from the building-block registry.
 - `commands`: array of `{ tool_id, tool_kind, command_id, executable, argv, script_runtime, allowed_parameters, environment, filesystem, network }`. `command_id` is the resolved predefined-command id (`^[a-z][a-z0-9_-]{0,63}$`) or `script:<tool_id>` for own-script tools. `executable` is the registry-resolved executable identity for `predefined-command` or the fixed runner for `own-script`. Predefined-command launch direct-execs the registry-resolved executable with literal `argv` and never uses PATH lookup, shell parsing, environment expansion or glob expansion. Own-script launch direct-execs the fixed `posix-sh` runner; POSIX shell parsing/expansion inside the reviewed `script_body` is part of own-script semantics and remains inside the sandbox, but runner path and runner arguments are not script-controllable. `argv` is the literal base argument vector before validated allowed-parameter tokens. `script_runtime` is present only for `own-script` tools and is `posix-sh`; it is omitted for `predefined-command` tools. Capabilities are scoped to this `tool_id`; never infer that one tool can use another tool's grants.
@@ -130,7 +129,7 @@ Protected-path matching semantics:
 - Compare both the normalized lexical request and the component-wise resolved absolute and workspace-root-relative forms. A request is denied if any form matches a protected pattern and no explicit grant matches.
 - Glob grammar is limited to `*` (any characters except `/`), `?` (one character except `/`) and `**` (zero or more complete path segments). No brace expansion, extglobs or regex syntax.
 - Patterns match the whole normalized path. A pattern starting with `**/` may match at any depth; otherwise matching is anchored at the beginning.
-- Matching is case-sensitive on Linux targets and case-insensitive on macOS Seatbelt targets to match the default filesystem risk profile.
+- Matching is case-sensitive on Linux targets and conservatively ASCII case-insensitive on macOS Seatbelt targets, regardless of the host volume's case setting.
 - Explicit grants are tool-scoped entries in `commands[].filesystem.protected_path_grants`. A grant only removes the protected-path deny for that tool; the path must still be inside the same tool's declared read/write scope.
 
 - repo/runtime metadata: `**/.git`, `**/.git/**`, `**/.loop`, `**/.loop/**`;

@@ -5,9 +5,9 @@ pub fn validate_protocol_jsonl_text(
     text: &str,
 ) -> Result<Vec<EventEnvelope>, RuntimeError> {
     let text_bytes = u64::try_from(text.len()).unwrap_or(u64::MAX);
-    if text_bytes > MAX_SESSION_LOG_BYTES {
+    if text_bytes > MAX_SESSION_EVENT_BYTES {
         return Err(RuntimeError::Protocol(format!(
-            "{} session log size {text_bytes} bytes exceeds max {MAX_SESSION_LOG_BYTES}",
+            "{} session event data size {text_bytes} bytes exceeds max {MAX_SESSION_EVENT_BYTES}",
             path.display()
         )));
     }
@@ -351,28 +351,12 @@ impl SessionAppendValidationState {
         self.lifecycle.tool_without_progress()
     }
 
+    #[cfg(test)]
     fn from_prior_events(
         path: &Path,
         expected_session_id: &str,
         prior_events: &[EventEnvelope],
     ) -> Result<Self, RuntimeError> {
-        let Some(first) = prior_events.first() else {
-            return Ok(Self::empty(expected_session_id));
-        };
-        if first.event_type != EventType::SessionStarted {
-            return Err(RuntimeError::Protocol(format!(
-                "{} line 1 must start with session.started",
-                path.display()
-            )));
-        }
-        if first.session_id != expected_session_id {
-            return Err(RuntimeError::Protocol(format!(
-                "{} contains session_id {:?}, expected {expected_session_id:?}",
-                path.display(),
-                first.session_id,
-            )));
-        }
-
         let mut state = Self::empty(expected_session_id);
         for event in prior_events {
             let canonical_bytes = event
@@ -418,12 +402,6 @@ impl SessionAppendValidationState {
         for line in text.split_terminator('\n') {
             let line_number = self.line_count + 1;
             let canonical_bytes = line.len().saturating_add(1);
-            if canonical_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} event stream budget exceeded at line {line_number}: {canonical_bytes} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
-                    path.display()
-                )));
-            }
             if line.ends_with('\r') {
                 return Err(RuntimeError::Protocol(format!(
                     "{} line {line_number} must use LF-only line endings",
@@ -431,7 +409,7 @@ impl SessionAppendValidationState {
                 )));
             }
             let event = parse_canonical_event(path, line_number, line)?;
-            self.validate_budget(path, line_number, &event.event_type, canonical_bytes)?;
+            self.validate_budget(path, line_number, canonical_bytes)?;
             self.validate_event(path, line_number, &event)?;
             visit(&event)?;
         }
@@ -445,7 +423,7 @@ impl SessionAppendValidationState {
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
         let line_number = self.line_count + 1;
-        self.validate_budget(path, line_number, &event.event_type, canonical_bytes)?;
+        self.validate_budget(path, line_number, canonical_bytes)?;
         self.validate_event(path, line_number, event)
     }
 
@@ -453,11 +431,13 @@ impl SessionAppendValidationState {
         &mut self,
         path: &Path,
         line_number: usize,
-        event_type: &EventType,
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
-        if event_type == &EventType::SessionResumed {
-            return Ok(());
+        if canonical_bytes > MAX_CANONICAL_EVENT_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "{} canonical event at line {line_number} is {canonical_bytes} bytes; max {MAX_CANONICAL_EVENT_BYTES}",
+                path.display()
+            )));
         }
         let event_count = self.runtime_event_count.saturating_add(1);
         if event_count > MAX_LOOP_EVENTS {
@@ -467,11 +447,10 @@ impl SessionAppendValidationState {
             )));
         }
         let stream_bytes = self.stream_bytes.saturating_add(canonical_bytes);
-        if stream_bytes > MAX_LOOP_EVENT_STREAM_BYTES {
+        if u64::try_from(stream_bytes).unwrap_or(u64::MAX) > MAX_SESSION_EVENT_BYTES {
             return Err(RuntimeError::Protocol(format!(
-                "{} event stream budget exceeded at line {line_number}: {} bytes exceeds max {MAX_LOOP_EVENT_STREAM_BYTES}",
-                path.display(),
-                stream_bytes
+                "{} session event data budget exceeded at line {line_number}: max {MAX_SESSION_EVENT_BYTES} bytes",
+                path.display()
             )));
         }
         self.runtime_event_count = event_count;
@@ -1218,6 +1197,7 @@ fn stream_is_failed(events: &[EventEnvelope]) -> bool {
         .is_some_and(|event| event.event_type == EventType::SessionFailed)
 }
 
+#[cfg(test)]
 fn stream_is_completed(events: &[EventEnvelope]) -> bool {
     events
         .last()

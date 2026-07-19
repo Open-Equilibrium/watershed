@@ -37,14 +37,13 @@ fn run_loop_internal(
         .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
     let definition_metadata = session_definition_metadata(&registry, loop_block)?;
     let policy = core_policy::compile_policy_artifact(
-        &loop_block.identity.id,
         &registry,
         loop_ref,
         runtime_policy_target(),
     )?;
     preflight_loop_tools(workspace, &registry, &policy, loop_block)?;
-    let base_session_id = session_id_for_loop(&loop_block.identity.id);
-    let reservation = reserve_unique_session_log(workspace, &base_session_id)?;
+    let base_session_id = &loop_block.identity.id;
+    let reservation = reserve_unique_session_log(workspace, base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
     write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
     let planned_runtime = execute_loop(
@@ -104,7 +103,7 @@ fn run_loop_internal(
         return Err(RuntimeError::session_failed(&expected_session_id, err));
     }
     let stdout = if capture_jsonl {
-        read_anchored_to_string_with_limit(&reservation.session_path, MAX_SESSION_LOG_BYTES)?
+        read_segmented_jsonl(&reservation.session_path, MAX_SESSION_EVENT_BYTES)?
     } else {
         format!(
             "loop {} (session {expected_session_id}) {outcome}\n",
