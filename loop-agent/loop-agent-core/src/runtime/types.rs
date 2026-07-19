@@ -18,14 +18,25 @@ pub const LOCAL_SESSION_DIR: &str = ".loop/sessions";
 pub const LOCAL_LOG_DIR: &str = ".loop/logs";
 /// Maximum canonical uncompressed bytes stored in one event or manifest segment.
 pub const MAX_SESSION_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
-/// Maximum segments needed when records are not split under the 48 MiB stream limit.
-const MAX_SESSION_STREAM_SEGMENTS: u64 = 5;
 /// Maximum canonical bytes stored for one event, including its trailing LF.
 pub const MAX_CANONICAL_EVENT_BYTES: usize = 320 * 1024;
 /// Maximum canonical event bytes accumulated by one session across all segments.
 pub const MAX_SESSION_EVENT_BYTES: u64 = 48 * 1024 * 1024;
 /// Maximum canonical context-manifest bytes accumulated across all segments.
 pub const MAX_SESSION_CONTEXT_MANIFEST_BYTES: u64 = 48 * 1024 * 1024;
+#[derive(Clone, Copy)]
+struct SessionStreamLimits {
+    max_segments: u64,
+    max_total_bytes: u64,
+}
+const EVENT_STREAM_LIMITS: SessionStreamLimits = SessionStreamLimits {
+    max_segments: 4,
+    max_total_bytes: MAX_SESSION_EVENT_BYTES,
+};
+const CONTEXT_MANIFEST_STREAM_LIMITS: SessionStreamLimits = SessionStreamLimits {
+    max_segments: 5,
+    max_total_bytes: MAX_SESSION_CONTEXT_MANIFEST_BYTES,
+};
 /// Maximum bytes stored in one immutable session-owned object chunk.
 pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum stored content bytes in one complete self-contained session bundle.

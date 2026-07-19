@@ -100,7 +100,7 @@ fn run_loop_internal(
         return Err(RuntimeError::session_failed(&expected_session_id, err));
     }
     let stdout = if capture_jsonl {
-        read_segmented_jsonl(&reservation.session_path, MAX_SESSION_EVENT_BYTES)?
+        read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)?
     } else {
         format!(
             "loop {} (session {expected_session_id}) {outcome}\n",

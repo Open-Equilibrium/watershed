@@ -517,7 +517,10 @@ fn read_anchored_context_manifest_signature(
     let mut recorded = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
     let mut line_number = 0usize;
     let mut verified_objects = BTreeSet::new();
-    for_each_segmented_jsonl_line(&path, MAX_SESSION_CONTEXT_MANIFEST_BYTES, |line| {
+    for_each_segmented_jsonl_line(
+        &path,
+        CONTEXT_MANIFEST_STREAM_LIMITS,
+        |line| {
         line_number = line_number.saturating_add(1);
         if !line.ends_with('\n') {
             return Err(RuntimeError::Protocol(format!(
@@ -566,7 +569,8 @@ fn read_anchored_context_manifest_signature(
         verify_context_manifest_objects(sessions, session_id, &value, &mut verified_objects)?;
         recorded.push(canonical.as_bytes());
         Ok(())
-    })?;
+        },
+    )?;
     let recoverable_manifest_count = completed_turns.saturating_add(1);
     let recorded = recorded.signature();
     if recorded.record_count < completed_turns || recorded.record_count > recoverable_manifest_count

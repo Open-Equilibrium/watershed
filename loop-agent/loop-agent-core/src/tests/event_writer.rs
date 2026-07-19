@@ -62,7 +62,7 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
         u64::try_from(record.len()).expect("size fits")
     );
     assert_eq!(
-        segmented_jsonl_files(&reservation.session_path)
+        segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
             .unwrap()
             .len(),
         2
@@ -71,13 +71,13 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
 }
 
 #[test]
-fn event_appender_refuses_to_reserve_a_sixth_segment() {
-    let workspace = empty_workspace("event-segment-sixth");
-    let reservation = reserve_session_log(&workspace, "segmentsixth001").expect("session reserved");
-    for ordinal in 1..=MAX_SESSION_STREAM_SEGMENTS {
+fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
+    let workspace = empty_workspace("stream-segment-caps");
+    let reservation = reserve_session_log(&workspace, "segmentcaps001").expect("session reserved");
+    for ordinal in 1..=EVENT_STREAM_LIMITS.max_segments {
         let path = segmented_jsonl_path(&reservation.session_path, ordinal)
             .expect("segment path resolves");
-        let bytes = if ordinal == MAX_SESSION_STREAM_SEGMENTS {
+        let bytes = if ordinal == EVENT_STREAM_LIMITS.max_segments {
             vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES - 1).expect("size fits")]
         } else {
             vec![b'x']
@@ -88,14 +88,22 @@ fn event_appender_refuses_to_reserve_a_sixth_segment() {
 
     let err = appender
         .append(reservation.session_path.diagnostic_path(), b"xx")
-        .expect_err("crossing append must not create a sixth segment");
+        .expect_err("crossing append must not create a fifth event segment");
 
     assert!(
-        err.to_string().contains("segment count exceeds max 5"),
+        err.to_string().contains("segment count exceeds max 4"),
         "{err}"
     );
-    let sixth = segmented_jsonl_path(&reservation.session_path, 6).expect("segment path resolves");
-    assert!(!sixth.diagnostic_path().exists());
+    let fifth = segmented_jsonl_path(&reservation.session_path, 5).expect("segment path resolves");
+    assert!(!fifth.diagnostic_path().exists());
+
+    for ordinal in 2..=CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
+        let path = segmented_jsonl_path(&reservation.context_path, ordinal)
+            .expect("manifest segment path resolves");
+        fs::write(path.diagnostic_path(), b"\n").expect("manifest segment written");
+    }
+    ContextManifestWriter::open(&reservation.context_path)
+        .expect("five context-manifest segments remain valid");
     reservation.rollback();
 }
 
@@ -115,7 +123,7 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
         ("event-segment-gap", vec![3], "non-contiguous"),
         (
             "event-segment-count",
-            (2..=6).collect::<Vec<_>>(),
+            (2..=5).collect::<Vec<_>>(),
             "segment count",
         ),
     ] {
@@ -130,7 +138,10 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
             fs::write(segment.diagnostic_path(), b"\n").expect("invalid segment fixture writes");
         }
 
-        let err = segmented_jsonl_files(&reservation.session_path)
+        let err = segmented_jsonl_files(
+            &reservation.session_path,
+            EVENT_STREAM_LIMITS,
+        )
             .expect_err("invalid segment layout is rejected");
         assert!(err.to_string().contains(expected), "{err}");
         reservation.rollback();
@@ -155,12 +166,16 @@ fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
 
         let results = if context {
             vec![
-                for_each_segmented_jsonl_line(base, MAX_SESSION_EVENT_BYTES, |_| Ok(()))
-                    .map(|_| ()),
+                for_each_segmented_jsonl_line(
+                    base,
+                    CONTEXT_MANIFEST_STREAM_LIMITS,
+                    |_| Ok(()),
+                )
+                .map(|_| ()),
             ]
         } else {
             vec![
-                read_segmented_jsonl(base, MAX_SESSION_EVENT_BYTES).map(|_| ()),
+                read_segmented_jsonl(base, EVENT_STREAM_LIMITS).map(|_| ()),
                 SessionLogAppender::open(base).map(|_| ()),
             ]
         };
@@ -192,7 +207,7 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
                 let segment = segmented_jsonl_path(&reservation.session_path, 2)
                     .expect("segment path resolves");
                 fs::hard_link(&target, segment.diagnostic_path()).expect("event segment linked");
-                read_segmented_jsonl(&reservation.session_path, MAX_SESSION_EVENT_BYTES).map(|_| ())
+                read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS).map(|_| ())
             }
             "context" => {
                 let segment = segmented_jsonl_path(&reservation.context_path, 2)
@@ -200,7 +215,7 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
                 fs::hard_link(&target, segment.diagnostic_path()).expect("context segment linked");
                 for_each_segmented_jsonl_line(
                     &reservation.context_path,
-                    MAX_SESSION_EVENT_BYTES,
+                    CONTEXT_MANIFEST_STREAM_LIMITS,
                     |_| Ok(()),
                 )
                 .map(|_| ())

@@ -245,7 +245,7 @@ fn resume_session_internal(
         )));
     }
     let stdout = if capture_jsonl {
-        let stream = read_segmented_jsonl(&path, MAX_SESSION_EVENT_BYTES)?;
+        let stream = read_segmented_jsonl(&path, EVENT_STREAM_LIMITS)?;
         let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
         canonical_event_stream(&events[prior_event_count..])?
     } else {
@@ -375,11 +375,15 @@ fn inspect_resume_session(
 ) -> Result<ResumeSessionInspection, RuntimeError> {
     let mut validation = SessionAppendValidationState::empty(session_id);
     let mut inspection = ResumeInspectionBuilder::new();
-    for_each_segmented_jsonl_line(path, MAX_SESSION_EVENT_BYTES, |line| {
-        validation.validate_appended_with(path.diagnostic_path(), line, |event| {
-            inspection.observe(event)
-        })
-    })?;
+    for_each_segmented_jsonl_line(
+        path,
+        EVENT_STREAM_LIMITS,
+        |line| {
+            validation.validate_appended_with(path.diagnostic_path(), line, |event| {
+                inspection.observe(event)
+            })
+        },
+    )?;
     let Some(clock) = inspection.clock else {
         return Err(RuntimeError::Protocol(format!(
             "{} must contain at least one event",
@@ -486,7 +490,7 @@ fn ensure_anchored_session_log_growth_within_limit(
     path: &AnchoredFile,
     appended_bytes: usize,
 ) -> Result<u64, RuntimeError> {
-    let existing_bytes = segmented_jsonl_files(path)?
+    let existing_bytes = segmented_jsonl_files(path, EVENT_STREAM_LIMITS)?
         .into_iter()
         .try_fold(0u64, |total, segment| {
             Ok::<_, RuntimeError>(total.saturating_add(segment.metadata()?.len()))
@@ -550,7 +554,7 @@ fn read_existing_session(
     })?;
     let file = sessions.file(format!("{session_id}.jsonl"));
     let path = file.diagnostic_path().to_owned();
-    let stream = read_segmented_jsonl(&file, MAX_SESSION_EVENT_BYTES)?;
+    let stream = read_segmented_jsonl(&file, EVENT_STREAM_LIMITS)?;
     let events = validate_session_log_text(&path, session_id, &stream)?;
     Ok(RunOutput {
         event_count: events.len(),

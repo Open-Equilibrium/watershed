@@ -172,7 +172,7 @@ impl SessionEventReader {
     pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
         let mut retried_inactive_partial = false;
         loop {
-            let segments = segmented_jsonl_files(&self.path)?;
+            let segments = segmented_jsonl_files(&self.path, EVENT_STREAM_LIMITS)?;
             let mut bytes = Vec::new();
             let mut final_complete_bytes = 0u64;
             for (index, segment) in segments.iter().enumerate() {
@@ -389,7 +389,7 @@ impl SessionEventReader {
             ensure_anchored_real_file(&segment)?;
             segments.push(segment);
         }
-        for ordinal in observed.saturating_add(1)..=MAX_SESSION_STREAM_SEGMENTS {
+        for ordinal in observed.saturating_add(1)..=EVENT_STREAM_LIMITS.max_segments {
             let segment = segmented_jsonl_path(&self.path, ordinal)?;
             match segment.metadata() {
                 Ok(_) => ensure_anchored_real_file(&segment)?,
