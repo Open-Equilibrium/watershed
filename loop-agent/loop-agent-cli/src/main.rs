@@ -270,6 +270,8 @@ where
             Err(LiveEventReceiveError::Closed) => break,
         }
     }
+    let result = worker.join();
+    observed_high_watermark = observed_high_watermark.max(receiver.highest_committed_sequence());
     drop(receiver);
     if output_error.is_none()
         && let Some(reader) = &mut reader
@@ -278,9 +280,8 @@ where
     {
         output_error = Some(err);
     }
-    let result = worker
-        .join()
-        .map_err(|_| RuntimeError::Protocol("CLI run worker panicked".to_owned()))?;
+    let result =
+        result.map_err(|_| RuntimeError::Protocol("CLI run worker panicked".to_owned()))?;
     if let Some(err) = output_error {
         return Err(err);
     }
@@ -558,11 +559,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_drain_emits_only_the_notified_operation_range() {
+    fn live_drain_catches_up_to_the_joined_operation_boundary() {
         let workspace = test_support::workspace_copy("smoke-loop");
         let output = loop_agent_core::run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
             .expect("fixture session runs");
-        assert!(output.event_count > 2);
+        assert!(output.event_count > 3);
         let mut reader = SessionEventReader::open(&workspace, &output.session_id)
             .expect("fixture session reader opens");
         let mut cursor = 0;
@@ -583,25 +584,34 @@ mod tests {
         .expect("bounded live drain succeeds");
         assert_eq!(cursor, 2);
 
-        write_verified_events(&mut reader, &mut cursor, 2, &mut emitted)
-            .expect("bounded verified drain succeeds");
-        assert_eq!(cursor, 2);
-        assert_eq!(emitted.iter().filter(|byte| **byte == b'\n').count(), 1);
+        let operation_end = output.event_count as u64 - 1;
+        let (notifier, receiver) = loop_agent_core::live_event_channel();
+        assert_eq!(
+            notifier.try_notify(&output.session_id, 3),
+            loop_agent_core::LiveEventNotifyStatus::Queued
+        );
+        let session_id = output.session_id.clone();
+        let producer = thread::spawn(move || notifier.try_notify(&session_id, operation_end));
+        assert_eq!(
+            producer.join().expect("producer joins"),
+            loop_agent_core::LiveEventNotifyStatus::Coalesced
+        );
 
         write_verified_events(
             &mut reader,
             &mut cursor,
-            output.event_count as u64,
+            receiver.highest_committed_sequence(),
             &mut emitted,
         )
-        .expect("remaining verified drain succeeds");
-        assert_eq!(cursor, output.event_count as u64);
+        .expect("joined operation catch-up succeeds");
+        assert_eq!(cursor, operation_end);
         assert_eq!(
             emitted,
             output
                 .stdout
                 .split_inclusive('\n')
                 .skip(1)
+                .take(output.event_count - 2)
                 .collect::<String>()
                 .as_bytes()
         );

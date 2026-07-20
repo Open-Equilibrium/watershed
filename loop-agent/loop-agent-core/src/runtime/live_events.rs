@@ -89,6 +89,15 @@ pub struct LiveEventReceiver {
 }
 
 impl LiveEventReceiver {
+    /// Returns the highest committed sequence currently published by this operation.
+    ///
+    /// Join the producer before using this value as the final replay boundary.
+    pub fn highest_committed_sequence(&self) -> u64 {
+        self.state
+            .highest_committed_sequence
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     /// Waits up to `timeout` for a coalesced committed-event wake-up.
     pub fn recv_timeout(
         &self,
@@ -106,10 +115,7 @@ impl LiveEventReceiver {
         Ok(LiveEventNotification {
             session_id,
             first_committed_sequence,
-            highest_committed_sequence: self
-                .state
-                .highest_committed_sequence
-                .load(std::sync::atomic::Ordering::Acquire),
+            highest_committed_sequence: self.highest_committed_sequence(),
         })
     }
 }
