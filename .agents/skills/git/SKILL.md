@@ -48,6 +48,7 @@ Commit every stable state: code compiles, affected `TESTING.md` gates are green,
 ## GitHub CLI
 
 - Use `gh auth status` before PR work; if `gh` is missing or unauthenticated, install/authenticate it or report the exact blocker.
+- Trigger exact-head CI for branch prefixes without push runs with `gh workflow run ci.yml --ref <branch>` once the manual trigger exists on `main`.
 - Before any push, verify the current branch is not `main` and its upstream is not `origin/main`.
 - Push the current branch with an explicit non-main refspec: `git push -u origin HEAD:refs/heads/<branch>`; never push `main`.
 - Create/view PRs with `gh pr create --base main --head <branch> --body-file <reviewed-body-file>` and `gh pr view`.
