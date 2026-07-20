@@ -1,8 +1,8 @@
 //! Loop Agent command-line entry point.
 
 use loop_agent_core::{
-    EmitMode, LiveEventNotifier, LiveEventReceiveError, RunOutput, RuntimeError,
-    SessionEventReader, render_human_failure_status,
+    EmitMode, LiveEventNotification, LiveEventNotifier, LiveEventReceiveError, RunOutput,
+    RuntimeError, SessionEventReader, render_human_failure_status,
 };
 use proto::EventEnvelope;
 use std::{
@@ -223,6 +223,7 @@ where
         0
     };
     let mut observed_high_watermark = cursor;
+    let mut first_committed_sequence = None;
     let worker = thread::Builder::new()
         .name("loop-cli-run".to_owned())
         .spawn(move || operation(notifier))
@@ -250,7 +251,13 @@ where
                         }
                     }
                 };
-                match write_new_events(reader, &mut cursor, observed_high_watermark, &mut stdout) {
+                match write_new_events(
+                    reader,
+                    &mut cursor,
+                    &mut first_committed_sequence,
+                    &notification,
+                    &mut stdout,
+                ) {
                     Ok(true) => {}
                     Ok(false) => break,
                     Err(err) => {
@@ -283,11 +290,17 @@ where
 fn write_new_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
-    through_sequence: u64,
+    first_committed_sequence: &mut Option<u64>,
+    notification: &LiveEventNotification,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
+    let first = *first_committed_sequence.get_or_insert(notification.first_committed_sequence);
+    *cursor = (*cursor).max(first.saturating_sub(1));
     write_events(
-        committed_events_through(reader.read_incremental_after(*cursor)?, through_sequence),
+        committed_events_through(
+            reader.read_incremental_after(*cursor)?,
+            notification.highest_committed_sequence,
+        ),
         cursor,
         writer,
         true,
@@ -545,7 +558,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn verified_drain_stops_at_the_observed_high_watermark() {
+    fn live_drain_emits_only_the_notified_operation_range() {
         let workspace = test_support::workspace_copy("smoke-loop");
         let output = loop_agent_core::run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
             .expect("fixture session runs");
@@ -553,16 +566,27 @@ mod tests {
         let mut reader = SessionEventReader::open(&workspace, &output.session_id)
             .expect("fixture session reader opens");
         let mut cursor = 0;
+        let mut first_committed_sequence = None;
         let mut emitted = Vec::new();
 
-        write_new_events(&mut reader, &mut cursor, 1, &mut emitted)
-            .expect("bounded live drain succeeds");
-        assert_eq!(cursor, 1);
+        write_new_events(
+            &mut reader,
+            &mut cursor,
+            &mut first_committed_sequence,
+            &loop_agent_core::LiveEventNotification {
+                session_id: output.session_id.clone(),
+                first_committed_sequence: 2,
+                highest_committed_sequence: 2,
+            },
+            &mut emitted,
+        )
+        .expect("bounded live drain succeeds");
+        assert_eq!(cursor, 2);
 
         write_verified_events(&mut reader, &mut cursor, 2, &mut emitted)
             .expect("bounded verified drain succeeds");
         assert_eq!(cursor, 2);
-        assert_eq!(emitted.iter().filter(|byte| **byte == b'\n').count(), 2);
+        assert_eq!(emitted.iter().filter(|byte| **byte == b'\n').count(), 1);
 
         write_verified_events(
             &mut reader,
@@ -572,7 +596,15 @@ mod tests {
         )
         .expect("remaining verified drain succeeds");
         assert_eq!(cursor, output.event_count as u64);
-        assert_eq!(emitted, output.stdout.as_bytes());
+        assert_eq!(
+            emitted,
+            output
+                .stdout
+                .split_inclusive('\n')
+                .skip(1)
+                .collect::<String>()
+                .as_bytes()
+        );
 
         drop(reader);
         std::fs::remove_dir_all(workspace).expect("temporary workspace removed");

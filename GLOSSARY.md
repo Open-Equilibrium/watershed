@@ -66,7 +66,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **JSONL event stream** — Loop Agent's headless mode that streams newline-delimited JSON runtime events to stdout for automation/CI/consumers.
 - **RPC mode** — Loop Agent's designed-for bidirectional stdin/stdout control mode. ADR-0055 selects the initial command/request shape; runtime events remain the public event contract.
 - **Session store** — Loop Agent's local append-only transcript persistence (e.g. `.loop/sessions/<session_id>.jsonl`). Runtime state only; **not** a project VCS/history engine.
-- **Live-event notification** — A bounded, best-effort wake-up reporting a session's highest committed sequence; it carries no event payload, and receivers replay events after their cursor from the authoritative session log.
+- **Live-event notification** — A bounded, best-effort wake-up reporting a session's earliest pending and highest committed sequences; it carries no event payload, and receivers replay events after their cursor from the authoritative session log.
 - **Persistence-before-notification** — The local guarantee that one serial session writer successfully appends a canonical event to the authoritative log before updating its high-watermark and attempting a live-event notification; physical `fsync` follows separate bounded durability checkpoints.
 - **Loop registry** — The name/id index used by `loop run <name>` and interactive slash commands such as `/hello-loop` inside `loop chat` to resolve a loop definition without requiring a path.
 - **Fixture workspace** — A checked-in test workspace for a golden loop; ADR-0041 defines how it points Loop Agent at the fixture registry and deterministic stub-model profile.

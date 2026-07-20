@@ -16,12 +16,27 @@ fn live_notification_is_bounded_coalesced_and_non_blocking() {
             .expect("pending notification is received"),
         LiveEventNotification {
             session_id: "bounded001".to_owned(),
+            first_committed_sequence: 1,
             highest_committed_sequence: 2,
+        }
+    );
+    assert_eq!(
+        notifier.try_notify("bounded001", 3),
+        LiveEventNotifyStatus::Queued
+    );
+    assert_eq!(
+        receiver
+            .recv_timeout(Duration::from_millis(50))
+            .expect("next notification is received"),
+        LiveEventNotification {
+            session_id: "bounded001".to_owned(),
+            first_committed_sequence: 3,
+            highest_committed_sequence: 3,
         }
     );
     drop(receiver);
     assert_eq!(
-        notifier.try_notify("bounded001", 3),
+        notifier.try_notify("bounded001", 4),
         LiveEventNotifyStatus::Closed
     );
 }
@@ -660,6 +675,10 @@ fn resumed_notifications_replay_exactly_the_appended_suffix() {
     assert_eq!(
         notification.highest_committed_sequence,
         output.event_count as u64
+    );
+    assert_eq!(
+        notification.first_committed_sequence,
+        prefix_events + 1
     );
     assert_eq!(
         appended.first().map(|event| &event.event_type),

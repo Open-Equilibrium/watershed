@@ -16,6 +16,8 @@ pub enum LiveEventNotifyStatus {
 pub struct LiveEventNotification {
     /// Session whose committed log should be read.
     pub session_id: String,
+    /// Earliest committed sequence represented by this pending wake-up.
+    pub first_committed_sequence: u64,
     /// Highest committed sequence observed when this wake-up was received.
     pub highest_committed_sequence: u64,
 }
@@ -49,7 +51,7 @@ struct LiveEventState {
 /// This handle owns no task or thread. Pass it to one run or resume operation. Each
 /// successful append advances a shared high-watermark and attempts a capacity-one wake-up.
 pub struct LiveEventNotifier {
-    sender: std::sync::mpsc::SyncSender<String>,
+    sender: std::sync::mpsc::SyncSender<(String, u64)>,
     state: std::sync::Arc<LiveEventState>,
 }
 
@@ -62,7 +64,10 @@ impl LiveEventNotifier {
         self.state
             .highest_committed_sequence
             .fetch_max(committed_sequence, std::sync::atomic::Ordering::Release);
-        match self.sender.try_send(session_id.to_owned()) {
+        match self
+            .sender
+            .try_send((session_id.to_owned(), committed_sequence))
+        {
             Ok(()) => LiveEventNotifyStatus::Queued,
             Err(std::sync::mpsc::TrySendError::Full(_)) => LiveEventNotifyStatus::Coalesced,
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => LiveEventNotifyStatus::Closed,
@@ -79,7 +84,7 @@ impl LiveEventNotifier {
 /// the replay/live race because a commit either advances the observed high-watermark or leaves
 /// another wake-up queued.
 pub struct LiveEventReceiver {
-    receiver: std::sync::mpsc::Receiver<String>,
+    receiver: std::sync::mpsc::Receiver<(String, u64)>,
     state: std::sync::Arc<LiveEventState>,
 }
 
@@ -89,7 +94,7 @@ impl LiveEventReceiver {
         &self,
         timeout: Duration,
     ) -> Result<LiveEventNotification, LiveEventReceiveError> {
-        let session_id = self
+        let (session_id, first_committed_sequence) = self
             .receiver
             .recv_timeout(timeout)
             .map_err(|err| match err {
@@ -98,6 +103,7 @@ impl LiveEventReceiver {
             })?;
         Ok(LiveEventNotification {
             session_id,
+            first_committed_sequence,
             highest_committed_sequence: self
                 .state
                 .highest_committed_sequence
