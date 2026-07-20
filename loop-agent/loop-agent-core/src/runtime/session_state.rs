@@ -535,7 +535,9 @@ fn read_existing_session(
     })?;
     let file = sessions.file(format!("{session_id}.jsonl"));
     let path = file.diagnostic_path().to_owned();
-    let stream = read_segmented_jsonl(&file, EVENT_STREAM_LIMITS)?;
+    let stream = retry_event_segment_discovery(|| {
+        read_segmented_jsonl(&file, EVENT_STREAM_LIMITS)
+    })?;
     let events = validate_session_log_text(&path, session_id, &stream)?;
     Ok(RunOutput {
         event_count: events.len(),

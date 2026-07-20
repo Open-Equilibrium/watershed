@@ -1,4 +1,20 @@
 #[test]
+fn event_segment_discovery_retries_one_transient_protocol_error() {
+    let mut attempts = 0;
+    let stream = retry_event_segment_discovery(|| {
+        attempts += 1;
+        if attempts == 1 {
+            Err(RuntimeError::Protocol("concurrent rotation".to_owned()))
+        } else {
+            Ok("complete")
+        }
+    })
+    .expect("transient discovery recovers");
+
+    assert_eq!((stream, attempts), ("complete", 2));
+}
+
+#[test]
 fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
     let log_conflict = empty_workspace("reserve-log-conflict");
     fs::create_dir_all(log_conflict.join(LOCAL_SESSION_DIR)).expect("session dir");

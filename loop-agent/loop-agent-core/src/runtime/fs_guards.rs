@@ -247,6 +247,15 @@ fn canonical_segmented_jsonl_sibling(
     }
 }
 
+fn retry_event_segment_discovery<T>(
+    mut discover: impl FnMut() -> Result<T, RuntimeError>,
+) -> Result<T, RuntimeError> {
+    match discover() {
+        Err(RuntimeError::Protocol(_)) => discover(),
+        result => result,
+    }
+}
+
 fn segmented_jsonl_files(
     base: &AnchoredFile,
     limits: SessionStreamLimits,

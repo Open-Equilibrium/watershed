@@ -181,16 +181,10 @@ impl SessionEventReader {
     /// event. Repeating this call is safe after a processing failure.
     pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
         let mut retried_inactive_partial = false;
-        let mut retried_segment_discovery = false;
         loop {
-            let segments = match segmented_jsonl_files(&self.path, EVENT_STREAM_LIMITS) {
-                Ok(segments) => segments,
-                Err(RuntimeError::Protocol(_)) if !retried_segment_discovery => {
-                    retried_segment_discovery = true;
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
+            let segments = retry_event_segment_discovery(|| {
+                segmented_jsonl_files(&self.path, EVENT_STREAM_LIMITS)
+            })?;
             let mut bytes = Vec::new();
             let mut final_complete_bytes = 0u64;
             for (index, segment) in segments.iter().enumerate() {
