@@ -260,20 +260,9 @@ fn event_line(
     loop_id: Option<&str>,
     payload: serde_json::Value,
 ) -> String {
-    EventEnvelope {
-        loop_id: loop_id.map(str::to_owned),
-        ..EventEnvelope::new(
-            event_id,
-            event_type,
-            session_id,
-            sequence,
-            event_timestamp(sequence),
-            "loop-agent-cli",
-            payload,
-        )
-    }
-    .canonical_jsonl()
-    .expect("event serializes")
+    event_line_with_parent(
+        event_id, event_type, session_id, sequence, loop_id, None, payload,
+    )
 }
 
 fn event_line_with_parent(
