@@ -102,6 +102,10 @@ fn unique_reservation_inventories_orphan_namespaces_before_probing() {
         (LOCAL_LOG_DIR, "BUNDLE001-7.LOG"),
         (LOCAL_SESSION_DIR, "BUNDLE001-8.LOCK"),
         (LOCAL_SESSION_DIR, "bundle001-9.object.sha256-invalid"),
+        (LOCAL_SESSION_DIR, "BUNDLE001-10.JSONL"),
+        (LOCAL_SESSION_DIR, "BUNDLE001-11.000002.JSONL"),
+        (LOCAL_LOG_DIR, "BUNDLE001-12.CONTEXTS.JSONL"),
+        (LOCAL_LOG_DIR, "BUNDLE001-13.CONTEXTS.000002.JSONL"),
     ];
     for (directory, leaf) in sentinels {
         let path = workspace.join(directory).join(leaf);
@@ -116,8 +120,8 @@ fn unique_reservation_inventories_orphan_namespaces_before_probing() {
         })
         .expect("inventory skips orphan namespaces");
 
-    assert_eq!(reservation.session_id, "bundle001-10");
-    assert_eq!(probed, ["bundle001-10"]);
+    assert_eq!(reservation.session_id, "bundle001-14");
+    assert_eq!(probed, ["bundle001-14"]);
     reservation.rollback();
     assert!(
         sentinels

@@ -905,7 +905,7 @@ fn session_candidate_hints(
             };
             let lower = name.to_ascii_lowercase();
             let classified = if logs {
-                classify_log_candidate_leaf(&lower, name == lower)
+                classify_log_candidate_leaf(&lower)
             } else {
                 classify_session_candidate_leaf(dir, &lower, name == lower)
             };
@@ -926,16 +926,13 @@ fn session_candidate_hints(
     Ok(hints)
 }
 
-fn classify_log_candidate_leaf(
-    name: &str,
-    canonical: bool,
-) -> Option<(&str, SessionCandidateHint)> {
+fn classify_log_candidate_leaf(name: &str) -> Option<(&str, SessionCandidateHint)> {
     if let Some(id) = name.strip_suffix(".log") {
         return Some((id, SessionCandidateHint::Occupied));
     }
     segmented_candidate_id(name, true)
         .or_else(|| name.strip_suffix(".contexts.jsonl"))
-        .map(|id| (id, canonical_candidate_hint(canonical)))
+        .map(|id| (id, SessionCandidateHint::Occupied))
 }
 
 fn classify_session_candidate_leaf<'a>(
@@ -959,18 +956,16 @@ fn classify_session_candidate_leaf<'a>(
         return Some((id, hint));
     }
     if let Some(id) = segmented_candidate_id(name, false) {
-        return Some((id, canonical_candidate_hint(canonical)));
+        return Some((id, SessionCandidateHint::Occupied));
     }
-    name.strip_suffix(".jsonl")
-        .map(|id| (id, SessionCandidateHint::Probe))
-}
-
-fn canonical_candidate_hint(canonical: bool) -> SessionCandidateHint {
-    if canonical {
-        SessionCandidateHint::Occupied
-    } else {
-        SessionCandidateHint::Probe
-    }
+    name.strip_suffix(".jsonl").map(|id| {
+        let hint = if canonical {
+            SessionCandidateHint::Probe
+        } else {
+            SessionCandidateHint::Occupied
+        };
+        (id, hint)
+    })
 }
 
 fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
