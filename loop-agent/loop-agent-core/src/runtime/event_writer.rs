@@ -1207,6 +1207,7 @@ impl SessionLogAppender {
             )));
         }
         let current_path = self.current_path()?;
+        validate_open_session_log_append_file(current_path.diagnostic_path(), &self.file)?;
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: current_path.diagnostic_path().to_owned(),
             source,
