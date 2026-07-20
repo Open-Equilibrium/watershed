@@ -137,7 +137,6 @@ pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
 pub struct SessionEventReader {
     observed_current_segment_bytes: u64,
     observed_event_bytes: u64,
-    observed_record_count: usize,
     observed_segment_count: usize,
     observed_signature: RuntimeStreamSignatureBuilder,
     lock_path: AnchoredFile,
@@ -164,7 +163,6 @@ impl SessionEventReader {
         Ok(Self {
             observed_current_segment_bytes: 0,
             observed_event_bytes: 0,
-            observed_record_count: 0,
             observed_segment_count: 0,
             observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
             lock_path: sessions.file(format!("{session_id}.lock")),
@@ -217,7 +215,8 @@ impl SessionEventReader {
                 continue;
             }
             let complete = &bytes[..complete_len];
-            let prefix_len = jsonl_record_prefix_len(complete, self.observed_record_count);
+            let prefix_len =
+                jsonl_record_prefix_len(complete, self.observed_signature.record_count);
             if prefix_len.is_none_or(|prefix_len| {
                 stream_signature(&complete[..prefix_len]).signature()
                     != self.observed_signature.signature()
@@ -250,7 +249,6 @@ impl SessionEventReader {
             self.ensure_cursor(cursor, validation.previous_sequence)?;
             self.observed_current_segment_bytes = final_complete_bytes;
             self.observed_event_bytes = u64::try_from(complete_len).unwrap_or(u64::MAX);
-            self.observed_record_count = validation.line_count;
             self.observed_segment_count = segments.len();
             self.observed_signature = stream_signature(complete);
             self.validation = validation;
@@ -379,7 +377,6 @@ impl SessionEventReader {
             for record in appended_bytes.split_inclusive(|byte| *byte == b'\n') {
                 self.observed_signature.push(record);
             }
-            self.observed_record_count = self.validation.line_count;
             self.observed_current_segment_bytes = final_complete_bytes;
             self.observed_event_bytes = self
                 .observed_event_bytes

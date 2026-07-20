@@ -398,7 +398,7 @@ fn full_event_cap_inspection_stays_within_d068_budgets() {
     let started = Instant::now();
     let inspection =
         inspect_resume_session(&session_path, "inspection001").expect("full-cap session inspects");
-    assert_eq!(inspection.prior_event_count, MAX_LOOP_EVENTS as usize);
+    assert_eq!(inspection.validation.line_count, MAX_LOOP_EVENTS as usize);
     assert!(inspection.prefix_metadata_valid);
     assert_eq!(inspection.last_event_type, EventType::SessionCompleted);
     assert_duration_budget(started.elapsed(), 15, "full-cap full-session inspection");

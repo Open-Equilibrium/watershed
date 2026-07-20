@@ -78,7 +78,7 @@ fn resume_session_internal(
     ensure_anchored_non_hardlinked_file(&path)?;
     let lock = acquire_anchored_session_lock(&sessions, session_id)?;
     let inspection = inspect_resume_session(&path, session_id)?;
-    let prior_event_count = inspection.prior_event_count;
+    let prior_event_count = inspection.validation.line_count;
     if matches!(
         inspection.last_event_type,
         EventType::SessionFailed | EventType::SessionCompleted
@@ -278,9 +278,7 @@ struct ResumeSessionInspection {
     completed_turns: usize,
     event_prefix: RuntimeStreamSignature,
     last_event_type: EventType,
-    planned_event_count: usize,
     prefix_metadata_valid: bool,
-    prior_event_count: usize,
     resume_marker_count: usize,
     root_loop_definition_id: Option<String>,
     validation: SessionAppendValidationState,
@@ -291,9 +289,7 @@ struct ResumeInspectionBuilder {
     completed_turns: usize,
     event_prefix: RuntimeStreamSignatureBuilder,
     last_event_type: Option<EventType>,
-    planned_event_count: usize,
     prefix_metadata_valid: bool,
-    prior_event_count: usize,
     resume_marker_count: usize,
     root_loop_definition_id: Option<String>,
 }
@@ -305,9 +301,7 @@ impl ResumeInspectionBuilder {
             completed_turns: 0,
             event_prefix: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
             last_event_type: None,
-            planned_event_count: 0,
             prefix_metadata_valid: true,
-            prior_event_count: 0,
             resume_marker_count: 0,
             root_loop_definition_id: None,
         }
@@ -326,7 +320,6 @@ impl ResumeInspectionBuilder {
                 clock
             }
         };
-        self.prior_event_count = self.prior_event_count.saturating_add(1);
         self.last_event_type = Some(event.event_type);
         self.completed_turns += usize::from(event.event_type == EventType::MessageCompleted);
         if self.root_loop_definition_id.is_none()
@@ -359,7 +352,6 @@ impl ResumeInspectionBuilder {
             ))
         })?;
         self.event_prefix.push(canonical.as_bytes());
-        self.planned_event_count = self.planned_event_count.saturating_add(1);
         Ok(())
     }
 }
@@ -389,9 +381,7 @@ fn inspect_resume_session(
         completed_turns: inspection.completed_turns,
         event_prefix: inspection.event_prefix.signature(),
         last_event_type,
-        planned_event_count: inspection.planned_event_count,
         prefix_metadata_valid: inspection.prefix_metadata_valid,
-        prior_event_count: inspection.prior_event_count,
         resume_marker_count: inspection.resume_marker_count,
         root_loop_definition_id: inspection.root_loop_definition_id,
         validation,
@@ -406,14 +396,14 @@ fn validate_resume_replay_prefix(
     loop_block: &core_script::LoopBlock,
 ) -> Result<ResumeReplayPrefix, RuntimeError> {
     if !inspection.prefix_metadata_valid
-        || inspection.planned_event_count > planned.events.record_count
+        || inspection.event_prefix.record_count > planned.events.record_count
         || !prefix_sink.event_prefix_matches()
     {
         return Err(invalid_resume_prefix_error(path, loop_block));
     }
 
     Ok(ResumeReplayPrefix {
-        planned_event_count: inspection.planned_event_count,
+        planned_event_count: inspection.event_prefix.record_count,
         resume_marker_count: inspection.resume_marker_count,
     })
 }
