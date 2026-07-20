@@ -840,16 +840,34 @@ fn reserve_session_log_with_publish_observer(
     })
 }
 
+const MAX_UNIQUE_SESSION_CANDIDATES: u32 = 10_000;
+
 fn reserve_unique_session_log(
     workspace: &Path,
     base_session_id: &str,
 ) -> Result<SessionReservation, RuntimeError> {
-    for ordinal in 1..=10_000 {
+    reserve_unique_session_log_with_probe_observer(workspace, base_session_id, |_| {})
+}
+
+fn reserve_unique_session_log_with_probe_observer(
+    workspace: &Path,
+    base_session_id: &str,
+    mut before_probe: impl FnMut(&str),
+) -> Result<SessionReservation, RuntimeError> {
+    if !proto::is_valid_session_id(base_session_id) {
+        return reserve_session_log(workspace, base_session_id);
+    }
+    let hints = session_candidate_hints(&ensure_runtime_dirs(workspace)?, base_session_id)?;
+    for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
+        if hints[(ordinal - 1) as usize] == SessionCandidateHint::Occupied {
+            continue;
+        }
         let candidate = if ordinal == 1 {
             base_session_id.to_owned()
         } else {
             suffixed_session_id(base_session_id, ordinal)
         };
+        before_probe(&candidate);
         match reserve_session_log(workspace, &candidate) {
             Ok(reservation) => return Ok(reservation),
             Err(RuntimeError::SessionLogExists(_) | RuntimeError::ActiveSession { .. }) => continue,
@@ -860,6 +878,119 @@ fn reserve_unique_session_log(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+enum SessionCandidateHint {
+    Free,
+    Occupied,
+    Probe,
+}
+
+fn session_candidate_hints(
+    dirs: &RuntimeDirs,
+    base_session_id: &str,
+) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
+    let mut hints = vec![SessionCandidateHint::Free; MAX_UNIQUE_SESSION_CANDIDATES as usize];
+    for (dir, logs) in [(&dirs.sessions, false), (&dirs.logs, true)] {
+        for entry in dir
+            .dir
+            .entries()
+            .map_err(|source| path_io_error(&dir.path, source))?
+        {
+            let entry = entry.map_err(|source| path_io_error(&dir.path, source))?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let lower = name.to_ascii_lowercase();
+            let classified = if logs {
+                classify_log_candidate_leaf(&lower, name == lower)
+            } else {
+                classify_session_candidate_leaf(dir, &lower, name == lower)
+            };
+            let Some((session_id, hint)) = classified else {
+                continue;
+            };
+            for index in [
+                (session_id == base_session_id).then_some(0),
+                generated_suffix_candidate_index(base_session_id, session_id),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                hints[index] = hints[index].max(hint);
+            }
+        }
+    }
+    Ok(hints)
+}
+
+fn classify_log_candidate_leaf(
+    name: &str,
+    canonical: bool,
+) -> Option<(&str, SessionCandidateHint)> {
+    if let Some(id) = name.strip_suffix(".log") {
+        return Some((id, SessionCandidateHint::Occupied));
+    }
+    segmented_candidate_id(name, true)
+        .or_else(|| name.strip_suffix(".contexts.jsonl"))
+        .map(|id| (id, canonical_candidate_hint(canonical)))
+}
+
+fn classify_session_candidate_leaf<'a>(
+    dir: &AnchoredDir,
+    name: &'a str,
+    canonical: bool,
+) -> Option<(&'a str, SessionCandidateHint)> {
+    if let Some((id, _)) = name.split_once(".object.sha256-") {
+        return Some((id, SessionCandidateHint::Occupied));
+    }
+    if let Some(id) = name.strip_suffix(".lock") {
+        let hint = match dir.file(name).metadata() {
+            Ok(metadata) if !metadata.file_type().is_symlink() => SessionCandidateHint::Occupied,
+            Err(RuntimeError::Io { source, .. })
+                if !canonical && source.kind() == io::ErrorKind::NotFound =>
+            {
+                SessionCandidateHint::Occupied
+            }
+            _ => SessionCandidateHint::Probe,
+        };
+        return Some((id, hint));
+    }
+    if let Some(id) = segmented_candidate_id(name, false) {
+        return Some((id, canonical_candidate_hint(canonical)));
+    }
+    name.strip_suffix(".jsonl")
+        .map(|id| (id, SessionCandidateHint::Probe))
+}
+
+fn canonical_candidate_hint(canonical: bool) -> SessionCandidateHint {
+    if canonical {
+        SessionCandidateHint::Occupied
+    } else {
+        SessionCandidateHint::Probe
+    }
+}
+
+fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
+    let (stem, ordinal) = name.strip_suffix(".jsonl")?.rsplit_once('.')?;
+    if ordinal.len() != 6 || !ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if contexts {
+        stem.strip_suffix(".contexts")
+    } else {
+        Some(stem)
+    }
+}
+
+fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> Option<usize> {
+    let ordinal = session_id.rsplit_once('-')?.1.parse::<u32>().ok()?;
+    if !(2..=MAX_UNIQUE_SESSION_CANDIDATES).contains(&ordinal) {
+        return None;
+    }
+    (suffixed_session_id(base_session_id, ordinal) == session_id).then_some(ordinal as usize - 1)
 }
 
 fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {

@@ -90,50 +90,107 @@ fn resume_event_capacity_counts_prior_markers_and_the_new_marker() {
 }
 
 #[test]
-fn unique_reservation_skips_complete_orphan_bundle_namespace() {
-    for (label, directory, leaf) in [
-        ("event segment", LOCAL_SESSION_DIR, "bundle001.000002.jsonl"),
-        (
-            "event overflow sentinel",
-            LOCAL_SESSION_DIR,
-            "bundle001.000007.jsonl",
-        ),
-        ("context base", LOCAL_LOG_DIR, "bundle001.contexts.jsonl"),
-        (
-            "context segment",
-            LOCAL_LOG_DIR,
-            "bundle001.contexts.000002.jsonl",
-        ),
-        (
-            "context overflow sentinel",
-            LOCAL_LOG_DIR,
-            "bundle001.contexts.000007.jsonl",
-        ),
-        ("metadata sidecar", LOCAL_LOG_DIR, "bundle001.log"),
-        ("metadata case alias", LOCAL_LOG_DIR, "BUNDLE001.LOG"),
-        ("lock case alias", LOCAL_SESSION_DIR, "BUNDLE001.LOCK"),
-        (
-            "object prefix",
-            LOCAL_SESSION_DIR,
-            "bundle001.object.sha256-0000000000000000000000000000000000000000000000000000000000000000",
-        ),
-    ] {
-        let workspace = empty_workspace(label);
-        let sentinel = workspace.join(directory).join(leaf);
-        fs::create_dir_all(sentinel.parent().expect("sentinel parent")).expect("runtime dir");
-        fs::write(&sentinel, label).expect("orphan sentinel written");
-
-        let reservation = reserve_unique_session_log(&workspace, "bundle001")
-            .expect("orphan namespace selects a suffix");
-
-        assert_eq!(reservation.session_id, "bundle001-2", "{label}");
-        reservation.rollback();
-        assert_eq!(
-            fs::read_to_string(&sentinel).expect("orphan sentinel remains"),
-            label,
-            "{label}"
-        );
+fn unique_reservation_inventories_orphan_namespaces_before_probing() {
+    let workspace = empty_workspace("reservation-orphan-inventory");
+    let sentinels = [
+        (LOCAL_SESSION_DIR, "bundle001.000002.jsonl"),
+        (LOCAL_SESSION_DIR, "bundle001-2.000007.jsonl"),
+        (LOCAL_LOG_DIR, "bundle001-3.contexts.jsonl"),
+        (LOCAL_LOG_DIR, "bundle001-4.contexts.000002.jsonl"),
+        (LOCAL_LOG_DIR, "bundle001-5.contexts.000007.jsonl"),
+        (LOCAL_LOG_DIR, "bundle001-6.log"),
+        (LOCAL_LOG_DIR, "BUNDLE001-7.LOG"),
+        (LOCAL_SESSION_DIR, "BUNDLE001-8.LOCK"),
+        (LOCAL_SESSION_DIR, "bundle001-9.object.sha256-invalid"),
+    ];
+    for (directory, leaf) in sentinels {
+        let path = workspace.join(directory).join(leaf);
+        fs::create_dir_all(path.parent().expect("sentinel parent")).expect("runtime dir");
+        fs::write(path, "").expect("orphan sentinel written");
     }
+    let mut probed = Vec::new();
+
+    let reservation =
+        reserve_unique_session_log_with_probe_observer(&workspace, "bundle001", |session_id| {
+            probed.push(session_id.to_owned())
+        })
+        .expect("inventory skips orphan namespaces");
+
+    assert_eq!(reservation.session_id, "bundle001-10");
+    assert_eq!(probed, ["bundle001-10"]);
+    reservation.rollback();
+    assert!(
+        sentinels
+            .iter()
+            .all(|(directory, leaf)| workspace.join(directory).join(leaf).is_file())
+    );
+}
+
+#[test]
+fn unique_reservation_marks_every_ordinal_for_a_truncated_candidate_alias() {
+    let workspace = empty_workspace("reservation-truncated-candidate");
+    let base = format!("{}-2", "a".repeat(126));
+    let sentinel = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join(format!("{base}.000002.jsonl"));
+    fs::create_dir_all(sentinel.parent().expect("sentinel parent")).expect("runtime dir");
+    fs::write(sentinel, "").expect("orphan segment written");
+    let mut probed = Vec::new();
+
+    let reservation = reserve_unique_session_log_with_probe_observer(&workspace, &base, |id| {
+        probed.push(id.to_owned())
+    })
+    .expect("duplicate generated candidate is skipped once");
+
+    assert_eq!(reservation.session_id, suffixed_session_id(&base, 3));
+    assert_eq!(probed, [suffixed_session_id(&base, 3)]);
+    reservation.rollback();
+}
+
+#[test]
+fn unique_reservation_validates_the_base_before_inventory() {
+    let workspace = empty_workspace("reservation-invalid-base");
+    let sentinel = workspace.join(LOCAL_SESSION_DIR).join("con.000002.jsonl");
+    fs::create_dir_all(sentinel.parent().expect("sentinel parent")).expect("runtime dir");
+    fs::write(sentinel, "").expect("orphan segment written");
+
+    assert!(matches!(
+        reserve_unique_session_log(&workspace, "con"),
+        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
+    ));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn unique_reservation_inventories_case_alias_symlink_locks_before_probing() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace("reservation-lock-alias-inventory");
+    let sessions = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&sessions).expect("session dir");
+    for ordinal in 1..=4 {
+        let id = if ordinal == 1 {
+            "bundle001".to_owned()
+        } else {
+            suffixed_session_id("bundle001", ordinal)
+        };
+        symlink(
+            "missing",
+            sessions.join(format!("{id}.lock").to_ascii_uppercase()),
+        )
+        .expect("case-alias lock symlink");
+    }
+    let mut probed = Vec::new();
+
+    let reservation =
+        reserve_unique_session_log_with_probe_observer(&workspace, "bundle001", |id| {
+            probed.push(id.to_owned())
+        })
+        .expect("case aliases are inventoried on a case-sensitive host");
+
+    assert_eq!(reservation.session_id, "bundle001-5");
+    assert_eq!(probed, ["bundle001-5"]);
+    reservation.rollback();
 }
 
 #[test]
