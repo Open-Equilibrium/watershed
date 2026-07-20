@@ -111,7 +111,7 @@ pub struct RunOutput {
     pub session_id: String,
     /// Path to the first persisted session segment; use [`replay_session`] or
     /// [`SessionEventReader`] for the complete history.
-    pub session_path: PathBuf,
+    pub(crate) session_path: PathBuf,
     /// Rendered status or event output; empty for live-event operations.
     pub stdout: String,
 }

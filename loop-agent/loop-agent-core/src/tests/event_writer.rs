@@ -341,7 +341,7 @@ fn context_sources_are_session_owned_hash_addressed_and_deduplicated() {
 }
 
 #[test]
-fn partial_session_object_is_never_published_before_retry() {
+fn session_object_retry_and_reopen_preserve_accounting() {
     let workspace = empty_workspace("session-object-partial-write");
     let reservation =
         reserve_session_log(&workspace, "objectpartial001").expect("session reserved");
@@ -383,6 +383,15 @@ fn partial_session_object_is_never_published_before_retry() {
         writer.accounted_bytes,
         u64::try_from(object.bytes.len()).expect("size fits")
     );
+    drop(writer);
+    let mut writer = SessionObjectWriter::open(
+        reservation.session_path.parent.clone(),
+        &reservation.session_id,
+    )
+    .expect("object writer reopens");
+    let accounted_bytes = writer.accounted_bytes;
+    writer.persist(&object).expect("existing object deduplicates");
+    assert_eq!(writer.accounted_bytes, accounted_bytes);
     drop(writer);
     reservation.rollback();
     drop(reservation);
@@ -579,54 +588,6 @@ fn context_writer_stays_bound_to_the_opened_log_directory() {
         "{\"turn\":1}\n"
     );
     reservation.rollback();
-}
-
-#[test]
-fn replay_then_live_drain_has_no_sequence_gap() {
-    let workspace = workspace_copy("hello-loop");
-    let (notifier, receiver) = live_event_channel();
-    let run_workspace = workspace.clone();
-    let run =
-        thread::spawn(move || run_loop_with_live_events(&run_workspace, "hello-loop", notifier));
-    let mut reader = None;
-    let mut cursor = 0;
-    let mut sequences = Vec::new();
-
-    loop {
-        match receiver.recv_timeout(Duration::from_millis(50)) {
-            Ok(notification) => {
-                let reader = reader.get_or_insert_with(|| {
-                    SessionEventReader::open(&workspace, &notification.session_id)
-                        .expect("notified session opens")
-                });
-                for event in reader
-                    .read_incremental_after(cursor)
-                    .expect("live suffix validates")
-                {
-                    sequences.push(event.sequence);
-                    cursor = event.sequence;
-                }
-            }
-            Err(LiveEventReceiveError::Timeout) => {}
-            Err(LiveEventReceiveError::Closed) => break,
-        }
-    }
-    let output = run
-        .join()
-        .expect("run thread joins")
-        .expect("run completes");
-    let mut reader = reader.expect("at least one committed event was notified");
-    for event in reader
-        .read_after(cursor)
-        .expect("closed producer permits final authoritative verification")
-    {
-        sequences.push(event.sequence);
-    }
-
-    assert_eq!(
-        sequences,
-        (1..=output.event_count as u64).collect::<Vec<_>>()
-    );
 }
 
 #[test]

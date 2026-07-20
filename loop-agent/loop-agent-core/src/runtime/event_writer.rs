@@ -610,7 +610,6 @@ impl ContextManifestWriter {
 struct SessionObjectWriter {
     accounted_bytes: u64,
     object_parent: AnchoredDir,
-    seen: BTreeSet<String>,
     session_id: String,
     verified: BTreeSet<String>,
 }
@@ -619,7 +618,6 @@ impl SessionObjectWriter {
     fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
         let prefix = format!("{session_id}.object.sha256-");
         let mut accounted_bytes = 0u64;
-        let mut seen = BTreeSet::new();
         for entry in object_parent
             .dir
             .entries()
@@ -649,12 +647,10 @@ impl SessionObjectWriter {
             ensure_session_object_size(path.diagnostic_path().display(), bytes)?;
             accounted_bytes = accounted_bytes.saturating_add(bytes);
             ensure_session_object_total(accounted_bytes)?;
-            seen.insert(digest.to_owned());
         }
         Ok(Self {
             accounted_bytes,
             object_parent,
-            seen,
             session_id: session_id.to_owned(),
             verified: BTreeSet::new(),
         })
@@ -693,13 +689,6 @@ impl SessionObjectWriter {
         if self.verified.contains(&object.digest) {
             return Ok(());
         }
-        let newly_accounted = !self.seen.contains(&object.digest);
-        let total = if newly_accounted {
-            self.accounted_bytes.saturating_add(object_bytes)
-        } else {
-            self.accounted_bytes
-        };
-        ensure_session_object_total(total)?;
         let path = self.object_parent.file(format!(
             "{}.object.sha256-{}",
             self.session_id, object.digest
@@ -715,18 +704,17 @@ impl SessionObjectWriter {
                 }
             }
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                let total = self.accounted_bytes.saturating_add(object_bytes);
+                ensure_session_object_total(total)?;
                 with_anchored_replacement_temp(&path, None, |temp_path, temp_file| {
                     drop(temp_file);
                     write_new(temp_path, &object.bytes)?;
                     ensure_anchored_new_leaf_available(&path)?;
                     temp_path.rename_to(&path)
                 })?;
+                self.accounted_bytes = total;
             }
             Err(error) => return Err(error),
-        }
-        if newly_accounted {
-            self.seen.insert(object.digest.clone());
-            self.accounted_bytes = total;
         }
         self.verified.insert(object.digest.clone());
         Ok(())

@@ -266,8 +266,7 @@ where
     drop(receiver);
     if output_error.is_none()
         && let Some(reader) = &mut reader
-        && let Err(err) =
-            write_verified_events(reader, &mut cursor, observed_high_watermark, &mut stdout)
+        && let Err(err) = write_verified_events(reader, &mut cursor, &mut stdout)
     {
         output_error = Some(err);
     }
@@ -298,17 +297,10 @@ fn write_new_events(
 fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
-    through_sequence: u64,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
     let events = reader.read_after(*cursor)?;
-    write_events(
-        committed_events_through(events, through_sequence),
-        cursor,
-        writer,
-        true,
-        |_| {},
-    )
+    write_events(events, cursor, writer, true, |_| {})
 }
 
 fn committed_events_through(
@@ -551,10 +543,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_drains_stop_at_the_operations_observed_high_watermark() {
+    fn terminal_drain_completes_the_authoritative_operation_log() {
         let workspace = test_support::workspace_copy("smoke-loop");
         let output = loop_agent_core::run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
             .expect("fixture session runs");
+        assert!(output.event_count > 2);
         let mut reader = SessionEventReader::open(&workspace, &output.session_id)
             .expect("fixture session reader opens");
         let mut cursor = 0;
@@ -566,16 +559,12 @@ mod tests {
         assert_eq!(cursor, 2);
         assert_eq!(emitted.iter().filter(|byte| **byte == b'\n').count(), 2);
 
-        let mut verified_reader = SessionEventReader::open(&workspace, &output.session_id)
-            .expect("verified fixture session reader opens");
-        let mut verified_cursor = 0;
-        let mut verified = Vec::new();
-        write_verified_events(&mut verified_reader, &mut verified_cursor, 2, &mut verified)
-            .expect("bounded verified drain succeeds");
-        assert_eq!((verified_cursor, verified), (cursor, emitted));
+        write_verified_events(&mut reader, &mut cursor, &mut emitted)
+            .expect("terminal verified drain succeeds");
+        assert_eq!(cursor, output.event_count as u64);
+        assert_eq!(emitted, output.stdout.as_bytes());
 
         drop(reader);
-        drop(verified_reader);
         std::fs::remove_dir_all(workspace).expect("temporary workspace removed");
     }
 }
