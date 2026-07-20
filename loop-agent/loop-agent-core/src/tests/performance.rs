@@ -389,13 +389,7 @@ fn full_event_cap_replay_stays_within_d068_budgets() {
 #[ignore = "performance gate"]
 fn full_event_cap_inspection_stays_within_d068_budgets() {
     let workspace = empty_workspace("d068-inspection");
-    write_synthetic_session(
-        &workspace,
-        "inspection001",
-        MAX_LOOP_EVENTS,
-        0,
-        |_| 288,
-    );
+    write_synthetic_session(&workspace, "inspection001", MAX_LOOP_EVENTS, 0, |_| 288);
     let sessions = open_runtime_dir(&workspace, "sessions")
         .expect("sessions dir opens")
         .expect("sessions dir exists");
@@ -516,13 +510,7 @@ fn ten_full_event_cap_sessions_are_stable_with_small_payloads() {
     let workspace = empty_workspace("d068-stability");
     for index in 0..10 {
         let session_id = format!("stability{index:02}");
-        write_synthetic_session(
-            &workspace,
-            &session_id,
-            MAX_LOOP_EVENTS,
-            0,
-            |_| 288,
-        );
+        write_synthetic_session(&workspace, &session_id, MAX_LOOP_EVENTS, 0, |_| 288);
     }
     for index in 0..10 {
         let session_id = format!("stability{index:02}");

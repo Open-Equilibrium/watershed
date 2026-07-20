@@ -390,7 +390,9 @@ fn session_object_retry_and_reopen_preserve_accounting() {
     )
     .expect("object writer reopens");
     let accounted_bytes = writer.accounted_bytes;
-    writer.persist(&object).expect("existing object deduplicates");
+    writer
+        .persist(&object)
+        .expect("existing object deduplicates");
     assert_eq!(writer.accounted_bytes, accounted_bytes);
     drop(writer);
     reservation.rollback();
