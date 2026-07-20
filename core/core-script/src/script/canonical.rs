@@ -1,3 +1,10 @@
+fn canonicalize_registry_block(block: RegistryBlock) -> Result<RegistryBlock, RegistryError> {
+    let mut value = serde_json::to_value(block).map_err(RegistryError::Serialize)?;
+    canonicalize_registry_value(&mut value);
+    let canonical = proto::canonical_json(&value).map_err(RegistryError::CanonicalJson)?;
+    serde_json::from_str(&canonical).map_err(RegistryError::Serialize)
+}
+
 fn canonicalize_registry_value(value: &mut Value) {
     match value {
         Value::Array(items) => items.iter_mut().for_each(canonicalize_registry_value),

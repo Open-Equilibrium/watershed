@@ -1316,7 +1316,7 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
 }
 
 #[test]
-fn resume_accepts_canonical_names_and_equivalent_references() {
+fn resume_uses_canonical_registry_strings_and_equivalent_references() {
     let workspace = workspace_copy("hello-loop");
     replace_registry_text(
         &workspace,
@@ -1324,9 +1324,19 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
         "name: HelloLoop",
         "name: Cafe\u{301}Loop",
     );
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\"",
+        "printf 'Cafe\u{301}\\n' \"$SUMMARY\"",
+    );
 
     let completed =
         run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("initial run completes");
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is readable"),
+        "Café\n"
+    );
     let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
     fs::write(&completed.session_path, &prefix).expect("partial canonical prefix written");
     write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop");
@@ -1337,6 +1347,12 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
         "phase_refs: [inspect, summarize]",
         "phase_refs: [Inspect, Summarize]",
     );
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf 'Cafe\u{301}\\n' \"$SUMMARY\"",
+        "printf 'Café\\n' \"$SUMMARY\"",
+    );
 
     let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
         .expect("canonical names and equivalent references preserve resume hashes");
@@ -1344,7 +1360,7 @@ fn resume_accepts_canonical_names_and_equivalent_references() {
     assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
     assert_eq!(
         fs::read_to_string(workspace.join("out/summary.txt")).expect("summary written on resume"),
-        "hello\n"
+        "Café\n"
     );
     let resumed = fs::read_to_string(&completed.session_path).expect("resumed log readable");
     let events =

@@ -1329,6 +1329,40 @@ fn registry_rejects_normalized_duplicate_names() {
 }
 
 #[test]
+fn resolved_registry_canonicalizes_runtime_strings_and_parameter_order() {
+    let parameter = |name: &str| AllowedParameter {
+        name: name.to_owned(),
+        value_type: ParameterValueType::None,
+        required: false,
+        allowed_values: Vec::new(),
+        value_pattern: None,
+        max_length: None,
+        min: None,
+        max: None,
+    };
+    let mut tool = own_script_tool("canonical-tool", "script:canonical-tool");
+    tool.identity.name = "Cafe\u{301}Tool".to_owned();
+    tool.script_body = Some("printf 'Cafe\u{301}\\n'".to_owned());
+    tool.allowed_parameters = vec![parameter("--z-last"), parameter("--a-first")];
+
+    let registry = ResolvedRegistry::from_blocks([RegistryBlock::Tool(tool)])
+        .expect("canonical tool resolves");
+    let tool = registry
+        .tool_block("canonical-tool")
+        .expect("canonical tool remains available");
+
+    assert_eq!(tool.identity.name, "CaféTool");
+    assert_eq!(tool.script_body.as_deref(), Some("printf 'Café\\n'"));
+    assert_eq!(
+        tool.allowed_parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<Vec<_>>(),
+        ["--a-first", "--z-last"]
+    );
+}
+
+#[test]
 fn registry_rejects_programmatic_invalid_shapes() {
     let instruction = |id: &str, name: &str| {
         RegistryBlock::Instruction(InstructionBlock {

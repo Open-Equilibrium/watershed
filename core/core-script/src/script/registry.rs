@@ -131,6 +131,7 @@ impl ResolvedRegistry {
                     parse_error("programmatic registry", message)
                 }
             })?;
+            let block = canonicalize_registry_block(block)?;
             registry.insert(block, &mut name_ids)?;
         }
         registry.name_ids = name_ids;
