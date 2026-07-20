@@ -41,6 +41,29 @@ fn live_notification_is_bounded_coalesced_and_non_blocking() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn event_appender_rejects_a_leaf_replaced_while_open() {
+    let workspace = empty_workspace("event-writer-replaced-leaf");
+    let reservation = reserve_session_log(&workspace, "replacedleaf001").expect("session reserved");
+    let path = reservation.session_path.diagnostic_path();
+    let replacement = path.with_extension("replacement");
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    fs::write(&replacement, b"replacement\n").expect("replacement writes");
+    fs::rename(&replacement, path).expect("active leaf is replaced");
+
+    let err = appender
+        .append(path, b"lost event\n")
+        .expect_err("the unlinked writer must fail closed");
+
+    assert!(err.to_string().contains("unlinked while open"), "{err}");
+    assert_eq!(
+        fs::read(path).expect("replacement remains"),
+        b"replacement\n"
+    );
+    reservation.rollback();
+}
+
 #[test]
 fn event_appender_rotates_before_crossing_the_segment_limit() {
     let workspace = empty_workspace("event-segment-rotation");

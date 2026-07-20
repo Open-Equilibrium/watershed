@@ -381,6 +381,12 @@ fn ensure_not_hardlinked_open_file(
     let links = hard_link_count(path, _metadata)?;
     #[cfg(windows)]
     let links = hard_link_count_for_open_file(path, file)?;
+    if links == 0 {
+        return Err(RuntimeError::Protocol(format!(
+            "{} was unlinked while open",
+            path.display()
+        )));
+    }
     if links > 1 {
         return Err(RuntimeError::Protocol(format!(
             "{} must not be hard-linked",
