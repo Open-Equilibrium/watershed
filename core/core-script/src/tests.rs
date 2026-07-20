@@ -1323,9 +1323,9 @@ fn registry_rejects_normalized_duplicate_names() {
         RegistryError::DuplicateName {
             kind: "instruction",
             name,
-        } if name == "Cafe\u{301}"
+        } if name == "Café"
     ));
-    assert_eq!(err.to_string(), "duplicate instruction name: Cafe\u{301}");
+    assert_eq!(err.to_string(), "duplicate instruction name: Café");
 }
 
 #[test]
