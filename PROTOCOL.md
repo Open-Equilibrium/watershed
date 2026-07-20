@@ -90,7 +90,7 @@ Runtime execution constructs each typed event, assigns its stable `event_id` and
 2. appends the canonical bytes to the session's append-only log and confirms the process-level write;
 3. updates the session's highest committed sequence and attempts a non-blocking live notification.
 
-Notification never overtakes persistence. A failed write retains and notifies any complete event prefix already visible in the log, removes only the incomplete suffix, then stops the writer before later events can pass it. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status while leaving the prior log as a valid prefix.
+Notification never overtakes persistence. A failed write notifies any complete event prefix only after removing an incomplete suffix, then stops the writer before later events can pass it. Failed cleanup reports no new readable prefix. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status; successful cleanup leaves the prior log as a valid prefix.
 
 Each caller-owned subscription has one pending wake-up slot retaining its earliest committed `sequence` and shared state containing the highest committed `sequence`; notifications carry no event payload. The producer updates that high-watermark after append and uses a non-blocking send. A full slot coalesces the wake-up, and a closed receiver is ignored, so a slow or disconnected consumer cannot block a run or another session. The core owns no caller transport, output task or arbitrary blocking writer. The CLI owns stdout; future adapters own their socket or IPC transport.
 

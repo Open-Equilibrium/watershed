@@ -498,7 +498,7 @@ trait EventLogAppender {
 }
 
 struct BatchAppendFailure {
-    committed_events: usize,
+    committed_events: Option<usize>,
     error: RuntimeError,
 }
 
@@ -759,7 +759,7 @@ fn ensure_context_manifest_growth_within_limit(
 impl BatchAppendFailure {
     fn none_committed(error: RuntimeError) -> Self {
         Self {
-            committed_events: 0,
+            committed_events: Some(0),
             error,
         }
     }
@@ -807,8 +807,23 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
             .append_batch(self.path.diagnostic_path(), &jsonl)
         {
             Ok(()) => {}
-            Err(failure) if failure.committed_events <= pending.len() => {
-                let committed_events = failure.committed_events;
+            Err(failure) => {
+                let Some(committed_events) = failure.committed_events else {
+                    reject_batch(pending, failure.error);
+                    self.stopped = true;
+                    return;
+                };
+                if committed_events > pending.len() {
+                    reject_batch(
+                        pending,
+                        RuntimeError::Protocol(format!(
+                            "session event appender reported {committed_events} committed events for a batch of {batch_len}: {}",
+                            failure.error
+                        )),
+                    );
+                    self.stopped = true;
+                    return;
+                }
                 let mut committed = pending;
                 let rejected = committed.split_off(committed_events);
                 acknowledge_batch(
@@ -817,17 +832,6 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
                     self.notifier.as_ref(),
                 );
                 reject_batch(rejected, failure.error);
-                self.stopped = true;
-                return;
-            }
-            Err(failure) => {
-                reject_batch(
-                    pending,
-                    RuntimeError::Protocol(format!(
-                        "session event appender reported {} committed events for a batch of {}: {}",
-                        failure.committed_events, batch_len, failure.error
-                    )),
-                );
                 self.stopped = true;
                 return;
             }
@@ -1272,6 +1276,11 @@ impl SessionLogAppender {
             let retained_len = original_len.saturating_add(retained_bytes as u64);
             let rollback = cleanup(&mut self.file, retained_len);
             if let Err(rollback) = rollback {
+                let committed_events = self
+                    .file
+                    .metadata()
+                    .is_ok_and(|metadata| metadata.len() == retained_len)
+                    .then_some(committed_events);
                 return Err(BatchAppendFailure {
                     committed_events,
                     error: RuntimeError::Protocol(format!(
@@ -1281,7 +1290,7 @@ impl SessionLogAppender {
                 });
             }
             return Err(BatchAppendFailure {
-                committed_events,
+                committed_events: Some(committed_events),
                 error: RuntimeError::Io {
                     path: path.to_owned(),
                     source,
@@ -1303,7 +1312,7 @@ impl EventLogAppender for SessionLogAppender {
         while committed_events < events.len() {
             self.rotate_before(events[committed_events].len())
                 .map_err(|error| BatchAppendFailure {
-                    committed_events,
+                    committed_events: Some(committed_events),
                     error,
                 })?;
 
@@ -1331,14 +1340,17 @@ impl EventLogAppender for SessionLogAppender {
                 |file, bytes| file.write_all(bytes),
                 cleanup_incomplete_suffix,
             ) {
-                let retained_bytes = batch[..failure.committed_events]
+                let Some(batch_committed_events) = failure.committed_events else {
+                    return Err(failure);
+                };
+                let retained_bytes = batch[..batch_committed_events]
                     .iter()
                     .map(|event| u64::try_from(event.len()).unwrap_or(u64::MAX))
                     .fold(0u64, u64::saturating_add);
                 self.current_bytes = self.current_bytes.saturating_add(retained_bytes);
                 self.total_bytes = self.total_bytes.saturating_add(retained_bytes);
                 return Err(BatchAppendFailure {
-                    committed_events: committed_events + failure.committed_events,
+                    committed_events: Some(committed_events + batch_committed_events),
                     error: failure.error,
                 });
             }
