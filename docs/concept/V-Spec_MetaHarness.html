@@ -87,7 +87,7 @@ Meta-Harness
   normalizes events across providers
   resolves shared config to target CLIs
   computes cross-agent metrics</code></pre>
-      <p>Meta-Harness integrates through Loop Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC, export and embedded APIs when implemented. The executor and CLI process share a host, but Meta-Harness never reads <code>.loop/sessions</code> directly or reaches into Loop Agent internals. It does not replace Loop Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence. Cross-host process control is outside the architecture.</p>
+      <p>Meta-Harness integrates through Loop Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. The executor and CLI process share a host, but Meta-Harness never reads <code>.loop/sessions</code> directly or reaches into Loop Agent internals. It does not replace Loop Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence. Cross-host process control is outside the architecture.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">
