@@ -278,6 +278,31 @@ fn closed_stdout_pipe_does_not_panic_for_jsonl_run() {
 }
 
 #[test]
+fn closed_stderr_pipe_preserves_the_usage_exit_code() {
+    let workspace = workspace_copy("smoke-loop");
+    let mut child = loop_command()
+        .current_dir(&workspace)
+        .arg("chat")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+    drop(child.stderr.take().expect("stderr is piped"));
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(b"unsupported\n")
+        .expect("chat input writes");
+
+    assert_eq!(
+        child.wait().expect("loop binary should exit").code(),
+        Some(64)
+    );
+}
+
+#[test]
 fn replay_tail_and_sessions_read_persisted_event_log() {
     let fixture = workspace_copy("smoke-loop");
     let run = loop_command()

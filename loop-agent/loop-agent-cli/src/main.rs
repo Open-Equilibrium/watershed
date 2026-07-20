@@ -81,7 +81,7 @@ fn print_error(error: &impl std::fmt::Display) {
         .chars()
         .flat_map(char::escape_debug)
         .collect::<String>();
-    eprintln!("error: {escaped}");
+    let _ = writeln!(io::stderr().lock(), "error: {escaped}");
 }
 
 fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
