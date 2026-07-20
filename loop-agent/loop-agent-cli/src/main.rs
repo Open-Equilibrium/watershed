@@ -266,7 +266,8 @@ where
     drop(receiver);
     if output_error.is_none()
         && let Some(reader) = &mut reader
-        && let Err(err) = write_verified_events(reader, &mut cursor, &mut stdout)
+        && let Err(err) =
+            write_verified_events(reader, &mut cursor, observed_high_watermark, &mut stdout)
     {
         output_error = Some(err);
     }
@@ -297,9 +298,10 @@ fn write_new_events(
 fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
+    through_sequence: u64,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
-    let events = reader.read_after(*cursor)?;
+    let events = committed_events_through(reader.read_after(*cursor)?, through_sequence);
     write_events(events, cursor, writer, true, |_| {})
 }
 
@@ -543,7 +545,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn terminal_drain_completes_the_authoritative_operation_log() {
+    fn verified_drain_stops_at_the_observed_high_watermark() {
         let workspace = test_support::workspace_copy("smoke-loop");
         let output = loop_agent_core::run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
             .expect("fixture session runs");
@@ -553,14 +555,22 @@ mod tests {
         let mut cursor = 0;
         let mut emitted = Vec::new();
 
-        write_new_events(&mut reader, &mut cursor, 2, &mut emitted)
+        write_new_events(&mut reader, &mut cursor, 1, &mut emitted)
             .expect("bounded live drain succeeds");
+        assert_eq!(cursor, 1);
 
+        write_verified_events(&mut reader, &mut cursor, 2, &mut emitted)
+            .expect("bounded verified drain succeeds");
         assert_eq!(cursor, 2);
         assert_eq!(emitted.iter().filter(|byte| **byte == b'\n').count(), 2);
 
-        write_verified_events(&mut reader, &mut cursor, &mut emitted)
-            .expect("terminal verified drain succeeds");
+        write_verified_events(
+            &mut reader,
+            &mut cursor,
+            output.event_count as u64,
+            &mut emitted,
+        )
+        .expect("remaining verified drain succeeds");
         assert_eq!(cursor, output.event_count as u64);
         assert_eq!(emitted, output.stdout.as_bytes());
 
