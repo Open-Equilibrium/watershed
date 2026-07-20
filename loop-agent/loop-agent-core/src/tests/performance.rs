@@ -367,8 +367,8 @@ fn protocol_validation_accepts_exact_event_data_limit_and_rejects_next_byte() {
 #[test]
 #[ignore = "performance gate"]
 fn full_event_cap_replay_stays_within_d068_budgets() {
-    let workspace =
-        write_synthetic_session("d068-full-cap", "fullcap001", MAX_LOOP_EVENTS, 0, |_| 288);
+    let workspace = empty_workspace("d068-full-cap");
+    write_synthetic_session(&workspace, "fullcap001", MAX_LOOP_EVENTS, 0, |_| 288);
     let peak_rss_sampler = PeakRssSampler::start();
     let started = Instant::now();
     let mut reader =
@@ -388,8 +388,9 @@ fn full_event_cap_replay_stays_within_d068_budgets() {
 #[test]
 #[ignore = "performance gate"]
 fn full_event_cap_inspection_stays_within_d068_budgets() {
-    let workspace = write_synthetic_session(
-        "d068-inspection",
+    let workspace = empty_workspace("d068-inspection");
+    write_synthetic_session(
+        &workspace,
         "inspection001",
         MAX_LOOP_EVENTS,
         0,
@@ -468,15 +469,19 @@ fn incremental_tail_reads_max_events_under_d068_latency_budget() {
 #[ignore = "performance gate"]
 fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
     let workload_started = Instant::now();
+    let workspace = empty_workspace("d068-representative");
     for index in 0..10 {
         let session_id = format!("representative{index:02}");
-        let workspace = write_synthetic_session(
-            &format!("d068-representative-{index}"),
+        write_synthetic_session(
+            &workspace,
             &session_id,
             16_000,
             32,
             representative_event_target_bytes,
         );
+    }
+    for index in 0..10 {
+        let session_id = format!("representative{index:02}");
         let replay_started = Instant::now();
         let mut reader = SessionEventReader::open(&workspace, &session_id).expect("session opens");
         let events = reader.read_after(0).expect("session replays");
@@ -495,8 +500,8 @@ fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
         );
         drop(events);
         drop(reader);
-        fs::remove_dir_all(workspace).expect("representative workspace removed");
     }
+    fs::remove_dir_all(workspace).expect("representative workspace removed");
     assert_duration_budget(
         workload_started.elapsed(),
         120,
@@ -508,23 +513,27 @@ fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
 #[ignore = "performance gate"]
 fn ten_full_event_cap_sessions_are_stable_with_small_payloads() {
     let started = Instant::now();
+    let workspace = empty_workspace("d068-stability");
     for index in 0..10 {
         let session_id = format!("stability{index:02}");
-        let workspace = write_synthetic_session(
-            &format!("d068-stability-{index}"),
+        write_synthetic_session(
+            &workspace,
             &session_id,
             MAX_LOOP_EVENTS,
             0,
             |_| 288,
         );
+    }
+    for index in 0..10 {
+        let session_id = format!("stability{index:02}");
         let mut reader = SessionEventReader::open(&workspace, &session_id).expect("session opens");
         assert_eq!(
             reader.read_after(0).expect("session replays").len(),
             MAX_LOOP_EVENTS as usize
         );
         drop(reader);
-        fs::remove_dir_all(workspace).expect("stability workspace removed");
     }
+    fs::remove_dir_all(workspace).expect("stability workspace removed");
     assert_duration_budget(started.elapsed(), 120, "ten full-cap stability workload");
 }
 
@@ -538,14 +547,13 @@ fn representative_event_target_bytes(index: u64) -> usize {
 }
 
 fn write_synthetic_session(
-    label: &str,
+    workspace: &Path,
     session_id: &str,
     event_count: u64,
     loop_invocations: u64,
     target_bytes: impl Fn(u64) -> usize,
-) -> TempWorkspace {
-    let workspace = empty_workspace(label);
-    let reservation = reserve_session_log(&workspace, session_id).expect("session reserved");
+) {
+    let reservation = reserve_session_log(workspace, session_id).expect("session reserved");
     {
         let path = reservation.session_path.diagnostic_path().to_owned();
         let mut appender =
@@ -572,7 +580,6 @@ fn write_synthetic_session(
     }
     reservation.mark_committed();
     reservation.release_lock().expect("session lock releases");
-    workspace
 }
 
 fn synthetic_event_shape(
