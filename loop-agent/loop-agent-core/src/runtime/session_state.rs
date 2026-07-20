@@ -41,7 +41,6 @@ pub fn resume_session(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     resume_session_internal(workspace, session_id, None, None, emit == EmitMode::Jsonl)
-        .map(|(output, _)| output)
 }
 
 /// Resumes a session with bounded, non-blocking committed-event notifications.
@@ -53,8 +52,7 @@ pub fn resume_session_with_live_events(
     session_id: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let (mut output, _) =
-        resume_session_internal(workspace, session_id, Some(notifier), None, false)?;
+    let mut output = resume_session_internal(workspace, session_id, Some(notifier), None, false)?;
     output.stdout.clear();
     Ok(output)
 }
@@ -65,7 +63,7 @@ fn resume_session_internal(
     notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
-) -> Result<(RunOutput, usize), RuntimeError> {
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     if !proto::is_valid_session_id(session_id) {
         return Err(RuntimeError::Usage(format!(
@@ -256,16 +254,13 @@ fn resume_session_internal(
         return Err(RuntimeError::session_failed(session_id, err));
     }
 
-    Ok((
-        RunOutput {
-            event_count: combined_event_count,
-            failed: resumed_failed,
-            session_id: session_id.to_owned(),
-            session_path: path.diagnostic_path().to_owned(),
-            stdout,
-        },
-        prior_event_count,
-    ))
+    Ok(RunOutput {
+        event_count: combined_event_count,
+        failed: resumed_failed,
+        session_id: session_id.to_owned(),
+        session_path: path.diagnostic_path().to_owned(),
+        stdout,
+    })
 }
 
 struct ResumeReplayPrefix {

@@ -92,7 +92,7 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
         let mut timings = EventWriterTimings::default();
         let (notifier, _receiver) = live_event_channel();
 
-        let (output, _) = resume_session_internal(
+        let output = resume_session_internal(
             &workspace,
             &completed.session_id,
             Some(notifier),

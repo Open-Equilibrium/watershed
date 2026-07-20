@@ -40,6 +40,52 @@ fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
     }
 }
 
+fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
+    fs::write(
+        workspace.join("registry/tools/bad-write.yaml"),
+        format!(
+            r#"tool:
+  id: bad-write
+  name: BadWrite
+  tool_kind: own-script
+  command: script:bad-write
+  script_runtime: posix-sh
+  script_body: |
+    {script_body}
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny
+"#
+        ),
+    )
+    .expect("bad tool fixture written");
+    replace_registry_text(
+        workspace,
+        "phases/summarize.yaml",
+        "tool_refs: [write-summary]",
+        "tool_refs: [write-summary, bad-write]",
+    );
+}
+
+fn workspace_at_write_summary_progress_with_existing_output() -> (TempWorkspace, PathBuf) {
+    let workspace = workspace_copy("hello-loop");
+    let session_dir = workspace.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let prefix = prefix_through_tool_progress(
+        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        "write-summary",
+    );
+    let path = session_dir.join("hello-loop.jsonl");
+    fs::write(&path, prefix).expect("progress prefix written");
+    write_definition_hash_metadata(&workspace, "hello-loop", "hello-loop");
+    fs::create_dir_all(workspace.join("out")).expect("output dir created");
+    fs::write(workspace.join("out/summary.txt"), "already-written\n")
+        .expect("sentinel summary written");
+    (workspace, path)
+}
+
 #[test]
 fn temp_workspace_survives_until_the_last_thread_owner_drops() {
     let workspace = empty_workspace("temp-workspace-owner");
@@ -67,30 +113,7 @@ fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'partial\\n' > out/partial.txt",
     );
-    fs::write(
-        workspace.join("registry/tools/bad-write.yaml"),
-        r#"tool:
-  id: bad-write
-  name: BadWrite
-  tool_kind: own-script
-  command: script:bad-write
-  script_runtime: posix-sh
-  script_body: |
-    printf 'later\n' > out/summary.txt
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("bad tool fixture written");
-    replace_registry_text(
-        &workspace,
-        "phases/summarize.yaml",
-        "tool_refs: [write-summary]",
-        "tool_refs: [write-summary, bad-write]",
-    );
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/summary.txt");
     fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
     workspace
 }

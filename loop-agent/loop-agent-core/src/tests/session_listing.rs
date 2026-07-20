@@ -270,30 +270,7 @@ fn run_loop_writes_quoted_own_script_target_with_spaces() {
 #[test]
 fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
     let workspace = workspace_copy("hello-loop");
-    fs::write(
-        workspace.join("registry/tools/bad-write.yaml"),
-        r#"tool:
-  id: bad-write
-  name: BadWrite
-  tool_kind: own-script
-  command: script:bad-write
-  script_runtime: posix-sh
-  script_body: |
-    cat ../outside.txt
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("bad tool fixture written");
-    replace_registry_text(
-        &workspace,
-        "phases/summarize.yaml",
-        "tool_refs: [write-summary]",
-        "tool_refs: [write-summary, bad-write]",
-    );
+    add_bad_write_tool_to_summarize(&workspace, "cat ../outside.txt");
 
     let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect_err("later invalid tool must reject before earlier write");
@@ -368,30 +345,7 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'partial\\n' > out/blocker",
     );
-    fs::write(
-        workspace.join("registry/tools/bad-write.yaml"),
-        r#"tool:
-  id: bad-write
-  name: BadWrite
-  tool_kind: own-script
-  command: script:bad-write
-  script_runtime: posix-sh
-  script_body: |
-    printf 'later\n' > out/blocker/later.txt
-  allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
-  network: deny
-"#,
-    )
-    .expect("bad tool fixture written");
-    replace_registry_text(
-        &workspace,
-        "phases/summarize.yaml",
-        "tool_refs: [write-summary]",
-        "tool_refs: [write-summary, bad-write]",
-    );
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
 
     let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
         .expect("later apply-time write is recorded as a failed run");
