@@ -317,7 +317,6 @@ struct SessionAppendValidationState {
     loop_started_ids: BTreeSet<String>,
     terminal_line: Option<usize>,
     stream_bytes: usize,
-    runtime_event_count: u64,
     line_count: usize,
     lifecycle: SessionLifecycleState,
 }
@@ -340,7 +339,6 @@ impl SessionAppendValidationState {
             loop_started_ids: BTreeSet::new(),
             terminal_line: None,
             stream_bytes: 0,
-            runtime_event_count: 0,
             line_count: 0,
             lifecycle: SessionLifecycleState::default(),
         }
@@ -438,8 +436,7 @@ impl SessionAppendValidationState {
         line_number: usize,
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
-        let event_count = self.runtime_event_count.saturating_add(1);
-        if event_count > MAX_LOOP_EVENTS {
+        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
             return Err(RuntimeError::Protocol(format!(
                 "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
                 path.display()
@@ -452,7 +449,6 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        self.runtime_event_count = event_count;
         self.stream_bytes = stream_bytes;
         Ok(())
     }
@@ -630,13 +626,13 @@ struct SessionLifecycleState {
     loops: LifecycleTracker<String>,
     loop_definition_ids: BTreeMap<String, String>,
     loop_parents: BTreeMap<String, Option<String>>,
-    steps: LifecycleTracker<StepLifecycleKey>,
+    terminal_steps: BTreeMap<StepLifecycleKey, usize>,
     tools: LifecycleTracker<ToolLifecycleKey>,
-    messages: LifecycleTracker<MessageLifecycleKey>,
+    terminal_messages: BTreeMap<MessageLifecycleKey, usize>,
     active_message_roles: BTreeMap<MessageLifecycleKey, String>,
     active_phases: BTreeMap<String, String>,
     active_steps: BTreeMap<String, StepLifecycleKey>,
-    tools_without_progress: BTreeMap<ToolLifecycleKey, String>,
+    tools_without_progress: BTreeSet<ToolLifecycleKey>,
 }
 
 impl SessionLifecycleState {
@@ -752,7 +748,7 @@ impl SessionLifecycleState {
                         active_phase
                     )));
                 }
-                if let Some(terminal_line) = self.steps.terminal_line(&step) {
+                if let Some(terminal_line) = self.terminal_steps.get(&step).copied() {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -772,11 +768,10 @@ impl SessionLifecycleState {
                     )));
                 }
                 self.active_steps.insert(loop_id, step.clone());
-                self.steps.start(step);
             }
             EventType::StepCompleted => {
                 let step = lifecycle_step_key(event, &self.active_phases);
-                if let Some(terminal_line) = self.steps.terminal_line(&step) {
+                if let Some(terminal_line) = self.terminal_steps.get(&step).copied() {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -786,31 +781,13 @@ impl SessionLifecycleState {
                         terminal_line,
                     ));
                 }
-                if !self.steps.is_started(&step) {
+                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                if self.active_steps.get(&loop_id) != Some(&step) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
                         path.display(),
                         step.step_id
                     )));
-                }
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                match self.active_steps.get(&loop_id) {
-                    Some(active_step) if active_step == &step => {}
-                    Some(active_step) => {
-                        return Err(RuntimeError::Protocol(format!(
-                            "{} line {line_number} step.completed requires active step_id {:?}, found {:?}",
-                            path.display(),
-                            step.step_id,
-                            active_step.step_id
-                        )));
-                    }
-                    None => {
-                        return Err(RuntimeError::Protocol(format!(
-                            "{} line {line_number} step.completed requires active step for step_id {:?}",
-                            path.display(),
-                            step.step_id
-                        )));
-                    }
                 }
                 if let Some(tool) = self
                     .tools
@@ -826,8 +803,8 @@ impl SessionLifecycleState {
                     ));
                 }
                 if let Some(message) = self
-                    .messages
-                    .active_keys()
+                    .active_message_roles
+                    .keys()
                     .find(|message| message.loop_id == loop_id)
                 {
                     return Err(open_child_lifecycle_error(
@@ -839,7 +816,7 @@ impl SessionLifecycleState {
                     ));
                 }
                 self.active_steps.remove(&loop_id);
-                self.steps.finish(step, line_number);
+                self.terminal_steps.insert(step, line_number);
             }
             EventType::ToolStarted => {
                 require_active_step(path, line_number, event, &self.active_steps)?;
@@ -861,8 +838,7 @@ impl SessionLifecycleState {
                         tool.tool_id
                     )));
                 }
-                self.tools_without_progress
-                    .insert(tool.clone(), tool.tool_id.clone());
+                self.tools_without_progress.insert(tool.clone());
                 self.tools.start(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
@@ -918,7 +894,7 @@ impl SessionLifecycleState {
             EventType::MessageDelta => {
                 require_active_step(path, line_number, event, &self.active_steps)?;
                 let message = lifecycle_message_key(path, line_number, event)?;
-                if let Some(terminal_line) = self.messages.terminal_line(&message) {
+                if let Some(terminal_line) = self.terminal_messages.get(&message).copied() {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -941,7 +917,6 @@ impl SessionLifecycleState {
                     }
                     Some(_) => {}
                     None => {
-                        self.messages.start(message.clone());
                         self.active_message_roles.insert(message, role);
                     }
                 }
@@ -949,7 +924,7 @@ impl SessionLifecycleState {
             EventType::MessageCompleted => {
                 require_active_step(path, line_number, event, &self.active_steps)?;
                 let message = lifecycle_message_key(path, line_number, event)?;
-                if let Some(terminal_line) = self.messages.terminal_line(&message) {
+                if let Some(terminal_line) = self.terminal_messages.get(&message).copied() {
                     return Err(terminal_lifecycle_error(
                         path,
                         line_number,
@@ -977,7 +952,7 @@ impl SessionLifecycleState {
                     )));
                 }
                 self.active_message_roles.remove(&message);
-                self.messages.finish(message, line_number);
+                self.terminal_messages.insert(message, line_number);
             }
             EventType::SessionStarted
             | EventType::SessionPaused
@@ -1008,13 +983,13 @@ impl SessionLifecycleState {
         if let Some(loop_id) = self.loops.active_keys().next() {
             return Err(open_lifecycle_error(path, "loop", loop_id));
         }
-        if let Some(step) = self.steps.active_keys().next() {
+        if let Some(step) = self.active_steps.values().next() {
             return Err(open_lifecycle_error(path, "step", &step.step_id));
         }
         if let Some(tool) = self.tools.active_keys().next() {
             return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
         }
-        if let Some(message) = self.messages.active_keys().next() {
+        if let Some(message) = self.active_message_roles.keys().next() {
             return Err(open_lifecycle_error(path, "message", &message.message_id));
         }
         Ok(())
@@ -1022,9 +997,9 @@ impl SessionLifecycleState {
 
     fn tool_without_progress(&self) -> Option<&str> {
         self.tools_without_progress
-            .values()
+            .iter()
             .next()
-            .map(String::as_str)
+            .map(|tool| tool.tool_id.as_str())
     }
 }
 

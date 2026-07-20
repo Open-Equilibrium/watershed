@@ -136,7 +136,6 @@ pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
 /// mutation of an already observed event, and leaves cursor advancement to the caller.
 pub struct SessionEventReader {
     observed_current_segment_bytes: u64,
-    observed_event_bytes: u64,
     observed_segment_count: usize,
     observed_signature: RuntimeStreamSignatureBuilder,
     lock_path: AnchoredFile,
@@ -162,7 +161,6 @@ impl SessionEventReader {
         ensure_anchored_real_file(&path)?;
         Ok(Self {
             observed_current_segment_bytes: 0,
-            observed_event_bytes: 0,
             observed_segment_count: 0,
             observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
             lock_path: sessions.file(format!("{session_id}.lock")),
@@ -248,7 +246,6 @@ impl SessionEventReader {
             }
             self.ensure_cursor(cursor, validation.previous_sequence)?;
             self.observed_current_segment_bytes = final_complete_bytes;
-            self.observed_event_bytes = u64::try_from(complete_len).unwrap_or(u64::MAX);
             self.observed_segment_count = segments.len();
             self.observed_signature = stream_signature(complete);
             self.validation = validation;
@@ -276,6 +273,8 @@ impl SessionEventReader {
         if self.validation.line_count == 0 || cursor < self.validation.previous_sequence {
             return self.read_after(cursor);
         }
+        let observed_event_bytes =
+            u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
         let mut retried_inactive_partial = false;
         loop {
             let segments = self.incremental_segments()?;
@@ -300,7 +299,7 @@ impl SessionEventReader {
                 let remaining_limit = MAX_SESSION_SEGMENT_BYTES.saturating_sub(offset);
                 let start = suffix.len();
                 let remaining_event_bytes = MAX_SESSION_EVENT_BYTES
-                    .saturating_sub(self.observed_event_bytes)
+                    .saturating_sub(observed_event_bytes)
                     .saturating_sub(u64::try_from(start).unwrap_or(u64::MAX));
                 file.take(remaining_limit.min(remaining_event_bytes).saturating_add(1))
                     .read_to_end(&mut suffix)
@@ -313,8 +312,7 @@ impl SessionEventReader {
                         segment.diagnostic_path().display()
                     )));
                 }
-                if self
-                    .observed_event_bytes
+                if observed_event_bytes
                     .saturating_add(u64::try_from(suffix.len()).unwrap_or(u64::MAX))
                     > MAX_SESSION_EVENT_BYTES
                 {
@@ -378,9 +376,6 @@ impl SessionEventReader {
                 self.observed_signature.push(record);
             }
             self.observed_current_segment_bytes = final_complete_bytes;
-            self.observed_event_bytes = self
-                .observed_event_bytes
-                .saturating_add(u64::try_from(complete_len).unwrap_or(u64::MAX));
             self.observed_segment_count = segments.len();
             return Ok(events_after(appended, cursor));
         }

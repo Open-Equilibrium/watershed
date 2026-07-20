@@ -786,7 +786,6 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
     let mut validation = SessionAppendValidationState::empty("budget001");
     validation.previous_sequence = MAX_LOOP_EVENTS - 1;
     validation.line_count = (MAX_LOOP_EVENTS - 1) as usize;
-    validation.runtime_event_count = MAX_LOOP_EVENTS - 1;
     validation.stream_bytes = 10 * 1024 * 1024;
     let event = |event_id, event_type, sequence| {
         let line = session_event_line("budget001", event_id, event_type, sequence);

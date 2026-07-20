@@ -218,7 +218,6 @@ fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> Prot
 struct RuntimeEventBuilder<'a> {
     active_step_payloads: BTreeMap<String, serde_json::Value>,
     clock: EventClock,
-    context_manifest_count: usize,
     context_manifests: RuntimeStreamSignatureBuilder,
     events: RuntimeStreamSignatureBuilder,
     failure_messages: BTreeMap<String, String>,
@@ -239,7 +238,6 @@ impl<'a> RuntimeEventBuilder<'a> {
         Self {
             active_step_payloads: BTreeMap::new(),
             clock,
-            context_manifest_count: 0,
             context_manifests: RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN),
             events: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
             failure_messages: BTreeMap::new(),
@@ -300,7 +298,6 @@ impl<'a> RuntimeEventBuilder<'a> {
             self.context_manifests.byte_count,
             manifest.line.len(),
         )?;
-        self.context_manifest_count += 1;
         self.pending_context_manifest = Some((manifest, objects));
         Ok(())
     }
@@ -348,7 +345,7 @@ impl<'a> RuntimeEventBuilder<'a> {
             Some(ContextManifestCheckpoint {
                 manifest,
                 objects,
-                ordinal: self.context_manifest_count,
+                ordinal: self.context_manifests.record_count.saturating_add(1),
             })
         } else {
             None
