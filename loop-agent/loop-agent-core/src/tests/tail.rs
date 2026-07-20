@@ -133,11 +133,14 @@ fn incremental_reader_defers_unverified_segment_layout_to_final_replay() {
     let (_workspace, path, _started, completed, mut reader) =
         reader_fixture("tail-deferred-segments", "taildeferredsegments001");
     assert_eq!(reader.read_after(0).expect("prefix reads").len(), 1);
+    let lock = path.with_extension("lock");
+    fs::write(&lock, b"").expect("session lock written");
     fs::write(
-        path.with_file_name("taildeferredsegments001.000005.jsonl"),
+        path.with_file_name("taildeferredsegments001.000003.jsonl"),
         b"",
     )
     .expect("unverified high segment written");
+    assert_protocol_contains(reader.read_after(1), "non-contiguous");
     append_session_log_line(&path, &completed).expect("terminal event appends");
 
     let appended = reader
@@ -145,7 +148,8 @@ fn incremental_reader_defers_unverified_segment_layout_to_final_replay() {
         .expect("incremental delivery reads only contiguous committed paths");
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
-    assert_protocol_contains(reader.read_after(2), "segment count");
+    fs::remove_file(lock).expect("session lock removed");
+    assert_protocol_contains(reader.read_after(2), "non-contiguous");
 }
 
 #[test]
