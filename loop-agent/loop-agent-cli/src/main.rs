@@ -6,7 +6,7 @@ use loop_agent_core::{
 };
 use proto::EventEnvelope;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     env,
     ffi::OsString,
     io::{self, BufRead, Write},
@@ -224,6 +224,7 @@ where
     };
     let mut observed_high_watermark = cursor;
     let mut first_committed_sequence = None;
+    let mut read_ahead = VecDeque::new();
     let worker = thread::Builder::new()
         .name("loop-cli-run".to_owned())
         .spawn(move || operation(notifier))
@@ -256,6 +257,7 @@ where
                     &mut cursor,
                     &mut first_committed_sequence,
                     &notification,
+                    &mut read_ahead,
                     &mut stdout,
                 ) {
                     Ok(true) => {}
@@ -273,6 +275,7 @@ where
     let result = worker.join();
     observed_high_watermark = observed_high_watermark.max(receiver.highest_committed_sequence());
     drop(receiver);
+    drop(read_ahead);
     if output_error.is_none()
         && let Some(reader) = &mut reader
         && let Err(err) =
@@ -293,20 +296,20 @@ fn write_new_events(
     cursor: &mut u64,
     first_committed_sequence: &mut Option<u64>,
     notification: &LiveEventNotification,
+    read_ahead: &mut VecDeque<EventEnvelope>,
     writer: &mut impl Write,
 ) -> Result<bool, RuntimeError> {
     let first = *first_committed_sequence.get_or_insert(notification.first_committed_sequence);
     *cursor = (*cursor).max(first.saturating_sub(1));
-    write_events(
-        committed_events_through(
-            reader.read_incremental_after(*cursor)?,
-            notification.highest_committed_sequence,
-        ),
-        cursor,
-        writer,
-        true,
-        |_| {},
-    )
+    let read_cursor = read_ahead.back().map_or(*cursor, |event| event.sequence);
+    if read_cursor < notification.highest_committed_sequence {
+        read_ahead.extend(reader.read_incremental_after(read_cursor)?);
+    }
+    let ready = read_ahead
+        .iter()
+        .take_while(|event| event.sequence <= notification.highest_committed_sequence)
+        .count();
+    write_events(read_ahead.drain(..ready), cursor, writer, true, |_| {})
 }
 
 fn write_verified_events(
@@ -568,6 +571,7 @@ mod tests {
             .expect("fixture session reader opens");
         let mut cursor = 0;
         let mut first_committed_sequence = None;
+        let mut read_ahead = VecDeque::new();
         let mut emitted = Vec::new();
 
         write_new_events(
@@ -579,10 +583,16 @@ mod tests {
                 first_committed_sequence: 2,
                 highest_committed_sequence: 2,
             },
+            &mut read_ahead,
             &mut emitted,
         )
         .expect("bounded live drain succeeds");
         assert_eq!(cursor, 2);
+        assert_eq!(read_ahead.front().map(|event| event.sequence), Some(3));
+        assert_eq!(
+            read_ahead.back().map(|event| event.sequence),
+            Some(output.event_count as u64)
+        );
 
         let operation_end = output.event_count as u64 - 1;
         let (notifier, receiver) = loop_agent_core::live_event_channel();
@@ -596,6 +606,25 @@ mod tests {
             producer.join().expect("producer joins"),
             loop_agent_core::LiveEventNotifyStatus::Coalesced
         );
+        let notification = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("coalesced notification received");
+
+        write_new_events(
+            &mut reader,
+            &mut cursor,
+            &mut first_committed_sequence,
+            &notification,
+            &mut read_ahead,
+            &mut emitted,
+        )
+        .expect("read-ahead drain succeeds");
+        assert_eq!(cursor, operation_end);
+        assert_eq!(
+            read_ahead.front().map(|event| event.sequence),
+            Some(output.event_count as u64)
+        );
+        drop(read_ahead);
 
         write_verified_events(
             &mut reader,
