@@ -676,10 +676,7 @@ fn resumed_notifications_replay_exactly_the_appended_suffix() {
         notification.highest_committed_sequence,
         output.event_count as u64
     );
-    assert_eq!(
-        notification.first_committed_sequence,
-        prefix_events + 1
-    );
+    assert_eq!(notification.first_committed_sequence, prefix_events + 1);
     assert_eq!(
         appended.first().map(|event| &event.event_type),
         Some(&EventType::SessionResumed)

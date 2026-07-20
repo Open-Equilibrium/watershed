@@ -94,13 +94,15 @@ impl LiveEventReceiver {
         &self,
         timeout: Duration,
     ) -> Result<LiveEventNotification, LiveEventReceiveError> {
-        let (session_id, first_committed_sequence) = self
-            .receiver
-            .recv_timeout(timeout)
-            .map_err(|err| match err {
-                std::sync::mpsc::RecvTimeoutError::Timeout => LiveEventReceiveError::Timeout,
-                std::sync::mpsc::RecvTimeoutError::Disconnected => LiveEventReceiveError::Closed,
-            })?;
+        let (session_id, first_committed_sequence) =
+            self.receiver
+                .recv_timeout(timeout)
+                .map_err(|err| match err {
+                    std::sync::mpsc::RecvTimeoutError::Timeout => LiveEventReceiveError::Timeout,
+                    std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                        LiveEventReceiveError::Closed
+                    }
+                })?;
         Ok(LiveEventNotification {
             session_id,
             first_committed_sequence,
