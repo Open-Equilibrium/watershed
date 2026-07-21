@@ -14,6 +14,8 @@ Watershed's defensible trust model is the combination across its three layers: s
 
 Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 runs deterministic in-process execution/emulation for the modeled checks, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
 
+This paragraph governs Loop Agent scripts. Liquid Apps use the parallel principle defined below: App manifests declare capabilities, and the App Runtime plus Role and capability checks enforce them.
+
 Because scripts are human-reviewable security/capability artifacts, they pass through one private `core-script` Safe-YAML parser into one unambiguous model (ADR-0031, ADR-0061). It accepts one YAML 1.2 document and rejects duplicate or merge keys, anchors, aliases, explicit tags, nulls, unknown fields and configured resource-budget violations; there is no fallback parser. The checked-in JSON Schema files document the intended shape, existing semantic and registry validation remains authoritative, and the Loop Agent V-Spec defines canonical bytes.
 
 Registry loading starts from one opened workspace capability and opens every registry directory and YAML leaf without following links. Linux and macOS are the primary targets; the private boundary remains portable to Windows (ADR-0063, ADR-0064).
@@ -48,14 +50,25 @@ Execution ownership is host-local. A Meta-Harness executor may control only CLI 
 
 Liquid is a standalone workspace product that external agents and tools can read and edit through its workspace CLI/API. That access is permissioned and auditable:
 
-- CLI/API access requires explicit workspace permission; agent reads and writes are **scoped** (external-agent permission model: D-030).
-- Every workspace write — from the UI, Liquid AI, the CLI/API or an external agent — goes through one **permissioned mutation pipeline** and is recorded in Liquid's **action history**; there are no hidden writes that bypass it (D-032).
-- Sync applies received actions through that same pipeline. Sync credentials authorize workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
+- CLI/API access requires an authenticated identity and an assigned allow-only **Role**. Unlisted resources and actions are denied by default; explicit deny/blacklist rules are deferred.
+- Roles may be assigned to users, groups, agent profiles, sessions and Automations and may allow discovery, proposal, execution, approval or management over named Workspaces, Pages, Blocks, Sources, App actions and Meta-Harness projections.
+- Effective authority is the intersection of the Role and narrower system, App, session, provider and execution-host boundaries. No layer can grant a capability another boundary denies.
+- Every workspace write — from the UI, Liquid AI, the CLI/API or an external agent — goes through one **permissioned mutation pipeline** and is recorded in Liquid's **action history**; there are no hidden writes that bypass it.
+- Sync applies received actions through that same pipeline. Sync credentials authorize Workspace exchange only; they do not authorize Meta-Harness control. Interrupted or untrusted sync never disables access to the local replica.
+- A headless Liquid replica is a separate execution boundary. It receives only Workspaces explicitly enabled for that replica, then enforces the same Roles and mutation pipeline as a UI replica.
 - External-agent writes are **attributed** (actor/origin) and **revertible**; sensitive changes require approval, and a proposed diff can be reviewed before apply.
 - Secrets/credentials stored in workspace data require special handling.
-- Script Blocks and external-agent edits are different risk classes and are treated separately (Script Block runtime/sandbox: D-034).
+- App execution, external MCP calls and external-agent edits are separate risk classes and keep separate capability grants.
 
 This is Liquid's **workspace** action history (over Liquid's own data), not a project-code VCS. Detail: [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
+
+### Liquid Apps, Block packages and MCP
+
+- App code runs locally in the restricted App Runtime. The first target is isolated JavaScript/TypeScript with declarative UI, explicit capabilities, CPU/memory/time limits, no ambient filesystem/process/environment access and deny-by-default network access. WASM is a later runtime target.
+- App state changes and App-driven workspace writes use the mutation pipeline. App code cannot edit another Block merely because a View is nearby; a Connection plus an effective permission is required.
+- An App action is capability-scoped and may be invoked by UI, Connection, Automation or agent only when the caller and App both allow it.
+- External MCP servers remain outside the App Runtime. Liquid's MCP adapter is the client boundary, validates declared inputs/outputs and maps only granted capabilities to typed App actions. MCP connectivity never grants broader Workspace access.
+- Block Registry packages are signed, versioned, sandboxed and capability-scoped. Initial support loads no arbitrary third-party native code; package update and migration are explicit, reviewable actions.
 
 ## Plugins & supply chain
 

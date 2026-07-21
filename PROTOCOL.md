@@ -8,7 +8,8 @@ Loop Agent is a **standalone host-local product**, and its event stream is a pub
 
 - **Loop Agent** — standalone CLI that emits execution events and accepts commands on its current host; its event stream is public.
 - **Meta-Harness** — self-contained, host-scoped headless control plane: consumes events from CLI agents on its own host through adapters; issues control/config commands; emits metrics; and exposes a local-or-remote CLI/API/service surface for Liquid and BYOA (transport: D-023; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)). It never controls another host's processes.
-- **Liquid** — standalone local-first workspace product. It reads and mutates its local replica, optionally exchanges committed workspace changes with a sync host, and presents projections from one or more Meta-Harness instances in one UI. Every remote projection retains its instance identity, freshness and authority. Liquid exposes its **own** workspace CLI/API so external agents/tools read and edit workspace data through its permissioned action-history pipeline (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Loop Agent and Meta-Harness do not mutate Liquid storage internals.
+- **Liquid** — standalone local-first workspace product. Each interactive or headless instance reads and mutates a local replica, exchanges committed Workspace changes through the central Sync Server, and may present projections from one or more Meta-Harness instances. Every projection retains its instance identity, freshness and authority. Liquid exposes its **own** Workspace CLI/API so external agents and integrations use typed actions through its Role, permission and History pipeline (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Loop Agent and Meta-Harness do not mutate Liquid storage internals.
+- **Sync Server** — central star-topology service for resumable Workspace change exchange. It neither runs Liquid Apps nor routes Meta-Harness commands.
 - **Adapters** — translate external agents (Codex CLI, Claude Code, Pi Agent, etc.) into the same contract.
 
 ## Topology and ownership invariants
@@ -16,8 +17,12 @@ Loop Agent is a **standalone host-local product**, and its event stream is a pub
 - Agent-process ownership is host-local: a Meta-Harness may start, stop and observe only CLI processes on its own host.
 - API reachability is independent of execution locality: Liquid or BYOA may call a Meta-Harness from another device when authenticated transport exists.
 - Liquid routes every live command to the Meta-Harness instance that owns the addressed session or configuration. A merged projection never creates cross-instance authority.
-- Workspace sync and live agent control are separate planes. Sync exchanges Liquid actions/state; it does not tunnel Meta-Harness commands or imply that a cached agent session is controllable offline.
-- Loss of sync connectivity does not change Liquid's working store: local reads and mutations continue, while resumable exchange waits for connectivity.
+- Liquid replicas connect to the Sync Server, never directly to one another. The normal replication unit is an authorized Workspace, not a hand-selected set of Blocks.
+- User devices normally sync each authorized Workspace in full. A headless Liquid replica requires explicit workspace-level opt-in before it receives that Workspace.
+- The Sync Server and headless Liquid replica are separate logical participants even when one deployment co-locates them.
+- Workspace sync and live agent control are separate planes. Sync exchanges Liquid Actions/state; it does not tunnel Meta-Harness commands or imply that cached agent state is controllable offline.
+- Loss of sync connectivity does not change a Liquid replica's working store: local reads and mutations continue, while resumable exchange waits for connectivity.
+- Agents use Liquid through the Workspace CLI/API and effective Roles. No visibility, View placement, Connection or Meta-Harness reachability grants implicit Workspace authority.
 
 ## MVP boundary
 

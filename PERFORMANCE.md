@@ -80,11 +80,11 @@ Implementation budgets to define before M2:
 Product targets (tiered; each tier gets its own benchmark — ADR-0014):
 
 1. **Local UI:** p95 < 100 ms from user action to acknowledged workspace mutation; representative Pages and Arrange mode hold a 60 fps render budget.
-2. **Single shared workspace:** **250 concurrent active actors** (humans + agents) with p95 mutation→ack < 250 ms and p95 mutation→peer-visible < 1 s.
-3. **Organization scale (design-for):** **1,000 users + 5,000 agents** across many workspaces via workspace sharding and **Block- and scope-filtered event subscriptions** (clients receive only subscribed state — no workspace-wide broadcast), holding the tier-2 latencies. Depends on the sync/conflict model (D-035); it is a history/storage/event-model constraint, **not** an MVP gate.
+2. **Single shared workspace:** **250 concurrent active actors** (humans + agents) with p95 mutation→ack < 250 ms and p95 committed mutation→replica-visible < 1 s while connected to the central Sync Server.
+3. **Organization scale (design-for):** **1,000 users + 5,000 agents** across many Workspaces via Workspace sharding and scope-filtered query/event subscriptions, holding the tier-2 latencies. Subscription filtering limits live fan-out; it does not change the authorized Workspace as the replication unit. Depends on D-035 and is **not** an MVP gate.
 4. **Throughput budget:** ≥ 1,000 mutations/s sustained per workspace node, including action-history append.
 
-The binding constraint at scale is event fan-out, not mutation processing; Block- and scope-filtered subscriptions are therefore a design assumption, not an optimization.
+The binding constraint at scale is event fan-out, not mutation processing; scope-filtered live subscriptions are therefore a design assumption, not an optimization.
 
 Implementation budgets to define before M3:
 - Block update dispatch latency.
@@ -94,6 +94,8 @@ Implementation budgets to define before M3:
 - Diff calculation latency for common Block/Page changes.
 - Revert latency for recent actions.
 - Memory per Block/View/session card.
+- App Runtime startup, action-dispatch, memory and CPU/time-limit enforcement.
+- Sync Server commit acknowledgement and replica catch-up latency after reconnect.
 
 ## Notes
 

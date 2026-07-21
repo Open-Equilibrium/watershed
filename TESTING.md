@@ -38,7 +38,7 @@ Checked registry fixtures follow the [Loop Agent V-Spec](docs/concept/V-Spec_Loo
 
 ## Liquid MVP pass/fail (M3)
 
-In addition to the provisional M3 DoD in `PLAN.md`, the Liquid MVP must prove: deterministic first-action Block creation; content flow and Arrange mode preserve one canonical Block order; Views share their owning Block's state; Connections do not depend on layout or active View; mobile rendering retains every Block with safe focused editing for complex Views; every UI/CLI/API/sync mutation records an action; external-agent changes can be reverted; action history shows actor, target, operation and diff/patch; and selected D-028/D-031/D-035 history, recovery and sync behavior works.
+In addition to the staged M3 DoD in `PLAN.md`, Liquid must prove: deterministic first-action Block creation; flow and Arrange mode preserve canonical View order; synchronized Views share Block state while duplicate creates a new Block; last-View deletion follows the decided Connection/Automation cascade and is recoverable through History; layout never grants Connection or permission access; allow-only Roles deny unlisted actions; mobile retains every Block with focused editing for complex Views; App code and MCP adapters cannot exceed declared capabilities; every write surface records an Action; external-agent changes can be reverted; replicas converge through the central Sync Server; headless replicas receive only opted-in Workspaces; and selected D-028/D-031/D-035 history, recovery and conflict behavior works.
 
 ## AgentPulse as a quality gate
 

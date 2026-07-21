@@ -58,26 +58,12 @@
         <ul><li><strong>A:</strong> SQLite plus append-only transcript/log files. Pro: queryable and local. Con: migration discipline needed.</li><li><strong>B:</strong> JSONL/files only. Pro: transparent. Con: weaker queries and concurrency.</li></ul>
         <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
       </article>
-      <article id="d-025" class="decision">
-        <h3>D-025 - Showing Several Meta-Harness Instances</h3>
-        <p><strong>Status:</strong> Open implementation detail before Liquid integration; each instance owning its agents remains fixed.</p>
-        <p><strong>Question:</strong> When Liquid shows information from several Meta-Harness instances, where should it combine that information?</p>
-        <ul><li><strong>A:</strong> Liquid asks each instance and combines the answers for display, while remembering the owner, age and command destination of every item. Pro: ownership stays clear. Con: saved offline results and sorting across instances need care.</li><li><strong>B:</strong> Add a separate service that combines the instances. Pro: one place for team-wide queries. Con: another service and another ownership boundary.</li></ul>
-        <p><strong>Recommendation:</strong> A for M3; begin with one primary/local instance, then add combined displays without giving Liquid control of every instance's config or schedules.</p>
-      </article>
     </div>
   </section>
 
   <section id="m3">
     <h2>M3 - Liquid</h2>
     <div class="grid">
-      <article id="d-005" class="decision">
-        <h3>D-005 - Liquid Page Navigation</h3>
-        <p><strong>Status:</strong> Open before Liquid UI implementation.</p>
-        <p><strong>Question:</strong> How should users move among Pages and Sources in the first Liquid workspace?</p>
-        <ul><li><strong>A:</strong> Workspace sidebar plus command palette. Pro: scales to many Pages and is agent-friendly. Con: more interaction design.</li><li><strong>B:</strong> Page tabs plus command palette. Pro: familiar for a few open Pages. Con: weak discovery and crowding at scale.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
-      </article>
       <article id="d-009" class="decision">
         <h3>D-009 - Liquid UI Framework</h3>
         <p><strong>Status:</strong> Open before Liquid app shell work.</p>
@@ -85,18 +71,11 @@
         <ul><li><strong>A:</strong> Flutter. Pro: mature cross-platform tooling. Con: larger runtime surface.</li><li><strong>B:</strong> Lower-level native/Dart stack. Pro: tighter control. Con: higher implementation cost.</li></ul>
         <p><strong>Recommendation:</strong> Flutter unless a concrete MVP requirement rules it out.</p>
       </article>
-      <article id="d-026" class="decision">
-        <h3>D-026 - Liquid Standalone MVP Scope</h3>
-        <p><strong>Status:</strong> Open before M3 scoping freeze.</p>
-        <p><strong>Question:</strong> Which Liquid capabilities are required when no agents are installed?</p>
-        <ul><li><strong>A:</strong> Page/Block workspace, local Script Blocks, PowerBar and action history. Pro: proves standalone value. Con: narrower agent integration.</li><li><strong>B:</strong> Include rich agent integration first. Pro: stronger platform demo. Con: weakens standalone proof.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
-      </article>
       <article id="d-027" class="decision">
         <h3>D-027 - Liquid CLI/API Surface</h3>
         <p><strong>Status:</strong> Open before external-agent Liquid edits.</p>
-        <p><strong>Question:</strong> Which workspace read and change commands should remain stable in the MVP?</p>
-        <ul><li><strong>A:</strong> A small set of specific create, read, update and delete commands. Pro: easy to test and restrict. Con: less flexible.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure and change safely.</li></ul>
+        <p><strong>Question:</strong> Which typed Workspace reads, changes and App actions should remain stable in the MVP?</p>
+        <ul><li><strong>A:</strong> A small set of resource-specific commands and action schemas. Pro: compact for agents, easy to test and restrict. Con: new capabilities need explicit additions.</li><li><strong>B:</strong> One broad document interface. Pro: flexible. Con: harder to secure, discover efficiently and change safely.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
       <article id="d-028" class="decision">
@@ -113,13 +92,6 @@
         <ul><li><strong>A:</strong> Use a SQLite database as the local copy. Pro: reliable offline searches and all-or-nothing updates. Con: upgrades and sharing need careful data conversion.</li><li><strong>B:</strong> Use folders of readable JSON files as the local copy. Pro: transparent. Con: weaker consistency and slower searching.</li></ul>
         <p><strong>Recommendation:</strong> A unless sync requirements force a different engine.</p>
       </article>
-      <article id="d-030" class="decision">
-        <h3>D-030 - External-Agent Permissions</h3>
-        <p><strong>Status:</strong> Open implementation detail before CLI/API mutation access; scoped, auditable access is the security baseline.</p>
-        <p><strong>Question:</strong> How should outside tools receive limited permission to read or change Liquid workspace data?</p>
-        <ul><li><strong>A:</strong> Grant named resources and actions, and ask before sensitive changes. Pro: damage is clearly limited. Con: more permission prompts and settings.</li><li><strong>B:</strong> Offer predefined permission bundles by workspace area. Pro: easier to manage. Con: each bundle gives broader access.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
-      </article>
       <article id="d-031" class="decision">
         <h3>D-031 - Revert Semantics</h3>
         <p><strong>Status:</strong> Open before action-history implementation.</p>
@@ -127,31 +99,10 @@
         <ul><li><strong>A:</strong> Record a new action that reverses the earlier one, or restore a save point when changes conflict. Pro: preserves history. Con: conflicts need clear handling.</li><li><strong>B:</strong> Replace history with the earlier state. Pro: simple. Con: weakens the audit trail.</li></ul>
         <p><strong>Recommendation:</strong> A.</p>
       </article>
-      <article id="d-032" class="decision">
-        <h3>D-032 - Shared Mutation Pipeline</h3>
-        <p><strong>Status:</strong> Open implementation detail before any Liquid write surface ships; one recorded mutation path is the accepted product invariant.</p>
-        <p><strong>Question:</strong> How should the interface, command line, Liquid AI and outside tools all send changes through one recorded path?</p>
-        <ul><li><strong>A:</strong> One shared, defined change pipeline. Pro: no hidden changes. Con: every Block and entry point follows a stricter contract.</li><li><strong>B:</strong> A translator for each entry point that writes to the same internal log. Pro: flexible integration. Con: every translator must behave identically.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
-      </article>
-      <article id="d-033" class="decision">
-        <h3>D-033 - Block SDK Rules</h3>
-        <p><strong>Status:</strong> Open before Block implementation.</p>
-        <p><strong>Question:</strong> What small set of rules should define a Block's saved data, Views, Connections, actions, permissions, upgrades and desktop/mobile behavior?</p>
-        <ul><li><strong>A:</strong> A small set of named versions in which every Block declares what it can do. Pro: stable, testable and safe. Con: fewer possibilities at first.</li><li><strong>B:</strong> Broad rules that allow Blocks to change their behavior freely. Pro: expressive. Con: harder to isolate and upgrade safely.</li></ul>
-        <p><strong>Recommendation:</strong> A.</p>
-      </article>
-      <article id="d-034" class="decision">
-        <h3>D-034 - Script Block Runtime</h3>
-        <p><strong>Status:</strong> Open before Script Blocks.</p>
-        <p><strong>Question:</strong> Where and how should Liquid Script Blocks run safely?</p>
-        <ul><li><strong>A:</strong> Run locally with access only to explicitly granted abilities. Pro: works offline and actions can be reviewed. Con: safe isolation must be built.</li><li><strong>B:</strong> Run only on a remote service. Pro: isolates the local device. Con: depends on a network service and weakens offline use.</li></ul>
-        <p><strong>Recommendation:</strong> A, with the exact runtime chosen during M3 design.</p>
-      </article>
       <article id="d-035" class="decision">
         <h3>D-035 - Sync Conflict Semantics</h3>
         <p><strong>Status:</strong> Open before shared-workspace work.</p>
-        <p><strong>Question:</strong> Liquid always saves locally and can share saved actions later; how should it combine changes made offline at the same time?</p>
+        <p><strong>Question:</strong> When local replicas send concurrent offline changes to the central Sync Server, how should Liquid combine them?</p>
         <ul><li><strong>A:</strong> Combine recorded changes using the same fixed rule for each field and ask the user when no safe combination exists. Pro: preserves local-first behavior and audit history. Con: more merge design.</li><li><strong>B:</strong> Keep the most recent ordinary field value and ask only about deletes or structural changes. Pro: smaller first implementation. Con: can silently discard intent.</li></ul>
         <p><strong>Recommendation:</strong> A, scoped first to the M3 Block Types and action model.</p>
       </article>

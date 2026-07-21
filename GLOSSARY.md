@@ -20,9 +20,10 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 ## Tools
 
-- **Liquid** — Standalone local-first workspace and app-building product (Pages, Blocks, Views, Sources and automations) with an internal workspace action history/VCS and a workspace CLI/API. Useful without Loop Agent or Meta-Harness; optionally syncs workspace data and presents connected Meta-Harness instances in one UI. CLI binary: `liq` (ADR-0013).
+- **Liquid** — Standalone local-first workspace and app-building product built from Pages, Blocks, Views, Sources, Connections and Automations. Every client works through a local replica; optional sync, agent integration and headless execution extend rather than replace that product. CLI binary: `liq` (ADR-0013).
 - **Loop Agent** — Host-local, CLI-only, Rust-core, script-driven, event-based deterministic agent-loop harness (not a generic coding agent). CLI binary: `loop` (ADR-0013).
-- **Meta-Harness** — Self-contained host-scoped headless control plane over CLI agents on one host (session registry, central config resolution, scheduling/automations, artifact indexing, AgentPulse), reachable through local or authenticated remote clients. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta` (ADR-0013).
+- **Meta-Harness** — Self-contained host-scoped headless control plane over CLI agents on one host (session registry, central config resolution, agent schedules/triggers, artifact indexing, AgentPulse), reachable through local or authenticated remote clients. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta` (ADR-0013).
+- **Execution location** — User-editable label for the host and owning Meta-Harness target used to start or control a session. Technical identifiers remain internal while routing authority is preserved.
 - **Pi Agent** — The Pi CLI agent integration target. Use the full term "Pi Agent" in docs; avoid bare "Pi" except when quoting an external CLI/product name.
 
 ## Roles & layers
@@ -86,19 +87,33 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 
 ## Liquid primitives
 
-- **Workspace** — Top-level container for Pages, Sources, settings and action history.
-- **Page** — Liquid's top-level authored surface: an ordered composition of Blocks with responsive layout metadata. A Page starts as an empty flow and may be arranged on a grid; there is no second authored-surface object or mode.
-- **Block** — A typed, addressable unit of content or functionality placed on a Page, such as text, database, code, formula, script, media, whiteboard or agent status. A text toggle is formatting inside a Text Block, not a Block type. Do not call Liquid Blocks "tools."
-- **Block Type** — The behavior, state contract, supported Views, connection ports, permissions and responsive capabilities shared by Blocks of one kind.
-- **View** — One representation or interaction surface over a Block's state and capabilities. A Block owns its Views; changing View does not create or replace the Block.
-- **Connection** — An explicit typed, permissioned data/control relation between Blocks. It addresses Blocks and their ports independently of the active View; visual proximity never grants data access.
-- **Source** — An external or shared data input addressable from a workspace. A Source is not a Page or a generic container for Liquid content.
-- **Sync host** — Optional service that exchanges committed Liquid workspace changes with local replicas resumably. It is independent of Meta-Harness and is not Liquid's interactive working store.
-- **Arrange mode** — The explicit Page layout state that reveals a responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
-- **Block SDK** — The contract for built-in and third-party Block Types, including state serialization/migrations, Views, connections/ports/actions, permissions and responsive behavior. ADR-0040 still limits the MVP to a fixed trusted Block palette plus script-as-compute.
-- **Workspace action history / workspace VCS** — Liquid's internal record of workspace mutations, enabling attribution, diff and revert. A VCS over Liquid's own workspace data — **not** a project-code VCS and not Loop Agent's session store. Its history and recovery model remain open in [D-028](docs/decisions/open-decisions.html#d-028) and [D-031](docs/decisions/open-decisions.html#d-031).
-- **Action** — One recorded workspace mutation: actor (human/liquid-ai/external-agent/meta-harness/system), origin (ui/cli/api/automation/import/sync), target, operation, before/after-or-patch, permission result, review status, correlation_id and revert metadata.
-- **Mutation pipeline** — The single permissioned path (validate → permission check → diff → apply → record action → emit event) every workspace write takes, regardless of whether it originates from the UI, Liquid AI, the CLI/API, sync or an external agent. No hidden writes bypass it.
-- **Workspace CLI/API** — Liquid's external surface (`liq …` CLI and local API/service) through which external agents and tools read and edit workspace data via the mutation pipeline.
-- **Liquid AI** — Liquid's built-in workspace assistant; uses the same mutation/action-history pipeline as external agents and reaches CLI agents only through an owning Meta-Harness public surface.
-- **External agent** — Any agent or tool (incl. BYOA, Meta-Harness-orchestrated) that reads/edits a Liquid workspace through the workspace CLI/API; writes are scoped, attributed and revertible.
+- **Workspace** — Top-level owner of Pages, Blocks, Sources, Connections, Automations, Roles, History and settings.
+- **Page** — Liquid's authored surface: an ordered composition of Block Views with responsive layout metadata. A Page starts as an empty flow and may later be arranged on a grid.
+- **Block** — A canonical, typed and addressable unit of content or functionality, such as text, database, code, formula, media, whiteboard, App or agent session. A text toggle is formatting inside a Text Block, not a Block Type.
+- **Block Type** — The versioned behavior, state contract, supported Views, ports/actions, permissions and responsive capabilities shared by Blocks of one kind.
+- **View** — One placement or representation of a Block. Several Views may expose the same Block on different Pages and stay synchronized because they share canonical Block state. Duplicating creates a new Block; adding a View does not.
+- **Connection** — An explicit typed and permissioned data/action relation among Blocks and Sources. It addresses stable objects and ports independently of active View or layout; visual proximity never grants access.
+- **Automation** — A Workspace-owned event/condition/action rule over Liquid objects and permitted external actions. It is distinct from Meta-Harness agent scheduling and orchestration.
+- **Source** — An external or shared resource addressable from a Workspace. Sources appear beside Pages in the Explorer and use the same open/navigation flow, but are not authored Pages internally.
+- **Explorer** — Liquid's primary Workspace navigation surface, listing Pages and Sources as peer entries.
+- **Page template** — A reusable starting composition of Blocks, Views, Connections and Automations for one use case; it creates an ordinary Page.
+- **PowerBar** — Liquid's command and creation surface for finding Workspace objects, adding Blocks and invoking permitted Workspace or agent actions.
+- **Role** — A reusable allow-only composition of permissions assigned to users, groups, agent profiles, sessions or Automations. Anything not allowed is denied by default; explicit deny/blacklist rules are post-MVP.
+- **History** — Liquid's attributed and reversible record of Workspace Actions; also called **workspace action history / workspace VCS** when distinguishing it from project-code VCS. Its detailed storage/recovery model remains open in [D-028](docs/decisions/open-decisions.html#d-028) and [D-031](docs/decisions/open-decisions.html#d-031).
+- **Liquid replica** — A complete local working copy of an authorized Workspace. Interactive reads and writes never require a remote round trip.
+- **Sync Server** — Central service in the replica star topology. It stores and exchanges committed Workspace changes resumably; it does not execute App Blocks or control agents.
+- **Headless Liquid replica** — Optional Liquid replica without a user interface. A Workspace must opt in before this replica can sync it; same-host agents then use Liquid's normal permission and action surfaces while user devices are offline.
+- **Arrange mode** — The explicit Page state that reveals the responsive grid and resize/reorder handles. Outside Arrange mode, a Page remains a content-first flow.
+- **Block SDK** — Versioned contract for reusable built-in and Block Registry Block Types: state/migrations, Views, ports/actions, permissions, lifecycle and responsive behavior. It is for product/community extension, not end-user app creation.
+- **Block Registry** — Official distribution catalog for reusable Block Types. Community packages are signed, sandboxed and capability-scoped; the initial model loads no arbitrary third-party native code.
+- **App** — Workspace-local interactive functionality with versioned state, declared UI, typed actions and explicit capabilities.
+- **App Block** — A Block containing one App. It may expose interactive and code-oriented Views and may be shown through Views on multiple Pages.
+- **App SDK** — The user/AI-facing contract for building Workspace-local Apps with minimal code, versioned state, declared UI/actions and explicit capabilities. It is distinct from the Block SDK.
+- **App Runtime** — Liquid's local sandbox for App code and declarative UI. Restricted JavaScript/TypeScript is the first target; WASM is a later extension.
+- **MCP adapter** — Boundary that maps an external MCP server's capabilities into typed, permissioned Liquid App actions. It may support an App Block or a headless integration.
+- **App action** — A typed capability declared by an App, invoked by its UI, a Connection, an Automation or an authorized agent through Liquid's CLI/API.
+- **Action** — One recorded Workspace mutation: actor (human/Liquid AI/external agent/Meta-Harness/system), origin (UI/CLI/API/Automation/import/sync), target, operation, before/after-or-patch, permission result, review status, `correlation_id` and revert metadata.
+- **Mutation pipeline** — The single permissioned path (validate → permission check → diff → apply → record Action → emit event) every Workspace write takes, including UI, Liquid AI, CLI/API, Automation, App and sync writes. No hidden write bypasses it.
+- **Workspace CLI/API** — Liquid's external surface (`liq …` and local API/service) through which agents and integrations discover permitted state and invoke typed reads, mutations and App actions.
+- **Liquid AI** — Liquid's built-in Workspace assistant. It uses the same Role, capability, mutation and History boundaries as external agents and reaches CLI agents only through the owning Meta-Harness.
+- **External agent** — Any agent or tool, including BYOA and Meta-Harness-orchestrated agents, that uses the Workspace CLI/API. Its effective access is scoped, attributed and reversible.
