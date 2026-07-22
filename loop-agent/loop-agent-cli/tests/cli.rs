@@ -3,7 +3,8 @@ use std::{
     fs,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
+    time::{Duration, Instant},
 };
 
 #[path = "../../tests/support.rs"]
@@ -30,6 +31,40 @@ fn run_chat(workspace: &Path, input: &[u8]) -> Output {
         .write_all(input)
         .expect("stdin write");
     child.wait_with_output().expect("loop binary should exit")
+}
+
+fn wait_with_output_before(mut child: Child, timeout: Duration) -> Output {
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("child status should be readable") {
+            break status;
+        }
+        if started.elapsed() >= timeout {
+            child.kill().expect("timed-out child should stop");
+            child.wait().expect("timed-out child should be reaped");
+            panic!("child did not exit within {timeout:?}");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let mut stdout = Vec::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout is piped")
+        .read_to_end(&mut stdout)
+        .expect("stdout should be readable");
+    let mut stderr = Vec::new();
+    child
+        .stderr
+        .take()
+        .expect("stderr is piped")
+        .read_to_end(&mut stderr)
+        .expect("stderr should be readable");
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
 }
 
 fn replace_seeded_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {
@@ -206,27 +241,48 @@ fn invalid_tail_arguments_print_usage_errors() {
 }
 
 #[test]
-fn tail_timeout_argument_is_accepted() {
-    let workspace = workspace_copy("smoke-loop");
-    let run = loop_command()
-        .current_dir(&workspace)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
-        .output()
-        .expect("loop binary should run");
-    assert!(run.status.success());
+fn tail_timeout_exits_after_current_non_terminal_prefix() {
+    let fixture = workspace_copy("smoke-loop");
+    let session_dir = fixture.join(".loop/sessions");
+    fs::create_dir_all(&session_dir).expect("session dir created");
+    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+        .lines()
+        .next()
+        .expect("golden has session.started")
+        .to_owned()
+        + "\n";
+    let session_path = session_dir.join("smoke-loop.jsonl");
+    let lock_path = session_dir.join("smoke-loop.lock");
+    fs::write(&session_path, &prefix).expect("partial session written");
+    fs::write(&lock_path, "").expect("active-session lock written");
 
-    let output = loop_command()
-        .current_dir(&workspace)
-        .args(["tail", "smoke-loop", "--timeout-ms", "1"])
-        .output()
-        .expect("loop binary should run");
+    let child = loop_command()
+        .current_dir(&fixture)
+        .args([
+            "tail",
+            "smoke-loop",
+            "--emit",
+            "jsonl",
+            "--timeout-ms",
+            "25",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+    let output = wait_with_output_before(child, Duration::from_secs(2));
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        "session smoke-loop tailed\n"
+        prefix
     );
+    assert_eq!(
+        fs::read_to_string(session_path).expect("partial session remains readable"),
+        prefix
+    );
+    assert!(lock_path.is_file(), "tail must not own the session lock");
 }
 
 #[test]
