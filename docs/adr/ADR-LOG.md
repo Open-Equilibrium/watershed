@@ -13,7 +13,7 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0003** | 2026-06-09 | Accepted | License is SPDX `AGPL-3.0-only` — `LICENSE`, `README.md`.
 - **ADR-0004** | 2026-06-05 | Accepted | Scripts define capabilities; sandbox policy enforces them — `SECURITY.md`.
 - **ADR-0005** | 2026-06-05 | Accepted | Reuse proven sandbox primitives and Wasmtime plugin isolation — `SECURITY.md`.
-- **ADR-0006** | 2026-06-05 | Accepted | Authored scripts are the source of truth; visual graphs are views — `SECURITY.md`, Loop Agent V-Spec.
+- **ADR-0006** | 2026-06-05 | Accepted | Authored scripts are the source of truth; visual graphs are views — `GLOSSARY.md`.
 - **ADR-0007** | 2026-06-05 | Accepted | AgentPulse belongs to Meta-Harness — `PLAN.md`, Meta-Harness V-Spec.
 - **ADR-0008** | 2026-06-05 | Accepted | Meta-Agent config writes are policy-gated, audited and approval-aware — `SECURITY.md`.
 - **ADR-0009** | 2026-06-05 | Accepted | Integration happens through protocol clients; Liquid is the rich UI consumer — `PROTOCOL.md`.
@@ -26,7 +26,7 @@ Format: `ID | date | status | decision — canonical context`
 - **ADR-0017** | 2026-06-11 | Accepted | Adoption sequence is Loop Agent, then Meta-Harness, then Liquid — `PLAN.md`.
 - **ADR-0018** | 2026-06-11 | Accepted | Layer positioning: Loop Agent execution runtime, Meta-Harness headless control plane, Liquid standalone workspace/action product — V-Specs.
 - **ADR-0019** | 2026-06-11 | Accepted | Docs keep an AGPL/free-software posture and make no monetization/open-core claims — `README.md`, `VISION.md`.
-- **ADR-0020** | 2026-06-11 | Accepted | Official repo target is `Open-Equilibrium/watershed`; npm is not a product target — `README.md`.
+- **ADR-0020** | 2026-06-11 | Accepted | Official repo target is `Open-Equilibrium/watershed`; npm is not a product target — `Cargo.toml`, `package.json`.
 - **ADR-0021 / ADR-0043 / ADR-0045** | 2026-06-16 / 2026-06-21 / 2026-06-22 | Accepted | M0 gates include fixed-viewport Chromium rendering of self-contained HTML through the canonical render script — `TESTING.md`.
 - **ADR-0022 / ADR-0060** | 2026-06-16 / 2026-07-13 | Accepted | From M1, meaningful line coverage is gated at >=90% via `cargo llvm-cov nextest --workspace --fail-under-lines 90`; timing-sensitive perf tests run optimized outside coverage — `TESTING.md`.
 - **ADR-0023 / ADR-0026 / ADR-0027** | 2026-06-16 | Accepted | Codex subagent topology, delegation points and explicit standards compliance are canonical in `AGENTS.md`.
