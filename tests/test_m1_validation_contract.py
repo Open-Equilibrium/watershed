@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+
 class M1ValidationContractTest(unittest.TestCase):
     def assert_git_ignore(self, path: str, *, ignored: bool) -> None:
         result = subprocess.run(
@@ -27,6 +28,7 @@ class M1ValidationContractTest(unittest.TestCase):
         ]:
             with self.subTest(path=path):
                 self.assert_git_ignore(path, ignored=ignored)
+
 
 if __name__ == "__main__":
     unittest.main()

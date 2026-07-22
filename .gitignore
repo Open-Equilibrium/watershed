@@ -31,3 +31,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Generated local assets
+output/
