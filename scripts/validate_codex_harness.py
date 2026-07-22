@@ -228,9 +228,9 @@ def validate_agents(root: Path) -> list[str]:
         instructions = agent.get("developer_instructions")
         if not isinstance(instructions, str) or "AGENTS.md" not in instructions:
             errors.append(f"{rel}: developer_instructions must reference AGENTS.md")
-        if agent.get("name") == "docs_scout" and "docs/adr/ADR-LOG.md" not in instructions:
+        elif agent.get("name") == "docs_scout" and "docs/adr/ADR-LOG.md" not in instructions:
             errors.append(f"{rel}: docs_scout must reference docs/adr/ADR-LOG.md")
-        if agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
+        elif agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
             errors.append(f"{rel}: doc_sync must reference docs/decisions/open-decisions.html")
     return errors
 

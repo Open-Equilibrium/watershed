@@ -215,6 +215,26 @@ class CodexHarnessValidatorTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(expected, validate_text_replacement(path, old, new))
 
+    def test_reports_invalid_agent_instructions_without_crashing(self) -> None:
+        for agent in ["docs_scout", "doc_sync"]:
+            for replacement in ["", "developer_instructions = 7\n"]:
+                with self.subTest(agent=agent, replacement=replacement):
+                    with tempfile.TemporaryDirectory() as temp:
+                        root = Path(temp)
+                        write_valid_harness(root)
+                        path = root / ".codex" / "agents" / f"{agent}.toml"
+                        text = path.read_text(encoding="utf-8")
+                        start = text.index('developer_instructions = """')
+                        end = text.index('"""', start + 28) + 3
+                        path.write_text(
+                            text[:start] + replacement + text[end:], encoding="utf-8"
+                        )
+
+                        self.assertIn(
+                            f".codex/agents/{agent}.toml: developer_instructions must reference AGENTS.md",
+                            validator.validate_repo(root),
+                        )
+
     def test_rejects_missing_required_tiered_agent(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
