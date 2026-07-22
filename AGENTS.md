@@ -1,12 +1,15 @@
 # AGENTS.md
 
-## Documentation policy (token efficiency)
+## Documentation policy
 
 1. **Minimal** — write the least text that fully conveys the point; no filler.
 2. **Clean** — one clear structure per file; prune anything outdated on edit.
-3. **Non-overlapping** — exactly one canonical home per topic; **reference, never duplicate** (see "Canonical references" below).
-4. **Single source of truth** — if information belongs in another file, link to it instead of restating it.
-5. **Smallest sufficient read** — structure docs so an agent can answer from the smallest relevant file; keep new docs lean and split only when a topic earns its own home. These rules apply to every file an agent creates or edits, including this one.
+3. **Non-overlapping** — exactly one canonical home per topic; **reference, never duplicate**.
+4. **Single source of truth** — if information belongs in another file, link to it.
+5. **Smallest sufficient read** — structure docs so an agent can answer from the smallest relevant file.
+6. **Simplicity** — keep structure, code, and documentation as simple as possible; human understanding and reviewability are the bottleneck.
+
+These rules apply to every file an agent creates or edits, including this one.
 
 ## V-Spec exception
 
@@ -14,67 +17,77 @@ The visual V-Spec files under `docs/concept/` optimize for information quality a
 
 ## Hard rules (non-negotiable)
 
-1. **Never assume. Always ask or record.** If anything is ambiguous or underspecified, stop and ask the maintainer. If the task explicitly permits documentation edits, record the uncertainty in `docs/decisions/open-decisions.html` instead of filling the gap with guesses.
-2. **Never decide for the maintainer.** Architectural, product, naming, dependency, licensing and design choices are the maintainer's to make unless the maintainer has explicitly decided them in the current task.
-3. **ADRs require prior approval.** Do not write an ADR for a decision that has not been explicitly approved by the maintainer. Propose first (see rule 4), record only after approval.
-4. **Maintain the open-decisions dashboard.** For every live open decision that blocks the current or next milestone, add an entry to `docs/decisions/open-decisions.html` with: a plain-language explanation (assume the reader is _not_ an expert in that area), realistic options with lay pros/cons, and a clear recommendation. The file MUST remain valid, self-contained HTML that renders correctly after every change.
-5. **Concurrency awareness.** At any time another agent may be active in any of the other tools (Liquid / Loop Agent / Meta-Harness). Coordinate through Git branches/PRs and the open-decisions flow; never assume exclusive ownership of files or branches; expect and cleanly merge parallel changes.
-6. **English only.** All code, comments, docs and identifiers in English.
-7. **Blocked = stop and report.** In autonomous runs (Codex goal mode included), if an open question blocks progress: stop working, do not work around it, and return the exact list of decisions to be made — existing IDs from `docs/decisions/open-decisions.html` where they exist, otherwise a new entry per rule 4.
-8. **MVP VCS boundary.** Do not add **project-code** VCS/history-engine behavior (version control over arbitrary software projects, e.g. Git/Jujutsu-style commit/branch/history management) to Loop Agent, Meta-Harness or Liquid. The MVP works inside normal Git projects; project-code VCS/history questions are deferred until after the MVP. This does **not** restrict Liquid's internal **workspace action history / workspace VCS** over its own workspace data (Pages, Blocks, Views, Connections, Sources and settings), which is an in-scope Liquid product responsibility — see `docs/concept/V-Spec_Liquid.html`.
+1. **English only** — all code, comments, docs and identifiers in English.
+2. **Never assume. Ask or record.** If anything is ambiguous or underspecified, stop and ask the maintainer, or record the entry in `docs/decisions/open-decisions.html` (assume the reader is _not_ an expert in that area). The file MUST remain valid, self-contained HTML that renders correctly after every change. Do not fill a gap with a guess.
+3. **Never decide for the maintainer.** Architectural, product, naming, dependency, licensing and design choices are the maintainer's to make unless the maintainer has explicitly decided them in the current task. ADRs require prior approval (see [Decision flow](#decision-flow)).
+4. **Blocked = stop and report.** In autonomous runs, if an open question blocks progress: stop, do not work around it, and return the exact list of decisions needed including realistic options with pros/cons and recommendation.
+5. **No secrets.** Never read, print, or commit credentials, tokens, keys, cookies, or `.env` files. Reference CI secrets by name only.
+6. **Tests are sacred.** Write a failing (red) test before new behavior; never weaken, skip, delete, or lower coverage thresholds to make a run pass. Tests must be meaningful, behavior-focused, and proportionate to the behavior under test; implementation-symptom tests do not count.
+7. **Durable artifacts over chat.** Record decisions and state in files, not in conversation history. Human review is the final gate.
+8. **Concurrency awareness.** At any time another agent may be active in any of the other tools (Liquid / Loop Agent / Meta-Harness). Coordinate through Git branches/PRs and the open-decisions flow; never assume exclusive ownership of files or branches; expect and cleanly merge parallel changes.
+9. **MVP VCS boundary.** Do not add Watershed-owned project-code VCS/history behavior. Liquid workspace action history over its own data remains in scope (ADR-0011; `SECURITY.md`).
 
 ## Decision flow
 
-Open milestone-relevant question → add to `open-decisions.html` (human-facing, plain language) → maintainer decides → record a terse entry in `docs/adr/ADR-LOG.md` (agent-facing).
+Open milestone-relevant question → add it to `docs/decisions/open-decisions.html` → maintainer decides → record a terse entry in `docs/adr/ADR-LOG.md`.
 
-- **`open-decisions.html`** is for the human: explanatory, layperson-friendly, renderable, and limited to live decisions.
+- **`docs/decisions/open-decisions.html`** is for the human: plain-language explanation, realistic options with pros/cons, a recommendation, renderable, and limited to live decisions.
 - **`docs/adr/ADR-LOG.md`** is for agents: minimal, token-efficient, decided items only.
 - **Hygiene limit:** active ADR entries plus live open-decision entries should stay under 100 total; consolidate before 80. Obvious, superseded or purely operational history belongs in the canonical docs, not in permanent decision lists.
-
-## Repo map
-
-```
-core/  proto/  loop-agent/  meta-harness/  liquid/   (see README.md)
-docs/decisions/open-decisions.html   open decisions (human dashboard)
-docs/adr/ADR-LOG.md                  decided records (agents)
-```
-
-## Canonical references (do not duplicate their content)
-
-- Terminology → `GLOSSARY.md`
-- Integration model & emergent features → `VISION.md`
-- Milestones & DoD → `PLAN.md`
-- Performance budgets (tests must check them) → `PERFORMANCE.md`
-- Inter-tool contract → `PROTOCOL.md`
-- Security & sandbox model → `SECURITY.md`
-- Test/eval strategy → `TESTING.md`
 
 ## Conventions
 
 - **Platform priority:** Linux and macOS are primary; Windows compatibility remains required but must not drive cross-platform design. Evaluate dependency and build effects per target—a `cfg(windows)`-only dependency is not a Linux/macOS cost—and prefer one portable boundary unless evidence justifies a target split.
-- **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior, without duplicating code, tests, docs or abstractions.
+- **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior without duplicating code, tests, docs or abstractions.
 - **Meaningful tests:** follow the test-economy rules in `TESTING.md`; protect all established behavior, including prior milestones, through distinct functional, contract, risk or regression cases—never line-by-line coverage tests.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
 - **Definition of Done:** code + tests and coverage per `TESTING.md` + relevant budget checks per `PERFORMANCE.md` + green CI gates (`rustfmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
 
+## Session workflow
+
+1. Gather context: delegate broad orientation to `repo_mapper` (structure) and `docs_scout` (contracts) when allowed.
+2. For code changes, write the failing behavior test first, make the smallest green fix, then refactor only while green.
+3. Run the repository gate defined by `TESTING.md`, `PERFORMANCE.md` and `.github/workflows/ci.yml`.
+4. Run `autoreview_lite`, then, for runtime package changes, `clawpatch_lite`; reconcile confirmed findings while changes are still expected. Record Clawpatch as not applicable in the closeout evidence when its runtime scope does not apply.
+5. Re-run the repository gate on the PR-ready candidate.
+6. Run `autoreview_pro`, then, for runtime package changes, `clawpatch_pro` as the final high-assurance review tier.
+7. Open the PR after the review tiers are clean, using the squash-ready body required by the `git` skill.
+8. Run `doc_sync` against the PR, fix valid findings, then check and fix CI. Rerun the repository gate after any file change.
+
+**Role-local completion:** Run each closeout role's own loop until that role returns clean. Once clean, the role remains complete: findings or fixes from later roles never restart it or any earlier role. Only the final repository gate must cover the resulting commit candidate.
+
+## Closeout open search-space stop
+
+A review role is in an open search space only when all of these are true:
+
+1. Confirmed or plausible findings are semantically equivalent variants of one bug class, such as alternate quoting, wrappers, encodings, bindings, or delayed execution.
+2. The current design has no finite, testable completion criterion that would prove the whole class handled.
+3. Another review would enumerate examples instead of verifying a general invariant or bounded grammar.
+
+When triggered, the role result is `BLOCKED`, never clean; a green gate does not clear the blocker. Keep completed, validated fixes, remove incomplete experiments from the current run, and rerun the touched-area checks needed for a stable worktree. Add or update one entry in `docs/decisions/open-decisions.html` with the affected boundary, why completion is unbounded, known fixed and unresolved examples, realistic options with tradeoffs, a recommendation, the maintainer decision required, and a finite acceptance criterion for resuming. Resume only after that decision is recorded through the repository decision flow.
+
+## Subagent coordination
+
+- Always directly communicate with subagents before declaring role stale.
+- Silence alone is not stale. If a subagent with edit capabilities has not responded for 30 minutes and no commits were added during that window, close it as stale and continue from the latest branch state.
+- A stale, interrupted, or shut down closeout subagent invalidates that role's gate result. Do not rely on partial state, cached findings, or status output left behind by `reviewer`, either review tier, or `doc_sync`.
+- After a stale closeout subagent, inspect and reconcile any files it changed, then rerun that role's **complete** required workflow from the role config or skill before claiming the gate is clean.
+- Final closeout reporting must name each closeout role and the exact command or subagent result that proves the role completed cleanly at its own execution point.
+
 ## Codex setup
 
-- Project config: `.codex/config.toml` (model/sandbox/approval/web-search posture; applies when the project is trusted). ADR-0057 keeps `sandbox_workspace_write.network_access = true` for networked repo closeout while `approval_policy = "never"` and `web_search = "disabled"` remain fixed; this is contributor/agent harness configuration, not product runtime egress.
-- Repo skills (`.agents/skills/`, each self-documenting in its `SKILL.md`):
-  - `tdd` — red/green implementation loop; default for all code changes.
-  - `git` — branching model (topic branches off `main`), stable-state commits, squash-ready PR body DCO sign-off, PR-ready closeout (canonical order: tests → autoreview → clawpatch → doc-sync → PR).
-  - `autoreview` — structured closeout review (vendored from openclaw/agent-skills, MIT — license in the skill folder); mandatory before a branch is declared PR-ready.
-  - `clawpatch` — final PR-readiness gate (pinned dev dependency in `package.json`; dev tooling only, no product Node runtime per ADR-0001).
-- Subagents (`.codex/agents/`) keep heavy/scoped work and its output out of the main thread (ADR-0023, ADR-0026). Information-gathering scanners (`repo_mapper`, `docs_scout`) run gpt-5.6-luna/medium; the `pr_validator`/`doc_sync` validators run gpt-5.6-sol/medium; edit-capable closeout agents run gpt-5.6-sol/xhigh; all return only concise summaries with evidence + references:
-  - `repo_mapper` (read-only) — session-start structural orientation (layout, crates, entry points, where things live).
+- **Harness** — trusted `.codex/config.toml` keeps workspace-write network access enabled with approvals and web search disabled (ADR-0057); `.codex/hooks.json` is opt-in defense-in-depth, never a security boundary (ADR-0024).
+- **Skills** (`.agents/skills/`):
+  - `git` — git conventions and process.
+  - `autoreview` — shared procedure for `autoreview_lite` and `autoreview_pro`.
+  - `clawpatch` — shared procedure for `clawpatch_lite` and `clawpatch_pro`.
+- **Subagents** (`.codex/agents/`) keep heavy, scoped work and its output out of the main thread.
+  - `repo_mapper` (read-only) — session-start structural orientation.
   - `docs_scout` (read-only) — contract/spec lookups from the canonical docs.
-  - `pr_validator` (writes build artifacts only, never source) — the full pre-PR gate matrix, run once; routine fmt/clippy/nextest stay in the main thread during the tdd loop (cheaper than a subagent round-trip).
-  - `autoreview_runner` (edit) — owns the autoreview closeout loop; commits stable fixes; returns commit refs.
-  - `clawpatch_runner` (edit) — owns the clawpatch gate loop; commits stable fixes; returns commit refs.
-  - `doc_sync` (read-only) — pre-PR audit that documentation + PR/commit standards were followed.
-  - `ui_validator` (Playwright) — planned, deferred until Liquid UI implementation (M3); not yet created.
-- Delegation points: **session start** — `repo_mapper` (structure) + `docs_scout` (relevant contracts) gather context; **during the tdd loop** — `docs_scout` resolves contract questions before any guess; **closeout** — `pr_validator` → `autoreview_runner` → `clawpatch_runner` → `doc_sync` (see the `git` skill).
-- Subagent liveness: never infer staleness from elapsed time or quiet output; slow hardware and long checks are expected. Leave about 20 minutes between routine status requests, then ask the subagent directly and wait for its reply; ask sooner only for a concrete coordination need.
-- Subagents are bound by these AGENTS.md standards (English-only, the hard rules, the doc policy): each agent's `developer_instructions` reference them and read this file on demand, and the closeout chain (`autoreview` → `clawpatch` → `doc_sync`) enforces them before any PR (ADR-0027). Codex does not document whether subagents inherit `AGENTS.md`, so compliance is set explicitly, not assumed.
-- Codex hooks (`.codex/hooks.json`; `[features] hooks`, canonical — the old `codex_hooks` key is deprecated): opt-in, defense-in-depth lifecycle guards (ADR-0024). EXPERIMENTAL per OpenAI, advisory only, and never a security boundary.
-- Local dev tools (contributors/agents): Rust toolchain (rustfmt, clippy), `cargo-nextest`, `cargo-llvm-cov`, `cargo-audit`, `cargo-deny`, `lychee` (see `TESTING.md`/`SECURITY.md`), Python 3, pnpm (`pnpm install` provides clawpatch), `gh` for PR work.
+  - `autoreview_lite` (edit) — iterative lightweight autoreview runner.
+  - `clawpatch_lite` (edit) — iterative lightweight clawpatch runner.
+  - `autoreview_pro` (edit) — final PR-ready autoreview.
+  - `clawpatch_pro` (edit) — final PR-ready clawpatch.
+  - `doc_sync` (read-only) — post-creation PR audit of doc + commit/PR standards.
+
+Every subagent must obey this file explicitly; role files may add scope but cannot weaken it (ADR-0023/ADR-0026/ADR-0027).

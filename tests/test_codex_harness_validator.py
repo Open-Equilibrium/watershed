@@ -176,44 +176,80 @@ class CodexHarnessValidatorTest(unittest.TestCase):
             ),
             (
                 "agent name",
-                ".codex/agents/docs-scout.toml",
+                ".codex/agents/docs_scout.toml",
                 'name = "docs_scout"',
                 'name = "wrong_name"',
-                ".codex/agents/docs-scout.toml: name must be 'docs_scout'",
+                ".codex/agents/docs_scout.toml: name must be 'docs_scout'",
             ),
             (
                 "unknown agent key",
-                ".codex/agents/repo-mapper.toml",
+                ".codex/agents/repo_mapper.toml",
                 'sandbox_mode = "read-only"',
                 'sandbox_mode = "read-only"\nunknown_key = "drift"',
-                ".codex/agents/repo-mapper.toml: unknown key 'unknown_key'",
+                ".codex/agents/repo_mapper.toml: unknown key 'unknown_key'",
             ),
             (
                 "skill name",
-                ".agents/skills/tdd/SKILL.md",
-                "name: tdd",
+                ".agents/skills/git/SKILL.md",
+                "name: git",
                 "name: test_driven",
-                ".agents/skills/tdd/SKILL.md: name must be 'tdd'",
+                ".agents/skills/git/SKILL.md: name must be 'git'",
             ),
             (
                 "skill rules reference",
-                ".agents/skills/tdd/SKILL.md",
+                ".agents/skills/git/SKILL.md",
                 "AGENTS.md",
                 "RULES.md",
-                ".agents/skills/tdd/SKILL.md: must reference AGENTS.md or canonical repo rules",
+                ".agents/skills/git/SKILL.md: must reference AGENTS.md or canonical repo rules",
             ),
             (
-                "validator gate reference",
-                ".codex/agents/pr-validator.toml",
-                "TESTING.md",
-                "GATES.md",
-                ".codex/agents/pr-validator.toml: pr_validator must reference TESTING.md",
+                "agent rules reference",
+                ".codex/agents/docs_scout.toml",
+                "AGENTS.md",
+                "RULES.md",
+                ".codex/agents/docs_scout.toml: developer_instructions must reference AGENTS.md",
             ),
         ]
 
         for name, path, old, new, expected in cases:
             with self.subTest(name=name):
                 self.assertIn(expected, validate_text_replacement(path, old, new))
+
+    def test_rejects_missing_required_tiered_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            (root / ".codex" / "agents" / "autoreview_lite.toml").unlink()
+
+            self.assertIn(
+                ".codex/agents/autoreview_lite.toml: missing required agent",
+                validator.validate_repo(root),
+            )
+
+    def test_agent_nicknames_are_optional(self) -> None:
+        errors = validate_text_replacement(
+            ".codex/agents/docs_scout.toml",
+            'nickname_candidates = ["Where Is The Spec", "Ctrl F Forever", "Decision Archaeologist"]\n',
+            "",
+        )
+
+        self.assertEqual([], errors)
+
+    def test_rejects_retired_tdd_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            target = root / ".agents" / "skills" / "tdd"
+            target.mkdir()
+            (target / "SKILL.md").write_text(
+                '---\nname: tdd\ndescription: "retired"\n---\n\nSee AGENTS.md.\n',
+                encoding="utf-8",
+            )
+
+            self.assertIn(
+                ".agents/skills/tdd/SKILL.md: retired skill must be absent",
+                validator.validate_repo(root),
+            )
 
     def test_rejects_hook_drift(self) -> None:
         cases = [

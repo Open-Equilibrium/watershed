@@ -1,30 +1,31 @@
 ---
 name: clawpatch
-description: "Run, fix, and triage clawpatch findings as the final PR-readiness gate: after the autoreview closeout is clean and before any PR is created. Covers map/review/report/triage/fix/revalidate."
+description: "Final runtime package review gate after autoreview and before PR."
 ---
 
-# Clawpatch gate
+# Clawpatch Gate
 
-clawpatch (pinned dev dependency in `package.json`) maps the repo into semantic feature slices, reviews them with the local Codex CLI as provider, and persists findings under `.clawpatch/`. It never commits, pushes, or opens PRs. Run it in its **own dedicated terminal session**; do not interleave other commands with a running review.
+This skill is the procedural home for the clawpatch sequence only.
 
-A branch is PR-ready only when the `autoreview` closeout is clean **and** clawpatch reports no open actionable findings.
+Run in the project root without interleaving unrelated commands.
 
-## Sequence (after autoreview is clean, before PR creation)
+1. Once per checkout: `pnpm install`, then `pnpm exec clawpatch doctor`.
+2. First run per repo: `pnpm exec clawpatch init`, then `pnpm exec clawpatch map`; rerun `map` after structural changes.
+3. Review open work: `pnpm exec clawpatch review --limit <n> --jobs 3` (`n` = number of features), then `pnpm exec clawpatch report`.
+4. Inspect one finding at a time with `next` / `show --finding <id>`.
+5. Findings are advisory: verify each against the real code path first. Triage false positives with a concrete note `triage --finding <id> --status false-positive --note "<real reason>"`; fix real findings under the AGENTS.md red/green rule, then `revalidate --finding <id>`.
+6. Commit stable state using the `git` skill.
+7. Repeat until `pnpm exec clawpatch revalidate --all --status open` has no open actionable findings, unless the open search-space stop below triggers.
 
-1. Once per checkout: `pnpm install`, then `pnpm exec clawpatch doctor` (verifies the Codex provider).
-2. First run per repo: `pnpm exec clawpatch init`, then `pnpm exec clawpatch map` (re-run `map` after structural changes).
-3. `pnpm exec clawpatch review --limit <n> --jobs 3` (<n> = the number of total open findings), then `pnpm exec clawpatch report`.
-4. Work findings one at a time via `next` / `show --finding <id>`:
-   - Findings are advisory: verify each against the real code path first - assess cross-references and effects, do not check files in isolation!
-   - False positive or intentional → `triage --finding <id> --status false-positive --note "<real reason>"`.
-   - Real → `fix --finding <id>` (requires a clean worktree — commit pending stable work first), review the resulting changes yourself, run the affected tests, then `revalidate --finding <id>`.
-5. After each accepted fix passes its tests, commit the stable state per the `git` skill.
-6. Repeat until `pnpm exec clawpatch revalidate --all --status open` reports no open actionable findings.
+## Open Search-Space Stop
 
-## Rules
+Apply the canonical [closeout open search-space stop](../../../AGENTS.md#closeout-open-search-space-stop). If it triggers:
 
-- You are not permitted to change anything inside the `.clawpatch` folder by hand!
-- Never triage away a real finding - challenge your assumption before triaging; triage notes must state a real reason.
-- Never let clawpatch findings bypass the tdd rules (no weakened tests).
-- Sync documentation if anything needs to be updated.
-- If a finding implies an undecided architectural question, stop per AGENTS.md rule 7 instead of fixing by guesswork.
+- Do not run another `review`, `revalidate`, or variant search.
+- Report clawpatch `BLOCKED` and stop immediately.
+
+## Hard Rules
+
+- Never edit `.clawpatch/` by hand!
+- Never weaken tests!
+- If a finding implies an undecided architectural/product question, stop and record it per `AGENTS.md` instead of fixing by guesswork.

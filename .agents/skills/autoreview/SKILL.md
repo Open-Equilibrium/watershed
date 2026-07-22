@@ -1,37 +1,28 @@
 ---
 name: autoreview
-description: "Run a structured code review (Codex) as a closeout check on a local or PR branch before commit or ship."
+description: "Run a structured code review after a green gate and before clawpatch/PR."
 ---
 
-# Auto Review
+# Autoreview
+
+This skill is the procedural home for the autoreview sequence only.
 
 Run the bundled structured review helper as a closeout check. This is code review, not Guardian `auto_review` approval routing.
 
-Codex usually delivers the best review results and should remain the normal final closeout engine.
-
-Use when:
-
-- user asks for Codex review / autoreview / second-model review
-- after non-trivial code edits, before final/commit/ship
-- reviewing a local branch or PR branch after fixes
-
 ## Contract
 
-- In this repository, follow `AGENTS.md` and the `git` skill for branch closeout.
-- Treat review output as advisory. Never blindly apply it.
-- Verify every finding by reading the real code path and adjacent files.
+- Treat review output as advisory until verified against the real code path and adjacent files.
 - Read dependency docs/source/types when the finding depends on external behavior.
-- Reject unrealistic edge cases, speculative risks, broad rewrites, and fixes that over-complicate the codebase.
-- Prefer small fixes at the right ownership boundary; no refactor unless it clearly improves the bug class.
-- When an accepted finding shows a bug class or repeated pattern, inspect the current PR scope for sibling instances before fixing.
+- Reject unrealistic edge cases, speculative risks, and broad rewrites. Prefer small fixes at the right ownership boundary; no refactor unless it clearly improves the bug class.
+- If a real finding reveals a bug class, inspect siblings in the current scope before fixing.
 - Fix the scoped bug class at once when practical; stop at touched surfaces, owner boundaries, and clear follow-up territory.
-- Keep going until structured review returns no accepted/actionable findings.
-- If a review-triggered fix changes code, rerun focused tests and rerun the structured review helper.
+- Fix accepted findings under the AGENTS.md red/green rule (never weaken tests), then rerun affected checks.
+- Keep going until structured review returns no accepted/actionable findings, unless the open search-space stop below triggers.
 - For security-audit suppression changes, verify accepted findings remain auditable: suppressed findings stay in structured output, active output keeps an unsuppressible suppression notice, and aggregate findings cannot hide unrelated active risk.
 - Never switch or override the requested review engine/model. If the review hits model capacity, retry the same command a few times with the same engine/model.
-- Be patient with large bundles. Structured review may remain active for a long time, especially with Codex tools or web search.
-- Treat heartbeat lines like `review still running: ... elapsed=... pid=...` as healthy progress, not a hang. Let the helper continue while heartbeats are advancing. Pass `--stream-engine-output` when live engine text is useful; Codex filters tool/file chatter, other engines pass raw output through.
-- Do not use elapsed time or quiet output alone to infer a stalled review. Query the running helper directly after missing expected heartbeats or an obviously failed subprocess; prefer letting the same helper command finish while it reports active work.
+- Be patient with large bundles. Structured review can take up to 30 minutes while the model call is active, especially with Codex tools or web search.
+- Treat heartbeat lines like `review still running: ... elapsed=... pid=...` as healthy progress, not a hang. Let the helper continue while heartbeats are advancing. Pass `--stream-engine-output` when live engine text is useful; Codex filters tool/file chatter.
+- Do not kill a review just because it has been quiet for 2-5 minutes, or because it is still running under the 30-minute window. Inspect the process only after missing multiple expected heartbeats, after 30 minutes, or after an obviously failed subprocess; prefer letting the same helper command finish.
 - Tools are useful in review mode. The helper allows read-only inspection tools and web search by default so reviewers can check dependency contracts, upstream docs, and current behavior.
 - Security perspective is always included, but it should not cripple legitimate functionality. Report security findings only when the change creates a concrete, actionable risk or removes an important safety check.
 - For regression provenance, keep roles separate: blamed code author, blamed PR author, PR merger/committer, current PR author, and PR/date. If no blamed PR is traceable, use the blamed commit as the provenance: commit SHA, date, and author username. Do not guess a merger or frame missing PR metadata as a separate finding.
@@ -41,9 +32,13 @@ Use when:
 - Treat the helper's successful exit plus absence of actionable findings as the clean review result, even if the underlying Codex CLI output is terse.
 - Multi-reviewer panels are opt-in only. Use them when explicitly requested or when risk justifies the extra spend; the main agent still verifies every accepted finding before fixing.
 - If rejecting a finding as intentional/not worth fixing, add a brief inline code comment only when it explains a real invariant or ownership decision that future reviewers should know.
-- If `gh`/Gitcrawl reports `database disk image is malformed`, run `gitcrawl doctor --json` once to let the portable cache repair before retrying review; do not bypass the shim unless repair fails and freshness requires live GitHub.
-- If Gitcrawl reports a portable manifest mismatch, source/runtime DB health error, or stale portable-store checkout, run `gitcrawl doctor --json` and inspect `source_db_health`, `runtime_db_health`, and `portable_store_status` before falling back to live GitHub.
-- Do not push just to review. Push only when the user requested push/ship/PR update.
+
+## Open Search-Space Stop
+
+Apply the canonical [closeout open search-space stop](../../../AGENTS.md#closeout-open-search-space-stop). If it triggers:
+
+- Do not run another helper, panel, review round, or variant search.
+- Report autoreview `BLOCKED` and stop immediately.
 
 ## Skill Path (set once)
 
@@ -127,7 +122,7 @@ On Windows, the default `--parallel-tests` shell preserves the platform `cmd.exe
 semantics used by Python `shell=True`. Use `--parallel-tests-shell powershell`
 or `--parallel-tests-shell pwsh` when the focused test command is PowerShell-specific.
 
-Tradeoff: tests may force code changes that stale the review. If tests or review lead to code edits, rerun the affected tests and rerun review until no accepted/actionable findings remain. Once that rerun exits cleanly, stop; do not spend another long review cycle on redundant confirmation.
+Tradeoff: tests may force code changes that stale the review. If tests or review lead to code edits, rerun the affected tests and rerun review until no accepted/actionable findings remain or the open search-space stop triggers. Once that rerun exits cleanly, stop; do not spend another long review cycle on redundant confirmation.
 
 ## Review Panels
 

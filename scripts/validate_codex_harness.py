@@ -46,12 +46,13 @@ EXPECTED_CONFIG_VALUES = {
 }
 
 REQUIRED_AGENT_FILES = {
-    "autoreview.toml": "autoreview_runner",
-    "clawpatch.toml": "clawpatch_runner",
-    "doc-sync.toml": "doc_sync",
-    "docs-scout.toml": "docs_scout",
-    "pr-validator.toml": "pr_validator",
-    "repo-mapper.toml": "repo_mapper",
+    "autoreview_lite.toml": "autoreview_lite",
+    "autoreview_pro.toml": "autoreview_pro",
+    "clawpatch_lite.toml": "clawpatch_lite",
+    "clawpatch_pro.toml": "clawpatch_pro",
+    "doc_sync.toml": "doc_sync",
+    "docs_scout.toml": "docs_scout",
+    "repo_mapper.toml": "repo_mapper",
 }
 AGENT_KEYS = {
     "description",
@@ -63,7 +64,8 @@ AGENT_KEYS = {
     "sandbox_mode",
 }
 
-REQUIRED_SKILLS = {"autoreview", "clawpatch", "git", "tdd"}
+REQUIRED_SKILLS = {"autoreview", "clawpatch", "git"}
+RETIRED_SKILLS = {"tdd"}
 SKILL_FRONT_MATTER_KEYS = {"description", "name"}
 PYTHON_HOOK_RE = re.compile(r"""["']?(\.codex[/\\]hooks[/\\][^"'\s]+\.py)["']?""")
 
@@ -217,8 +219,12 @@ def validate_agents(root: Path) -> list[str]:
         if agent.get("name") != expected_name:
             errors.append(f"{rel}: name must be {expected_name!r}")
         nicknames = agent.get("nickname_candidates")
-        if not isinstance(nicknames, list) or not nicknames:
-            errors.append(f"{rel}: nickname_candidates must be non-empty")
+        if nicknames is not None and (
+            not isinstance(nicknames, list)
+            or not nicknames
+            or not all(isinstance(nickname, str) and nickname for nickname in nicknames)
+        ):
+            errors.append(f"{rel}: nickname_candidates must be a non-empty string list")
         instructions = agent.get("developer_instructions")
         if not isinstance(instructions, str) or "AGENTS.md" not in instructions:
             errors.append(f"{rel}: developer_instructions must reference AGENTS.md")
@@ -226,10 +232,6 @@ def validate_agents(root: Path) -> list[str]:
             errors.append(f"{rel}: docs_scout must reference docs/adr/ADR-LOG.md")
         if agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
             errors.append(f"{rel}: doc_sync must reference docs/decisions/open-decisions.html")
-        if agent.get("name") == "pr_validator":
-            for reference in ("TESTING.md", ".github/workflows/ci.yml"):
-                if reference not in instructions:
-                    errors.append(f"{rel}: pr_validator must reference {reference}")
     return errors
 
 
@@ -242,6 +244,8 @@ def validate_skills(root: Path) -> list[str]:
     found_skills = {path.name for path in skill_dir.iterdir() if path.is_dir()}
     for name in sorted(REQUIRED_SKILLS - found_skills):
         errors.append(f".agents/skills/{name}/SKILL.md: missing required skill")
+    for name in sorted(RETIRED_SKILLS & found_skills):
+        errors.append(f".agents/skills/{name}/SKILL.md: retired skill must be absent")
 
     for path in sorted(skill_dir.glob("*/SKILL.md")):
         rel = f".agents/skills/{path.parent.name}/SKILL.md"

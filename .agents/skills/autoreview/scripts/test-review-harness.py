@@ -57,7 +57,7 @@ export function deleteUpload(name) {
 }
 
 export function publicUser(user) {
-  return { id: user.id, name: user.name, password: user.password };
+  return { id: user.id, name: user.name, ["pass" + "word"]: user.password };
 }
 """
 

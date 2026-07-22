@@ -122,6 +122,8 @@ def run_with_heartbeat(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     first_communicate = True
     while True:
@@ -154,6 +156,8 @@ def run_with_stream(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     events: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -519,7 +523,7 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         stream_display=CodexStreamDisplay() if args.stream_engine_output else None,
     )
     try:
-        output = output_path.read_text()
+        output = output_path.read_text(encoding="utf-8")
     finally:
         schema_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
