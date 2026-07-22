@@ -20,7 +20,7 @@ This skill is the procedural home for branch, commit, push and PR mechanics. The
 - `main` is protected by GitHub ruleset `protect-main`: PR-only, green CI and maintainer approval. If protection is missing, stop; never push to `main`.
 - Reuse the current branch when it fits. Otherwise, fetch `origin`, fast-forward local `main`, then create a short-lived topic branch from local `main`.
 - A topic branch must not track `origin/main`; unset or repoint that upstream before continuing. Keep current by merging `origin/main`; do not rewrite published history.
-- Subagents never create, switch or push branches and never open PRs. They may commit stable fixes in their assigned scope.
+- Subagents never create, switch, merge or push branches and never open PRs. They may commit stable fixes in their assigned scope.
 
 ## Commits
 

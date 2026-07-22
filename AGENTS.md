@@ -72,7 +72,7 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
 - Silence alone is not stale. If a subagent with edit capabilities has not responded for 30 minutes and no commits were added during that window, close it as stale and continue from the latest branch state.
 - A stale, interrupted, or shut down closeout subagent invalidates that role's gate result. Do not rely on partial state, cached findings, or status output left behind by `reviewer`, either review tier, or `doc_sync`.
 - After a stale closeout subagent, inspect and reconcile any files it changed, then rerun that role's **complete** required workflow from the role config or skill before claiming the gate is clean.
-- Final closeout reporting must name each closeout role and the exact command or subagent result that proves the role completed cleanly at its own execution point.
+- Closeout roles return only accepted/refuted findings, changed paths, validation results, commit IDs and remaining risks. Final reporting names each role and the exact command or subagent result that proves it completed cleanly at its own execution point.
 
 ## Codex setup
 

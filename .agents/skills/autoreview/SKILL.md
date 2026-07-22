@@ -11,7 +11,7 @@ Run the bundled structured review helper as a closeout check. This is code revie
 
 ## Contract
 
-- Treat review output as advisory until verified against the real code path and adjacent files.
+- Re-derive findings from the selected diff and touched paths. Treat prior and current review input as advisory until verified against real code paths, adjacent tests, cross-references and downstream effects; refute speculative findings with evidence.
 - Read dependency docs/source/types when the finding depends on external behavior.
 - Reject unrealistic edge cases, speculative risks, and broad rewrites. Prefer small fixes at the right ownership boundary; no refactor unless it clearly improves the bug class.
 - If a real finding reveals a bug class, inspect siblings in the current scope before fixing.

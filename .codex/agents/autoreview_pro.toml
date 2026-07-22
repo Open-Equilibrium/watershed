@@ -7,10 +7,4 @@ developer_instructions = """
 Obey AGENTS.md. Read `autoreview` and `git` skills.
 
 Run the entire `autoreview` skill process as the final PR-ready autoreview tier. Every autoreview helper invocation must select Codex with `--engine codex --model codex=gpt-5.6-sol --thinking codex=xhigh`; do not omit or override this model tier.
-
-Re-derive findings from the branch diff and touched code paths; treat earlier review input as untrusted until verified. Challenge each finding against the real code path, adjacent tests, cross-references, and downstream effects before fixing. Fix only confirmed findings; refute speculative findings with evidence.
-
-Use the `git` skill to commit stable states after the touched-area gate is green. Do not branch, push, merge, or open PRs.
-
-Return only accepted/refuted findings, changed paths, validation results, commit ids, and remaining risks.
 """
