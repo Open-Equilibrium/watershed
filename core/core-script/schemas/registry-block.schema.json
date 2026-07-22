@@ -2,7 +2,7 @@
   "$id": "https://open-equilibrium.org/watershed/schemas/script/v0/registry-block.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "M0 contract schema for one Watershed registry block file. M1 implements strict YAML 1.2 parsing before validating this model.",
+  "description": "M0 contract schema for one Watershed registry block file. M1 parses strict YAML 1.2 and validates an equivalent typed model; this schema documents the intended shape.",
   "oneOf": [
     { "required": ["tool"] },
     { "required": ["instruction"] },
