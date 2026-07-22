@@ -93,21 +93,7 @@ jobs:
         run: pnpm run docs:render-check
 
       - name: Check documentation links
-        run: >-
-          lychee
-          --no-progress
-          --include-fragments
-          README.md
-          PLAN.md
-          VISION.md
-          PROTOCOL.md
-          SECURITY.md
-          TESTING.md
-          PERFORMANCE.md
-          GLOSSARY.md
-          CONTRIBUTING.md
-          CODE_OF_CONDUCT.md
-          CHANGELOG.md
-          meta-harness/README.md
-          liquid/README.md
-          docs/**/*.html
+        shell: pwsh
+        run: |
+          $docs = @(git ls-files -- '*.md' '*.html')
+          lychee --no-progress --include-fragments @docs
