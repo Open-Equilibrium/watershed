@@ -85,10 +85,18 @@ fn print_error(error: &impl std::fmt::Display) {
 }
 
 fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
-    let workspace = env::current_dir().map_err(|source| RuntimeError::Io {
-        path: PathBuf::from("."),
-        source,
-    })?;
+    dispatch_with_workspace(args, || {
+        env::current_dir().map_err(|source| RuntimeError::Io {
+            path: PathBuf::from("."),
+            source,
+        })
+    })
+}
+
+fn dispatch_with_workspace(
+    args: &[String],
+    workspace: impl FnOnce() -> Result<PathBuf, RuntimeError>,
+) -> Result<ExitCode, RuntimeError> {
     let Some(command) = args.first().map(String::as_str) else {
         return Err(RuntimeError::Usage(usage()));
     };
@@ -97,12 +105,14 @@ fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
         "run" => {
             let loop_ref = positional(args, 1, "loop name")?;
             let emit = emit_mode(args)?;
+            let workspace = workspace()?;
             let output = run_command(&workspace, loop_ref, emit)?;
             Ok(command_exit_code(output.failed))
         }
         "replay" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
+            let workspace = workspace()?;
             let output = flow_agent_core::replay_session(workspace, session_id, emit)?;
             write_stdout(&output.stdout)?;
             Ok(command_exit_code(output.failed))
@@ -110,6 +120,7 @@ fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
         "tail" => {
             let session_id = positional(args, 1, "session_id")?;
             let (emit, tail_options) = tail_args(args)?;
+            let workspace = workspace()?;
             Ok(command_exit_code(tail_command(
                 &workspace,
                 session_id,
@@ -120,11 +131,13 @@ fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
         "resume" => {
             let session_id = positional(args, 1, "session_id")?;
             let emit = emit_mode(args)?;
+            let workspace = workspace()?;
             let output = resume_command(&workspace, session_id, emit)?;
             Ok(command_exit_code(output.failed))
         }
         "sessions" => {
             reject_extra_args(args, 1)?;
+            let workspace = workspace()?;
             let mut output = String::new();
             for session_id in flow_agent_core::list_sessions(workspace)? {
                 output.push_str(&session_id);
@@ -135,6 +148,7 @@ fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
         }
         "chat" => {
             reject_extra_args(args, 1)?;
+            let workspace = workspace()?;
             chat(workspace)
         }
         _ => Err(RuntimeError::Usage(usage())),
@@ -571,6 +585,18 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn usage_errors_do_not_resolve_the_workspace() {
+        for args in [Vec::<String>::new(), vec!["unknown".to_owned()]] {
+            let error = dispatch_with_workspace(&args, || {
+                panic!("usage validation must not resolve the workspace")
+            })
+            .expect_err("missing and unknown commands are usage errors");
+
+            assert!(matches!(error, RuntimeError::Usage(_)));
         }
     }
 
