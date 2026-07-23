@@ -301,7 +301,7 @@ class CodexHarnessValidatorTest(unittest.TestCase):
                 "missing script",
                 "hook",
                 "command",
-                'python ".codex/hooks/missing.py"',
+                'node "scripts/run-python.mjs" ".codex/hooks/missing.py"',
                 ".codex/hooks.json: hook command references missing script .codex/hooks/missing.py",
             ),
             (
@@ -321,6 +321,35 @@ class CodexHarnessValidatorTest(unittest.TestCase):
                 payload = json.loads(hooks_path.read_text(encoding="utf-8"))
                 entry = payload["hooks"]["PreToolUse"][0]
                 (entry if target == "entry" else entry["hooks"][0])[key] = value
+                hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+                self.assertIn(expected, validator.validate_repo(root))
+
+    def test_rejects_hook_commands_outside_approved_scripts(self) -> None:
+        cases = [
+            (
+                "chained command",
+                'node "scripts/run-python.mjs" ".codex/hooks/pre_tool_use_guard.py" && node "scripts/run-python.mjs" ".codex/hooks/stop_closeout_check.py"',
+                ".codex/hooks.json: hook command must use the approved Node launcher form",
+                False,
+            ),
+            (
+                "script traversal",
+                'node "scripts/run-python.mjs" ".codex/hooks/../../outside.py"',
+                ".codex/hooks.json: hook command script must be below .codex/hooks",
+                True,
+            ),
+        ]
+
+        for name, command, expected, create_outside_script in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                write_valid_harness(root)
+                if create_outside_script:
+                    (root / "outside.py").write_text("", encoding="utf-8")
+                hooks_path = root / ".codex" / "hooks.json"
+                payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+                payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command
                 hooks_path.write_text(json.dumps(payload), encoding="utf-8")
 
                 self.assertIn(expected, validator.validate_repo(root))

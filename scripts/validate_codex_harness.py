@@ -67,7 +67,11 @@ AGENT_KEYS = {
 REQUIRED_SKILLS = {"autoreview", "clawpatch", "git"}
 RETIRED_SKILLS = {"tdd"}
 SKILL_FRONT_MATTER_KEYS = {"description", "name"}
-PYTHON_HOOK_RE = re.compile(r"""["']?(\.codex[/\\]hooks[/\\][^"'\s]+\.py)["']?""")
+HOOK_COMMAND_RE = re.compile(
+    r'^node\s+(?:"scripts/run-python\.mjs"|scripts/run-python\.mjs)\s+'
+    r'(?:"(?P<quoted_script>\.codex[/\\]hooks[/\\][^"]+\.py)"|'
+    r'(?P<script>\.codex[/\\]hooks[/\\][^\s]+\.py))$'
+)
 
 
 def validate_repo(root: Path) -> list[str]:
@@ -197,13 +201,17 @@ def validate_hook_command(
     if not isinstance(timeout, int) or timeout <= 0:
         errors.append(f"{prefix}.timeout must be a positive integer")
 
-    match = PYTHON_HOOK_RE.search(command)
+    match = HOOK_COMMAND_RE.fullmatch(command)
     if match is None:
-        errors.append(f"{rel}: hook command must reference a .codex/hooks/*.py script")
+        errors.append(f"{rel}: hook command must use the approved Node launcher form")
         return errors
 
-    script = match.group(1).replace("\\", "/")
-    if not (root / script).is_file():
+    script = (match.group("quoted_script") or match.group("script")).replace("\\", "/")
+    script_path = (root / script).resolve()
+    hooks_dir = (root / ".codex" / "hooks").resolve()
+    if not script_path.is_relative_to(hooks_dir):
+        errors.append(f"{rel}: hook command script must be below .codex/hooks")
+    elif not script_path.is_file():
         errors.append(f"{rel}: hook command references missing script {script}")
     return errors
 
