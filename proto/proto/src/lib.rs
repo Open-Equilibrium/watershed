@@ -2,7 +2,10 @@
 
 #![deny(missing_docs)]
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    ser::{Error as _, SerializeMap},
+};
 use serde_json::{Number, Value};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -14,7 +17,7 @@ use unicode_normalization::UnicodeNormalization;
 pub const PROTOCOL_VERSION_V0: &str = "0";
 
 /// Canonical runtime event envelope shared by Loop Agent, Meta-Harness and Liquid.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 pub struct EventEnvelope {
     /// Additive v0 envelope fields not yet understood by this implementation.
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -33,16 +36,10 @@ pub struct EventEnvelope {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_loop_id: Option<String>,
     /// Event-family payload. Payloads must be JSON objects.
-    #[serde(
-        deserialize_with = "deserialize_payload_object",
-        serialize_with = "serialize_payload_object"
-    )]
+    #[serde(deserialize_with = "deserialize_payload_object")]
     pub payload: Value,
     /// Protocol version. v0 envelopes must use [`PROTOCOL_VERSION_V0`].
-    #[serde(
-        deserialize_with = "deserialize_protocol_version_v0",
-        serialize_with = "serialize_protocol_version_v0"
-    )]
+    #[serde(deserialize_with = "deserialize_protocol_version_v0")]
     pub protocol_version: String,
     /// One-based event order within the session stream.
     pub sequence: u64,
@@ -75,6 +72,59 @@ impl fmt::Display for EventMetadataError {
 }
 
 impl std::error::Error for EventMetadataError {}
+
+impl Serialize for EventEnvelope {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(field) = self
+            .additional_fields
+            .keys()
+            .find(|field| is_reserved_envelope_field(field))
+        {
+            return Err(S::Error::custom(format!(
+                "additional field {field:?} collides with envelope field"
+            )));
+        }
+        if !self.payload.is_object() {
+            return Err(S::Error::custom("payload must be a JSON object"));
+        }
+        if self.protocol_version != PROTOCOL_VERSION_V0 {
+            return Err(S::Error::custom(format!(
+                "unsupported protocol_version {:?}; expected {:?}",
+                self.protocol_version, PROTOCOL_VERSION_V0
+            )));
+        }
+
+        let optional_fields = usize::from(self.correlation_id.is_some())
+            + usize::from(self.loop_id.is_some())
+            + usize::from(self.parent_loop_id.is_some());
+        let mut map =
+            serializer.serialize_map(Some(8 + optional_fields + self.additional_fields.len()))?;
+        for (field, value) in &self.additional_fields {
+            map.serialize_entry(field, value)?;
+        }
+        if let Some(correlation_id) = &self.correlation_id {
+            map.serialize_entry("correlation_id", correlation_id)?;
+        }
+        map.serialize_entry("event_id", &self.event_id)?;
+        map.serialize_entry("event_type", &self.event_type)?;
+        if let Some(loop_id) = &self.loop_id {
+            map.serialize_entry("loop_id", loop_id)?;
+        }
+        if let Some(parent_loop_id) = &self.parent_loop_id {
+            map.serialize_entry("parent_loop_id", parent_loop_id)?;
+        }
+        map.serialize_entry("payload", &self.payload)?;
+        map.serialize_entry("protocol_version", &self.protocol_version)?;
+        map.serialize_entry("sequence", &self.sequence)?;
+        map.serialize_entry("session_id", &self.session_id)?;
+        map.serialize_entry("source", &self.source)?;
+        map.serialize_entry("timestamp", &self.timestamp)?;
+        map.end()
+    }
+}
 
 impl EventEnvelope {
     /// Builds a v0 event envelope with no loop, parent-loop or correlation id.
@@ -178,6 +228,23 @@ fn nfc_json_string_values(value: Value) -> Value {
         ),
         Value::Null | Value::Bool(_) | Value::Number(_) => value,
     }
+}
+
+fn is_reserved_envelope_field(field: &str) -> bool {
+    matches!(
+        field,
+        "correlation_id"
+            | "event_id"
+            | "event_type"
+            | "loop_id"
+            | "parent_loop_id"
+            | "payload"
+            | "protocol_version"
+            | "sequence"
+            | "session_id"
+            | "source"
+            | "timestamp"
+    )
 }
 
 /// v0 normalized runtime event types.
@@ -521,30 +588,6 @@ where
         Err(serde::de::Error::custom(format!(
             "unsupported protocol_version {value:?}; expected {PROTOCOL_VERSION_V0:?}"
         )))
-    }
-}
-
-fn serialize_protocol_version_v0<S>(value: &String, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    if value == PROTOCOL_VERSION_V0 {
-        value.serialize(serializer)
-    } else {
-        Err(serde::ser::Error::custom(format!(
-            "unsupported protocol_version {value:?}; expected {PROTOCOL_VERSION_V0:?}"
-        )))
-    }
-}
-
-fn serialize_payload_object<S>(payload: &Value, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    if payload.is_object() {
-        payload.serialize(serializer)
-    } else {
-        Err(serde::ser::Error::custom("payload must be a JSON object"))
     }
 }
 

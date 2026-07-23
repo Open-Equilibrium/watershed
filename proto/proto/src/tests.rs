@@ -291,6 +291,23 @@ fn event_envelope_preserves_additive_top_level_fields_canonically() {
     );
 }
 
+#[test]
+fn event_envelope_rejects_additional_fields_with_reserved_names() {
+    for field in ["event_id", "loop_id"] {
+        let mut event = test_event(json!({"reason": "fixture-start"}));
+        event
+            .additional_fields
+            .insert(field.to_owned(), json!("unexpected"));
+
+        let err = serde_json::to_string(&event).expect_err("reserved field must fail");
+        assert!(err.to_string().contains(field));
+        let err = event
+            .canonical_jsonl()
+            .expect_err("reserved field must fail canonical serialization");
+        assert!(err.to_string().contains(field));
+    }
+}
+
 fn test_event(payload: Value) -> EventEnvelope {
     EventEnvelope::new(
         "evt-001",
