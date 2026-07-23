@@ -338,19 +338,20 @@ fn write_events(
     emit_jsonl: bool,
     mut observe: impl FnMut(&EventEnvelope),
 ) -> Result<bool, RuntimeError> {
+    let mut output_open = true;
     for event in events {
-        if emit_jsonl {
+        if emit_jsonl && output_open {
             let jsonl = event.canonical_jsonl().map_err(|err| {
                 RuntimeError::Protocol(format!("failed to serialize committed event: {err}"))
             })?;
             if !write_output(writer, jsonl.as_bytes())? {
-                return Ok(false);
+                output_open = false;
             }
         }
         *cursor = event.sequence;
         observe(&event);
     }
-    Ok(true)
+    Ok(output_open)
 }
 
 fn tail_command(
@@ -560,6 +561,46 @@ fn usage() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct BrokenWriter;
+
+    impl Write for BrokenWriter {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_events_observes_terminal_failure_after_broken_pipe() {
+        let workspace = test_support::workspace_copy("sandbox-negative");
+        let session_dir = workspace.join(".loop/sessions");
+        std::fs::create_dir_all(&session_dir).expect("session directory created");
+        std::fs::write(
+            session_dir.join("sandbox-negative-write.jsonl"),
+            test_support::expected_stream("sandbox-negative", "sandbox-negative-write.jsonl"),
+        )
+        .expect("failed session fixture copied");
+        let mut reader = SessionEventReader::open(&workspace, "sandbox-negative-write")
+            .expect("failed session opens");
+        let events = reader.read_after(0).expect("failed events read");
+        let terminal_sequence = events.last().expect("failed session has events").sequence;
+        let mut cursor = 0;
+        let mut observation = TailObservation::default();
+
+        let output_open = write_events(events, &mut cursor, &mut BrokenWriter, true, |event| {
+            observation.observe(event)
+        })
+        .expect("broken pipe is not an operation failure");
+
+        assert!(!output_open);
+        assert_eq!(cursor, terminal_sequence);
+        assert!(observation.terminal);
+        assert!(observation.failed);
+    }
 
     #[test]
     fn live_drain_catches_up_to_the_joined_operation_boundary() {
