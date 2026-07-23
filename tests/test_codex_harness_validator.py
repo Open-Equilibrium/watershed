@@ -423,6 +423,32 @@ process.stderr.write = (message) => {
 
                 self.assertIn(expected, validator.validate_repo(root))
 
+    def test_rejects_shell_metacharacters_in_hook_script_paths(self) -> None:
+        commands = [
+            'node "scripts/run-python.mjs" ".codex/hooks/$(touch pwn).py"',
+            'node "scripts/run-python.mjs" ".codex/hooks/`touch pwn`.py"',
+            'node "scripts/run-python.mjs" .codex/hooks/unsafe;name.py',
+            'node "scripts/run-python.mjs" .codex/hooks/unsafe&name.py',
+            'node "scripts/run-python.mjs" .codex/hooks/unsafe|name.py',
+            'node "scripts/run-python.mjs" .codex/hooks/unsafe>name.py',
+            r'node "scripts/run-python.mjs" .codex\hooks\pre_tool_use_guard.py',
+            "node\nscripts/run-python.mjs .codex/hooks/pre_tool_use_guard.py",
+        ]
+
+        for command in commands:
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                write_valid_harness(root)
+                hooks_path = root / ".codex" / "hooks.json"
+                payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+                payload["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = command
+                hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+                self.assertIn(
+                    ".codex/hooks.json: hook command must use the approved Node launcher form",
+                    validator.validate_repo(root),
+                )
+
     def test_pre_tool_guard_accepts_command_and_cmd_envelopes(self) -> None:
         for key in ("command", "cmd"):
             with self.subTest(key=key):

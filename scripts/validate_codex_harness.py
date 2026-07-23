@@ -67,10 +67,13 @@ AGENT_KEYS = {
 REQUIRED_SKILLS = {"autoreview", "clawpatch", "git"}
 RETIRED_SKILLS = {"tdd"}
 SKILL_FRONT_MATTER_KEYS = {"description", "name"}
+HOOK_SCRIPT_PATH_PATTERN = (
+    r"\.codex/hooks/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.py"
+)
 HOOK_COMMAND_RE = re.compile(
-    r'^node\s+(?:"scripts/run-python\.mjs"|scripts/run-python\.mjs)\s+'
-    r'(?:"(?P<quoted_script>\.codex[/\\]hooks[/\\][^"]+\.py)"|'
-    r'(?P<script>\.codex[/\\]hooks[/\\][^\s]+\.py))$'
+    rf'^node (?:"scripts/run-python\.mjs"|scripts/run-python\.mjs) '
+    rf'(?:"(?P<quoted_script>{HOOK_SCRIPT_PATH_PATTERN})"|'
+    rf'(?P<script>{HOOK_SCRIPT_PATH_PATTERN}))$'
 )
 
 
@@ -206,7 +209,7 @@ def validate_hook_command(
         errors.append(f"{rel}: hook command must use the approved Node launcher form")
         return errors
 
-    script = (match.group("quoted_script") or match.group("script")).replace("\\", "/")
+    script = match.group("quoted_script") or match.group("script")
     script_path = (root / script).resolve()
     hooks_dir = (root / ".codex" / "hooks").resolve()
     if not script_path.is_relative_to(hooks_dir):
