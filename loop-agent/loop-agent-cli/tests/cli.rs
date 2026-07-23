@@ -408,21 +408,18 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
         .expect("golden has session.started")
         .to_owned()
         + "\n";
+    let lock_path = session_dir.join("smoke-loop.lock");
     fs::write(session_dir.join("smoke-loop.jsonl"), &prefix).expect("partial session written");
+    fs::write(&lock_path, "").expect("active-session lock written");
 
-    let output = loop_command()
+    let child = loop_command()
         .current_dir(&fixture)
-        .args([
-            "tail",
-            "smoke-loop",
-            "--emit",
-            "jsonl",
-            "--no-follow",
-            "--timeout-ms",
-            "25",
-        ])
-        .output()
-        .expect("loop binary should run");
+        .args(["tail", "smoke-loop", "--emit", "jsonl", "--no-follow"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("loop binary should spawn");
+    let output = wait_with_output_before(child, Duration::from_secs(2));
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
@@ -430,6 +427,7 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         prefix
     );
+    assert!(lock_path.is_file(), "tail must not own the session lock");
 }
 
 #[test]
