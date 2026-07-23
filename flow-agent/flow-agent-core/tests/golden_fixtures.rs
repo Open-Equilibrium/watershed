@@ -52,6 +52,7 @@ fn smoke_loop_stream_matches_m0_order_contract() {
     let workspace = workspace_copy("smoke-loop");
     let output =
         run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop fixture executes");
+    assert!(!output.failed);
     let expected = fs::read_to_string(fixture_root().join("smoke-loop/expected/smoke-loop.jsonl"))
         .expect("smoke-loop golden stream reads");
     assert_eq!(output.stdout, expected);
