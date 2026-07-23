@@ -79,22 +79,38 @@ fn smoke_loop_stream_matches_m0_order_contract() {
 }
 
 #[test]
-fn sandbox_negative_runtime_matches_golden_stream() {
-    let workspace = workspace_copy("sandbox-negative");
-    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
-        .expect("sandbox-negative-write fixture executes");
-    assert!(output.failed);
-    let expected = fs::read_to_string(
-        fixture_root().join("sandbox-negative/expected/sandbox-negative-write.jsonl"),
-    )
-    .expect("sandbox-negative-write golden stream reads");
+fn sandbox_negative_runtime_matches_golden_streams() {
+    let expected_dir = fixture_root().join("sandbox-negative/expected");
+    for stream_path in expected_streams()
+        .into_iter()
+        .filter(|path| path.parent() == Some(expected_dir.as_path()))
+    {
+        let loop_ref = stream_path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .expect("sandbox-negative stream name is UTF-8");
+        let workspace = workspace_copy("sandbox-negative");
+        let output = run_loop(&workspace, loop_ref, EmitMode::Jsonl)
+            .unwrap_or_else(|err| panic!("{loop_ref} fixture executes: {err}"));
+        assert!(output.failed, "{loop_ref} must fail");
+        let expected = fs::read_to_string(&stream_path)
+            .unwrap_or_else(|err| panic!("{}: {err}", stream_path.display()));
 
-    assert_eq!(output.stdout, expected);
+        assert_eq!(output.stdout, expected, "{}", stream_path.display());
+    }
 }
 
 #[test]
 fn hello_loop_stream_covers_m0_contract_dimensions() {
-    let stream = load_stream("hello-loop", "hello-loop.jsonl");
+    let workspace = workspace_copy("hello-loop");
+    let output =
+        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop fixture executes");
+    assert!(!output.failed);
+    let expected_path = fixture_root().join("hello-loop/expected/hello-loop.jsonl");
+    let expected = fs::read_to_string(&expected_path).expect("hello-loop golden stream reads");
+    assert_eq!(output.stdout, expected);
+    let stream = flow_agent_core::validate_protocol_jsonl_text(&expected_path, &output.stdout)
+        .expect("hello-loop runtime stream is protocol-valid");
 
     assert_hello_loop_payload_dimensions(&stream);
 }
