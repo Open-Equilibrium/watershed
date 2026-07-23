@@ -12,6 +12,30 @@ use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
 
 #[test]
 #[ignore = "performance gate"]
+fn one_near_limit_orchestrating_loop_stays_within_per_loop_memory_budget() {
+    let (workspace, active_bytes) = near_limit_registry_workspace();
+    assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
+    assert!(active_bytes >= core_script::MAX_ACTIVE_REGISTRY_BYTES * 9 / 10);
+
+    let peak_rss_sampler = PeakRssSampler::start();
+    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+        .unwrap_or_else(|err| panic!("smoke-loop: {err}"));
+    assert!(output.event_count > 0, "smoke-loop must emit events");
+    assert!(!output.failed, "smoke-loop should complete successfully");
+
+    if let Some(mut sampler) = peak_rss_sampler {
+        let baseline = sampler.baseline();
+        let peak_growth = sampler.finish().saturating_sub(baseline);
+        let budget = 10 * 1024 * 1024;
+        assert!(
+            peak_growth <= budget,
+            "near-limit fixture peak RSS growth must stay <= {budget} bytes for one active top-level loop: {peak_growth} bytes"
+        );
+    }
+}
+
+#[test]
+#[ignore = "performance gate"]
 fn ten_near_limit_orchestrating_loops_complete_under_m1_runtime_contract() {
     let (workspace, active_bytes) = near_limit_registry_workspace();
     assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
