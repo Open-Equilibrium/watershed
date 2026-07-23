@@ -99,10 +99,17 @@ def validate_config(root: Path) -> list[str]:
     for key, expected in EXPECTED_CONFIG_VALUES.items():
         if config.get(key) != expected:
             errors.append(f"{rel}: {key} must be {expected!r}")
-    network_access = config.get("sandbox_workspace_write", {}).get("network_access")
+    sandbox_workspace_write = config.get("sandbox_workspace_write")
+    network_access = (
+        sandbox_workspace_write.get("network_access")
+        if isinstance(sandbox_workspace_write, dict)
+        else None
+    )
     if network_access is not True:
         errors.append(f"{rel}: sandbox_workspace_write.network_access must be true")
-    features = config.get("features", {})
+    features = config.get("features")
+    if not isinstance(features, dict):
+        features = {}
     if features.get("hooks") is not True:
         errors.append(f"{rel}: features.hooks must be true")
     if features.get("multi_agent") is not True:
@@ -122,6 +129,9 @@ def validate_hooks(root: Path) -> list[str]:
         return [f"{rel}: missing file"]
     except json.JSONDecodeError as err:
         return [f"{rel}: invalid JSON: {err.msg}"]
+
+    if not isinstance(data, dict):
+        return [f"{rel}: root must be an object"]
 
     errors.extend(unknown_keys(rel, data, {"hooks"}, "root key"))
     hooks = data.get("hooks")

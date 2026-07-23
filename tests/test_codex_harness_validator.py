@@ -70,6 +70,23 @@ class CodexHarnessValidatorTest(unittest.TestCase):
     def test_current_harness_is_valid(self) -> None:
         self.assertEqual([], validator.validate_repo(ROOT))
 
+    def test_reports_malformed_config_shapes_without_crashing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            (root / ".codex" / "config.toml").write_text(
+                (root / ".codex" / "config.toml")
+                .read_text(encoding="utf-8")
+                .replace("[features]", 'features = "invalid"'),
+                encoding="utf-8",
+            )
+            (root / ".codex" / "hooks.json").write_text("[]", encoding="utf-8")
+
+            errors = validator.validate_repo(root)
+
+        self.assertIn(".codex/config.toml: [features] must be a table", errors)
+        self.assertIn(".codex/hooks.json: root must be an object", errors)
+
     def test_project_python_launcher_runs_python(self) -> None:
         result = subprocess.run(
             [
