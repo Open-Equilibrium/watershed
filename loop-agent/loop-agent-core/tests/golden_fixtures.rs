@@ -41,6 +41,13 @@ fn every_fixture_workspace_has_config_and_expected_stream() {
 }
 
 #[test]
+fn every_expected_stream_is_protocol_valid() {
+    for stream_path in expected_streams() {
+        load_stream_from_path(&stream_path);
+    }
+}
+
+#[test]
 fn smoke_loop_stream_matches_m0_order_contract() {
     let workspace = workspace_copy("smoke-loop");
     let output =
