@@ -30,6 +30,7 @@ fn run_flow_internal(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
+    require_fixture_execution_backend(&config)?;
     let registry =
         core_script::load_flow_registry_from_workspace(workspace, &config.registry_root, flow_ref)?;
     let flow_block = registry

@@ -207,6 +207,8 @@ pub enum RuntimeError {
         /// Canonical mandatory context bytes required by the turn.
         required_bytes: usize,
     },
+    /// M1 has no productive provider or external-tool execution backend.
+    ExecutionBackendUnavailable,
     /// The per-session event writer failed after event construction.
     EventWriter(Box<RuntimeError>),
     /// A persisted session failed during runtime execution.
@@ -265,6 +267,9 @@ impl fmt::Display for RuntimeError {
                 f,
                 "context_budget_exceeded: mandatory context is {required_bytes} canonical bytes (one estimated token per byte), input budget is {input_budget_tokens} tokens"
             ),
+            Self::ExecutionBackendUnavailable => f.write_str(
+                "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile",
+            ),
             Self::EventWriter(source) => write!(f, "event writer: {source}"),
             Self::SessionFailed { session_id, source } => {
                 write!(f, "session {session_id} failed: {source}")
@@ -293,6 +298,7 @@ impl std::error::Error for RuntimeError {
             Self::Denied { .. }
             | Self::Protocol(_)
             | Self::ContextBudgetExceeded { .. }
+            | Self::ExecutionBackendUnavailable
             | Self::ActiveSession { .. }
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)

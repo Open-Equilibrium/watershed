@@ -158,6 +158,30 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
     ));
 }
 
+#[test]
+fn non_fixture_workspace_fails_closed_before_runtime_side_effects() {
+    let workspace = workspace_copy("hello-flow");
+    fs::write(
+        workspace.join(".flow/config.yaml"),
+        "registry_root: registry\n",
+    )
+    .expect("normal workspace config written");
+
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
+        .expect_err("M1 has no productive provider or tool backend");
+
+    assert_eq!(
+        err.to_string(),
+        "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile"
+    );
+    assert_eq!(err.exit_code(), 65);
+    assert!(!workspace.join("out/summary.txt").exists());
+    assert!(
+        !workspace.join(LOCAL_SESSION_DIR).exists(),
+        "backend rejection must precede session persistence"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn workspace_config_rejects_symlinked_config_file() {

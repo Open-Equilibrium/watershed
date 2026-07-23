@@ -70,6 +70,8 @@ fn resume_session_internal(
             "invalid session_id {session_id:?}"
         )));
     }
+    let config = load_workspace_config(workspace)?;
+    require_fixture_execution_backend(&config)?;
     let sessions = open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
         path: workspace.join(LOCAL_SESSION_DIR),
         source: io::Error::from(io::ErrorKind::NotFound),
@@ -95,7 +97,6 @@ fn resume_session_internal(
         &metadata,
     )?;
 
-    let config = load_workspace_config(workspace)?;
     let registry =
         core_script::load_flow_registry_from_workspace(workspace, &config.registry_root, &flow_id)?;
     let flow_block = registry.flow_block(&flow_id).ok_or_else(|| {

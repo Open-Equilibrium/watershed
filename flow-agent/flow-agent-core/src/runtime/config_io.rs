@@ -31,6 +31,14 @@ struct WorkspaceConfig {
     stub_model_fixture_profile: bool,
 }
 
+fn require_fixture_execution_backend(config: &WorkspaceConfig) -> Result<(), RuntimeError> {
+    if config.stub_model_fixture_profile {
+        Ok(())
+    } else {
+        Err(RuntimeError::ExecutionBackendUnavailable)
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkspaceConfigSource {
