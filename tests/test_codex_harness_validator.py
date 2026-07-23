@@ -547,16 +547,16 @@ process.stderr.write = (message) => {
                 self.assertEqual("", result.stderr)
 
     def test_stop_hook_reports_only_ten_conflict_markers(self) -> None:
+        conflicts = [f"file-{index}: leftover conflict marker" for index in range(12)]
         stdout = "\n".join(
-            [f"file-{index}: leftover conflict marker" for index in range(12)]
-            + ["file: trailing whitespace"]
+            [conflicts[0], "file: trailing whitespace", *conflicts[1:]]
         )
         with mock.patch.object(
             stop_hook.subprocess,
             "run",
             return_value=subprocess.CompletedProcess([], 2, stdout, "ignored"),
         ) as run:
-            self.assertEqual(10, len(stop_hook.conflict_diagnostics()))
+            self.assertEqual(conflicts[:10], stop_hook.conflict_diagnostics())
 
         self.assertIn("diff", run.call_args.args[0])
         self.assertIn("--check", run.call_args.args[0])
