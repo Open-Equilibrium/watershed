@@ -24,7 +24,15 @@
 
   <section id="m1">
     <h2>M1 - Loop Agent</h2>
-    <p class="muted">No open M1 decisions.</p>
+    <div class="grid">
+      <article id="d-047" class="decision">
+        <h3>D-047 - Flow Agent Identity Migration</h3>
+        <p><strong>Status:</strong> Open, rename blocker.</p>
+        <p><strong>Question:</strong> Which public and durable identifiers should change with the approved Loop Agent to Flow Agent product rename?</p>
+        <ul><li><strong>A:</strong> Rename the product, packages, command, event source and storage namespace to <code>flow-agent</code>, <code>flow</code>, <code>flow-agent-cli</code> and <code>.flow</code>, without legacy aliases. Pro: one consistent pre-release identity and the smallest maintained surface. Con: existing development fixtures and local M1 state use new names.</li><li><strong>B:</strong> Rename the product and packages but keep <code>loop</code> and <code>.loop</code> as deliberate workflow terms. Pro: preserves current command and local state. Con: leaves a mixed public identity.</li><li><strong>C:</strong> Use the new names while retaining aliases and storage migration. Pro: preserves compatibility. Con: adds two public surfaces and migration code before any release.</li></ul>
+        <p><strong>Recommendation:</strong> A because M1 is unreleased. Keep generic workflow contracts such as loops, <code>loop_id</code>, <code>loop.*</code> events and <code>loop-context-v0</code> unchanged.</p>
+      </article>
+    </div>
   </section>
 
   <section id="m2">
