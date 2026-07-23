@@ -74,13 +74,13 @@ fn validate_event_payload(
         EventType::SessionFailed => {
             validator.require_string("reason")?;
         }
-        EventType::LoopStarted | EventType::LoopCompleted => {
-            validator.require_string("loop_definition_id")?;
-            validator.optional_string("loop_name")?;
+        EventType::FlowStarted | EventType::FlowCompleted => {
+            validator.require_string("flow_definition_id")?;
+            validator.optional_string("flow_name")?;
         }
-        EventType::LoopFailed => {
-            validator.require_string("loop_definition_id")?;
-            validator.optional_string("loop_name")?;
+        EventType::FlowFailed => {
+            validator.require_string("flow_definition_id")?;
+            validator.optional_string("flow_name")?;
             validator.require_string("error")?;
         }
         EventType::PhaseEntered => {
@@ -314,7 +314,7 @@ struct SessionAppendValidationState {
     stream_session_id: Option<String>,
     previous_sequence: u64,
     event_ids: BTreeSet<String>,
-    loop_started_ids: BTreeSet<String>,
+    flow_started_ids: BTreeSet<String>,
     terminal_line: Option<usize>,
     stream_bytes: usize,
     line_count: usize,
@@ -336,7 +336,7 @@ impl SessionAppendValidationState {
             stream_session_id: None,
             previous_sequence: 0,
             event_ids: BTreeSet::new(),
-            loop_started_ids: BTreeSet::new(),
+            flow_started_ids: BTreeSet::new(),
             terminal_line: None,
             stream_bytes: 0,
             line_count: 0,
@@ -348,8 +348,8 @@ impl SessionAppendValidationState {
         self.lifecycle.tool_without_progress()
     }
 
-    fn terminal_loop_ids(&self) -> BTreeSet<String> {
-        self.lifecycle.loops.terminal.keys().cloned().collect()
+    fn terminal_flow_ids(&self) -> BTreeSet<String> {
+        self.lifecycle.flows.terminal.keys().cloned().collect()
     }
 
     #[cfg(test)]
@@ -436,9 +436,9 @@ impl SessionAppendValidationState {
         line_number: usize,
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
-        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_LOOP_EVENTS {
+        if u64::try_from(line_number).unwrap_or(u64::MAX) > MAX_FLOW_EVENTS {
             return Err(RuntimeError::Protocol(format!(
-                "{} runtime event budget exceeded at line {line_number}: max {MAX_LOOP_EVENTS}",
+                "{} runtime event budget exceeded at line {line_number}: max {MAX_FLOW_EVENTS}",
                 path.display()
             )));
         }
@@ -496,28 +496,28 @@ impl SessionAppendValidationState {
             )));
         }
         validate_event_payload(path, line_number, event)?;
-        if event.event_type == EventType::LoopStarted {
-            let loop_id = event.loop_id.as_deref().ok_or_else(|| {
+        if event.event_type == EventType::FlowStarted {
+            let flow_id = event.flow_id.as_deref().ok_or_else(|| {
                 RuntimeError::Protocol(format!(
-                    "{} line {line_number} loop.started must include loop_id",
+                    "{} line {line_number} flow.started must include flow_id",
                     path.display()
                 ))
             })?;
-            if self.loop_started_ids.contains(loop_id) {
+            if self.flow_started_ids.contains(flow_id) {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} must use a unique loop_id for loop.started",
+                    "{} line {line_number} must use a unique flow_id for flow.started",
                     path.display()
                 )));
             }
-            if u64::try_from(self.loop_started_ids.len()).unwrap_or(u64::MAX)
-                >= MAX_LOOP_INVOCATIONS
+            if u64::try_from(self.flow_started_ids.len()).unwrap_or(u64::MAX)
+                >= MAX_FLOW_INVOCATIONS
             {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} loop invocation budget exceeded at line {line_number}: max {MAX_LOOP_INVOCATIONS}",
+                    "{} flow invocation budget exceeded at line {line_number}: max {MAX_FLOW_INVOCATIONS}",
                     path.display()
                 )));
             }
-            self.loop_started_ids.insert(loop_id.to_owned());
+            self.flow_started_ids.insert(flow_id.to_owned());
         }
         match &self.stream_session_id {
             Some(existing) if existing != &event.session_id => {
@@ -623,9 +623,9 @@ fn validate_session_log_text(
 
 #[derive(Default)]
 struct SessionLifecycleState {
-    loops: LifecycleTracker<String>,
-    loop_definition_ids: BTreeMap<String, String>,
-    loop_parents: BTreeMap<String, Option<String>>,
+    flows: LifecycleTracker<String>,
+    flow_definition_ids: BTreeMap<String, String>,
+    flow_parents: BTreeMap<String, Option<String>>,
     terminal_steps: BTreeMap<StepLifecycleKey, usize>,
     tools: LifecycleTracker<ToolLifecycleKey>,
     terminal_messages: BTreeMap<MessageLifecycleKey, usize>,
@@ -649,58 +649,58 @@ impl SessionLifecycleState {
             )));
         }
 
-        if event.event_type != EventType::LoopStarted
-            && let Some(loop_id) = &event.loop_id
+        if event.event_type != EventType::FlowStarted
+            && let Some(flow_id) = &event.flow_id
         {
-            if !self.loops.is_started(loop_id) {
+            if !self.flows.is_started(flow_id) {
                 return Err(RuntimeError::Protocol(format!(
-                    "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
+                    "{} line {line_number} {} must follow flow.started for flow_id {flow_id:?}",
                     path.display(),
                     event.event_type.as_str()
                 )));
             }
-            if let Some(terminal_line) = self.loops.terminal_line(loop_id) {
+            if let Some(terminal_line) = self.flows.terminal_line(flow_id) {
                 return Err(terminal_lifecycle_error(
                     path,
                     line_number,
                     event,
-                    "loop",
-                    loop_id,
+                    "flow",
+                    flow_id,
                     terminal_line,
                 ));
             }
         }
-        validate_lifecycle_parent(path, line_number, event, &self.loops, &self.loop_parents)?;
+        validate_lifecycle_parent(path, line_number, event, &self.flows, &self.flow_parents)?;
 
         match event.event_type {
-            EventType::LoopStarted => {
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                self.loop_definition_ids.insert(
-                    loop_id.clone(),
-                    lifecycle_payload_string(event, "loop_definition_id"),
+            EventType::FlowStarted => {
+                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+                self.flow_definition_ids.insert(
+                    flow_id.clone(),
+                    lifecycle_payload_string(event, "flow_definition_id"),
                 );
-                self.loop_parents
-                    .insert(loop_id.clone(), event.parent_loop_id.clone());
-                self.loops.start(loop_id);
+                self.flow_parents
+                    .insert(flow_id.clone(), event.parent_flow_id.clone());
+                self.flows.start(flow_id);
             }
-            EventType::LoopCompleted | EventType::LoopFailed => {
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if !self.loops.is_started(&loop_id) {
+            EventType::FlowCompleted | EventType::FlowFailed => {
+                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+                if !self.flows.is_started(&flow_id) {
                     return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} must follow loop.started for loop_id {loop_id:?}",
+                        "{} line {line_number} {} must follow flow.started for flow_id {flow_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
                 }
-                let loop_definition_id = lifecycle_payload_string(event, "loop_definition_id");
-                if self.loop_definition_ids.get(&loop_id) != Some(&loop_definition_id) {
+                let flow_definition_id = lifecycle_payload_string(event, "flow_definition_id");
+                if self.flow_definition_ids.get(&flow_id) != Some(&flow_definition_id) {
                     return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} {} loop_definition_id must match loop.started for loop_id {loop_id:?}",
+                        "{} line {line_number} {} flow_definition_id must match flow.started for flow_id {flow_id:?}",
                         path.display(),
                         event.event_type.as_str()
                     )));
                 }
-                if let Some(step) = self.active_steps.get(&loop_id) {
+                if let Some(step) = self.active_steps.get(&flow_id) {
                     return Err(open_child_lifecycle_error(
                         path,
                         line_number,
@@ -709,32 +709,32 @@ impl SessionLifecycleState {
                         &step.step_id,
                     ));
                 }
-                if let Some(child) = self.loops.active_keys().find(|child| {
-                    self.loop_parents.get(*child).and_then(Option::as_deref)
-                        == Some(loop_id.as_str())
+                if let Some(child) = self.flows.active_keys().find(|child| {
+                    self.flow_parents.get(*child).and_then(Option::as_deref)
+                        == Some(flow_id.as_str())
                 }) {
                     return Err(open_child_lifecycle_error(
                         path,
                         line_number,
                         event,
-                        "child loop",
+                        "child flow",
                         child,
                     ));
                 }
-                self.loops.finish(loop_id, line_number);
+                self.flows.finish(flow_id, line_number);
             }
             EventType::PhaseEntered => {
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if let Some(active_step) = self.active_steps.get(&loop_id) {
+                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+                if let Some(active_step) = self.active_steps.get(&flow_id) {
                     return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} phase.entered requires no active step for loop_id {:?}; active step_id {:?}",
+                        "{} line {line_number} phase.entered requires no active step for flow_id {:?}; active step_id {:?}",
                         path.display(),
-                        loop_id,
+                        flow_id,
                         active_step.step_id
                     )));
                 }
                 self.active_phases
-                    .insert(loop_id, lifecycle_payload_string(event, "phase_id"));
+                    .insert(flow_id, lifecycle_payload_string(event, "phase_id"));
             }
             EventType::StepStarted => {
                 let active_phase =
@@ -758,16 +758,16 @@ impl SessionLifecycleState {
                         terminal_line,
                     ));
                 }
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if let Some(active_step) = self.active_steps.get(&loop_id) {
+                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+                if let Some(active_step) = self.active_steps.get(&flow_id) {
                     return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} step.started requires no active step for loop_id {:?}; active step_id {:?}",
+                        "{} line {line_number} step.started requires no active step for flow_id {:?}; active step_id {:?}",
                         path.display(),
-                        loop_id,
+                        flow_id,
                         active_step.step_id
                     )));
                 }
-                self.active_steps.insert(loop_id, step.clone());
+                self.active_steps.insert(flow_id, step.clone());
             }
             EventType::StepCompleted => {
                 let step = lifecycle_step_key(event, &self.active_phases);
@@ -781,8 +781,8 @@ impl SessionLifecycleState {
                         terminal_line,
                     ));
                 }
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-                if self.active_steps.get(&loop_id) != Some(&step) {
+                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+                if self.active_steps.get(&flow_id) != Some(&step) {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} step.completed must follow step.started for step_id {:?}",
                         path.display(),
@@ -792,7 +792,7 @@ impl SessionLifecycleState {
                 if let Some(tool) = self
                     .tools
                     .active_keys()
-                    .find(|tool| tool.loop_id.as_deref() == Some(loop_id.as_str()))
+                    .find(|tool| tool.flow_id.as_deref() == Some(flow_id.as_str()))
                 {
                     return Err(open_child_lifecycle_error(
                         path,
@@ -805,7 +805,7 @@ impl SessionLifecycleState {
                 if let Some(message) = self
                     .active_message_roles
                     .keys()
-                    .find(|message| message.loop_id == loop_id)
+                    .find(|message| message.flow_id == flow_id)
                 {
                     return Err(open_child_lifecycle_error(
                         path,
@@ -815,7 +815,7 @@ impl SessionLifecycleState {
                         &message.message_id,
                     ));
                 }
-                self.active_steps.remove(&loop_id);
+                self.active_steps.remove(&flow_id);
                 self.terminal_steps.insert(step, line_number);
             }
             EventType::ToolStarted => {
@@ -870,7 +870,7 @@ impl SessionLifecycleState {
                 self.tools_without_progress.remove(&tool);
             }
             EventType::ToolFailed => {
-                let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
+                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
                 let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
                 if let Some(terminal_line) = self.tools.terminal_line(&tool) {
                     return Err(terminal_lifecycle_error(
@@ -882,9 +882,9 @@ impl SessionLifecycleState {
                         terminal_line,
                     ));
                 }
-                if !self.tools.is_started(&tool) && self.active_phases.contains_key(&loop_id) {
+                if !self.tools.is_started(&tool) && self.active_phases.contains_key(&flow_id) {
                     return Err(RuntimeError::Protocol(format!(
-                        "{} line {line_number} tool.failed must follow tool.started after phase.entered for loop_id {loop_id:?}",
+                        "{} line {line_number} tool.failed must follow tool.started after phase.entered for flow_id {flow_id:?}",
                         path.display()
                     )));
                 }
@@ -980,8 +980,8 @@ impl SessionLifecycleState {
         }) {
             return Ok(());
         }
-        if let Some(loop_id) = self.loops.active_keys().next() {
-            return Err(open_lifecycle_error(path, "loop", loop_id));
+        if let Some(flow_id) = self.flows.active_keys().next() {
+            return Err(open_lifecycle_error(path, "flow", flow_id));
         }
         if let Some(step) = self.active_steps.values().next() {
             return Err(open_lifecycle_error(path, "step", &step.step_id));
@@ -1076,66 +1076,66 @@ fn terminal_lifecycle_error(
     ))
 }
 
-fn require_lifecycle_loop_id(
+fn require_lifecycle_flow_id(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
 ) -> Result<String, RuntimeError> {
-    event.loop_id.clone().ok_or_else(|| {
+    event.flow_id.clone().ok_or_else(|| {
         RuntimeError::Protocol(format!(
-            "{} line {line_number} {} must include loop_id",
+            "{} line {line_number} {} must include flow_id",
             path.display(),
             event.event_type.as_str()
         ))
     })
 }
 
-/// Ensures parent loop references are already started, still active, and
-/// consistent with the parent recorded by loop.started.
+/// Ensures parent flow references are already started, still active, and
+/// consistent with the parent recorded by flow.started.
 fn validate_lifecycle_parent(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
-    loops: &LifecycleTracker<String>,
-    loop_parents: &BTreeMap<String, Option<String>>,
+    flows: &LifecycleTracker<String>,
+    flow_parents: &BTreeMap<String, Option<String>>,
 ) -> Result<(), RuntimeError> {
-    if event.parent_loop_id.is_some() && event.loop_id.is_none() {
+    if event.parent_flow_id.is_some() && event.flow_id.is_none() {
         return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} parent_loop_id requires loop_id",
+            "{} line {line_number} parent_flow_id requires flow_id",
             path.display()
         )));
     }
 
-    let Some(loop_id) = &event.loop_id else {
+    let Some(flow_id) = &event.flow_id else {
         return Ok(());
     };
 
-    if let Some(parent_loop_id) = &event.parent_loop_id {
-        if parent_loop_id == loop_id {
+    if let Some(parent_flow_id) = &event.parent_flow_id {
+        if parent_flow_id == flow_id {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} parent_loop_id must not match loop_id {loop_id:?}",
+                "{} line {line_number} parent_flow_id must not match flow_id {flow_id:?}",
                 path.display()
             )));
         }
-        if !loops.is_started(parent_loop_id) {
+        if !flows.is_started(parent_flow_id) {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} parent_loop_id {parent_loop_id:?} must reference an already started loop",
+                "{} line {line_number} parent_flow_id {parent_flow_id:?} must reference an already started flow",
                 path.display()
             )));
         }
-        if let Some(terminal_line) = loops.terminal_line(parent_loop_id) {
+        if let Some(terminal_line) = flows.terminal_line(parent_flow_id) {
             return Err(RuntimeError::Protocol(format!(
-                "{} line {line_number} parent_loop_id {parent_loop_id:?} references terminal loop on line {terminal_line}",
+                "{} line {line_number} parent_flow_id {parent_flow_id:?} references terminal flow on line {terminal_line}",
                 path.display()
             )));
         }
     }
 
-    if let Some(expected_parent) = loop_parents.get(loop_id)
-        && expected_parent != &event.parent_loop_id
+    if let Some(expected_parent) = flow_parents.get(flow_id)
+        && expected_parent != &event.parent_flow_id
     {
         return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} parent_loop_id for loop_id {loop_id:?} must match loop.started",
+            "{} line {line_number} parent_flow_id for flow_id {flow_id:?} must match flow.started",
             path.display()
         )));
     }
@@ -1145,20 +1145,20 @@ fn validate_lifecycle_parent(
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct MessageLifecycleKey {
-    loop_id: String,
+    flow_id: String,
     message_id: String,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct StepLifecycleKey {
-    loop_id: Option<String>,
+    flow_id: Option<String>,
     phase_id: Option<String>,
     step_id: String,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct ToolLifecycleKey {
-    loop_id: Option<String>,
+    flow_id: Option<String>,
     phase_id: Option<String>,
     step_id: Option<String>,
     tool_id: String,
@@ -1170,10 +1170,10 @@ fn require_active_phase(
     event: &EventEnvelope,
     active_phases: &BTreeMap<String, String>,
 ) -> Result<String, RuntimeError> {
-    let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-    active_phases.get(&loop_id).cloned().ok_or_else(|| {
+    let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+    active_phases.get(&flow_id).cloned().ok_or_else(|| {
         RuntimeError::Protocol(format!(
-            "{} line {line_number} {} requires active phase for loop_id {loop_id:?}",
+            "{} line {line_number} {} requires active phase for flow_id {flow_id:?}",
             path.display(),
             event.event_type.as_str()
         ))
@@ -1186,10 +1186,10 @@ fn require_active_step(
     event: &EventEnvelope,
     active_steps: &BTreeMap<String, StepLifecycleKey>,
 ) -> Result<StepLifecycleKey, RuntimeError> {
-    let loop_id = require_lifecycle_loop_id(path, line_number, event)?;
-    active_steps.get(&loop_id).cloned().ok_or_else(|| {
+    let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
+    active_steps.get(&flow_id).cloned().ok_or_else(|| {
         RuntimeError::Protocol(format!(
-            "{} line {line_number} {} requires active step for loop_id {loop_id:?}",
+            "{} line {line_number} {} requires active step for flow_id {flow_id:?}",
             path.display(),
             event.event_type.as_str()
         ))
@@ -1200,20 +1200,20 @@ fn lifecycle_step_key(
     event: &EventEnvelope,
     active_phases: &BTreeMap<String, String>,
 ) -> StepLifecycleKey {
-    let loop_id = event.loop_id.clone();
+    let flow_id = event.flow_id.clone();
     let phase_id = event
         .payload
         .get("phase_id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
         .or_else(|| {
-            loop_id
+            flow_id
                 .as_ref()
-                .and_then(|loop_id| active_phases.get(loop_id))
+                .and_then(|flow_id| active_phases.get(flow_id))
                 .cloned()
         });
     StepLifecycleKey {
-        loop_id,
+        flow_id,
         phase_id,
         step_id: lifecycle_payload_string(event, "step_id"),
     }
@@ -1224,21 +1224,21 @@ fn lifecycle_tool_key(
     active_phases: &BTreeMap<String, String>,
     active_steps: &BTreeMap<String, StepLifecycleKey>,
 ) -> ToolLifecycleKey {
-    let loop_id = event.loop_id.clone();
-    let active_step = loop_id
+    let flow_id = event.flow_id.clone();
+    let active_step = flow_id
         .as_ref()
-        .and_then(|loop_id| active_steps.get(loop_id));
+        .and_then(|flow_id| active_steps.get(flow_id));
     let phase_id = active_step
         .and_then(|step| step.phase_id.clone())
         .or_else(|| {
-            loop_id
+            flow_id
                 .as_ref()
-                .and_then(|loop_id| active_phases.get(loop_id))
+                .and_then(|flow_id| active_phases.get(flow_id))
                 .cloned()
         });
     let step_id = active_step.map(|step| step.step_id.clone());
     ToolLifecycleKey {
-        loop_id,
+        flow_id,
         phase_id,
         step_id,
         tool_id: lifecycle_payload_string(event, "tool_id"),
@@ -1251,7 +1251,7 @@ fn lifecycle_message_key(
     event: &EventEnvelope,
 ) -> Result<MessageLifecycleKey, RuntimeError> {
     Ok(MessageLifecycleKey {
-        loop_id: require_lifecycle_loop_id(path, line_number, event)?,
+        flow_id: require_lifecycle_flow_id(path, line_number, event)?,
         message_id: lifecycle_payload_string(event, "message_id"),
     })
 }

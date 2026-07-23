@@ -29,12 +29,12 @@ pub struct EventEnvelope {
     pub event_id: String,
     /// Normalized event family and transition name.
     pub event_type: EventType,
-    /// Loop invocation id for loop-scoped events.
+    /// Flow invocation id for flow-scoped events.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub loop_id: Option<String>,
-    /// Parent loop invocation id when this event belongs to a subloop.
+    pub flow_id: Option<String>,
+    /// Parent flow invocation id when this event belongs to a subflow.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_loop_id: Option<String>,
+    pub parent_flow_id: Option<String>,
     /// Event-family payload. Payloads must be JSON objects.
     #[serde(deserialize_with = "deserialize_payload_object")]
     pub payload: Value,
@@ -98,8 +98,8 @@ impl Serialize for EventEnvelope {
         }
 
         let optional_fields = usize::from(self.correlation_id.is_some())
-            + usize::from(self.loop_id.is_some())
-            + usize::from(self.parent_loop_id.is_some());
+            + usize::from(self.flow_id.is_some())
+            + usize::from(self.parent_flow_id.is_some());
         let mut map =
             serializer.serialize_map(Some(8 + optional_fields + self.additional_fields.len()))?;
         for (field, value) in &self.additional_fields {
@@ -110,11 +110,11 @@ impl Serialize for EventEnvelope {
         }
         map.serialize_entry("event_id", &self.event_id)?;
         map.serialize_entry("event_type", &self.event_type)?;
-        if let Some(loop_id) = &self.loop_id {
-            map.serialize_entry("loop_id", loop_id)?;
+        if let Some(flow_id) = &self.flow_id {
+            map.serialize_entry("flow_id", flow_id)?;
         }
-        if let Some(parent_loop_id) = &self.parent_loop_id {
-            map.serialize_entry("parent_loop_id", parent_loop_id)?;
+        if let Some(parent_flow_id) = &self.parent_flow_id {
+            map.serialize_entry("parent_flow_id", parent_flow_id)?;
         }
         map.serialize_entry("payload", &self.payload)?;
         map.serialize_entry("protocol_version", &self.protocol_version)?;
@@ -127,7 +127,7 @@ impl Serialize for EventEnvelope {
 }
 
 impl EventEnvelope {
-    /// Builds a v0 event envelope with no loop, parent-loop or correlation id.
+    /// Builds a v0 event envelope with no flow, parent-flow or correlation id.
     pub fn new(
         event_id: impl Into<String>,
         event_type: EventType,
@@ -142,8 +142,8 @@ impl EventEnvelope {
             correlation_id: None,
             event_id: nfc_string(event_id.into()),
             event_type,
-            loop_id: None,
-            parent_loop_id: None,
+            flow_id: None,
+            parent_flow_id: None,
             payload: nfc_json_string_values(payload),
             protocol_version: PROTOCOL_VERSION_V0.to_owned(),
             sequence,
@@ -191,14 +191,14 @@ impl EventEnvelope {
             .is_some_and(|value| value.is_empty())
         {
             Some(("correlation_id", "must be non-empty when present"))
-        } else if self.loop_id.as_ref().is_some_and(|value| value.is_empty()) {
-            Some(("loop_id", "must be non-empty when present"))
+        } else if self.flow_id.as_ref().is_some_and(|value| value.is_empty()) {
+            Some(("flow_id", "must be non-empty when present"))
         } else if self
-            .parent_loop_id
+            .parent_flow_id
             .as_ref()
             .is_some_and(|value| value.is_empty())
         {
-            Some(("parent_loop_id", "must be non-empty when present"))
+            Some(("parent_flow_id", "must be non-empty when present"))
         } else {
             None
         };
@@ -236,8 +236,8 @@ fn is_reserved_envelope_field(field: &str) -> bool {
         "correlation_id"
             | "event_id"
             | "event_type"
-            | "loop_id"
-            | "parent_loop_id"
+            | "flow_id"
+            | "parent_flow_id"
             | "payload"
             | "protocol_version"
             | "sequence"
@@ -260,12 +260,12 @@ pub enum EventType {
     SessionCompleted,
     /// A session reached a failed terminal state.
     SessionFailed,
-    /// A loop invocation started.
-    LoopStarted,
-    /// A loop invocation completed successfully.
-    LoopCompleted,
-    /// A loop invocation failed.
-    LoopFailed,
+    /// A flow invocation started.
+    FlowStarted,
+    /// A flow invocation completed successfully.
+    FlowCompleted,
+    /// A flow invocation failed.
+    FlowFailed,
     /// Runtime entered a phase.
     PhaseEntered,
     /// Runtime started a phase step.
@@ -305,9 +305,9 @@ impl EventType {
             Self::SessionResumed => "session.resumed",
             Self::SessionCompleted => "session.completed",
             Self::SessionFailed => "session.failed",
-            Self::LoopStarted => "loop.started",
-            Self::LoopCompleted => "loop.completed",
-            Self::LoopFailed => "loop.failed",
+            Self::FlowStarted => "flow.started",
+            Self::FlowCompleted => "flow.completed",
+            Self::FlowFailed => "flow.failed",
             Self::PhaseEntered => "phase.entered",
             Self::StepStarted => "step.started",
             Self::StepCompleted => "step.completed",
@@ -336,9 +336,9 @@ impl TryFrom<&str> for EventType {
             "session.resumed" => Ok(Self::SessionResumed),
             "session.completed" => Ok(Self::SessionCompleted),
             "session.failed" => Ok(Self::SessionFailed),
-            "loop.started" => Ok(Self::LoopStarted),
-            "loop.completed" => Ok(Self::LoopCompleted),
-            "loop.failed" => Ok(Self::LoopFailed),
+            "flow.started" => Ok(Self::FlowStarted),
+            "flow.completed" => Ok(Self::FlowCompleted),
+            "flow.failed" => Ok(Self::FlowFailed),
             "phase.entered" => Ok(Self::PhaseEntered),
             "step.started" => Ok(Self::StepStarted),
             "step.completed" => Ok(Self::StepCompleted),

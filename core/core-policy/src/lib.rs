@@ -80,8 +80,8 @@ pub struct PolicyArtifact {
     pub policy_version: String,
     /// Runtime limits shared by commands in this artifact.
     pub runtime_limits: RuntimeLimits,
-    /// Source loop definition id.
-    pub source_loop_definition_id: String,
+    /// Source flow definition id.
+    pub source_flow_definition_id: String,
     /// Sandbox target for this artifact.
     pub target: PolicyTarget,
 }
@@ -193,8 +193,8 @@ pub enum PolicyTarget {
 /// Error returned while compiling policy artifacts from a script registry.
 #[derive(Debug)]
 pub enum PolicyCompileError {
-    /// Requested loop reference was missing.
-    MissingLoop(String),
+    /// Requested flow reference was missing.
+    MissingFlow(String),
     /// Supported policy-artifact target was asked to encode network allow entries.
     NonEmptyNetworkAllowlist {
         /// Tool id with non-empty network allow entries.
@@ -207,8 +207,8 @@ pub enum PolicyCompileError {
 impl fmt::Display for PolicyCompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingLoop(reference) => {
-                write!(f, "policy compile references missing loop {reference}")
+            Self::MissingFlow(reference) => {
+                write!(f, "policy compile references missing flow {reference}")
             }
             Self::NonEmptyNetworkAllowlist { tool_id } => write!(
                 f,
@@ -223,7 +223,7 @@ impl std::error::Error for PolicyCompileError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::InvalidArtifact(err) => Some(err),
-            Self::MissingLoop(_) | Self::NonEmptyNetworkAllowlist { .. } => None,
+            Self::MissingFlow(_) | Self::NonEmptyNetworkAllowlist { .. } => None,
         }
     }
 }
@@ -231,21 +231,21 @@ impl std::error::Error for PolicyCompileError {
 /// Compiles a policy artifact for one sandbox target.
 pub fn compile_policy_artifact(
     registry: &core_script::ResolvedRegistry,
-    loop_ref: &str,
+    flow_ref: &str,
     target: PolicyTarget,
 ) -> Result<PolicyArtifact, PolicyCompileError> {
-    let loop_block = registry
-        .loop_block(loop_ref)
-        .ok_or_else(|| PolicyCompileError::MissingLoop(loop_ref.to_owned()))?;
+    let flow_block = registry
+        .flow_block(flow_ref)
+        .ok_or_else(|| PolicyCompileError::MissingFlow(flow_ref.to_owned()))?;
     let mut phase_tools = BTreeMap::<String, BTreeSet<String>>::new();
     let mut tool_ids = BTreeSet::<String>::new();
-    let mut visited_loops = BTreeSet::<String>::new();
-    collect_loop_policy_scope(
+    let mut visited_flows = BTreeSet::<String>::new();
+    collect_flow_policy_scope(
         registry,
-        loop_block,
+        flow_block,
         &mut phase_tools,
         &mut tool_ids,
-        &mut visited_loops,
+        &mut visited_flows,
     );
 
     let mut commands = Vec::new();
@@ -268,13 +268,13 @@ pub fn compile_policy_artifact(
         policy_version: POLICY_VERSION_V0.to_owned(),
         runtime_limits: RuntimeLimits {
             headless: true,
-            timeout_ms: if loop_block.phase_refs.len() > 1 || !loop_block.subloop_refs.is_empty() {
+            timeout_ms: if flow_block.phase_refs.len() > 1 || !flow_block.subflow_refs.is_empty() {
                 60_000
             } else {
                 30_000
             },
         },
-        source_loop_definition_id: loop_block.identity.id.clone(),
+        source_flow_definition_id: flow_block.identity.id.clone(),
         target,
     };
     artifact
@@ -283,21 +283,21 @@ pub fn compile_policy_artifact(
     Ok(artifact)
 }
 
-fn collect_loop_policy_scope(
+fn collect_flow_policy_scope(
     registry: &core_script::ResolvedRegistry,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
     phase_tools: &mut BTreeMap<String, BTreeSet<String>>,
     tool_ids: &mut BTreeSet<String>,
-    visited_loops: &mut BTreeSet<String>,
+    visited_flows: &mut BTreeSet<String>,
 ) {
-    if !visited_loops.insert(loop_block.identity.id.clone()) {
+    if !visited_flows.insert(flow_block.identity.id.clone()) {
         return;
     }
 
-    for phase_ref in &loop_block.phase_refs {
+    for phase_ref in &flow_block.phase_refs {
         let phase = registry
             .phase_block(phase_ref)
-            .expect("resolved registry validates loop phase references");
+            .expect("resolved registry validates flow phase references");
         let scoped_tools = phase_tools.entry(phase.identity.id.clone()).or_default();
         for tool_ref in &phase.tool_refs {
             let tool = registry
@@ -308,11 +308,11 @@ fn collect_loop_policy_scope(
         }
     }
 
-    for subloop_ref in &loop_block.subloop_refs {
-        let subloop = registry
-            .loop_block(subloop_ref)
-            .expect("resolved registry validates subloop references");
-        collect_loop_policy_scope(registry, subloop, phase_tools, tool_ids, visited_loops);
+    for subflow_ref in &flow_block.subflow_refs {
+        let subflow = registry
+            .flow_block(subflow_ref)
+            .expect("resolved registry validates subflow references");
+        collect_flow_policy_scope(registry, subflow, phase_tools, tool_ids, visited_flows);
     }
 }
 

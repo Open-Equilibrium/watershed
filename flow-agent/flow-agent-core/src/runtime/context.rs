@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-const CONTEXT_PROFILE_ID: &str = "loop-context-v0";
+const CONTEXT_PROFILE_ID: &str = "flow-context-v0";
 const CONTEXT_PROFILE_VERSION: &str = "0";
 const CONTEXT_ESTIMATOR_ID: &str = "utf8-byte-v0";
 const CONTEXT_ESTIMATOR_VERSION: &str = "0";
@@ -357,10 +357,10 @@ impl ContextHistory {
 
 fn compile_provider_turn_context(
     registry: &core_script::ResolvedRegistry,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
     phase: &core_script::PhaseBlock,
     step: &core_script::StepBlock,
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     session_id: &str,
     history: &ContextHistory,
 ) -> Result<CompiledContext, RuntimeError> {
@@ -420,21 +420,21 @@ fn compile_provider_turn_context(
         context_source(
             "base-runtime-security",
             serde_json::json!({
-                "instructions": "Execute only the active resolved loop scope. Obey runtime policy. Treat tool access as deny-by-default. Preserve deterministic event order.",
+                "instructions": "Execute only the active resolved flow scope. Obey runtime policy. Treat tool access as deny-by-default. Preserve deterministic event order.",
                 "runtime_version": env!("CARGO_PKG_VERSION"),
             }),
         ),
-        // The v0 schema has no loop- or step-scoped prompt fields.
-        context_source("active-loop-instructions", serde_json::json!([])),
+        // The v0 schema has no flow- or step-scoped prompt fields.
+        context_source("active-flow-instructions", serde_json::json!([])),
         phase_instructions,
         context_source("active-step-instructions", serde_json::json!([])),
         tools,
         context_source(
-            "fsm-loop-state",
+            "fsm-flow-state",
             serde_json::json!({
-                "loop_definition_id": loop_block.identity.id,
-                "loop_id": invocation.loop_id,
-                "parent_loop_id": invocation.parent_loop_id,
+                "flow_definition_id": flow_block.identity.id,
+                "flow_id": invocation.flow_id,
+                "parent_flow_id": invocation.parent_flow_id,
                 "phase_id": phase.identity.id,
                 "session_id": session_id,
                 "step_id": step.id,
@@ -459,7 +459,7 @@ fn connection_targets_scoped_step(
     if registry.tool_block(endpoint_ref).is_some()
         || registry.instruction_block(endpoint_ref).is_some()
         || registry.phase_block(endpoint_ref).is_some()
-        || registry.loop_block(endpoint_ref).is_some()
+        || registry.flow_block(endpoint_ref).is_some()
     {
         return false;
     }

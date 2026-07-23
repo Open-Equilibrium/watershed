@@ -1,6 +1,6 @@
 fn emit_runtime_failure(
-    loop_block: &core_script::LoopBlock,
-    invocation: &LoopInvocation,
+    flow_block: &core_script::FlowBlock,
+    invocation: &FlowInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
@@ -8,11 +8,11 @@ fn emit_runtime_failure(
         emit_runtime_tool_failure(invocation, failure, builder)?;
     }
     emit_runtime_error(invocation, failure, builder)?;
-    emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
+    emit_runtime_flow_failure(flow_block, invocation, &failure.reason, builder)
 }
 
 fn emit_runtime_error(
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
@@ -36,24 +36,24 @@ fn emit_runtime_error(
     builder.emit(Some(invocation), EventType::Error, error_payload)
 }
 
-fn emit_runtime_loop_failure(
-    loop_block: &core_script::LoopBlock,
-    invocation: &LoopInvocation,
+fn emit_runtime_flow_failure(
+    flow_block: &core_script::FlowBlock,
+    invocation: &FlowInvocation,
     reason: &str,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),
-        EventType::LoopFailed,
+        EventType::FlowFailed,
         serde_json::json!({
             "error": reason,
-            "loop_definition_id": loop_block.identity.id,
+            "flow_definition_id": flow_block.identity.id,
         }),
     )
 }
 
 fn emit_runtime_tool_failure(
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
@@ -71,24 +71,24 @@ fn emit_runtime_tool_failure(
 }
 
 fn emit_runtime_error_failure(
-    loop_block: &core_script::LoopBlock,
-    invocation: &LoopInvocation,
+    flow_block: &core_script::FlowBlock,
+    invocation: &FlowInvocation,
     err: &RuntimeError,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     let failure = runtime_failure_for_unhandled_error(err);
     complete_active_step(invocation, builder)?;
     emit_runtime_error(invocation, &failure, builder)?;
-    emit_runtime_loop_failure(loop_block, invocation, &failure.reason, builder)
+    emit_runtime_flow_failure(flow_block, invocation, &failure.reason, builder)
 }
 
 fn complete_active_step(
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     let payload = builder
         .active_step_payloads
-        .get(&invocation.loop_id)
+        .get(&invocation.flow_id)
         .cloned();
     match payload {
         Some(payload) => builder.emit(Some(invocation), EventType::StepCompleted, payload),

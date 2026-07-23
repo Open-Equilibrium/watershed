@@ -349,8 +349,8 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
 
 #[test]
 fn context_sources_are_session_owned_hash_addressed_and_deduplicated() {
-    let workspace = workspace_copy("hello-loop");
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("loop runs");
+    let workspace = workspace_copy("hello-flow");
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("flow runs");
     let manifest_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));
@@ -479,9 +479,9 @@ fn session_object_limits_accept_exact_values_and_reject_excess() {
 #[test]
 fn twenty_runs_finish_and_catch_up_with_permanently_lagging_receivers() {
     for run in 0..20 {
-        let workspace = workspace_copy("smoke-loop");
+        let workspace = workspace_copy("smoke-flow");
         let (notifier, receiver) = live_event_channel();
-        let output = run_loop_with_live_events(&workspace, "smoke-loop", notifier)
+        let output = run_flow_with_live_events(&workspace, "smoke-flow", notifier)
             .expect("a full live notification slot cannot block a run");
         let notification = receiver
             .recv_timeout(Duration::from_millis(50))
@@ -664,10 +664,10 @@ fn saturated_and_disconnected_sessions_are_isolated() {
         "session-b"
     );
 
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let (disconnected, receiver) = live_event_channel();
     drop(receiver);
-    let output = run_loop_with_live_events(&workspace, "smoke-loop", disconnected)
+    let output = run_flow_with_live_events(&workspace, "smoke-flow", disconnected)
         .expect("receiver disconnect cannot fail persistence");
     assert_eq!(
         fs::read_to_string(&output.session_path)
@@ -680,27 +680,27 @@ fn saturated_and_disconnected_sessions_are_isolated() {
 
 #[test]
 fn resumed_notifications_replay_exactly_the_appended_suffix() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    let prefix = expected_stream("smoke-flow", "smoke-flow.jsonl")
         .lines()
         .take(2)
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
     let prefix_events = prefix.lines().count() as u64;
-    fs::write(session_dir.join("smoke-loop.jsonl"), &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "smoke-loop", "smoke-loop");
+    fs::write(session_dir.join("smoke-flow.jsonl"), &prefix).expect("partial log written");
+    write_definition_hash_metadata(&workspace, "smoke-flow", "smoke-flow");
     let (notifier, receiver) = live_event_channel();
 
-    let output = resume_session_with_live_events(&workspace, "smoke-loop", notifier)
+    let output = resume_session_with_live_events(&workspace, "smoke-flow", notifier)
         .expect("resume completes");
     let notification = receiver
         .recv_timeout(Duration::from_millis(50))
         .expect("resumed suffix wakes receiver");
     let mut reader =
-        SessionEventReader::open(&workspace, "smoke-loop").expect("resumed session opens");
+        SessionEventReader::open(&workspace, "smoke-flow").expect("resumed session opens");
     let appended = reader
         .read_after(prefix_events)
         .expect("resumed suffix replays");
@@ -837,12 +837,12 @@ fn progress_batch(
     Vec<EventEnvelope>,
     EventEnvelope,
 ) {
-    let fixture = expected_stream("hello-loop", "hello-loop.jsonl")
+    let fixture = expected_stream("hello-flow", "hello-flow.jsonl")
         .lines()
         .map(|line| serde_json::from_str::<EventEnvelope>(line).expect("fixture event parses"))
         .collect::<Vec<_>>();
     let validation =
-        SessionAppendValidationState::from_prior_events(path, "hello-loop", &fixture[..7])
+        SessionAppendValidationState::from_prior_events(path, "hello-flow", &fixture[..7])
             .expect("fixture prefix validates");
     let progress = (0..count)
         .map(|index| {

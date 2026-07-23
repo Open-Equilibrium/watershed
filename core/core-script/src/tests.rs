@@ -14,7 +14,7 @@ fn registry_location(root: &Path) -> (&Path, &Path) {
 
 fn load_registry(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
     let (workspace, registry_root) = registry_location(root.as_ref());
-    load_loop_registry_from_workspace(workspace, registry_root, "root")
+    load_flow_registry_from_workspace(workspace, registry_root, "root")
 }
 
 fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile>), RegistryError> {
@@ -98,15 +98,15 @@ proptest! {
 }
 
 #[test]
-fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
+fn registry_loader_resolves_hello_flow_refs_and_canonical_output() {
     let workspace =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../flow-agent/fixtures/hello-loop");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../flow-agent/fixtures/hello-flow");
     let registry =
-        load_loop_registry_from_workspace(&workspace, Path::new("registry"), "hello-loop")
-            .expect("hello-loop registry loads");
+        load_flow_registry_from_workspace(&workspace, Path::new("registry"), "hello-flow")
+            .expect("hello-flow registry loads");
 
-    assert!(registry.loop_block("hello-loop").is_some());
-    assert!(registry.loop_block("HelloLoop").is_some());
+    assert!(registry.flow_block("hello-flow").is_some());
+    assert!(registry.flow_block("HelloFlow").is_some());
     assert_eq!(
         registry
             .phase_block("inspect")
@@ -125,21 +125,21 @@ fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
         canonical,
         registry.canonical_json().expect("canonical output repeats")
     );
-    assert!(canonical.contains("\"hello-loop\""));
+    assert!(canonical.contains("\"hello-flow\""));
     assert!(canonical.contains("\"write-summary\""));
 }
 
 #[test]
-fn loop_registry_retains_the_unique_transitive_definition_closure() {
+fn flow_registry_retains_the_unique_transitive_definition_closure() {
     let root = temp_registry_dir("scoped-registry");
     for (path, source) in [
         (
             "root.yaml",
-            "loop:\n  id: root\n  name: Root\n  phase_refs: [shared-phase]\n  subloop_refs: [child, child]\n  connection_refs: [tool-link]\n",
+            "flow:\n  id: root\n  name: Root\n  phase_refs: [shared-phase]\n  subflow_refs: [child, child]\n  connection_refs: [tool-link]\n",
         ),
         (
             "child.yaml",
-            "loop:\n  id: child\n  name: Child\n  phase_refs: [shared-phase]\n  subloop_refs: []\n  connection_refs: []\n",
+            "flow:\n  id: child\n  name: Child\n  phase_refs: [shared-phase]\n  subflow_refs: []\n  connection_refs: []\n",
         ),
         (
             "phase.yaml",
@@ -166,7 +166,7 @@ fn loop_registry_retains_the_unique_transitive_definition_closure() {
     }
     let (workspace, registry_root) = registry_location(&root);
 
-    let registry = load_loop_registry_from_workspace(workspace, registry_root, "Root")
+    let registry = load_flow_registry_from_workspace(workspace, registry_root, "Root")
         .expect("reachable registry loads by root name");
     let value: Value = serde_json::from_str(
         &registry
@@ -175,36 +175,36 @@ fn loop_registry_retains_the_unique_transitive_definition_closure() {
     )
     .expect("canonical registry is JSON");
 
-    assert!(registry.loop_block("root").is_some());
-    assert!(registry.loop_block("child").is_some());
+    assert!(registry.flow_block("root").is_some());
+    assert!(registry.flow_block("child").is_some());
     assert!(registry.tool_block("endpoint-tool").is_some());
     assert!(registry.instruction_block("unused").is_none());
     assert_eq!(
-        value["loops"].as_object().map(serde_json::Map::len),
+        value["flows"].as_object().map(serde_json::Map::len),
         Some(2)
     );
     assert_eq!(
         value["instructions"].as_object().map(serde_json::Map::len),
         Some(1),
-        "one definition is retained when root and repeated subloops share it"
+        "one definition is retained when root and repeated subflows share it"
     );
 }
 
 #[test]
-fn loop_registry_reports_a_missing_reachable_definition_from_its_owner() {
+fn flow_registry_reports_a_missing_reachable_definition_from_its_owner() {
     let root = temp_registry_dir("scoped-registry-missing-reference");
     std::fs::write(
         root.join("root.yaml"),
-        "loop:\n  id: root\n  name: Root\n  phase_refs: [missing]\n  subloop_refs: []\n  connection_refs: []\n",
+        "flow:\n  id: root\n  name: Root\n  phase_refs: [missing]\n  subflow_refs: []\n  connection_refs: []\n",
     )
-    .expect("root loop written");
+    .expect("root flow written");
 
     let error = load_registry(&root).expect_err("missing reachable phase is rejected");
 
     assert!(matches!(
         error,
         RegistryError::MissingReference {
-            from_kind: "loop",
+            from_kind: "flow",
             from_id,
             reference_kind: "phase",
             reference,
@@ -267,14 +267,14 @@ fn parser_rejects_oversized_names_and_definition_text() {
 }
 
 #[test]
-fn loop_registry_rejects_a_definition_closure_above_its_byte_budget() {
+fn flow_registry_rejects_a_definition_closure_above_its_byte_budget() {
     let root = temp_registry_dir("active-registry-limit");
-    let loop_source = "loop:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subloop_refs: []\n  connection_refs: []\n";
+    let flow_source = "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subflow_refs: []\n  connection_refs: []\n";
     let phase_source = "phase:\n  id: phase\n  name: Phase\n  instruction_refs: [instruction]\n  tool_refs: []\n  steps:\n    - id: run\n      name: Run\n";
     let instruction_source =
         "instruction:\n  id: instruction\n  name: Instruction\n  prompt: Retained\n";
     for (path, source) in [
-        ("loop.yaml", loop_source),
+        ("flow.yaml", flow_source),
         ("phase.yaml", phase_source),
         ("instruction.yaml", instruction_source),
     ] {
@@ -282,9 +282,9 @@ fn loop_registry_rejects_a_definition_closure_above_its_byte_budget() {
     }
     let (workspace, registry_root) = registry_location(&root);
     let max_active =
-        u64::try_from(loop_source.len() + phase_source.len()).expect("test sources fit in u64");
+        u64::try_from(flow_source.len() + phase_source.len()).expect("test sources fit in u64");
 
-    let error = ResolvedRegistry::load_for_loop_with_limits(
+    let error = ResolvedRegistry::load_for_flow_with_limits(
         workspace,
         registry_root,
         "root",
@@ -305,7 +305,7 @@ fn loop_registry_rejects_a_definition_closure_above_its_byte_budget() {
 fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
     let workspace = temp_registry_dir("registry-workspace-boundary");
     let escaping_root = Path::new("../outside");
-    let err = load_loop_registry_from_workspace(&workspace, escaping_root, "root")
+    let err = load_flow_registry_from_workspace(&workspace, escaping_root, "root")
         .expect_err("registry root must stay within workspace");
     assert!(
         matches!(&err, RegistryError::UnsafePath { path, .. } if path == escaping_root),
@@ -314,7 +314,7 @@ fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
     assert!(err.to_string().contains("stay within the workspace"));
 
     let missing_workspace = workspace.join("missing-workspace");
-    let err = load_loop_registry_from_workspace(&missing_workspace, Path::new("registry"), "root")
+    let err = load_flow_registry_from_workspace(&missing_workspace, Path::new("registry"), "root")
         .expect_err("missing workspace must remain an I/O failure");
     assert!(
         matches!(&err, RegistryError::Io { path, source }
@@ -339,10 +339,10 @@ fn registry_loader_accepts_nested_yaml_files_and_ignores_non_registry_files() {
     )
     .expect("phase written");
     std::fs::write(
-        root.join("loop.yaml"),
-        "loop:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subloop_refs: []\n  connection_refs: []\n",
+        root.join("flow.yaml"),
+        "flow:\n  id: root\n  name: Root\n  phase_refs: [phase]\n  subflow_refs: []\n  connection_refs: []\n",
     )
-    .expect("loop written");
+    .expect("flow written");
 
     let registry = load_registry(root).expect("nested yml registry loads");
 
@@ -359,7 +359,7 @@ fn registry_loader_rejects_files_above_read_limit() {
     .expect("registry file written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_for_loop_with_limits(
+    let err = ResolvedRegistry::load_for_flow_with_limits(
         workspace,
         registry_root,
         "root",
@@ -481,7 +481,7 @@ fn registry_loader_rejects_total_bytes_above_read_limit() {
     std::fs::write(root.join("b.yaml"), second).expect("second registry file written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_for_loop_with_limits(
+    let err = ResolvedRegistry::load_for_flow_with_limits(
         workspace,
         registry_root,
         "root",
@@ -512,7 +512,7 @@ fn registry_loader_bounds_all_visited_entries() {
     std::fs::write(root.join("README.txt"), "ignored").expect("non-registry entry written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_for_loop_with_all_limits(
+    let err = ResolvedRegistry::load_for_flow_with_all_limits(
         workspace,
         registry_root,
         "root",
@@ -549,7 +549,7 @@ fn registry_loader_rejects_directories_above_traversal_depth_limit() {
     .expect("registry file written");
 
     let (workspace, registry_root) = registry_location(&root);
-    let err = ResolvedRegistry::load_for_loop_with_all_limits(
+    let err = ResolvedRegistry::load_for_flow_with_all_limits(
         workspace,
         registry_root,
         "root",
@@ -610,13 +610,13 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
     assert!(invalid_step.to_string().contains("invalid block id"));
     assert!(matches!(invalid_step, RegistryError::InvalidBlockId(value) if value == "BadStep"));
 
-    let empty_loop = ResolvedRegistry::from_blocks([RegistryBlock::Loop(LoopBlock {
+    let empty_flow = ResolvedRegistry::from_blocks([RegistryBlock::Flow(FlowBlock {
         phase_refs: Vec::new(),
-        ..test_loop()
+        ..test_flow()
     })])
-    .expect_err("empty loop phase_refs rejected");
-    assert!(std::error::Error::source(&empty_loop).is_some());
-    assert!(empty_loop.to_string().contains("loop.phase_refs"));
+    .expect_err("empty flow phase_refs rejected");
+    assert!(std::error::Error::source(&empty_flow).is_some());
+    assert!(empty_flow.to_string().contains("flow.phase_refs"));
 
     let mut phase_with_connection = test_phase();
     phase_with_connection.steps[0]
@@ -639,18 +639,18 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
         ),
         (
             "phase",
-            vec![RegistryBlock::Loop(LoopBlock {
+            vec![RegistryBlock::Flow(FlowBlock {
                 phase_refs: vec!["missing-phase".to_owned()],
-                ..test_loop()
+                ..test_flow()
             })],
         ),
         (
-            "loop",
+            "flow",
             vec![
                 simple_phase_block("phase"),
-                RegistryBlock::Loop(LoopBlock {
-                    subloop_refs: vec!["missing-loop".to_owned()],
-                    ..test_loop()
+                RegistryBlock::Flow(FlowBlock {
+                    subflow_refs: vec!["missing-flow".to_owned()],
+                    ..test_flow()
                 }),
             ],
         ),
@@ -658,9 +658,9 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
             "connection",
             vec![
                 simple_phase_block("phase"),
-                RegistryBlock::Loop(LoopBlock {
+                RegistryBlock::Flow(FlowBlock {
                     connection_refs: vec!["missing-connection".to_owned()],
-                    ..test_loop()
+                    ..test_flow()
                 }),
             ],
         ),
@@ -683,7 +683,7 @@ fn registry_reference_validation_reports_each_missing_reference_shape() {
             vec![
                 RegistryBlock::Phase(phase_with_connection),
                 RegistryBlock::Connection(test_connection("phase.step", "phase.step")),
-                RegistryBlock::Loop(test_loop()),
+                RegistryBlock::Flow(test_flow()),
             ],
         ),
     ] {
@@ -696,14 +696,14 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
     const INSTRUCTION: &str =
         "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect input\n";
     let tool =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/tools/read-file.yaml");
     let phase =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/phases/inspect.yaml");
     let connection = include_str!(
-        "../../../flow-agent/fixtures/hello-loop/registry/connections/inspect-data.yaml"
+        "../../../flow-agent/fixtures/hello-flow/registry/connections/inspect-data.yaml"
     );
-    let loop_block =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
+    let flow_block =
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/flows/hello-flow.yaml");
     let network_tool = tool.replace(
         "  network: deny",
         "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443",
@@ -780,8 +780,8 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
             connection.replace("  connection_kind:", "  extra: true\n  connection_kind:"),
         ),
         (
-            "unknown-loop-field.yaml",
-            loop_block.replace("  phase_refs:", "  extra: true\n  phase_refs:"),
+            "unknown-flow-field.yaml",
+            flow_block.replace("  phase_refs:", "  extra: true\n  phase_refs:"),
         ),
         (
             "explicit-null.yaml",
@@ -798,14 +798,14 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
 #[test]
 fn parser_enforces_registry_schema() {
     let tool =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/tools/read-file.yaml");
     let instruction = include_str!(
-        "../../../flow-agent/fixtures/hello-loop/registry/instructions/inspect-input.yaml"
+        "../../../flow-agent/fixtures/hello-flow/registry/instructions/inspect-input.yaml"
     );
     let phase =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
-    let loop_block =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/phases/inspect.yaml");
+    let flow_block =
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/flows/hello-flow.yaml");
     let cases = [
         ("invalid-id.yaml", tool.replacen("id: read-file", "id: ReadFile", 1)),
         (
@@ -843,8 +843,8 @@ fn parser_enforces_registry_schema() {
             ),
         ),
         (
-            "empty-loop.yaml",
-            loop_block.replace("phase_refs: [inspect, summarize]", "phase_refs: []"),
+            "empty-flow.yaml",
+            flow_block.replace("phase_refs: [inspect, summarize]", "phase_refs: []"),
         ),
         (
             "zero-port.yaml",
@@ -947,7 +947,7 @@ fn registry_loader_rejects_linked_registry_root() {
     #[cfg(windows)]
     create_windows_junction(&linked_root, &outside);
 
-    let err = load_loop_registry_from_workspace(&parent, Path::new("linked-root"), "root")
+    let err = load_flow_registry_from_workspace(&parent, Path::new("linked-root"), "root")
         .expect_err("linked registry root must be rejected");
 
     assert!(
@@ -960,7 +960,7 @@ fn registry_loader_rejects_linked_registry_root() {
 #[test]
 fn parser_handles_block_script_bodies_and_requires_content() {
     let fixture =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/write-summary.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/tools/write-summary.yaml");
     let literal = fixture.replace(
         "    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n",
         "    #!/bin/sh\n    write_scope: [\"literal-only\"]\n    ---\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n",
@@ -1108,108 +1108,108 @@ fn connection_endpoint_resolves_dotted_block_name_before_step_syntax() {
 }
 
 #[test]
-fn registry_reference_validation_rejects_loop_cycles() {
+fn registry_reference_validation_rejects_flow_cycles() {
     let err = ResolvedRegistry::from_blocks([
         simple_phase_block("phase"),
-        RegistryBlock::Loop(LoopBlock {
+        RegistryBlock::Flow(FlowBlock {
             identity: BlockIdentity {
                 id: "a".to_owned(),
                 name: "A".to_owned(),
             },
             phase_refs: vec!["phase".to_owned()],
-            subloop_refs: vec!["b".to_owned()],
+            subflow_refs: vec!["b".to_owned()],
             connection_refs: Vec::new(),
         }),
-        RegistryBlock::Loop(LoopBlock {
+        RegistryBlock::Flow(FlowBlock {
             identity: BlockIdentity {
                 id: "b".to_owned(),
                 name: "B".to_owned(),
             },
             phase_refs: vec!["phase".to_owned()],
-            subloop_refs: vec!["a".to_owned()],
+            subflow_refs: vec!["a".to_owned()],
             connection_refs: Vec::new(),
         }),
     ])
     .expect_err("cycle rejected");
 
-    assert!(err.to_string().contains("loop cycle"));
-    assert!(matches!(err, RegistryError::LoopCycle { .. }));
+    assert!(err.to_string().contains("flow cycle"));
+    assert!(matches!(err, RegistryError::FlowCycle { .. }));
 }
 
 #[test]
-fn registry_reference_validation_rejects_deep_loop_chains() {
-    assert_eq!(MAX_LOOP_NESTING_DEPTH, 16);
-    ResolvedRegistry::from_blocks(loop_chain_blocks(MAX_LOOP_NESTING_DEPTH))
-        .expect("max loop nesting depth is accepted");
+fn registry_reference_validation_rejects_deep_flow_chains() {
+    assert_eq!(MAX_FLOW_NESTING_DEPTH, 16);
+    ResolvedRegistry::from_blocks(flow_chain_blocks(MAX_FLOW_NESTING_DEPTH))
+        .expect("max flow nesting depth is accepted");
 
-    let err = ResolvedRegistry::from_blocks(loop_chain_blocks(MAX_LOOP_NESTING_DEPTH + 1))
-        .expect_err("loop nesting above the max is rejected");
+    let err = ResolvedRegistry::from_blocks(flow_chain_blocks(MAX_FLOW_NESTING_DEPTH + 1))
+        .expect_err("flow nesting above the max is rejected");
 
     assert!(std::error::Error::source(&err).is_none());
-    assert!(err.to_string().contains("loop nesting depth"));
+    assert!(err.to_string().contains("flow nesting depth"));
     assert!(matches!(
         err,
-        RegistryError::LoopDepthExceeded {
-            loop_id,
+        RegistryError::FlowDepthExceeded {
+            flow_id,
             depth,
             max,
-        } if loop_id == format!("loop-{MAX_LOOP_NESTING_DEPTH:03}")
-            && depth == MAX_LOOP_NESTING_DEPTH + 1
-            && max == MAX_LOOP_NESTING_DEPTH
+        } if flow_id == format!("flow-{MAX_FLOW_NESTING_DEPTH:03}")
+            && depth == MAX_FLOW_NESTING_DEPTH + 1
+            && max == MAX_FLOW_NESTING_DEPTH
     ));
 }
 
 #[test]
-fn registry_reference_validation_rejects_more_than_32_direct_subloops() {
-    let mut blocks = loop_chain_blocks(2);
-    let RegistryBlock::Loop(root) = &mut blocks[1] else {
-        panic!("second chain block must be a loop");
+fn registry_reference_validation_rejects_more_than_32_direct_subflows() {
+    let mut blocks = flow_chain_blocks(2);
+    let RegistryBlock::Flow(root) = &mut blocks[1] else {
+        panic!("second chain block must be a flow");
     };
-    root.subloop_refs = vec!["loop-001".to_owned(); MAX_LOOP_FANOUT];
-    ResolvedRegistry::from_blocks(blocks).expect("32 direct subloop references are accepted");
+    root.subflow_refs = vec!["flow-001".to_owned(); MAX_FLOW_FANOUT];
+    ResolvedRegistry::from_blocks(blocks).expect("32 direct subflow references are accepted");
 
-    let mut blocks = loop_chain_blocks(2);
-    let RegistryBlock::Loop(root) = &mut blocks[1] else {
-        panic!("second chain block must be a loop");
+    let mut blocks = flow_chain_blocks(2);
+    let RegistryBlock::Flow(root) = &mut blocks[1] else {
+        panic!("second chain block must be a flow");
     };
-    root.subloop_refs = vec!["loop-001".to_owned(); MAX_LOOP_FANOUT + 1];
+    root.subflow_refs = vec!["flow-001".to_owned(); MAX_FLOW_FANOUT + 1];
 
     let err = ResolvedRegistry::from_blocks(blocks)
-        .expect_err("more than 32 direct subloop invocations are rejected");
+        .expect_err("more than 32 direct subflow invocations are rejected");
 
-    assert!(err.to_string().contains("subloop fan-out"));
+    assert!(err.to_string().contains("subflow fan-out"));
 }
 
 #[test]
-fn registry_reference_validation_counts_shared_subloop_tails_per_path() {
-    let mut blocks = loop_chain_blocks(MAX_LOOP_NESTING_DEPTH);
-    blocks.push(RegistryBlock::Loop(LoopBlock {
+fn registry_reference_validation_counts_shared_subflow_tails_per_path() {
+    let mut blocks = flow_chain_blocks(MAX_FLOW_NESTING_DEPTH);
+    blocks.push(RegistryBlock::Flow(FlowBlock {
         identity: BlockIdentity {
             id: "zz-parent".to_owned(),
             name: "Parent".to_owned(),
         },
         phase_refs: vec!["chain-phase".to_owned()],
-        subloop_refs: vec!["loop-000".to_owned()],
+        subflow_refs: vec!["flow-000".to_owned()],
         connection_refs: Vec::new(),
     }));
 
     let err = ResolvedRegistry::from_blocks(blocks)
-        .expect_err("shared subloop tail still counts against parent depth");
+        .expect_err("shared subflow tail still counts against parent depth");
 
     assert!(matches!(
         err,
-        RegistryError::LoopDepthExceeded {
+        RegistryError::FlowDepthExceeded {
             depth,
             max,
             ..
-        } if depth == MAX_LOOP_NESTING_DEPTH + 1 && max == MAX_LOOP_NESTING_DEPTH
+        } if depth == MAX_FLOW_NESTING_DEPTH + 1 && max == MAX_FLOW_NESTING_DEPTH
     ));
 }
 
 #[test]
-fn registry_accepts_duplicate_subloop_tails_within_depth() {
-    ResolvedRegistry::from_blocks(duplicated_subloop_tail_blocks(MAX_LOOP_NESTING_DEPTH))
-        .expect("duplicated acyclic subloop tail validates");
+fn registry_accepts_duplicate_subflow_tails_within_depth() {
+    ResolvedRegistry::from_blocks(duplicated_subflow_tail_blocks(MAX_FLOW_NESTING_DEPTH))
+        .expect("duplicated acyclic subflow tail validates");
 }
 
 #[test]
@@ -1490,33 +1490,33 @@ fn registry_rejects_duplicate_phase_tool_refs() {
 }
 
 #[test]
-fn parser_defaults_optional_loop_reference_lists() {
+fn parser_defaults_optional_flow_reference_lists() {
     let block = parse_registry_block(
-        "minimal-loop.yaml",
-        "loop:\n  id: minimal-loop\n  name: MinimalLoop\n  phase_refs: [phase-a]\n",
+        "minimal-flow.yaml",
+        "flow:\n  id: minimal-flow\n  name: MinimalFlow\n  phase_refs: [phase-a]\n",
     )
-    .expect("minimal loop parses");
+    .expect("minimal flow parses");
 
-    let RegistryBlock::Loop(loop_block) = block else {
-        panic!("expected loop block");
+    let RegistryBlock::Flow(flow_block) = block else {
+        panic!("expected flow block");
     };
-    assert!(loop_block.subloop_refs.is_empty());
-    assert!(loop_block.connection_refs.is_empty());
+    assert!(flow_block.subflow_refs.is_empty());
+    assert!(flow_block.connection_refs.is_empty());
 }
 
 #[test]
 fn parser_accepts_yaml_comments_and_discards_formatting_comments() {
     let block = parse_registry_block(
-            "commented-loop.yaml",
-            "# leading comment\nloop: # block comment\n  id: commented-loop # field comment\n  name: \"Hash # Loop\"\n  phase_refs: [phase-a] # inline list comment\n",
+            "commented-flow.yaml",
+            "# leading comment\nflow: # block comment\n  id: commented-flow # field comment\n  name: \"Hash # Flow\"\n  phase_refs: [phase-a] # inline list comment\n",
         )
         .expect("comments are ignored outside quoted scalars");
 
-    let RegistryBlock::Loop(loop_block) = block else {
-        panic!("expected loop block");
+    let RegistryBlock::Flow(flow_block) = block else {
+        panic!("expected flow block");
     };
-    assert_eq!(loop_block.identity.name, "Hash # Loop");
-    assert_eq!(loop_block.phase_refs, vec!["phase-a"]);
+    assert_eq!(flow_block.identity.name, "Hash # Flow");
+    assert_eq!(flow_block.phase_refs, vec!["phase-a"]);
 }
 
 #[test]
@@ -1583,7 +1583,7 @@ fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
 #[test]
 fn parser_rejects_malformed_or_quoted_typed_scalars() {
     let parameter_tool =
-        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/tools/read-file.yaml");
     let network_tool = include_str!(
         "../../../flow-agent/fixtures/sandbox-negative/registry/tools/network-tool.yaml"
     )
@@ -1632,10 +1632,10 @@ fn parser_rejects_malformed_or_quoted_typed_scalars() {
 
 #[test]
 fn ids_follow_v0_token_rules() {
-    for value in ["hello-loop", "read_file_1", "com0", "com10"] {
+    for value in ["hello-flow", "read_file_1", "com0", "com10"] {
         assert!(is_valid_block_id(value), "{value}");
     }
-    for value in ["", "HelloLoop", "../hello", "nul", "com1", "lpt9"] {
+    for value in ["", "HelloFlow", "../hello", "nul", "com1", "lpt9"] {
         assert!(!is_valid_block_id(value), "{value}");
     }
 
@@ -1687,14 +1687,14 @@ fn registry_schema_distinguishes_character_and_runtime_byte_limits() {
 fn registry_schema_concrete_blocks_own_full_shapes() {
     let parsed = registry_schema();
 
-    for definition in ["connection", "instruction", "loop", "phase", "tool"] {
+    for definition in ["connection", "instruction", "flow", "phase", "tool"] {
         let block = &parsed["$defs"][definition];
         assert_eq!(block["additionalProperties"], false, "{definition}");
         assert!(block["properties"]["id"].is_object(), "{definition}");
         assert!(block["properties"]["name"].is_object(), "{definition}");
     }
 
-    for definition in ["connection", "instruction", "loop", "phase"] {
+    for definition in ["connection", "instruction", "flow", "phase"] {
         assert!(
             parsed["$defs"][definition]["allOf"].is_null(),
             "{definition} must not compose identity through allOf"
@@ -1969,14 +1969,14 @@ fn test_phase() -> PhaseBlock {
     }
 }
 
-fn test_loop() -> LoopBlock {
-    LoopBlock {
+fn test_flow() -> FlowBlock {
+    FlowBlock {
         identity: BlockIdentity {
             id: "root".to_owned(),
             name: "Root".to_owned(),
         },
         phase_refs: vec!["phase".to_owned()],
-        subloop_refs: Vec::new(),
+        subflow_refs: Vec::new(),
         connection_refs: Vec::new(),
     }
 }
@@ -2004,38 +2004,38 @@ fn assert_missing_reference(blocks: Vec<RegistryBlock>, expected: &str) {
     }
 }
 
-fn loop_chain_blocks(depth: usize) -> Vec<RegistryBlock> {
+fn flow_chain_blocks(depth: usize) -> Vec<RegistryBlock> {
     let mut blocks = vec![simple_phase_block("chain-phase")];
-    blocks.extend((0..depth).map(|index| RegistryBlock::Loop(loop_chain_block(index, depth))));
+    blocks.extend((0..depth).map(|index| RegistryBlock::Flow(flow_chain_block(index, depth))));
     blocks
 }
 
-fn loop_chain_block(index: usize, depth: usize) -> LoopBlock {
-    LoopBlock {
+fn flow_chain_block(index: usize, depth: usize) -> FlowBlock {
+    FlowBlock {
         identity: BlockIdentity {
-            id: format!("loop-{index:03}"),
-            name: format!("Loop {index:03}"),
+            id: format!("flow-{index:03}"),
+            name: format!("Flow {index:03}"),
         },
         phase_refs: vec!["chain-phase".to_owned()],
-        subloop_refs: (index + 1 < depth)
-            .then(|| format!("loop-{:03}", index + 1))
+        subflow_refs: (index + 1 < depth)
+            .then(|| format!("flow-{:03}", index + 1))
             .into_iter()
             .collect(),
         connection_refs: Vec::new(),
     }
 }
 
-fn duplicated_subloop_tail_blocks(depth: usize) -> Vec<RegistryBlock> {
+fn duplicated_subflow_tail_blocks(depth: usize) -> Vec<RegistryBlock> {
     let mut blocks = vec![simple_phase_block("dup-phase")];
     blocks.extend((0..depth).map(|index| {
-        let child = (index + 1 < depth).then(|| format!("dup-loop-{:03}", index + 1));
-        RegistryBlock::Loop(LoopBlock {
+        let child = (index + 1 < depth).then(|| format!("dup-flow-{:03}", index + 1));
+        RegistryBlock::Flow(FlowBlock {
             identity: BlockIdentity {
-                id: format!("dup-loop-{index:03}"),
-                name: format!("DupLoop {index:03}"),
+                id: format!("dup-flow-{index:03}"),
+                name: format!("DupFlow {index:03}"),
             },
             phase_refs: vec!["dup-phase".to_owned()],
-            subloop_refs: child
+            subflow_refs: child
                 .into_iter()
                 .flat_map(|child| [child.clone(), child])
                 .collect(),

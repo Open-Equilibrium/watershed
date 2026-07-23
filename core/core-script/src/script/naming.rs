@@ -134,27 +134,27 @@ pub enum RegistryError {
         /// User-supplied reference.
         reference: String,
     },
-    /// Recursive loop references contain a cycle.
-    LoopCycle {
-        /// Loop id involved in the cycle.
-        loop_id: String,
+    /// Recursive flow references contain a cycle.
+    FlowCycle {
+        /// Flow id involved in the cycle.
+        flow_id: String,
     },
-    /// Recursive loop references exceed the nesting cap.
-    LoopDepthExceeded {
-        /// Loop id where the cap was exceeded.
-        loop_id: String,
+    /// Recursive flow references exceed the nesting cap.
+    FlowDepthExceeded {
+        /// Flow id where the cap was exceeded.
+        flow_id: String,
         /// Observed nesting depth.
         depth: usize,
         /// Maximum allowed nesting depth.
         max: usize,
     },
-    /// One Loop declares more direct runtime subloop invocations than allowed.
-    LoopFanoutExceeded {
-        /// Loop whose direct subloop list exceeded the cap.
-        loop_id: String,
-        /// Observed direct subloop invocation count.
+    /// One Flow declares more direct runtime subflow invocations than allowed.
+    FlowFanoutExceeded {
+        /// Flow whose direct subflow list exceeded the cap.
+        flow_id: String,
+        /// Observed direct subflow invocation count.
         count: usize,
-        /// Maximum allowed direct subloop invocation count.
+        /// Maximum allowed direct subflow invocation count.
         max: usize,
     },
     /// Semantic validation failed.
@@ -208,22 +208,22 @@ impl fmt::Display for RegistryError {
                 f,
                 "{from_kind} {from_id} references missing {reference_kind} {reference}"
             ),
-            Self::LoopCycle { loop_id } => write!(f, "loop cycle includes {loop_id}"),
-            Self::LoopDepthExceeded {
-                loop_id,
+            Self::FlowCycle { flow_id } => write!(f, "flow cycle includes {flow_id}"),
+            Self::FlowDepthExceeded {
+                flow_id,
                 depth,
                 max,
             } => write!(
                 f,
-                "loop nesting depth {depth} for {loop_id} exceeds max {max}"
+                "flow nesting depth {depth} for {flow_id} exceeds max {max}"
             ),
-            Self::LoopFanoutExceeded {
-                loop_id,
+            Self::FlowFanoutExceeded {
+                flow_id,
                 count,
                 max,
             } => write!(
                 f,
-                "loop subloop fan-out {count} for {loop_id} exceeds max {max}"
+                "flow subflow fan-out {count} for {flow_id} exceeds max {max}"
             ),
             Self::Semantic(err) => write!(f, "{err}"),
             Self::CanonicalJson(err) => {
@@ -251,9 +251,9 @@ impl std::error::Error for RegistryError {
             | Self::DuplicateName { .. }
             | Self::AmbiguousReference { .. }
             | Self::MissingReference { .. }
-            | Self::LoopCycle { .. }
-            | Self::LoopDepthExceeded { .. }
-            | Self::LoopFanoutExceeded { .. } => None,
+            | Self::FlowCycle { .. }
+            | Self::FlowDepthExceeded { .. }
+            | Self::FlowFanoutExceeded { .. } => None,
         }
     }
 }
@@ -295,10 +295,10 @@ pub enum SemanticValidationError {
         /// Tool id.
         tool_id: String,
     },
-    /// A loop definition violates its semantic constraints.
-    InvalidLoopDefinition {
-        /// Loop id.
-        loop_id: String,
+    /// A flow definition violates its semantic constraints.
+    InvalidFlowDefinition {
+        /// Flow id.
+        flow_id: String,
         /// Rejection reason.
         message: String,
     },
@@ -327,8 +327,8 @@ impl fmt::Display for SemanticValidationError {
             Self::InvalidCanonicalCidr { cidr, tool_id } => {
                 write!(f, "invalid canonical CIDR for tool {tool_id}: {cidr}")
             }
-            Self::InvalidLoopDefinition { loop_id, message } => {
-                write!(f, "invalid loop definition {loop_id}: {message}")
+            Self::InvalidFlowDefinition { flow_id, message } => {
+                write!(f, "invalid flow definition {flow_id}: {message}")
             }
         }
     }

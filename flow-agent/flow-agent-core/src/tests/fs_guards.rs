@@ -127,7 +127,7 @@ fn live_reader_stays_bound_to_the_opened_session_directory() {
         1,
         EventClock::fixed_fixture().timestamp(1),
         "flow-agent-cli",
-        serde_json::json!({"loop_definition_id":"hello-loop"}),
+        serde_json::json!({"flow_definition_id":"hello-flow"}),
     );
     fs::write(
         reservation.session_path.diagnostic_path(),
@@ -140,7 +140,7 @@ fn live_reader_stays_bound_to_the_opened_session_directory() {
     fs::rename(&session_dir, &moved_session_dir).expect("session directory moved");
     symlink(&outside, &session_dir).expect("replacement session symlink created");
     let mut outside_event = event.clone();
-    outside_event.payload = serde_json::json!({"loop_definition_id":"outside"});
+    outside_event.payload = serde_json::json!({"flow_definition_id":"outside"});
     fs::write(
         outside.join("reader001.jsonl"),
         outside_event

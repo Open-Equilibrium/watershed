@@ -1,16 +1,16 @@
 impl ResolvedRegistry {
-    fn load_for_loop_with_limits(
+    fn load_for_flow_with_limits(
         workspace: &Path,
         registry_root: &Path,
-        loop_reference: &str,
+        flow_reference: &str,
         max_file_bytes: u64,
         max_total_bytes: u64,
         max_active_bytes: u64,
     ) -> Result<Self, RegistryError> {
-        Self::load_for_loop_with_all_limits(
+        Self::load_for_flow_with_all_limits(
             workspace,
             registry_root,
-            loop_reference,
+            flow_reference,
             max_active_bytes,
             RegistryTraversalLimits {
                 max_file_bytes,
@@ -21,10 +21,10 @@ impl ResolvedRegistry {
         )
     }
 
-    fn load_for_loop_with_all_limits(
+    fn load_for_flow_with_all_limits(
         workspace: &Path,
         registry_root: &Path,
-        loop_reference: &str,
+        flow_reference: &str,
         max_active_bytes: u64,
         limits: RegistryTraversalLimits,
     ) -> Result<Self, RegistryError> {
@@ -60,8 +60,8 @@ impl ResolvedRegistry {
             catalog.insert(&block, file.clone())?;
         }
 
-        let root_loop = catalog.require("loop", loop_reference, "registry", "root")?;
-        let mut pending = vec![(root_loop.kind, root_loop.identity.id.clone())];
+        let root_flow = catalog.require("flow", flow_reference, "registry", "root")?;
+        let mut pending = vec![(root_flow.kind, root_flow.identity.id.clone())];
         let mut loaded = BTreeSet::new();
         let mut active_bytes = 0u64;
         let mut blocks = Vec::new();
@@ -106,7 +106,7 @@ impl ResolvedRegistry {
         let mut registry = Self {
             connections: BTreeMap::new(),
             instructions: BTreeMap::new(),
-            loops: BTreeMap::new(),
+            flows: BTreeMap::new(),
             phases: BTreeMap::new(),
             tools: BTreeMap::new(),
             name_ids: BTreeMap::new(),
@@ -180,24 +180,24 @@ impl ResolvedRegistry {
             connection.to_ref =
                 self.canonical_endpoint_reference(&connection.to_ref, &connection.identity.id)?;
         }
-        for loop_block in canonical.loops.values_mut() {
-            for reference in &mut loop_block.phase_refs {
+        for flow_block in canonical.flows.values_mut() {
+            for reference in &mut flow_block.phase_refs {
                 *reference = self
-                    .require_phase(reference, "loop", &loop_block.identity.id)?
+                    .require_phase(reference, "flow", &flow_block.identity.id)?
                     .identity
                     .id
                     .clone();
             }
-            for reference in &mut loop_block.subloop_refs {
+            for reference in &mut flow_block.subflow_refs {
                 *reference = self
-                    .require_loop(reference, "loop", &loop_block.identity.id)?
+                    .require_flow(reference, "flow", &flow_block.identity.id)?
                     .identity
                     .id
                     .clone();
             }
-            for reference in &mut loop_block.connection_refs {
+            for reference in &mut flow_block.connection_refs {
                 *reference = self
-                    .require_connection(reference, "loop", &loop_block.identity.id)?
+                    .require_connection(reference, "flow", &flow_block.identity.id)?
                     .identity
                     .id
                     .clone();
@@ -220,7 +220,7 @@ impl ResolvedRegistry {
                     .map(|block| &block.identity)
             })
             .or_else(|| self.phase_block(reference).map(|block| &block.identity))
-            .or_else(|| self.loop_block(reference).map(|block| &block.identity));
+            .or_else(|| self.flow_block(reference).map(|block| &block.identity));
         if let Some(identity) = direct_target {
             return Ok(if self.direct_endpoint_match_count(&identity.id) == 1 {
                 identity.id.clone()
@@ -241,9 +241,9 @@ impl ResolvedRegistry {
         })
     }
 
-    /// Resolves a loop by id or unambiguous name.
-    pub fn loop_block(&self, reference: &str) -> Option<&LoopBlock> {
-        self.named_block("loop", reference, &self.loops)
+    /// Resolves a flow by id or unambiguous name.
+    pub fn flow_block(&self, reference: &str) -> Option<&FlowBlock> {
+        self.named_block("flow", reference, &self.flows)
     }
 
     /// Resolves a phase by id or unambiguous name.
@@ -320,10 +320,10 @@ impl ResolvedRegistry {
                 name_ids,
                 block,
             ),
-            RegistryBlock::Loop(block) => insert_named_block(
-                "loop",
+            RegistryBlock::Flow(block) => insert_named_block(
+                "flow",
                 block.identity.clone(),
-                &mut self.loops,
+                &mut self.flows,
                 name_ids,
                 block,
             ),
@@ -364,32 +364,32 @@ impl ResolvedRegistry {
             self.require_endpoint(&connection.to_ref, &connection.identity.id)?;
         }
 
-        for loop_block in self.loops.values() {
-            for reference in &loop_block.phase_refs {
-                self.require_phase(reference, "loop", &loop_block.identity.id)?;
+        for flow_block in self.flows.values() {
+            for reference in &flow_block.phase_refs {
+                self.require_phase(reference, "flow", &flow_block.identity.id)?;
             }
-            for reference in &loop_block.subloop_refs {
-                self.require_loop(reference, "loop", &loop_block.identity.id)?;
+            for reference in &flow_block.subflow_refs {
+                self.require_flow(reference, "flow", &flow_block.identity.id)?;
             }
-            let loop_connection_ids = loop_block
+            let flow_connection_ids = flow_block
                 .connection_refs
                 .iter()
                 .map(|reference| {
-                    self.require_connection(reference, "loop", &loop_block.identity.id)
+                    self.require_connection(reference, "flow", &flow_block.identity.id)
                         .map(|connection| connection.identity.id.as_str())
                 })
                 .collect::<Result<BTreeSet<_>, RegistryError>>()?;
 
-            for phase_ref in &loop_block.phase_refs {
-                let phase = self.require_phase(phase_ref, "loop", &loop_block.identity.id)?;
+            for phase_ref in &flow_block.phase_refs {
+                let phase = self.require_phase(phase_ref, "flow", &flow_block.identity.id)?;
                 for step in &phase.steps {
                     for connection_ref in &step.connection_refs {
                         let connection =
                             self.require_connection(connection_ref, "step", &step.id)?;
-                        if !loop_connection_ids.contains(connection.identity.id.as_str()) {
+                        if !flow_connection_ids.contains(connection.identity.id.as_str()) {
                             return Err(RegistryError::MissingReference {
-                                from_kind: "loop",
-                                from_id: loop_block.identity.id.clone(),
+                                from_kind: "flow",
+                                from_id: flow_block.identity.id.clone(),
                                 reference_kind: "step connection",
                                 reference: connection_ref.clone(),
                             });
@@ -399,7 +399,7 @@ impl ResolvedRegistry {
             }
         }
 
-        self.validate_loop_cycles()
+        self.validate_flow_cycles()
     }
 
     fn require_tool(
@@ -447,17 +447,17 @@ impl ResolvedRegistry {
             })
     }
 
-    fn require_loop(
+    fn require_flow(
         &self,
         reference: &str,
         from_kind: &'static str,
         from_id: &str,
-    ) -> Result<&LoopBlock, RegistryError> {
-        self.loop_block(reference)
+    ) -> Result<&FlowBlock, RegistryError> {
+        self.flow_block(reference)
             .ok_or_else(|| RegistryError::MissingReference {
                 from_kind,
                 from_id: from_id.to_owned(),
-                reference_kind: "loop",
+                reference_kind: "flow",
                 reference: reference.to_owned(),
             })
     }
@@ -517,88 +517,88 @@ impl ResolvedRegistry {
             self.tool_block(reference).is_some(),
             self.instruction_block(reference).is_some(),
             self.phase_block(reference).is_some(),
-            self.loop_block(reference).is_some(),
+            self.flow_block(reference).is_some(),
         ]
         .into_iter()
         .filter(|matched| *matched)
         .count()
     }
 
-    fn validate_loop_cycles(&self) -> Result<(), RegistryError> {
+    fn validate_flow_cycles(&self) -> Result<(), RegistryError> {
         // WHY: keep the visited cache for the whole registry validation pass so duplicated
-        // subloop tails are validated once without changing duplicate execution semantics.
-        let mut visited = BTreeMap::<String, LoopTailDepth>::new();
-        for loop_id in self.loops.keys() {
+        // subflow tails are validated once without changing duplicate execution semantics.
+        let mut visited = BTreeMap::<String, FlowTailDepth>::new();
+        for flow_id in self.flows.keys() {
             let mut visiting = BTreeSet::new();
-            self.visit_loop(loop_id, 1, &mut visiting, &mut visited)?;
+            self.visit_flow(flow_id, 1, &mut visiting, &mut visited)?;
         }
         Ok(())
     }
 
-    fn visit_loop(
+    fn visit_flow(
         &self,
-        loop_id: &str,
+        flow_id: &str,
         depth: usize,
         visiting: &mut BTreeSet<String>,
-        visited: &mut BTreeMap<String, LoopTailDepth>,
+        visited: &mut BTreeMap<String, FlowTailDepth>,
     ) -> Result<(), RegistryError> {
-        if depth > MAX_LOOP_NESTING_DEPTH {
-            return Err(RegistryError::LoopDepthExceeded {
-                loop_id: loop_id.to_owned(),
+        if depth > MAX_FLOW_NESTING_DEPTH {
+            return Err(RegistryError::FlowDepthExceeded {
+                flow_id: flow_id.to_owned(),
                 depth,
-                max: MAX_LOOP_NESTING_DEPTH,
+                max: MAX_FLOW_NESTING_DEPTH,
             });
         }
-        if let Some(tail) = visited.get(loop_id) {
+        if let Some(tail) = visited.get(flow_id) {
             let resolved_depth = depth + tail.depth - 1;
-            if resolved_depth > MAX_LOOP_NESTING_DEPTH {
-                return Err(RegistryError::LoopDepthExceeded {
-                    loop_id: tail.deepest_loop_id.clone(),
+            if resolved_depth > MAX_FLOW_NESTING_DEPTH {
+                return Err(RegistryError::FlowDepthExceeded {
+                    flow_id: tail.deepest_flow_id.clone(),
                     depth: resolved_depth,
-                    max: MAX_LOOP_NESTING_DEPTH,
+                    max: MAX_FLOW_NESTING_DEPTH,
                 });
             }
             return Ok(());
         }
-        if !visiting.insert(loop_id.to_owned()) {
-            return Err(RegistryError::LoopCycle {
-                loop_id: loop_id.to_owned(),
+        if !visiting.insert(flow_id.to_owned()) {
+            return Err(RegistryError::FlowCycle {
+                flow_id: flow_id.to_owned(),
             });
         }
 
-        let loop_block = self.require_loop(loop_id, "loop", loop_id)?;
-        if loop_block.subloop_refs.len() > MAX_LOOP_FANOUT {
-            return Err(RegistryError::LoopFanoutExceeded {
-                loop_id: loop_id.to_owned(),
-                count: loop_block.subloop_refs.len(),
-                max: MAX_LOOP_FANOUT,
+        let flow_block = self.require_flow(flow_id, "flow", flow_id)?;
+        if flow_block.subflow_refs.len() > MAX_FLOW_FANOUT {
+            return Err(RegistryError::FlowFanoutExceeded {
+                flow_id: flow_id.to_owned(),
+                count: flow_block.subflow_refs.len(),
+                max: MAX_FLOW_FANOUT,
             });
         }
-        let mut tail = LoopTailDepth {
-            deepest_loop_id: loop_id.to_owned(),
+        let mut tail = FlowTailDepth {
+            deepest_flow_id: flow_id.to_owned(),
             depth: 1,
         };
-        for subloop_ref in &loop_block.subloop_refs {
-            let subloop = self.require_loop(subloop_ref, "loop", loop_id)?;
-            self.visit_loop(&subloop.identity.id, depth + 1, visiting, visited)?;
+        for subflow_ref in &flow_block.subflow_refs {
+            let subflow = self.require_flow(subflow_ref, "flow", flow_id)?;
+            self.visit_flow(&subflow.identity.id, depth + 1, visiting, visited)?;
             let child_tail = visited
-                .get(&subloop.identity.id)
-                .expect("visited child loop has tail depth");
+                .get(&subflow.identity.id)
+                .expect("visited child flow has tail depth");
             if child_tail.depth + 1 > tail.depth {
-                tail = LoopTailDepth {
-                    deepest_loop_id: child_tail.deepest_loop_id.clone(),
+                tail = FlowTailDepth {
+                    deepest_flow_id: child_tail.deepest_flow_id.clone(),
                     depth: child_tail.depth + 1,
                 };
             }
         }
 
-        visiting.remove(loop_id);
-        visited.insert(loop_id.to_owned(), tail);
+        visiting.remove(flow_id);
+        visited.insert(flow_id.to_owned(), tail);
         Ok(())
     }
 }
 
-struct LoopTailDepth {
-    deepest_loop_id: String,
+struct FlowTailDepth {
+    deepest_flow_id: String,
     depth: usize,
 }

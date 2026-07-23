@@ -1,5 +1,5 @@
-fn load_test_registry(workspace: &Path, loop_ref: &str) -> core_script::ResolvedRegistry {
-    core_script::load_loop_registry_from_workspace(workspace, Path::new("registry"), loop_ref)
+fn load_test_registry(workspace: &Path, flow_ref: &str) -> core_script::ResolvedRegistry {
+    core_script::load_flow_registry_from_workspace(workspace, Path::new("registry"), flow_ref)
         .expect("fixture registry loads")
 }
 
@@ -70,16 +70,16 @@ fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
 }
 
 fn workspace_at_write_summary_progress_with_existing_output() -> (TempWorkspace, PathBuf) {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let prefix = prefix_through_tool_progress(
-        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        &expected_stream("hello-flow", "hello-flow.jsonl"),
         "write-summary",
     );
-    let path = session_dir.join("hello-loop.jsonl");
+    let path = session_dir.join("hello-flow.jsonl");
     fs::write(&path, prefix).expect("progress prefix written");
-    write_definition_hash_metadata(&workspace, "hello-loop", "hello-loop");
+    write_definition_hash_metadata(&workspace, "hello-flow", "hello-flow");
     fs::create_dir_all(workspace.join("out")).expect("output dir created");
     fs::write(workspace.join("out/summary.txt"), "already-written\n")
         .expect("sentinel summary written");
@@ -106,7 +106,7 @@ fn temp_workspace_survives_until_the_last_thread_owner_drops() {
 }
 
 fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -170,22 +170,22 @@ fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> S
     panic!("missing {event_type} for {tool_id}");
 }
 
-fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: &str) {
-    let registry = load_test_registry(workspace, loop_ref);
-    let loop_block = registry.loop_block(loop_ref).expect("loop exists");
+fn write_definition_hash_metadata(workspace: &Path, session_id: &str, flow_ref: &str) {
+    let registry = load_test_registry(workspace, flow_ref);
+    let flow_block = registry.flow_block(flow_ref).expect("flow exists");
     let registry_json = registry.canonical_json().expect("registry serializes");
-    let loop_json = proto::canonical_json(
-        &serde_json::to_value(loop_block).expect("loop definition converts to JSON"),
+    let flow_json = proto::canonical_json(
+        &serde_json::to_value(flow_block).expect("flow definition converts to JSON"),
     )
-    .expect("loop definition serializes");
+    .expect("flow definition serializes");
     let log_dir = workspace.join(LOCAL_LOG_DIR);
     fs::create_dir_all(&log_dir).expect("log dir created");
     fs::write(
         log_dir.join(format!("{session_id}.log")),
         format!(
-            "registry_hash=sha256:{}\nloop_definition_hash=sha256:{}\nloop_definition_id={loop_ref}\n",
+            "registry_hash=sha256:{}\nflow_definition_hash=sha256:{}\nflow_definition_id={flow_ref}\n",
             sha256_hex(registry_json.as_bytes()),
-            sha256_hex(loop_json.as_bytes())
+            sha256_hex(flow_json.as_bytes())
         ),
     )
     .expect("definition hash metadata written");
@@ -201,16 +201,16 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, loop_ref: 
         .filter(|line| line.contains("\"event_type\":\"message.completed\""))
         .count();
     let config = load_workspace_config(workspace).expect("workspace config loads");
-    let policy = core_policy::compile_policy_artifact(&registry, loop_ref, runtime_policy_target())
+    let policy = core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())
         .expect("runtime policy compiles");
     let mut captured = CapturedRuntime::default();
-    let planned = execute_loop_with_sink(
+    let planned = execute_flow_with_sink(
         workspace,
         &registry,
         &policy,
-        loop_block,
+        flow_block,
         session_id,
-        LoopExecutionOptions::with_stub_model_fixture_profile(
+        FlowExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
             ToolSideEffectMode::DryRun,
             config.stub_model_fixture_profile,
@@ -257,11 +257,11 @@ fn event_line(
     event_type: EventType,
     session_id: &str,
     sequence: u64,
-    loop_id: Option<&str>,
+    flow_id: Option<&str>,
     payload: serde_json::Value,
 ) -> String {
     event_line_with_parent(
-        event_id, event_type, session_id, sequence, loop_id, None, payload,
+        event_id, event_type, session_id, sequence, flow_id, None, payload,
     )
 }
 
@@ -270,13 +270,13 @@ fn event_line_with_parent(
     event_type: EventType,
     session_id: &str,
     sequence: u64,
-    loop_id: Option<&str>,
-    parent_loop_id: Option<&str>,
+    flow_id: Option<&str>,
+    parent_flow_id: Option<&str>,
     payload: serde_json::Value,
 ) -> String {
     EventEnvelope {
-        loop_id: loop_id.map(str::to_owned),
-        parent_loop_id: parent_loop_id.map(str::to_owned),
+        flow_id: flow_id.map(str::to_owned),
+        parent_flow_id: parent_flow_id.map(str::to_owned),
         ..EventEnvelope::new(
             event_id,
             event_type,
@@ -291,25 +291,25 @@ fn event_line_with_parent(
     .expect("event serializes")
 }
 
-fn loop_started_line(event_id: &str, sequence: u64) -> String {
+fn flow_started_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         sequence,
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"smoke-flow"}),
     )
 }
 
-fn loop_completed_line(event_id: &str, sequence: u64) -> String {
+fn flow_completed_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
-        EventType::LoopCompleted,
+        EventType::FlowCompleted,
         "meta001",
         sequence,
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"smoke-flow"}),
     )
 }
 
@@ -319,7 +319,7 @@ fn phase_entered_line(event_id: &str, sequence: u64) -> String {
         EventType::PhaseEntered,
         "meta001",
         sequence,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({
             "instruction_ids": [],
             "phase_id": "phase",
@@ -335,7 +335,7 @@ fn step_started_line(event_id: &str, sequence: u64) -> String {
         EventType::StepStarted,
         "meta001",
         sequence,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({
             "phase_id": "phase",
             "step_id": "step",
@@ -350,7 +350,7 @@ fn step_completed_line(event_id: &str, sequence: u64) -> String {
         EventType::StepCompleted,
         "meta001",
         sequence,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({
             "phase_id": "phase",
             "step_id": "step",
@@ -365,7 +365,7 @@ fn tool_started_line(event_id: &str, sequence: u64) -> String {
         EventType::ToolStarted,
         "meta001",
         sequence,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({
             "allowed_parameters": [],
             "network_access": "deny",
@@ -384,7 +384,7 @@ fn tool_failed_line(event_id: &str, sequence: u64) -> String {
         EventType::ToolFailed,
         "meta001",
         sequence,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({
             "error": "denied",
             "tool_id": "tool",
@@ -482,42 +482,42 @@ impl RuntimeEventSink for FsmTransitionTimings {
 }
 
 fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
-    let workspace = fixture_dir("smoke-loop");
-    let (registry, policy) = fixture_runtime_policy("smoke-loop", "smoke-loop");
-    let root_loop = registry
-        .loop_block("smoke-loop")
-        .ok_or_else(|| RuntimeError::Protocol("smoke-loop fixture is missing".to_owned()))?;
+    let workspace = fixture_dir("smoke-flow");
+    let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
+    let root_flow = registry
+        .flow_block("smoke-flow")
+        .ok_or_else(|| RuntimeError::Protocol("smoke-flow fixture is missing".to_owned()))?;
     let mut timings = FsmTransitionTimings::new();
-    let runtime = execute_loop_with_sink(
+    let runtime = execute_flow_with_sink(
         &workspace,
         &registry,
         &policy,
-        root_loop,
+        root_flow,
         "budget001",
-        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
         Some(&mut timings),
     )?;
     if runtime.failed || timings.nanos.len() != runtime.events.record_count {
         return Err(RuntimeError::Protocol(
-            "smoke-loop transition timing did not cover a successful runtime".to_owned(),
+            "smoke-flow transition timing did not cover a successful runtime".to_owned(),
         ));
     }
     Ok(timings.nanos)
 }
 
-fn loop_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
+fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
     events
         .iter()
         .find(|event| {
-            event.event_type == EventType::LoopStarted
+            event.event_type == EventType::FlowStarted
                 && event
                     .payload
-                    .get("loop_definition_id")
+                    .get("flow_definition_id")
                     .and_then(serde_json::Value::as_str)
                     == Some(definition_id)
         })
-        .and_then(|event| event.loop_id.as_deref())
-        .expect("loop definition starts")
+        .and_then(|event| event.flow_id.as_deref())
+        .expect("flow definition starts")
         .to_owned()
 }
 
@@ -525,7 +525,7 @@ fn emit_noop_dispatch_for_budget(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     policy: RuntimeToolPolicy<'_>,
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
 ) -> Result<usize, RuntimeError> {
     let mut builder = RuntimeEventBuilder::with_clock(
         "dispatchprobe001".to_owned(),
@@ -552,11 +552,11 @@ fn p95_nanos(mut values: Vec<u128>) -> u128 {
 
 fn fixture_runtime_policy(
     fixture: &str,
-    loop_id: &str,
+    flow_id: &str,
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
     let workspace = fixture_dir(fixture);
-    let registry = load_test_registry(&workspace, loop_id);
-    let policy = core_policy::compile_policy_artifact(&registry, loop_id, runtime_policy_target())
+    let registry = load_test_registry(&workspace, flow_id);
+    let policy = core_policy::compile_policy_artifact(&registry, flow_id, runtime_policy_target())
         .expect("fixture policy compiles");
     (registry, policy)
 }

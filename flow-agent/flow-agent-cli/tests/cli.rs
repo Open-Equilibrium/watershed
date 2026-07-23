@@ -140,7 +140,7 @@ fn help_flags_print_usage() {
         assert!(
             String::from_utf8(output.stdout)
                 .expect("stdout should be UTF-8")
-                .starts_with("usage: flow run <loop>"),
+                .starts_with("usage: flow run <flow>"),
             "{flag}"
         );
         assert!(output.stderr.is_empty(), "{flag}");
@@ -159,7 +159,7 @@ fn no_arguments_and_unknown_commands_print_usage_errors() {
         assert!(
             String::from_utf8(output.stderr)
                 .expect("stderr should be UTF-8")
-                .contains("usage: flow run <loop>")
+                .contains("usage: flow run <flow>")
         );
         assert!(output.stdout.is_empty());
     }
@@ -167,17 +167,17 @@ fn no_arguments_and_unknown_commands_print_usage_errors() {
 
 #[test]
 fn invalid_command_arguments_print_usage_errors() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     for (args, expected) in [
         (
-            vec!["run", "smoke-loop", "--emit", "human"],
+            vec!["run", "smoke-flow", "--emit", "human"],
             "unsupported emit mode",
         ),
         (
-            vec!["run", "smoke-loop", "--emit"],
+            vec!["run", "smoke-flow", "--emit"],
             "missing value for --emit",
         ),
-        (vec!["run", "smoke-loop", "--bogus"], "unknown argument"),
+        (vec!["run", "smoke-flow", "--bogus"], "unknown argument"),
         (vec!["sessions", "--bogus"], "unknown argument"),
         (vec!["replay"], "missing session_id"),
     ] {
@@ -196,12 +196,12 @@ fn invalid_command_arguments_print_usage_errors() {
 
 #[test]
 fn registry_diagnostics_escape_terminal_controls() {
-    let workspace = workspace_copy("smoke-loop");
-    let hostile_loop_ref = "missing\u{1b}]0;owned\u{7}";
+    let workspace = workspace_copy("smoke-flow");
+    let hostile_flow_ref = "missing\u{1b}]0;owned\u{7}";
 
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["run", hostile_loop_ref])
+        .args(["run", hostile_flow_ref])
         .output()
         .expect("flow binary should run");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
@@ -219,7 +219,7 @@ fn registry_diagnostics_escape_terminal_controls() {
 
 #[test]
 fn invalid_tail_arguments_print_usage_errors() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     for (args, expected) in [
         (
             vec!["tail", "smoke001", "--emit", "human"],
@@ -258,17 +258,17 @@ fn invalid_tail_arguments_print_usage_errors() {
 
 #[test]
 fn tail_timeout_exits_after_current_non_terminal_prefix() {
-    let fixture = workspace_copy("smoke-loop");
+    let fixture = workspace_copy("smoke-flow");
     let session_dir = fixture.join(".flow/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
-    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    let prefix = expected_stream("smoke-flow", "smoke-flow.jsonl")
         .lines()
         .next()
         .expect("golden has session.started")
         .to_owned()
         + "\n";
-    let session_path = session_dir.join("smoke-loop.jsonl");
-    let lock_path = session_dir.join("smoke-loop.lock");
+    let session_path = session_dir.join("smoke-flow.jsonl");
+    let lock_path = session_dir.join("smoke-flow.lock");
     fs::write(&session_path, &prefix).expect("partial session written");
     fs::write(&lock_path, "").expect("active-session lock written");
 
@@ -276,7 +276,7 @@ fn tail_timeout_exits_after_current_non_terminal_prefix() {
         .current_dir(&fixture)
         .args([
             "tail",
-            "smoke-loop",
+            "smoke-flow",
             "--emit",
             "jsonl",
             "--timeout-ms",
@@ -302,39 +302,39 @@ fn tail_timeout_exits_after_current_non_terminal_prefix() {
 }
 
 #[test]
-fn run_loop_emits_golden_jsonl_and_persists_session_log() {
-    let workspace = workspace_copy("smoke-loop");
+fn run_flow_emits_golden_jsonl_and_persists_session_log() {
+    let workspace = workspace_copy("smoke-flow");
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
 
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
 
-    let expected = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let expected = expected_stream("smoke-flow", "smoke-flow.jsonl");
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         expected
     );
     assert_eq!(
-        fs::read_to_string(workspace.join(".flow/sessions/smoke-loop.jsonl"))
+        fs::read_to_string(workspace.join(".flow/sessions/smoke-flow.jsonl"))
             .expect("session log is written"),
         expected
     );
     assert!(
-        workspace.join(".flow/logs/smoke-loop.log").is_file(),
+        workspace.join(".flow/logs/smoke-flow.log").is_file(),
         "structured run log should be written"
     );
 }
 
 #[test]
 fn closed_stdout_pipe_does_not_panic_for_jsonl_run() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
         .stdout(closed_pipe_stdout())
         .stderr(Stdio::piped())
         .output()
@@ -347,7 +347,7 @@ fn closed_stdout_pipe_does_not_panic_for_jsonl_run() {
 
 #[test]
 fn closed_stderr_pipe_preserves_the_usage_exit_code() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let mut child = flow_command()
         .current_dir(&workspace)
         .arg("chat")
@@ -372,10 +372,10 @@ fn closed_stderr_pipe_preserves_the_usage_exit_code() {
 
 #[test]
 fn replay_tail_and_sessions_read_persisted_event_log() {
-    let fixture = workspace_copy("smoke-loop");
+    let fixture = workspace_copy("smoke-flow");
     let run = flow_command()
         .current_dir(&fixture)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
     assert!(run.status.success());
@@ -383,7 +383,7 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
     for command in ["replay", "tail"] {
         let output = flow_command()
             .current_dir(&fixture)
-            .args([command, "smoke-loop", "--emit", "jsonl"])
+            .args([command, "smoke-flow", "--emit", "jsonl"])
             .output()
             .expect("flow binary should run");
 
@@ -391,7 +391,7 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
         assert!(output.stderr.is_empty(), "{command}");
         assert_eq!(
             String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-            expected_stream("smoke-loop", "smoke-loop.jsonl"),
+            expected_stream("smoke-flow", "smoke-flow.jsonl"),
             "{command}"
         );
     }
@@ -405,28 +405,28 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
     assert!(sessions.status.success());
     assert_eq!(
         String::from_utf8(sessions.stdout).expect("stdout should be UTF-8"),
-        "smoke-loop\n"
+        "smoke-flow\n"
     );
 }
 
 #[test]
 fn tail_no_follow_exits_after_current_non_terminal_prefix() {
-    let fixture = workspace_copy("smoke-loop");
+    let fixture = workspace_copy("smoke-flow");
     let session_dir = fixture.join(".flow/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
-    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    let prefix = expected_stream("smoke-flow", "smoke-flow.jsonl")
         .lines()
         .next()
         .expect("golden has session.started")
         .to_owned()
         + "\n";
-    let lock_path = session_dir.join("smoke-loop.lock");
-    fs::write(session_dir.join("smoke-loop.jsonl"), &prefix).expect("partial session written");
+    let lock_path = session_dir.join("smoke-flow.lock");
+    fs::write(session_dir.join("smoke-flow.jsonl"), &prefix).expect("partial session written");
     fs::write(&lock_path, "").expect("active-session lock written");
 
     let child = flow_command()
         .current_dir(&fixture)
-        .args(["tail", "smoke-loop", "--emit", "jsonl", "--no-follow"])
+        .args(["tail", "smoke-flow", "--emit", "jsonl", "--no-follow"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -444,20 +444,20 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
 
 #[test]
 fn tail_follows_a_growing_session_through_its_terminal_event() {
-    let fixture = workspace_copy("smoke-loop");
+    let fixture = workspace_copy("smoke-flow");
     let session_dir = fixture.join(".flow/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
-    let expected = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let expected = expected_stream("smoke-flow", "smoke-flow.jsonl");
     let split = expected.find('\n').expect("golden has a first event") + 1;
-    let session_path = session_dir.join("smoke-loop.jsonl");
-    let lock_path = session_dir.join("smoke-loop.lock");
+    let session_path = session_dir.join("smoke-flow.jsonl");
+    let lock_path = session_dir.join("smoke-flow.lock");
     fs::write(&session_path, &expected[..split]).expect("initial prefix written");
     fs::write(&lock_path, "").expect("active-session lock written");
     let mut child = flow_command()
         .current_dir(&fixture)
         .args([
             "tail",
-            "smoke-loop",
+            "smoke-flow",
             "--emit",
             "jsonl",
             "--timeout-ms",
@@ -502,17 +502,17 @@ fn tail_follows_a_growing_session_through_its_terminal_event() {
 
 #[test]
 fn closed_stdout_pipe_does_not_fail_for_jsonl_tail() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let run = flow_command()
         .current_dir(&workspace)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
     assert!(run.status.success());
 
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["tail", "smoke-loop", "--emit", "jsonl"])
+        .args(["tail", "smoke-flow", "--emit", "jsonl"])
         .stdout(closed_pipe_stdout())
         .stderr(Stdio::piped())
         .output()
@@ -525,19 +525,19 @@ fn closed_stdout_pipe_does_not_fail_for_jsonl_tail() {
 
 #[test]
 fn resume_rejects_terminal_sessions_without_rewriting_log() {
-    let fixture = workspace_copy("smoke-loop");
+    let fixture = workspace_copy("smoke-flow");
     let run = flow_command()
         .current_dir(&fixture)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
     assert!(run.status.success());
-    let before = fs::read_to_string(fixture.join(".flow/sessions/smoke-loop.jsonl"))
+    let before = fs::read_to_string(fixture.join(".flow/sessions/smoke-flow.jsonl"))
         .expect("session log exists");
 
     let output = flow_command()
         .current_dir(&fixture)
-        .args(["resume", "smoke-loop", "--emit", "jsonl"])
+        .args(["resume", "smoke-flow", "--emit", "jsonl"])
         .output()
         .expect("flow binary should run");
 
@@ -549,7 +549,7 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
     );
     assert!(output.stdout.is_empty());
     assert_eq!(
-        fs::read_to_string(fixture.join(".flow/sessions/smoke-loop.jsonl"))
+        fs::read_to_string(fixture.join(".flow/sessions/smoke-flow.jsonl"))
             .expect("session log exists"),
         before
     );
@@ -557,10 +557,10 @@ fn resume_rejects_terminal_sessions_without_rewriting_log() {
 
 #[test]
 fn resume_partial_session_prints_human_status() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let seed = flow_command()
         .current_dir(&workspace)
-        .args(["run", "smoke-loop", "--emit", "jsonl"])
+        .args(["run", "smoke-flow", "--emit", "jsonl"])
         .output()
         .expect("flow binary should seed metadata");
     assert!(seed.status.success());
@@ -568,17 +568,17 @@ fn resume_partial_session_prints_human_status() {
 
     let session_dir = workspace.join(".flow/sessions");
     fs::create_dir_all(&session_dir).expect("session dir created");
-    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    let prefix = expected_stream("smoke-flow", "smoke-flow.jsonl")
         .lines()
         .take(2)
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    replace_seeded_session_with_prefix(&workspace, "smoke-loop", &prefix);
+    replace_seeded_session_with_prefix(&workspace, "smoke-flow", &prefix);
 
     let output = flow_command()
         .current_dir(&workspace)
-        .args(["resume", "smoke-loop"])
+        .args(["resume", "smoke-flow"])
         .output()
         .expect("flow binary should run");
 
@@ -586,10 +586,10 @@ fn resume_partial_session_prints_human_status() {
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        "session smoke-loop resumed\n"
+        "session smoke-flow resumed\n"
     );
     assert!(
-        fs::read_to_string(session_dir.join("smoke-loop.jsonl"))
+        fs::read_to_string(session_dir.join("smoke-flow.jsonl"))
             .expect("resumed log readable")
             .contains("\"event_type\":\"session.completed\"")
     );
@@ -632,7 +632,7 @@ fn failed_jsonl_resume_exits_with_failed_status() {
 
 #[test]
 fn unsafe_session_id_is_rejected_before_filesystem_access() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let output = flow_command()
         .current_dir(&workspace)
         .args(["replay", "../smoke001", "--emit", "jsonl"])
@@ -649,38 +649,38 @@ fn unsafe_session_id_is_rejected_before_filesystem_access() {
 }
 
 #[test]
-fn chat_hello_command_runs_hello_loop() {
-    let workspace = workspace_copy("hello-loop");
-    let output = run_chat(&workspace, b"/hello-loop\n");
+fn chat_hello_command_runs_hello_flow() {
+    let workspace = workspace_copy("hello-flow");
+    let output = run_chat(&workspace, b"/hello-flow\n");
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
     assert_eq!(
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
-        expected_stream("hello-loop", "hello-loop.jsonl")
+        expected_stream("hello-flow", "hello-flow.jsonl")
     );
 }
 
 #[test]
-fn chat_failed_loop_exits_with_failed_status() {
+fn chat_failed_flow_exits_with_failed_status() {
     let workspace = workspace_copy("sandbox-negative");
     fs::write(
-        workspace.join("registry/loops/hello-loop.yaml"),
-        "loop:\n  id: hello-loop\n  name: HelloLoop\n  phase_refs: [negative-write]\n  subloop_refs: []\n  connection_refs: []\n",
+        workspace.join("registry/flows/hello-flow.yaml"),
+        "flow:\n  id: hello-flow\n  name: HelloFlow\n  phase_refs: [negative-write]\n  subflow_refs: []\n  connection_refs: []\n",
     )
-    .expect("chat loop fixture written");
-    let output = run_chat(&workspace, b"/hello-loop\n");
+    .expect("chat flow fixture written");
+    let output = run_chat(&workspace, b"/hello-flow\n");
 
     assert_eq!(output.status.code(), Some(65));
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
-    assert!(stdout.contains("\"loop_definition_id\":\"hello-loop\""));
+    assert!(stdout.contains("\"flow_definition_id\":\"hello-flow\""));
     assert!(stdout.contains("\"event_type\":\"session.failed\""));
     assert!(!workspace.join("out/forbidden.txt").exists());
 }
 
 #[test]
 fn chat_ignores_blank_input_until_eof() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let output = run_chat(&workspace, b"\n   \n");
 
     assert!(output.status.success());
@@ -690,7 +690,7 @@ fn chat_ignores_blank_input_until_eof() {
 
 #[test]
 fn chat_rejects_unsupported_commands() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let output = run_chat(&workspace, b"/unknown\n");
 
     assert_eq!(output.status.code(), Some(64));
@@ -762,7 +762,7 @@ fn failed_human_commands_report_the_terminal_reason() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     assert_eq!(
         stdout,
-        "loop sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
+        "flow sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
     );
     assert!(!stdout.contains("completed"));
     assert!(

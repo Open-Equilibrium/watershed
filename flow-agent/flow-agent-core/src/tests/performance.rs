@@ -1,17 +1,17 @@
 #[test]
 fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signatures() {
-    let workspace = fixture_dir("hello-loop");
-    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let root_loop = registry
-        .loop_block("hello-loop")
-        .expect("hello-loop fixture exists");
+    let workspace = fixture_dir("hello-flow");
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let root_flow = registry
+        .flow_block("hello-flow")
+        .expect("hello-flow fixture exists");
     let options =
-        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun);
-    let planned = execute_loop(
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun);
+    let planned = execute_flow(
         &workspace,
         &registry,
         &policy,
-        root_loop,
+        root_flow,
         "planchecked001",
         options.clone(),
     )
@@ -31,11 +31,11 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
     other_stream.push(b"bc");
     assert_ne!(original.signature(), mutated.signature());
     assert_ne!(original.signature(), other_stream.signature());
-    let checked = execute_loop(
+    let checked = execute_flow(
         &workspace,
         &registry,
         &policy,
-        root_loop,
+        root_flow,
         "planchecked001",
         options,
     )
@@ -48,17 +48,17 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
 
 #[test]
 #[ignore = "performance gate"]
-fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
+fn hello_flow_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
     let mut notification_nanos = Vec::new();
 
     for _ in 0..5 {
-        let workspace = workspace_copy("hello-loop");
+        let workspace = workspace_copy("hello-flow");
         let mut timings = EventWriterTimings::default();
         let (notifier, _receiver) = live_event_channel();
-        let output = run_loop_internal(
+        let output = run_flow_internal(
             &workspace,
-            "hello-loop",
+            "hello-flow",
             Some(notifier),
             Some(&mut timings),
             false,
@@ -71,23 +71,23 @@ fn hello_loop_runtime_emit_p95_stays_under_m1_budget() {
         notification_nanos.extend(timings.notification_nanos);
     }
 
-    assert_event_writer_p95(append_nanos, notification_nanos, "hello-loop run");
+    assert_event_writer_p95(append_nanos, notification_nanos, "hello-flow run");
 }
 
 #[test]
 #[ignore = "performance gate"]
-fn hello_loop_resume_append_p95_stays_under_m1_budget() {
+fn hello_flow_resume_append_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();
     let mut notification_nanos = Vec::new();
 
     for _ in 0..5 {
-        let workspace = workspace_copy("hello-loop");
+        let workspace = workspace_copy("hello-flow");
         let completed =
-            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop completes");
+            run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("hello-flow completes");
         let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
         let prefix_events = prefix.lines().count();
         fs::write(&completed.session_path, &prefix).expect("partial prefix written");
-        write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop");
+        write_definition_hash_metadata(&workspace, &completed.session_id, "hello-flow");
         fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
         let mut timings = EventWriterTimings::default();
         let (notifier, _receiver) = live_event_channel();
@@ -107,7 +107,7 @@ fn hello_loop_resume_append_p95_stays_under_m1_budget() {
         notification_nanos.extend(timings.notification_nanos);
     }
 
-    assert_event_writer_p95(append_nanos, notification_nanos, "hello-loop resume");
+    assert_event_writer_p95(append_nanos, notification_nanos, "hello-flow resume");
 }
 
 fn assert_event_writer_p95(append_nanos: Vec<u128>, notification_nanos: Vec<u128>, path: &str) {
@@ -168,7 +168,7 @@ fn fsm_transition_p95_stays_under_m1_budget() {
 #[ignore = "performance gate"]
 fn noop_dispatch_p95_stays_under_m1_budget() {
     let workspace = empty_workspace("noop-dispatch-budget");
-    let (registry, policy) = fixture_runtime_policy("smoke-loop", "smoke-loop");
+    let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
     let phase = registry.phase_block("smoke").expect("smoke phase exists");
     let tool = registry.tool_block("echo").expect("echo tool exists");
     let command_policy =
@@ -178,9 +178,9 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
         protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
         stub_model_fixture_profile: true,
     };
-    let invocation = LoopInvocation {
-        loop_id: "loop-001".to_owned(),
-        parent_loop_id: None,
+    let invocation = FlowInvocation {
+        flow_id: "flow-001".to_owned(),
+        parent_flow_id: None,
     };
     let mut nanos = Vec::new();
 
@@ -208,7 +208,7 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
 
 #[test]
 fn shared_workspace_tool_write_parents_are_concurrent_safe() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     fs::remove_dir_all(workspace.join("out")).expect("fixture output dir removed");
 
     for index in 0..10 {
@@ -227,12 +227,12 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
         )
         .expect("phase fixture written");
         fs::write(
-            workspace.join(format!("registry/loops/hello-loop-{index}.yaml")),
+            workspace.join(format!("registry/flows/hello-flow-{index}.yaml")),
             format!(
-                "loop:\n  id: hello-loop-{index}\n  name: HelloLoop{index}\n  phase_refs: [inspect, summarize-{index}]\n  subloop_refs: []\n  connection_refs: [inspect-data, inspect-trigger, summary-refresh]\n"
+                "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n  subflow_refs: []\n  connection_refs: [inspect-data, inspect-trigger, summary-refresh]\n"
             ),
         )
-        .expect("loop fixture written");
+        .expect("flow fixture written");
     }
 
     let barrier = Arc::new(Barrier::new(10));
@@ -242,12 +242,12 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 barrier.wait();
-                run_loop(
+                run_flow(
                     workspace.as_ref(),
-                    &format!("hello-loop-{index}"),
+                    &format!("hello-flow-{index}"),
                     EmitMode::Jsonl,
                 )
-                .expect("shared workspace loop runs")
+                .expect("shared workspace flow runs")
             })
         })
         .collect::<Vec<_>>();
@@ -272,8 +272,8 @@ fn d068_sizing_profile_and_payload_distribution_are_exact() {
     const TOOL_CALLS: u64 = 25_600;
 
     assert_eq!(
-        2 + (2 * MAX_LOOP_INVOCATIONS) + 1_024 + (4 * MODEL_CYCLES) + 100 + (2 * TOOL_CALLS),
-        MAX_LOOP_EVENTS
+        2 + (2 * MAX_FLOW_INVOCATIONS) + 1_024 + (4 * MODEL_CYCLES) + 100 + (2 * TOOL_CALLS),
+        MAX_FLOW_EVENTS
     );
     assert_eq!(SESSIONS * INVOCATIONS_PER_SESSION, 320);
     assert_eq!(SESSIONS * EVENTS_PER_SESSION, 160_000);
@@ -281,7 +281,7 @@ fn d068_sizing_profile_and_payload_distribution_are_exact() {
         (1..=EVENTS_PER_SESSION)
             .filter(|sequence| {
                 synthetic_event_shape(*sequence, EVENTS_PER_SESSION, INVOCATIONS_PER_SESSION).0
-                    == EventType::LoopStarted
+                    == EventType::FlowStarted
             })
             .count(),
         INVOCATIONS_PER_SESSION as usize
@@ -314,15 +314,15 @@ fn d068_sizing_profile_and_payload_distribution_are_exact() {
         let expected_event_id = format!("evt-{sequence:03}");
         assert_eq!(event["event_id"].as_str(), Some(expected_event_id.as_str()));
     }
-    let loop_line = sized_synthetic_event_line_with_loop(
+    let flow_line = sized_synthetic_event_line_with_flow(
         "profile001",
         2,
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         768,
-        Some("loop-001"),
+        Some("flow-001"),
         None,
     );
-    assert_eq!(loop_line.len(), 768);
+    assert_eq!(flow_line.len(), 768);
 }
 
 #[test]
@@ -368,7 +368,7 @@ fn protocol_validation_accepts_exact_event_data_limit_and_rejects_next_byte() {
 #[ignore = "performance gate"]
 fn full_event_cap_replay_stays_within_d068_budgets() {
     let workspace = empty_workspace("d068-full-cap");
-    write_synthetic_session(&workspace, "fullcap001", MAX_LOOP_EVENTS, 0, |_| 288);
+    write_synthetic_session(&workspace, "fullcap001", MAX_FLOW_EVENTS, 0, |_| 288);
     let peak_rss_sampler = PeakRssSampler::start();
     let started = Instant::now();
     let mut reader =
@@ -376,10 +376,10 @@ fn full_event_cap_replay_stays_within_d068_budgets() {
     let events = reader.read_after(0).expect("full-cap session replays");
     let elapsed = started.elapsed();
 
-    assert_eq!(events.len(), MAX_LOOP_EVENTS as usize);
+    assert_eq!(events.len(), MAX_FLOW_EVENTS as usize);
     assert_eq!(
         events.last().map(|event| event.sequence),
-        Some(MAX_LOOP_EVENTS)
+        Some(MAX_FLOW_EVENTS)
     );
     assert_duration_budget(elapsed, 10, "full-cap initial replay");
     assert_peak_rss_growth_budget(peak_rss_sampler, 256, "full-cap initial replay");
@@ -389,7 +389,7 @@ fn full_event_cap_replay_stays_within_d068_budgets() {
 #[ignore = "performance gate"]
 fn full_event_cap_inspection_stays_within_d068_budgets() {
     let workspace = empty_workspace("d068-inspection");
-    write_synthetic_session(&workspace, "inspection001", MAX_LOOP_EVENTS, 0, |_| 288);
+    write_synthetic_session(&workspace, "inspection001", MAX_FLOW_EVENTS, 0, |_| 288);
     let sessions = open_runtime_dir(&workspace, "sessions")
         .expect("sessions dir opens")
         .expect("sessions dir exists");
@@ -398,7 +398,7 @@ fn full_event_cap_inspection_stays_within_d068_budgets() {
     let started = Instant::now();
     let inspection =
         inspect_resume_session(&session_path, "inspection001").expect("full-cap session inspects");
-    assert_eq!(inspection.validation.line_count, MAX_LOOP_EVENTS as usize);
+    assert_eq!(inspection.validation.line_count, MAX_FLOW_EVENTS as usize);
     assert!(inspection.prefix_metadata_valid);
     assert_eq!(inspection.last_event_type, EventType::SessionCompleted);
     assert_duration_budget(started.elapsed(), 15, "full-cap full-session inspection");
@@ -483,7 +483,7 @@ fn representative_ten_session_storage_workload_stays_within_d068_budgets() {
         assert_eq!(
             events
                 .iter()
-                .filter(|event| event.event_type == EventType::LoopStarted)
+                .filter(|event| event.event_type == EventType::FlowStarted)
                 .count(),
             32
         );
@@ -510,14 +510,14 @@ fn ten_full_event_cap_sessions_are_stable_with_small_payloads() {
     let workspace = empty_workspace("d068-stability");
     for index in 0..10 {
         let session_id = format!("stability{index:02}");
-        write_synthetic_session(&workspace, &session_id, MAX_LOOP_EVENTS, 0, |_| 288);
+        write_synthetic_session(&workspace, &session_id, MAX_FLOW_EVENTS, 0, |_| 288);
     }
     for index in 0..10 {
         let session_id = format!("stability{index:02}");
         let mut reader = SessionEventReader::open(&workspace, &session_id).expect("session opens");
         assert_eq!(
             reader.read_after(0).expect("session replays").len(),
-            MAX_LOOP_EVENTS as usize
+            MAX_FLOW_EVENTS as usize
         );
         drop(reader);
     }
@@ -538,7 +538,7 @@ fn write_synthetic_session(
     workspace: &Path,
     session_id: &str,
     event_count: u64,
-    loop_invocations: u64,
+    flow_invocations: u64,
     target_bytes: impl Fn(u64) -> usize,
 ) {
     let reservation = reserve_session_log(workspace, session_id).expect("session reserved");
@@ -548,17 +548,17 @@ fn write_synthetic_session(
             SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
         for index in 0..event_count {
             let sequence = index + 1;
-            let (event_type, loop_number, parent_loop_number) =
-                synthetic_event_shape(sequence, event_count, loop_invocations);
-            let loop_id = loop_number.map(|number| format!("loop-{number:03}"));
-            let parent_loop_id = parent_loop_number.map(|number| format!("loop-{number:03}"));
-            let line = sized_synthetic_event_line_with_loop(
+            let (event_type, flow_number, parent_flow_number) =
+                synthetic_event_shape(sequence, event_count, flow_invocations);
+            let flow_id = flow_number.map(|number| format!("flow-{number:03}"));
+            let parent_flow_id = parent_flow_number.map(|number| format!("flow-{number:03}"));
+            let line = sized_synthetic_event_line_with_flow(
                 session_id,
                 sequence,
                 event_type,
                 target_bytes(index),
-                loop_id.as_deref(),
-                parent_loop_id.as_deref(),
+                flow_id.as_deref(),
+                parent_flow_id.as_deref(),
             );
             appender
                 .append(&path, line.as_bytes())
@@ -573,11 +573,11 @@ fn write_synthetic_session(
 fn synthetic_event_shape(
     sequence: u64,
     event_count: u64,
-    loop_invocations: u64,
+    flow_invocations: u64,
 ) -> (EventType, Option<u64>, Option<u64>) {
     assert!(
-        loop_invocations == 0 || event_count > 2 * loop_invocations + 1,
-        "synthetic session must leave room for its Loop lifecycles and terminal event"
+        flow_invocations == 0 || event_count > 2 * flow_invocations + 1,
+        "synthetic session must leave room for its Flow lifecycles and terminal event"
     );
     if sequence == 1 {
         return (EventType::SessionStarted, None, None);
@@ -585,23 +585,23 @@ fn synthetic_event_shape(
     if sequence == event_count {
         return (EventType::SessionCompleted, None, None);
     }
-    if loop_invocations == 0 {
+    if flow_invocations == 0 {
         return (EventType::MetricSample, None, None);
     }
     if sequence == 2 {
-        return (EventType::LoopStarted, Some(1), None);
+        return (EventType::FlowStarted, Some(1), None);
     }
-    if sequence <= 2 * loop_invocations {
+    if sequence <= 2 * flow_invocations {
         let child = ((sequence - 3) / 2) + 2;
         let event_type = if sequence % 2 == 1 {
-            EventType::LoopStarted
+            EventType::FlowStarted
         } else {
-            EventType::LoopCompleted
+            EventType::FlowCompleted
         };
         return (event_type, Some(child), Some(1));
     }
-    if sequence == 2 * loop_invocations + 1 {
-        return (EventType::LoopCompleted, Some(1), None);
+    if sequence == 2 * flow_invocations + 1 {
+        return (EventType::FlowCompleted, Some(1), None);
     }
     (EventType::MetricSample, None, None)
 }
@@ -612,16 +612,16 @@ fn sized_synthetic_event_line(
     event_type: EventType,
     target_bytes: usize,
 ) -> String {
-    sized_synthetic_event_line_with_loop(session_id, sequence, event_type, target_bytes, None, None)
+    sized_synthetic_event_line_with_flow(session_id, sequence, event_type, target_bytes, None, None)
 }
 
-fn sized_synthetic_event_line_with_loop(
+fn sized_synthetic_event_line_with_flow(
     session_id: &str,
     sequence: u64,
     event_type: EventType,
     target_bytes: usize,
-    loop_id: Option<&str>,
-    parent_loop_id: Option<&str>,
+    flow_id: Option<&str>,
+    parent_flow_id: Option<&str>,
 ) -> String {
     let payload = match event_type {
         EventType::MetricSample => serde_json::json!({
@@ -632,12 +632,12 @@ fn sized_synthetic_event_line_with_loop(
         EventType::SessionStarted | EventType::SessionCompleted => {
             serde_json::json!({"padding":""})
         }
-        EventType::LoopStarted | EventType::LoopCompleted => serde_json::json!({
-            "loop_definition_id": "d068-synthetic-loop",
-            "loop_name": "D068SyntheticLoop",
+        EventType::FlowStarted | EventType::FlowCompleted => serde_json::json!({
+            "flow_definition_id": "d068-synthetic-flow",
+            "flow_name": "D068SyntheticFlow",
             "padding": "",
         }),
-        _ => unreachable!("synthetic profiles use only session, Loop, and metric events"),
+        _ => unreachable!("synthetic profiles use only session, Flow, and metric events"),
     };
     let mut event = EventEnvelope::new(
         format!("evt-{sequence:03}"),
@@ -648,8 +648,8 @@ fn sized_synthetic_event_line_with_loop(
         "flow-agent-perf",
         payload,
     );
-    event.loop_id = loop_id.map(str::to_owned);
-    event.parent_loop_id = parent_loop_id.map(str::to_owned);
+    event.flow_id = flow_id.map(str::to_owned);
+    event.parent_flow_id = parent_flow_id.map(str::to_owned);
     let base = event.canonical_jsonl().expect("synthetic event serializes");
     assert!(
         base.len() <= target_bytes,

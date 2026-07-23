@@ -103,10 +103,10 @@ fn dispatch_with_workspace(
 
     match command {
         "run" => {
-            let loop_ref = positional(args, 1, "loop name")?;
+            let flow_ref = positional(args, 1, "flow name")?;
             let emit = emit_mode(args)?;
             let workspace = workspace()?;
-            let output = run_command(&workspace, loop_ref, emit)?;
+            let output = run_command(&workspace, flow_ref, emit)?;
             Ok(command_exit_code(output.failed))
         }
         "replay" => {
@@ -163,8 +163,8 @@ fn chat(workspace: PathBuf) -> Result<ExitCode, RuntimeError> {
             source,
         })?;
         match line.trim() {
-            "/hello-loop" | "hello" => {
-                let output = run_command(&workspace, "hello-loop", EmitMode::Jsonl)?;
+            "/hello-flow" | "hello" => {
+                let output = run_command(&workspace, "hello-flow", EmitMode::Jsonl)?;
                 return Ok(command_exit_code(output.failed));
             }
             "" => {}
@@ -184,19 +184,19 @@ fn command_exit_code(failed: bool) -> ExitCode {
 
 fn run_command(
     workspace: &Path,
-    loop_ref: &str,
+    flow_ref: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
     if emit == EmitMode::Human {
-        let output = flow_agent_core::run_loop(workspace, loop_ref, emit)?;
+        let output = flow_agent_core::run_flow(workspace, flow_ref, emit)?;
         write_stdout(&output.stdout)?;
         return Ok(output);
     }
     let workspace = workspace.to_owned();
     let operation_workspace = workspace.clone();
-    let loop_ref = loop_ref.to_owned();
+    let flow_ref = flow_ref.to_owned();
     stream_live_operation(workspace, None, move |notifier| {
-        flow_agent_core::run_loop_with_live_events(operation_workspace, &loop_ref, notifier)
+        flow_agent_core::run_flow_with_live_events(operation_workspace, &flow_ref, notifier)
     })
 }
 
@@ -569,7 +569,7 @@ fn os_string_to_string(value: OsString) -> Result<String, &'static str> {
 }
 
 fn usage() -> String {
-    "usage: flow run <loop> [--emit jsonl] | flow replay <session_id> [--emit jsonl] | flow tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | flow resume <session_id> [--emit jsonl] | flow sessions | flow chat".to_owned()
+    "usage: flow run <flow> [--emit jsonl] | flow replay <session_id> [--emit jsonl] | flow tail <session_id> [--emit jsonl] [--no-follow] [--timeout-ms N] | flow resume <session_id> [--emit jsonl] | flow sessions | flow chat".to_owned()
 }
 
 #[cfg(test)]
@@ -630,8 +630,8 @@ mod tests {
 
     #[test]
     fn live_drain_catches_up_to_the_joined_operation_boundary() {
-        let workspace = test_support::workspace_copy("smoke-loop");
-        let output = flow_agent_core::run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+        let workspace = test_support::workspace_copy("smoke-flow");
+        let output = flow_agent_core::run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
             .expect("fixture session runs");
         assert!(output.event_count > 3);
         let mut reader = SessionEventReader::open(&workspace, &output.session_id)

@@ -2,7 +2,7 @@ fn emit_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     policy: RuntimeToolPolicy<'_>,
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {

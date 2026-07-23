@@ -8,17 +8,17 @@ const POLICY_TARGETS: [PolicyTarget; 2] = [
     PolicyTarget::MacosSeatbelt,
 ];
 
-fn fixture_registry(fixture: &str, loop_ref: &str) -> core_script::ResolvedRegistry {
+fn fixture_registry(fixture: &str, flow_ref: &str) -> core_script::ResolvedRegistry {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../flow-agent/fixtures")
         .join(fixture);
-    core_script::load_loop_registry_from_workspace(&workspace, Path::new("registry"), loop_ref)
+    core_script::load_flow_registry_from_workspace(&workspace, Path::new("registry"), flow_ref)
         .expect("fixture registry loads")
 }
 
 #[test]
 fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
-    for fixture in ["smoke-loop", "hello-loop"] {
+    for fixture in ["smoke-flow", "hello-flow"] {
         let registry = fixture_registry(fixture, fixture);
 
         let expected = fs::read_to_string(
@@ -51,26 +51,26 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
 }
 
 #[test]
-fn policy_compiler_reports_a_missing_root_loop() {
-    let registry = fixture_registry("smoke-loop", "smoke-loop");
+fn policy_compiler_reports_a_missing_root_flow() {
+    let registry = fixture_registry("smoke-flow", "smoke-flow");
 
     let err = compile_policy_artifact(
         &registry,
-        "missing-loop",
+        "missing-flow",
         PolicyTarget::LinuxLandlockSeccomp,
     )
-    .expect_err("missing root loop must fail");
+    .expect_err("missing root flow must fail");
 
     assert_eq!(
         err.to_string(),
-        "policy compile references missing loop missing-loop"
+        "policy compile references missing flow missing-flow"
     );
 }
 
 fn smoke_registry_with_tool(
     update: impl FnOnce(&mut core_script::ToolBlock),
 ) -> core_script::ResolvedRegistry {
-    let source = fixture_registry("smoke-loop", "smoke-loop");
+    let source = fixture_registry("smoke-flow", "smoke-flow");
     let mut tool = source.tool_block("echo").expect("echo tool exists").clone();
     update(&mut tool);
     let mut phase = source
@@ -81,10 +81,10 @@ fn smoke_registry_with_tool(
     core_script::ResolvedRegistry::from_blocks([
         core_script::RegistryBlock::Tool(tool),
         core_script::RegistryBlock::Phase(phase),
-        core_script::RegistryBlock::Loop(
+        core_script::RegistryBlock::Flow(
             source
-                .loop_block("smoke-loop")
-                .expect("smoke loop exists")
+                .flow_block("smoke-flow")
+                .expect("smoke flow exists")
                 .clone(),
         ),
     ])
@@ -105,7 +105,7 @@ fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
         };
     });
 
-    let err = compile_policy_artifact(&registry, "smoke-loop", PolicyTarget::LinuxLandlockSeccomp)
+    let err = compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::LinuxLandlockSeccomp)
         .expect_err("network allowlist is rejected");
 
     assert!(matches!(
@@ -128,7 +128,7 @@ fn policy_compiler_preserves_macos_network_allowlists() {
         };
     });
 
-    let artifact = compile_policy_artifact(&registry, "smoke-loop", PolicyTarget::MacosSeatbelt)
+    let artifact = compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::MacosSeatbelt)
         .expect("macOS policy artifacts may carry reviewed CIDR allowlists");
 
     assert_eq!(artifact.target, PolicyTarget::MacosSeatbelt);
@@ -153,7 +153,7 @@ fn policy_compiler_rejects_unknown_predefined_commands() {
         };
     });
 
-    let err = compile_policy_artifact(&registry, "smoke-loop", PolicyTarget::LinuxLandlockSeccomp)
+    let err = compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::LinuxLandlockSeccomp)
         .expect_err("unknown predefined command must fail closed");
 
     assert!(err.to_string().contains("unknown trusted command"), "{err}");
@@ -596,7 +596,7 @@ fn expected_decision_fixtures_are_canonical_and_match_compiled_policies() {
             let artifact =
                 compile_policy_artifact(&registry, &expected.fixture_name, target.clone())
                     .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
-            assert_eq!(artifact.source_loop_definition_id, expected.fixture_name);
+            assert_eq!(artifact.source_flow_definition_id, expected.fixture_name);
             assert_eq!(artifact.target, target);
             assert_attempt_denied(&artifact, attempt);
         }
@@ -1012,7 +1012,7 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
             headless: true,
             timeout_ms: 1000,
         },
-        source_loop_definition_id: "sort-loop".to_owned(),
+        source_flow_definition_id: "sort-flow".to_owned(),
         target: PolicyTarget::LinuxLandlockSeccomp,
     };
 
@@ -1168,7 +1168,7 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
             headless: true,
             timeout_ms: 1000,
         },
-        source_loop_definition_id: format!("{tool_id}-loop"),
+        source_flow_definition_id: format!("{tool_id}-flow"),
         target: PolicyTarget::LinuxLandlockSeccomp,
     }
 }

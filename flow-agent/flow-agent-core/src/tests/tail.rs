@@ -96,16 +96,16 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
 
 #[test]
 fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
-    let workspace = workspace_copy("smoke-loop");
-    let reservation = reserve_session_log(&workspace, "smoke-loop").expect("session reserved");
-    let stream = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let workspace = workspace_copy("smoke-flow");
+    let reservation = reserve_session_log(&workspace, "smoke-flow").expect("session reserved");
+    let stream = expected_stream("smoke-flow", "smoke-flow.jsonl");
     let without_trailing_lf = stream.strip_suffix('\n').expect("fixture ends with LF");
     let (prefix, terminal) = without_trailing_lf
         .rsplit_once('\n')
         .map(|(prefix, terminal)| (format!("{prefix}\n"), format!("{terminal}\n")))
         .expect("fixture has a terminal event");
     fs::write(reservation.session_path.diagnostic_path(), prefix).expect("prefix written");
-    let mut reader = SessionEventReader::open(&workspace, "smoke-loop").expect("reader opens");
+    let mut reader = SessionEventReader::open(&workspace, "smoke-flow").expect("reader opens");
     let initial = reader.read_after(0).expect("prefix reads");
     let cursor = initial.last().expect("prefix has events").sequence;
     let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path");

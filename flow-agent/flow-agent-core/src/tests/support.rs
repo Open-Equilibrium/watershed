@@ -11,7 +11,7 @@ use std::{
 
 static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-impl LoopExecutionOptions {
+impl FlowExecutionOptions {
     fn new(clock: EventClock, side_effect_mode: ToolSideEffectMode) -> Self {
         Self::with_stub_model_fixture_profile(clock, side_effect_mode, true)
     }

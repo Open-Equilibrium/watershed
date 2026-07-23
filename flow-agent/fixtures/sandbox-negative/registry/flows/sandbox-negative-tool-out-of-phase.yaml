@@ -1,6 +1,6 @@
-loop:
+flow:
   id: sandbox-negative-tool-out-of-phase
   name: SandboxNegativeToolOutOfPhase
   phase_refs: [negative-no-tools]
-  subloop_refs: []
+  subflow_refs: []
   connection_refs: [out-of-phase-sentinel]

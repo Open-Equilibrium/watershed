@@ -8,11 +8,11 @@ Report suspected vulnerabilities privately to **b-weber@gmx.at** — please do n
 
 ## Trust model
 
-Watershed's defensible trust model is the combination across its three layers: structured loops + scoped runtime capabilities + normalized events/transcripts + policy gates + metric feedback + permissioned workspace mutations + action history/revert + AGPL/free-software transparency. Concretely: external-agent actions must be scoped; Liquid workspace mutations must be attributed and revertible; Meta-Harness config changes must be policy-gated and audited; Flow Agent runtime capabilities must be declared and sandboxed. Because Watershed is AGPL/free software, users can **inspect, self-host, fork and verify** core behavior — transparency is part of the trust boundary, not a substitute for it.
+Watershed's defensible trust model is the combination across its three layers: structured flows + scoped runtime capabilities + normalized events/transcripts + policy gates + metric feedback + permissioned workspace mutations + action history/revert + AGPL/free-software transparency. Concretely: external-agent actions must be scoped; Liquid workspace mutations must be attributed and revertible; Meta-Harness config changes must be policy-gated and audited; Flow Agent runtime capabilities must be declared and sandboxed. Because Watershed is AGPL/free software, users can **inspect, self-host, fork and verify** core behavior — transparency is part of the trust boundary, not a substitute for it.
 
 ## Principle: scripts define, sandbox enforces
 
-Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 runs deterministic in-process execution/emulation for the modeled checks, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
+Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per flow; M1 runs deterministic in-process execution/emulation for the modeled checks, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
 
 This paragraph governs Flow Agent scripts. Liquid Apps use the parallel principle defined below: App manifests declare capabilities, and the App Runtime plus Role and capability checks enforce them.
 
@@ -23,20 +23,20 @@ Registry loading starts from one opened workspace capability and opens every reg
 - **Command allowlisting limits names, not effects.** Interpreters and deploy commands (`python`, `cf push`, build scripts, git hooks) are Turing-complete escapes; argument filters are bypassable via path traversal, symlinks and shell metacharacters.
 - **Agent intent is untrusted (prompt injection / confused-deputy).** Reading untrusted content + holding private data + an exfiltration path is unconditionally exploitable regardless of prompt hardening ("lethal trifecta"). The fix is architectural separation, not a longer allowlist.
 
-`loop-context-v0` always includes base runtime/security instructions in mandatory Tier 0 and fails before provider contact if they do not fit (ADR-0058). This protects instruction integrity and provider-cache consistency, but prompt text remains defense in depth: compiled capability policy and runtime enforcement are the security boundary.
+`flow-context-v0` always includes base runtime/security instructions in mandatory Tier 0 and fails before provider contact if they do not fit (ADR-0058). This protects instruction integrity and provider-cache consistency, but prompt text remains defense in depth: compiled capability policy and runtime enforcement are the security boundary.
 
 ## MVP VCS boundary
 
-Flow Agent runs inside normal Git projects in the MVP, but it does not own project history and does not implement project VCS behavior. Security and auditability in the MVP come from deterministic loop state, structured logs, protocol events, config-review/audit records and sandbox enforcement. Host Git operations may run only when explicitly declared as Tool commands and sandboxed like any other command.
+Flow Agent runs inside normal Git projects in the MVP, but it does not own project history and does not implement project VCS behavior. Security and auditability in the MVP come from deterministic flow state, structured logs, protocol events, config-review/audit records and sandbox enforcement. Host Git operations may run only when explicitly declared as Tool commands and sandboxed like any other command.
 
-## Enforcement (per loop)
+## Enforcement (per flow)
 
 1. Compile script policy → deterministic M1 in-process enforcement/emulation plus OS policy artifacts. Linux Landlock + seccomp and macOS Seatbelt are post-M1 OS-enforcement backends. Reuse proven sandbox primitives where possible. M0 produces policy artifacts plus escape tests (ADR-0032, ADR-0052).
 2. **Network egress deny-by-default**. M1 Linux-target policy rejects non-empty CIDR allow entries and emulates deny-all network decisions for sandbox-negative tests (ADR-0051, ADR-0052). CIDR allow entries remain part of the policy artifact/schema so reviewed capabilities are explicit, but they are not silently treated as enforced by Landlock/seccomp until a post-M1 egress backend exists.
 3. Filesystem **read/write confined** to declared roots; protect the default protected paths below unless explicitly granted.
 4. **Blast-radius control** via least-capability tools, isolated workspaces when configured, deterministic logs and short-lived bounded runs.
 5. `.flow/logs` now; post-M1 subprocesses must be bounded, headless and timed out — for stability, **not** as a security boundary.
-6. Post-M1 optional **container/microVM per loop** for loops touching untrusted content (web, foreign repos).
+6. Post-M1 optional **container/microVM per flow** for flows touching untrusted content (web, foreign repos).
 
 ## Meta-Agent configuration writes
 
@@ -99,7 +99,7 @@ Top-level policy fields:
 
 - `policy_version`: fixed string `"0"`.
 - `target`: `linux-landlock-seccomp` or `macos-seatbelt`.
-- `source_loop_definition_id`: resolved Loop definition id from the building-block registry.
+- `source_flow_definition_id`: resolved Flow definition id from the building-block registry.
 - `commands`: array of `{ tool_id, tool_kind, command_id, executable, argv, script_runtime, allowed_parameters, environment, filesystem, network }`. `command_id` is the resolved predefined-command id (`^[a-z][a-z0-9_-]{0,63}$`) or `script:<tool_id>` for own-script tools. `executable` is the registry-resolved executable identity for `predefined-command` or the fixed runner for `own-script`. Predefined-command launch direct-execs the registry-resolved executable with literal `argv` and never uses PATH lookup, shell parsing, environment expansion or glob expansion. Own-script launch direct-execs the fixed `posix-sh` runner; POSIX shell parsing/expansion inside the reviewed `script_body` is part of own-script semantics and remains inside the sandbox, but runner path and runner arguments are not script-controllable. `argv` is the literal base argument vector before validated allowed-parameter tokens. `script_runtime` is present only for `own-script` tools and is `posix-sh`; it is omitted for `predefined-command` tools. Capabilities are scoped to this `tool_id`; never infer that one tool can use another tool's grants.
 - `commands[].allowed_parameters`: array of parameter specs with `name` (exact flag), `value_type` (`none`, `string`, `integer`, `workspace-relative-path` or `enum`), `required` boolean and type-specific constraints. `allowed_values` is present only for `enum`; `value_pattern` and `max_length` are required for `string` and optional for `workspace-relative-path`; `min`/`max` are optional for `integer`. The M1 CLI/stub supplies no invocation parameter tokens; once a runtime interface supplies them, unknown parameters, extra positional arguments and invalid values are denied before launch.
 - `commands[].environment`: `{ default, allow }`, where `default` is `clear` and `allow` is an array of non-secret environment variable names. Tool processes never inherit the host environment by default, and policy artifacts/events never serialize environment values. V0 allow names match `^[A-Z_][A-Z0-9_]{0,63}$` and must not match secret-bearing prefixes or words: `*_TOKEN`, `*_KEY`, `*_SECRET`, `*_PASSWORD`, `*_CREDENTIAL*`, `AWS_*`, `GCP_*`, `AZURE_*`, `OPENAI_*`, `ANTHROPIC_*`, `GH_*`, `GITHUB_*`, `CF_*` or `KUBE*`. Environment allowlists also deny execution-control, proxy, VCS/helper-control, config-injection and credential-handle names: `PATH`, `PATHEXT`, `LD_*`, `DYLD_*`, `BASH_ENV`, `ENV`, `SHELLOPTS`, `IFS`, `CDPATH`, `GLOBIGNORE`, `NODE_OPTIONS`, `PYTHONPATH`, `PYTHONHOME`, `RUBYOPT`, `PERL5LIB`, `PERL5OPT`, `JAVA_TOOL_OPTIONS`, `RUSTC_WRAPPER`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_TARGET_*_RUNNER`, `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `FTP_PROXY`, `GIT_SSH_COMMAND`, `GIT_ASKPASS`, `SSH_ASKPASS`, `GIT_CONFIG_*`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `GIT_TERMINAL_PROMPT`, `GIT_PROXY_COMMAND`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`, `GPG_TTY`, `KRB5CCNAME`, `DOCKER_HOST`, `DOCKER_CONFIG`, `KUBECONFIG`, `NETRC` and `NPM_CONFIG_USERCONFIG`. Any future need for those classes must be modeled as a separate reviewed capability, not a generic environment allow entry.
@@ -133,13 +133,13 @@ Negative expected-decision artifacts use the same canonical JSON serialization a
 - symlink escape: `{ kind: "symlink_escape", tool_id, operation, path, symlink_path, symlink_target }`;
 - interpreter escape: `{ kind: "interpreter_escape", tool_id, executable, argv }`, where `argv` is an array of strings.
 
-Default protected paths are denied even inside a declared read/write root unless a loop explicitly grants the exact path or pattern:
+Default protected paths are denied even inside a declared read/write root unless a flow explicitly grants the exact path or pattern:
 
 Protected-path matching semantics:
 
 - Convert `\` to `/`, remove duplicate separators and reject absolute paths, drive prefixes and paths that escape the declared root.
 - Resolve paths component-by-component from the declared root before matching, with symlinks resolved before applying any following `..` component. This is the `openat2`/realpath-style order; lexical `..` cleanup alone is not authoritative.
-- For create, rename or write requests to a non-existent leaf, resolve every existing ancestor including the final parent component-wise, then append the unresolved suffix for matching. Symlink loops, unresolved symlink targets and root escapes are denied.
+- For create, rename or write requests to a non-existent leaf, resolve every existing ancestor including the final parent component-wise, then append the unresolved suffix for matching. Symlink flows, unresolved symlink targets and root escapes are denied.
 - Compare both the normalized lexical request and the component-wise resolved absolute and workspace-root-relative forms. A request is denied if any form matches a protected pattern and no explicit grant matches.
 - Glob grammar is limited to `*` (any characters except `/`), `?` (one character except `/`) and `**` (zero or more complete path segments). No brace expansion, extglobs or regex syntax.
 - Patterns match the whole normalized path. A pattern starting with `**/` may match at any depth; otherwise matching is anchored at the beginning.

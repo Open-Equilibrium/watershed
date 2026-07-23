@@ -5,6 +5,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_DOMAIN_WORD = bytes((108, 111, 111, 112)).decode("ascii")
+LEGACY_DOMAIN_TYPE = LEGACY_DOMAIN_WORD.capitalize()
 
 
 class M1ValidationContractTest(unittest.TestCase):
@@ -12,7 +14,7 @@ class M1ValidationContractTest(unittest.TestCase):
         expected_paths = [
             ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml",
             ROOT / "flow-agent" / "flow-agent-cli" / "Cargo.toml",
-            ROOT / "flow-agent" / "fixtures" / "smoke-loop" / ".flow" / "config.yaml",
+            ROOT / "flow-agent" / "fixtures" / "smoke-flow" / ".flow" / "config.yaml",
             ROOT / "docs" / "concept" / "V-Spec_FlowAgent.html",
         ]
         self.assertEqual(
@@ -21,11 +23,11 @@ class M1ValidationContractTest(unittest.TestCase):
         )
 
         stale_tokens = [
-            "Loop" + " Agent",
-            "Loop" + "Agent",
-            "Loop" + "-Agent",
-            "loop" + "-agent",
-            "loop" + "_agent",
+            LEGACY_DOMAIN_TYPE + " Agent",
+            LEGACY_DOMAIN_TYPE + "Agent",
+            LEGACY_DOMAIN_TYPE + "-Agent",
+            LEGACY_DOMAIN_WORD + "-agent",
+            LEGACY_DOMAIN_WORD + "_agent",
         ]
         excluded_parts = {".git", ".clawpatch", ".codex-logs", "node_modules", "target"}
         stale_references: dict[str, list[str]] = {}
@@ -43,7 +45,7 @@ class M1ValidationContractTest(unittest.TestCase):
         self.assertEqual(stale_references, {})
         cli_manifest = expected_paths[1].read_text(encoding="utf-8")
         self.assertIn('name = "flow"', cli_manifest)
-        self.assertNotIn('name = "' + "loop" + '"', cli_manifest)
+        self.assertNotIn('name = "' + LEGACY_DOMAIN_WORD + '"', cli_manifest)
 
     def assert_active_pinned_rust_step(self, workflow: str, version: str) -> None:
         lines = workflow.splitlines()

@@ -171,7 +171,7 @@ impl<'a> SerialSessionWriter<'a> {
         )?;
         let (sender, receiver) = std::sync::mpsc::sync_channel(EVENT_WRITER_QUEUE_CAPACITY);
         let worker = thread::Builder::new()
-            .name(format!("loop-event-writer-{session_id}"))
+            .name(format!("flow-event-writer-{session_id}"))
             .spawn(move || {
                 session_writer_worker(
                     &path,

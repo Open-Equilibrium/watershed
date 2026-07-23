@@ -1,0 +1,6 @@
+flow:
+  id: smoke-flow
+  name: SmokeFlow
+  phase_refs: [smoke]
+  subflow_refs: []
+  connection_refs: []

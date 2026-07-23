@@ -1,16 +1,16 @@
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{ambient_authority, fs::Dir};
 
-/// Loads the unique transitive registry closure for one top-level Loop.
-pub fn load_loop_registry_from_workspace(
+/// Loads the unique transitive registry closure for one top-level Flow.
+pub fn load_flow_registry_from_workspace(
     workspace: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
-    loop_reference: &str,
+    flow_reference: &str,
 ) -> Result<ResolvedRegistry, RegistryError> {
-    ResolvedRegistry::load_for_loop_with_limits(
+    ResolvedRegistry::load_for_flow_with_limits(
         workspace.as_ref(),
         registry_root.as_ref(),
-        loop_reference,
+        flow_reference,
         MAX_REGISTRY_FILE_BYTES,
         MAX_REGISTRY_TOTAL_BYTES,
         MAX_ACTIVE_REGISTRY_BYTES,
@@ -98,7 +98,7 @@ impl RegistryCatalog {
         reference: &str,
         connection_id: &str,
     ) -> Result<&RegistryCatalogEntry, RegistryError> {
-        let matches = ["tool", "instruction", "phase", "loop"]
+        let matches = ["tool", "instruction", "phase", "flow"]
             .into_iter()
             .filter_map(|kind| self.resolve(kind, reference))
             .collect::<Vec<_>>();
@@ -132,7 +132,7 @@ fn registry_block_identity(block: &RegistryBlock) -> (&'static str, &BlockIdenti
         RegistryBlock::Instruction(block) => ("instruction", &block.identity),
         RegistryBlock::Phase(block) => ("phase", &block.identity),
         RegistryBlock::Connection(block) => ("connection", &block.identity),
-        RegistryBlock::Loop(block) => ("loop", &block.identity),
+        RegistryBlock::Flow(block) => ("flow", &block.identity),
     }
 }
 
@@ -168,15 +168,15 @@ fn enqueue_dependencies(
                 pending.push((target.kind, target.identity.id.clone()));
             }
         }
-        RegistryBlock::Loop(loop_block) => {
-            for reference in &loop_block.phase_refs {
-                push("phase", reference, "loop", &loop_block.identity.id)?;
+        RegistryBlock::Flow(flow_block) => {
+            for reference in &flow_block.phase_refs {
+                push("phase", reference, "flow", &flow_block.identity.id)?;
             }
-            for reference in &loop_block.subloop_refs {
-                push("loop", reference, "loop", &loop_block.identity.id)?;
+            for reference in &flow_block.subflow_refs {
+                push("flow", reference, "flow", &flow_block.identity.id)?;
             }
-            for reference in &loop_block.connection_refs {
-                push("connection", reference, "loop", &loop_block.identity.id)?;
+            for reference in &flow_block.connection_refs {
+                push("connection", reference, "flow", &flow_block.identity.id)?;
             }
         }
     }

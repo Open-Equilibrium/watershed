@@ -31,10 +31,10 @@ cargo test --workspace
 Run the checked-in smoke fixture from its workspace directory:
 
 ```console
-cd flow-agent/fixtures/smoke-loop
-cargo run -p flow-agent-cli -- run smoke-loop --emit jsonl
-cargo run -p flow-agent-cli -- replay smoke-loop --emit jsonl
-cargo run -p flow-agent-cli -- tail smoke-loop --emit jsonl --no-follow
+cd flow-agent/fixtures/smoke-flow
+cargo run -p flow-agent-cli -- run smoke-flow --emit jsonl
+cargo run -p flow-agent-cli -- replay smoke-flow --emit jsonl
+cargo run -p flow-agent-cli -- tail smoke-flow --emit jsonl --no-follow
 cargo run -p flow-agent-cli -- sessions
 ```
 

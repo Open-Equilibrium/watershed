@@ -12,7 +12,7 @@ fn canonicalize_registry_value(value: &mut Value) {
             if map.contains_key("phase_refs") {
                 map.entry("connection_refs".to_owned())
                     .or_insert_with(|| Value::Array(Vec::new()));
-                map.entry("subloop_refs".to_owned())
+                map.entry("subflow_refs".to_owned())
                     .or_insert_with(|| Value::Array(Vec::new()));
             }
             if let Some(Value::Array(steps)) = map.get_mut("steps") {

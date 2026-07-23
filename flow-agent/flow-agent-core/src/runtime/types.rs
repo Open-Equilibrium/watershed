@@ -48,11 +48,11 @@ const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
     - MAX_SESSION_CONTEXT_MANIFEST_BYTES
     - MAX_SESSION_METADATA_BYTES;
 /// Maximum canonical events accumulated by one session, including resume events.
-const MAX_LOOP_EVENTS: u64 = 155_750;
-/// Maximum runtime Loop invocations accumulated by one session, including the root.
-const MAX_LOOP_INVOCATIONS: u64 = 512;
-/// Maximum live Loop invocations across all active sessions in one process.
-const MAX_LIVE_LOOP_INVOCATIONS: usize = 32;
+const MAX_FLOW_EVENTS: u64 = 155_750;
+/// Maximum runtime Flow invocations accumulated by one session, including the root.
+const MAX_FLOW_INVOCATIONS: u64 = 512;
+/// Maximum live Flow invocations across all active sessions in one process.
+const MAX_LIVE_FLOW_INVOCATIONS: usize = 32;
 const MAX_WORKSPACE_CONFIG_BYTES: u64 = 1024 * 1024;
 const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 const RUNTIME_ERROR_REASON: &str = "runtime_error";

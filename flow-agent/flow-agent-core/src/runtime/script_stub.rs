@@ -607,7 +607,7 @@ fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
 fn emit_tool_progress(
     message: &'static str,
     tool: &core_script::ToolBlock,
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
     builder.emit(

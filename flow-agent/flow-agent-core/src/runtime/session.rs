@@ -1,29 +1,29 @@
-/// Runs a loop from a workspace registry and captures its output.
-pub fn run_loop(
+/// Runs a flow from a workspace registry and captures its output.
+pub fn run_flow(
     workspace: impl AsRef<Path>,
-    loop_ref: &str,
+    flow_ref: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    run_loop_internal(workspace, loop_ref, None, None, emit == EmitMode::Jsonl)
+    run_flow_internal(workspace, flow_ref, None, None, emit == EmitMode::Jsonl)
 }
 
-/// Runs a loop with bounded, non-blocking committed-event notifications.
+/// Runs a flow with bounded, non-blocking committed-event notifications.
 ///
 /// The caller owns the receiver and any blocking transport. Notifications carry only a
 /// high-watermark wake-up; read event payloads from [`SessionEventReader`] by sequence.
-pub fn run_loop_with_live_events(
+pub fn run_flow_with_live_events(
     workspace: impl AsRef<Path>,
-    loop_ref: &str,
+    flow_ref: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut output = run_loop_internal(workspace, loop_ref, Some(notifier), None, false)?;
+    let mut output = run_flow_internal(workspace, flow_ref, Some(notifier), None, false)?;
     output.stdout.clear();
     Ok(output)
 }
 
-fn run_loop_internal(
+fn run_flow_internal(
     workspace: impl AsRef<Path>,
-    loop_ref: &str,
+    flow_ref: &str,
     notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
@@ -31,25 +31,25 @@ fn run_loop_internal(
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
     let registry =
-        core_script::load_loop_registry_from_workspace(workspace, &config.registry_root, loop_ref)?;
-    let loop_block = registry
-        .loop_block(loop_ref)
-        .ok_or_else(|| RuntimeError::Usage(format!("unknown loop {loop_ref}")))?;
-    let definition_metadata = session_definition_metadata(&registry, loop_block)?;
+        core_script::load_flow_registry_from_workspace(workspace, &config.registry_root, flow_ref)?;
+    let flow_block = registry
+        .flow_block(flow_ref)
+        .ok_or_else(|| RuntimeError::Usage(format!("unknown flow {flow_ref}")))?;
+    let definition_metadata = session_definition_metadata(&registry, flow_block)?;
     let policy =
-        core_policy::compile_policy_artifact(&registry, loop_ref, runtime_policy_target())?;
-    preflight_loop_tools(workspace, &registry, &policy, loop_block)?;
-    let base_session_id = &loop_block.identity.id;
+        core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())?;
+    preflight_flow_tools(workspace, &registry, &policy, flow_block)?;
+    let base_session_id = &flow_block.identity.id;
     let reservation = reserve_unique_session_log(workspace, base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
     write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-    let planned_runtime = execute_loop(
+    let planned_runtime = execute_flow(
         workspace,
         &registry,
         &policy,
-        loop_block,
+        flow_block,
         &expected_session_id,
-        LoopExecutionOptions::with_stub_model_fixture_profile(
+        FlowExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
             ToolSideEffectMode::DryRun,
             config.stub_model_fixture_profile,
@@ -57,13 +57,13 @@ fn run_loop_internal(
     )?;
     let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
     let (runtime_result, replay_matches) = {
-        let result = execute_loop_with_sink(
+        let result = execute_flow_with_sink(
             workspace,
             &registry,
             &policy,
-            loop_block,
+            flow_block,
             &expected_session_id,
-            LoopExecutionOptions::with_stub_model_fixture_profile(
+            FlowExecutionOptions::with_stub_model_fixture_profile(
                 config.event_clock,
                 ToolSideEffectMode::ApplyAll,
                 config.stub_model_fixture_profile,
@@ -103,8 +103,8 @@ fn run_loop_internal(
         read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)?
     } else {
         format!(
-            "loop {} (session {expected_session_id}) {outcome}\n",
-            loop_block.identity.id
+            "flow {} (session {expected_session_id}) {outcome}\n",
+            flow_block.identity.id
         )
     };
     Ok(RunOutput {

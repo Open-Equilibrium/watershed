@@ -31,16 +31,16 @@ fn protocol_validator_rejects_required_envelope_metadata() {
         "correlation_id",
     );
 
-    let mut empty_loop_id = base_event();
-    empty_loop_id.loop_id = Some(String::new());
-    assert_invalid_event("empty-loop-id.jsonl", empty_loop_id, "loop_id");
+    let mut empty_flow_id = base_event();
+    empty_flow_id.flow_id = Some(String::new());
+    assert_invalid_event("empty-flow-id.jsonl", empty_flow_id, "flow_id");
 
-    let mut empty_parent_loop_id = base_event();
-    empty_parent_loop_id.parent_loop_id = Some(String::new());
+    let mut empty_parent_flow_id = base_event();
+    empty_parent_flow_id.parent_flow_id = Some(String::new());
     assert_invalid_event(
-        "empty-parent-loop-id.jsonl",
-        empty_parent_loop_id,
-        "parent_loop_id",
+        "empty-parent-flow-id.jsonl",
+        empty_parent_flow_id,
+        "parent_flow_id",
     );
 }
 
@@ -470,59 +470,59 @@ fn protocol_validator_rejects_stream_identity_edges() {
         "after terminal session event",
     );
 
-    let loop_started_without_id = event_line(
+    let flow_started_without_id = event_line(
         "evt-002",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         2,
         None,
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        serde_json::json!({"flow_definition_id":"smoke-flow"}),
     );
     assert_invalid_stream(
-        "loop-started-without-loop-id.jsonl",
-        &format!("{canonical}{loop_started_without_id}"),
-        "loop.started must include loop_id",
+        "flow-started-without-flow-id.jsonl",
+        &format!("{canonical}{flow_started_without_id}"),
+        "flow.started must include flow_id",
     );
 
     let child_with_unknown_parent = event_line_with_parent(
         "evt-002",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         2,
-        Some("loop-002"),
-        Some("loop-missing"),
-        serde_json::json!({"loop_definition_id":"child-loop"}),
+        Some("flow-002"),
+        Some("flow-missing"),
+        serde_json::json!({"flow_definition_id":"child-flow"}),
     );
     assert_invalid_session_log(
-        "unknown-parent-loop.jsonl",
+        "unknown-parent-flow.jsonl",
         "meta001",
         &format!("{canonical}{child_with_unknown_parent}"),
-        "parent_loop_id",
+        "parent_flow_id",
     );
 
-    let self_parented_loop = event_line_with_parent(
+    let self_parented_flow = event_line_with_parent(
         "evt-002",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         2,
-        Some("loop-001"),
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"smoke-loop"}),
+        Some("flow-001"),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"smoke-flow"}),
     );
     assert_invalid_session_log(
-        "self-parent-loop.jsonl",
+        "self-parent-flow.jsonl",
         "meta001",
-        &format!("{canonical}{self_parented_loop}"),
-        "parent_loop_id",
+        &format!("{canonical}{self_parented_flow}"),
+        "parent_flow_id",
     );
 
-    let parent_without_loop_id = event_line_with_parent(
+    let parent_without_flow_id = event_line_with_parent(
         "evt-003",
         EventType::MessageDelta,
         "meta001",
         3,
         None,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({
             "content_delta": "hello",
             "message_id": "msg-001",
@@ -530,15 +530,15 @@ fn protocol_validator_rejects_stream_identity_edges() {
         }),
     );
     assert_invalid_session_log(
-        "parent-without-loop-id.jsonl",
+        "parent-without-flow-id.jsonl",
         "meta001",
         &format!(
             "{}{}{}",
             canonical,
-            loop_started_line("evt-002", 2),
-            parent_without_loop_id
+            flow_started_line("evt-002", 2),
+            parent_without_flow_id
         ),
-        "parent_loop_id",
+        "parent_flow_id",
     );
 }
 
@@ -638,16 +638,16 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
             serde_json::json!({"reason":"failed"}),
         ),
         (
-            EventType::LoopStarted,
-            serde_json::json!({"loop_definition_id":"smoke-loop","loop_name":"Smoke"}),
+            EventType::FlowStarted,
+            serde_json::json!({"flow_definition_id":"smoke-flow","flow_name":"Smoke"}),
         ),
         (
-            EventType::LoopCompleted,
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            EventType::FlowCompleted,
+            serde_json::json!({"flow_definition_id":"smoke-flow"}),
         ),
         (
-            EventType::LoopFailed,
-            serde_json::json!({"error":"write_denied","loop_definition_id":"smoke-loop"}),
+            EventType::FlowFailed,
+            serde_json::json!({"error":"write_denied","flow_definition_id":"smoke-flow"}),
         ),
         (
             EventType::PhaseEntered,
@@ -750,18 +750,18 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
 
 #[test]
 fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
-    assert_eq!(MAX_LOOP_INVOCATIONS, 512);
-    assert_eq!(MAX_LOOP_EVENTS, 155_750);
+    assert_eq!(MAX_FLOW_INVOCATIONS, 512);
+    assert_eq!(MAX_FLOW_EVENTS, 155_750);
 
     let mut builder =
         RuntimeEventBuilder::with_clock("budget001".to_owned(), EventClock::fixed_fixture(), false);
-    builder.loop_counter = MAX_LOOP_INVOCATIONS;
+    builder.flow_counter = MAX_FLOW_INVOCATIONS;
     assert!(matches!(
-        builder.next_loop_invocation(None),
-        Err(RuntimeError::Protocol(message)) if message.contains("loop invocation budget")
+        builder.next_flow_invocation(None),
+        Err(RuntimeError::Protocol(message)) if message.contains("flow invocation budget")
     ));
 
-    builder.sequence = MAX_LOOP_EVENTS;
+    builder.sequence = MAX_FLOW_EVENTS;
     assert!(matches!(
         builder.emit(
             None,
@@ -784,8 +784,8 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
 
     let path = Path::new("resume-budget.jsonl");
     let mut validation = SessionAppendValidationState::empty("budget001");
-    validation.previous_sequence = MAX_LOOP_EVENTS - 1;
-    validation.line_count = (MAX_LOOP_EVENTS - 1) as usize;
+    validation.previous_sequence = MAX_FLOW_EVENTS - 1;
+    validation.line_count = (MAX_FLOW_EVENTS - 1) as usize;
     validation.stream_bytes = 10 * 1024 * 1024;
     let event = |event_id, event_type, sequence| {
         let line = session_event_line("budget001", event_id, event_type, sequence);
@@ -794,11 +794,11 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
             line.len(),
         )
     };
-    let (resumed, resumed_bytes) = event("evt-resumed", EventType::SessionResumed, MAX_LOOP_EVENTS);
+    let (resumed, resumed_bytes) = event("evt-resumed", EventType::SessionResumed, MAX_FLOW_EVENTS);
     validation
         .validate_constructed_event(path, &resumed, resumed_bytes)
         .expect("the final event slot accepts a resume marker");
-    let (paused, bytes) = event("evt-paused", EventType::SessionPaused, MAX_LOOP_EVENTS + 1);
+    let (paused, bytes) = event("evt-paused", EventType::SessionPaused, MAX_FLOW_EVENTS + 1);
     assert!(matches!(
         validation.validate_constructed_event(path, &paused, bytes),
         Err(RuntimeError::Protocol(message)) if message.contains("runtime event budget")
@@ -836,16 +836,16 @@ fn canonical_event_size_has_an_independent_hard_limit() {
 }
 
 #[test]
-fn live_invocation_counter_rejects_only_the_thirty_third_started_loop() {
+fn live_invocation_counter_rejects_only_the_thirty_third_started_flow() {
     let counter = LiveInvocationCounter::new();
-    let guards = (0..MAX_LIVE_LOOP_INVOCATIONS)
-        .map(|_| counter.acquire().expect("first 32 live loops fit"))
+    let guards = (0..MAX_LIVE_FLOW_INVOCATIONS)
+        .map(|_| counter.acquire().expect("first 32 live flows fit"))
         .collect::<Vec<_>>();
 
     let err = counter
         .acquire()
         .err()
-        .expect("thirty-third live loop is rejected");
+        .expect("thirty-third live flow is rejected");
     assert!(err.to_string().contains("max 32"), "{err}");
     drop(guards);
     assert!(counter.acquire().is_ok());
@@ -887,7 +887,7 @@ fn only_active_execution_occupies_a_live_invocation_slot() {
 
 #[test]
 fn runtime_failure_and_sandbox_negative_helpers_cover_edge_paths() {
-    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let (registry, _) = fixture_runtime_policy("hello-flow", "hello-flow");
     let tool = registry
         .tool_block("write-summary")
         .expect("write tool exists");
@@ -1005,27 +1005,27 @@ fn protocol_validation_covers_envelope_and_stream_edges() {
         "sequence must increase by exactly 1",
     );
     assert_invalid_stream(
-        "duplicate-loop-id.jsonl",
+        "duplicate-flow-id.jsonl",
         &[
             session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            loop_started_line("evt-002", 2),
-            loop_started_line("evt-003", 3),
+            flow_started_line("evt-002", 2),
+            flow_started_line("evt-003", 3),
         ]
         .concat(),
-        "unique loop_id",
+        "unique flow_id",
     );
 }
 
 #[test]
-fn loop_terminal_definition_must_match_loop_start() {
+fn flow_terminal_definition_must_match_flow_start() {
     for (event_type, payload) in [
         (
-            EventType::LoopCompleted,
-            serde_json::json!({"loop_definition_id":"other-loop"}),
+            EventType::FlowCompleted,
+            serde_json::json!({"flow_definition_id":"other-flow"}),
         ),
         (
-            EventType::LoopFailed,
-            serde_json::json!({"error":"failed","loop_definition_id":"other-loop"}),
+            EventType::FlowFailed,
+            serde_json::json!({"error":"failed","flow_definition_id":"other-flow"}),
         ),
     ] {
         assert_invalid_session_log(
@@ -1033,18 +1033,18 @@ fn loop_terminal_definition_must_match_loop_start() {
             "meta001",
             &[
                 session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-                loop_started_line("evt-002", 2),
+                flow_started_line("evt-002", 2),
                 event_line(
                     "evt-003",
                     event_type,
                     "meta001",
                     3,
-                    Some("loop-001"),
+                    Some("flow-001"),
                     payload,
                 ),
             ]
             .concat(),
-            "loop_definition_id must match loop.started",
+            "flow_definition_id must match flow.started",
         );
     }
 }
@@ -1056,7 +1056,7 @@ fn duplicate_active_tool_start_is_rejected() {
         "meta001",
         &[
             session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             step_started_line("evt-004", 4),
             tool_started_line("evt-005", 5),
@@ -1078,7 +1078,7 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
             event_type,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"message":"working","tool_id":"tool"}),
         ),
         EventType::ToolCompleted => event_line(
@@ -1086,7 +1086,7 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
             event_type,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"exit_code":0,"tool_id":"tool"}),
         ),
         EventType::ToolTimedOut => event_line(
@@ -1094,7 +1094,7 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
             event_type,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"error":"timeout","tool_id":"tool"}),
         ),
         EventType::MessageDelta => event_line(
@@ -1102,7 +1102,7 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
             event_type,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({
                 "content_delta": "hello",
                 "message_id": "msg-001",
@@ -1114,7 +1114,7 @@ fn lifecycle_event_line(event_type: EventType, event_id: &str, sequence: u64) ->
             event_type,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"message_id":"msg-001","role":"assistant"}),
         ),
         _ => unreachable!("not a tracked lifecycle event"),
@@ -1126,7 +1126,7 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
     let started = base_event().canonical_jsonl().expect("started serializes");
     let step_terminal = [
         started.clone(),
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4),
         step_completed_line("evt-005", 5),
@@ -1134,7 +1134,7 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
     .concat();
     let tool_terminal = format!(
         "{started}{}{}{}{}{}",
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4),
         tool_started_line("evt-005", 5),
@@ -1142,7 +1142,7 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
     );
     let message_terminal = format!(
         "{started}{}{}{}{}{}",
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4),
         lifecycle_event_line(EventType::MessageDelta, "evt-005", 5),
@@ -1186,14 +1186,14 @@ fn lifecycle_validation_rejects_each_event_kind_after_its_terminal() {
 fn protocol_accepts_optional_step_phase_and_multiple_message_deltas() {
     let prefix = [
         session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         event_line(
             "evt-004",
             EventType::StepStarted,
             "meta001",
             4,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"step_id":"step","step_name":"Step"}),
         ),
         lifecycle_event_line(EventType::MessageDelta, "evt-005", 5),
@@ -1212,7 +1212,7 @@ fn protocol_accepts_optional_step_phase_and_multiple_message_deltas() {
 
     let active_tool = [
         session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4),
         tool_started_line("evt-005", 5),

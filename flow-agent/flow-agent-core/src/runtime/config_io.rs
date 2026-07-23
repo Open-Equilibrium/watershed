@@ -76,16 +76,16 @@ fn resume_event_clock(
 }
 
 fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
-    let loop_path = workspace.join(".flow");
-    let config_path = loop_path.join("config.yaml");
+    let flow_path = workspace.join(".flow");
+    let config_path = flow_path.join("config.yaml");
     let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority())
         .map_err(|source| path_io_error(workspace, source))?;
-    let loop_dir = workspace_dir
+    let flow_dir = workspace_dir
         .open_dir_nofollow(".flow")
-        .map_err(|source| unsafe_workspace_config_path(loop_path, source, "directory"))?;
+        .map_err(|source| unsafe_workspace_config_path(flow_path, source, "directory"))?;
     let mut options = cap_std::fs::OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
-    let file = loop_dir
+    let file = flow_dir
         .open_with("config.yaml", &options)
         .map_err(|source| unsafe_workspace_config_path(config_path.clone(), source, "file"))?;
     let metadata = file

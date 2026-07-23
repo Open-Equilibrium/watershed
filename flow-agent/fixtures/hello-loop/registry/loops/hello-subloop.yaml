@@ -1,6 +1,0 @@
-loop:
-  id: hello-subloop
-  name: HelloSubloop
-  phase_refs: [inspect]
-  subloop_refs: []
-  connection_refs: [inspect-data]

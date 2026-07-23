@@ -17,7 +17,7 @@ impl RuntimeExecution {
 
 const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
 const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
-static LIVE_LOOP_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
+static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
 
 struct LiveInvocationCounter {
     count: std::sync::atomic::AtomicUsize,
@@ -33,9 +33,9 @@ impl LiveInvocationCounter {
     fn acquire(&self) -> Result<LiveInvocationGuard<'_>, RuntimeError> {
         let mut observed = self.count.load(std::sync::atomic::Ordering::Acquire);
         loop {
-            if observed >= MAX_LIVE_LOOP_INVOCATIONS {
+            if observed >= MAX_LIVE_FLOW_INVOCATIONS {
                 return Err(RuntimeError::Protocol(format!(
-                    "global live loop invocation limit reached: max {MAX_LIVE_LOOP_INVOCATIONS}"
+                    "global live flow invocation limit reached: max {MAX_LIVE_FLOW_INVOCATIONS}"
                 )));
             }
             match self.count.compare_exchange_weak(
@@ -114,9 +114,9 @@ impl RuntimeStreamSignatureBuilder {
 }
 
 #[derive(Clone, Debug)]
-struct LoopInvocation {
-    loop_id: String,
-    parent_loop_id: Option<String>,
+struct FlowInvocation {
+    flow_id: String,
+    parent_flow_id: Option<String>,
 }
 
 struct RuntimeFailure {
@@ -166,14 +166,14 @@ impl ToolSideEffectMode {
 }
 
 #[derive(Clone, Debug)]
-struct LoopExecutionOptions {
+struct FlowExecutionOptions {
     clock: EventClock,
     side_effect_mode: ToolSideEffectMode,
     stub_model_fixture_profile: bool,
-    terminal_loop_ids: BTreeSet<String>,
+    terminal_flow_ids: BTreeSet<String>,
 }
 
-impl LoopExecutionOptions {
+impl FlowExecutionOptions {
     fn with_stub_model_fixture_profile(
         clock: EventClock,
         side_effect_mode: ToolSideEffectMode,
@@ -183,12 +183,12 @@ impl LoopExecutionOptions {
             clock,
             side_effect_mode,
             stub_model_fixture_profile,
-            terminal_loop_ids: BTreeSet::new(),
+            terminal_flow_ids: BTreeSet::new(),
         }
     }
 
-    fn with_terminal_loop_ids(mut self, terminal_loop_ids: BTreeSet<String>) -> Self {
-        self.terminal_loop_ids = terminal_loop_ids;
+    fn with_terminal_flow_ids(mut self, terminal_flow_ids: BTreeSet<String>) -> Self {
+        self.terminal_flow_ids = terminal_flow_ids;
         self
     }
 }
@@ -223,7 +223,7 @@ struct RuntimeEventBuilder<'a> {
     failure_messages: BTreeMap<String, String>,
     failure_status: Option<String>,
     history: ContextHistory,
-    loop_counter: u64,
+    flow_counter: u64,
     message_counter: u64,
     sequence: u64,
     session_id: String,
@@ -243,7 +243,7 @@ impl<'a> RuntimeEventBuilder<'a> {
             failure_messages: BTreeMap::new(),
             failure_status: None,
             history: ContextHistory::default(),
-            loop_counter: 0,
+            flow_counter: 0,
             message_counter: 0,
             sequence: 0,
             session_id,
@@ -264,22 +264,22 @@ impl<'a> RuntimeEventBuilder<'a> {
         builder
     }
 
-    fn next_loop_invocation(
+    fn next_flow_invocation(
         &mut self,
-        parent_loop_id: Option<String>,
-    ) -> Result<LoopInvocation, RuntimeError> {
-        let next_loop_counter = self.loop_counter + 1;
-        // WHY: loop invocation budgets preserve duplicate subloop execution semantics while
+        parent_flow_id: Option<String>,
+    ) -> Result<FlowInvocation, RuntimeError> {
+        let next_flow_counter = self.flow_counter + 1;
+        // WHY: flow invocation budgets preserve duplicate subflow execution semantics while
         // bounding the total runtime work one session can request.
-        if next_loop_counter > MAX_LOOP_INVOCATIONS {
+        if next_flow_counter > MAX_FLOW_INVOCATIONS {
             return Err(RuntimeError::Protocol(format!(
-                "loop invocation budget exceeded: next invocation {next_loop_counter} exceeds max {MAX_LOOP_INVOCATIONS}"
+                "flow invocation budget exceeded: next invocation {next_flow_counter} exceeds max {MAX_FLOW_INVOCATIONS}"
             )));
         }
-        self.loop_counter = next_loop_counter;
-        Ok(LoopInvocation {
-            loop_id: format!("loop-{:03}", self.loop_counter),
-            parent_loop_id,
+        self.flow_counter = next_flow_counter;
+        Ok(FlowInvocation {
+            flow_id: format!("flow-{:03}", self.flow_counter),
+            parent_flow_id,
         })
     }
 
@@ -304,16 +304,16 @@ impl<'a> RuntimeEventBuilder<'a> {
 
     fn emit(
         &mut self,
-        invocation: Option<&LoopInvocation>,
+        invocation: Option<&FlowInvocation>,
         event_type: EventType,
         payload: serde_json::Value,
     ) -> Result<(), RuntimeError> {
         let sequence = self.sequence + 1;
-        // WHY: enforce event budgets before storing the event so oversized in-cap loops
+        // WHY: enforce event budgets before storing the event so oversized in-cap flows
         // cannot accumulate unbounded memory.
-        if sequence > MAX_LOOP_EVENTS {
+        if sequence > MAX_FLOW_EVENTS {
             return Err(RuntimeError::Protocol(format!(
-                "runtime event budget exceeded: next event {sequence} exceeds max {MAX_LOOP_EVENTS}"
+                "runtime event budget exceeded: next event {sequence} exceeds max {MAX_FLOW_EVENTS}"
             )));
         }
         let measurement_started_at = self
@@ -330,8 +330,8 @@ impl<'a> RuntimeEventBuilder<'a> {
             payload,
         );
         if let Some(invocation) = invocation {
-            event.loop_id = Some(invocation.loop_id.clone());
-            event.parent_loop_id = invocation.parent_loop_id.clone();
+            event.flow_id = Some(invocation.flow_id.clone());
+            event.parent_flow_id = invocation.parent_flow_id.clone();
         }
         let event_bytes = event.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize runtime event: {err}"))
@@ -406,10 +406,10 @@ impl<'a> RuntimeEventBuilder<'a> {
             match event.event_type {
                 EventType::StepStarted => {
                     self.active_step_payloads
-                        .insert(invocation.loop_id.clone(), event.payload.clone());
+                        .insert(invocation.flow_id.clone(), event.payload.clone());
                 }
                 EventType::StepCompleted => {
-                    self.active_step_payloads.remove(&invocation.loop_id);
+                    self.active_step_payloads.remove(&invocation.flow_id);
                 }
                 _ => {}
             }
@@ -432,26 +432,26 @@ impl<'a> RuntimeEventBuilder<'a> {
     }
 }
 
-fn execute_loop(
+fn execute_flow(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
-    root_loop: &core_script::LoopBlock,
+    root_flow: &core_script::FlowBlock,
     session_id: &str,
-    options: LoopExecutionOptions,
+    options: FlowExecutionOptions,
 ) -> Result<RuntimeExecution, RuntimeError> {
-    execute_loop_with_sink(
-        workspace, registry, policy, root_loop, session_id, options, None,
+    execute_flow_with_sink(
+        workspace, registry, policy, root_flow, session_id, options, None,
     )
 }
 
-fn execute_loop_with_sink(
+fn execute_flow_with_sink(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
-    root_loop: &core_script::LoopBlock,
+    root_flow: &core_script::FlowBlock,
     session_id: &str,
-    options: LoopExecutionOptions,
+    options: FlowExecutionOptions,
     sink: Option<&mut dyn RuntimeEventSink>,
 ) -> Result<RuntimeExecution, RuntimeError> {
     let validate_plan = options.side_effect_mode == ToolSideEffectMode::DryRun;
@@ -473,15 +473,15 @@ fn execute_loop_with_sink(
     };
     builder.emit(None, EventType::SessionStarted, start_payload)?;
 
-    let context = LoopEmitContext {
+    let context = FlowEmitContext {
         workspace,
         registry,
         policy,
         side_effect_mode: options.side_effect_mode,
         stub_model_fixture_profile: options.stub_model_fixture_profile,
-        terminal_loop_ids: &options.terminal_loop_ids,
+        terminal_flow_ids: &options.terminal_flow_ids,
     };
-    let failed = match emit_loop_block(&context, root_loop, None, &mut builder) {
+    let failed = match emit_flow_block(&context, root_flow, None, &mut builder) {
         Ok(failed) => failed,
         Err(err) if should_terminalize_error(options.side_effect_mode, &err) => {
             let reason = runtime_failure_for_unhandled_error(&err).reason;
@@ -520,63 +520,63 @@ fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &RuntimeE
             || matches!(err, RuntimeError::ContextBudgetExceeded { .. }))
 }
 
-fn preflight_loop_tools(
+fn preflight_flow_tools(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
 ) -> Result<(), RuntimeError> {
     let mut invocation_count = 0;
-    preflight_loop_tools_at_depth(
+    preflight_flow_tools_at_depth(
         workspace,
         registry,
         policy,
-        loop_block,
+        flow_block,
         1,
         &mut invocation_count,
     )
 }
 
-fn preflight_loop_tools_at_depth(
+fn preflight_flow_tools_at_depth(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
     depth: usize,
     invocation_count: &mut u64,
 ) -> Result<(), RuntimeError> {
     *invocation_count = invocation_count.checked_add(1).ok_or_else(|| {
-        RuntimeError::Protocol("loop invocation budget counter overflowed".to_owned())
+        RuntimeError::Protocol("flow invocation budget counter overflowed".to_owned())
     })?;
-    if *invocation_count > MAX_LOOP_INVOCATIONS {
+    if *invocation_count > MAX_FLOW_INVOCATIONS {
         return Err(RuntimeError::Protocol(format!(
-            "loop invocation budget exceeded: next invocation {invocation_count} exceeds max {MAX_LOOP_INVOCATIONS}"
+            "flow invocation budget exceeded: next invocation {invocation_count} exceeds max {MAX_FLOW_INVOCATIONS}"
         )));
     }
-    if depth > core_script::MAX_LOOP_NESTING_DEPTH {
+    if depth > core_script::MAX_FLOW_NESTING_DEPTH {
         return Err(RuntimeError::Protocol(format!(
-            "loop nesting depth {depth} for {} exceeds max {}",
-            loop_block.identity.id,
-            core_script::MAX_LOOP_NESTING_DEPTH
+            "flow nesting depth {depth} for {} exceeds max {}",
+            flow_block.identity.id,
+            core_script::MAX_FLOW_NESTING_DEPTH
         )));
     }
 
-    for phase_ref in &loop_block.phase_refs {
+    for phase_ref in &flow_block.phase_refs {
         let phase = registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
         preflight_phase_tools(workspace, registry, policy, phase)?;
     }
 
-    for subloop_ref in &loop_block.subloop_refs {
-        let subloop = registry.loop_block(subloop_ref).ok_or_else(|| {
-            RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
+    for subflow_ref in &flow_block.subflow_refs {
+        let subflow = registry.flow_block(subflow_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing flow {subflow_ref}"))
         })?;
-        preflight_loop_tools_at_depth(
+        preflight_flow_tools_at_depth(
             workspace,
             registry,
             policy,
-            subloop,
+            subflow,
             depth + 1,
             invocation_count,
         )?;
@@ -606,93 +606,93 @@ fn preflight_phase_tools(
     Ok(())
 }
 
-fn emit_loop_block(
-    context: &LoopEmitContext<'_>,
-    loop_block: &core_script::LoopBlock,
-    parent_loop_id: Option<String>,
+fn emit_flow_block(
+    context: &FlowEmitContext<'_>,
+    flow_block: &core_script::FlowBlock,
+    parent_flow_id: Option<String>,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    emit_loop_block_at_depth(context, loop_block, parent_loop_id, builder, 1)
+    emit_flow_block_at_depth(context, flow_block, parent_flow_id, builder, 1)
 }
 
-struct LoopEmitContext<'a> {
+struct FlowEmitContext<'a> {
     workspace: &'a Path,
     registry: &'a core_script::ResolvedRegistry,
     policy: &'a core_policy::PolicyArtifact,
     side_effect_mode: ToolSideEffectMode,
     stub_model_fixture_profile: bool,
-    terminal_loop_ids: &'a BTreeSet<String>,
+    terminal_flow_ids: &'a BTreeSet<String>,
 }
 
-fn emit_loop_block_at_depth(
-    context: &LoopEmitContext<'_>,
-    loop_block: &core_script::LoopBlock,
-    parent_loop_id: Option<String>,
+fn emit_flow_block_at_depth(
+    context: &FlowEmitContext<'_>,
+    flow_block: &core_script::FlowBlock,
+    parent_flow_id: Option<String>,
     builder: &mut RuntimeEventBuilder<'_>,
     depth: usize,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
-    if depth > core_script::MAX_LOOP_NESTING_DEPTH {
+    if depth > core_script::MAX_FLOW_NESTING_DEPTH {
         return Err(RuntimeError::Protocol(format!(
-            "loop nesting depth {depth} for {} exceeds max {}",
-            loop_block.identity.id,
-            core_script::MAX_LOOP_NESTING_DEPTH
+            "flow nesting depth {depth} for {} exceeds max {}",
+            flow_block.identity.id,
+            core_script::MAX_FLOW_NESTING_DEPTH
         )));
     }
 
-    let invocation = builder.next_loop_invocation(parent_loop_id)?;
+    let invocation = builder.next_flow_invocation(parent_flow_id)?;
     // A parent remains live while it waits for a nested invocation; queued but not started,
     // terminal and fully paused invocations do not hold this process-wide slot.
     let _live_invocation = context
         .side_effect_mode
-        .occupies_live_invocation_slot(context.terminal_loop_ids.contains(&invocation.loop_id))
-        .then(|| LIVE_LOOP_INVOCATIONS.acquire())
+        .occupies_live_invocation_slot(context.terminal_flow_ids.contains(&invocation.flow_id))
+        .then(|| LIVE_FLOW_INVOCATIONS.acquire())
         .transpose()?;
     builder.emit(
         Some(&invocation),
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         serde_json::json!({
-            "loop_definition_id": loop_block.identity.id,
-            "loop_name": loop_block.identity.name,
+            "flow_definition_id": flow_block.identity.id,
+            "flow_name": flow_block.identity.name,
         }),
     )?;
 
-    for phase_ref in &loop_block.phase_refs {
+    for phase_ref in &flow_block.phase_refs {
         let phase = context.registry.phase_block(phase_ref).ok_or_else(|| {
             RuntimeError::Protocol(format!("resolved registry missing phase {phase_ref}"))
         })?;
-        match emit_phase(context, loop_block, phase, &invocation, builder) {
+        match emit_phase(context, flow_block, phase, &invocation, builder) {
             Ok(Some(failure)) => {
-                emit_runtime_failure(loop_block, &invocation, &failure, builder)?;
+                emit_runtime_failure(flow_block, &invocation, &failure, builder)?;
                 return Ok(Some(failure));
             }
             Ok(None) => {}
             Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
-                emit_runtime_error_failure(loop_block, &invocation, &err, builder)?;
+                emit_runtime_error_failure(flow_block, &invocation, &err, builder)?;
                 return Err(err);
             }
             Err(err) => return Err(err),
         }
     }
 
-    for subloop_ref in &loop_block.subloop_refs {
-        let subloop = context.registry.loop_block(subloop_ref).ok_or_else(|| {
-            RuntimeError::Protocol(format!("resolved registry missing loop {subloop_ref}"))
+    for subflow_ref in &flow_block.subflow_refs {
+        let subflow = context.registry.flow_block(subflow_ref).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing flow {subflow_ref}"))
         })?;
-        match emit_loop_block_at_depth(
+        match emit_flow_block_at_depth(
             context,
-            subloop,
-            Some(invocation.loop_id.clone()),
+            subflow,
+            Some(invocation.flow_id.clone()),
             builder,
             depth + 1,
         ) {
             Ok(Some(failure)) => {
-                emit_runtime_loop_failure(loop_block, &invocation, &failure.reason, builder)?;
+                emit_runtime_flow_failure(flow_block, &invocation, &failure.reason, builder)?;
                 return Ok(Some(failure));
             }
             Ok(None) => {}
             Err(err) if should_terminalize_error(context.side_effect_mode, &err) => {
                 let reason = runtime_failure_for_unhandled_error(&err).reason;
-                emit_runtime_loop_failure(loop_block, &invocation, &reason, builder)?;
+                emit_runtime_flow_failure(flow_block, &invocation, &reason, builder)?;
                 return Err(err);
             }
             Err(err) => return Err(err),
@@ -701,20 +701,20 @@ fn emit_loop_block_at_depth(
 
     builder.emit(
         Some(&invocation),
-        EventType::LoopCompleted,
+        EventType::FlowCompleted,
         serde_json::json!({
-            "loop_definition_id": loop_block.identity.id,
-            "loop_name": loop_block.identity.name,
+            "flow_definition_id": flow_block.identity.id,
+            "flow_name": flow_block.identity.name,
         }),
     )?;
     Ok(None)
 }
 
 fn emit_phase(
-    context: &LoopEmitContext<'_>,
-    loop_block: &core_script::LoopBlock,
+    context: &FlowEmitContext<'_>,
+    flow_block: &core_script::FlowBlock,
     phase: &core_script::PhaseBlock,
-    invocation: &LoopInvocation,
+    invocation: &FlowInvocation,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
     let instruction_ids = phase
@@ -767,7 +767,7 @@ fn emit_phase(
         if phase_uses_stub_model(context.registry, phase) {
             let compiled = compile_provider_turn_context(
                 context.registry,
-                loop_block,
+                flow_block,
                 phase,
                 step,
                 invocation,

@@ -1,6 +1,6 @@
-loop:
-  id: hello-loop
-  name: HelloLoop
+flow:
+  id: hello-flow
+  name: HelloFlow
   phase_refs: [inspect, summarize]
-  subloop_refs: [hello-subloop, hello-subloop]
+  subflow_refs: [hello-subflow, hello-subflow]
   connection_refs: [inspect-data, inspect-trigger, summary-refresh]

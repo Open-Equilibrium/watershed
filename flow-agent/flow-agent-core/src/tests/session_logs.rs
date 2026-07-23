@@ -1,6 +1,6 @@
 #[test]
 fn corrupted_session_log_is_rejected_without_rewrite() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("bad001.jsonl");
@@ -27,22 +27,22 @@ fn corrupted_session_log_is_rejected_without_rewrite() {
 
 #[test]
 fn replay_rejects_a_record_split_across_segments_without_rewrite() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let stream = expected_stream("smoke-loop", "smoke-loop.jsonl");
+    let stream = expected_stream("smoke-flow", "smoke-flow.jsonl");
     let final_line_start = stream[..stream.len() - 1]
         .rfind('\n')
         .map_or(0, |index| index + 1);
     let split = final_line_start + (stream.len() - final_line_start) / 2;
-    let base_path = session_dir.join("smoke-loop.jsonl");
-    let second_path = session_dir.join("smoke-loop.000002.jsonl");
+    let base_path = session_dir.join("smoke-flow.jsonl");
+    let second_path = session_dir.join("smoke-flow.000002.jsonl");
     fs::write(&base_path, &stream.as_bytes()[..split]).expect("partial base segment written");
     fs::write(&second_path, &stream.as_bytes()[split..]).expect("second segment written");
     let before_base = fs::read(&base_path).expect("base segment reads");
     let before_second = fs::read(&second_path).expect("second segment reads");
 
-    let err = replay_session(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = replay_session(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("replay must reject a record split across segments");
 
     assert!(
@@ -56,29 +56,29 @@ fn replay_rejects_a_record_split_across_segments_without_rewrite() {
 }
 
 #[test]
-fn run_loop_allocates_next_session_id_when_base_log_is_corrupt() {
-    let workspace = workspace_copy("smoke-loop");
+fn run_flow_allocates_next_session_id_when_base_log_is_corrupt() {
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let corrupt_path = session_dir.join("smoke-loop.jsonl");
+    let corrupt_path = session_dir.join("smoke-flow.jsonl");
     fs::write(&corrupt_path, "{\"not\":\"an event\"}\n").expect("corrupt base log written");
     let before = fs::read_to_string(&corrupt_path).expect("corrupt base log readable");
 
-    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect("run allocates a new ordinal after corrupt existing log");
 
     assert!(!output.failed);
-    assert_eq!(output.session_id, "smoke-loop-2");
+    assert_eq!(output.session_id, "smoke-flow-2");
     assert_eq!(
         fs::read_to_string(&corrupt_path).expect("corrupt base log remains readable"),
         before
     );
-    assert!(session_dir.join("smoke-loop-2.jsonl").is_file());
+    assert!(session_dir.join("smoke-flow-2.jsonl").is_file());
 }
 
 #[test]
 fn resume_event_capacity_counts_prior_markers_and_the_new_marker() {
-    let max = usize::try_from(MAX_LOOP_EVENTS).expect("event limit fits usize");
+    let max = usize::try_from(MAX_FLOW_EVENTS).expect("event limit fits usize");
 
     assert_eq!(
         checked_resume_event_count(max - 2, 1).expect("exact limit is accepted"),
@@ -306,12 +306,12 @@ fn append_rejects_hardlinked_leaf_without_changing_target() {
 
 #[test]
 fn session_log_filename_must_match_envelope_session_id() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     fs::write(
         session_dir.join("wrong001.jsonl"),
-        first_event_line("smoke-loop", "smoke-loop.jsonl"),
+        first_event_line("smoke-flow", "smoke-flow.jsonl"),
     )
     .expect("mismatched log written");
 
@@ -323,7 +323,7 @@ fn session_log_filename_must_match_envelope_session_id() {
 
 #[test]
 fn resume_rejects_session_log_without_started_event() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("missing-start.jsonl");
@@ -357,7 +357,7 @@ fn resume_rejects_session_log_without_started_event() {
 
 #[test]
 fn resume_rejects_tool_completion_without_tool_start() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("missing-tool-start.jsonl");
@@ -372,24 +372,24 @@ fn resume_rejects_tool_completion_without_tool_start() {
     )
     .canonical_jsonl()
     .expect("session event serializes");
-    let loop_started = EventEnvelope {
-        loop_id: Some("loop-001".to_owned()),
+    let flow_started = EventEnvelope {
+        flow_id: Some("flow-001".to_owned()),
         ..EventEnvelope::new(
             "evt-002",
-            EventType::LoopStarted,
+            EventType::FlowStarted,
             "missing-tool-start",
             2,
             "2026-01-01T00:00:01Z",
             "flow-agent-cli",
             serde_json::json!({
-                "loop_definition_id": "smoke-loop",
+                "flow_definition_id": "smoke-flow",
             }),
         )
     }
     .canonical_jsonl()
-    .expect("loop event serializes");
+    .expect("flow event serializes");
     let tool_completed = EventEnvelope {
-        loop_id: Some("loop-001".to_owned()),
+        flow_id: Some("flow-001".to_owned()),
         ..EventEnvelope::new(
             "evt-003",
             EventType::ToolCompleted,
@@ -405,7 +405,7 @@ fn resume_rejects_tool_completion_without_tool_start() {
     }
     .canonical_jsonl()
     .expect("tool event serializes");
-    let before = format!("{started}{loop_started}{tool_completed}");
+    let before = format!("{started}{flow_started}{tool_completed}");
     fs::write(&path, &before).expect("malformed tool lifecycle log written");
 
     let err = resume_session(&workspace, "missing-tool-start", EmitMode::Jsonl)
@@ -421,38 +421,38 @@ fn resume_rejects_tool_completion_without_tool_start() {
 }
 
 #[test]
-fn session_log_rejects_events_after_loop_terminal() {
+fn session_log_rejects_events_after_flow_terminal() {
     let stream = [
         event_line(
             "evt-001",
             EventType::SessionStarted,
-            "loop-terminal",
+            "flow-terminal",
             1,
             None,
             serde_json::json!({"reason":"fixture-start"}),
         ),
         event_line(
             "evt-002",
-            EventType::LoopStarted,
-            "loop-terminal",
+            EventType::FlowStarted,
+            "flow-terminal",
             2,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            Some("flow-001"),
+            serde_json::json!({"flow_definition_id":"smoke-flow"}),
         ),
         event_line(
             "evt-003",
-            EventType::LoopCompleted,
-            "loop-terminal",
+            EventType::FlowCompleted,
+            "flow-terminal",
             3,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            Some("flow-001"),
+            serde_json::json!({"flow_definition_id":"smoke-flow"}),
         ),
         event_line(
             "evt-004",
             EventType::PhaseEntered,
-            "loop-terminal",
+            "flow-terminal",
             4,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({
                 "instruction_ids": [],
                 "phase_id": "phase-001",
@@ -463,11 +463,11 @@ fn session_log_rejects_events_after_loop_terminal() {
     ]
     .concat();
 
-    let err = validate_session_log_text(Path::new("loop-terminal.jsonl"), "loop-terminal", &stream)
-        .expect_err("loop-scoped events after loop terminal must be rejected");
+    let err = validate_session_log_text(Path::new("flow-terminal.jsonl"), "flow-terminal", &stream)
+        .expect_err("flow-scoped events after flow terminal must be rejected");
 
     assert!(
-        matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal loop"))
+        matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal flow"))
     );
 }
 
@@ -484,18 +484,18 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
         ),
         event_line(
             "evt-002",
-            EventType::LoopStarted,
+            EventType::FlowStarted,
             "reuse-lifecycle",
             2,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"reuse-loop"}),
+            Some("flow-001"),
+            serde_json::json!({"flow_definition_id":"reuse-flow"}),
         ),
         event_line(
             "evt-003",
             EventType::PhaseEntered,
             "reuse-lifecycle",
             3,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({
                 "instruction_ids": [],
                 "phase_id": "phase-a",
@@ -508,7 +508,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::StepStarted,
             "reuse-lifecycle",
             4,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"phase_id":"phase-a","step_id":"attempt","step_name":"Attempt"}),
         ),
         event_line(
@@ -516,7 +516,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::ToolStarted,
             "reuse-lifecycle",
             5,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
                 "network_access": "deny",
@@ -532,7 +532,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::ToolCompleted,
             "reuse-lifecycle",
             6,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"exit_code":0,"tool_id":"echo"}),
         ),
         event_line(
@@ -540,7 +540,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::StepCompleted,
             "reuse-lifecycle",
             7,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"phase_id":"phase-a","step_id":"attempt","step_name":"Attempt"}),
         ),
         event_line(
@@ -548,7 +548,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::PhaseEntered,
             "reuse-lifecycle",
             8,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({
                 "instruction_ids": [],
                 "phase_id": "phase-b",
@@ -561,7 +561,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::StepStarted,
             "reuse-lifecycle",
             9,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"phase_id":"phase-b","step_id":"attempt","step_name":"Attempt"}),
         ),
         event_line(
@@ -569,7 +569,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::ToolStarted,
             "reuse-lifecycle",
             10,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
                 "network_access": "deny",
@@ -585,7 +585,7 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::ToolCompleted,
             "reuse-lifecycle",
             11,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"exit_code":0,"tool_id":"echo"}),
         ),
         event_line(
@@ -593,16 +593,16 @@ fn session_log_allows_step_and_tool_reuse_in_later_phase() {
             EventType::StepCompleted,
             "reuse-lifecycle",
             12,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"phase_id":"phase-b","step_id":"attempt","step_name":"Attempt"}),
         ),
         event_line(
             "evt-013",
-            EventType::LoopCompleted,
+            EventType::FlowCompleted,
             "reuse-lifecycle",
             13,
-            Some("loop-001"),
-            serde_json::json!({"loop_definition_id":"reuse-loop"}),
+            Some("flow-001"),
+            serde_json::json!({"flow_definition_id":"reuse-flow"}),
         ),
         event_line(
             "evt-014",
@@ -706,31 +706,31 @@ fn appended_session_log_validator_preserves_event_and_terminal_state() {
 }
 
 #[test]
-fn appended_session_log_validator_preserves_loop_identity() {
+fn appended_session_log_validator_preserves_flow_identity() {
     let started = base_event().canonical_jsonl().expect("started serializes");
-    let loop_started = loop_started_line("evt-002", 2);
+    let flow_started = flow_started_line("evt-002", 2);
     let prior_events = validate_session_log_text(
-        Path::new("append-loop.jsonl"),
+        Path::new("append-flow.jsonl"),
         "meta001",
-        &format!("{started}{loop_started}"),
+        &format!("{started}{flow_started}"),
     )
-    .expect("loop prior validates");
-    let duplicate_loop = event_line(
+    .expect("flow prior validates");
+    let duplicate_flow = event_line(
         "evt-003",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         3,
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"other-loop"}),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"other-flow"}),
     );
     assert!(matches!(
         validate_appended_session_log_text(
-            Path::new("append-loop.jsonl"),
+            Path::new("append-flow.jsonl"),
             "meta001",
             &prior_events,
-            &duplicate_loop
+            &duplicate_flow
         ),
-        Err(RuntimeError::Protocol(message)) if message.contains("unique loop_id")
+        Err(RuntimeError::Protocol(message)) if message.contains("unique flow_id")
     ));
 }
 
@@ -754,100 +754,100 @@ fn session_lifecycle_rejects_parent_edges() {
     );
 
     assert_invalid_session_log(
-        "phase-before-loop.jsonl",
+        "phase-before-flow.jsonl",
         "meta001",
         &format!("{started}{}", phase_entered_line("evt-002", 2)),
-        "must follow loop.started",
+        "must follow flow.started",
     );
 
-    let parent_without_loop = event_line_with_parent(
+    let parent_without_flow = event_line_with_parent(
         "evt-002",
         EventType::Error,
         "meta001",
         2,
         None,
-        Some("parent-loop"),
+        Some("parent-flow"),
         serde_json::json!({
             "code": "E_PARENT",
             "data": {},
-            "message": "parent without loop",
+            "message": "parent without flow",
         }),
     );
     assert_invalid_session_log(
-        "parent-without-loop.jsonl",
+        "parent-without-flow.jsonl",
         "meta001",
-        &format!("{started}{parent_without_loop}"),
-        "parent_loop_id requires loop_id",
+        &format!("{started}{parent_without_flow}"),
+        "parent_flow_id requires flow_id",
     );
 
     let self_parent = event_line_with_parent(
         "evt-002",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         2,
-        Some("loop-001"),
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"child-loop"}),
+        Some("flow-001"),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"child-flow"}),
     );
     assert_invalid_session_log(
         "self-parent.jsonl",
         "meta001",
         &format!("{started}{self_parent}"),
-        "must not match loop_id",
+        "must not match flow_id",
     );
 
     let missing_parent = event_line_with_parent(
         "evt-002",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         2,
-        Some("child-loop"),
+        Some("child-flow"),
         Some("missing-parent"),
-        serde_json::json!({"loop_definition_id":"child-loop"}),
+        serde_json::json!({"flow_definition_id":"child-flow"}),
     );
     assert_invalid_session_log(
         "missing-parent.jsonl",
         "meta001",
         &format!("{started}{missing_parent}"),
-        "already started loop",
+        "already started flow",
     );
 
     let child_after_terminal_parent = event_line_with_parent(
         "evt-004",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         4,
-        Some("child-loop"),
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"child-loop"}),
+        Some("child-flow"),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"child-flow"}),
     );
     assert_invalid_session_log(
         "terminal-parent.jsonl",
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
-            loop_completed_line("evt-003", 3),
+            flow_started_line("evt-002", 2),
+            flow_completed_line("evt-003", 3),
             child_after_terminal_parent
         ),
-        "references terminal loop",
+        "references terminal flow",
     );
 
     let child_started = event_line_with_parent(
         "evt-003",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "meta001",
         3,
-        Some("child-loop"),
-        Some("loop-001"),
-        serde_json::json!({"loop_definition_id":"child-loop"}),
+        Some("child-flow"),
+        Some("flow-001"),
+        serde_json::json!({"flow_definition_id":"child-flow"}),
     );
     let child_phase_without_parent = event_line(
         "evt-004",
         EventType::PhaseEntered,
         "meta001",
         4,
-        Some("child-loop"),
+        Some("child-flow"),
         serde_json::json!({
             "instruction_ids": [],
             "phase_id": "phase",
@@ -860,11 +860,11 @@ fn session_lifecycle_rejects_parent_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             child_started,
             child_phase_without_parent
         ),
-        "must match loop.started",
+        "must match flow.started",
     );
 }
 
@@ -877,7 +877,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             step_started_line("evt-004", 4),
             phase_entered_line("evt-005", 5)
@@ -890,7 +890,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         "meta001",
         &format!(
             "{started}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             step_started_line("evt-003", 3)
         ),
         "requires active phase",
@@ -901,7 +901,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         EventType::StepStarted,
         "meta001",
         4,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"phase_id":"other-phase","step_id":"step","step_name":"Step"}),
     );
     assert_invalid_session_log(
@@ -909,7 +909,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             mismatched_step_phase
         ),
@@ -921,7 +921,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         EventType::StepStarted,
         "meta001",
         5,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"phase_id":"phase","step_id":"other-step","step_name":"OtherStep"}),
     );
     assert_invalid_session_log(
@@ -929,7 +929,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             step_started_line("evt-004", 4),
             second_active_step
@@ -942,7 +942,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             step_completed_line("evt-004", 4)
         ),
@@ -954,7 +954,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         EventType::StepCompleted,
         "meta001",
         5,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"phase_id":"phase","step_id":"other-step","step_name":"OtherStep"}),
     );
     assert_invalid_session_log(
@@ -962,7 +962,7 @@ fn session_lifecycle_rejects_phase_and_step_active_state_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             step_started_line("evt-004", 4),
             wrong_step_completed
@@ -976,7 +976,7 @@ fn session_lifecycle_rejects_tool_edges() {
     let started = base_event().canonical_jsonl().expect("started serializes");
     let active_step_prefix = format!(
         "{started}{}{}{}",
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4)
     );
@@ -986,7 +986,7 @@ fn session_lifecycle_rejects_tool_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             tool_started_line("evt-004", 4)
         ),
@@ -998,7 +998,7 @@ fn session_lifecycle_rejects_tool_edges() {
         EventType::ToolCompleted,
         "meta001",
         5,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"exit_code":0,"tool_id":"tool"}),
     );
     assert_invalid_session_log(
@@ -1013,7 +1013,7 @@ fn session_lifecycle_rejects_tool_edges() {
         EventType::ToolFailed,
         "meta001",
         4,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"error":"denied","tool_id":"tool"}),
     );
     assert_invalid_session_log(
@@ -1021,7 +1021,7 @@ fn session_lifecycle_rejects_tool_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             tool_failed_without_start
         ),
@@ -1034,7 +1034,7 @@ fn session_lifecycle_rejects_message_edges() {
     let started = base_event().canonical_jsonl().expect("started serializes");
     let active_step_prefix = format!(
         "{started}{}{}{}",
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4)
     );
@@ -1045,7 +1045,7 @@ fn session_lifecycle_rejects_message_edges() {
             EventType::MessageDelta,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
         )
     };
@@ -1054,7 +1054,7 @@ fn session_lifecycle_rejects_message_edges() {
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             phase_entered_line("evt-003", 3),
             message_delta_line("evt-004", 4)
         ),
@@ -1067,7 +1067,7 @@ fn session_lifecycle_rejects_message_edges() {
             EventType::MessageCompleted,
             "meta001",
             sequence,
-            Some("loop-001"),
+            Some("flow-001"),
             serde_json::json!({"message_id":"msg-001","role":role}),
         )
     };
@@ -1087,7 +1087,7 @@ fn session_lifecycle_rejects_message_edges() {
         EventType::MessageDelta,
         "meta001",
         6,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"content_delta":"hi","message_id":"msg-001","role":"user"}),
     );
     assert_invalid_session_log(
@@ -1113,7 +1113,7 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
     let started = base_event().canonical_jsonl().expect("started serializes");
     let active_step_prefix = format!(
         "{started}{}{}{}",
-        loop_started_line("evt-002", 2),
+        flow_started_line("evt-002", 2),
         phase_entered_line("evt-003", 3),
         step_started_line("evt-004", 4)
     );
@@ -1122,24 +1122,24 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
         EventType::MessageDelta,
         "meta001",
         5,
-        Some("loop-001"),
+        Some("flow-001"),
         serde_json::json!({"content_delta":"hello","message_id":"msg-001","role":"assistant"}),
     );
 
     assert_invalid_session_log(
-        "terminal-with-open-loop.jsonl",
+        "terminal-with-open-flow.jsonl",
         "meta001",
         &format!(
             "{started}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             session_event_line("meta001", "evt-003", EventType::SessionCompleted, 3),
         ),
-        "open loop",
+        "open flow",
     );
     assert_invalid_session_log(
         "terminal-with-open-step.jsonl",
         "meta001",
-        &format!("{active_step_prefix}{}", loop_completed_line("evt-005", 5)),
+        &format!("{active_step_prefix}{}", flow_completed_line("evt-005", 5)),
         "active step",
     );
     assert_invalid_session_log(
@@ -1162,29 +1162,29 @@ fn session_lifecycle_rejects_terminal_with_open_entities() {
         "active message",
     );
     assert_invalid_session_log(
-        "terminal-with-active-child-loop.jsonl",
+        "terminal-with-active-child-flow.jsonl",
         "meta001",
         &format!(
             "{started}{}{}{}",
-            loop_started_line("evt-002", 2),
+            flow_started_line("evt-002", 2),
             event_line_with_parent(
                 "evt-003",
-                EventType::LoopStarted,
+                EventType::FlowStarted,
                 "meta001",
                 3,
-                Some("loop-002"),
-                Some("loop-001"),
-                serde_json::json!({"loop_definition_id":"smoke-loop"}),
+                Some("flow-002"),
+                Some("flow-001"),
+                serde_json::json!({"flow_definition_id":"smoke-flow"}),
             ),
-            loop_completed_line("evt-004", 4),
+            flow_completed_line("evt-004", 4),
         ),
-        "active child loop",
+        "active child flow",
     );
 }
 
 #[test]
 fn resume_rejects_events_after_terminal_without_rewriting_log() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("terminal-plus.jsonl");
@@ -1236,7 +1236,7 @@ fn resume_rejects_events_after_terminal_without_rewriting_log() {
 
 #[test]
 fn resume_rejects_placeholder_prefix_without_rerunning_tool() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let event = EventEnvelope::new(
@@ -1275,9 +1275,9 @@ fn resume_rejects_placeholder_prefix_without_rerunning_tool() {
 
 #[test]
 fn resume_recovers_session_started_only_crash_prefix_from_metadata() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let completed =
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("seed session completes");
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("seed session completes");
     let prefix = completed
         .stdout
         .lines()
@@ -1294,7 +1294,7 @@ fn resume_recovers_session_started_only_crash_prefix_from_metadata() {
     .expect("crash precedes the first context checkpoint");
 
     let resumed = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
-        .expect("definition metadata identifies the selected loop");
+        .expect("definition metadata identifies the selected flow");
 
     assert!(
         resumed
@@ -1313,7 +1313,7 @@ fn resume_recovers_session_started_only_crash_prefix_from_metadata() {
 
 #[test]
 fn resume_rejects_active_session_lock_without_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let reservation = reserve_session_log(&workspace, "hello001").expect("reservation succeeds");
     write_initial_session_log(&reservation, "hello001").expect("initial log writes");
 
@@ -1327,7 +1327,7 @@ fn resume_rejects_active_session_lock_without_side_effects() {
 
 #[test]
 fn resume_rejects_case_aliased_session_lock_without_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let reservation = reserve_session_log(&workspace, "hello001").expect("reservation succeeds");
     write_initial_session_log(&reservation, "hello001").expect("initial log writes");
     let alias = workspace.join(LOCAL_SESSION_DIR).join("HELLO001.LOCK");
@@ -1350,7 +1350,7 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
     let (workspace, path) = workspace_at_write_summary_progress_with_existing_output();
 
     let output =
-        resume_session(&workspace, "hello-loop", EmitMode::Jsonl).expect("session resumes");
+        resume_session(&workspace, "hello-flow", EmitMode::Jsonl).expect("session resumes");
 
     assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
     assert!(output.stdout.contains("\"event_type\":\"tool.completed\""));
@@ -1359,19 +1359,19 @@ fn resume_does_not_rerun_tool_after_progress_prefix() {
         "already-written\n"
     );
     let resumed = fs::read_to_string(&path).expect("resumed log readable");
-    let events = validate_session_log_text(&path, "hello-loop", &resumed)
+    let events = validate_session_log_text(&path, "hello-flow", &resumed)
         .expect("resumed log remains valid");
     assert!(stream_is_completed(&events));
 }
 
 #[test]
 fn resume_uses_canonical_registry_strings_and_equivalent_references() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
-        "loops/hello-loop.yaml",
-        "name: HelloLoop",
-        "name: Cafe\u{301}Loop",
+        "flows/hello-flow.yaml",
+        "name: HelloFlow",
+        "name: Cafe\u{301}Flow",
     );
     replace_registry_text(
         &workspace,
@@ -1381,18 +1381,18 @@ fn resume_uses_canonical_registry_strings_and_equivalent_references() {
     );
 
     let completed =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("initial run completes");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("initial run completes");
     assert_eq!(
         fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is readable"),
         "Café\n"
     );
     let prefix = prefix_before_tool_started(&completed.stdout, "write-summary");
     fs::write(&completed.session_path, &prefix).expect("partial canonical prefix written");
-    write_definition_hash_metadata(&workspace, &completed.session_id, "hello-loop");
+    write_definition_hash_metadata(&workspace, &completed.session_id, "hello-flow");
     fs::remove_file(workspace.join("out/summary.txt")).expect("completed side effect removed");
     replace_registry_text(
         &workspace,
-        "loops/hello-loop.yaml",
+        "flows/hello-flow.yaml",
         "phase_refs: [inspect, summarize]",
         "phase_refs: [Inspect, Summarize]",
     );
@@ -1444,11 +1444,11 @@ fn resume_ignores_unrelated_registry_additions() {
     let (workspace, _) = workspace_at_write_summary_progress_with_existing_output();
     fs::write(
         workspace.join("registry/instructions/unrelated.yaml"),
-        "instruction:\n  id: unrelated\n  name: Unrelated\n  prompt: Not used by hello-loop\n",
+        "instruction:\n  id: unrelated\n  name: Unrelated\n  prompt: Not used by hello-flow\n",
     )
     .expect("unrelated definition written");
 
-    let output = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("unrelated definition does not change the closure hash");
 
     assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
@@ -1469,7 +1469,7 @@ fn resume_rejects_registry_drift_before_side_effects() {
         "printf 'drift\\n' > out/summary.txt",
     );
 
-    let err = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("registry drift must reject resume");
 
     assert!(matches!(
@@ -1484,14 +1484,14 @@ fn resume_rejects_registry_drift_before_side_effects() {
 
 #[test]
 fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
-    let workspace = workspace_copy("hello-loop");
-    let registry = load_test_registry(&workspace, "hello-loop");
-    let loop_block = registry.loop_block("hello-loop").expect("loop exists");
+    let workspace = workspace_copy("hello-flow");
+    let registry = load_test_registry(&workspace, "hello-flow");
+    let flow_block = registry.flow_block("hello-flow").expect("flow exists");
     let metadata_path = workspace.join(LOCAL_LOG_DIR).join("partial001.log");
     fs::create_dir_all(metadata_path.parent().expect("metadata parent")).expect("metadata dir");
 
     fs::write(&metadata_path, "").expect("empty metadata writes");
-    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, flow_block)
         .expect_err("metadata without registry hash must fail closed");
     assert!(matches!(
         err,
@@ -1500,30 +1500,30 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
 
     fs::write(
         &metadata_path,
-        "loop_definition_id=hello-loop\nregistry_hash=sha256:partial\n",
+        "flow_definition_id=hello-flow\nregistry_hash=sha256:partial\n",
     )
     .expect("partial metadata writes");
-    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
-        .expect_err("metadata without loop hash must fail closed");
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, flow_block)
+        .expect_err("metadata without flow hash must fail closed");
     assert!(matches!(
         err,
-        RuntimeError::Protocol(message) if message.contains("missing loop_definition_hash")
+        RuntimeError::Protocol(message) if message.contains("missing flow_definition_hash")
     ));
 
     fs::write(
         &metadata_path,
-        "registry_hash=sha256:partial\nloop_definition_hash=sha256:partial\n",
+        "registry_hash=sha256:partial\nflow_definition_hash=sha256:partial\n",
     )
-    .expect("metadata without loop id writes");
-    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
-        .expect_err("metadata without loop id must fail closed");
+    .expect("metadata without flow id writes");
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, flow_block)
+        .expect_err("metadata without flow id must fail closed");
     assert!(matches!(
         err,
-        RuntimeError::Protocol(message) if message.contains("missing loop_definition_id")
+        RuntimeError::Protocol(message) if message.contains("missing flow_definition_id")
     ));
 
     fs::remove_file(&metadata_path).expect("metadata removed");
-    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, flow_block)
         .expect_err("absent metadata must fail closed");
     assert!(matches!(
         err,
@@ -1531,7 +1531,7 @@ fn resume_definition_metadata_rejects_partial_hashes_and_missing_directory() {
     ));
 
     fs::remove_dir_all(workspace.join(LOCAL_LOG_DIR)).expect("metadata directory removed");
-    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, loop_block)
+    let err = verify_resume_definition_metadata(&workspace, "partial001", &registry, flow_block)
         .expect_err("missing metadata directory must fail closed");
     assert!(matches!(
         err,
@@ -1556,17 +1556,17 @@ fn session_metadata_and_resume_paths_reject_malformed_inputs() {
 #[cfg(any(unix, windows))]
 #[test]
 fn resume_rejects_hardlinked_session_log_before_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let outside = empty_workspace("outside-resume-hardlink-reject");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let event = first_event_line("hello-loop", "hello-loop.jsonl");
-    let outside_target = outside.join("hello-loop.jsonl");
+    let event = first_event_line("hello-flow", "hello-flow.jsonl");
+    let outside_target = outside.join("hello-flow.jsonl");
     fs::write(&outside_target, &event).expect("outside log written");
-    let session_path = session_dir.join("hello-loop.jsonl");
+    let session_path = session_dir.join("hello-flow.jsonl");
     fs::hard_link(&outside_target, &session_path).expect("session hard link");
 
-    let err = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("hard-linked session log must not resume");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
@@ -1579,14 +1579,14 @@ fn resume_rejects_hardlinked_session_log_before_side_effects() {
 
 #[test]
 fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     fs::write(
         workspace.join(".flow/config.yaml"),
         "registry_root: registry\n",
     )
     .expect("live workspace config written");
     let completed =
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("live-profile run completes");
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("live-profile run completes");
     let prefix = completed
         .stdout
         .lines()
@@ -1595,12 +1595,12 @@ fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
         .join("\n")
         + "\n";
     fs::write(&completed.session_path, &prefix).expect("partial live session written");
-    write_definition_hash_metadata(&workspace, &completed.session_id, "smoke-loop");
+    write_definition_hash_metadata(&workspace, &completed.session_id, "smoke-flow");
 
     let output = resume_session(&workspace, &completed.session_id, EmitMode::Human)
         .expect("live-profile session resumes");
 
-    assert_eq!(output.stdout, "session smoke-loop resumed\n");
+    assert_eq!(output.stdout, "session smoke-flow resumed\n");
     let resumed_text =
         fs::read_to_string(&completed.session_path).expect("resumed session remains readable");
     let resumed_events = validate_session_log_text(
@@ -1659,18 +1659,18 @@ fn resume_human_mode_reports_the_terminal_failure_reason() {
 
 #[test]
 fn resume_rejects_tool_started_prefix_without_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let prefix = prefix_through_tool_started(
-        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        &expected_stream("hello-flow", "hello-flow.jsonl"),
         "write-summary",
     );
-    let path = session_dir.join("hello-loop.jsonl");
+    let path = session_dir.join("hello-flow.jsonl");
     fs::write(&path, &prefix).expect("started prefix written");
-    write_definition_hash_metadata(&workspace, "hello-loop", "hello-loop");
+    write_definition_hash_metadata(&workspace, "hello-flow", "hello-flow");
 
-    let err = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("tool.started prefix is ambiguous and must not resume");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("in-flight tool")));
@@ -1679,16 +1679,16 @@ fn resume_rejects_tool_started_prefix_without_side_effects() {
 
 #[test]
 fn resume_commits_resume_marker_before_apply_side_effects_fail() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let prefix = prefix_before_tool_started(
-        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        &expected_stream("hello-flow", "hello-flow.jsonl"),
         "write-summary",
     );
-    let path = session_dir.join("hello-loop.jsonl");
+    let path = session_dir.join("hello-flow.jsonl");
     fs::write(&path, &prefix).expect("prefix written");
-    write_definition_hash_metadata(&workspace, "hello-loop", "hello-loop");
+    write_definition_hash_metadata(&workspace, "hello-flow", "hello-flow");
 
     let summary_path = workspace.join("out/summary.txt");
     for attempt in 0..100 {
@@ -1697,13 +1697,13 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
         fs::write(temp_path, b"collision").expect("replacement temp collision written");
     }
 
-    let err = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("apply-time side effect failure must fail the resume");
 
     let RuntimeError::SessionFailed { session_id, source } = err else {
         panic!("expected identified session failure, got {err:?}");
     };
-    assert_eq!(session_id, "hello-loop");
+    assert_eq!(session_id, "hello-flow");
     assert_denied(
         *source,
         core_policy::DenyReasonCode::WriteDenied,
@@ -1719,11 +1719,11 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
     }));
     assert!(!resumed.contains("\"event_type\":\"session.completed\""));
     let events =
-        validate_session_log_text(&path, "hello-loop", &resumed).expect("marker log remains valid");
+        validate_session_log_text(&path, "hello-flow", &resumed).expect("marker log remains valid");
     let denial = core_policy::DenyReasonCode::WriteDenied.as_str();
     for (event_type, field) in [
         (EventType::Error, "code"),
-        (EventType::LoopFailed, "error"),
+        (EventType::FlowFailed, "error"),
         (EventType::SessionFailed, "reason"),
     ] {
         assert!(events.iter().any(|event| {
@@ -1739,34 +1739,34 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
 
 #[test]
 fn resume_retries_prior_resume_marker_tail_without_duplicate_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let prefix = prefix_before_tool_started(
-        &expected_stream("hello-loop", "hello-loop.jsonl"),
+        &expected_stream("hello-flow", "hello-flow.jsonl"),
         "write-summary",
     );
-    let path = session_dir.join("hello-loop.jsonl");
+    let path = session_dir.join("hello-flow.jsonl");
     let event_count = prefix.lines().count();
     let resume_sequence = event_count as u64 + 1;
     let resume_marker = event_line(
         &format!("evt-{resume_sequence:03}"),
         EventType::SessionResumed,
-        "hello-loop",
+        "hello-flow",
         resume_sequence,
         None,
         serde_json::json!({"reason":"resume"}),
     );
     let before = format!("{prefix}{resume_marker}");
     fs::write(&path, &before).expect("prior resume marker written");
-    write_definition_hash_metadata(&workspace, "hello-loop", "hello-loop");
+    write_definition_hash_metadata(&workspace, "hello-flow", "hello-flow");
 
-    let output = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("marker-only resume tail retries from the durable prefix");
 
     assert!(!output.failed);
     let resumed = fs::read_to_string(&path).expect("resumed log remains readable");
-    let events = validate_session_log_text(&path, "hello-loop", &resumed)
+    let events = validate_session_log_text(&path, "hello-flow", &resumed)
         .expect("resumed log remains valid");
     assert_eq!(
         events
@@ -1801,17 +1801,17 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
     let workspace = workspace_with_later_invalid_own_script_path();
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let path = session_dir.join("hello-loop.jsonl");
-    let prefix = expected_stream("hello-loop", "hello-loop.jsonl")
+    let path = session_dir.join("hello-flow.jsonl");
+    let prefix = expected_stream("hello-flow", "hello-flow.jsonl")
         .lines()
         .take(2)
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
     fs::write(&path, &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "hello-loop", "hello-loop");
+    write_definition_hash_metadata(&workspace, "hello-flow", "hello-flow");
 
-    let err = resume_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
 
     assert_denied(
@@ -1829,24 +1829,24 @@ fn resume_preflights_later_own_script_path_before_earlier_side_effects() {
 #[cfg(not(any(unix, windows)))]
 #[test]
 fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-resume-hardlink");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    let prefix = expected_stream("smoke-flow", "smoke-flow.jsonl")
         .lines()
         .take(2)
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let outside_target = outside.join("smoke-loop.jsonl");
+    let outside_target = outside.join("smoke-flow.jsonl");
     fs::write(&outside_target, &prefix).expect("outside log written");
-    let session_path = session_dir.join("smoke-loop.jsonl");
+    let session_path = session_dir.join("smoke-flow.jsonl");
     fs::hard_link(&outside_target, &session_path).expect("session hard link");
-    write_definition_hash_metadata(&workspace, "smoke-loop", "smoke-loop");
+    write_definition_hash_metadata(&workspace, "smoke-flow", "smoke-flow");
 
     let output =
-        resume_session(&workspace, "smoke-loop", EmitMode::Jsonl).expect("session resumes");
+        resume_session(&workspace, "smoke-flow", EmitMode::Jsonl).expect("session resumes");
 
     assert!(output.event_count > 2);
     assert_eq!(
@@ -1862,10 +1862,10 @@ fn resume_replaces_hardlinked_session_log_when_link_count_unverified() {
 
 #[test]
 fn resume_rejects_noncanonical_resume_marker_without_rewriting_log() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
-    let mut prefix = expected_stream("smoke-loop", "smoke-loop.jsonl")
+    let mut prefix = expected_stream("smoke-flow", "smoke-flow.jsonl")
         .lines()
         .take(2)
         .collect::<Vec<_>>()
@@ -1874,16 +1874,16 @@ fn resume_rejects_noncanonical_resume_marker_without_rewriting_log() {
     prefix.push_str(&event_line(
         "evt-016",
         EventType::SessionResumed,
-        "smoke-loop",
+        "smoke-flow",
         3,
         None,
         serde_json::json!({"reason":"resume"}),
     ));
-    let path = session_dir.join("smoke-loop.jsonl");
+    let path = session_dir.join("smoke-flow.jsonl");
     fs::write(&path, &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "smoke-loop", "smoke-loop");
+    write_definition_hash_metadata(&workspace, "smoke-flow", "smoke-flow");
 
-    let err = resume_session(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = resume_session(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("noncanonical resume marker must not resume");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("valid prefix")));

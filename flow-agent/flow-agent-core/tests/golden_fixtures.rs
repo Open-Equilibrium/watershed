@@ -1,8 +1,8 @@
 use core_script::{
-    AllowedParameter, LoopBlock, ParameterValueType, PhaseBlock, RegistryBlock, ScriptRuntime,
+    AllowedParameter, FlowBlock, ParameterValueType, PhaseBlock, RegistryBlock, ScriptRuntime,
     StepBlock, ToolBlock, ToolCommand, ToolKind, parse_registry_block,
 };
-use flow_agent_core::{EmitMode, run_loop};
+use flow_agent_core::{EmitMode, run_flow};
 use proto::{EventEnvelope, EventType};
 use std::{collections::HashSet, fs, path::Path};
 
@@ -48,23 +48,23 @@ fn every_expected_stream_is_protocol_valid() {
 }
 
 #[test]
-fn smoke_loop_stream_matches_m0_order_contract() {
-    let workspace = workspace_copy("smoke-loop");
+fn smoke_flow_stream_matches_m0_order_contract() {
+    let workspace = workspace_copy("smoke-flow");
     let output =
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop fixture executes");
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("smoke-flow fixture executes");
     assert!(!output.failed);
-    let expected = fs::read_to_string(fixture_root().join("smoke-loop/expected/smoke-loop.jsonl"))
-        .expect("smoke-loop golden stream reads");
+    let expected = fs::read_to_string(fixture_root().join("smoke-flow/expected/smoke-flow.jsonl"))
+        .expect("smoke-flow golden stream reads");
     assert_eq!(output.stdout, expected);
 
-    let stream = load_stream("smoke-loop", "smoke-loop.jsonl");
+    let stream = load_stream("smoke-flow", "smoke-flow.jsonl");
     let event_types = event_types(&stream);
 
     assert_eq!(
         event_types,
         vec![
             EventType::SessionStarted,
-            EventType::LoopStarted,
+            EventType::FlowStarted,
             EventType::PhaseEntered,
             EventType::StepStarted,
             EventType::MessageDelta,
@@ -72,11 +72,11 @@ fn smoke_loop_stream_matches_m0_order_contract() {
             EventType::ToolStarted,
             EventType::ToolCompleted,
             EventType::StepCompleted,
-            EventType::LoopCompleted,
+            EventType::FlowCompleted,
             EventType::SessionCompleted,
         ]
     );
-    assert_smoke_loop_payload_dimensions(&stream);
+    assert_smoke_flow_payload_dimensions(&stream);
 }
 
 #[test]
@@ -86,14 +86,14 @@ fn sandbox_negative_runtime_matches_golden_streams() {
         .into_iter()
         .filter(|path| path.parent() == Some(expected_dir.as_path()))
     {
-        let loop_ref = stream_path
+        let flow_ref = stream_path
             .file_stem()
             .and_then(|name| name.to_str())
             .expect("sandbox-negative stream name is UTF-8");
         let workspace = workspace_copy("sandbox-negative");
-        let output = run_loop(&workspace, loop_ref, EmitMode::Jsonl)
-            .unwrap_or_else(|err| panic!("{loop_ref} fixture executes: {err}"));
-        assert!(output.failed, "{loop_ref} must fail");
+        let output = run_flow(&workspace, flow_ref, EmitMode::Jsonl)
+            .unwrap_or_else(|err| panic!("{flow_ref} fixture executes: {err}"));
+        assert!(output.failed, "{flow_ref} must fail");
         let expected = fs::read_to_string(&stream_path)
             .unwrap_or_else(|err| panic!("{}: {err}", stream_path.display()));
 
@@ -102,32 +102,32 @@ fn sandbox_negative_runtime_matches_golden_streams() {
 }
 
 #[test]
-fn hello_loop_stream_covers_m0_contract_dimensions() {
-    let workspace = workspace_copy("hello-loop");
+fn hello_flow_stream_covers_m0_contract_dimensions() {
+    let workspace = workspace_copy("hello-flow");
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("hello-loop fixture executes");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("hello-flow fixture executes");
     assert!(!output.failed);
-    let expected_path = fixture_root().join("hello-loop/expected/hello-loop.jsonl");
-    let expected = fs::read_to_string(&expected_path).expect("hello-loop golden stream reads");
+    let expected_path = fixture_root().join("hello-flow/expected/hello-flow.jsonl");
+    let expected = fs::read_to_string(&expected_path).expect("hello-flow golden stream reads");
     assert_eq!(output.stdout, expected);
     let stream = flow_agent_core::validate_protocol_jsonl_text(&expected_path, &output.stdout)
-        .expect("hello-loop runtime stream is protocol-valid");
+        .expect("hello-flow runtime stream is protocol-valid");
 
-    assert_hello_loop_payload_dimensions(&stream);
+    assert_hello_flow_payload_dimensions(&stream);
 }
 
 #[test]
-fn hello_loop_source_tools_cover_m0_contract() {
-    let fixture = fixture_root().join("hello-loop");
-    let loop_block = load_loop_block(&fixture.join("registry/loops/hello-loop.yaml"));
+fn hello_flow_source_tools_cover_m0_contract() {
+    let fixture = fixture_root().join("hello-flow");
+    let flow_block = load_flow_block(&fixture.join("registry/flows/hello-flow.yaml"));
     let inspect_phase = load_phase_block(&fixture.join("registry/phases/inspect.yaml"));
     let summarize_phase = load_phase_block(&fixture.join("registry/phases/summarize.yaml"));
     let read_file = load_tool_block(&fixture.join("registry/tools/read-file.yaml"));
     let write_summary = load_tool_block(&fixture.join("registry/tools/write-summary.yaml"));
 
-    assert_eq!(loop_block.phase_refs, vec!["inspect", "summarize"]);
+    assert_eq!(flow_block.phase_refs, vec!["inspect", "summarize"]);
     assert_eq!(
-        loop_block.connection_refs,
+        flow_block.connection_refs,
         vec!["inspect-data", "inspect-trigger", "summary-refresh"]
     );
     assert_eq!(inspect_phase.tool_refs, vec!["read-file"]);
@@ -209,8 +209,8 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             stream_path.display()
         );
         assert!(
-            event_types.contains(&EventType::LoopFailed),
-            "{} must contain loop.failed",
+            event_types.contains(&EventType::FlowFailed),
+            "{} must contain flow.failed",
             stream_path.display()
         );
         assert!(
@@ -228,10 +228,10 @@ fn sandbox_negative_streams_fail_without_completion_events() {
                 .collect::<Vec<_>>(),
             vec![
                 EventType::Error,
-                EventType::LoopFailed,
+                EventType::FlowFailed,
                 EventType::SessionFailed,
             ],
-            "{} must end with error, loop.failed and session.failed",
+            "{} must end with error, flow.failed and session.failed",
             stream_path.display()
         );
         if sandbox_negative_attempts_tool_launch(&stream_path) {
@@ -257,8 +257,8 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             stream_path.display()
         );
         assert!(
-            !event_types.contains(&EventType::LoopCompleted),
-            "{} must not contain loop.completed",
+            !event_types.contains(&EventType::FlowCompleted),
+            "{} must not contain flow.completed",
             stream_path.display()
         );
         assert!(
@@ -312,10 +312,10 @@ fn load_registry_block(path: &Path) -> RegistryBlock {
         .unwrap_or_else(|err| panic!("{}: {err}", path.display()))
 }
 
-fn load_loop_block(path: &Path) -> LoopBlock {
+fn load_flow_block(path: &Path) -> FlowBlock {
     match load_registry_block(path) {
-        RegistryBlock::Loop(block) => block,
-        block => panic!("{}: expected loop block, got {block:?}", path.display()),
+        RegistryBlock::Flow(block) => block,
+        block => panic!("{}: expected flow block, got {block:?}", path.display()),
     }
 }
 
@@ -347,12 +347,12 @@ fn event_types(stream: &[EventEnvelope]) -> Vec<EventType> {
     stream.iter().map(|event| event.event_type).collect()
 }
 
-fn assert_smoke_loop_payload_dimensions(stream: &[EventEnvelope]) {
-    let loop_started = find_event(stream, EventType::LoopStarted, "smoke loop.started");
+fn assert_smoke_flow_payload_dimensions(stream: &[EventEnvelope]) {
+    let flow_started = find_event(stream, EventType::FlowStarted, "smoke flow.started");
     assert_payload_eq(
-        loop_started,
-        "loop_definition_id",
-        serde_json::json!("smoke-loop"),
+        flow_started,
+        "flow_definition_id",
+        serde_json::json!("smoke-flow"),
     );
 
     let phase_entered = find_event(stream, EventType::PhaseEntered, "smoke phase.entered");
@@ -379,25 +379,25 @@ fn assert_smoke_loop_payload_dimensions(stream: &[EventEnvelope]) {
     assert_payload_eq(tool_started, "write_scope", serde_json::json!([]));
 }
 
-fn assert_hello_loop_payload_dimensions(stream: &[EventEnvelope]) {
+fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
     assert_step_connection_payloads(stream);
     assert!(
         stream
             .iter()
             .any(|event| event.event_type == EventType::ToolProgress),
-        "hello-loop must include tool progress"
+        "hello-flow must include tool progress"
     );
 
-    let root_loop = find_payload_event(
+    let root_flow = find_payload_event(
         stream,
-        EventType::LoopStarted,
-        "loop_definition_id",
-        serde_json::json!("hello-loop"),
+        EventType::FlowStarted,
+        "flow_definition_id",
+        serde_json::json!("hello-flow"),
     );
-    let root_loop_id = root_loop
-        .loop_id
+    let root_flow_id = root_flow
+        .flow_id
         .as_deref()
-        .expect("hello-loop root loop.started must include loop_id");
+        .expect("hello-flow root flow.started must include flow_id");
 
     let phase_count = stream
         .iter()
@@ -405,7 +405,7 @@ fn assert_hello_loop_payload_dimensions(stream: &[EventEnvelope]) {
         .count();
     assert!(
         phase_count >= 2,
-        "hello-loop must include at least two phase.entered events"
+        "hello-flow must include at least two phase.entered events"
     );
     find_payload_event(
         stream,
@@ -469,7 +469,7 @@ fn assert_hello_loop_payload_dimensions(stream: &[EventEnvelope]) {
         step_started_pairs
             .iter()
             .any(|pairs| pairs == &[("inspect-data".to_owned(), "data".to_owned())]),
-        "hello-loop must include inspect-data/data connection pair"
+        "hello-flow must include inspect-data/data connection pair"
     );
     assert!(
         step_started_pairs.iter().any(|pairs| pairs
@@ -477,40 +477,40 @@ fn assert_hello_loop_payload_dimensions(stream: &[EventEnvelope]) {
                 ("inspect-trigger".to_owned(), "trigger".to_owned()),
                 ("summary-refresh".to_owned(), "refresh".to_owned()),
             ]),
-        "hello-loop must include trigger and refresh connection pairs in order"
+        "hello-flow must include trigger and refresh connection pairs in order"
     );
 
-    let subloop_started = stream
+    let subflow_started = stream
         .iter()
         .filter(|event| {
-            event.event_type == EventType::LoopStarted && event.parent_loop_id.is_some()
+            event.event_type == EventType::FlowStarted && event.parent_flow_id.is_some()
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        subloop_started.len(),
+        subflow_started.len(),
         2,
-        "hello-loop must reuse one subloop definition twice"
+        "hello-flow must reuse one subflow definition twice"
     );
 
-    let mut subloop_ids = HashSet::new();
-    for event in subloop_started {
+    let mut subflow_ids = HashSet::new();
+    for event in subflow_started {
         assert_payload_eq(
             event,
-            "loop_definition_id",
-            serde_json::json!("hello-subloop"),
+            "flow_definition_id",
+            serde_json::json!("hello-subflow"),
         );
         assert_eq!(
-            event.parent_loop_id.as_deref(),
-            Some(root_loop_id),
-            "hello-loop subloop parent_loop_id must match root loop_id"
+            event.parent_flow_id.as_deref(),
+            Some(root_flow_id),
+            "hello-flow subflow parent_flow_id must match root flow_id"
         );
-        let loop_id = event
-            .loop_id
+        let flow_id = event
+            .flow_id
             .as_deref()
-            .expect("hello-loop subloop must include loop_id");
+            .expect("hello-flow subflow must include flow_id");
         assert!(
-            subloop_ids.insert(loop_id),
-            "hello-loop subloop invocations must use distinct loop_id values"
+            subflow_ids.insert(flow_id),
+            "hello-flow subflow invocations must use distinct flow_id values"
         );
     }
 }

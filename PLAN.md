@@ -35,7 +35,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 ### M1 — Flow Agent MVP (standalone CLI)
 
-**Wedge:** Flow Agent execution wedge — prove evented agent loops as a deterministic, auditable, reusable agent-loop runtime (not a generic coding agent).
+**Wedge:** Flow Agent execution wedge — prove evented agent flows as a deterministic, auditable, reusable agent-flow runtime (not a generic coding agent).
 
 **Status:** M1 implementation is in progress. The standalone CLI runtime, JSONL event stream, local session log, replay/tail/resume commands, fixture registry loading and validation gates are in active hardening against the DoD.
 
@@ -45,17 +45,17 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Headless JSONL event stream over stdout.
 - Local append-only session/transcript log (ADR-0037); initial resume/tail/replay behavior over the log.
 - Public runtime events persisted before bounded non-blocking live notification, with caller-owned sequence replay from the authoritative log (ADR-0036, ADR-0059, ADR-0062).
-- Building-block registry for Tools, Instructions, Phases, Loops and Connections using explicit by-name/id references, canonical serialization and cycle detection (ADR-0031).
+- Building-block registry for Tools, Instructions, Phases, Flows and Connections using explicit by-name/id references, canonical serialization and cycle detection (ADR-0031).
 - Deterministic FSM phase/step engine: phase order, available tools, instruction loading and state transitions are deterministic; LLM/tool outputs are inputs to deterministic transitions.
-- Deterministic, cache-stable `loop-context-v0` compilation over mandatory active scope plus narrowly bounded continuity, with reproducible per-turn manifests; persisted compaction and retrieval are post-M1 (ADR-0050, ADR-0058).
-- Script-defined Tools/Instructions/Phases/Loops with recursive composition (`Loop` as a building block).
+- Deterministic, cache-stable `flow-context-v0` compilation over mandatory active scope plus narrowly bounded continuity, with reproducible per-turn manifests; persisted compaction and retrieval are post-M1 (ADR-0050, ADR-0058).
+- Script-defined Tools/Instructions/Phases/Flows with recursive composition (`Flow` as a building block).
 - Event-driven execution: no polling loop for normal agent progress.
 - Runtime kernel: deterministic bounded in-process fixture interpretation plus session event and context-manifest logs. External subprocess timeouts, bounded stdout/stderr, per-tool run logs and `tool.timed_out` remain post-M1.
-- Deterministic in-process enforcement/emulation for declared command, parameter-schema, read/write, protected-path and deny-all network capabilities per loop. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
+- Deterministic in-process enforcement/emulation for declared command, parameter-schema, read/write, protected-path and deny-all network capabilities per flow. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
 - Protocol adapter that emits normalized `proto` v0 events.
-- Golden loops and sandbox-negative tests per `TESTING.md` (ADR-0034).
+- Golden flows and sandbox-negative tests per `TESTING.md` (ADR-0034).
 
-**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; persists every canonical event before any live notification; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Flow Agent M1 budgets in `PERFORMANCE.md`. Flow Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Flow Agent MVP feature depends on a Watershed project-history/VCS engine.
+**DoD:** a multi-phase local flow with a subflow runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; persists every canonical event before any live notification; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Flow Agent M1 budgets in `PERFORMANCE.md`. Flow Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Flow Agent MVP feature depends on a Watershed project-history/VCS engine.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 

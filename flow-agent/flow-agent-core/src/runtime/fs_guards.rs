@@ -421,13 +421,13 @@ struct RuntimeDirs {
 
 fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
     let workspace = AnchoredDir::workspace(workspace)?;
-    let loop_dir = workspace
+    let flow_dir = workspace
         .child(".flow", true, DirectoryErrorMode::Protocol)?
         .expect("created runtime directory is present");
-    let sessions = loop_dir
+    let sessions = flow_dir
         .child("sessions", true, DirectoryErrorMode::Protocol)?
         .expect("created session directory is present");
-    let logs = loop_dir
+    let logs = flow_dir
         .child("logs", true, DirectoryErrorMode::Protocol)?
         .expect("created log directory is present");
     Ok(RuntimeDirs { logs, sessions })
@@ -435,10 +435,10 @@ fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
 
 fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
     let workspace = AnchoredDir::workspace(workspace)?;
-    let Some(loop_dir) = workspace.child(".flow", false, DirectoryErrorMode::Protocol)? else {
+    let Some(flow_dir) = workspace.child(".flow", false, DirectoryErrorMode::Protocol)? else {
         return Ok(None);
     };
-    loop_dir.child(leaf, false, DirectoryErrorMode::Protocol)
+    flow_dir.child(leaf, false, DirectoryErrorMode::Protocol)
 }
 
 fn validate_anchored_directory(

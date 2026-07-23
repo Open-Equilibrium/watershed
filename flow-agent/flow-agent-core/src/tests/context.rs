@@ -13,11 +13,11 @@ fn tier_zero(turn_value: &str) -> [ContextSource; 9] {
             "base-runtime-security",
             serde_json::json!({"policy":"deny"}),
         ),
-        context_source("active-loop-instructions", serde_json::json!([])),
+        context_source("active-flow-instructions", serde_json::json!([])),
         context_source("active-phase-instructions", serde_json::json!(["phase"])),
         context_source("active-step-instructions", serde_json::json!([])),
         context_source("active-available-tools", serde_json::json!({"z":1,"a":2})),
-        context_source("fsm-loop-state", serde_json::json!({"turn":turn_value})),
+        context_source("fsm-flow-state", serde_json::json!({"turn":turn_value})),
         context_source("typed-connection-inputs", serde_json::json!([])),
         context_source("current-user-input", serde_json::json!({"present":false})),
         context_source("unresolved-call-result", serde_json::json!([])),
@@ -26,9 +26,9 @@ fn tier_zero(turn_value: &str) -> [ContextSource; 9] {
 
 fn compile_summarize_turn_context(
     registry: &core_script::ResolvedRegistry,
-    loop_id: &str,
+    flow_id: &str,
 ) -> CompiledContext {
-    let loop_block = registry.loop_block("hello-loop").expect("loop exists");
+    let flow_block = registry.flow_block("hello-flow").expect("flow exists");
     let phase = registry.phase_block("summarize").expect("phase exists");
     let step = phase
         .steps
@@ -37,12 +37,12 @@ fn compile_summarize_turn_context(
         .expect("step exists");
     compile_provider_turn_context(
         registry,
-        loop_block,
+        flow_block,
         phase,
         step,
-        &LoopInvocation {
-            loop_id: loop_id.to_owned(),
-            parent_loop_id: None,
+        &FlowInvocation {
+            flow_id: flow_id.to_owned(),
+            parent_flow_id: None,
         },
         "contextdirection001",
         &ContextHistory::default(),
@@ -100,9 +100,9 @@ fn prefix_before_message_completed(stream: &str) -> String {
 
 #[test]
 fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
-    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let first = compile_summarize_turn_context(&registry, "hello-loop#1");
-    let second = compile_summarize_turn_context(&registry, "hello-loop#2");
+    let (registry, _) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let first = compile_summarize_turn_context(&registry, "hello-flow#1");
+    let second = compile_summarize_turn_context(&registry, "hello-flow#2");
     let source_lines = std::str::from_utf8(&first.provider_bytes)
         .expect("provider context is UTF-8")
         .lines()
@@ -117,11 +117,11 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
         .collect::<Vec<_>>();
     let expected_ids = [
         "base-runtime-security",
-        "active-loop-instructions",
+        "active-flow-instructions",
         "active-phase-instructions",
         "active-step-instructions",
         "active-available-tools",
-        "fsm-loop-state",
+        "fsm-flow-state",
         "typed-connection-inputs",
         "current-user-input",
         "unresolved-call-result",
@@ -188,18 +188,18 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
 
 #[test]
 fn typed_connection_inputs_exclude_outbound_step_connections() {
-    let workspace = workspace_copy("hello-loop");
-    let registry = load_test_registry(&workspace, "hello-loop");
-    let with_outbound_reference = compile_summarize_turn_context(&registry, "hello-loop#1");
+    let workspace = workspace_copy("hello-flow");
+    let registry = load_test_registry(&workspace, "hello-flow");
+    let with_outbound_reference = compile_summarize_turn_context(&registry, "hello-flow#1");
     replace_registry_text(
         &workspace,
         "phases/summarize.yaml",
         "connection_refs: [inspect-trigger, summary-refresh]",
         "connection_refs: [inspect-trigger]",
     );
-    let inbound_reference_only = load_test_registry(&workspace, "hello-loop");
+    let inbound_reference_only = load_test_registry(&workspace, "hello-flow");
     let without_outbound_reference =
-        compile_summarize_turn_context(&inbound_reference_only, "hello-loop#1");
+        compile_summarize_turn_context(&inbound_reference_only, "hello-flow#1");
 
     let inputs = context_source_content(&with_outbound_reference, "typed-connection-inputs");
     assert_eq!(inputs.as_array().map(Vec::len), Some(1));
@@ -220,7 +220,7 @@ fn typed_connection_inputs_exclude_outbound_step_connections() {
 
 #[test]
 fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "connections/inspect-trigger.yaml",
@@ -239,8 +239,8 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
         "connection_refs: [inspect-trigger, summary-refresh]",
         "connection_refs: [InspectTrigger, inspect-data, SummaryRefresh]",
     );
-    let registry = load_test_registry(&workspace, "hello-loop");
-    let declared = compile_summarize_turn_context(&registry, "hello-loop#1");
+    let registry = load_test_registry(&workspace, "hello-flow");
+    let declared = compile_summarize_turn_context(&registry, "hello-flow#1");
 
     let inputs = context_source_content(&declared, "typed-connection-inputs");
     assert_eq!(inputs.as_array().map(Vec::len), Some(2));
@@ -253,8 +253,8 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
         "connection_refs: [InspectTrigger, inspect-data, SummaryRefresh]",
         "connection_refs: [inspect-data, InspectTrigger, SummaryRefresh]",
     );
-    let registry = load_test_registry(&workspace, "hello-loop");
-    let reordered = compile_summarize_turn_context(&registry, "hello-loop#1");
+    let registry = load_test_registry(&workspace, "hello-flow");
+    let reordered = compile_summarize_turn_context(&registry, "hello-flow#1");
     let reordered_inputs = context_source_content(&reordered, "typed-connection-inputs");
     assert_eq!(reordered_inputs[0]["connection"]["id"], "inspect-data");
     assert_eq!(reordered_inputs[1]["connection"]["id"], "inspect-trigger");
@@ -270,7 +270,7 @@ fn typed_connection_inputs_resolve_phase_id_or_name_and_preserve_reference_order
 
 #[test]
 fn context_direction_filter_does_not_change_step_event_connections() {
-    let (registry, _) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let (registry, _) = fixture_runtime_policy("hello-flow", "hello-flow");
     let phase = registry.phase_block("summarize").expect("phase exists");
     let step = phase
         .steps
@@ -443,9 +443,9 @@ fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
 
 #[test]
 fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
     let manifest_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));
@@ -527,23 +527,23 @@ fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
 
 #[test]
 fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
-    let workspace = workspace_copy("hello-loop");
-    let (_, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let workspace = workspace_copy("hello-flow");
+    let (_, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     exceed_context_budget_with_valid_instructions(&workspace);
-    let registry = load_test_registry(&workspace, "hello-loop");
-    let loop_block = registry
-        .loop_block("hello-loop")
-        .expect("loop exists")
+    let registry = load_test_registry(&workspace, "hello-flow");
+    let flow_block = registry
+        .flow_block("hello-flow")
+        .expect("flow exists")
         .clone();
 
     let mut captured = CapturedRuntime::default();
-    let runtime = execute_loop_with_sink(
+    let runtime = execute_flow_with_sink(
         &workspace,
         &registry,
         &policy,
-        &loop_block,
+        &flow_block,
         "contextbudget001",
-        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
         Some(&mut captured),
     )
     .expect("budget failure becomes a deterministic failed stream");
@@ -564,15 +564,15 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
 
 #[test]
 fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     exceed_context_budget_with_valid_instructions(&workspace);
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Human)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Human)
         .expect_err("the committed context failure must be returned");
     let RuntimeError::SessionFailed { session_id, source } = &err else {
         panic!("expected identified session failure, got {err:?}");
     };
-    assert_eq!(session_id, "hello-loop");
+    assert_eq!(session_id, "hello-flow");
     let RuntimeError::ContextBudgetExceeded {
         input_budget_tokens,
         required_bytes,
@@ -582,14 +582,14 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     };
     assert!(
         err.to_string()
-            .starts_with("session hello-loop failed: context_budget_exceeded:"),
+            .starts_with("session hello-flow failed: context_budget_exceeded:"),
         "{err}"
     );
-    let output = read_existing_session(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = read_existing_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("failed session log is readable");
     let path = output.session_path;
     let stream = output.stdout;
-    let events = validate_session_log_text(&path, "hello-loop", &stream)
+    let events = validate_session_log_text(&path, "hello-flow", &stream)
         .expect("failed session log remains authoritative");
     let error = events
         .iter()
@@ -610,21 +610,21 @@ fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
 
 #[test]
 fn recorded_context_profile_is_verified_before_object_io_and_resume_replay() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
     let events =
         validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
             .expect("runtime stream validates");
-    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let loop_block = registry.loop_block("hello-loop").expect("loop exists");
-    let planned = execute_loop(
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let flow_block = registry.flow_block("hello-flow").expect("flow exists");
+    let planned = execute_flow(
         &workspace,
         &registry,
         &policy,
-        loop_block,
+        flow_block,
         &output.session_id,
-        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
     )
     .expect("deterministic replay plans");
     let recorded = read_recorded_context_manifest_signature(
@@ -688,12 +688,12 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
         ("malformed-json", "line 2: invalid context manifest JSON"),
         ("whitespace", "context manifest is not canonical JSONL"),
     ] {
-        let workspace = workspace_copy("hello-loop");
+        let workspace = workspace_copy("hello-flow");
         let output =
-            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+            run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
         let before = prefix_before_tool_started(&output.stdout, "write-summary");
         fs::write(&output.session_path, &before).expect("partial session prefix written");
-        write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
+        write_definition_hash_metadata(&workspace, &output.session_id, "hello-flow");
         let context_path = workspace
             .join(LOCAL_LOG_DIR)
             .join(format!("{}.contexts.jsonl", output.session_id));
@@ -735,12 +735,12 @@ fn resume_rejects_missing_modified_or_invalid_session_context_objects() {
         ("modified", "referenced context object hash does not match"),
         ("invalid-digest", "context manifest object_uri is invalid"),
     ] {
-        let workspace = workspace_copy("hello-loop");
+        let workspace = workspace_copy("hello-flow");
         let output =
-            run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+            run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
         let before = prefix_before_tool_started(&output.stdout, "write-summary");
         fs::write(&output.session_path, &before).expect("partial session prefix written");
-        write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
+        write_definition_hash_metadata(&workspace, &output.session_id, "hello-flow");
         let context_path = workspace
             .join(LOCAL_LOG_DIR)
             .join(format!("{}.contexts.jsonl", output.session_id));
@@ -833,16 +833,16 @@ fn context_object_verification_checks_the_aggregate_before_hashing() {
 
 #[test]
 fn resume_recovers_one_deterministic_inflight_context_manifest() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let output =
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("fixture loop completes");
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture flow completes");
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));
     let context_stream = fs::read_to_string(&context_path).expect("context manifest reads");
     let prefix = prefix_before_message_completed(&output.stdout);
     fs::write(&output.session_path, &prefix).expect("incomplete event prefix written");
-    write_definition_hash_metadata(&workspace, &output.session_id, "smoke-loop");
+    write_definition_hash_metadata(&workspace, &output.session_id, "smoke-flow");
     fs::write(&context_path, &context_stream).expect("in-flight manifest restored");
 
     let resumed = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
@@ -871,9 +871,9 @@ fn resume_recovers_one_deterministic_inflight_context_manifest() {
 
 #[test]
 fn resume_rejects_more_than_one_future_context_manifest() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("fixture loop completes");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
     let context_path = workspace
         .join(LOCAL_LOG_DIR)
         .join(format!("{}.contexts.jsonl", output.session_id));
@@ -881,7 +881,7 @@ fn resume_rejects_more_than_one_future_context_manifest() {
     assert!(context_stream.lines().count() > 1);
     let prefix = prefix_before_message_completed(&output.stdout);
     fs::write(&output.session_path, &prefix).expect("incomplete event prefix written");
-    write_definition_hash_metadata(&workspace, &output.session_id, "hello-loop");
+    write_definition_hash_metadata(&workspace, &output.session_id, "hello-flow");
     fs::write(&context_path, context_stream).expect("future manifests restored");
     let before = fs::read_to_string(&output.session_path).expect("event prefix reads");
 

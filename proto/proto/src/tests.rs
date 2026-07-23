@@ -9,9 +9,9 @@ fn event_type_names_match_protocol_v0_set_and_round_trip() {
         "session.resumed",
         "session.completed",
         "session.failed",
-        "loop.started",
-        "loop.completed",
-        "loop.failed",
+        "flow.started",
+        "flow.completed",
+        "flow.failed",
         "phase.entered",
         "step.started",
         "step.completed",
@@ -118,8 +118,8 @@ fn envelope_metadata_validation_reports_invalid_fields() {
     assert_invalid!(source, String::new());
     assert_invalid!(timestamp, "not-a-time".to_owned());
     assert_invalid!(correlation_id, Some(String::new()));
-    assert_invalid!(loop_id, Some(String::new()));
-    assert_invalid!(parent_loop_id, Some(String::new()));
+    assert_invalid!(flow_id, Some(String::new()));
+    assert_invalid!(parent_flow_id, Some(String::new()));
 }
 
 #[test]
@@ -165,25 +165,25 @@ fn canonical_json_normalizes_strings_to_nfc() {
 fn canonical_event_output_normalizes_all_string_values_to_nfc() {
     let mut event = EventEnvelope::new(
         "evt-e\u{301}",
-        EventType::LoopStarted,
+        EventType::FlowStarted,
         "smoke001",
         1,
         "2026-01-01T00:00:00Z",
         "flow-agent-cli",
         json!({
-            "loop_name": "Cafe\u{301}",
+            "flow_name": "Cafe\u{301}",
             "nested": ["e\u{301}"]
         }),
     );
-    event.loop_id = Some("loop-e\u{301}".to_owned());
+    event.flow_id = Some("flow-e\u{301}".to_owned());
     event.correlation_id = Some("corr-e\u{301}".to_owned());
     let canonical = event.canonical_jsonl().expect("event canonicalizes");
     let event: serde_json::Value = serde_json::from_str(&canonical).expect("event parses");
 
     assert_eq!(event["event_id"], "evt-é");
-    assert_eq!(event["loop_id"], "loop-é");
+    assert_eq!(event["flow_id"], "flow-é");
     assert_eq!(event["correlation_id"], "corr-é");
-    assert_eq!(event["payload"]["loop_name"], json!("Café"));
+    assert_eq!(event["payload"]["flow_name"], json!("Café"));
     assert_eq!(event["payload"]["nested"][0], json!("é"));
 }
 
@@ -293,7 +293,7 @@ fn event_envelope_preserves_additive_top_level_fields_canonically() {
 
 #[test]
 fn event_envelope_rejects_additional_fields_with_reserved_names() {
-    for field in ["event_id", "loop_id"] {
+    for field in ["event_id", "flow_id"] {
         let mut event = test_event(json!({"reason": "fixture-start"}));
         event
             .additional_fields

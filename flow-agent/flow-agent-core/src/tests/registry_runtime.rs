@@ -1,13 +1,13 @@
 #[test]
 fn registry_root_must_stay_inside_workspace() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     fs::write(
         workspace.join(".flow/config.yaml"),
         "fixture_profile: stub-model\nregistry_root: ../registry\nstub_model: deterministic\n",
     )
     .expect("config rewrite succeeds");
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("escaped registry root must fail");
 
     assert!(matches!(err, RuntimeError::Usage(message) if message.contains("registry_root")));
@@ -19,10 +19,10 @@ fn registry_root_must_stay_inside_workspace() {
 fn registry_root_rejects_symlinked_path_components() {
     use std::os::unix::fs::symlink;
 
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-registry-root");
     copy_dir(
-        &fixture_dir("smoke-loop").join("registry"),
+        &fixture_dir("smoke-flow").join("registry"),
         &outside.join("registry"),
     );
     symlink(&outside, workspace.join("link")).expect("registry root symlink created");
@@ -32,7 +32,7 @@ fn registry_root_rejects_symlinked_path_components() {
     )
     .expect("config rewrite succeeds");
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("symlinked registry root component must fail");
 
     assert!(matches!(
@@ -46,10 +46,10 @@ fn registry_root_rejects_symlinked_path_components() {
 #[cfg(windows)]
 #[test]
 fn registry_root_rejects_junction_path_components() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-registry-root-junction");
     copy_dir(
-        &fixture_dir("smoke-loop").join("registry"),
+        &fixture_dir("smoke-flow").join("registry"),
         &outside.join("registry"),
     );
     create_windows_junction(&workspace.join("link"), &outside);
@@ -59,7 +59,7 @@ fn registry_root_rejects_junction_path_components() {
     )
     .expect("config rewrite succeeds");
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("junction registry root component must fail");
 
     assert!(matches!(
@@ -72,8 +72,8 @@ fn registry_root_rejects_junction_path_components() {
 
 #[cfg(target_os = "macos")]
 #[test]
-fn run_loop_accepts_reviewed_macos_network_allowlist() {
-    let workspace = workspace_copy("smoke-loop");
+fn run_flow_accepts_reviewed_macos_network_allowlist() {
+    let workspace = workspace_copy("smoke-flow");
     replace_registry_text(
         &workspace,
         "tools/echo.yaml",
@@ -81,7 +81,7 @@ fn run_loop_accepts_reviewed_macos_network_allowlist() {
         "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
     );
 
-    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect("macOS runtime compiles its target policy");
 
     assert!(!output.failed);
@@ -89,30 +89,30 @@ fn run_loop_accepts_reviewed_macos_network_allowlist() {
 }
 
 #[test]
-fn runtime_executes_subloops_after_all_parent_phases() {
-    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let loop_block = registry
-        .loop_block("hello-loop")
-        .expect("hello loop exists");
+fn runtime_executes_subflows_after_all_parent_phases() {
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let flow_block = registry
+        .flow_block("hello-flow")
+        .expect("hello flow exists");
 
     let mut captured = CapturedRuntime::default();
-    execute_loop_with_sink(
+    execute_flow_with_sink(
         Path::new("."),
         &registry,
         &policy,
-        loop_block,
+        flow_block,
         "ordering001",
-        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
         Some(&mut captured),
     )
-    .expect("hello loop executes");
-    let root_loop_id = loop_id_for_definition(&captured.events, "hello-loop");
+    .expect("hello flow executes");
+    let root_flow_id = flow_id_for_definition(&captured.events, "hello-flow");
     let summarize_completed = captured
         .events
         .iter()
         .position(|event| {
             event.event_type == EventType::StepCompleted
-                && event.loop_id.as_deref() == Some(root_loop_id.as_str())
+                && event.flow_id.as_deref() == Some(root_flow_id.as_str())
                 && event
                     .payload
                     .get("phase_id")
@@ -120,47 +120,47 @@ fn runtime_executes_subloops_after_all_parent_phases() {
                     == Some("summarize")
         })
         .expect("parent summarize phase completes");
-    let first_subloop_started = captured
+    let first_subflow_started = captured
         .events
         .iter()
         .position(|event| {
-            event.event_type == EventType::LoopStarted
-                && event.parent_loop_id.as_deref() == Some(root_loop_id.as_str())
+            event.event_type == EventType::FlowStarted
+                && event.parent_flow_id.as_deref() == Some(root_flow_id.as_str())
         })
-        .expect("child loop starts");
+        .expect("child flow starts");
 
     assert!(
-        summarize_completed < first_subloop_started,
-        "subloops must start after all parent phases complete"
+        summarize_completed < first_subflow_started,
+        "subflows must start after all parent phases complete"
     );
 }
 
 #[test]
 fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     fs::write(
         workspace.join("registry/phases/smoke.yaml"),
         "phase:\n  id: smoke\n  name: Smoke\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: noop\n      name: Noop\n",
     )
     .expect("tool-free phase written");
-    let loops = workspace.join("registry/loops");
-    let write_loop = |id: &str, refs: &[&str]| {
+    let flows = workspace.join("registry/flows");
+    let write_flow = |id: &str, refs: &[&str]| {
         fs::write(
-            loops.join(format!("{id}.yaml")),
+            flows.join(format!("{id}.yaml")),
             format!(
-                "loop:\n  id: {id}\n  name: {id}\n  phase_refs: [smoke]\n  subloop_refs: [{}]\n  connection_refs: []\n",
+                "flow:\n  id: {id}\n  name: {id}\n  phase_refs: [smoke]\n  subflow_refs: [{}]\n  connection_refs: []\n",
                 refs.join(", ")
             ),
         )
-        .expect("loop written");
+        .expect("flow written");
     };
 
-    write_loop("branch", &vec!["smoke-loop"; 29]);
+    write_flow("branch", &vec!["smoke-flow"; 29]);
     let mut root_refs = vec!["branch"; 17];
-    root_refs.push("smoke-loop");
-    write_loop("budget-root", &root_refs);
+    root_refs.push("smoke-flow");
+    write_flow("budget-root", &root_refs);
 
-    let output = run_loop(&workspace, "budget-root", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "budget-root", EmitMode::Jsonl)
         .expect("512 cumulative invocations are accepted");
     assert!(!output.failed);
     let events =
@@ -169,20 +169,20 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.event_type == EventType::LoopStarted)
+            .filter(|event| event.event_type == EventType::FlowStarted)
             .count(),
-        usize::try_from(MAX_LOOP_INVOCATIONS).expect("invocation limit fits usize")
+        usize::try_from(MAX_FLOW_INVOCATIONS).expect("invocation limit fits usize")
     );
-    let root_loop_id = events
+    let root_flow_id = events
         .iter()
-        .find(|event| event.event_type == EventType::LoopStarted && event.parent_loop_id.is_none())
-        .and_then(|event| event.loop_id.clone())
+        .find(|event| event.event_type == EventType::FlowStarted && event.parent_flow_id.is_none())
+        .and_then(|event| event.flow_id.clone())
         .expect("root invocation exists");
     let persisted_events = events
         .iter()
         .take_while(|event| {
-            event.event_type != EventType::LoopCompleted
-                || event.loop_id.as_deref() != Some(root_loop_id.as_str())
+            event.event_type != EventType::FlowCompleted
+                || event.flow_id.as_deref() != Some(root_flow_id.as_str())
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -200,16 +200,16 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     )
     .expect("512-invocation prefix with only the root active validates");
     let over_budget = EventEnvelope {
-        loop_id: Some("loop-over-budget".to_owned()),
-        parent_loop_id: Some(root_loop_id),
+        flow_id: Some("flow-over-budget".to_owned()),
+        parent_flow_id: Some(root_flow_id),
         ..EventEnvelope::new(
             "evt-over-budget",
-            EventType::LoopStarted,
+            EventType::FlowStarted,
             &output.session_id,
             sequence,
             event_timestamp(sequence),
             "flow-agent-cli",
-            serde_json::json!({"loop_definition_id":"smoke-loop"}),
+            serde_json::json!({"flow_definition_id":"smoke-flow"}),
         )
     };
     persisted.push_str(
@@ -220,15 +220,15 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     assert_invalid_stream(
         "invocation-budget.jsonl",
         &persisted,
-        "loop invocation budget exceeded",
+        "flow invocation budget exceeded",
     );
     let sessions = list_sessions(&workspace).expect("sessions list before rejection");
 
-    root_refs.push("smoke-loop");
-    write_loop("budget-root", &root_refs);
+    root_refs.push("smoke-flow");
+    write_flow("budget-root", &root_refs);
     assert!(matches!(
-        run_loop(&workspace, "budget-root", EmitMode::Jsonl),
-        Err(RuntimeError::Protocol(message)) if message.contains("loop invocation budget")
+        run_flow(&workspace, "budget-root", EmitMode::Jsonl),
+        Err(RuntimeError::Protocol(message)) if message.contains("flow invocation budget")
     ));
     assert_eq!(
         list_sessions(&workspace).expect("sessions list after rejection"),
@@ -238,8 +238,8 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
 }
 
 #[test]
-fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
-    let workspace = workspace_copy("smoke-loop");
+fn run_flow_rejects_unknown_predefined_command_without_side_effects() {
+    let workspace = workspace_copy("smoke-flow");
     replace_registry_text(
         &workspace,
         "tools/echo.yaml",
@@ -247,7 +247,7 @@ fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
         "command_id: agent-custom",
     );
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("unknown predefined command must fail closed");
 
     assert!(
@@ -256,20 +256,20 @@ fn run_loop_rejects_unknown_predefined_command_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke-loop.jsonl")
+            .join("smoke-flow.jsonl")
             .exists()
     );
     assert!(
         !workspace
             .join(LOCAL_LOG_DIR)
-            .join("smoke-loop.log")
+            .join("smoke-flow.log")
             .exists()
     );
 }
 
 #[test]
-fn run_loop_executes_own_script_without_exact_fixture_body() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_executes_own_script_without_exact_fixture_body() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -277,7 +277,7 @@ fn run_loop_executes_own_script_without_exact_fixture_body() {
         "script_body: |\n    # Explain the reviewed deterministic write.\n\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
     );
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("own-script comments and body execute through M1 runner");
 
     assert!(!output.failed);
@@ -289,8 +289,8 @@ fn run_loop_executes_own_script_without_exact_fixture_body() {
 }
 
 #[test]
-fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_keeps_quoted_redirection_markers_in_own_script_output() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -298,7 +298,7 @@ fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
         "script_body: |\n    printf '%s > done\\n' \"$SUMMARY\" > out/summary.txt",
     );
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("quoted redirection marker stays in output");
 
     assert!(!output.failed);
@@ -309,10 +309,10 @@ fn run_loop_keeps_quoted_redirection_markers_in_own_script_output() {
 }
 
 #[test]
-fn run_loop_replaces_existing_own_script_output_on_repeat_run() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_replaces_existing_own_script_output_on_repeat_run() {
+    let workspace = workspace_copy("hello-flow");
 
-    let first = run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("first run succeeds");
+    let first = run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("first run succeeds");
     assert!(!first.failed);
     let summary_path = workspace.join("out/summary.txt");
     assert_eq!(
@@ -321,10 +321,10 @@ fn run_loop_replaces_existing_own_script_output_on_repeat_run() {
     );
     fs::write(&summary_path, "stale\n").expect("stale summary written");
 
-    let second = run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("second run succeeds");
+    let second = run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("second run succeeds");
 
     assert!(!second.failed);
-    assert_eq!(second.session_id, "hello-loop-2");
+    assert_eq!(second.session_id, "hello-flow-2");
     assert_eq!(
         fs::read_to_string(summary_path).expect("summary is replaced"),
         "hello\n"
@@ -333,7 +333,7 @@ fn run_loop_replaces_existing_own_script_output_on_repeat_run() {
 
 #[test]
 fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
-    let (_registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let command_policy = policy
         .commands
         .iter()
@@ -485,7 +485,7 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
 
 #[test]
 fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
-    let (_registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let command_policy = policy
         .commands
         .iter()
@@ -538,7 +538,7 @@ fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
 
 #[test]
 fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
-    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let write_tool = registry
         .tool_block("write-summary")
         .expect("write-summary tool exists");
@@ -632,8 +632,8 @@ fn predefined_command_runtime_uses_policy_membership_and_local_progress() {
 
 #[cfg(windows)]
 #[test]
-fn run_loop_rejects_windows_short_alias_of_protected_directory() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_windows_short_alias_of_protected_directory() {
+    let workspace = workspace_copy("hello-flow");
     fs::create_dir(workspace.join(".git")).expect("protected directory created");
     assert!(
         workspace.join("GIT~1").is_dir(),
@@ -645,7 +645,7 @@ fn run_loop_rejects_windows_short_alias_of_protected_directory() {
     )
     .expect("alias write tool written");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("resolved protected directory alias must fail before execution");
 
     assert_denied(

@@ -7,13 +7,13 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
-/// Maximum allowed recursive loop nesting depth, counting the root as depth one.
-pub const MAX_LOOP_NESTING_DEPTH: usize = 16;
-/// Maximum direct runtime subloop invocations declared by one Loop.
-pub const MAX_LOOP_FANOUT: usize = 32;
+/// Maximum allowed recursive flow nesting depth, counting the root as depth one.
+pub const MAX_FLOW_NESTING_DEPTH: usize = 16;
+/// Maximum direct runtime subflow invocations declared by one Flow.
+pub const MAX_FLOW_FANOUT: usize = 32;
 /// Maximum size for one registry YAML file.
 pub const MAX_REGISTRY_FILE_BYTES: u64 = 128 * 1024;
-/// Maximum source bytes retained by one top-level Loop and its dependency closure.
+/// Maximum source bytes retained by one top-level Flow and its dependency closure.
 pub const MAX_ACTIVE_REGISTRY_BYTES: u64 = 1024 * 1024;
 /// Maximum cumulative size for a registry root.
 pub const MAX_REGISTRY_TOTAL_BYTES: u64 = 16 * 1024 * 1024;
@@ -47,8 +47,8 @@ pub enum RegistryBlock {
     Phase(PhaseBlock),
     /// Connection block.
     Connection(ConnectionBlock),
-    /// Loop block.
-    Loop(LoopBlock),
+    /// Flow block.
+    Flow(FlowBlock),
 }
 
 /// Tool definition block.
@@ -329,18 +329,18 @@ pub enum ConnectionKind {
     Refresh,
 }
 
-/// Loop definition block.
+/// Flow definition block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct LoopBlock {
-    /// Loop identity.
+pub struct FlowBlock {
+    /// Flow identity.
     #[serde(flatten)]
     pub identity: BlockIdentity,
-    /// Ordered phase references executed by the loop.
+    /// Ordered phase references executed by the flow.
     pub phase_refs: Vec<String>,
-    /// Ordered subloop references executed after phases.
+    /// Ordered subflow references executed after phases.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub subloop_refs: Vec<String>,
-    /// Connections declared at loop scope.
+    pub subflow_refs: Vec<String>,
+    /// Connections declared at flow scope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connection_refs: Vec<String>,
 }
@@ -352,8 +352,8 @@ pub struct ResolvedRegistry {
     connections: BTreeMap<String, ConnectionBlock>,
     /// Instruction blocks keyed by id.
     instructions: BTreeMap<String, InstructionBlock>,
-    /// Loop blocks keyed by id.
-    loops: BTreeMap<String, LoopBlock>,
+    /// Flow blocks keyed by id.
+    flows: BTreeMap<String, FlowBlock>,
     /// Phase blocks keyed by id.
     phases: BTreeMap<String, PhaseBlock>,
     /// Tool blocks keyed by id.

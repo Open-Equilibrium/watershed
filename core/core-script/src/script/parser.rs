@@ -63,7 +63,7 @@ fn deserialize_registry_block(
         "instruction" => deserialize_value(source_name, payload).map(RegistryBlock::Instruction),
         "phase" => deserialize_value(source_name, payload).map(RegistryBlock::Phase),
         "connection" => deserialize_value(source_name, payload).map(RegistryBlock::Connection),
-        "loop" => deserialize_value(source_name, payload).map(RegistryBlock::Loop),
+        "flow" => deserialize_value(source_name, payload).map(RegistryBlock::Flow),
         _ => Err(parse_error(
             source_name,
             format!("unsupported registry block kind `{kind}`"),
@@ -173,14 +173,14 @@ fn reject_unknown_fields(
             value,
             &["id", "name", "connection_kind", "from_ref", "to_ref"],
         )?,
-        "loop" => reject_mapping_fields(
+        "flow" => reject_mapping_fields(
             source_name,
             value,
             &[
                 "id",
                 "name",
                 "phase_refs",
-                "subloop_refs",
+                "subflow_refs",
                 "connection_refs",
             ],
         )?,

@@ -31,7 +31,7 @@ Protocol v0 is designed for the Flow Agent CLI MVP and later Meta-Harness integr
 ## Runtime event families (v0 scope)
 
 - **Session lifecycle:** `session.started | session.paused | session.resumed | session.completed | session.failed`.
-- **Loop/activity:** `loop.started | loop.completed | loop.failed | phase.entered | step.started | step.completed`.
+- **Flow/activity:** `flow.started | flow.completed | flow.failed | phase.entered | step.started | step.completed`.
 - **Transcript:** `message.delta | message.completed` (near-real-time transcript sync; deltas are first-class).
 - **Tool/runtime:** `tool.started | tool.progress | tool.completed | tool.failed | tool.timed_out`.
 - **Artifacts:** `artifact.logged` (logs, summaries, handoff packs, checkpoints, host-provided diffs).
@@ -45,10 +45,10 @@ M1 Flow Agent emits the families exercised by the ADR-0034 fixtures and runtime 
 
 ### v0 lifecycle ordering
 
-- `session.started` is the first event. `session.completed` or `session.failed` is last and requires every started loop, step, tool and message to be terminal.
-- A loop-scoped event follows its unique `loop.started` and precedes that loop's `loop.completed` or `loop.failed`. A subloop's `parent_loop_id` identifies its unchanged, active parent.
-- `phase.entered` requires no active step and selects that loop's current phase. Each `step.started` belongs to the current phase; a loop has at most one active step, closed by the matching `step.completed`.
-- `tool.started` belongs to the active step. Its progress and terminal event use the same loop, phase, step and tool identity. A pre-phase `tool.failed` may omit `tool.started` to record a failure during preflight; after `phase.entered`, it may not.
+- `session.started` is the first event. `session.completed` or `session.failed` is last and requires every started flow, step, tool and message to be terminal.
+- A flow-scoped event follows its unique `flow.started` and precedes that flow's `flow.completed` or `flow.failed`. A subflow's `parent_flow_id` identifies its unchanged, active parent.
+- `phase.entered` requires no active step and selects that flow's current phase. Each `step.started` belongs to the current phase; a flow has at most one active step, closed by the matching `step.completed`.
+- `tool.started` belongs to the active step. Its progress and terminal event use the same flow, phase, step and tool identity. A pre-phase `tool.failed` may omit `tool.started` to record a failure during preflight; after `phase.entered`, it may not.
 - `message.delta` belongs to the active step and starts a message identity; further deltas and the matching `message.completed` retain its role. Completed lifecycle identities cannot be reused.
 
 Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029); ADR-0055 selects the initial method set as `flow.start`, `flow.status`, `flow.cancel`, `flow.tail` and `flow.export`. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
@@ -63,8 +63,8 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the sessio
 | `event_id` | non-empty opaque string, unique within the session |
 | `event_type` | one of the v0 runtime event names above |
 | `session_id` | path-safe v0 token; opaque to consumers |
-| `loop_id` | optional runtime loop invocation id when loop-scoped; unique within the session |
-| `parent_loop_id` | optional parent runtime loop invocation id for subloop events |
+| `flow_id` | optional runtime flow invocation id when flow-scoped; unique within the session |
+| `parent_flow_id` | optional parent runtime flow invocation id for subflow events |
 | `sequence` | unsigned integer, starts at 1 and increases by exactly 1 per `session_id` |
 | `timestamp` | canonical RFC 3339 UTC form ending in literal `Z`; numeric zero offsets are not accepted |
 | `source` | non-empty opaque string identifying the emitter, e.g. `flow-agent-cli` |
@@ -75,11 +75,11 @@ Consumers retain unknown top-level fields so additive v0 extensions survive repl
 
 M1 Flow Agent derives timestamps from its event clock: `timestamp = base + (sequence - 1) seconds`. Fixture workspaces use a fixed base for byte-stable golden streams; non-fixture workspaces use a wall-clock base captured once at session start rather than sampling wall time per event.
 
-## v0 ID safety and loop identity
+## v0 ID safety and flow identity
 
 - `session_id` is a token, not a path. V0 session IDs match `^[a-z0-9_-]{1,128}$` except Windows DOS device basenames (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`); lowercase-only IDs avoid filename aliasing on case-insensitive targets. Producers reject externally supplied values outside that grammar before reading or writing a session bundle. Reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..` and empty strings before filesystem access. If a future protocol accepts broader external session IDs, it must specify a canonical filename encoding instead of joining raw IDs into paths.
-- `loop_id` is a runtime invocation id, not the registry/definition id. The root loop and every subloop invocation get distinct `loop_id` values within the session. Reusing one subloop definition twice therefore emits two different `loop_id` values, each with `parent_loop_id` equal to the containing runtime loop invocation id.
-- Loop definition identity travels in payload fields, not in `loop_id`. `loop.*` events carry `loop_definition_id`; `loop_name` is optional display metadata.
+- `flow_id` is a runtime invocation id, not the registry/definition id. The root flow and every subflow invocation get distinct `flow_id` values within the session. Reusing one subflow definition twice therefore emits two different `flow_id` values, each with `parent_flow_id` equal to the containing runtime flow invocation id.
+- Flow definition identity travels in payload fields, not in `flow_id`. `flow.*` events carry `flow_definition_id`; `flow_name` is optional display metadata.
 
 ## M1 local session storage
 
@@ -110,10 +110,10 @@ Minimum v0 payload fields:
 All listed payload fields are strings unless noted otherwise; string arrays are JSON arrays of strings. `role` is `system | user | assistant | tool`, `value` is a JSON number, `exit_code` is an integer and `data` is a JSON object.
 
 - `session.*`: `reason` optional except failure events, where it is required.
-- `loop.*`: `loop_definition_id` required; `loop_name` optional; `error` required for `loop.failed`.
+- `flow.*`: `flow_definition_id` required; `flow_name` optional; `error` required for `flow.failed`.
 - `phase.entered`: `phase_id`, `phase_name`, `instruction_ids` and `tool_ids` (string arrays; empty when none).
 - `step.started | step.completed`: `step_id`, `step_name`, optional `phase_id`, optional `instruction_id`, optional `connection_ids` and `connection_kinds` (string arrays; `connection_kinds` values are `data | trigger | refresh`). If either connection array is present, both are present with the same length; index `i` in `connection_ids` pairs with index `i` in `connection_kinds`, in the owning Step block's `connection_refs` order after registry resolution. With no connections, omit both arrays or emit both as empty arrays.
-- `step.completed` closes the step lifecycle on success or failure; derive outcome from the tool, error, loop and session events.
+- `step.completed` closes the step lifecycle on success or failure; derive outcome from the tool, error, flow and session events.
 - `message.delta`: `message_id`, `role`, `content_delta`.
 - `message.completed`: `message_id`, `role`.
 - `tool.started`: `tool_id`, `tool_name`, `tool_kind` (`predefined-command | own-script`), `read_scope` and `write_scope` (string arrays), `allowed_parameters` (string array of allowed parameter names), `network_access` (`deny | declared`).

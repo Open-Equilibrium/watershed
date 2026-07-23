@@ -1,7 +1,7 @@
 fn validate_registry_block_semantics(block: &RegistryBlock) -> Result<(), SemanticValidationError> {
     match block {
         RegistryBlock::Tool(tool) => validate_tool_semantics(tool),
-        RegistryBlock::Loop(loop_block) => validate_loop_semantics(loop_block),
+        RegistryBlock::Flow(flow_block) => validate_flow_semantics(flow_block),
         RegistryBlock::Instruction(_) | RegistryBlock::Phase(_) | RegistryBlock::Connection(_) => {
             Ok(())
         }
@@ -14,7 +14,7 @@ fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
         RegistryBlock::Instruction(block) => ("instruction", &block.identity),
         RegistryBlock::Phase(block) => ("phase", &block.identity),
         RegistryBlock::Connection(block) => ("connection", &block.identity),
-        RegistryBlock::Loop(block) => ("loop", &block.identity),
+        RegistryBlock::Flow(block) => ("flow", &block.identity),
     };
     if !is_valid_block_id(&identity.id) {
         return Err(format!("{kind}.id must be a valid block id"));
@@ -76,11 +76,11 @@ fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
     }
 }
 
-fn validate_loop_semantics(loop_block: &LoopBlock) -> Result<(), SemanticValidationError> {
-    if loop_block.phase_refs.is_empty() {
-        return Err(SemanticValidationError::InvalidLoopDefinition {
-            loop_id: loop_block.identity.id.clone(),
-            message: "loop.phase_refs must contain at least one item".to_owned(),
+fn validate_flow_semantics(flow_block: &FlowBlock) -> Result<(), SemanticValidationError> {
+    if flow_block.phase_refs.is_empty() {
+        return Err(SemanticValidationError::InvalidFlowDefinition {
+            flow_id: flow_block.identity.id.clone(),
+            message: "flow.phase_refs must contain at least one item".to_owned(),
         });
     }
     Ok(())

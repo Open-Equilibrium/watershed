@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V-Spec — Meta-Harness</title>
 <style>
-:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.loop{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.loop{grid-template-columns:1fr}}
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.flow{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -76,7 +76,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
       <p><strong>Meta-Harness consumes Flow Agent; it does not own it.</strong> Flow Agent is a <a href="V-Spec_FlowAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
       <pre><code>Flow Agent
   owns one local agent runtime
-  owns deterministic loop execution
+  owns deterministic flow execution
   owns local transcript/session persistence
   owns run/replay/tail/resume and JSONL runtime surfaces
 
@@ -158,7 +158,7 @@ meta approvals</code></pre></div>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
-      <div class="loop" aria-label="Meta-Harness control-plane pipeline">
+      <div class="flow" aria-label="Meta-Harness control-plane pipeline">
         <div class="node">CLI / API / BYOA / Liquid command</div><div class="arrow">→</div><div class="node">Control plane + policy gate</div><div class="arrow">→</div><div class="node">Config resolver</div>
         <div class="node">Executor</div><div class="arrow">→</div><div class="node">Agent adapter</div><div class="arrow">→</div><div class="node">Artifact index</div>
         <div class="node">AgentPulse</div><div class="arrow">→</div><div class="node">Metrics / events</div><div class="arrow">→</div><div class="node">API / service</div>
@@ -198,7 +198,7 @@ liquid integration
   instructions: ["review safety", "review tests"]
   tools: ["read", "search", "run-tests"]
   targets:
-    flow-agent:  loop script + building blocks
+    flow-agent:  flow script + building blocks
     codex-cli:   instruction pack + command args
     claude-code: instruction pack + command args
     pi-agent:    instruction pack + command args</code></pre>
@@ -207,7 +207,7 @@ liquid integration
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">
       <p><strong>AgentPulse belongs to Meta-Harness, not Liquid.</strong> Each instance computes and stores metrics from normalized events/artifacts produced on its host. Liquid may render them through Blocks/Views and visually compare instances, but never rewrites their ownership. Metrics are queryable through the CLI/API.</p>
-      <ul><li>rework ratio;</li><li>first-attempt success;</li><li>cost-per-productive-outcome;</li><li>loop comparison across agents/configs.</li></ul>
+      <ul><li>rework ratio;</li><li>first-attempt success;</li><li>cost-per-productive-outcome;</li><li>flow comparison across agents/configs.</li></ul>
       <p>The formulas are open in <a href="../decisions/open-decisions.html#d-010">D-010</a>. No M2 implementation should guess them.</p>
     </div></section>
 

@@ -1,19 +1,19 @@
 #[test]
-fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
-    let workspace = workspace_copy("smoke-loop");
+fn run_flow_allocates_unique_session_id_for_repeated_valid_runs() {
+    let workspace = workspace_copy("smoke-flow");
 
     let first =
-        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("first loop run succeeds");
-    let second = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
-        .expect("second loop run gets a unique session id");
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("first flow run succeeds");
+    let second = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("second flow run gets a unique session id");
 
-    assert_eq!(first.session_id, "smoke-loop");
+    assert_eq!(first.session_id, "smoke-flow");
     assert_eq!(
         first.stdout,
-        expected_stream("smoke-loop", "smoke-loop.jsonl")
+        expected_stream("smoke-flow", "smoke-flow.jsonl")
     );
-    assert_eq!(second.session_id, "smoke-loop-2");
-    assert!(second.stdout.contains("\"session_id\":\"smoke-loop-2\""));
+    assert_eq!(second.session_id, "smoke-flow-2");
+    assert!(second.stdout.contains("\"session_id\":\"smoke-flow-2\""));
     assert_eq!(
         validate_protocol_jsonl_text(Path::new("second-run.jsonl"), &second.stdout)
             .expect("second run stream remains protocol-valid")
@@ -23,13 +23,13 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
     assert!(
         workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke-loop.jsonl")
+            .join("smoke-flow.jsonl")
             .is_file()
     );
     assert!(
         workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke-loop-2.jsonl")
+            .join("smoke-flow-2.jsonl")
             .is_file()
     );
     for session_id in [&first.session_id, &second.session_id] {
@@ -47,8 +47,8 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
                 .collect::<Vec<_>>(),
             [
                 "registry_hash",
-                "loop_definition_hash",
-                "loop_definition_id",
+                "flow_definition_hash",
+                "flow_definition_id",
             ]
         );
     }
@@ -56,22 +56,22 @@ fn run_loop_allocates_unique_session_id_for_repeated_valid_runs() {
 
 #[test]
 fn human_run_replay_and_session_listing_report_status() {
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
 
-    let run = run_loop(&workspace, "smoke-loop", EmitMode::Human).expect("loop runs");
+    let run = run_flow(&workspace, "smoke-flow", EmitMode::Human).expect("flow runs");
     assert!(!run.failed);
     assert_eq!(
         run.stdout,
-        "loop smoke-loop (session smoke-loop) completed\n"
+        "flow smoke-flow (session smoke-flow) completed\n"
     );
 
     let replay =
-        replay_session(&workspace, "smoke-loop", EmitMode::Human).expect("session replays");
-    assert_eq!(replay.stdout, "session smoke-loop replayed\n");
+        replay_session(&workspace, "smoke-flow", EmitMode::Human).expect("session replays");
+    assert_eq!(replay.stdout, "session smoke-flow replayed\n");
 
     assert_eq!(
         list_sessions(&workspace).expect("sessions list"),
-        vec!["smoke-loop"]
+        vec!["smoke-flow"]
     );
 
     let before = fs::read_to_string(&run.session_path).expect("terminal session readable");
@@ -85,12 +85,12 @@ fn human_run_replay_and_session_listing_report_status() {
     );
 
     let failed_workspace = workspace_copy("sandbox-negative");
-    let failed = run_loop(&failed_workspace, "sandbox-negative-write", EmitMode::Human)
+    let failed = run_flow(&failed_workspace, "sandbox-negative-write", EmitMode::Human)
         .expect("negative fixture reaches its deterministic terminal state");
     assert!(failed.failed);
     assert_eq!(
         failed.stdout,
-        "loop sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
+        "flow sandbox-negative-write (session sandbox-negative-write) failed (write_denied): write outside declared roots denied\n"
     );
 }
 
@@ -134,7 +134,7 @@ fn list_sessions_handles_missing_dirs_and_filters_unsafe_names() {
         Vec::<String>::new()
     );
 
-    fs::create_dir(workspace.join(".flow")).expect("loop dir");
+    fs::create_dir(workspace.join(".flow")).expect("flow dir");
     assert_eq!(
         list_sessions(&workspace).expect("missing sessions dir is empty"),
         Vec::<String>::new()
@@ -180,8 +180,8 @@ fn list_sessions_skips_non_utf8_file_stems() {
 }
 
 #[test]
-fn run_loop_emits_resolved_ids_for_name_references() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_emits_resolved_ids_for_name_references() {
+    let workspace = workspace_copy("hello-flow");
     let phase_path = workspace.join("registry/phases/inspect.yaml");
     let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
     fs::write(
@@ -200,17 +200,17 @@ fn run_loop_emits_resolved_ids_for_name_references() {
     .expect("phase fixture rewritten");
 
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("loop executes with name refs");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("flow executes with name refs");
 
     assert_eq!(
         output.stdout,
-        expected_stream("hello-loop", "hello-loop.jsonl")
+        expected_stream("hello-flow", "hello-flow.jsonl")
     );
 }
 
 #[test]
-fn run_loop_rejects_write_summary_without_declared_write_scope() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_write_summary_without_declared_write_scope() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -218,17 +218,17 @@ fn run_loop_rejects_write_summary_without_declared_write_scope() {
         "write_scope: []",
     );
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("undeclared write scope must fail");
 
     assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "write scope");
     assert!(!workspace.join("out/summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_rejects_unsupported_own_script_before_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_unsupported_own_script_before_side_effects() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -236,19 +236,19 @@ fn run_loop_rejects_unsupported_own_script_before_side_effects() {
         "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n    cat ../outside.txt",
     );
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("unsupported own-script command must reject");
 
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_writes_quoted_own_script_target_with_spaces() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_writes_quoted_own_script_target_with_spaces() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -257,7 +257,7 @@ fn run_loop_writes_quoted_own_script_target_with_spaces() {
     );
 
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("quoted own-script target runs");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("quoted own-script target runs");
 
     assert!(!output.failed);
     assert_eq!(
@@ -268,26 +268,26 @@ fn run_loop_writes_quoted_own_script_target_with_spaces() {
 }
 
 #[test]
-fn run_loop_preflights_later_invalid_tool_before_earlier_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_preflights_later_invalid_tool_before_earlier_side_effects() {
+    let workspace = workspace_copy("hello-flow");
     add_bad_write_tool_to_summarize(&workspace, "cat ../outside.txt");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("later invalid tool must reject before earlier write");
 
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("unsupported own-script command"))
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
-        "loops/hello-loop.yaml",
+        "flows/hello-flow.yaml",
         "phase_refs: [inspect, summarize]",
         "phase_refs: [inspect, summarize, negative-no-tools]",
     );
@@ -308,7 +308,7 @@ fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     .expect("negative phase written");
     fs::create_dir_all(workspace.join("out/summary.txt")).expect("conflicting output directory");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("invalid output path must preflight before runtime setup");
 
     assert_denied(
@@ -321,10 +321,10 @@ fn run_loop_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
 }
 
 #[test]
-fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
+fn run_flow_preflights_later_own_script_path_before_earlier_side_effects() {
     let workspace = workspace_with_later_invalid_own_script_path();
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("later invalid own-script path must reject before earlier write");
 
     assert_denied(
@@ -333,12 +333,12 @@ fn run_loop_preflights_later_own_script_path_before_earlier_side_effects() {
         "must be a file",
     );
     assert!(!workspace.join("out/partial.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_keeps_started_audit_after_partial_apply_failure() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_keeps_started_audit_after_partial_apply_failure() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -347,7 +347,7 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
     );
     add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("later apply-time write is recorded as a failed run");
 
     assert!(output.failed);
@@ -374,7 +374,7 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
     assert!(
         events
             .iter()
-            .any(|event| event.event_type == EventType::LoopFailed)
+            .any(|event| event.event_type == EventType::FlowFailed)
     );
     assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
     assert!(
@@ -384,7 +384,7 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
     assert!(
         workspace
             .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
+            .join("hello-flow.log")
             .exists(),
         "partial side effects must keep the run log"
     );
@@ -402,27 +402,27 @@ fn run_loop_keeps_started_audit_after_partial_apply_failure() {
 }
 
 #[test]
-fn run_loop_rejects_lifecycle_invalid_output_before_persisting_session() {
-    let workspace = workspace_copy("smoke-loop");
+fn run_flow_rejects_lifecycle_invalid_output_before_persisting_session() {
+    let workspace = workspace_copy("smoke-flow");
     replace_registry_text(
         &workspace,
-        "loops/smoke-loop.yaml",
+        "flows/smoke-flow.yaml",
         "phase_refs: [smoke]",
         "phase_refs: [smoke, smoke]",
     );
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("lifecycle-invalid runtime output must reject");
 
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
     );
-    assert_no_session_artifacts(&workspace, "smoke-loop");
+    assert_no_session_artifacts(&workspace, "smoke-flow");
 }
 
 #[test]
-fn run_loop_rejects_protected_own_script_write_without_grant() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_protected_own_script_write_without_grant() {
+    let workspace = workspace_copy("hello-flow");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -439,7 +439,7 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
     )
     .expect("tool fixture rewritten");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("ungranted protected path write must reject");
 
     assert_denied(
@@ -448,13 +448,13 @@ fn run_loop_rejects_protected_own_script_write_without_grant() {
         "protected path",
     );
     assert!(!workspace.join(".env").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_allows_linux_case_variant_of_protected_path_pattern() {
+    let workspace = workspace_copy("hello-flow");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -471,7 +471,7 @@ fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
     )
     .expect("tool fixture rewritten");
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("linux runtime protected-path matching is case-sensitive");
 
     assert!(!output.failed);
@@ -483,8 +483,8 @@ fn run_loop_allows_linux_case_variant_of_protected_path_pattern() {
 
 #[cfg(any(windows, target_os = "macos"))]
 #[test]
-fn run_loop_rejects_case_variant_of_protected_path_pattern() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_case_variant_of_protected_path_pattern() {
+    let workspace = workspace_copy("hello-flow");
     let tool_path = workspace.join("registry/tools/write-summary.yaml");
     let source = fs::read_to_string(&tool_path).expect("tool fixture readable");
     fs::write(
@@ -501,7 +501,7 @@ fn run_loop_rejects_case_variant_of_protected_path_pattern() {
     )
     .expect("tool fixture rewritten");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("runtime protected-path matching is case-insensitive");
 
     assert_denied(
@@ -510,12 +510,12 @@ fn run_loop_rejects_case_variant_of_protected_path_pattern() {
         "protected path",
     );
     assert!(!workspace.join(".ENV").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_allows_summary_write_inside_enclosing_write_scope() {
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "tools/write-summary.yaml",
@@ -523,7 +523,7 @@ fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
         r#"write_scope: ["workspace"]"#,
     );
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("enclosing write scope permits summary artifact");
 
     assert!(!output.failed);
@@ -535,7 +535,7 @@ fn run_loop_allows_summary_write_inside_enclosing_write_scope() {
 
 #[test]
 fn phase_scoped_tools_run_once_for_multi_step_phase() {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
         "phases/summarize.yaml",
@@ -544,7 +544,7 @@ fn phase_scoped_tools_run_once_for_multi_step_phase() {
     );
 
     let output =
-        run_loop(&workspace, "hello-loop", EmitMode::Jsonl).expect("multi-step phase executes");
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("multi-step phase executes");
 
     assert!(!output.failed);
     let events = validate_session_log_text(

@@ -1,17 +1,17 @@
 #[test]
-fn sandbox_denial_follows_resolved_operation_not_loop_identity() {
+fn sandbox_denial_follows_resolved_operation_not_flow_identity() {
     let workspace = workspace_copy("sandbox-negative");
-    let loop_path = workspace.join("registry/loops/sandbox-negative-write.yaml");
-    let source = fs::read_to_string(&loop_path).expect("loop fixture readable");
+    let flow_path = workspace.join("registry/flows/sandbox-negative-write.yaml");
+    let source = fs::read_to_string(&flow_path).expect("flow fixture readable");
     fs::write(
-        &loop_path,
+        &flow_path,
         source
             .replace("id: sandbox-negative-write", "id: custom-denied-write")
             .replace("name: SandboxNegativeWrite", "name: RenamedNegativeWrite"),
     )
-    .expect("loop fixture rewritten");
+    .expect("flow fixture rewritten");
 
-    let output = run_loop(&workspace, "custom-denied-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "custom-denied-write", EmitMode::Jsonl)
         .expect("renamed negative operation runs");
 
     assert!(output.failed);
@@ -19,12 +19,12 @@ fn sandbox_denial_follows_resolved_operation_not_loop_identity() {
     assert!(
         output
             .stdout
-            .contains("\"loop_definition_id\":\"custom-denied-write\"")
+            .contains("\"flow_definition_id\":\"custom-denied-write\"")
     );
     assert!(
         output
             .stdout
-            .contains("\"loop_name\":\"RenamedNegativeWrite\"")
+            .contains("\"flow_name\":\"RenamedNegativeWrite\"")
     );
 }
 
@@ -32,7 +32,7 @@ fn sandbox_denial_follows_resolved_operation_not_loop_identity() {
 fn sandbox_negative_write_reaches_tool_dispatch_before_denial() {
     let workspace = workspace_copy("sandbox-negative");
 
-    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
         .expect("sandbox denial produces a valid stream");
 
     assert!(output.failed);
@@ -87,7 +87,7 @@ fn sandbox_negative_dispatch_requires_stub_model_fixture_profile() {
     )
     .expect("config rewritten without fixture profile");
 
-    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
         .expect("non-fixture workspace runs");
 
     let events =
@@ -107,22 +107,22 @@ fn sandbox_negative_dispatch_requires_stub_model_fixture_profile() {
 fn nested_sandbox_denial_emits_child_tool_failure_only() {
     let workspace = workspace_copy("sandbox-negative");
     fs::write(
-        workspace.join("registry/loops/sandbox-negative-write.yaml"),
-        "loop:\n  id: sandbox-negative-write\n  name: SandboxNegativeWrite\n  phase_refs: [benign-parent]\n  subloop_refs: [nested-negative-write]\n  connection_refs: []\n",
+        workspace.join("registry/flows/sandbox-negative-write.yaml"),
+        "flow:\n  id: sandbox-negative-write\n  name: SandboxNegativeWrite\n  phase_refs: [benign-parent]\n  subflow_refs: [nested-negative-write]\n  connection_refs: []\n",
     )
-    .expect("parent loop fixture rewritten");
+    .expect("parent flow fixture rewritten");
     fs::write(
         workspace.join("registry/phases/benign-parent.yaml"),
         "phase:\n  id: benign-parent\n  name: BenignParent\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  steps:\n    - id: observe\n      name: Observe\n",
     )
     .expect("benign parent phase written");
     fs::write(
-        workspace.join("registry/loops/nested-negative-write.yaml"),
-        "loop:\n  id: nested-negative-write\n  name: NestedNegativeWrite\n  phase_refs: [negative-write]\n  subloop_refs: []\n  connection_refs: []\n",
+        workspace.join("registry/flows/nested-negative-write.yaml"),
+        "flow:\n  id: nested-negative-write\n  name: NestedNegativeWrite\n  phase_refs: [negative-write]\n  subflow_refs: []\n  connection_refs: []\n",
     )
-    .expect("nested loop fixture written");
+    .expect("nested flow fixture written");
 
-    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
         .expect("nested negative operation produces a valid stream");
 
     assert!(output.failed);
@@ -132,20 +132,20 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
         &output.stdout,
     )
     .expect("nested negative stream validates");
-    let parent_loop_id = loop_id_for_definition(&events, "sandbox-negative-write");
-    let child_loop_id = loop_id_for_definition(&events, "nested-negative-write");
+    let parent_flow_id = flow_id_for_definition(&events, "sandbox-negative-write");
+    let child_flow_id = flow_id_for_definition(&events, "nested-negative-write");
     let tool_failed = events
         .iter()
         .filter(|event| event.event_type == EventType::ToolFailed)
         .collect::<Vec<_>>();
     assert_eq!(tool_failed.len(), 1);
     assert_eq!(
-        tool_failed[0].loop_id.as_deref(),
-        Some(child_loop_id.as_str())
+        tool_failed[0].flow_id.as_deref(),
+        Some(child_flow_id.as_str())
     );
     assert_ne!(
-        tool_failed[0].loop_id.as_deref(),
-        Some(parent_loop_id.as_str())
+        tool_failed[0].flow_id.as_deref(),
+        Some(parent_flow_id.as_str())
     );
     assert_eq!(
         tool_failed[0]
@@ -160,13 +160,13 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
         .collect::<Vec<_>>();
     assert_eq!(error_events.len(), 1);
     assert_eq!(
-        error_events[0].loop_id.as_deref(),
-        Some(child_loop_id.as_str())
+        error_events[0].flow_id.as_deref(),
+        Some(child_flow_id.as_str())
     );
-    for loop_id in [&parent_loop_id, &child_loop_id] {
+    for flow_id in [&parent_flow_id, &child_flow_id] {
         assert!(events.iter().any(|event| {
-            event.event_type == EventType::LoopFailed
-                && event.loop_id.as_deref() == Some(loop_id.as_str())
+            event.event_type == EventType::FlowFailed
+                && event.flow_id.as_deref() == Some(flow_id.as_str())
                 && event
                     .payload
                     .get("error")
@@ -178,11 +178,11 @@ fn nested_sandbox_denial_emits_child_tool_failure_only() {
 }
 
 #[test]
-fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
+fn sandbox_out_of_phase_denial_follows_registry_shape_not_flow_id() {
     let workspace = workspace_copy("sandbox-negative");
     replace_registry_text(
         &workspace,
-        "loops/sandbox-negative-tool-out-of-phase.yaml",
+        "flows/sandbox-negative-tool-out-of-phase.yaml",
         "id: sandbox-negative-tool-out-of-phase",
         "id: custom-tool-out-of-phase",
     );
@@ -193,7 +193,7 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
         "from_ref: custom-tool-out-of-phase",
     );
 
-    let output = run_loop(&workspace, "custom-tool-out-of-phase", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "custom-tool-out-of-phase", EmitMode::Jsonl)
         .expect("renamed out-of-phase operation runs");
 
     assert!(output.failed);
@@ -201,7 +201,7 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
     assert!(
         output
             .stdout
-            .contains("\"loop_definition_id\":\"custom-tool-out-of-phase\"")
+            .contains("\"flow_definition_id\":\"custom-tool-out-of-phase\"")
     );
 }
 
@@ -209,7 +209,7 @@ fn sandbox_out_of_phase_denial_follows_registry_shape_not_loop_id() {
 fn sandbox_out_of_phase_denial_reports_attempt_context() {
     let workspace = workspace_copy("sandbox-negative");
 
-    let output = run_loop(
+    let output = run_flow(
         &workspace,
         "sandbox-negative-tool-out-of-phase",
         EmitMode::Jsonl,
@@ -266,7 +266,7 @@ fn sandbox_out_of_phase_denial_requires_stub_model_fixture_profile() {
     )
     .expect("config rewritten without fixture profile");
 
-    let output = run_loop(
+    let output = run_flow(
         &workspace,
         "sandbox-negative-tool-out-of-phase",
         EmitMode::Jsonl,
@@ -291,7 +291,7 @@ fn sandbox_out_of_phase_denial_ignores_instruction_prompt_text() {
     )
     .expect("instruction fixture rewritten");
 
-    let output = run_loop(
+    let output = run_flow(
         &workspace,
         "sandbox-negative-tool-out-of-phase",
         EmitMode::Jsonl,
@@ -307,7 +307,7 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
     let workspace = workspace_copy("sandbox-negative");
     replace_registry_text(
         &workspace,
-        "loops/sandbox-negative-write.yaml",
+        "flows/sandbox-negative-write.yaml",
         "phase_refs: [negative-write]",
         "phase_refs: [benign]",
     );
@@ -317,8 +317,8 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
         )
         .expect("benign phase written");
 
-    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
-        .expect("loop with reused fixture id runs");
+    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+        .expect("flow with reused fixture id runs");
 
     assert!(!output.failed);
     assert!(
@@ -330,8 +330,8 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
 }
 
 #[test]
-fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
-    let workspace = workspace_copy("smoke-loop");
+fn out_of_phase_fixture_denial_does_not_apply_to_other_flows_by_phase_id() {
+    let workspace = workspace_copy("smoke-flow");
     fs::write(
         workspace.join("registry/tools/unrelated-negative.yaml"),
         "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
@@ -339,7 +339,7 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
     .expect("unrelated sentinel tool written");
     replace_registry_text(
         &workspace,
-        "loops/smoke-loop.yaml",
+        "flows/smoke-flow.yaml",
         "phase_refs: [smoke]",
         "phase_refs: [negative-no-tools]",
     );
@@ -350,8 +350,8 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
         "id: negative-no-tools",
     );
 
-    let output = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
-        .expect("normal loop can reuse fixture phase id");
+    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("normal flow can reuse fixture phase id");
 
     assert!(!output.failed);
     assert!(
@@ -364,7 +364,7 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_loops_by_phase_id() {
 
 #[test]
 fn sandbox_negative_runtime_matches_non_write_denial_fixtures() {
-    for loop_id in [
+    for flow_id in [
         "sandbox-negative-environment",
         "sandbox-negative-interpreter",
         "sandbox-negative-network",
@@ -373,17 +373,17 @@ fn sandbox_negative_runtime_matches_non_write_denial_fixtures() {
         "sandbox-negative-tool-out-of-phase",
     ] {
         let workspace = workspace_copy("sandbox-negative");
-        let output = run_loop(&workspace, loop_id, EmitMode::Jsonl)
+        let output = run_flow(&workspace, flow_id, EmitMode::Jsonl)
             .expect("sandbox denial produces a valid stream");
-        let expected = expected_stream("sandbox-negative", &format!("{loop_id}.jsonl"));
-        assert_eq!(output.stdout, expected, "{loop_id} output");
+        let expected = expected_stream("sandbox-negative", &format!("{flow_id}.jsonl"));
+        assert_eq!(output.stdout, expected, "{flow_id} output");
         assert_eq!(
             fs::read_to_string(
                 workspace.join(format!(".flow/sessions/{}.jsonl", output.session_id))
             )
             .expect("authoritative session log readable"),
             expected,
-            "{loop_id} session log"
+            "{flow_id} session log"
         );
     }
 }

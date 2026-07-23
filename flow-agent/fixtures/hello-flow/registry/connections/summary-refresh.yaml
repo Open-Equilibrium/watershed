@@ -3,4 +3,4 @@ connection:
   name: SummaryRefresh
   connection_kind: refresh
   from_ref: summarize.write
-  to_ref: hello-loop
+  to_ref: hello-flow

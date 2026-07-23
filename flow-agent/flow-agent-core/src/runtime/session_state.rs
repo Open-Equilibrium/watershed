@@ -88,22 +88,22 @@ fn resume_session_internal(
     let logs = open_runtime_dir(workspace, "logs")?
         .ok_or_else(|| missing_definition_metadata(session_id))?;
     let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
-    let loop_id = resumable_loop_id(
+    let flow_id = resumable_flow_id(
         path.diagnostic_path(),
         session_id,
-        inspection.root_loop_definition_id.as_deref(),
+        inspection.root_flow_definition_id.as_deref(),
         &metadata,
     )?;
 
     let config = load_workspace_config(workspace)?;
     let registry =
-        core_script::load_loop_registry_from_workspace(workspace, &config.registry_root, &loop_id)?;
-    let loop_block = registry.loop_block(&loop_id).ok_or_else(|| {
-        RuntimeError::Protocol(format!("resolved registry missing loop {loop_id}"))
+        core_script::load_flow_registry_from_workspace(workspace, &config.registry_root, &flow_id)?;
+    let flow_block = registry.flow_block(&flow_id).ok_or_else(|| {
+        RuntimeError::Protocol(format!("resolved registry missing flow {flow_id}"))
     })?;
-    verify_resume_definition_metadata_values(session_id, &metadata, &registry, loop_block)?;
+    verify_resume_definition_metadata_values(session_id, &metadata, &registry, flow_block)?;
     let policy =
-        core_policy::compile_policy_artifact(&registry, &loop_id, runtime_policy_target())?;
+        core_policy::compile_policy_artifact(&registry, &flow_id, runtime_policy_target())?;
     let clock = resume_event_clock(&config, inspection.clock)?;
     let recorded_context = read_anchored_context_manifest_signature(
         &logs,
@@ -113,13 +113,13 @@ fn resume_session_internal(
     )?;
     let mut prefix_sink =
         RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
-    let planned_runtime = execute_loop_with_sink(
+    let planned_runtime = execute_flow_with_sink(
         workspace,
         &registry,
         &policy,
-        loop_block,
+        flow_block,
         session_id,
-        LoopExecutionOptions::with_stub_model_fixture_profile(
+        FlowExecutionOptions::with_stub_model_fixture_profile(
             clock,
             ToolSideEffectMode::DryRun,
             config.stub_model_fixture_profile,
@@ -143,7 +143,7 @@ fn resume_session_internal(
         &inspection,
         &prefix_sink,
         &planned_runtime,
-        loop_block,
+        flow_block,
     )?;
     let combined_event_count = checked_resume_event_count(
         planned_runtime.events.record_count,
@@ -163,13 +163,13 @@ fn resume_session_internal(
             planned_event_count: resume_prefix.planned_event_count,
             resume_marker_count: resume_prefix.resume_marker_count,
         };
-        let runtime = execute_loop_with_sink(
+        let runtime = execute_flow_with_sink(
             workspace,
             &registry,
             &policy,
-            loop_block,
+            flow_block,
             session_id,
-            LoopExecutionOptions::with_stub_model_fixture_profile(
+            FlowExecutionOptions::with_stub_model_fixture_profile(
                 clock,
                 ToolSideEffectMode::PreflightResume {
                     prefix_event_count: resume_prefix.planned_event_count as u64,
@@ -188,7 +188,7 @@ fn resume_session_internal(
             path.diagnostic_path().display()
         )));
     }
-    let terminal_loop_ids = inspection.validation.terminal_loop_ids();
+    let terminal_flow_ids = inspection.validation.terminal_flow_ids();
     let context_path = logs.file(format!("{session_id}.contexts.jsonl"));
     let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
         context_path,
@@ -209,20 +209,20 @@ fn resume_session_internal(
             resume_marker_count: resume_prefix.resume_marker_count,
             writer: &mut serial_writer,
         };
-        let result = execute_loop_with_sink(
+        let result = execute_flow_with_sink(
             workspace,
             &registry,
             &policy,
-            loop_block,
+            flow_block,
             session_id,
-            LoopExecutionOptions::with_stub_model_fixture_profile(
+            FlowExecutionOptions::with_stub_model_fixture_profile(
                 clock,
                 ToolSideEffectMode::Resume {
                     prefix_event_count: resume_prefix.planned_event_count as u64,
                 },
                 config.stub_model_fixture_profile,
             )
-            .with_terminal_loop_ids(terminal_loop_ids),
+            .with_terminal_flow_ids(terminal_flow_ids),
             Some(&mut resume_sink),
         );
         let matches = result
@@ -280,7 +280,7 @@ struct ResumeSessionInspection {
     last_event_type: EventType,
     prefix_metadata_valid: bool,
     resume_marker_count: usize,
-    root_loop_definition_id: Option<String>,
+    root_flow_definition_id: Option<String>,
     validation: SessionAppendValidationState,
 }
 
@@ -291,7 +291,7 @@ struct ResumeInspectionBuilder {
     last_event_type: Option<EventType>,
     prefix_metadata_valid: bool,
     resume_marker_count: usize,
-    root_loop_definition_id: Option<String>,
+    root_flow_definition_id: Option<String>,
 }
 
 impl ResumeInspectionBuilder {
@@ -303,7 +303,7 @@ impl ResumeInspectionBuilder {
             last_event_type: None,
             prefix_metadata_valid: true,
             resume_marker_count: 0,
-            root_loop_definition_id: None,
+            root_flow_definition_id: None,
         }
     }
 
@@ -322,12 +322,12 @@ impl ResumeInspectionBuilder {
         };
         self.last_event_type = Some(event.event_type);
         self.completed_turns += usize::from(event.event_type == EventType::MessageCompleted);
-        if self.root_loop_definition_id.is_none()
-            && event.event_type == EventType::LoopStarted
-            && event.parent_loop_id.is_none()
+        if self.root_flow_definition_id.is_none()
+            && event.event_type == EventType::FlowStarted
+            && event.parent_flow_id.is_none()
         {
-            self.root_loop_definition_id =
-                Some(lifecycle_payload_string(event, "loop_definition_id"));
+            self.root_flow_definition_id =
+                Some(lifecycle_payload_string(event, "flow_definition_id"));
         }
         self.prefix_metadata_valid &= event.event_id == format!("evt-{:03}", event.sequence)
             && event.timestamp == clock.timestamp(event.sequence);
@@ -383,7 +383,7 @@ fn inspect_resume_session(
         last_event_type,
         prefix_metadata_valid: inspection.prefix_metadata_valid,
         resume_marker_count: inspection.resume_marker_count,
-        root_loop_definition_id: inspection.root_loop_definition_id,
+        root_flow_definition_id: inspection.root_flow_definition_id,
         validation,
     })
 }
@@ -393,13 +393,13 @@ fn validate_resume_replay_prefix(
     inspection: &ResumeSessionInspection,
     prefix_sink: &RuntimePrefixSink,
     planned: &RuntimeExecution,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
 ) -> Result<ResumeReplayPrefix, RuntimeError> {
     if !inspection.prefix_metadata_valid
         || inspection.event_prefix.record_count > planned.events.record_count
         || !prefix_sink.event_prefix_matches()
     {
-        return Err(invalid_resume_prefix_error(path, loop_block));
+        return Err(invalid_resume_prefix_error(path, flow_block));
     }
 
     Ok(ResumeReplayPrefix {
@@ -413,19 +413,19 @@ fn checked_resume_event_count(
     resume_marker_count: usize,
 ) -> Result<usize, RuntimeError> {
     let total = (planned_event_count as u128) + (resume_marker_count as u128) + 1;
-    if total > u128::from(MAX_LOOP_EVENTS) {
+    if total > u128::from(MAX_FLOW_EVENTS) {
         return Err(RuntimeError::Protocol(format!(
-            "runtime event budget exceeded: resume requires {total} events; max {MAX_LOOP_EVENTS}"
+            "runtime event budget exceeded: resume requires {total} events; max {MAX_FLOW_EVENTS}"
         )));
     }
     Ok(usize::try_from(total).expect("event limit fits usize"))
 }
 
-fn invalid_resume_prefix_error(path: &Path, loop_block: &core_script::LoopBlock) -> RuntimeError {
+fn invalid_resume_prefix_error(path: &Path, flow_block: &core_script::FlowBlock) -> RuntimeError {
     RuntimeError::Protocol(format!(
-        "{} is not a valid prefix of loop {}",
+        "{} is not a valid prefix of flow {}",
         path.display(),
-        loop_block.identity.id
+        flow_block.identity.id
     ))
 }
 
@@ -499,24 +499,24 @@ fn shift_resumed_event(
     event
 }
 
-fn resumable_loop_id(
+fn resumable_flow_id(
     path: &Path,
     session_id: &str,
-    event_loop_id: Option<&str>,
+    event_flow_id: Option<&str>,
     metadata: &SessionLogMetadata,
 ) -> Result<String, RuntimeError> {
-    let recorded_loop_id = metadata.loop_definition_id.as_deref().ok_or_else(|| {
+    let recorded_flow_id = metadata.flow_definition_id.as_deref().ok_or_else(|| {
         RuntimeError::Protocol(format!(
-            "session {session_id} registry drift: missing loop_definition_id metadata"
+            "session {session_id} registry drift: missing flow_definition_id metadata"
         ))
     })?;
-    if event_loop_id.is_some_and(|event_loop_id| event_loop_id != recorded_loop_id) {
+    if event_flow_id.is_some_and(|event_flow_id| event_flow_id != recorded_flow_id) {
         return Err(RuntimeError::Protocol(format!(
-            "{} session {session_id} loop definition metadata does not match durable events",
+            "{} session {session_id} flow definition metadata does not match durable events",
             path.display()
         )));
     }
-    Ok(recorded_loop_id.to_owned())
+    Ok(recorded_flow_id.to_owned())
 }
 
 fn read_existing_session(
@@ -614,30 +614,30 @@ impl Drop for SessionLockGuard {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SessionDefinitionMetadata {
-    loop_definition_id: String,
+    flow_definition_id: String,
     registry_hash: String,
-    loop_definition_hash: String,
+    flow_definition_hash: String,
 }
 
 #[derive(Default, Debug, Eq, PartialEq)]
 struct SessionLogMetadata {
-    loop_definition_id: Option<String>,
+    flow_definition_id: Option<String>,
     registry_hash: Option<String>,
-    loop_definition_hash: Option<String>,
+    flow_definition_hash: Option<String>,
 }
 
 fn session_definition_metadata(
     registry: &core_script::ResolvedRegistry,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
 ) -> Result<SessionDefinitionMetadata, RuntimeError> {
     let registry_json = registry.canonical_json()?;
-    let loop_json = proto::canonical_json(&serde_json::to_value(loop_block)?).map_err(|err| {
-        RuntimeError::Protocol(format!("failed to serialize loop definition hash: {err}"))
+    let flow_json = proto::canonical_json(&serde_json::to_value(flow_block)?).map_err(|err| {
+        RuntimeError::Protocol(format!("failed to serialize flow definition hash: {err}"))
     })?;
     Ok(SessionDefinitionMetadata {
-        loop_definition_id: loop_block.identity.id.clone(),
+        flow_definition_id: flow_block.identity.id.clone(),
         registry_hash: sha256_hash_text(registry_json.as_bytes()),
-        loop_definition_hash: sha256_hash_text(loop_json.as_bytes()),
+        flow_definition_hash: sha256_hash_text(flow_json.as_bytes()),
     })
 }
 
@@ -650,42 +650,42 @@ fn verify_resume_definition_metadata(
     workspace: &Path,
     session_id: &str,
     registry: &core_script::ResolvedRegistry,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
 ) -> Result<(), RuntimeError> {
     // WHY: resume hashes bind a partial session to the registry definitions that produced
     // it; incomplete metadata cannot prove the prefix matches the current registry.
     let logs = open_runtime_dir(workspace, "logs")?
         .ok_or_else(|| missing_definition_metadata(session_id))?;
     let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
-    verify_resume_definition_metadata_values(session_id, &metadata, registry, loop_block)
+    verify_resume_definition_metadata_values(session_id, &metadata, registry, flow_block)
 }
 
 fn verify_resume_definition_metadata_values(
     session_id: &str,
     metadata: &SessionLogMetadata,
     registry: &core_script::ResolvedRegistry,
-    loop_block: &core_script::LoopBlock,
+    flow_block: &core_script::FlowBlock,
 ) -> Result<(), RuntimeError> {
     let Some(recorded_registry_hash) = metadata.registry_hash.as_deref() else {
         return Err(RuntimeError::Protocol(format!(
             "session {session_id} registry drift: missing registry_hash metadata"
         )));
     };
-    let Some(recorded_loop_definition_hash) = metadata.loop_definition_hash.as_deref() else {
+    let Some(recorded_flow_definition_hash) = metadata.flow_definition_hash.as_deref() else {
         return Err(RuntimeError::Protocol(format!(
-            "session {session_id} registry drift: missing loop_definition_hash metadata"
+            "session {session_id} registry drift: missing flow_definition_hash metadata"
         )));
     };
-    let Some(recorded_loop_definition_id) = metadata.loop_definition_id.as_deref() else {
+    let Some(recorded_flow_definition_id) = metadata.flow_definition_id.as_deref() else {
         return Err(RuntimeError::Protocol(format!(
-            "session {session_id} registry drift: missing loop_definition_id metadata"
+            "session {session_id} registry drift: missing flow_definition_id metadata"
         )));
     };
 
-    let expected = session_definition_metadata(registry, loop_block)?;
-    if recorded_loop_definition_id != expected.loop_definition_id
+    let expected = session_definition_metadata(registry, flow_block)?;
+    if recorded_flow_definition_id != expected.flow_definition_id
         || recorded_registry_hash != expected.registry_hash
-        || recorded_loop_definition_hash != expected.loop_definition_hash
+        || recorded_flow_definition_hash != expected.flow_definition_hash
     {
         return Err(RuntimeError::Protocol(format!(
             "session {session_id} registry drift: recorded definition metadata does not match current registry"
@@ -770,9 +770,9 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
             )));
         };
         match key {
-            "loop_definition_id" => metadata.loop_definition_id = Some(value.to_owned()),
+            "flow_definition_id" => metadata.flow_definition_id = Some(value.to_owned()),
             "registry_hash" => metadata.registry_hash = Some(value.to_owned()),
-            "loop_definition_hash" => metadata.loop_definition_hash = Some(value.to_owned()),
+            "flow_definition_hash" => metadata.flow_definition_hash = Some(value.to_owned()),
             _ => {}
         }
     }
@@ -1193,11 +1193,11 @@ fn session_log_metadata_text(definition_metadata: Option<&SessionDefinitionMetad
         metadata.push_str("registry_hash=");
         metadata.push_str(&definition.registry_hash);
         metadata.push('\n');
-        metadata.push_str("loop_definition_hash=");
-        metadata.push_str(&definition.loop_definition_hash);
+        metadata.push_str("flow_definition_hash=");
+        metadata.push_str(&definition.flow_definition_hash);
         metadata.push('\n');
-        metadata.push_str("loop_definition_id=");
-        metadata.push_str(&definition.loop_definition_id);
+        metadata.push_str("flow_definition_id=");
+        metadata.push_str(&definition.flow_definition_id);
         metadata.push('\n');
     }
     metadata

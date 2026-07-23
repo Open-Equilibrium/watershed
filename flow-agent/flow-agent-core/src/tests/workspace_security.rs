@@ -1,7 +1,7 @@
 #[test]
 fn workspace_config_helpers_reject_unsafe_registry_roots() {
     let workspace = empty_workspace("workspace-config-helpers");
-    fs::create_dir_all(workspace.join(".flow")).expect("loop config dir");
+    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
     fs::create_dir(workspace.join("registry")).expect("registry dir");
     fs::write(workspace.join("registry-file"), "not a dir").expect("registry file");
 
@@ -165,7 +165,7 @@ fn workspace_config_rejects_symlinked_config_file() {
 
     let workspace = empty_workspace("workspace-config-symlink");
     let outside = empty_workspace("outside-workspace-config");
-    fs::create_dir_all(workspace.join(".flow")).expect("loop config dir");
+    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
     let outside_config = outside.join("config.yaml");
     fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
     symlink(&outside_config, workspace.join(".flow/config.yaml")).expect("config symlink");
@@ -199,40 +199,40 @@ fn workspace_config_rejects_linked_parent_directory() {
 
 #[cfg(unix)]
 #[test]
-fn run_loop_rejects_symlinked_log_dir_without_side_effects() {
+fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
     use std::os::unix::fs::symlink;
 
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-log");
-    fs::create_dir_all(workspace.join(".flow")).expect("loop dir");
+    fs::create_dir_all(workspace.join(".flow")).expect("flow dir");
     symlink(&outside, workspace.join(LOCAL_LOG_DIR)).expect("log dir symlink");
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("symlinked log dir must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
-    assert!(!outside.join("smoke-loop.log").exists());
+    assert!(!outside.join("smoke-flow.log").exists());
     assert!(
         !workspace
             .join(LOCAL_SESSION_DIR)
-            .join("smoke-loop.jsonl")
+            .join("smoke-flow.jsonl")
             .exists()
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn run_loop_rejects_symlinked_session_leaf_without_side_effects() {
+fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
 
-    let workspace = workspace_copy("smoke-loop");
+    let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-session");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let outside_target = outside.join("victim.jsonl");
-    symlink(&outside_target, session_dir.join("smoke-loop.jsonl")).expect("session leaf symlink");
+    symlink(&outside_target, session_dir.join("smoke-flow.jsonl")).expect("session leaf symlink");
 
-    let err = run_loop(&workspace, "smoke-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("symlinked session leaf must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
@@ -240,24 +240,24 @@ fn run_loop_rejects_symlinked_session_leaf_without_side_effects() {
     assert!(
         !workspace
             .join(LOCAL_LOG_DIR)
-            .join("smoke-loop.log")
+            .join("smoke-flow.log")
             .exists()
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
+fn run_flow_rejects_symlinked_summary_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
 
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let outside = empty_workspace("outside-summary");
     let outside_target = outside.join("summary.txt");
     fs::write(&outside_target, "outside\n").expect("outside target written");
     fs::create_dir_all(workspace.join("out")).expect("out dir");
     symlink(&outside_target, workspace.join("out/summary.txt")).expect("summary leaf symlink");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("symlinked summary leaf must fail");
 
     assert_denied(
@@ -269,12 +269,12 @@ fn run_loop_rejects_symlinked_summary_leaf_without_side_effects() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
     );
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_writes_portable_near_limit_output_leaf() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_writes_portable_near_limit_output_leaf() {
+    let workspace = workspace_copy("hello-flow");
     let leaf = "a".repeat(240);
     let target = format!("out/{leaf}");
     replace_registry_text(
@@ -284,7 +284,7 @@ fn run_loop_writes_portable_near_limit_output_leaf() {
         &target,
     );
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("portable near-limit output leaf runs");
 
     assert!(!output.failed, "{}", output.stdout);
@@ -295,8 +295,8 @@ fn run_loop_writes_portable_near_limit_output_leaf() {
 }
 
 #[test]
-fn run_loop_rejects_multi_write_own_script_before_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_multi_write_own_script_before_side_effects() {
+    let workspace = workspace_copy("hello-flow");
     fs::write(
         workspace.join("registry/tools/write-summary.yaml"),
         r#"tool:
@@ -317,7 +317,7 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     )
     .expect("write-summary fixture mutated");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("multi-write own-script must fail before execution");
 
     assert!(
@@ -326,14 +326,14 @@ fn run_loop_rejects_multi_write_own_script_before_side_effects() {
     );
     assert!(!workspace.join("out/partial.txt").exists());
     assert!(!workspace.join("out/summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[test]
-fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
+fn run_flow_rejects_non_file_declared_write_paths_before_side_effects() {
     for (leaf_is_directory, expected) in [(true, "must be a file"), (false, "must be a directory")]
     {
-        let workspace = workspace_copy("hello-loop");
+        let workspace = workspace_copy("hello-flow");
         let output_parent = workspace.join("out");
         if leaf_is_directory {
             fs::create_dir_all(output_parent.join("summary.txt"))
@@ -345,17 +345,17 @@ fn run_loop_rejects_non_file_declared_write_paths_before_side_effects() {
             fs::write(&output_parent, "not a directory\n").expect("file created in write ancestor");
         }
 
-        let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+        let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
             .expect_err("non-file declared write path must fail preflight");
 
         assert_denied(err, core_policy::DenyReasonCode::WriteDenied, expected);
-        assert_no_session_artifacts(&workspace, "hello-loop");
+        assert_no_session_artifacts(&workspace, "hello-flow");
     }
 }
 
 #[test]
-fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_commits_failure_stream_when_apply_side_effects_fail() {
+    let workspace = workspace_copy("hello-flow");
     let summary_path = workspace.join("out/summary.txt");
     for attempt in 0..100 {
         let temp_path =
@@ -363,7 +363,7 @@ fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
         fs::write(temp_path, b"collision").expect("replacement temp collision written");
     }
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("apply-time side effect failure is recorded as a failed run");
 
     assert!(output.failed);
@@ -392,7 +392,7 @@ fn run_loop_commits_failure_stream_when_apply_side_effects_fail() {
     assert!(
         workspace
             .join(LOCAL_LOG_DIR)
-            .join("hello-loop.log")
+            .join("hello-flow.log")
             .exists()
     );
 }
@@ -428,18 +428,18 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
         }
     }
 
-    let workspace = workspace_copy("hello-loop");
-    let (registry, policy) = fixture_runtime_policy("hello-loop", "hello-loop");
-    let loop_block = registry
-        .loop_block("hello-loop")
-        .expect("hello loop exists");
-    let err = match execute_loop_with_sink(
+    let workspace = workspace_copy("hello-flow");
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let flow_block = registry
+        .flow_block("hello-flow")
+        .expect("hello flow exists");
+    let err = match execute_flow_with_sink(
         &workspace,
         &registry,
         &policy,
-        loop_block,
+        flow_block,
         "commitfail001",
-        LoopExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::ApplyAll),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::ApplyAll),
         Some(&mut RejectWriteStart),
     ) {
         Err(err) => err,
@@ -457,15 +457,15 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
 
 #[cfg(unix)]
 #[test]
-fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
+fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
     use std::os::unix::fs::symlink;
 
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     let outside = empty_workspace("outside-summary-ancestor");
     fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
     symlink(&outside, workspace.join("out")).expect("summary ancestor symlink");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("symlinked summary ancestor must fail");
 
     assert_denied(
@@ -474,18 +474,18 @@ fn run_loop_rejects_symlinked_summary_ancestor_without_side_effects() {
         "symlink",
     );
     assert!(!outside.join("summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[cfg(windows)]
 #[test]
-fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_junction_summary_ancestor_without_side_effects() {
+    let workspace = workspace_copy("hello-flow");
     let outside = empty_workspace("outside-summary-junction");
     fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
     create_windows_junction(&workspace.join("out"), &outside);
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("junction summary ancestor must fail");
 
     assert_denied(
@@ -494,20 +494,20 @@ fn run_loop_rejects_junction_summary_ancestor_without_side_effects() {
         "reparse",
     );
     assert!(!outside.join("summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[cfg(any(unix, windows))]
 #[test]
-fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
-    let workspace = workspace_copy("hello-loop");
+fn run_flow_rejects_hardlinked_summary_leaf_without_side_effects() {
+    let workspace = workspace_copy("hello-flow");
     let outside = empty_workspace("outside-summary-hardlink");
     let outside_target = outside.join("summary.txt");
     fs::write(&outside_target, "outside\n").expect("outside target written");
     fs::create_dir_all(workspace.join("out")).expect("out dir");
     fs::hard_link(&outside_target, workspace.join("out/summary.txt")).expect("summary hard link");
 
-    let err = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("hard-linked summary leaf must fail");
 
     assert_denied(err, core_policy::DenyReasonCode::WriteDenied, "hard-linked");
@@ -515,14 +515,14 @@ fn run_loop_rejects_hardlinked_summary_leaf_without_side_effects() {
         fs::read_to_string(&outside_target).expect("outside target readable"),
         "outside\n"
     );
-    assert_no_session_artifacts(&workspace, "hello-loop");
+    assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
 #[cfg(not(any(unix, windows)))]
 #[test]
-fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified()
+fn run_flow_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified()
  {
-    let workspace = workspace_copy("hello-loop");
+    let workspace = workspace_copy("hello-flow");
     fs::create_dir_all(workspace.join("out")).expect("out dir");
     let outside = empty_workspace("outside-summary-hardlink-unverified");
     let outside_target = outside.join("summary.txt");
@@ -530,7 +530,7 @@ fn run_loop_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_
     let summary_path = workspace.join("out/summary.txt");
     fs::hard_link(&outside_target, &summary_path).expect("summary hard link");
 
-    let output = run_loop(&workspace, "hello-loop", EmitMode::Jsonl)
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("unverifiable hardlink is safely replaced");
 
     assert!(!output.failed);
