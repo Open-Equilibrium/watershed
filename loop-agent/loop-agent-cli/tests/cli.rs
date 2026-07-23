@@ -15,6 +15,22 @@ fn loop_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_loop"))
 }
 
+fn closed_pipe_stdout() -> Stdio {
+    let mut reader = loop_command()
+        .arg("--version")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("pipe reader should spawn");
+    let writer = reader.stdin.take().expect("pipe writer is available");
+    assert!(
+        reader.wait().expect("pipe reader should exit").success(),
+        "pipe reader should close its stdin"
+    );
+    Stdio::from(writer)
+}
+
 fn run_chat(workspace: &Path, input: &[u8]) -> Output {
     let mut child = loop_command()
         .current_dir(workspace)
@@ -316,17 +332,13 @@ fn run_loop_emits_golden_jsonl_and_persists_session_log() {
 #[test]
 fn closed_stdout_pipe_does_not_panic_for_jsonl_run() {
     let workspace = workspace_copy("smoke-loop");
-    let mut child = loop_command()
+    let output = loop_command()
         .current_dir(&workspace)
         .args(["run", "smoke-loop", "--emit", "jsonl"])
-        .stdout(Stdio::piped())
+        .stdout(closed_pipe_stdout())
         .stderr(Stdio::piped())
-        .spawn()
-        .expect("loop binary should spawn");
-
-    drop(child.stdout.take().expect("stdout is piped"));
-
-    let output = child.wait_with_output().expect("loop binary should exit");
+        .output()
+        .expect("loop binary should run");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert!(output.status.success(), "{stderr}");
@@ -498,17 +510,13 @@ fn closed_stdout_pipe_does_not_fail_for_jsonl_tail() {
         .expect("loop binary should run");
     assert!(run.status.success());
 
-    let mut child = loop_command()
+    let output = loop_command()
         .current_dir(&workspace)
         .args(["tail", "smoke-loop", "--emit", "jsonl"])
-        .stdout(Stdio::piped())
+        .stdout(closed_pipe_stdout())
         .stderr(Stdio::piped())
-        .spawn()
-        .expect("loop binary should spawn");
-
-    drop(child.stdout.take().expect("stdout is piped"));
-
-    let output = child.wait_with_output().expect("loop binary should exit");
+        .output()
+        .expect("loop binary should run");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert!(output.status.success(), "{stderr}");
