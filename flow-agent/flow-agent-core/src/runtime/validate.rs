@@ -1,3 +1,5 @@
+use super::*;
+
 /// Validates public v0 event JSONL canonical bytes, envelope fields, payload
 /// contracts and session lifecycle ordering.
 pub fn validate_protocol_jsonl_text(
@@ -28,7 +30,7 @@ pub fn validate_protocol_jsonl_text(
     Ok(events)
 }
 
-fn validate_event_metadata(
+pub fn validate_event_metadata(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -41,7 +43,7 @@ fn validate_event_metadata(
     })
 }
 
-fn validate_event_payload(
+pub fn validate_event_payload(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -180,14 +182,14 @@ fn validate_event_payload(
     Ok(())
 }
 
-struct PayloadValidator<'a> {
-    path: &'a Path,
-    line_number: usize,
-    event_type: EventType,
-    payload: &'a serde_json::Map<String, serde_json::Value>,
+pub struct PayloadValidator<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) line_number: usize,
+    pub(crate) event_type: EventType,
+    pub(crate) payload: &'a serde_json::Map<String, serde_json::Value>,
 }
 
-fn null_location(value: &serde_json::Value, location: &str) -> Option<String> {
+pub fn null_location(value: &serde_json::Value, location: &str) -> Option<String> {
     match value {
         serde_json::Value::Null => Some(location.to_owned()),
         serde_json::Value::Array(values) => values
@@ -202,27 +204,31 @@ fn null_location(value: &serde_json::Value, location: &str) -> Option<String> {
 }
 
 impl PayloadValidator<'_> {
-    fn reject_nulls(&self, value: &serde_json::Value, location: &str) -> Result<(), RuntimeError> {
+    pub(crate) fn reject_nulls(
+        &self,
+        value: &serde_json::Value,
+        location: &str,
+    ) -> Result<(), RuntimeError> {
         null_location(value, location)
             .map(|location| self.error(&format!("{location} must not be null in protocol v0")))
             .map_or(Ok(()), Err)
     }
 
-    fn require_string(&self, field: &str) -> Result<&str, RuntimeError> {
+    pub(crate) fn require_string(&self, field: &str) -> Result<&str, RuntimeError> {
         match self.payload.get(field).and_then(serde_json::Value::as_str) {
             Some(value) if !value.is_empty() => Ok(value),
             _ => Err(self.error(&format!("payload.{field} must be a non-empty string"))),
         }
     }
 
-    fn optional_string(&self, field: &str) -> Result<(), RuntimeError> {
+    pub(crate) fn optional_string(&self, field: &str) -> Result<(), RuntimeError> {
         if self.payload.contains_key(field) {
             self.require_string(field)?;
         }
         Ok(())
     }
 
-    fn require_role(&self) -> Result<(), RuntimeError> {
+    pub(crate) fn require_role(&self) -> Result<(), RuntimeError> {
         let role = self.require_string("role")?;
         if matches!(role, "system" | "user" | "assistant" | "tool") {
             Ok(())
@@ -231,21 +237,24 @@ impl PayloadValidator<'_> {
         }
     }
 
-    fn require_string_array(&self, field: &str) -> Result<Vec<&str>, RuntimeError> {
+    pub(crate) fn require_string_array(&self, field: &str) -> Result<Vec<&str>, RuntimeError> {
         let Some(value) = self.payload.get(field) else {
             return Err(self.error(&format!("payload.{field} must be a string array")));
         };
         self.string_array(field, value)
     }
 
-    fn optional_string_array(&self, field: &str) -> Result<Option<Vec<&str>>, RuntimeError> {
+    pub(crate) fn optional_string_array(
+        &self,
+        field: &str,
+    ) -> Result<Option<Vec<&str>>, RuntimeError> {
         self.payload
             .get(field)
             .map(|value| self.string_array(field, value))
             .transpose()
     }
 
-    fn string_array<'a>(
+    pub(crate) fn string_array<'a>(
         &self,
         field: &str,
         value: &'a serde_json::Value,
@@ -263,7 +272,7 @@ impl PayloadValidator<'_> {
             .collect()
     }
 
-    fn optional_integer(&self, field: &str) -> Result<(), RuntimeError> {
+    pub(crate) fn optional_integer(&self, field: &str) -> Result<(), RuntimeError> {
         if let Some(value) = self.payload.get(field) {
             let Some(number) = value.as_number() else {
                 return Err(self.error(&format!("payload.{field} must be an integer")));
@@ -275,7 +284,7 @@ impl PayloadValidator<'_> {
         Ok(())
     }
 
-    fn require_number(&self, field: &str) -> Result<(), RuntimeError> {
+    pub(crate) fn require_number(&self, field: &str) -> Result<(), RuntimeError> {
         if self
             .payload
             .get(field)
@@ -287,7 +296,7 @@ impl PayloadValidator<'_> {
         }
     }
 
-    fn optional_object(&self, field: &str) -> Result<(), RuntimeError> {
+    pub(crate) fn optional_object(&self, field: &str) -> Result<(), RuntimeError> {
         if self
             .payload
             .get(field)
@@ -299,7 +308,7 @@ impl PayloadValidator<'_> {
         }
     }
 
-    fn error(&self, message: &str) -> RuntimeError {
+    pub(crate) fn error(&self, message: &str) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} line {} {} {message}",
             self.path.display(),
@@ -309,28 +318,28 @@ impl PayloadValidator<'_> {
     }
 }
 
-struct SessionAppendValidationState {
-    expected_session_id: Option<String>,
-    stream_session_id: Option<String>,
-    previous_sequence: u64,
-    event_ids: BTreeSet<String>,
-    flow_started_ids: BTreeSet<String>,
-    terminal_line: Option<usize>,
-    stream_bytes: usize,
-    line_count: usize,
-    lifecycle: SessionLifecycleState,
+pub struct SessionAppendValidationState {
+    pub(crate) expected_session_id: Option<String>,
+    pub(crate) stream_session_id: Option<String>,
+    pub(crate) previous_sequence: u64,
+    pub(crate) event_ids: BTreeSet<String>,
+    pub(crate) flow_started_ids: BTreeSet<String>,
+    pub(crate) terminal_line: Option<usize>,
+    pub(crate) stream_bytes: usize,
+    pub(crate) line_count: usize,
+    pub(crate) lifecycle: SessionLifecycleState,
 }
 
 impl SessionAppendValidationState {
-    fn unscoped() -> Self {
+    pub(crate) fn unscoped() -> Self {
         Self::new(None)
     }
 
-    fn empty(expected_session_id: &str) -> Self {
+    pub(crate) fn empty(expected_session_id: &str) -> Self {
         Self::new(Some(expected_session_id))
     }
 
-    fn new(expected_session_id: Option<&str>) -> Self {
+    pub(crate) fn new(expected_session_id: Option<&str>) -> Self {
         Self {
             expected_session_id: expected_session_id.map(str::to_owned),
             stream_session_id: None,
@@ -344,16 +353,16 @@ impl SessionAppendValidationState {
         }
     }
 
-    fn tool_without_progress(&self) -> Option<&str> {
+    pub(crate) fn tool_without_progress(&self) -> Option<&str> {
         self.lifecycle.tool_without_progress()
     }
 
-    fn terminal_flow_ids(&self) -> BTreeSet<String> {
+    pub(crate) fn terminal_flow_ids(&self) -> BTreeSet<String> {
         self.lifecycle.flows.terminal.keys().cloned().collect()
     }
 
     #[cfg(test)]
-    fn from_prior_events(
+    pub(crate) fn from_prior_events(
         path: &Path,
         expected_session_id: &str,
         prior_events: &[EventEnvelope],
@@ -371,7 +380,7 @@ impl SessionAppendValidationState {
         Ok(state)
     }
 
-    fn validate_appended(
+    pub(crate) fn validate_appended(
         &mut self,
         path: &Path,
         text: &str,
@@ -384,7 +393,7 @@ impl SessionAppendValidationState {
         Ok(appended_events)
     }
 
-    fn validate_appended_with(
+    pub(crate) fn validate_appended_with(
         &mut self,
         path: &Path,
         text: &str,
@@ -418,7 +427,7 @@ impl SessionAppendValidationState {
         Ok(())
     }
 
-    fn validate_constructed_event(
+    pub(crate) fn validate_constructed_event(
         &mut self,
         path: &Path,
         event: &EventEnvelope,
@@ -430,7 +439,7 @@ impl SessionAppendValidationState {
         self.validate_event(path, line_number, event)
     }
 
-    fn validate_budget(
+    pub(crate) fn validate_budget(
         &mut self,
         path: &Path,
         line_number: usize,
@@ -453,7 +462,7 @@ impl SessionAppendValidationState {
         Ok(())
     }
 
-    fn validate_event(
+    pub(crate) fn validate_event(
         &mut self,
         path: &Path,
         line_number: usize,
@@ -554,7 +563,7 @@ impl SessionAppendValidationState {
     }
 }
 
-fn validate_event_size(
+pub fn validate_event_size(
     path: &Path,
     line_number: usize,
     canonical_bytes: usize,
@@ -568,7 +577,7 @@ fn validate_event_size(
     )))
 }
 
-fn parse_canonical_event(
+pub fn parse_canonical_event(
     path: &Path,
     line_number: usize,
     line: &str,
@@ -602,7 +611,7 @@ fn parse_canonical_event(
     })
 }
 
-fn validate_session_log_text(
+pub fn validate_session_log_text(
     path: &Path,
     expected_session_id: &str,
     text: &str,
@@ -622,21 +631,21 @@ fn validate_session_log_text(
 }
 
 #[derive(Default)]
-struct SessionLifecycleState {
-    flows: LifecycleTracker<String>,
-    flow_definition_ids: BTreeMap<String, String>,
-    flow_parents: BTreeMap<String, Option<String>>,
-    terminal_steps: BTreeMap<StepLifecycleKey, usize>,
-    tools: LifecycleTracker<ToolLifecycleKey>,
-    terminal_messages: BTreeMap<MessageLifecycleKey, usize>,
-    active_message_roles: BTreeMap<MessageLifecycleKey, String>,
-    active_phases: BTreeMap<String, String>,
-    active_steps: BTreeMap<String, StepLifecycleKey>,
-    tools_without_progress: BTreeSet<ToolLifecycleKey>,
+pub struct SessionLifecycleState {
+    pub(crate) flows: LifecycleTracker<String>,
+    pub(crate) flow_definition_ids: BTreeMap<String, String>,
+    pub(crate) flow_parents: BTreeMap<String, Option<String>>,
+    pub(crate) terminal_steps: BTreeMap<StepLifecycleKey, usize>,
+    pub(crate) tools: LifecycleTracker<ToolLifecycleKey>,
+    pub(crate) terminal_messages: BTreeMap<MessageLifecycleKey, usize>,
+    pub(crate) active_message_roles: BTreeMap<MessageLifecycleKey, String>,
+    pub(crate) active_phases: BTreeMap<String, String>,
+    pub(crate) active_steps: BTreeMap<String, StepLifecycleKey>,
+    pub(crate) tools_without_progress: BTreeSet<ToolLifecycleKey>,
 }
 
 impl SessionLifecycleState {
-    fn validate_event(
+    pub(crate) fn validate_event(
         &mut self,
         path: &Path,
         line_number: usize,
@@ -967,7 +976,7 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    fn validate_terminal_session(
+    pub(crate) fn validate_terminal_session(
         &self,
         path: &Path,
         last_event: Option<&EventEnvelope>,
@@ -995,7 +1004,7 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    fn tool_without_progress(&self) -> Option<&str> {
+    pub(crate) fn tool_without_progress(&self) -> Option<&str> {
         self.tools_without_progress
             .iter()
             .next()
@@ -1003,16 +1012,16 @@ impl SessionLifecycleState {
     }
 }
 
-fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
+pub fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
     RuntimeError::Protocol(format!(
         "{} terminal session has open {kind} {id:?}",
         path.display()
     ))
 }
 
-struct LifecycleTracker<K: Ord> {
-    active: BTreeSet<K>,
-    terminal: BTreeMap<K, usize>,
+pub struct LifecycleTracker<K: Ord> {
+    pub(crate) active: BTreeSet<K>,
+    pub(crate) terminal: BTreeMap<K, usize>,
 }
 
 impl<K: Ord> Default for LifecycleTracker<K> {
@@ -1025,29 +1034,29 @@ impl<K: Ord> Default for LifecycleTracker<K> {
 }
 
 impl<K: Ord> LifecycleTracker<K> {
-    fn start(&mut self, key: K) {
+    pub(crate) fn start(&mut self, key: K) {
         self.active.insert(key);
     }
 
-    fn finish(&mut self, key: K, line_number: usize) {
+    pub(crate) fn finish(&mut self, key: K, line_number: usize) {
         self.active.remove(&key);
         self.terminal.insert(key, line_number);
     }
 
-    fn is_started(&self, key: &K) -> bool {
+    pub(crate) fn is_started(&self, key: &K) -> bool {
         self.active.contains(key) || self.terminal.contains_key(key)
     }
 
-    fn terminal_line(&self, key: &K) -> Option<usize> {
+    pub(crate) fn terminal_line(&self, key: &K) -> Option<usize> {
         self.terminal.get(key).copied()
     }
 
-    fn active_keys(&self) -> impl Iterator<Item = &K> {
+    pub(crate) fn active_keys(&self) -> impl Iterator<Item = &K> {
         self.active.iter()
     }
 }
 
-fn open_child_lifecycle_error(
+pub fn open_child_lifecycle_error(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1061,7 +1070,7 @@ fn open_child_lifecycle_error(
     ))
 }
 
-fn terminal_lifecycle_error(
+pub fn terminal_lifecycle_error(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1076,7 +1085,7 @@ fn terminal_lifecycle_error(
     ))
 }
 
-fn require_lifecycle_flow_id(
+pub fn require_lifecycle_flow_id(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1092,7 +1101,7 @@ fn require_lifecycle_flow_id(
 
 /// Ensures parent flow references are already started, still active, and
 /// consistent with the parent recorded by flow.started.
-fn validate_lifecycle_parent(
+pub fn validate_lifecycle_parent(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1144,27 +1153,27 @@ fn validate_lifecycle_parent(
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct MessageLifecycleKey {
-    flow_id: String,
-    message_id: String,
+pub struct MessageLifecycleKey {
+    pub(crate) flow_id: String,
+    pub(crate) message_id: String,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct StepLifecycleKey {
-    flow_id: Option<String>,
-    phase_id: Option<String>,
-    step_id: String,
+pub struct StepLifecycleKey {
+    pub(crate) flow_id: Option<String>,
+    pub(crate) phase_id: Option<String>,
+    pub(crate) step_id: String,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct ToolLifecycleKey {
-    flow_id: Option<String>,
-    phase_id: Option<String>,
-    step_id: Option<String>,
-    tool_id: String,
+pub struct ToolLifecycleKey {
+    pub(crate) flow_id: Option<String>,
+    pub(crate) phase_id: Option<String>,
+    pub(crate) step_id: Option<String>,
+    pub(crate) tool_id: String,
 }
 
-fn require_active_phase(
+pub fn require_active_phase(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1180,7 +1189,7 @@ fn require_active_phase(
     })
 }
 
-fn require_active_step(
+pub fn require_active_step(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1196,7 +1205,7 @@ fn require_active_step(
     })
 }
 
-fn lifecycle_step_key(
+pub fn lifecycle_step_key(
     event: &EventEnvelope,
     active_phases: &BTreeMap<String, String>,
 ) -> StepLifecycleKey {
@@ -1219,7 +1228,7 @@ fn lifecycle_step_key(
     }
 }
 
-fn lifecycle_tool_key(
+pub fn lifecycle_tool_key(
     event: &EventEnvelope,
     active_phases: &BTreeMap<String, String>,
     active_steps: &BTreeMap<String, StepLifecycleKey>,
@@ -1245,7 +1254,7 @@ fn lifecycle_tool_key(
     }
 }
 
-fn lifecycle_message_key(
+pub fn lifecycle_message_key(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
@@ -1256,7 +1265,7 @@ fn lifecycle_message_key(
     })
 }
 
-fn lifecycle_payload_string(event: &EventEnvelope, field: &str) -> String {
+pub fn lifecycle_payload_string(event: &EventEnvelope, field: &str) -> String {
     event
         .payload
         .get(field)
@@ -1265,20 +1274,20 @@ fn lifecycle_payload_string(event: &EventEnvelope, field: &str) -> String {
         .to_owned()
 }
 
-fn stream_is_failed(events: &[EventEnvelope]) -> bool {
+pub fn stream_is_failed(events: &[EventEnvelope]) -> bool {
     events
         .last()
         .is_some_and(|event| event.event_type == EventType::SessionFailed)
 }
 
 #[cfg(test)]
-fn stream_is_completed(events: &[EventEnvelope]) -> bool {
+pub fn stream_is_completed(events: &[EventEnvelope]) -> bool {
     events
         .last()
         .is_some_and(|event| event.event_type == EventType::SessionCompleted)
 }
 
-fn format_unix_timestamp(seconds: i64) -> String {
+pub fn format_unix_timestamp(seconds: i64) -> String {
     let days = seconds.div_euclid(86_400);
     let seconds_of_day = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
@@ -1288,7 +1297,7 @@ fn format_unix_timestamp(seconds: i64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
     let doe = z - era * 146_097;

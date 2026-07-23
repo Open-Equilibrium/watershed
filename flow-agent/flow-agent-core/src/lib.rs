@@ -2,20 +2,15 @@
 
 #![deny(missing_docs)]
 
-include!("runtime/types.rs");
-include!("runtime/live_events.rs");
-include!("runtime/session.rs");
-include!("runtime/tail.rs");
-include!("runtime/session_state.rs");
-include!("runtime/fs_guards.rs");
-include!("runtime/engine_fsm.rs");
-include!("runtime/context.rs");
-include!("runtime/event_writer.rs");
-include!("runtime/tool_exec.rs");
-include!("runtime/script_stub.rs");
-include!("runtime/failures.rs");
-include!("runtime/config_io.rs");
-include!("runtime/validate.rs");
+mod runtime;
+
+pub use runtime::{
+    EmitMode, LiveEventNotification, LiveEventNotifier, LiveEventNotifyStatus,
+    LiveEventReceiveError, LiveEventReceiver, RunOutput, RuntimeError, SessionEventReader,
+    list_sessions, live_event_channel, render_human_failure_status, replay_session, resume_session,
+    resume_session_with_live_events, run_flow, run_flow_with_live_events,
+    validate_protocol_jsonl_text,
+};
 
 #[cfg(test)]
 mod tests;

@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn corrupted_session_log_is_rejected_without_rewrite() {
     let workspace = workspace_copy("smoke-flow");

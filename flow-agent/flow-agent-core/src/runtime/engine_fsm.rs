@@ -1,13 +1,15 @@
-struct RuntimeExecution {
-    context_manifests: RuntimeStreamSignature,
-    events: RuntimeStreamSignature,
-    failed: bool,
-    failure_status: Option<String>,
-    terminal_error: Option<RuntimeError>,
+use super::*;
+
+pub struct RuntimeExecution {
+    pub(crate) context_manifests: RuntimeStreamSignature,
+    pub(crate) events: RuntimeStreamSignature,
+    pub(crate) failed: bool,
+    pub(crate) failure_status: Option<String>,
+    pub(crate) terminal_error: Option<RuntimeError>,
 }
 
 impl RuntimeExecution {
-    fn matches_plan(&self, planned: &Self) -> bool {
+    pub(crate) fn matches_plan(&self, planned: &Self) -> bool {
         self.events == planned.events
             && self.context_manifests == planned.context_manifests
             && self.failed == planned.failed
@@ -15,22 +17,22 @@ impl RuntimeExecution {
     }
 }
 
-const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
-const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
-static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
+pub const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
+pub const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
+pub static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
 
-struct LiveInvocationCounter {
-    count: std::sync::atomic::AtomicUsize,
+pub struct LiveInvocationCounter {
+    pub(crate) count: std::sync::atomic::AtomicUsize,
 }
 
 impl LiveInvocationCounter {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             count: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
-    fn acquire(&self) -> Result<LiveInvocationGuard<'_>, RuntimeError> {
+    pub(crate) fn acquire(&self) -> Result<LiveInvocationGuard<'_>, RuntimeError> {
         let mut observed = self.count.load(std::sync::atomic::Ordering::Acquire);
         loop {
             if observed >= MAX_LIVE_FLOW_INVOCATIONS {
@@ -51,8 +53,8 @@ impl LiveInvocationCounter {
     }
 }
 
-struct LiveInvocationGuard<'a> {
-    counter: &'a LiveInvocationCounter,
+pub struct LiveInvocationGuard<'a> {
+    pub(crate) counter: &'a LiveInvocationCounter,
 }
 
 impl Drop for LiveInvocationGuard<'_> {
@@ -64,21 +66,21 @@ impl Drop for LiveInvocationGuard<'_> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct RuntimeStreamSignature {
-    byte_count: usize,
-    digest: [u8; 32],
-    record_count: usize,
+pub struct RuntimeStreamSignature {
+    pub(crate) byte_count: usize,
+    pub(crate) digest: [u8; 32],
+    pub(crate) record_count: usize,
 }
 
 #[derive(Clone)]
-struct RuntimeStreamSignatureBuilder {
-    byte_count: usize,
-    hasher: Sha256,
-    record_count: usize,
+pub struct RuntimeStreamSignatureBuilder {
+    pub(crate) byte_count: usize,
+    pub(crate) hasher: Sha256,
+    pub(crate) record_count: usize,
 }
 
 impl RuntimeStreamSignatureBuilder {
-    fn new(domain: &[u8]) -> Self {
+    pub(crate) fn new(domain: &[u8]) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(
             u64::try_from(domain.len())
@@ -93,7 +95,7 @@ impl RuntimeStreamSignatureBuilder {
         }
     }
 
-    fn push(&mut self, record: &[u8]) {
+    pub(crate) fn push(&mut self, record: &[u8]) {
         self.hasher.update(
             u64::try_from(record.len())
                 .unwrap_or(u64::MAX)
@@ -104,7 +106,7 @@ impl RuntimeStreamSignatureBuilder {
         self.record_count = self.record_count.saturating_add(1);
     }
 
-    fn signature(&self) -> RuntimeStreamSignature {
+    pub(crate) fn signature(&self) -> RuntimeStreamSignature {
         RuntimeStreamSignature {
             byte_count: self.byte_count,
             digest: self.hasher.clone().finalize().into(),
@@ -114,29 +116,29 @@ impl RuntimeStreamSignatureBuilder {
 }
 
 #[derive(Clone, Debug)]
-struct FlowInvocation {
-    flow_id: String,
-    parent_flow_id: Option<String>,
+pub struct FlowInvocation {
+    pub(crate) flow_id: String,
+    pub(crate) parent_flow_id: Option<String>,
 }
 
-struct RuntimeFailure {
-    reason: String,
-    message: &'static str,
-    data: serde_json::Map<String, serde_json::Value>,
-    tool_id: Option<String>,
-    phase_id: Option<String>,
-    emit_tool_failed: bool,
+pub struct RuntimeFailure {
+    pub(crate) reason: String,
+    pub(crate) message: &'static str,
+    pub(crate) data: serde_json::Map<String, serde_json::Value>,
+    pub(crate) tool_id: Option<String>,
+    pub(crate) phase_id: Option<String>,
+    pub(crate) emit_tool_failed: bool,
 }
 
 #[derive(Clone, Copy)]
-struct RuntimeToolPolicy<'a> {
-    command: &'a core_policy::CommandPolicy,
-    protected_path_match_mode: ProtectedPathMatchMode,
-    stub_model_fixture_profile: bool,
+pub struct RuntimeToolPolicy<'a> {
+    pub(crate) command: &'a core_policy::CommandPolicy,
+    pub(crate) protected_path_match_mode: ProtectedPathMatchMode,
+    pub(crate) stub_model_fixture_profile: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ToolSideEffectMode {
+pub enum ToolSideEffectMode {
     ApplyAll,
     DryRun,
     PreflightResume { prefix_event_count: u64 },
@@ -144,11 +146,11 @@ enum ToolSideEffectMode {
 }
 
 impl ToolSideEffectMode {
-    fn occupies_live_invocation_slot(self, terminal_in_prefix: bool) -> bool {
+    pub(crate) fn occupies_live_invocation_slot(self, terminal_in_prefix: bool) -> bool {
         matches!(self, Self::ApplyAll) || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
     }
 
-    fn should_execute_tool(self, completed_sequence: u64) -> bool {
+    pub(crate) fn should_execute_tool(self, completed_sequence: u64) -> bool {
         match self {
             Self::ApplyAll => true,
             Self::DryRun => false,
@@ -157,7 +159,7 @@ impl ToolSideEffectMode {
         }
     }
 
-    fn should_preflight_tool(self, completed_sequence: u64) -> bool {
+    pub(crate) fn should_preflight_tool(self, completed_sequence: u64) -> bool {
         match self {
             Self::PreflightResume { prefix_event_count } => completed_sequence > prefix_event_count,
             Self::ApplyAll | Self::DryRun | Self::Resume { .. } => false,
@@ -166,15 +168,15 @@ impl ToolSideEffectMode {
 }
 
 #[derive(Clone, Debug)]
-struct FlowExecutionOptions {
-    clock: EventClock,
-    side_effect_mode: ToolSideEffectMode,
-    stub_model_fixture_profile: bool,
-    terminal_flow_ids: BTreeSet<String>,
+pub struct FlowExecutionOptions {
+    pub(crate) clock: EventClock,
+    pub(crate) side_effect_mode: ToolSideEffectMode,
+    pub(crate) stub_model_fixture_profile: bool,
+    pub(crate) terminal_flow_ids: BTreeSet<String>,
 }
 
 impl FlowExecutionOptions {
-    fn with_stub_model_fixture_profile(
+    pub(crate) fn with_stub_model_fixture_profile(
         clock: EventClock,
         side_effect_mode: ToolSideEffectMode,
         stub_model_fixture_profile: bool,
@@ -187,53 +189,55 @@ impl FlowExecutionOptions {
         }
     }
 
-    fn with_terminal_flow_ids(mut self, terminal_flow_ids: BTreeSet<String>) -> Self {
+    pub(crate) fn with_terminal_flow_ids(mut self, terminal_flow_ids: BTreeSet<String>) -> Self {
         self.terminal_flow_ids = terminal_flow_ids;
         self
     }
 }
 
 #[cfg(target_os = "macos")]
-fn runtime_policy_target() -> core_policy::PolicyTarget {
+pub fn runtime_policy_target() -> core_policy::PolicyTarget {
     core_policy::PolicyTarget::MacosSeatbelt
 }
 
 #[cfg(not(target_os = "macos"))]
-fn runtime_policy_target() -> core_policy::PolicyTarget {
+pub fn runtime_policy_target() -> core_policy::PolicyTarget {
     core_policy::PolicyTarget::LinuxLandlockSeccomp
 }
 
 #[cfg(windows)]
-fn runtime_protected_path_match_mode(
+pub fn runtime_protected_path_match_mode(
     _target: &core_policy::PolicyTarget,
 ) -> ProtectedPathMatchMode {
     ProtectedPathMatchMode::CaseInsensitive
 }
 
 #[cfg(not(windows))]
-fn runtime_protected_path_match_mode(target: &core_policy::PolicyTarget) -> ProtectedPathMatchMode {
+pub fn runtime_protected_path_match_mode(
+    target: &core_policy::PolicyTarget,
+) -> ProtectedPathMatchMode {
     core_policy::protected_path_match_mode_for_policy_target(target)
 }
 
-struct RuntimeEventBuilder<'a> {
-    active_step_payloads: BTreeMap<String, serde_json::Value>,
-    clock: EventClock,
-    context_manifests: RuntimeStreamSignatureBuilder,
-    events: RuntimeStreamSignatureBuilder,
-    failure_messages: BTreeMap<String, String>,
-    failure_status: Option<String>,
-    history: ContextHistory,
-    flow_counter: u64,
-    message_counter: u64,
-    sequence: u64,
-    session_id: String,
-    sink: Option<&'a mut dyn RuntimeEventSink>,
-    pending_context_manifest: Option<(ContextManifest, Vec<ContextObject>)>,
-    validation: Option<SessionAppendValidationState>,
+pub struct RuntimeEventBuilder<'a> {
+    pub(crate) active_step_payloads: BTreeMap<String, serde_json::Value>,
+    pub(crate) clock: EventClock,
+    pub(crate) context_manifests: RuntimeStreamSignatureBuilder,
+    pub(crate) events: RuntimeStreamSignatureBuilder,
+    pub(crate) failure_messages: BTreeMap<String, String>,
+    pub(crate) failure_status: Option<String>,
+    pub(crate) history: ContextHistory,
+    pub(crate) flow_counter: u64,
+    pub(crate) message_counter: u64,
+    pub(crate) sequence: u64,
+    pub(crate) session_id: String,
+    pub(crate) sink: Option<&'a mut dyn RuntimeEventSink>,
+    pub(crate) pending_context_manifest: Option<(ContextManifest, Vec<ContextObject>)>,
+    pub(crate) validation: Option<SessionAppendValidationState>,
 }
 
 impl<'a> RuntimeEventBuilder<'a> {
-    fn with_clock(session_id: String, clock: EventClock, validate_plan: bool) -> Self {
+    pub(crate) fn with_clock(session_id: String, clock: EventClock, validate_plan: bool) -> Self {
         let validation = validate_plan.then(|| SessionAppendValidationState::empty(&session_id));
         Self {
             active_step_payloads: BTreeMap::new(),
@@ -253,7 +257,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         }
     }
 
-    fn with_sink(
+    pub(crate) fn with_sink(
         session_id: String,
         clock: EventClock,
         validate_plan: bool,
@@ -264,7 +268,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         builder
     }
 
-    fn next_flow_invocation(
+    pub(crate) fn next_flow_invocation(
         &mut self,
         parent_flow_id: Option<String>,
     ) -> Result<FlowInvocation, RuntimeError> {
@@ -283,12 +287,12 @@ impl<'a> RuntimeEventBuilder<'a> {
         })
     }
 
-    fn next_message_id(&mut self) -> String {
+    pub(crate) fn next_message_id(&mut self) -> String {
         self.message_counter += 1;
         format!("msg-{:03}", self.message_counter)
     }
 
-    fn record_context_manifest(
+    pub(crate) fn record_context_manifest(
         &mut self,
         manifest: ContextManifest,
         objects: Vec<ContextObject>,
@@ -302,7 +306,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         Ok(())
     }
 
-    fn emit(
+    pub(crate) fn emit(
         &mut self,
         invocation: Option<&FlowInvocation>,
         event_type: EventType,
@@ -417,7 +421,7 @@ impl<'a> RuntimeEventBuilder<'a> {
         Ok(())
     }
 
-    fn into_execution(
+    pub(crate) fn into_execution(
         self,
         failed: bool,
         terminal_error: Option<RuntimeError>,
@@ -432,7 +436,7 @@ impl<'a> RuntimeEventBuilder<'a> {
     }
 }
 
-fn execute_flow(
+pub fn execute_flow(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
@@ -445,7 +449,7 @@ fn execute_flow(
     )
 }
 
-fn execute_flow_with_sink(
+pub fn execute_flow_with_sink(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
@@ -507,20 +511,20 @@ fn execute_flow_with_sink(
     }
 }
 
-fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> bool {
+pub fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> bool {
     matches!(
         side_effect_mode,
         ToolSideEffectMode::ApplyAll | ToolSideEffectMode::Resume { .. }
     )
 }
 
-fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &RuntimeError) -> bool {
+pub fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &RuntimeError) -> bool {
     !matches!(err, RuntimeError::EventWriter(_))
         && (should_terminalize_runtime_error(side_effect_mode)
             || matches!(err, RuntimeError::ContextBudgetExceeded { .. }))
 }
 
-fn preflight_flow_tools(
+pub fn preflight_flow_tools(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
@@ -537,7 +541,7 @@ fn preflight_flow_tools(
     )
 }
 
-fn preflight_flow_tools_at_depth(
+pub fn preflight_flow_tools_at_depth(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
@@ -585,7 +589,7 @@ fn preflight_flow_tools_at_depth(
     Ok(())
 }
 
-fn preflight_phase_tools(
+pub fn preflight_phase_tools(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
@@ -606,7 +610,7 @@ fn preflight_phase_tools(
     Ok(())
 }
 
-fn emit_flow_block(
+pub fn emit_flow_block(
     context: &FlowEmitContext<'_>,
     flow_block: &core_script::FlowBlock,
     parent_flow_id: Option<String>,
@@ -615,16 +619,16 @@ fn emit_flow_block(
     emit_flow_block_at_depth(context, flow_block, parent_flow_id, builder, 1)
 }
 
-struct FlowEmitContext<'a> {
-    workspace: &'a Path,
-    registry: &'a core_script::ResolvedRegistry,
-    policy: &'a core_policy::PolicyArtifact,
-    side_effect_mode: ToolSideEffectMode,
-    stub_model_fixture_profile: bool,
-    terminal_flow_ids: &'a BTreeSet<String>,
+pub struct FlowEmitContext<'a> {
+    pub(crate) workspace: &'a Path,
+    pub(crate) registry: &'a core_script::ResolvedRegistry,
+    pub(crate) policy: &'a core_policy::PolicyArtifact,
+    pub(crate) side_effect_mode: ToolSideEffectMode,
+    pub(crate) stub_model_fixture_profile: bool,
+    pub(crate) terminal_flow_ids: &'a BTreeSet<String>,
 }
 
-fn emit_flow_block_at_depth(
+pub fn emit_flow_block_at_depth(
     context: &FlowEmitContext<'_>,
     flow_block: &core_script::FlowBlock,
     parent_flow_id: Option<String>,
@@ -710,7 +714,7 @@ fn emit_flow_block_at_depth(
     Ok(None)
 }
 
-fn emit_phase(
+pub fn emit_phase(
     context: &FlowEmitContext<'_>,
     flow_block: &core_script::FlowBlock,
     phase: &core_script::PhaseBlock,
@@ -853,7 +857,7 @@ fn emit_phase(
     Ok(None)
 }
 
-fn step_payload(
+pub fn step_payload(
     registry: &core_script::ResolvedRegistry,
     phase: &core_script::PhaseBlock,
     step: &core_script::StepBlock,
@@ -895,7 +899,7 @@ fn step_payload(
     Ok(payload)
 }
 
-fn phase_uses_stub_model(
+pub fn phase_uses_stub_model(
     registry: &core_script::ResolvedRegistry,
     phase: &core_script::PhaseBlock,
 ) -> bool {
@@ -906,7 +910,7 @@ fn phase_uses_stub_model(
     })
 }
 
-fn stub_message_content(
+pub fn stub_message_content(
     registry: &core_script::ResolvedRegistry,
     phase: &core_script::PhaseBlock,
     provider_context: &[u8],
@@ -931,7 +935,7 @@ fn stub_message_content(
     Ok("hello")
 }
 
-fn command_policy_for_phase<'a>(
+pub fn command_policy_for_phase<'a>(
     policy: &'a core_policy::PolicyArtifact,
     phase_id: &str,
     tool: &core_script::ToolBlock,

@@ -1,4 +1,6 @@
-fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
+use super::*;
+
+pub fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
     let text = read_workspace_config_to_string(workspace)?;
     let source: WorkspaceConfigSource =
         core_script::parse_safe_yaml_config(".flow/config.yaml", &text)
@@ -25,13 +27,13 @@ fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeErr
 }
 
 #[derive(Debug)]
-struct WorkspaceConfig {
-    event_clock: EventClock,
-    registry_root: PathBuf,
-    stub_model_fixture_profile: bool,
+pub struct WorkspaceConfig {
+    pub(crate) event_clock: EventClock,
+    pub(crate) registry_root: PathBuf,
+    pub(crate) stub_model_fixture_profile: bool,
 }
 
-fn require_fixture_execution_backend(config: &WorkspaceConfig) -> Result<(), RuntimeError> {
+pub fn require_fixture_execution_backend(config: &WorkspaceConfig) -> Result<(), RuntimeError> {
     if config.stub_model_fixture_profile {
         Ok(())
     } else {
@@ -41,15 +43,15 @@ fn require_fixture_execution_backend(config: &WorkspaceConfig) -> Result<(), Run
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WorkspaceConfigSource {
-    registry_root: String,
+pub struct WorkspaceConfigSource {
+    pub(crate) registry_root: String,
     #[serde(default)]
-    fixture_profile: String,
+    pub(crate) fixture_profile: String,
     #[serde(default)]
-    stub_model: String,
+    pub(crate) stub_model: String,
 }
 
-fn workspace_stub_model_fixture_profile(
+pub fn workspace_stub_model_fixture_profile(
     fixture_profile: &str,
     stub_model: &str,
 ) -> Result<bool, RuntimeError> {
@@ -73,7 +75,7 @@ fn workspace_stub_model_fixture_profile(
     }
 }
 
-fn resume_event_clock(
+pub fn resume_event_clock(
     config: &WorkspaceConfig,
     recorded_clock: EventClock,
 ) -> Result<EventClock, RuntimeError> {
@@ -83,7 +85,7 @@ fn resume_event_clock(
     Ok(recorded_clock)
 }
 
-fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
+pub fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
     let flow_path = workspace.join(".flow");
     let config_path = flow_path.join("config.yaml");
     let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority())
@@ -114,7 +116,7 @@ fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeEr
     decode_utf8(&config_path, bytes)
 }
 
-fn unsafe_workspace_config_path(path: PathBuf, source: io::Error, kind: &str) -> RuntimeError {
+pub fn unsafe_workspace_config_path(path: PathBuf, source: io::Error, kind: &str) -> RuntimeError {
     if source.kind() == io::ErrorKind::NotFound {
         return RuntimeError::Io { path, source };
     }
@@ -124,14 +126,14 @@ fn unsafe_workspace_config_path(path: PathBuf, source: io::Error, kind: &str) ->
     ))
 }
 
-fn path_io_error(path: &Path, source: io::Error) -> RuntimeError {
+pub fn path_io_error(path: &Path, source: io::Error) -> RuntimeError {
     RuntimeError::Io {
         path: path.to_path_buf(),
         source,
     }
 }
 
-fn for_each_anchored_file_line_with_limit(
+pub fn for_each_anchored_file_line_with_limit(
     path: &AnchoredFile,
     max_bytes: u64,
     mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
@@ -172,13 +174,13 @@ fn for_each_anchored_file_line_with_limit(
     Ok(total)
 }
 
-fn decode_utf8(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {
+pub fn decode_utf8(path: &Path, bytes: Vec<u8>) -> Result<String, RuntimeError> {
     String::from_utf8(bytes).map_err(|source| {
         RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
     })
 }
 
-fn read_opened_file_with_limit(
+pub fn read_opened_file_with_limit(
     file: impl Read,
     total_len: u64,
     path: &Path,

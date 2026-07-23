@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn runtime_error_exit_classes_and_source_chain_are_observable() {
     let usage = RuntimeError::Usage("usage".to_owned());

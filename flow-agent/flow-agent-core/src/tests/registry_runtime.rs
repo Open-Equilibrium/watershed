@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn registry_root_must_stay_inside_workspace() {
     let workspace = workspace_copy("smoke-flow");

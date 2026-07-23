@@ -1,23 +1,14 @@
 use super::*;
-use std::{
-    io,
-    sync::{
-        Arc, Barrier, Mutex,
-        atomic::{AtomicUsize, Ordering},
-    },
-    thread,
-    time::{Duration, Instant},
-};
 
-static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+pub(super) static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 impl FlowExecutionOptions {
-    fn new(clock: EventClock, side_effect_mode: ToolSideEffectMode) -> Self {
+    pub(super) fn new(clock: EventClock, side_effect_mode: ToolSideEffectMode) -> Self {
         Self::with_stub_model_fixture_profile(clock, side_effect_mode, true)
     }
 }
 
-fn write_initial_session_log_with_clock(
+pub(super) fn write_initial_session_log_with_clock(
     reservation: &SessionReservation,
     session_id: &str,
     clock: EventClock,
@@ -38,7 +29,7 @@ fn write_initial_session_log_with_clock(
         .map_err(|source| path_io_error(reservation.session_path.diagnostic_path(), source))
 }
 
-fn validate_appended_session_log_text(
+pub(super) fn validate_appended_session_log_text(
     path: &Path,
     expected_session_id: &str,
     prior_events: &[EventEnvelope],
@@ -51,14 +42,14 @@ fn validate_appended_session_log_text(
         .validate_appended(path, text)
 }
 
-fn write_initial_session_log(
+pub(super) fn write_initial_session_log(
     reservation: &SessionReservation,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
     write_initial_session_log_with_clock(reservation, session_id, EventClock::fixed_fixture())
 }
 
-fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
+pub(super) fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {
     fs::OpenOptions::new()
         .append(true)
         .open(path)
@@ -66,11 +57,15 @@ fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> 
         .map_err(|source| path_io_error(path, source))
 }
 
-fn event_timestamp(sequence: u64) -> String {
+pub(super) fn event_timestamp(sequence: u64) -> String {
     EventClock::fixed_fixture().timestamp(sequence)
 }
 
-fn assert_denied(err: RuntimeError, reason: core_policy::DenyReasonCode, message_fragment: &str) {
+pub(super) fn assert_denied(
+    err: RuntimeError,
+    reason: core_policy::DenyReasonCode,
+    message_fragment: &str,
+) {
     match err {
         RuntimeError::Denied {
             reason: actual,
@@ -86,7 +81,7 @@ fn assert_denied(err: RuntimeError, reason: core_policy::DenyReasonCode, message
     }
 }
 
-fn assert_active_session(err: RuntimeError, session_id: &str, lock_name: &str) {
+pub(super) fn assert_active_session(err: RuntimeError, session_id: &str, lock_name: &str) {
     match err {
         RuntimeError::ActiveSession {
             session_id: actual,

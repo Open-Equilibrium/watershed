@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn event_segment_discovery_retries_one_transient_protocol_error() {
     let mut attempts = 0;

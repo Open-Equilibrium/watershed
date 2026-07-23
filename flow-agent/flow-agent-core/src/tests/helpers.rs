@@ -1,9 +1,14 @@
-fn load_test_registry(workspace: &Path, flow_ref: &str) -> core_script::ResolvedRegistry {
+use super::*;
+
+pub(super) fn load_test_registry(
+    workspace: &Path,
+    flow_ref: &str,
+) -> core_script::ResolvedRegistry {
     core_script::load_flow_registry_from_workspace(workspace, Path::new("registry"), flow_ref)
         .expect("fixture registry loads")
 }
 
-fn empty_workspace(label: &str) -> TempWorkspace {
+pub(super) fn empty_workspace(label: &str) -> TempWorkspace {
     let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let target = TempWorkspace::new(std::env::temp_dir().join(format!(
         "watershed-flow-agent-core-{label}-{}-{id}",
@@ -16,7 +21,7 @@ fn empty_workspace(label: &str) -> TempWorkspace {
     target
 }
 
-fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
+pub(super) fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
     let path = workspace.join("registry").join(path);
     let text = fs::read_to_string(&path).expect("registry fixture reads");
     assert_eq!(
@@ -27,7 +32,7 @@ fn replace_registry_text(workspace: &Path, path: &str, before: &str, after: &str
     fs::write(path, text.replacen(before, after, 1)).expect("registry fixture updates");
 }
 
-fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
+pub(super) fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
     for (directory, extension) in [(LOCAL_SESSION_DIR, "jsonl"), (LOCAL_LOG_DIR, "log")] {
         let path = workspace
             .join(directory)
@@ -40,7 +45,7 @@ fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
     }
 }
 
-fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
+pub(super) fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
     fs::write(
         workspace.join("registry/tools/bad-write.yaml"),
         format!(
@@ -69,7 +74,8 @@ fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
     );
 }
 
-fn workspace_at_write_summary_progress_with_existing_output() -> (TempWorkspace, PathBuf) {
+pub(super) fn workspace_at_write_summary_progress_with_existing_output() -> (TempWorkspace, PathBuf)
+{
     let workspace = workspace_copy("hello-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
@@ -87,7 +93,7 @@ fn workspace_at_write_summary_progress_with_existing_output() -> (TempWorkspace,
 }
 
 #[test]
-fn temp_workspace_survives_until_the_last_thread_owner_drops() {
+pub(super) fn temp_workspace_survives_until_the_last_thread_owner_drops() {
     let workspace = empty_workspace("temp-workspace-owner");
     let path = workspace.to_path_buf();
     fs::write(workspace.join("marker"), "retained").expect("marker written");
@@ -105,7 +111,7 @@ fn temp_workspace_survives_until_the_last_thread_owner_drops() {
     assert!(!path.exists());
 }
 
-fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
+pub(super) fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
@@ -119,7 +125,7 @@ fn workspace_with_later_invalid_own_script_path() -> TempWorkspace {
 }
 
 #[cfg(windows)]
-fn create_windows_junction(link: &Path, target: &Path) {
+pub(super) fn create_windows_junction(link: &Path, target: &Path) {
     let output = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
         .arg(link)
@@ -134,15 +140,15 @@ fn create_windows_junction(link: &Path, target: &Path) {
     );
 }
 
-fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {
+pub(super) fn prefix_through_tool_progress(stream: &str, tool_id: &str) -> String {
     prefix_through_tool_event(stream, "tool.progress", tool_id)
 }
 
-fn prefix_through_tool_started(stream: &str, tool_id: &str) -> String {
+pub(super) fn prefix_through_tool_started(stream: &str, tool_id: &str) -> String {
     prefix_through_tool_event(stream, "tool.started", tool_id)
 }
 
-fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
+pub(super) fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
     let event_marker = "\"event_type\":\"tool.started\"";
     let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
     let mut prefix = String::new();
@@ -156,7 +162,7 @@ fn prefix_before_tool_started(stream: &str, tool_id: &str) -> String {
     panic!("missing tool.started for {tool_id}");
 }
 
-fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> String {
+pub(super) fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> String {
     let event_marker = format!("\"event_type\":\"{event_type}\"");
     let tool_marker = format!("\"tool_id\":\"{tool_id}\"");
     let mut prefix = String::new();
@@ -170,7 +176,7 @@ fn prefix_through_tool_event(stream: &str, event_type: &str, tool_id: &str) -> S
     panic!("missing {event_type} for {tool_id}");
 }
 
-fn write_definition_hash_metadata(workspace: &Path, session_id: &str, flow_ref: &str) {
+pub(super) fn write_definition_hash_metadata(workspace: &Path, session_id: &str, flow_ref: &str) {
     let registry = load_test_registry(workspace, flow_ref);
     let flow_block = registry.flow_block(flow_ref).expect("flow exists");
     let registry_json = registry.canonical_json().expect("registry serializes");
@@ -243,7 +249,7 @@ fn write_definition_hash_metadata(workspace: &Path, session_id: &str, flow_ref: 
     }
 }
 
-fn first_event_line(fixture: &str, stream: &str) -> String {
+pub(super) fn first_event_line(fixture: &str, stream: &str) -> String {
     expected_stream(fixture, stream)
         .lines()
         .next()
@@ -252,7 +258,7 @@ fn first_event_line(fixture: &str, stream: &str) -> String {
         + "\n"
 }
 
-fn event_line(
+pub(super) fn event_line(
     event_id: &str,
     event_type: EventType,
     session_id: &str,
@@ -265,7 +271,7 @@ fn event_line(
     )
 }
 
-fn event_line_with_parent(
+pub(super) fn event_line_with_parent(
     event_id: &str,
     event_type: EventType,
     session_id: &str,
@@ -291,7 +297,7 @@ fn event_line_with_parent(
     .expect("event serializes")
 }
 
-fn flow_started_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn flow_started_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::FlowStarted,
@@ -302,7 +308,7 @@ fn flow_started_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn flow_completed_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn flow_completed_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::FlowCompleted,
@@ -313,7 +319,7 @@ fn flow_completed_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn phase_entered_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn phase_entered_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::PhaseEntered,
@@ -329,7 +335,7 @@ fn phase_entered_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn step_started_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn step_started_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::StepStarted,
@@ -344,7 +350,7 @@ fn step_started_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn step_completed_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn step_completed_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::StepCompleted,
@@ -359,7 +365,7 @@ fn step_completed_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn tool_started_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn tool_started_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::ToolStarted,
@@ -378,7 +384,7 @@ fn tool_started_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn tool_failed_line(event_id: &str, sequence: u64) -> String {
+pub(super) fn tool_failed_line(event_id: &str, sequence: u64) -> String {
     event_line(
         event_id,
         EventType::ToolFailed,
@@ -392,7 +398,7 @@ fn tool_failed_line(event_id: &str, sequence: u64) -> String {
     )
 }
 
-fn base_event() -> EventEnvelope {
+pub(super) fn base_event() -> EventEnvelope {
     EventEnvelope::new(
         "evt-001",
         EventType::SessionStarted,
@@ -404,34 +410,34 @@ fn base_event() -> EventEnvelope {
     )
 }
 
-fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
+pub(super) fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
     let text = event.canonical_jsonl().expect("event serializes");
     assert_invalid_stream(name, &text, expected);
 }
 
-fn assert_invalid_stream(name: &str, text: &str, expected: &str) {
+pub(super) fn assert_invalid_stream(name: &str, text: &str, expected: &str) {
     let err =
         validate_protocol_jsonl_text(Path::new(name), text).expect_err("invalid event must fail");
 
     assert!(err.to_string().contains(expected), "{err}");
 }
 
-fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected: &str) {
+pub(super) fn assert_invalid_session_log(name: &str, session_id: &str, text: &str, expected: &str) {
     let err = validate_session_log_text(Path::new(name), session_id, text)
         .expect_err("invalid session log must fail");
 
     assert!(err.to_string().contains(expected), "{err}");
 }
 
-struct FsmTransitionTimings {
-    completed_at: Instant,
-    nanos: Vec<u128>,
+pub(super) struct FsmTransitionTimings {
+    pub(super) completed_at: Instant,
+    pub(super) nanos: Vec<u128>,
 }
 
 #[derive(Default)]
-struct CapturedRuntime {
-    context_checkpoints: Vec<ContextManifestCheckpoint>,
-    events: Vec<EventEnvelope>,
+pub(super) struct CapturedRuntime {
+    pub(super) context_checkpoints: Vec<ContextManifestCheckpoint>,
+    pub(super) events: Vec<EventEnvelope>,
 }
 
 impl RuntimeEventSink for CapturedRuntime {
@@ -455,7 +461,7 @@ impl RuntimeEventSink for CapturedRuntime {
 }
 
 impl FsmTransitionTimings {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             completed_at: Instant::now(),
             nanos: Vec::new(),
@@ -481,7 +487,7 @@ impl RuntimeEventSink for FsmTransitionTimings {
     }
 }
 
-fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
+pub(super) fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
     let workspace = fixture_dir("smoke-flow");
     let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
     let root_flow = registry
@@ -505,7 +511,7 @@ fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
     Ok(timings.nanos)
 }
 
-fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
+pub(super) fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
     events
         .iter()
         .find(|event| {
@@ -521,7 +527,7 @@ fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> Stri
         .to_owned()
 }
 
-fn emit_noop_dispatch_for_budget(
+pub(super) fn emit_noop_dispatch_for_budget(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     policy: RuntimeToolPolicy<'_>,
@@ -543,14 +549,14 @@ fn emit_noop_dispatch_for_budget(
     Ok(builder.events.record_count)
 }
 
-fn p95_nanos(mut values: Vec<u128>) -> u128 {
+pub(super) fn p95_nanos(mut values: Vec<u128>) -> u128 {
     assert!(!values.is_empty(), "p95 requires at least one value");
     values.sort_unstable();
     let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
     values[index]
 }
 
-fn fixture_runtime_policy(
+pub(super) fn fixture_runtime_policy(
     fixture: &str,
     flow_id: &str,
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
@@ -561,7 +567,7 @@ fn fixture_runtime_policy(
     (registry, policy)
 }
 
-fn session_event_line(
+pub(super) fn session_event_line(
     session_id: &str,
     event_id: &str,
     event_type: EventType,

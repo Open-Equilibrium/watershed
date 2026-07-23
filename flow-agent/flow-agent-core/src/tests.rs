@@ -1,69 +1,41 @@
+use core_policy::ProtectedPathMatchMode;
+use proto::{EventEnvelope, EventType};
+use std::{
+    collections::BTreeSet,
+    fs,
+    io::{self, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    sync::{
+        Arc, Barrier, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
+};
+
 #[path = "../../tests/support.rs"]
 mod test_support;
+use crate::runtime::*;
 use test_support::{
     PeakRssSampler, TempWorkspace, copy_dir, current_resident_set_size, expected_stream,
     fixture_dir, workspace_copy,
 };
 
-include!("tests/support.rs");
-include!("tests/helpers.rs");
+mod support;
+use support::*;
 
-mod surface_contracts {
-    use super::*;
-    include!("tests/surface_contracts.rs");
-}
+mod helpers;
+use helpers::*;
 
-mod registry_runtime {
-    use super::*;
-    include!("tests/registry_runtime.rs");
-}
-
-mod session_listing {
-    use super::*;
-    include!("tests/session_listing.rs");
-}
-
-mod sandbox {
-    use super::*;
-    include!("tests/sandbox.rs");
-}
-
-mod session_logs {
-    use super::*;
-    include!("tests/session_logs.rs");
-}
-
-mod tail {
-    use super::*;
-    include!("tests/tail.rs");
-}
-
-mod fs_guards {
-    use super::*;
-    include!("tests/fs_guards.rs");
-}
-
-mod protocol {
-    use super::*;
-    include!("tests/protocol.rs");
-}
-
-mod workspace_security {
-    use super::*;
-    include!("tests/workspace_security.rs");
-}
-
-mod performance {
-    use super::*;
-    include!("tests/performance.rs");
-}
-
-mod context {
-    use super::*;
-    include!("tests/context.rs");
-}
-
-mod event_writer {
-    use super::*;
-    include!("tests/event_writer.rs");
-}
+mod context;
+mod event_writer;
+mod fs_guards;
+mod performance;
+mod protocol;
+mod registry_runtime;
+mod sandbox;
+mod session_listing;
+mod session_logs;
+mod surface_contracts;
+mod tail;
+mod workspace_security;

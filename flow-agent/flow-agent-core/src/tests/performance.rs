@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signatures() {
     let workspace = fixture_dir("hello-flow");

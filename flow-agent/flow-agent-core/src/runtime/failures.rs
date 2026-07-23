@@ -1,4 +1,6 @@
-fn emit_runtime_failure(
+use super::*;
+
+pub fn emit_runtime_failure(
     flow_block: &core_script::FlowBlock,
     invocation: &FlowInvocation,
     failure: &RuntimeFailure,
@@ -11,7 +13,7 @@ fn emit_runtime_failure(
     emit_runtime_flow_failure(flow_block, invocation, &failure.reason, builder)
 }
 
-fn emit_runtime_error(
+pub fn emit_runtime_error(
     invocation: &FlowInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder<'_>,
@@ -36,7 +38,7 @@ fn emit_runtime_error(
     builder.emit(Some(invocation), EventType::Error, error_payload)
 }
 
-fn emit_runtime_flow_failure(
+pub fn emit_runtime_flow_failure(
     flow_block: &core_script::FlowBlock,
     invocation: &FlowInvocation,
     reason: &str,
@@ -52,7 +54,7 @@ fn emit_runtime_flow_failure(
     )
 }
 
-fn emit_runtime_tool_failure(
+pub fn emit_runtime_tool_failure(
     invocation: &FlowInvocation,
     failure: &RuntimeFailure,
     builder: &mut RuntimeEventBuilder<'_>,
@@ -70,7 +72,7 @@ fn emit_runtime_tool_failure(
     Ok(())
 }
 
-fn emit_runtime_error_failure(
+pub fn emit_runtime_error_failure(
     flow_block: &core_script::FlowBlock,
     invocation: &FlowInvocation,
     err: &RuntimeError,
@@ -82,7 +84,7 @@ fn emit_runtime_error_failure(
     emit_runtime_flow_failure(flow_block, invocation, &failure.reason, builder)
 }
 
-fn complete_active_step(
+pub fn complete_active_step(
     invocation: &FlowInvocation,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<(), RuntimeError> {
@@ -96,7 +98,7 @@ fn complete_active_step(
     }
 }
 
-fn sandbox_tool_dispatch_failure(
+pub fn sandbox_tool_dispatch_failure(
     tool: &core_script::ToolBlock,
     stub_model_fixture_profile: bool,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
@@ -112,7 +114,7 @@ fn sandbox_tool_dispatch_failure(
     )))
 }
 
-fn sandbox_out_of_phase_failure(
+pub fn sandbox_out_of_phase_failure(
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     phase: &core_script::PhaseBlock,
@@ -144,14 +146,14 @@ fn sandbox_out_of_phase_failure(
     ))
 }
 
-fn sandbox_negative_operation_for_tool(tool: &core_script::ToolBlock) -> Option<&str> {
+pub fn sandbox_negative_operation_for_tool(tool: &core_script::ToolBlock) -> Option<&str> {
     let [operation] = sandbox_negative_arguments(tool)? else {
         return None;
     };
     sandbox_negative_reason_for_operation(operation).map(|_| operation.as_str())
 }
 
-fn sandbox_negative_reason_for_tool(
+pub fn sandbox_negative_reason_for_tool(
     tool: &core_script::ToolBlock,
 ) -> Result<Option<core_policy::DenyReasonCode>, RuntimeError> {
     let Some(arguments) = sandbox_negative_arguments(tool) else {
@@ -173,7 +175,7 @@ fn sandbox_negative_reason_for_tool(
         })
 }
 
-fn sandbox_negative_arguments(tool: &core_script::ToolBlock) -> Option<&[String]> {
+pub fn sandbox_negative_arguments(tool: &core_script::ToolBlock) -> Option<&[String]> {
     match (&tool.tool_kind, &tool.command) {
         (
             core_script::ToolKind::PredefinedCommand,
@@ -183,7 +185,9 @@ fn sandbox_negative_arguments(tool: &core_script::ToolBlock) -> Option<&[String]
     }
 }
 
-fn sandbox_negative_reason_for_operation(operation: &str) -> Option<core_policy::DenyReasonCode> {
+pub fn sandbox_negative_reason_for_operation(
+    operation: &str,
+) -> Option<core_policy::DenyReasonCode> {
     match operation {
         "environment" => Some(core_policy::DenyReasonCode::EnvironmentDenied),
         "interpreter" => Some(core_policy::DenyReasonCode::InterpreterEscapeDenied),
@@ -195,11 +199,11 @@ fn sandbox_negative_reason_for_operation(operation: &str) -> Option<core_policy:
     }
 }
 
-fn runtime_denied(reason: core_policy::DenyReasonCode, message: String) -> RuntimeError {
+pub fn runtime_denied(reason: core_policy::DenyReasonCode, message: String) -> RuntimeError {
     RuntimeError::Denied { reason, message }
 }
 
-fn runtime_protocol_or_denied(
+pub fn runtime_protocol_or_denied(
     denied_reason: Option<core_policy::DenyReasonCode>,
     message: String,
 ) -> RuntimeError {
@@ -209,7 +213,7 @@ fn runtime_protocol_or_denied(
     }
 }
 
-fn runtime_failure_for_reason(
+pub fn runtime_failure_for_reason(
     reason_code: core_policy::DenyReasonCode,
     tool_id: Option<String>,
 ) -> RuntimeFailure {
@@ -224,7 +228,7 @@ fn runtime_failure_for_reason(
     }
 }
 
-fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
+pub fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
     let (reason, message, data) = match err {
         RuntimeError::ContextBudgetExceeded {
             input_budget_tokens,
@@ -269,7 +273,7 @@ fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure {
     }
 }
 
-fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<RuntimeFailure> {
+pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<RuntimeFailure> {
     let reason = match err {
         RuntimeError::Denied { reason, .. } => reason.clone(),
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::PermissionDenied => {
@@ -294,7 +298,7 @@ fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<R
     Some(runtime_failure_for_reason(reason, Some(tool_id.to_owned())))
 }
 
-fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFailure {
+pub fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFailure {
     RuntimeFailure {
         reason: core_policy::DenyReasonCode::ToolOutOfPhase
             .as_str()
@@ -307,7 +311,7 @@ fn runtime_out_of_phase_failure(phase_id: String, tool_id: String) -> RuntimeFai
     }
 }
 
-fn runtime_io_error_kind(kind: io::ErrorKind) -> &'static str {
+pub fn runtime_io_error_kind(kind: io::ErrorKind) -> &'static str {
     match kind {
         io::ErrorKind::NotFound => "not_found",
         io::ErrorKind::PermissionDenied => "permission_denied",
@@ -327,7 +331,7 @@ fn runtime_io_error_kind(kind: io::ErrorKind) -> &'static str {
     }
 }
 
-fn policy_phase_contains_tool(
+pub fn policy_phase_contains_tool(
     policy: &core_policy::PolicyArtifact,
     phase_id: &str,
     tool_id: &str,
@@ -338,7 +342,7 @@ fn policy_phase_contains_tool(
         .any(|phase| phase.phase_id == phase_id && phase.tool_ids.iter().any(|id| id == tool_id))
 }
 
-fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
+pub fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
     match reason {
         core_policy::DenyReasonCode::WriteDenied => "write outside declared roots denied",
         core_policy::DenyReasonCode::NetworkDenied => "network egress denied by default",
@@ -350,7 +354,7 @@ fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
     }
 }
 
-fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeError> {
+pub fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeError> {
     let mut stream = String::new();
     for event in events {
         stream.push_str(&event.canonical_jsonl().map_err(|err| {
@@ -360,21 +364,21 @@ fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeErr
     Ok(stream)
 }
 
-fn policy_tool_kind_name(kind: &core_policy::ToolKind) -> &'static str {
+pub fn policy_tool_kind_name(kind: &core_policy::ToolKind) -> &'static str {
     match kind {
         core_policy::ToolKind::PredefinedCommand => "predefined-command",
         core_policy::ToolKind::OwnScript => "own-script",
     }
 }
 
-fn tool_network_access_name(policy: &core_script::NetworkPolicy) -> &'static str {
+pub fn tool_network_access_name(policy: &core_script::NetworkPolicy) -> &'static str {
     match policy {
         core_script::NetworkPolicy::Deny(_) => "deny",
         core_script::NetworkPolicy::Declared { .. } => "declared",
     }
 }
 
-fn connection_kind_name(kind: &core_script::ConnectionKind) -> &'static str {
+pub fn connection_kind_name(kind: &core_script::ConnectionKind) -> &'static str {
     match kind {
         core_script::ConnectionKind::Data => "data",
         core_script::ConnectionKind::Trigger => "trigger",

@@ -1,3 +1,5 @@
+use super::*;
+
 fn reader_fixture(
     workspace_name: &str,
     session_id: &str,

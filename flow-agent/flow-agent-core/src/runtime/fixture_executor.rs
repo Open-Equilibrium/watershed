@@ -1,4 +1,6 @@
-fn execute_own_script(
+use super::*;
+
+pub fn execute_own_script(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
@@ -16,7 +18,7 @@ fn execute_own_script(
     Ok(())
 }
 
-fn plan_own_script(
+pub fn plan_own_script(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
@@ -36,12 +38,12 @@ fn plan_own_script(
     compile_own_script_operations(protected_path_match_mode, policy, script_body)
 }
 
-struct ScriptWrite {
-    contents: Vec<u8>,
-    target: String,
+pub struct ScriptWrite {
+    pub(crate) contents: Vec<u8>,
+    pub(crate) target: String,
 }
 
-fn compile_own_script_operations(
+pub fn compile_own_script_operations(
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
     script_body: &str,
@@ -68,7 +70,7 @@ fn compile_own_script_operations(
     Ok(write)
 }
 
-fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
+pub fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeError> {
     let Some(redirection_index) = redirection_position(line)? else {
         return Ok(None);
     };
@@ -82,7 +84,7 @@ fn script_redirection(line: &str) -> Result<Option<(String, String)>, RuntimeErr
     Ok(Some((command.to_owned(), target)))
 }
 
-fn redirection_position(line: &str) -> Result<Option<usize>, RuntimeError> {
+pub fn redirection_position(line: &str) -> Result<Option<usize>, RuntimeError> {
     let mut position = None;
     let mut quote = None;
     let mut chars = line.char_indices().peekable();
@@ -117,7 +119,7 @@ fn redirection_position(line: &str) -> Result<Option<usize>, RuntimeError> {
     Ok(position)
 }
 
-fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
+pub fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
     if value.is_empty() {
         return Err(RuntimeError::Protocol(
             "own-script redirection target must be one literal path".to_owned(),
@@ -139,7 +141,7 @@ fn unquote_script_path(value: &str) -> Result<String, RuntimeError> {
     Ok(value.to_owned())
 }
 
-fn validate_script_write_target(
+pub fn validate_script_write_target(
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
     target: &str,
@@ -176,14 +178,14 @@ fn validate_script_write_target(
     Ok(relative)
 }
 
-fn script_replacement_temp_parent_scope(relative: &str) -> String {
+pub fn script_replacement_temp_parent_scope(relative: &str) -> String {
     relative.rsplit_once('/').map_or_else(
         || "workspace".to_owned(),
         |(parent, _)| format!("workspace/{parent}"),
     )
 }
 
-fn write_script_output(
+pub fn write_script_output(
     workspace: &Path,
     target: &str,
     contents: &[u8],
@@ -201,7 +203,7 @@ fn write_script_output(
     replace_script_output_atomically(&path, contents)
 }
 
-fn preflight_own_script_outputs(
+pub fn preflight_own_script_outputs(
     workspace: &Path,
     write: Option<&ScriptWrite>,
     protected_path_match_mode: ProtectedPathMatchMode,
@@ -221,7 +223,7 @@ fn preflight_own_script_outputs(
     Ok(())
 }
 
-fn replace_script_output_atomically(
+pub fn replace_script_output_atomically(
     path: &AnchoredFile,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
@@ -251,7 +253,7 @@ fn replace_script_output_atomically(
     )
 }
 
-fn anchored_workspace_write_path(
+pub fn anchored_workspace_write_path(
     workspace: &Path,
     target: &str,
     create: bool,
@@ -272,7 +274,7 @@ fn anchored_workspace_write_path(
     ))
 }
 
-fn with_anchored_replacement_temp<T>(
+pub fn with_anchored_replacement_temp<T>(
     path: &AnchoredFile,
     denied_reason: Option<core_policy::DenyReasonCode>,
     operation: impl FnOnce(&AnchoredFile, fs::File) -> Result<T, RuntimeError>,
@@ -285,7 +287,7 @@ fn with_anchored_replacement_temp<T>(
     result
 }
 
-fn create_anchored_replacement_temp(
+pub fn create_anchored_replacement_temp(
     path: &AnchoredFile,
     denied_reason: Option<core_policy::DenyReasonCode>,
 ) -> Result<(AnchoredFile, fs::File), RuntimeError> {
@@ -316,7 +318,7 @@ fn create_anchored_replacement_temp(
     ))
 }
 
-fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
+pub fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeError> {
     let file_name = path.file_name().ok_or_else(|| {
         RuntimeError::Protocol("replacement path must have a file name".to_owned())
     })?;
@@ -327,7 +329,7 @@ fn replacement_temp_path(path: &Path, attempt: u32) -> Result<PathBuf, RuntimeEr
     )))
 }
 
-fn ensure_script_target_not_protected(
+pub fn ensure_script_target_not_protected(
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
     scoped_target: &str,
@@ -358,7 +360,7 @@ fn ensure_script_target_not_protected(
     ))
 }
 
-fn ensure_resolved_script_target_not_protected(
+pub fn ensure_resolved_script_target_not_protected(
     workspace: &Path,
     target: &str,
     protected_path_match_mode: ProtectedPathMatchMode,
@@ -368,7 +370,7 @@ fn ensure_resolved_script_target_not_protected(
     ensure_script_target_not_protected(protected_path_match_mode, policy, &resolved_target)
 }
 
-fn resolved_workspace_scoped_target(
+pub fn resolved_workspace_scoped_target(
     workspace: &Path,
     target: &str,
 ) -> Result<String, RuntimeError> {
@@ -447,27 +449,27 @@ fn resolved_workspace_scoped_target(
 }
 
 #[cfg(unix)]
-fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
+pub fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
     use std::os::unix::fs::MetadataExt;
 
     Ok(metadata.nlink())
 }
 
 #[cfg(windows)]
-fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, RuntimeError> {
+pub fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, RuntimeError> {
     Ok(windows_open_file_information(path, file)?.number_of_links)
 }
 
 #[cfg(windows)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct WindowsOpenFileInformation {
-    volume_serial_number: u64,
-    file_index: u64,
-    number_of_links: u64,
+pub struct WindowsOpenFileInformation {
+    pub(crate) volume_serial_number: u64,
+    pub(crate) file_index: u64,
+    pub(crate) number_of_links: u64,
 }
 
 #[cfg(windows)]
-fn windows_open_file_information(
+pub fn windows_open_file_information(
     path: &Path,
     file: &fs::File,
 ) -> Result<WindowsOpenFileInformation, RuntimeError> {
@@ -489,7 +491,7 @@ fn windows_open_file_information(
     })
 }
 
-fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
+pub fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
     // WHY: script write targets use one shared slash-only path policy across parser,
     // policy and runtime checks.
     if target.is_empty()
@@ -516,7 +518,7 @@ fn normalize_script_write_target(target: &str) -> Result<String, RuntimeError> {
     })
 }
 
-fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
+pub fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
     let command = command.trim();
     if let Some(rest) = command.strip_prefix("printf ") {
         evaluate_printf_command(rest)
@@ -531,7 +533,7 @@ fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
     }
 }
 
-fn evaluate_printf_command(rest: &str) -> Result<Vec<u8>, RuntimeError> {
+pub fn evaluate_printf_command(rest: &str) -> Result<Vec<u8>, RuntimeError> {
     let (format, rest) = parse_single_quoted_argument(rest.trim())?;
     let rest = rest.trim();
     let formatted = if rest.is_empty() {
@@ -546,7 +548,7 @@ fn evaluate_printf_command(rest: &str) -> Result<Vec<u8>, RuntimeError> {
     Ok(formatted.into_bytes())
 }
 
-fn parse_single_quoted_argument(value: &str) -> Result<(String, &str), RuntimeError> {
+pub fn parse_single_quoted_argument(value: &str) -> Result<(String, &str), RuntimeError> {
     let Some(rest) = value.strip_prefix('\'') else {
         return Err(RuntimeError::Protocol(
             "own-script printf format must be single-quoted".to_owned(),
@@ -560,7 +562,7 @@ fn parse_single_quoted_argument(value: &str) -> Result<(String, &str), RuntimeEr
     Ok((rest[..end].to_owned(), &rest[end + 1..]))
 }
 
-fn decode_printf_escapes(value: &str) -> Result<String, RuntimeError> {
+pub fn decode_printf_escapes(value: &str) -> Result<String, RuntimeError> {
     let mut out = String::new();
     let mut chars = value.chars();
     while let Some(ch) = chars.next() {
@@ -586,7 +588,7 @@ fn decode_printf_escapes(value: &str) -> Result<String, RuntimeError> {
     Ok(out)
 }
 
-fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
+pub fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
     let unquoted = if value.len() >= 2
         && ((value.starts_with('"') && value.ends_with('"'))
             || (value.starts_with('\'') && value.ends_with('\'')))
@@ -604,7 +606,7 @@ fn unquote_script_argument(value: &str) -> Result<String, RuntimeError> {
     }
 }
 
-fn emit_tool_progress(
+pub fn emit_tool_progress(
     message: &'static str,
     tool: &core_script::ToolBlock,
     invocation: &FlowInvocation,
@@ -620,7 +622,7 @@ fn emit_tool_progress(
     )
 }
 
-fn ensure_anchored_writable_regular_leaf(path: &AnchoredFile) -> Result<bool, RuntimeError> {
+pub fn ensure_anchored_writable_regular_leaf(path: &AnchoredFile) -> Result<bool, RuntimeError> {
     match path.metadata() {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(runtime_denied(
             core_policy::DenyReasonCode::SymlinkEscapeDenied,

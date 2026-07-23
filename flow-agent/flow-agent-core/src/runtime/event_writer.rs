@@ -1,9 +1,11 @@
-const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
-const EVENT_WRITER_BATCH_CAPACITY: usize = EVENT_WRITER_QUEUE_CAPACITY;
-const EVENT_WRITER_BATCH_WINDOW: Duration = Duration::from_millis(25);
-const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
+use super::*;
 
-trait RuntimeEventSink {
+pub const EVENT_WRITER_QUEUE_CAPACITY: usize = 64;
+pub const EVENT_WRITER_BATCH_CAPACITY: usize = EVENT_WRITER_QUEUE_CAPACITY;
+pub const EVENT_WRITER_BATCH_WINDOW: Duration = Duration::from_millis(25);
+pub const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
+
+pub trait RuntimeEventSink {
     fn measurement_started_at(&self) -> Option<Instant>;
 
     fn commit(
@@ -15,15 +17,15 @@ trait RuntimeEventSink {
     ) -> Result<(), RuntimeError>;
 }
 
-struct RuntimePrefixSink {
-    context_manifests: RuntimeStreamSignatureBuilder,
-    events: RuntimeStreamSignatureBuilder,
-    expected_context_manifests: RuntimeStreamSignature,
-    expected_events: RuntimeStreamSignature,
+pub struct RuntimePrefixSink {
+    pub(crate) context_manifests: RuntimeStreamSignatureBuilder,
+    pub(crate) events: RuntimeStreamSignatureBuilder,
+    pub(crate) expected_context_manifests: RuntimeStreamSignature,
+    pub(crate) expected_events: RuntimeStreamSignature,
 }
 
 impl RuntimePrefixSink {
-    fn new(
+    pub(crate) fn new(
         expected_events: RuntimeStreamSignature,
         expected_context_manifests: RuntimeStreamSignature,
     ) -> Self {
@@ -35,11 +37,11 @@ impl RuntimePrefixSink {
         }
     }
 
-    fn event_prefix_matches(&self) -> bool {
+    pub(crate) fn event_prefix_matches(&self) -> bool {
         self.events.signature() == self.expected_events
     }
 
-    fn context_prefix_matches(&self) -> bool {
+    pub(crate) fn context_prefix_matches(&self) -> bool {
         self.context_manifests.signature() == self.expected_context_manifests
     }
 }
@@ -70,20 +72,20 @@ impl RuntimeEventSink for RuntimePrefixSink {
 }
 
 #[derive(Default)]
-struct EventWriterTimings {
-    append_nanos: Vec<u128>,
-    notification_nanos: Vec<u128>,
+pub struct EventWriterTimings {
+    pub(crate) append_nanos: Vec<u128>,
+    pub(crate) notification_nanos: Vec<u128>,
 }
 
-struct WriterOutcome {
-    append_latency_nanos: Option<u128>,
-    appended: bool,
-    error: Option<RuntimeError>,
-    notification_latency_nanos: Option<u128>,
+pub struct WriterOutcome {
+    pub(crate) append_latency_nanos: Option<u128>,
+    pub(crate) appended: bool,
+    pub(crate) error: Option<RuntimeError>,
+    pub(crate) notification_latency_nanos: Option<u128>,
 }
 
 impl WriterOutcome {
-    fn failed(error: RuntimeError) -> Self {
+    pub(crate) fn failed(error: RuntimeError) -> Self {
         Self {
             append_latency_nanos: None,
             appended: false,
@@ -93,41 +95,41 @@ impl WriterOutcome {
     }
 }
 
-struct QueuedEvent {
-    acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
-    canonical_jsonl: String,
-    context_manifest: Option<ContextManifestCheckpoint>,
-    event: Box<EventEnvelope>,
-    measurement_started_at: Option<Instant>,
-    pre_batch_latency_nanos: Option<u128>,
+pub struct QueuedEvent {
+    pub(crate) acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>,
+    pub(crate) canonical_jsonl: String,
+    pub(crate) context_manifest: Option<ContextManifestCheckpoint>,
+    pub(crate) event: Box<EventEnvelope>,
+    pub(crate) measurement_started_at: Option<Instant>,
+    pub(crate) pre_batch_latency_nanos: Option<u128>,
 }
 
-enum SessionWriterCommand {
+pub enum SessionWriterCommand {
     Commit(QueuedEvent),
     Shutdown(std::sync::mpsc::SyncSender<WriterOutcome>),
 }
 
-struct SerialSessionWriter<'a> {
-    commit_reservation: Option<&'a SessionReservation>,
-    deferred: Vec<std::sync::mpsc::Receiver<WriterOutcome>>,
-    failed: bool,
-    sender: Option<std::sync::mpsc::SyncSender<SessionWriterCommand>>,
-    timings: Option<&'a mut EventWriterTimings>,
-    worker: Option<thread::JoinHandle<()>>,
+pub struct SerialSessionWriter<'a> {
+    pub(crate) commit_reservation: Option<&'a SessionReservation>,
+    pub(crate) deferred: Vec<std::sync::mpsc::Receiver<WriterOutcome>>,
+    pub(crate) failed: bool,
+    pub(crate) sender: Option<std::sync::mpsc::SyncSender<SessionWriterCommand>>,
+    pub(crate) timings: Option<&'a mut EventWriterTimings>,
+    pub(crate) worker: Option<thread::JoinHandle<()>>,
 }
 
-struct SerialWriterStart<'a> {
-    context_path: AnchoredFile,
-    path: AnchoredFile,
-    session_id: String,
-    validation: SessionAppendValidationState,
-    commit_reservation: Option<&'a SessionReservation>,
-    notifier: Option<LiveEventNotifier>,
-    timings: Option<&'a mut EventWriterTimings>,
+pub struct SerialWriterStart<'a> {
+    pub(crate) context_path: AnchoredFile,
+    pub(crate) path: AnchoredFile,
+    pub(crate) session_id: String,
+    pub(crate) validation: SessionAppendValidationState,
+    pub(crate) commit_reservation: Option<&'a SessionReservation>,
+    pub(crate) notifier: Option<LiveEventNotifier>,
+    pub(crate) timings: Option<&'a mut EventWriterTimings>,
 }
 
 impl<'a> SerialSessionWriter<'a> {
-    fn start(
+    pub(crate) fn start(
         reservation: &'a SessionReservation,
         notifier: Option<LiveEventNotifier>,
         timings: Option<&'a mut EventWriterTimings>,
@@ -143,12 +145,12 @@ impl<'a> SerialSessionWriter<'a> {
         })
     }
 
-    fn start_prevalidated(start: SerialWriterStart<'a>) -> Result<Self, RuntimeError> {
+    pub(crate) fn start_prevalidated(start: SerialWriterStart<'a>) -> Result<Self, RuntimeError> {
         let appender = SessionLogAppender::open(&start.path)?;
         Self::start_with_appender(start, appender)
     }
 
-    fn start_with_appender<A>(
+    pub(crate) fn start_with_appender<A>(
         start: SerialWriterStart<'a>,
         appender: A,
     ) -> Result<Self, RuntimeError>
@@ -197,7 +199,7 @@ impl<'a> SerialSessionWriter<'a> {
         })
     }
 
-    fn apply_outcome(&mut self, outcome: WriterOutcome) -> Result<(), RuntimeError> {
+    pub(crate) fn apply_outcome(&mut self, outcome: WriterOutcome) -> Result<(), RuntimeError> {
         if outcome.appended
             && let Some(reservation) = self.commit_reservation
         {
@@ -218,7 +220,7 @@ impl<'a> SerialSessionWriter<'a> {
         Ok(())
     }
 
-    fn drain_deferred(&mut self) -> Result<(), RuntimeError> {
+    pub(crate) fn drain_deferred(&mut self) -> Result<(), RuntimeError> {
         let mut first_error = None;
         for response in std::mem::take(&mut self.deferred) {
             let result = response
@@ -232,7 +234,7 @@ impl<'a> SerialSessionWriter<'a> {
         first_error.map_or(Ok(()), Err)
     }
 
-    fn finish(&mut self) -> Result<(), RuntimeError> {
+    pub(crate) fn finish(&mut self) -> Result<(), RuntimeError> {
         let Some(sender) = self.sender.take() else {
             return Ok(());
         };
@@ -305,26 +307,26 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
     }
 }
 
-struct ResumeEventSink<'writer, 'session> {
-    clock: EventClock,
-    marker_committed: bool,
-    marker_event: EventEnvelope,
-    marker_stream: String,
-    planned_event_count: usize,
-    resume_marker_count: usize,
-    writer: &'writer mut SerialSessionWriter<'session>,
+pub struct ResumeEventSink<'writer, 'session> {
+    pub(crate) clock: EventClock,
+    pub(crate) marker_committed: bool,
+    pub(crate) marker_event: EventEnvelope,
+    pub(crate) marker_stream: String,
+    pub(crate) planned_event_count: usize,
+    pub(crate) resume_marker_count: usize,
+    pub(crate) writer: &'writer mut SerialSessionWriter<'session>,
 }
 
-struct ResumePreflightSink<'path> {
-    appended_bytes: usize,
-    clock: EventClock,
-    path: &'path AnchoredFile,
-    planned_event_count: usize,
-    resume_marker_count: usize,
+pub struct ResumePreflightSink<'path> {
+    pub(crate) appended_bytes: usize,
+    pub(crate) clock: EventClock,
+    pub(crate) path: &'path AnchoredFile,
+    pub(crate) planned_event_count: usize,
+    pub(crate) resume_marker_count: usize,
 }
 
 impl ResumePreflightSink<'_> {
-    fn finish(self) -> Result<(), RuntimeError> {
+    pub(crate) fn finish(self) -> Result<(), RuntimeError> {
         prepare_session_log_append(self.path, self.appended_bytes).map(|_| ())
     }
 }
@@ -406,31 +408,31 @@ impl Drop for SerialSessionWriter<'_> {
 }
 
 #[derive(Default)]
-struct DirtySyncState {
-    dirty_since: Option<Instant>,
+pub struct DirtySyncState {
+    pub(crate) dirty_since: Option<Instant>,
 }
 
 impl DirtySyncState {
-    fn is_dirty(&self) -> bool {
+    pub(crate) fn is_dirty(&self) -> bool {
         self.dirty_since.is_some()
     }
 
-    fn mark_dirty(&mut self, now: Instant) {
+    pub(crate) fn mark_dirty(&mut self, now: Instant) {
         self.dirty_since.get_or_insert(now);
     }
 
-    fn mark_synced(&mut self) {
+    pub(crate) fn mark_synced(&mut self) {
         self.dirty_since = None;
     }
 
-    fn is_due(&self, now: Instant) -> bool {
+    pub(crate) fn is_due(&self, now: Instant) -> bool {
         self.dirty_since.is_some_and(|started_at| {
             now.checked_duration_since(started_at)
                 .is_some_and(|elapsed| elapsed >= EVENT_WRITER_DIRTY_SYNC_INTERVAL)
         })
     }
 
-    fn wait_timeout(&self, now: Instant) -> Duration {
+    pub(crate) fn wait_timeout(&self, now: Instant) -> Duration {
         self.dirty_since
             .map_or(EVENT_WRITER_DIRTY_SYNC_INTERVAL, |started_at| {
                 EVENT_WRITER_DIRTY_SYNC_INTERVAL.saturating_sub(
@@ -442,17 +444,17 @@ impl DirtySyncState {
 }
 
 #[derive(Default)]
-struct PendingEventBatch {
-    events: Vec<QueuedEvent>,
-    started_at: Option<Instant>,
+pub struct PendingEventBatch {
+    pub(crate) events: Vec<QueuedEvent>,
+    pub(crate) started_at: Option<Instant>,
 }
 
 impl PendingEventBatch {
-    fn start(&mut self, now: Instant) {
+    pub(crate) fn start(&mut self, now: Instant) {
         self.started_at.get_or_insert(now);
     }
 
-    fn push(&mut self, mut event: QueuedEvent) {
+    pub(crate) fn push(&mut self, mut event: QueuedEvent) {
         let now = Instant::now();
         self.start(now);
         event.pre_batch_latency_nanos = event
@@ -462,18 +464,18 @@ impl PendingEventBatch {
         self.events.push(event);
     }
 
-    fn is_due(&self, now: Instant) -> bool {
+    pub(crate) fn is_due(&self, now: Instant) -> bool {
         self.started_at.is_some_and(|started_at| {
             now.checked_duration_since(started_at)
                 .is_some_and(|elapsed| elapsed >= EVENT_WRITER_BATCH_WINDOW)
         })
     }
 
-    fn is_full(&self) -> bool {
+    pub(crate) fn is_full(&self) -> bool {
         self.events.len() == EVENT_WRITER_BATCH_CAPACITY
     }
 
-    fn wait_timeout(&self, now: Instant) -> Option<Duration> {
+    pub(crate) fn wait_timeout(&self, now: Instant) -> Option<Duration> {
         self.started_at.map(|started_at| {
             EVENT_WRITER_BATCH_WINDOW.saturating_sub(
                 now.checked_duration_since(started_at)
@@ -482,13 +484,13 @@ impl PendingEventBatch {
         })
     }
 
-    fn take(&mut self) -> Vec<QueuedEvent> {
+    pub(crate) fn take(&mut self) -> Vec<QueuedEvent> {
         self.started_at = None;
         std::mem::take(&mut self.events)
     }
 }
 
-trait EventLogAppender {
+pub trait EventLogAppender {
     fn append(&mut self, path: &Path, bytes: &[u8]) -> Result<(), RuntimeError>;
     fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
         self.append(path, &events.concat())
@@ -497,26 +499,26 @@ trait EventLogAppender {
     fn sync(&mut self, path: &Path) -> Result<(), RuntimeError>;
 }
 
-struct BatchAppendFailure {
-    committed_events: Option<usize>,
-    error: RuntimeError,
+pub struct BatchAppendFailure {
+    pub(crate) committed_events: Option<usize>,
+    pub(crate) error: RuntimeError,
 }
 
-struct ContextManifestWriter {
-    appender: SessionLogAppender,
-    byte_count: u64,
-    last_manifest: Option<String>,
-    manifest_count: usize,
-    object_writer: Option<SessionObjectWriter>,
+pub struct ContextManifestWriter {
+    pub(crate) appender: SessionLogAppender,
+    pub(crate) byte_count: u64,
+    pub(crate) last_manifest: Option<String>,
+    pub(crate) manifest_count: usize,
+    pub(crate) object_writer: Option<SessionObjectWriter>,
 }
 
 impl ContextManifestWriter {
     #[cfg(test)]
-    fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
+    pub(crate) fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
         Self::open_with_object_writer(path, None)
     }
 
-    fn open_for_session(
+    pub(crate) fn open_for_session(
         path: &AnchoredFile,
         object_parent: AnchoredDir,
         session_id: &str,
@@ -527,7 +529,7 @@ impl ContextManifestWriter {
         )
     }
 
-    fn open_with_object_writer(
+    pub(crate) fn open_with_object_writer(
         path: &AnchoredFile,
         object_writer: Option<SessionObjectWriter>,
     ) -> Result<Self, RuntimeError> {
@@ -554,7 +556,7 @@ impl ContextManifestWriter {
         })
     }
 
-    fn persist(
+    pub(crate) fn persist(
         &mut self,
         path: &AnchoredFile,
         checkpoint: &ContextManifestCheckpoint,
@@ -607,15 +609,15 @@ impl ContextManifestWriter {
     }
 }
 
-struct SessionObjectWriter {
-    accounted_bytes: u64,
-    object_parent: AnchoredDir,
-    session_id: String,
-    verified: BTreeSet<String>,
+pub struct SessionObjectWriter {
+    pub(crate) accounted_bytes: u64,
+    pub(crate) object_parent: AnchoredDir,
+    pub(crate) session_id: String,
+    pub(crate) verified: BTreeSet<String>,
 }
 
 impl SessionObjectWriter {
-    fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
+    pub(crate) fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
         let prefix = format!("{session_id}.object.sha256-");
         let mut accounted_bytes = 0u64;
         for entry in object_parent
@@ -656,14 +658,14 @@ impl SessionObjectWriter {
         })
     }
 
-    fn persist_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
+    pub(crate) fn persist_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
         for object in objects {
             self.persist(object)?;
         }
         Ok(())
     }
 
-    fn persist(&mut self, object: &ContextObject) -> Result<(), RuntimeError> {
+    pub(crate) fn persist(&mut self, object: &ContextObject) -> Result<(), RuntimeError> {
         self.persist_with(object, |path, bytes| {
             let mut file = open_anchored_session_log_append_file(path)?;
             file.write_all(bytes)
@@ -673,7 +675,7 @@ impl SessionObjectWriter {
         })
     }
 
-    fn persist_with(
+    pub(crate) fn persist_with(
         &mut self,
         object: &ContextObject,
         write_new: impl FnOnce(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
@@ -721,7 +723,10 @@ impl SessionObjectWriter {
     }
 }
 
-fn ensure_session_object_size(label: impl fmt::Display, bytes: u64) -> Result<(), RuntimeError> {
+pub fn ensure_session_object_size(
+    label: impl fmt::Display,
+    bytes: u64,
+) -> Result<(), RuntimeError> {
     if bytes > MAX_SESSION_OBJECT_BYTES {
         return Err(RuntimeError::Protocol(format!(
             "{label} session object is {bytes} bytes; max {MAX_SESSION_OBJECT_BYTES}"
@@ -730,7 +735,7 @@ fn ensure_session_object_size(label: impl fmt::Display, bytes: u64) -> Result<()
     Ok(())
 }
 
-fn ensure_session_object_total(bytes: u64) -> Result<(), RuntimeError> {
+pub fn ensure_session_object_total(bytes: u64) -> Result<(), RuntimeError> {
     if bytes > MAX_SESSION_OBJECT_TOTAL_BYTES {
         return Err(RuntimeError::Protocol(format!(
             "session bundle object data size {bytes} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
@@ -739,7 +744,7 @@ fn ensure_session_object_total(bytes: u64) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-fn ensure_context_manifest_growth_within_limit(
+pub fn ensure_context_manifest_growth_within_limit(
     path: &Path,
     current_bytes: impl TryInto<u64>,
     appended_bytes: usize,
@@ -757,7 +762,7 @@ fn ensure_context_manifest_growth_within_limit(
 }
 
 impl BatchAppendFailure {
-    fn none_committed(error: RuntimeError) -> Self {
+    pub(crate) fn none_committed(error: RuntimeError) -> Self {
         Self {
             committed_events: Some(0),
             error,
@@ -765,21 +770,21 @@ impl BatchAppendFailure {
     }
 }
 
-struct WriterWorker<'a, A> {
-    appender: A,
-    batch: PendingEventBatch,
-    context_path: &'a AnchoredFile,
-    context_writer: ContextManifestWriter,
-    dirty: DirtySyncState,
-    notifier: Option<LiveEventNotifier>,
-    path: &'a AnchoredFile,
-    pending_error: Option<RuntimeError>,
-    stopped: bool,
-    validation: SessionAppendValidationState,
+pub struct WriterWorker<'a, A> {
+    pub(crate) appender: A,
+    pub(crate) batch: PendingEventBatch,
+    pub(crate) context_path: &'a AnchoredFile,
+    pub(crate) context_writer: ContextManifestWriter,
+    pub(crate) dirty: DirtySyncState,
+    pub(crate) notifier: Option<LiveEventNotifier>,
+    pub(crate) path: &'a AnchoredFile,
+    pub(crate) pending_error: Option<RuntimeError>,
+    pub(crate) stopped: bool,
+    pub(crate) validation: SessionAppendValidationState,
 }
 
 impl<A: EventLogAppender> WriterWorker<'_, A> {
-    fn flush_batch(&mut self) {
+    pub(crate) fn flush_batch(&mut self) {
         let pending = self.batch.take();
         if pending.is_empty() {
             return;
@@ -841,7 +846,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
         acknowledge_batch(pending, append_latency_nanos, self.notifier.as_ref());
     }
 
-    fn commit(&mut self, event: QueuedEvent) {
+    pub(crate) fn commit(&mut self, event: QueuedEvent) {
         if is_micro_batch_event(&event.event.event_type) && !self.stopped {
             self.batch.push(event);
             if self.batch.is_full() {
@@ -878,7 +883,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
         let _ = event.acknowledgement.send(outcome);
     }
 
-    fn tick(&mut self) {
+    pub(crate) fn tick(&mut self) {
         let now = Instant::now();
         if self.batch.is_due(now) {
             self.flush_batch();
@@ -889,7 +894,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
         }
     }
 
-    fn wait_timeout(&self) -> Duration {
+    pub(crate) fn wait_timeout(&self) -> Duration {
         let now = Instant::now();
         self.batch.wait_timeout(now).map_or_else(
             || self.dirty.wait_timeout(now),
@@ -897,7 +902,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
         )
     }
 
-    fn shutdown(&mut self, acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>) {
+    pub(crate) fn shutdown(&mut self, acknowledgement: std::sync::mpsc::SyncSender<WriterOutcome>) {
         self.flush_batch();
         let error = self.pending_error.take().or_else(|| {
             if self.dirty.is_dirty() && !self.stopped {
@@ -915,7 +920,7 @@ impl<A: EventLogAppender> WriterWorker<'_, A> {
     }
 }
 
-fn session_writer_worker<A>(
+pub fn session_writer_worker<A>(
     path: &AnchoredFile,
     context_path: &AnchoredFile,
     validation: SessionAppendValidationState,
@@ -958,7 +963,7 @@ fn session_writer_worker<A>(
     }
 }
 
-fn validate_batch(
+pub fn validate_batch(
     path: &Path,
     validation: &mut SessionAppendValidationState,
     batch: &[QueuedEvent],
@@ -978,7 +983,7 @@ fn validate_batch(
     Ok(())
 }
 
-fn reject_batch(batch: Vec<QueuedEvent>, error: RuntimeError) {
+pub fn reject_batch(batch: Vec<QueuedEvent>, error: RuntimeError) {
     let mut error = Some(error);
     for pending in batch {
         let outcome = error.take().map_or_else(
@@ -989,7 +994,7 @@ fn reject_batch(batch: Vec<QueuedEvent>, error: RuntimeError) {
     }
 }
 
-fn acknowledge_batch(
+pub fn acknowledge_batch(
     batch: Vec<QueuedEvent>,
     append_latency_nanos: u128,
     notifier: Option<&LiveEventNotifier>,
@@ -1006,7 +1011,10 @@ fn acknowledge_batch(
     }
 }
 
-fn notify_committed(notifier: Option<&LiveEventNotifier>, event: &EventEnvelope) -> Option<u128> {
+pub fn notify_committed(
+    notifier: Option<&LiveEventNotifier>,
+    event: &EventEnvelope,
+) -> Option<u128> {
     notifier.map(|notifier| {
         let started_at = Instant::now();
         let _ = notifier.try_notify(&event.session_id, event.sequence);
@@ -1014,27 +1022,27 @@ fn notify_committed(notifier: Option<&LiveEventNotifier>, event: &EventEnvelope)
     })
 }
 
-fn is_micro_batch_event(event_type: &EventType) -> bool {
+pub fn is_micro_batch_event(event_type: &EventType) -> bool {
     matches!(
         event_type,
         EventType::MessageDelta | EventType::ToolProgress
     )
 }
 
-fn discarded_after_writer_failure() -> RuntimeError {
+pub fn discarded_after_writer_failure() -> RuntimeError {
     RuntimeError::Protocol("event discarded after a prior session writer failure".to_owned())
 }
 
-struct SessionEventCommit<'a> {
-    path: &'a Path,
-    context_path: &'a AnchoredFile,
-    event: &'a EventEnvelope,
-    canonical_jsonl: &'a str,
-    context_manifest: Option<ContextManifestCheckpoint>,
-    measurement_started_at: Option<Instant>,
+pub struct SessionEventCommit<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) context_path: &'a AnchoredFile,
+    pub(crate) event: &'a EventEnvelope,
+    pub(crate) canonical_jsonl: &'a str,
+    pub(crate) context_manifest: Option<ContextManifestCheckpoint>,
+    pub(crate) measurement_started_at: Option<Instant>,
 }
 
-fn commit_session_event<A>(
+pub fn commit_session_event<A>(
     commit: SessionEventCommit<'_>,
     appender: &mut A,
     context_writer: &mut ContextManifestWriter,
@@ -1105,7 +1113,7 @@ where
     }
 }
 
-fn is_event_sync_checkpoint(event_type: &EventType) -> bool {
+pub fn is_event_sync_checkpoint(event_type: &EventType) -> bool {
     matches!(
         event_type,
         EventType::MessageCompleted
@@ -1118,21 +1126,21 @@ fn is_event_sync_checkpoint(event_type: &EventType) -> bool {
     )
 }
 
-struct SessionLogAppender {
-    base_path: AnchoredFile,
-    current_bytes: u64,
-    current_ordinal: u64,
-    file: fs::File,
-    limits: SessionStreamLimits,
-    total_bytes: u64,
+pub struct SessionLogAppender {
+    pub(crate) base_path: AnchoredFile,
+    pub(crate) current_bytes: u64,
+    pub(crate) current_ordinal: u64,
+    pub(crate) file: fs::File,
+    pub(crate) limits: SessionStreamLimits,
+    pub(crate) total_bytes: u64,
 }
 
 impl SessionLogAppender {
-    fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
+    pub(crate) fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
         Self::open_with_limits(path, EVENT_STREAM_LIMITS)
     }
 
-    fn open_with_limits(
+    pub(crate) fn open_with_limits(
         path: &AnchoredFile,
         limits: SessionStreamLimits,
     ) -> Result<Self, RuntimeError> {
@@ -1170,15 +1178,15 @@ impl SessionLogAppender {
         })
     }
 
-    fn len(&self, _path: &Path) -> Result<u64, RuntimeError> {
+    pub(crate) fn len(&self, _path: &Path) -> Result<u64, RuntimeError> {
         Ok(self.total_bytes)
     }
 
-    fn current_path(&self) -> Result<AnchoredFile, RuntimeError> {
+    pub(crate) fn current_path(&self) -> Result<AnchoredFile, RuntimeError> {
         segmented_jsonl_path(&self.base_path, self.current_ordinal)
     }
 
-    fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
+    pub(crate) fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
         let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
         if appended_bytes > MAX_SESSION_SEGMENT_BYTES {
             return Err(RuntimeError::Protocol(format!(
@@ -1221,7 +1229,7 @@ impl SessionLogAppender {
         Ok(())
     }
 
-    fn append_native_batch_with<F, C>(
+    pub(crate) fn append_native_batch_with<F, C>(
         &mut self,
         _path: &Path,
         events: &[&[u8]],
@@ -1373,15 +1381,15 @@ impl EventLogAppender for SessionLogAppender {
     }
 }
 
-fn cleanup_incomplete_suffix(file: &mut fs::File, retained_len: u64) -> io::Result<()> {
+pub fn cleanup_incomplete_suffix(file: &mut fs::File, retained_len: u64) -> io::Result<()> {
     file.set_len(retained_len)?;
     file.sync_all()
 }
 
-fn writer_channel_closed_error() -> RuntimeError {
+pub fn writer_channel_closed_error() -> RuntimeError {
     RuntimeError::Protocol("session event writer channel closed unexpectedly".to_owned())
 }
 
-fn event_writer_failure(source: RuntimeError) -> RuntimeError {
+pub fn event_writer_failure(source: RuntimeError) -> RuntimeError {
     RuntimeError::EventWriter(Box::new(source))
 }

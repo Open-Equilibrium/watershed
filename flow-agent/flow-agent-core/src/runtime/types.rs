@@ -1,75 +1,63 @@
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
-use cap_std::{ambient_authority, fs::Dir};
-use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
-use proto::{EventEnvelope, EventType};
-use std::{
-    cell::Cell,
-    collections::{BTreeMap, BTreeSet},
-    fmt, fs,
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+use super::*;
 
 /// Workspace-relative directory containing persisted session JSONL logs.
-const LOCAL_SESSION_DIR: &str = ".flow/sessions";
+pub const LOCAL_SESSION_DIR: &str = ".flow/sessions";
 /// Workspace-relative directory containing structured sidecar run logs.
-const LOCAL_LOG_DIR: &str = ".flow/logs";
+pub const LOCAL_LOG_DIR: &str = ".flow/logs";
 /// Maximum canonical uncompressed bytes stored in one event or manifest segment.
-const MAX_SESSION_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_SESSION_SEGMENT_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum canonical bytes stored for one event, including its trailing LF.
-const MAX_CANONICAL_EVENT_BYTES: usize = 320 * 1024;
+pub const MAX_CANONICAL_EVENT_BYTES: usize = 320 * 1024;
 /// Maximum canonical event bytes accumulated by one session across all segments.
-const MAX_SESSION_EVENT_BYTES: u64 = 48 * 1024 * 1024;
+pub const MAX_SESSION_EVENT_BYTES: u64 = 48 * 1024 * 1024;
 /// Maximum canonical context-manifest bytes accumulated across all segments.
-const MAX_SESSION_CONTEXT_MANIFEST_BYTES: u64 = 48 * 1024 * 1024;
+pub const MAX_SESSION_CONTEXT_MANIFEST_BYTES: u64 = 48 * 1024 * 1024;
 #[derive(Clone, Copy)]
-struct SessionStreamLimits {
-    max_segments: u64,
-    max_total_bytes: u64,
+pub struct SessionStreamLimits {
+    pub(crate) max_segments: u64,
+    pub(crate) max_total_bytes: u64,
 }
-const EVENT_STREAM_LIMITS: SessionStreamLimits = SessionStreamLimits {
+pub const EVENT_STREAM_LIMITS: SessionStreamLimits = SessionStreamLimits {
     max_segments: 4,
     max_total_bytes: MAX_SESSION_EVENT_BYTES,
 };
-const CONTEXT_MANIFEST_STREAM_LIMITS: SessionStreamLimits = SessionStreamLimits {
+pub const CONTEXT_MANIFEST_STREAM_LIMITS: SessionStreamLimits = SessionStreamLimits {
     max_segments: 5,
     max_total_bytes: MAX_SESSION_CONTEXT_MANIFEST_BYTES,
 };
 /// Maximum bytes stored in one immutable session-owned object chunk.
-const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
 /// Maximum stored content bytes in one complete self-contained session bundle.
-const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
-const MAX_SESSION_METADATA_BYTES: u64 = 16 * 1024 * 1024;
+pub const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
+pub const MAX_SESSION_METADATA_BYTES: u64 = 16 * 1024 * 1024;
 /// Object-data share after reserving the event, manifest and metadata maxima.
-const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
+pub const MAX_SESSION_OBJECT_TOTAL_BYTES: u64 = MAX_SESSION_BUNDLE_BYTES
     - MAX_SESSION_EVENT_BYTES
     - MAX_SESSION_CONTEXT_MANIFEST_BYTES
     - MAX_SESSION_METADATA_BYTES;
 /// Maximum canonical events accumulated by one session, including resume events.
-const MAX_FLOW_EVENTS: u64 = 155_750;
+pub const MAX_FLOW_EVENTS: u64 = 155_750;
 /// Maximum runtime Flow invocations accumulated by one session, including the root.
-const MAX_FLOW_INVOCATIONS: u64 = 512;
+pub const MAX_FLOW_INVOCATIONS: u64 = 512;
 /// Maximum live Flow invocations across all active sessions in one process.
-const MAX_LIVE_FLOW_INVOCATIONS: usize = 32;
-const MAX_WORKSPACE_CONFIG_BYTES: u64 = 1024 * 1024;
-const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
-const RUNTIME_ERROR_REASON: &str = "runtime_error";
+pub const MAX_LIVE_FLOW_INVOCATIONS: usize = 32;
+pub const MAX_WORKSPACE_CONFIG_BYTES: u64 = 1024 * 1024;
+pub const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
+pub const RUNTIME_ERROR_REASON: &str = "runtime_error";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct EventClock {
-    base_unix_seconds: i64,
+pub struct EventClock {
+    pub(crate) base_unix_seconds: i64,
 }
 
 impl EventClock {
-    fn fixed_fixture() -> Self {
+    pub(crate) fn fixed_fixture() -> Self {
         Self {
             base_unix_seconds: FIXTURE_CLOCK_UNIX_SECONDS,
         }
     }
 
-    fn wall_clock() -> Self {
+    pub(crate) fn wall_clock() -> Self {
         let base_unix_seconds = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
@@ -77,7 +65,7 @@ impl EventClock {
         Self { base_unix_seconds }
     }
 
-    fn from_first_event(event: &EventEnvelope) -> Option<Self> {
+    pub(crate) fn from_first_event(event: &EventEnvelope) -> Option<Self> {
         proto::parse_rfc3339_utc_timestamp(&event.timestamp).map(|base_unix_seconds| Self {
             base_unix_seconds: base_unix_seconds.saturating_sub(
                 i64::try_from(event.sequence.saturating_sub(1)).unwrap_or(i64::MAX),
@@ -85,7 +73,7 @@ impl EventClock {
         })
     }
 
-    fn timestamp(self, sequence: u64) -> String {
+    pub(crate) fn timestamp(self, sequence: u64) -> String {
         let offset = i64::try_from(sequence.saturating_sub(1)).unwrap_or(i64::MAX);
         format_unix_timestamp(self.base_unix_seconds.saturating_add(offset))
     }
@@ -116,7 +104,7 @@ pub struct RunOutput {
     pub stdout: String,
 }
 
-fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
+pub fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
     events
         .last()
         .filter(|event| event.event_type == EventType::SessionFailed)?
@@ -125,11 +113,11 @@ fn terminal_failure_reason(events: &[EventEnvelope]) -> Option<&str> {
         .as_str()
 }
 
-fn escape_human_failure_text(text: &str) -> String {
+pub fn escape_human_failure_text(text: &str) -> String {
     text.chars().flat_map(char::escape_debug).collect()
 }
 
-fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
+pub fn human_failure_status(events: &[EventEnvelope]) -> Option<String> {
     let reason = terminal_failure_reason(events)?;
     let message = events
         .iter()
@@ -160,11 +148,11 @@ pub fn render_human_failure_status(reason: &str, message: Option<&str>) -> Strin
     )
 }
 
-fn human_session_status(session_id: &str, action: &str, events: &[EventEnvelope]) -> String {
+pub fn human_session_status(session_id: &str, action: &str, events: &[EventEnvelope]) -> String {
     human_session_status_from_failure(session_id, action, human_failure_status(events).as_deref())
 }
 
-fn human_session_status_from_failure(
+pub fn human_session_status_from_failure(
     session_id: &str,
     action: &str,
     failure: Option<&str>,

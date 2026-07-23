@@ -1,4 +1,6 @@
-const LIVE_EVENT_NOTIFICATION_CAPACITY: usize = 1;
+use super::*;
+
+pub const LIVE_EVENT_NOTIFICATION_CAPACITY: usize = 1;
 
 /// Result of a non-blocking committed-event notification attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -42,8 +44,8 @@ impl fmt::Display for LiveEventReceiveError {
 
 impl std::error::Error for LiveEventReceiveError {}
 
-struct LiveEventState {
-    highest_committed_sequence: std::sync::atomic::AtomicU64,
+pub struct LiveEventState {
+    pub(crate) highest_committed_sequence: std::sync::atomic::AtomicU64,
 }
 
 /// Producer side of one bounded, caller-owned live-event notification channel.
@@ -51,8 +53,8 @@ struct LiveEventState {
 /// This handle owns no task or thread. Pass it to one run or resume operation. Each
 /// successful append advances a shared high-watermark and attempts a capacity-one wake-up.
 pub struct LiveEventNotifier {
-    sender: std::sync::mpsc::SyncSender<(String, u64)>,
-    state: std::sync::Arc<LiveEventState>,
+    pub(crate) sender: std::sync::mpsc::SyncSender<(String, u64)>,
+    pub(crate) state: std::sync::Arc<LiveEventState>,
 }
 
 impl LiveEventNotifier {
@@ -84,8 +86,8 @@ impl LiveEventNotifier {
 /// the replay/live race because a commit either advances the observed high-watermark or leaves
 /// another wake-up queued.
 pub struct LiveEventReceiver {
-    receiver: std::sync::mpsc::Receiver<(String, u64)>,
-    state: std::sync::Arc<LiveEventState>,
+    pub(crate) receiver: std::sync::mpsc::Receiver<(String, u64)>,
+    pub(crate) state: std::sync::Arc<LiveEventState>,
 }
 
 impl LiveEventReceiver {
@@ -141,12 +143,12 @@ pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
 /// tolerates an incomplete final JSONL line while the session lock is present, rejects
 /// mutation of an already observed event, and leaves cursor advancement to the caller.
 pub struct SessionEventReader {
-    observed_current_segment_bytes: u64,
-    observed_segment_count: usize,
-    observed_signature: RuntimeStreamSignatureBuilder,
-    lock_path: AnchoredFile,
-    path: AnchoredFile,
-    validation: SessionAppendValidationState,
+    pub(crate) observed_current_segment_bytes: u64,
+    pub(crate) observed_segment_count: usize,
+    pub(crate) observed_signature: RuntimeStreamSignatureBuilder,
+    pub(crate) lock_path: AnchoredFile,
+    pub(crate) path: AnchoredFile,
+    pub(crate) validation: SessionAppendValidationState,
 }
 
 impl SessionEventReader {
@@ -273,7 +275,7 @@ impl SessionEventReader {
         self.read_incremental_after_with(cursor, &mut || {})
     }
 
-    fn read_incremental_after_with(
+    pub(crate) fn read_incremental_after_with(
         &mut self,
         cursor: u64,
         after_read: &mut impl FnMut(),
@@ -389,7 +391,7 @@ impl SessionEventReader {
         }
     }
 
-    fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
+    pub(crate) fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
         let observed = u64::try_from(self.observed_segment_count).unwrap_or(u64::MAX);
         let mut segments = Vec::new();
         for ordinal in 1..=observed {
@@ -413,7 +415,7 @@ impl SessionEventReader {
         Ok(segments)
     }
 
-    fn session_lock_present(&self) -> Result<bool, RuntimeError> {
+    pub(crate) fn session_lock_present(&self) -> Result<bool, RuntimeError> {
         match ensure_anchored_real_file(&self.lock_path) {
             Ok(()) => Ok(true),
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
@@ -423,14 +425,14 @@ impl SessionEventReader {
         }
     }
 
-    fn inactive_partial(&self) -> RuntimeError {
+    pub(crate) fn inactive_partial(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} contains an incomplete final JSONL line without an active session lock",
             self.path.diagnostic_path().display()
         ))
     }
 
-    fn reset_validation(&mut self) {
+    pub(crate) fn reset_validation(&mut self) {
         let session_id = self
             .validation
             .expected_session_id
@@ -440,7 +442,11 @@ impl SessionEventReader {
         self.validation = SessionAppendValidationState::empty(&session_id);
     }
 
-    fn ensure_cursor(&self, cursor: u64, latest_sequence: u64) -> Result<(), RuntimeError> {
+    pub(crate) fn ensure_cursor(
+        &self,
+        cursor: u64,
+        latest_sequence: u64,
+    ) -> Result<(), RuntimeError> {
         if cursor <= latest_sequence {
             return Ok(());
         }
@@ -450,7 +456,7 @@ impl SessionEventReader {
         )))
     }
 
-    fn changed_outside_append_only(&self) -> RuntimeError {
+    pub(crate) fn changed_outside_append_only(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} changed outside append-only session semantics",
             self.path.diagnostic_path().display()
@@ -458,7 +464,7 @@ impl SessionEventReader {
     }
 }
 
-fn stream_signature(bytes: &[u8]) -> RuntimeStreamSignatureBuilder {
+pub fn stream_signature(bytes: &[u8]) -> RuntimeStreamSignatureBuilder {
     let mut signature = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
     for record in bytes.split_inclusive(|byte| *byte == b'\n') {
         signature.push(record);
@@ -466,7 +472,7 @@ fn stream_signature(bytes: &[u8]) -> RuntimeStreamSignatureBuilder {
     signature
 }
 
-fn jsonl_record_prefix_len(bytes: &[u8], record_count: usize) -> Option<usize> {
+pub fn jsonl_record_prefix_len(bytes: &[u8], record_count: usize) -> Option<usize> {
     if record_count == 0 {
         return Some(0);
     }
@@ -478,13 +484,13 @@ fn jsonl_record_prefix_len(bytes: &[u8], record_count: usize) -> Option<usize> {
         .map(|(index, _)| index + 1)
 }
 
-fn events_after(mut events: Vec<EventEnvelope>, cursor: u64) -> Vec<EventEnvelope> {
+pub fn events_after(mut events: Vec<EventEnvelope>, cursor: u64) -> Vec<EventEnvelope> {
     let first = events.partition_point(|event| event.sequence <= cursor);
     events.drain(..first);
     events
 }
 
-fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
+pub fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
     bytes
         .iter()
         .rposition(|byte| *byte == b'\n')

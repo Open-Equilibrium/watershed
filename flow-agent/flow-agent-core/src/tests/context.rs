@@ -1,3 +1,5 @@
+use super::*;
+
 fn test_profile(input_budget: usize) -> ContextModelProfile {
     ContextModelProfile {
         context_limit: input_budget + 20,

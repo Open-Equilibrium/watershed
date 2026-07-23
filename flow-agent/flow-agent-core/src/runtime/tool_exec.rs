@@ -1,4 +1,6 @@
-fn emit_tool(
+use super::*;
+
+pub fn emit_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
     policy: RuntimeToolPolicy<'_>,
@@ -80,13 +82,13 @@ fn emit_tool(
     Ok(None)
 }
 
-enum ToolDispatchMode<'a> {
+pub enum ToolDispatchMode<'a> {
     Plan,
     Preflight { workspace: &'a Path },
     Execute { workspace: &'a Path },
 }
 
-fn tool_dispatch_progress(
+pub fn tool_dispatch_progress(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
@@ -124,7 +126,7 @@ fn tool_dispatch_progress(
     }
 }
 
-fn execute_predefined_command(
+pub fn execute_predefined_command(
     policy: &core_policy::CommandPolicy,
     command_id: &str,
     argv: &[String],
@@ -139,7 +141,7 @@ fn execute_predefined_command(
     Ok(progress)
 }
 
-fn trusted_predefined_command_progress(
+pub fn trusted_predefined_command_progress(
     command_id: &str,
 ) -> Result<Option<&'static str>, RuntimeError> {
     if !core_policy::is_trusted_predefined_command_id(command_id) {

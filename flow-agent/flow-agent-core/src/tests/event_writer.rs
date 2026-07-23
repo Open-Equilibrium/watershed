@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn live_notification_is_bounded_coalesced_and_non_blocking() {
     let (notifier, receiver) = live_event_channel();

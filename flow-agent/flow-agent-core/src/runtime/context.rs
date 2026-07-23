@@ -1,24 +1,24 @@
-use sha2::{Digest, Sha256};
+use super::*;
 
-const CONTEXT_PROFILE_ID: &str = "flow-context-v0";
-const CONTEXT_PROFILE_VERSION: &str = "0";
-const CONTEXT_ESTIMATOR_ID: &str = "utf8-byte-v0";
-const CONTEXT_ESTIMATOR_VERSION: &str = "0";
-const CACHE_STABLE_TIER_ZERO_SOURCES: usize = 5;
-const STUB_MODEL_CONTEXT_LIMIT: usize = 128 * 1024;
-const STUB_MODEL_OUTPUT_RESERVE: usize = 8 * 1024;
-const STUB_MODEL_SAFETY_MARGIN: usize = 4 * 1024;
+pub const CONTEXT_PROFILE_ID: &str = "flow-context-v0";
+pub const CONTEXT_PROFILE_VERSION: &str = "0";
+pub const CONTEXT_ESTIMATOR_ID: &str = "utf8-byte-v0";
+pub const CONTEXT_ESTIMATOR_VERSION: &str = "0";
+pub const CACHE_STABLE_TIER_ZERO_SOURCES: usize = 5;
+pub const STUB_MODEL_CONTEXT_LIMIT: usize = 128 * 1024;
+pub const STUB_MODEL_OUTPUT_RESERVE: usize = 8 * 1024;
+pub const STUB_MODEL_SAFETY_MARGIN: usize = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ContextModelProfile {
-    context_limit: usize,
-    id: &'static str,
-    output_reserve: usize,
-    safety_margin: usize,
+pub struct ContextModelProfile {
+    pub(crate) context_limit: usize,
+    pub(crate) id: &'static str,
+    pub(crate) output_reserve: usize,
+    pub(crate) safety_margin: usize,
 }
 
 impl ContextModelProfile {
-    fn stub_v0() -> Self {
+    pub(crate) fn stub_v0() -> Self {
         Self {
             context_limit: STUB_MODEL_CONTEXT_LIMIT,
             id: "stub-model-v0",
@@ -27,7 +27,7 @@ impl ContextModelProfile {
         }
     }
 
-    fn input_budget_tokens(self) -> Result<usize, RuntimeError> {
+    pub(crate) fn input_budget_tokens(self) -> Result<usize, RuntimeError> {
         self.context_limit
             .checked_sub(self.output_reserve)
             .and_then(|remaining| remaining.checked_sub(self.safety_margin))
@@ -40,12 +40,12 @@ impl ContextModelProfile {
     }
 }
 
-struct ContextSource {
-    source_id: String,
-    content: serde_json::Value,
+pub struct ContextSource {
+    pub(crate) source_id: String,
+    pub(crate) content: serde_json::Value,
 }
 
-fn context_source(source_id: impl Into<String>, content: serde_json::Value) -> ContextSource {
+pub fn context_source(source_id: impl Into<String>, content: serde_json::Value) -> ContextSource {
     ContextSource {
         source_id: source_id.into(),
         content,
@@ -53,13 +53,13 @@ fn context_source(source_id: impl Into<String>, content: serde_json::Value) -> C
 }
 
 #[derive(Default)]
-struct ContextOmissionCounts {
-    recent_complete_interaction: usize,
-    tier_2: usize,
+pub struct ContextOmissionCounts {
+    pub(crate) recent_complete_interaction: usize,
+    pub(crate) tier_2: usize,
 }
 
 impl ContextOmissionCounts {
-    fn manifest_value(&self) -> serde_json::Value {
+    pub(crate) fn manifest_value(&self) -> serde_json::Value {
         serde_json::json!({
             "checkpoint": 0,
             "current_incomplete_turn": 0,
@@ -72,33 +72,33 @@ impl ContextOmissionCounts {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ContextManifest {
-    line: String,
+pub struct ContextManifest {
+    pub(crate) line: String,
 }
 
 #[derive(Clone)]
-struct ContextManifestCheckpoint {
-    manifest: ContextManifest,
-    objects: Vec<ContextObject>,
-    ordinal: usize,
+pub struct ContextManifestCheckpoint {
+    pub(crate) manifest: ContextManifest,
+    pub(crate) objects: Vec<ContextObject>,
+    pub(crate) ordinal: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ContextObject {
-    bytes: Vec<u8>,
-    digest: String,
+pub struct ContextObject {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) digest: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CompiledContext {
-    cache_prefix_bytes: usize,
-    context_hash: String,
-    manifest: ContextManifest,
-    objects: Vec<ContextObject>,
-    provider_bytes: Vec<u8>,
+pub struct CompiledContext {
+    pub(crate) cache_prefix_bytes: usize,
+    pub(crate) context_hash: String,
+    pub(crate) manifest: ContextManifest,
+    pub(crate) objects: Vec<ContextObject>,
+    pub(crate) provider_bytes: Vec<u8>,
 }
 
-fn compile_context(
+pub fn compile_context(
     model: &ContextModelProfile,
     tier_zero: &[ContextSource; 9],
     recent_interaction: Option<&ContextSource>,
@@ -199,7 +199,7 @@ fn compile_context(
     })
 }
 
-fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError> {
+pub fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError> {
     let value = serde_json::json!({
         "content": source.content,
         "source_id": source.source_id,
@@ -213,7 +213,7 @@ fn context_source_bytes(source: &ContextSource) -> Result<Vec<u8>, RuntimeError>
     Ok(text.into_bytes())
 }
 
-fn bounded_context_array_source(
+pub fn bounded_context_array_source(
     source_id: impl Into<String>,
     items: impl IntoIterator<Item = Result<Option<serde_json::Value>, RuntimeError>>,
     input_budget_tokens: usize,
@@ -247,7 +247,7 @@ fn bounded_context_array_source(
     Ok(context_source(source_id, serde_json::Value::Array(content)))
 }
 
-fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_json::Value {
+pub fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_json::Value {
     let digest = sha256_hex(bytes);
     serde_json::json!({
         "object_uri": format!("session-object:sha256:{digest}"),
@@ -256,7 +256,7 @@ fn context_source_manifest_value(source: &ContextSource, bytes: &[u8]) -> serde_
     })
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut encoded = String::with_capacity(digest.len() * 2);
@@ -267,7 +267,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     encoded
 }
 
-fn is_lowercase_sha256_hex(value: &str) -> bool {
+pub fn is_lowercase_sha256_hex(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -275,19 +275,19 @@ fn is_lowercase_sha256_hex(value: &str) -> bool {
 }
 
 #[derive(Default)]
-struct ContextHistory {
-    completed_interactions: usize,
-    latest_completed: Option<(u64, serde_json::Value, Vec<serde_json::Value>)>,
-    pending_deltas: BTreeMap<String, Vec<serde_json::Value>>,
-    unresolved_tools: BTreeSet<String>,
+pub struct ContextHistory {
+    pub(crate) completed_interactions: usize,
+    pub(crate) latest_completed: Option<(u64, serde_json::Value, Vec<serde_json::Value>)>,
+    pub(crate) pending_deltas: BTreeMap<String, Vec<serde_json::Value>>,
+    pub(crate) unresolved_tools: BTreeSet<String>,
 }
 
-fn event_payload_id<'a>(event: &'a EventEnvelope, field: &str) -> Option<&'a str> {
+pub fn event_payload_id<'a>(event: &'a EventEnvelope, field: &str) -> Option<&'a str> {
     event.payload.get(field).and_then(serde_json::Value::as_str)
 }
 
 impl ContextHistory {
-    fn record(&mut self, event: &EventEnvelope) {
+    pub(crate) fn record(&mut self, event: &EventEnvelope) {
         match event.event_type {
             EventType::MessageDelta => {
                 if let Some(message_id) = event_payload_id(event, "message_id") {
@@ -318,7 +318,9 @@ impl ContextHistory {
         }
     }
 
-    fn continuity(&self) -> Result<(Option<ContextSource>, ContextOmissionCounts), RuntimeError> {
+    pub(crate) fn continuity(
+        &self,
+    ) -> Result<(Option<ContextSource>, ContextOmissionCounts), RuntimeError> {
         let Some((sequence, payload, deltas)) = &self.latest_completed else {
             return Ok((None, ContextOmissionCounts::default()));
         };
@@ -350,12 +352,12 @@ impl ContextHistory {
         ))
     }
 
-    fn unresolved_call_result_state(&self) -> serde_json::Value {
+    pub(crate) fn unresolved_call_result_state(&self) -> serde_json::Value {
         serde_json::json!(self.unresolved_tools)
     }
 }
 
-fn compile_provider_turn_context(
+pub fn compile_provider_turn_context(
     registry: &core_script::ResolvedRegistry,
     flow_block: &core_script::FlowBlock,
     phase: &core_script::PhaseBlock,
@@ -450,7 +452,7 @@ fn compile_provider_turn_context(
     compile_context(&model, &tier_zero, tier_one.as_ref(), omitted)
 }
 
-fn connection_targets_scoped_step(
+pub fn connection_targets_scoped_step(
     registry: &core_script::ResolvedRegistry,
     phase: &core_script::PhaseBlock,
     step: &core_script::StepBlock,
@@ -474,7 +476,7 @@ fn connection_targets_scoped_step(
 }
 
 #[cfg(test)]
-fn read_recorded_context_manifest_signature(
+pub fn read_recorded_context_manifest_signature(
     workspace: &Path,
     session_id: &str,
     completed_turns: usize,
@@ -497,7 +499,7 @@ fn read_recorded_context_manifest_signature(
     read_anchored_context_manifest_signature(&logs, &sessions, session_id, completed_turns)
 }
 
-fn read_anchored_context_manifest_signature(
+pub fn read_anchored_context_manifest_signature(
     logs: &AnchoredDir,
     sessions: &AnchoredDir,
     session_id: &str,
@@ -586,7 +588,7 @@ fn read_anchored_context_manifest_signature(
     Ok(recorded)
 }
 
-fn verify_context_manifest_objects(
+pub fn verify_context_manifest_objects(
     sessions: &AnchoredDir,
     session_id: &str,
     manifest: &serde_json::Value,

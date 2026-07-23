@@ -1,3 +1,5 @@
+use super::*;
+
 /// Lists valid persisted session ids in canonical order.
 pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
     let workspace = workspace.as_ref();
@@ -57,7 +59,7 @@ pub fn resume_session_with_live_events(
     Ok(output)
 }
 
-fn resume_session_internal(
+pub fn resume_session_internal(
     workspace: impl AsRef<Path>,
     session_id: &str,
     notifier: Option<LiveEventNotifier>,
@@ -264,39 +266,39 @@ fn resume_session_internal(
     })
 }
 
-struct ResumeReplayPrefix {
-    planned_event_count: usize,
-    resume_marker_count: usize,
+pub struct ResumeReplayPrefix {
+    pub(crate) planned_event_count: usize,
+    pub(crate) resume_marker_count: usize,
 }
 
-struct ResumeAppendPlan {
-    marker_event: EventEnvelope,
-    marker_stream: String,
+pub struct ResumeAppendPlan {
+    pub(crate) marker_event: EventEnvelope,
+    pub(crate) marker_stream: String,
 }
 
-struct ResumeSessionInspection {
-    clock: EventClock,
-    completed_turns: usize,
-    event_prefix: RuntimeStreamSignature,
-    last_event_type: EventType,
-    prefix_metadata_valid: bool,
-    resume_marker_count: usize,
-    root_flow_definition_id: Option<String>,
-    validation: SessionAppendValidationState,
+pub struct ResumeSessionInspection {
+    pub(crate) clock: EventClock,
+    pub(crate) completed_turns: usize,
+    pub(crate) event_prefix: RuntimeStreamSignature,
+    pub(crate) last_event_type: EventType,
+    pub(crate) prefix_metadata_valid: bool,
+    pub(crate) resume_marker_count: usize,
+    pub(crate) root_flow_definition_id: Option<String>,
+    pub(crate) validation: SessionAppendValidationState,
 }
 
-struct ResumeInspectionBuilder {
-    clock: Option<EventClock>,
-    completed_turns: usize,
-    event_prefix: RuntimeStreamSignatureBuilder,
-    last_event_type: Option<EventType>,
-    prefix_metadata_valid: bool,
-    resume_marker_count: usize,
-    root_flow_definition_id: Option<String>,
+pub struct ResumeInspectionBuilder {
+    pub(crate) clock: Option<EventClock>,
+    pub(crate) completed_turns: usize,
+    pub(crate) event_prefix: RuntimeStreamSignatureBuilder,
+    pub(crate) last_event_type: Option<EventType>,
+    pub(crate) prefix_metadata_valid: bool,
+    pub(crate) resume_marker_count: usize,
+    pub(crate) root_flow_definition_id: Option<String>,
 }
 
 impl ResumeInspectionBuilder {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             clock: None,
             completed_turns: 0,
@@ -308,7 +310,7 @@ impl ResumeInspectionBuilder {
         }
     }
 
-    fn observe(&mut self, event: &EventEnvelope) -> Result<(), RuntimeError> {
+    pub(crate) fn observe(&mut self, event: &EventEnvelope) -> Result<(), RuntimeError> {
         let clock = match self.clock {
             Some(clock) => clock,
             None => {
@@ -357,7 +359,7 @@ impl ResumeInspectionBuilder {
     }
 }
 
-fn inspect_resume_session(
+pub fn inspect_resume_session(
     path: &AnchoredFile,
     session_id: &str,
 ) -> Result<ResumeSessionInspection, RuntimeError> {
@@ -389,7 +391,7 @@ fn inspect_resume_session(
     })
 }
 
-fn validate_resume_replay_prefix(
+pub fn validate_resume_replay_prefix(
     path: &Path,
     inspection: &ResumeSessionInspection,
     prefix_sink: &RuntimePrefixSink,
@@ -409,7 +411,7 @@ fn validate_resume_replay_prefix(
     })
 }
 
-fn checked_resume_event_count(
+pub fn checked_resume_event_count(
     planned_event_count: usize,
     resume_marker_count: usize,
 ) -> Result<usize, RuntimeError> {
@@ -422,7 +424,10 @@ fn checked_resume_event_count(
     Ok(usize::try_from(total).expect("event limit fits usize"))
 }
 
-fn invalid_resume_prefix_error(path: &Path, flow_block: &core_script::FlowBlock) -> RuntimeError {
+pub fn invalid_resume_prefix_error(
+    path: &Path,
+    flow_block: &core_script::FlowBlock,
+) -> RuntimeError {
     RuntimeError::Protocol(format!(
         "{} is not a valid prefix of flow {}",
         path.display(),
@@ -430,7 +435,7 @@ fn invalid_resume_prefix_error(path: &Path, flow_block: &core_script::FlowBlock)
     ))
 }
 
-fn resume_append_plan(
+pub fn resume_append_plan(
     session_id: &str,
     validation: &SessionAppendValidationState,
     clock: EventClock,
@@ -460,7 +465,7 @@ fn resume_append_plan(
     })
 }
 
-fn prepare_session_log_append(
+pub fn prepare_session_log_append(
     path: &AnchoredFile,
     appended_bytes: usize,
 ) -> Result<(), RuntimeError> {
@@ -468,7 +473,7 @@ fn prepare_session_log_append(
     open_anchored_session_log_append_file(path).map(|_| ())
 }
 
-fn ensure_anchored_session_log_growth_within_limit(
+pub fn ensure_anchored_session_log_growth_within_limit(
     path: &AnchoredFile,
     appended_bytes: usize,
 ) -> Result<u64, RuntimeError> {
@@ -489,7 +494,7 @@ fn ensure_anchored_session_log_growth_within_limit(
     Ok(existing_bytes)
 }
 
-fn shift_resumed_event(
+pub fn shift_resumed_event(
     mut event: EventEnvelope,
     sequence_offset: u64,
     clock: EventClock,
@@ -500,7 +505,7 @@ fn shift_resumed_event(
     event
 }
 
-fn resumable_flow_id(
+pub fn resumable_flow_id(
     path: &Path,
     session_id: &str,
     event_flow_id: Option<&str>,
@@ -520,7 +525,7 @@ fn resumable_flow_id(
     Ok(recorded_flow_id.to_owned())
 }
 
-fn read_existing_session(
+pub fn read_existing_session(
     workspace: &Path,
     session_id: &str,
     emit: EmitMode,
@@ -552,18 +557,18 @@ fn read_existing_session(
 }
 
 #[derive(Debug)]
-struct SessionReservation {
-    context_path: AnchoredFile,
-    log_path: AnchoredFile,
-    lock_path: AnchoredFile,
-    session_path: AnchoredFile,
-    session_id: String,
-    cleanup_on_drop: Cell<bool>,
-    committed: Cell<bool>,
+pub struct SessionReservation {
+    pub(crate) context_path: AnchoredFile,
+    pub(crate) log_path: AnchoredFile,
+    pub(crate) lock_path: AnchoredFile,
+    pub(crate) session_path: AnchoredFile,
+    pub(crate) session_id: String,
+    pub(crate) cleanup_on_drop: Cell<bool>,
+    pub(crate) committed: Cell<bool>,
 }
 
 impl SessionReservation {
-    fn rollback(&self) {
+    pub(crate) fn rollback(&self) {
         if !self.committed.get() {
             remove_segmented_jsonl(&self.session_path);
             let _ = self.log_path.remove();
@@ -573,13 +578,13 @@ impl SessionReservation {
         self.cleanup_on_drop.set(false);
     }
 
-    fn release_lock(&self) -> Result<(), RuntimeError> {
+    pub(crate) fn release_lock(&self) -> Result<(), RuntimeError> {
         self.lock_path.remove()?;
         self.cleanup_on_drop.set(false);
         Ok(())
     }
 
-    fn mark_committed(&self) {
+    pub(crate) fn mark_committed(&self) {
         self.committed.set(true);
     }
 }
@@ -592,13 +597,13 @@ impl Drop for SessionReservation {
     }
 }
 
-struct SessionLockGuard {
-    path: AnchoredFile,
-    cleanup_on_drop: Cell<bool>,
+pub struct SessionLockGuard {
+    pub(crate) path: AnchoredFile,
+    pub(crate) cleanup_on_drop: Cell<bool>,
 }
 
 impl SessionLockGuard {
-    fn release(&self) -> Result<(), RuntimeError> {
+    pub(crate) fn release(&self) -> Result<(), RuntimeError> {
         self.path.remove()?;
         self.cleanup_on_drop.set(false);
         Ok(())
@@ -614,20 +619,20 @@ impl Drop for SessionLockGuard {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct SessionDefinitionMetadata {
-    flow_definition_id: String,
-    registry_hash: String,
-    flow_definition_hash: String,
+pub struct SessionDefinitionMetadata {
+    pub(crate) flow_definition_id: String,
+    pub(crate) registry_hash: String,
+    pub(crate) flow_definition_hash: String,
 }
 
 #[derive(Default, Debug, Eq, PartialEq)]
-struct SessionLogMetadata {
-    flow_definition_id: Option<String>,
-    registry_hash: Option<String>,
-    flow_definition_hash: Option<String>,
+pub struct SessionLogMetadata {
+    pub(crate) flow_definition_id: Option<String>,
+    pub(crate) registry_hash: Option<String>,
+    pub(crate) flow_definition_hash: Option<String>,
 }
 
-fn session_definition_metadata(
+pub fn session_definition_metadata(
     registry: &core_script::ResolvedRegistry,
     flow_block: &core_script::FlowBlock,
 ) -> Result<SessionDefinitionMetadata, RuntimeError> {
@@ -642,12 +647,12 @@ fn session_definition_metadata(
     })
 }
 
-fn sha256_hash_text(bytes: &[u8]) -> String {
+pub fn sha256_hash_text(bytes: &[u8]) -> String {
     format!("sha256:{}", sha256_hex(bytes))
 }
 
 #[cfg(test)]
-fn verify_resume_definition_metadata(
+pub fn verify_resume_definition_metadata(
     workspace: &Path,
     session_id: &str,
     registry: &core_script::ResolvedRegistry,
@@ -661,7 +666,7 @@ fn verify_resume_definition_metadata(
     verify_resume_definition_metadata_values(session_id, &metadata, registry, flow_block)
 }
 
-fn verify_resume_definition_metadata_values(
+pub fn verify_resume_definition_metadata_values(
     session_id: &str,
     metadata: &SessionLogMetadata,
     registry: &core_script::ResolvedRegistry,
@@ -695,7 +700,7 @@ fn verify_resume_definition_metadata_values(
     Ok(())
 }
 
-fn require_anchored_session_log_metadata(
+pub fn require_anchored_session_log_metadata(
     logs: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLogMetadata, RuntimeError> {
@@ -715,7 +720,7 @@ fn require_anchored_session_log_metadata(
     )?)
 }
 
-fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, RuntimeError> {
+pub fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, RuntimeError> {
     let expected = path
         .leaf
         .file_name()
@@ -744,7 +749,7 @@ fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, Runtime
     Ok(None)
 }
 
-fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
+pub fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
     if matches!(
         &error,
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound
@@ -755,13 +760,13 @@ fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> Run
     }
 }
 
-fn missing_definition_metadata(session_id: &str) -> RuntimeError {
+pub fn missing_definition_metadata(session_id: &str) -> RuntimeError {
     RuntimeError::Protocol(format!(
         "session {session_id} registry drift: missing definition metadata"
     ))
 }
 
-fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
+pub fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
     let mut metadata = SessionLogMetadata::default();
     for (line_number, line) in text.lines().enumerate() {
         let Some((key, value)) = line.split_once('=') else {
@@ -780,14 +785,14 @@ fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeE
     Ok(metadata)
 }
 
-fn reserve_session_log(
+pub fn reserve_session_log(
     workspace: &Path,
     session_id: &str,
 ) -> Result<SessionReservation, RuntimeError> {
     reserve_session_log_with_publish_observer(workspace, session_id, || {})
 }
 
-fn reserve_session_log_with_publish_observer(
+pub fn reserve_session_log_with_publish_observer(
     workspace: &Path,
     session_id: &str,
     after_publish: impl FnOnce(),
@@ -841,16 +846,16 @@ fn reserve_session_log_with_publish_observer(
     })
 }
 
-const MAX_UNIQUE_SESSION_CANDIDATES: u32 = 10_000;
+pub const MAX_UNIQUE_SESSION_CANDIDATES: u32 = 10_000;
 
-fn reserve_unique_session_log(
+pub fn reserve_unique_session_log(
     workspace: &Path,
     base_session_id: &str,
 ) -> Result<SessionReservation, RuntimeError> {
     reserve_unique_session_log_with_probe_observer(workspace, base_session_id, |_| {})
 }
 
-fn reserve_unique_session_log_with_probe_observer(
+pub fn reserve_unique_session_log_with_probe_observer(
     workspace: &Path,
     base_session_id: &str,
     mut before_probe: impl FnMut(&str),
@@ -882,13 +887,13 @@ fn reserve_unique_session_log_with_probe_observer(
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-enum SessionCandidateHint {
+pub enum SessionCandidateHint {
     Free,
     Occupied,
     Probe,
 }
 
-fn session_candidate_hints(
+pub fn session_candidate_hints(
     dirs: &RuntimeDirs,
     base_session_id: &str,
 ) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
@@ -927,7 +932,7 @@ fn session_candidate_hints(
     Ok(hints)
 }
 
-fn classify_log_candidate_leaf(name: &str) -> Option<(&str, SessionCandidateHint)> {
+pub fn classify_log_candidate_leaf(name: &str) -> Option<(&str, SessionCandidateHint)> {
     if let Some(id) = name.strip_suffix(".log") {
         return Some((id, SessionCandidateHint::Occupied));
     }
@@ -936,7 +941,7 @@ fn classify_log_candidate_leaf(name: &str) -> Option<(&str, SessionCandidateHint
         .map(|id| (id, SessionCandidateHint::Occupied))
 }
 
-fn classify_session_candidate_leaf<'a>(
+pub fn classify_session_candidate_leaf<'a>(
     dir: &AnchoredDir,
     name: &'a str,
     canonical: bool,
@@ -969,7 +974,7 @@ fn classify_session_candidate_leaf<'a>(
     })
 }
 
-fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
+pub fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
     let (stem, ordinal) = name.strip_suffix(".jsonl")?.rsplit_once('.')?;
     if ordinal.len() != 6 || !ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -981,7 +986,7 @@ fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
     }
 }
 
-fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> Option<usize> {
+pub fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> Option<usize> {
     let ordinal = session_id.rsplit_once('-')?.1.parse::<u32>().ok()?;
     if !(2..=MAX_UNIQUE_SESSION_CANDIDATES).contains(&ordinal) {
         return None;
@@ -989,7 +994,7 @@ fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> 
     (suffixed_session_id(base_session_id, ordinal) == session_id).then_some(ordinal as usize - 1)
 }
 
-fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
+pub fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
     let suffix = format!("-{ordinal}");
     let prefix_len = 128usize.saturating_sub(suffix.len());
     let prefix = if base_session_id.len() > prefix_len {
@@ -1002,7 +1007,7 @@ fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
     candidate
 }
 
-fn reserve_anchored_session_file(
+pub fn reserve_anchored_session_file(
     path: &AnchoredFile,
     session_id: &str,
     after_publish: impl FnOnce(),
@@ -1018,7 +1023,7 @@ fn reserve_anchored_session_file(
     Ok(())
 }
 
-fn ensure_session_bundle_namespace_available(
+pub fn ensure_session_bundle_namespace_available(
     dirs: &RuntimeDirs,
     session_path: &AnchoredFile,
     log_path: &AnchoredFile,
@@ -1070,7 +1075,7 @@ fn ensure_session_bundle_namespace_available(
     Ok(())
 }
 
-fn ensure_anchored_bundle_leaf_available(
+pub fn ensure_anchored_bundle_leaf_available(
     path: &AnchoredFile,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
@@ -1081,7 +1086,10 @@ fn ensure_anchored_bundle_leaf_available(
     }
 }
 
-fn reserve_anchored_bundle_file(path: &AnchoredFile, session_id: &str) -> Result<(), RuntimeError> {
+pub fn reserve_anchored_bundle_file(
+    path: &AnchoredFile,
+    session_id: &str,
+) -> Result<(), RuntimeError> {
     reserve_new_anchored_file(path).map_err(|err| match err {
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
             RuntimeError::SessionLogExists(session_id.to_owned())
@@ -1090,7 +1098,7 @@ fn reserve_anchored_bundle_file(path: &AnchoredFile, session_id: &str) -> Result
     })
 }
 
-fn ensure_anchored_session_file_available(
+pub fn ensure_anchored_session_file_available(
     path: &AnchoredFile,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
@@ -1111,11 +1119,11 @@ fn ensure_anchored_session_file_available(
     }
 }
 
-fn reserve_new_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError> {
+pub fn reserve_new_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError> {
     create_anchored_file(path).map(|_| ())
 }
 
-fn reserve_anchored_session_lock_file(
+pub fn reserve_anchored_session_lock_file(
     path: &AnchoredFile,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
@@ -1131,7 +1139,7 @@ fn reserve_anchored_session_lock_file(
     }
 }
 
-fn active_session_lock_message(path: &Path, session_id: &str) -> String {
+pub fn active_session_lock_message(path: &Path, session_id: &str) -> String {
     // WHY: M1 cannot safely prove stale lock ownership, so report the exact manual clear
     // path instead of stealing the lock.
     format!(
@@ -1140,7 +1148,7 @@ fn active_session_lock_message(path: &Path, session_id: &str) -> String {
     )
 }
 
-fn acquire_anchored_session_lock(
+pub fn acquire_anchored_session_lock(
     sessions: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLockGuard, RuntimeError> {
@@ -1159,7 +1167,7 @@ fn acquire_anchored_session_lock(
     Ok(guard)
 }
 
-fn write_reserved_session_metadata(
+pub fn write_reserved_session_metadata(
     reservation: &SessionReservation,
     definition_metadata: Option<&SessionDefinitionMetadata>,
 ) -> Result<(), RuntimeError> {
@@ -1169,7 +1177,7 @@ fn write_reserved_session_metadata(
     )
 }
 
-fn replace_anchored_existing_file_atomically(
+pub fn replace_anchored_existing_file_atomically(
     path: &AnchoredFile,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
@@ -1188,7 +1196,9 @@ fn replace_anchored_existing_file_atomically(
     })
 }
 
-fn session_log_metadata_text(definition_metadata: Option<&SessionDefinitionMetadata>) -> String {
+pub fn session_log_metadata_text(
+    definition_metadata: Option<&SessionDefinitionMetadata>,
+) -> String {
     let mut metadata = String::new();
     if let Some(definition) = definition_metadata {
         metadata.push_str("registry_hash=");

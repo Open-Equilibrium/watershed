@@ -1,3 +1,5 @@
+use super::*;
+
 /// Runs a flow from a workspace registry and captures its output.
 pub fn run_flow(
     workspace: impl AsRef<Path>,
@@ -21,7 +23,7 @@ pub fn run_flow_with_live_events(
     Ok(output)
 }
 
-fn run_flow_internal(
+pub fn run_flow_internal(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
     notifier: Option<LiveEventNotifier>,

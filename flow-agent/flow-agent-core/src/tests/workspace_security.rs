@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn workspace_config_helpers_reject_unsafe_registry_roots() {
     let workspace = empty_workspace("workspace-config-helpers");

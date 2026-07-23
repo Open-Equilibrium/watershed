@@ -1,3 +1,5 @@
+use super::*;
+
 #[test]
 fn protocol_validator_rejects_sequence_that_does_not_start_at_one() {
     let event = EventEnvelope::new(
