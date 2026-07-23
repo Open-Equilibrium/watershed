@@ -175,6 +175,38 @@ process.stderr.write = (message) => {
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
 
+    def test_windows_python_launcher_stops_on_probe_error_or_signal(self) -> None:
+        result = run_node_module_test(
+            f"""
+            import assert from "node:assert/strict";
+            import {{ runPython }} from {json.dumps((ROOT / "scripts" / "run-python.mjs").as_uri())};
+
+            for (const probe of [
+              {{ error: Object.assign(new Error("access denied"), {{ code: "EACCES" }}) }},
+              {{ signal: "SIGTERM" }},
+            ]) {{
+              const calls = [];
+              const stderr = {{ text: "", write(chunk) {{ this.text += chunk; }} }};
+              const status = runPython(["script.py"], {{
+                platform: "win32",
+                stderr,
+                spawnSync(executable) {{
+                  calls.push(executable);
+                  return probe;
+                }},
+              }});
+
+              assert.equal(status, 1);
+              assert.deepEqual(calls, ["py"]);
+              assert.notEqual(stderr.text, "");
+            }}
+            """
+        )
+
+        self.assertEqual("", result.stdout)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+
     def test_windows_python_launcher_preserves_script_failure(self) -> None:
         result = run_node_module_test(
             f"""

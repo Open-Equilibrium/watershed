@@ -25,10 +25,6 @@ function pythonCandidates(platform, args) {
       ];
 }
 
-function launcherProbeFailed(result) {
-  return result.error || result.signal || (result.status ?? 1) !== 0;
-}
-
 export function runPython(
   args,
   { platform = process.platform, spawnSync = defaultSpawnSync, stderr = process.stderr } = {},
@@ -42,7 +38,19 @@ export function runPython(
   for (const candidate of pythonCandidates(platform, args)) {
     if (candidate.probeArgs) {
       const probe = spawnSync(candidate.executable, candidate.probeArgs, { stdio: "ignore" });
-      if (launcherProbeFailed(probe)) {
+      if (probe.error?.code === "ENOENT") {
+        missing.push(candidate.missingName);
+        continue;
+      }
+      if (probe.error) {
+        writeError(stderr, `${candidate.executable}: ${probe.error.message}`);
+        return 1;
+      }
+      if (probe.signal) {
+        writeError(stderr, `${candidate.executable}: stopped by signal ${probe.signal}`);
+        return 1;
+      }
+      if ((probe.status ?? 1) !== 0) {
         missing.push(candidate.missingName);
         continue;
       }
