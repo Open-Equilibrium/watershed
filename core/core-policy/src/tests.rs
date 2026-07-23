@@ -529,6 +529,30 @@ fn policy_artifact_rejects_phase_scope_unknown_tool_ids() {
 }
 
 #[test]
+fn policy_artifact_rejects_duplicate_phase_scope_tool_ids() {
+    let mut artifact = valid_policy_artifact("read-file");
+    artifact.phase_scope.push(PhaseScope {
+        phase_id: "summarize".to_owned(),
+        tool_ids: vec!["read-file".to_owned()],
+    });
+    artifact
+        .validate()
+        .expect("one tool occurrence in different phases is valid");
+    artifact.phase_scope[0]
+        .tool_ids
+        .push("read-file".to_owned());
+
+    let err = artifact
+        .validate()
+        .expect_err("duplicate phase tool ids must fail validation");
+
+    assert_eq!(
+        err.to_string(),
+        "phase_scope inspect contains duplicate tool_id read-file"
+    );
+}
+
+#[test]
 fn policy_artifact_rejects_commands_missing_from_phase_scope() {
     let mut artifact = valid_policy_artifact("read-file");
     artifact

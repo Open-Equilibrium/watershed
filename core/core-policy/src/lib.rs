@@ -150,10 +150,17 @@ impl PolicyArtifact {
                     phase.phase_id
                 )));
             }
+            let mut phase_tool_ids = BTreeSet::new();
             for tool_id in &phase.tool_ids {
                 if !command_tool_ids.contains(tool_id.as_str()) {
                     return Err(policy_artifact_error(format!(
                         "phase_scope {} references unknown tool_id {}",
+                        phase.phase_id, tool_id
+                    )));
+                }
+                if !phase_tool_ids.insert(tool_id.as_str()) {
+                    return Err(policy_artifact_error(format!(
+                        "phase_scope {} contains duplicate tool_id {}",
                         phase.phase_id, tool_id
                     )));
                 }
