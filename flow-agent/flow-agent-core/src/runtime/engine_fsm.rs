@@ -914,7 +914,19 @@ pub fn emit_phase(
             step_payload.clone(),
         )?;
 
-        if phase_uses_stub_model(context.registry, phase) {
+        if step_index == 0
+            && let Some(failure) = sandbox_out_of_phase_failure(
+                context.registry,
+                context.policy,
+                phase,
+                context.stub_model_fixture_profile,
+            )
+        {
+            builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
+            return Ok(Some(failure));
+        }
+
+        if phase_uses_stub_model(phase) {
             let compiled = compile_provider_turn_context(
                 context.registry,
                 flow_block,
@@ -947,16 +959,6 @@ pub fn emit_phase(
         }
 
         if step_index == 0 {
-            if let Some(failure) = sandbox_out_of_phase_failure(
-                context.registry,
-                context.policy,
-                phase,
-                context.stub_model_fixture_profile,
-            ) {
-                builder.emit(Some(invocation), EventType::StepCompleted, step_payload)?;
-                return Ok(Some(failure));
-            }
-
             for tool_ref in &phase.tool_refs {
                 let tool = context.registry.tool_block(tool_ref).ok_or_else(|| {
                     RuntimeError::Protocol(format!("resolved registry missing tool {tool_ref}"))
@@ -1045,15 +1047,8 @@ pub fn step_payload(
     Ok(payload)
 }
 
-pub fn phase_uses_stub_model(
-    registry: &core_script::ResolvedRegistry,
-    phase: &core_script::PhaseBlock,
-) -> bool {
-    phase.tool_refs.iter().any(|tool_ref| {
-        registry
-            .tool_block(tool_ref)
-            .is_some_and(|tool| tool.tool_kind == core_script::ToolKind::PredefinedCommand)
-    })
+pub fn phase_uses_stub_model(phase: &core_script::PhaseBlock) -> bool {
+    !phase.instruction_refs.is_empty()
 }
 
 pub fn stub_message_content(

@@ -478,6 +478,40 @@ fn run_persists_one_canonical_context_manifest_per_stub_model_turn() {
 }
 
 #[test]
+fn instruction_bearing_own_script_step_runs_stub_model_turn() {
+    let workspace = workspace_copy("hello-flow");
+    let output =
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("fixture flow completes");
+    let events =
+        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
+            .expect("runtime stream validates");
+    let start = events
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::StepStarted
+                && event.payload["phase_id"] == "summarize"
+                && event.payload["step_id"] == "write"
+        })
+        .expect("summarize step starts");
+    let end = events[start + 1..]
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::StepCompleted
+                && event.payload["phase_id"] == "summarize"
+                && event.payload["step_id"] == "write"
+        })
+        .map(|index| start + 1 + index)
+        .expect("summarize step completes");
+
+    assert!(
+        events[start + 1..end]
+            .iter()
+            .any(|event| event.event_type == EventType::MessageCompleted),
+        "an instruction-bearing step must run the model regardless of Tool kind"
+    );
+}
+
+#[test]
 fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
     let failure = runtime_failure_for_unhandled_error(&RuntimeError::ContextBudgetExceeded {
         input_budget_tokens: 5,
