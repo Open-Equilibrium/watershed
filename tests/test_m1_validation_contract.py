@@ -7,6 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class M1ValidationContractTest(unittest.TestCase):
+    def test_ci_uses_the_pinned_rust_toolchain(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("rustup override set 1.97.1", workflow)
+        self.assertIn("^rustc 1\\.97\\.1 ", workflow)
+
     def assert_git_ignore(self, path: str, *, ignored: bool) -> None:
         result = subprocess.run(
             ["git", "check-ignore", "--no-index", "--quiet", path],
