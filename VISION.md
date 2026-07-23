@@ -26,6 +26,8 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
 
+The current M1 Flow Agent milestone is the deterministic, fixture-bounded runtime foundation. Practical provider/process execution is M1.1 and OS-enforced isolation is M1.2; scope and evidence are canonical in `PLAN.md` and `SECURITY.md`.
+
 Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model (ADR-0019).
 
 ## Integration and ownership

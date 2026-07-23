@@ -41,7 +41,7 @@ Protocol v0 is designed for the Flow Agent CLI MVP and later Meta-Harness integr
 
 Runtime events use the v0 Flow Agent short-form name set decided in ADR-0036. `message.delta` and `tool.progress` stay first-class for near-real-time consumers. Do not maintain a second event naming convention.
 
-M1 Flow Agent emits the families exercised by the ADR-0034 fixtures and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
+M1 Flow Agent emits the families exercised by the explicit fixture profile and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
 
 ### v0 lifecycle ordering
 
@@ -83,9 +83,11 @@ M1 Flow Agent derives timestamps from its event clock: `timestamp = base + (sequ
 
 ## M1 local session storage
 
-The ordered append-only event segments are authoritative for replay and catch-up. The first is `.flow/sessions/<session_id>.jsonl`; later segments are `<session_id>.<six-digit-ordinal>.jsonl`, beginning at `000002`. Rotation occurs before an event would exceed the canonical uncompressed-byte per-segment limit; one event is never split, sequence and all [session safety limits](PERFORMANCE.md#adr-0068-safety-envelope) continue unchanged, and prior segments become immutable. Context manifests follow the same rotation and ordinal rules from `<session_id>.contexts.jsonl`; one manifest record is never split.
+The ordered append-only event segments are authoritative for replay and catch-up. The first is `.flow/sessions/<session_id>.jsonl`; later segments are `<session_id>.<six-digit-ordinal>.jsonl`, beginning at `000002`. Rotation occurs before an event would exceed the canonical uncompressed-byte per-segment limit; one event is never split, sequence and all [session safety limits](PERFORMANCE.md#adr-0068-safety-envelope) continue unchanged, and prior segments become immutable. Context manifests use `.flow/logs/<session_id>.contexts.jsonl` and the same rotation and ordinal rules; one manifest record is never split.
 
 Context manifests reference the exact canonical source bytes through `session-object:sha256:<digest>`. Flow Agent stores those session-owned immutable objects once per digest, accounts existing objects again on resume and verifies availability and content before use. Larger future artifacts must be chunked; no reference needed to validate or reconstruct recorded canonical history and provider context may point only to mutable or externally owned storage. Export and deletion operate on the complete bundle. The bundle preserves canonical history but cannot reproduce an external provider, tool, compatible registry for continuation, mutable environment or undeclared side effect. Local paths, locks, recovery and replay/resume behavior are defined in the [Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html#surfaces); other tools consume public surfaces, never this store directly.
+
+M1 implements run, replay, tail, resume and valid-session listing over one internal bundle inventory. Public export, delete, prune, retention and storage/quota-status operations are M1.1 work and must consume the same complete inventory rather than infer ownership from one filename.
 
 ## M1 local append and live delivery (ADR-0059, ADR-0062)
 
@@ -123,7 +125,7 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `artifact.logged`: `artifact_id`, `artifact_type`, `uri`.
 - `attention.requested`: `request_id`, `reason`.
 - `metric.sample`: `metric_name`, `value`.
-- `error`: `code`, `message`, optional `data`.
+- `error`: `code`, `message`, optional `data`. M1 uses `execution_backend_unavailable` when a non-fixture workspace requests productive provider/Tool execution that M1 does not implement; the failure occurs before those side effects and cannot be followed by successful Flow/session completion.
 
 ## CLI exit status
 

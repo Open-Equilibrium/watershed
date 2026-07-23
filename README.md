@@ -4,7 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1 Flow Agent MVP stage.** This repository contains the standalone Flow Agent CLI runtime, protocol/event contracts, deterministic fixture streams, policy artifacts, sandbox-negative tests and M1 validation gates described in [PLAN.md](PLAN.md).
+**M1 — Flow Agent deterministic runtime foundation.** Implementation is complete on this branch, pending maintainer review and merge. M1 provides deterministic registry, planning, event, context, session and in-process policy-emulation contracts; practical provider/process execution and OS isolation are separate M1.1 and M1.2 stages in [PLAN.md](PLAN.md).
 
 ## Repo layout
 
@@ -24,11 +24,11 @@ docs/         governance, specs, decisions
 From the repo root:
 
 ```console
-cargo build --workspace
-cargo test --workspace
+cargo build --locked --workspace
+cargo nextest run --locked --workspace --all-targets
 ```
 
-Run the checked-in smoke fixture from its workspace directory:
+Run the checked-in smoke fixture from its workspace directory. Its explicit fixture profile selects deterministic stubs; this does not call a provider or execute a general external process:
 
 ```console
 cd flow-agent/fixtures/smoke-flow
@@ -39,6 +39,8 @@ cargo run -p flow-agent-cli -- sessions
 ```
 
 Workspace layout and registry fields are defined in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html); checked-in examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/).
+
+M1 cannot productively call an LLM/provider, run arbitrary external Tools or scripts, guarantee OS isolation, allow network destinations, or export/delete/prune sessions. A normal workspace fails closed instead of reporting fixture execution as success.
 
 ## Product boundaries
 

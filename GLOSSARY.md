@@ -21,7 +21,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 ## Tools
 
 - **Liquid** — Standalone local-first workspace and app-building product built from Pages, Blocks, Views, Sources, Connections and Automations. Every client works through a local replica; optional sync, agent integration and headless execution extend rather than replace that product. CLI binary: `liq` (ADR-0013).
-- **Flow Agent** — Host-local, CLI-only, Rust-core, script-driven, event-based deterministic agent-flow harness (not a generic coding agent). CLI binary: `flow` (ADR-0013).
+- **Flow Agent** — Host-local, CLI-only, Rust-core, script-driven deterministic Flow runtime (not a generic coding agent). M1 is fixture-bounded; M1.1 adds practical provider/process execution and M1.2 adds OS isolation. CLI binary: `flow` (ADR-0013).
 - **Meta-Harness** — Self-contained host-scoped headless control plane over CLI agents on one host (session registry, central config resolution, agent schedules/triggers, artifact indexing, AgentPulse), reachable through local or authenticated remote clients. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta` (ADR-0013).
 - **Execution location** — User-editable label for the host and owning Meta-Harness target used to start or control a session. Technical identifiers remain internal while routing authority is preserved.
 - **Pi Agent** — The Pi CLI agent integration target. Use the full term "Pi Agent" in docs; avoid bare "Pi" except when quoting an external CLI/product name.
@@ -41,16 +41,20 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Building-block registry** — The resolver for addressable Tools, Instructions, Phases, Flows and Connections. In v0 it safely catalogs one-block YAML entries under a configured root, then retains and resolves only the selected Flow's transitive definition closure, once per unique definition.
 - **Canonical serialization** — Deterministic UTF-8 JSON of the parsed, semantically validated and registry-resolved selected definition closure; equivalent closures serialize to the same bytes for review, audit and golden tests.
 - **Tool** — A capability with an exact command identity (predefined or own script) and declared parameter, path and network boundaries. Nothing outside the declared command is permitted.
-- **Policy artifact** — The canonical JSON output produced by `core-policy` to show tool-scoped capabilities for a target sandbox backend, including deterministic object-key and array ordering. M1 enforces compatible policy deterministically in process; OS sandbox backends are post-M1.
+- **Policy artifact** — The canonical JSON output produced by `core-policy` to show Tool-scoped capabilities for a target enforcement backend, including deterministic object-key and array ordering. M1 evaluates compatible decisions in process but provides no OS security boundary.
 - **Predefined-command registry** — The trusted id-to-executable map used by predefined-command Tools. A script names a `command_id`; Flow Agent resolves it to one executable identity and combines it with the script's literal base `argv` without PATH lookup or shell parsing.
-- **Predefined-command Tool** — A Tool that calls a fixed command id declared by the script, resolved through the predefined-command registry and constrained by policy.
+- **Predefined-command Tool** — A Tool that names a fixed command id resolved through the predefined-command registry. M1 fixtures emulate its result; M1.1 direct-execs the resolved command under bounded runtime controls.
 - **Allowed parameter** — A reviewed parameter spec for a Tool: exact name, typed value shape, required flag and type-specific constraints such as enum values, string pattern/length or integer range. Unknown parameters and values that fail validation are denied before tool launch.
-- **Own-script Tool** — A Tool whose reviewed inline `script_body` uses the fixed v0 `posix-sh` contract. M1 execution and later sandboxing are defined in the [Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html) and [`SECURITY.md`](SECURITY.md).
+- **Own-script Tool** — A Tool whose reviewed inline `script_body` uses the fixed v0 `posix-sh` contract. M1 interprets only its bounded fixture subset; real runner and isolation stages are defined in the [Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html) and [`SECURITY.md`](SECURITY.md).
 - **Instruction** — A modular prompt primitive (`id`, `name`, `prompt`). Carries no phase binding or tool ownership; phases reference instructions and tools.
 - **Connection** — A declared relation between building blocks, data sources, events or outputs. Connections make data/control flow explicit instead of hiding it in agent-specific terminology.
 - **Phase** — A workflow stage; declares the tools and instructions available within it and contains ordered steps. Authored as a script; a visual graph is a view over that script.
 - **Flow** — A fully configured, deterministic AI-native process: a state machine composed of phases and building blocks (1…n agents). A flow is itself a building block.
 - **Subflow** — A flow used inside another flow.
+- **Flow execution plan** — The finite typed, deterministic and side-effect-free description of resolved Flow invocations, lifecycle boundaries, context inputs and Tool intents consumed by runtime apply.
+- **Fixture executor** — The M1 in-process executor enabled only by the canonical fixture profile; it returns deterministic model/Tool doubles and is not a provider, subprocess runner or POSIX shell.
+- **Policy emulation** — M1's deterministic in-process evaluation of modeled policy decisions. It proves runtime correctness contracts, not OS isolation.
+- **OS isolation** — M1.2 enforcement that prevents real provider/Tool processes and their children from exceeding applied filesystem, process and network boundaries.
 
 ## Flow Agent runtime surfaces
 
@@ -70,7 +74,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Live-event notification** — A bounded, best-effort wake-up reporting a session's earliest pending and highest committed sequences; it carries no event payload, and receivers replay events after their cursor from the authoritative session log.
 - **Persistence-before-notification** — The local guarantee that one serial session writer successfully appends a canonical event to the authoritative log before updating its high-watermark and attempting a live-event notification; physical `fsync` follows separate bounded durability checkpoints.
 - **Flow registry** — The name/id index used by `flow run <name>` and interactive slash commands such as `/hello-flow` inside `flow chat` to resolve a flow definition without requiring a path.
-- **Fixture workspace** — A checked-in test workspace for a golden flow; ADR-0041 defines how it points Flow Agent at the fixture registry and deterministic stub-model profile.
+- **Fixture workspace** — A checked-in test workspace whose explicit canonical fixture profile selects the fixture executor and deterministic stub model.
 - **Flow definition ID** — The registry/building-block id of a Flow definition; carried in event payloads as `flow_definition_id`.
 - **Runtime flow invocation ID** — The `flow_id` assigned to one root-flow or subflow invocation in a session; distinct from the Flow definition ID and linked to a parent by `parent_flow_id`.
 - **Stub model** — A deterministic model double used by tests so golden event streams are byte-stable in CI.

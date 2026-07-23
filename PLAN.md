@@ -33,29 +33,79 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **DoD:** the scaffold compiles on Linux, macOS, and Windows; its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
 
-### M1 — Flow Agent MVP (standalone CLI)
+### M1 — Flow Agent deterministic runtime foundation
 
-**Wedge:** Flow Agent execution wedge — prove evented agent flows as a deterministic, auditable, reusable agent-flow runtime (not a generic coding agent).
+**Status:** Implementation complete on this branch; pending maintainer review and merge.
 
-**Status:** M1 implementation is in progress. The standalone CLI runtime, JSONL event stream, local session log, replay/tail/resume commands, fixture registry loading and validation gates are in active hardening against the DoD.
+**Purpose:** establish the deterministic, auditable runtime contracts that later practical execution and OS isolation extend without presenting fixture behavior as productive provider or process execution.
 
 **Deliverables:**
 
-- Standalone CLI Flow Agent (human CLI run path).
-- Headless JSONL event stream over stdout.
-- Local append-only session/transcript log (ADR-0037); initial resume/tail/replay behavior over the log.
-- Public runtime events persisted before bounded non-blocking live notification, with caller-owned sequence replay from the authoritative log (ADR-0036, ADR-0059, ADR-0062).
-- Building-block registry for Tools, Instructions, Phases, Flows and Connections using explicit by-name/id references, canonical serialization and cycle detection (ADR-0031).
-- Deterministic FSM phase/step engine: phase order, available tools, instruction loading and state transitions are deterministic; LLM/tool outputs are inputs to deterministic transitions.
-- Deterministic, cache-stable `flow-context-v0` compilation over mandatory active scope plus narrowly bounded continuity, with reproducible per-turn manifests; persisted compaction and retrieval are post-M1 (ADR-0050, ADR-0058).
-- Script-defined Tools/Instructions/Phases/Flows with recursive composition (`Flow` as a building block).
-- Event-driven execution: no polling loop for normal agent progress.
-- Runtime kernel: deterministic bounded in-process fixture interpretation plus session event and context-manifest logs. External subprocess timeouts, bounded stdout/stderr, per-tool run logs and `tool.timed_out` remain post-M1.
-- Deterministic in-process enforcement/emulation for declared command, parameter-schema, read/write, protected-path and deny-all network capabilities per flow. Linux-target policy rejects non-empty network allowlists; Linux Landlock/seccomp OS enforcement and macOS Seatbelt parity are post-M1 targets (ADR-0051, ADR-0052).
-- Protocol adapter that emits normalized `proto` v0 events.
-- Golden flows and sandbox-negative tests per `TESTING.md` (ADR-0034).
+- Strict Flow registry and policy contracts with canonical serialization and bounded recursive resolution.
+- Pure deterministic Flow planning, FSM orchestration and exactly-once apply over the fixture executor.
+- Fixture/stub execution only when the workspace explicitly selects the canonical fixture profile; other workspaces fail closed before provider or tool side effects.
+- Canonical Flow runtime events, append-only session history, replay, tail and resume.
+- Deterministic, cache-stable `flow-context-v0` compilation and reproducible context manifests.
+- Deterministic in-process policy enforcement/emulation for declared command, parameter, path, protected-path and deny-all network decisions.
+- Cross-platform functional, coverage and Linux performance gates defined by `TESTING.md`, `PERFORMANCE.md` and CI.
 
-**DoD:** a multi-phase local flow with a subflow runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; persists every canonical event before any live notification; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Flow Agent M1 budgets in `PERFORMANCE.md`. Flow Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Flow Agent MVP feature depends on a Watershed project-history/VCS engine.
+M1 does not provide a real provider adapter, general external process execution, a complete POSIX shell, OS-enforced isolation, positive network grants, or public session export/delete/prune operations.
+
+**DoD:** a fixture-profile workspace runs multi-phase Flows and Subflows headlessly; planning is side-effect-free; each planned fixture side effect is applied at most once; non-fixture execution fails closed; canonical events and context manifests are persisted and replayed/tailed/resumed without repeating completed side effects; controlled returns release session locks while preserving valid artifacts; policy-emulation and sandbox-negative tests remain explicit about the absence of an OS boundary; and every M1 test, coverage and performance gate passes. Flow Agent remains standalone and has no Watershed-owned project-code VCS behavior.
+
+### M1.1 — Flow Agent practical execution
+
+**Purpose:** turn the deterministic M1 foundation into a useful local Flow Agent without claiming the OS isolation reserved for M1.2.
+
+**Deliverables:**
+
+1. A provider abstraction with at least one real provider adapter.
+2. Typed user inputs.
+3. Typed Connection values.
+4. Typed Tool and Artifact outputs for `flow-context-v0` or an explicitly versioned successor.
+5. Invocation parameters validated against each Tool's `allowed_parameters`.
+6. A general bounded external subprocess runner.
+7. Predefined commands launched by direct exec without shell parsing, PATH lookup or ambient environment inheritance.
+8. Own-script execution through one fixed runner with a bounded runtime and no implicit interpreter selection.
+9. Timeouts and cancellation.
+10. Bounded stdout and stderr.
+11. Per-Tool run logs.
+12. Actual `tool.timed_out` and real Tool-failure event emission.
+13. The M1 pure-plan/exactly-once-apply boundary for real providers and Tools.
+14. Whole-bundle session export, delete, prune and storage/quota status with retention configuration.
+15. No Watershed-owned project-code VCS behavior.
+
+**DoD:**
+
+- A non-fixture workspace runs a real Flow through a real provider adapter.
+- At least one predefined command and one own-script Tool use the bounded runner.
+- Inputs, Connection values and invocation parameters are typed and validated.
+- Provider and Tool side effects occur exactly once per planned invocation.
+- Timeout, cancellation, output caps and Tool logs are tested.
+- Export, delete and prune operate on the complete session bundle.
+- No capability depends on Meta-Harness or Liquid.
+- Current gates plus the M1.1 performance and security budgets decided before implementation pass.
+
+### M1.2 — Flow Agent OS isolation
+
+**Purpose:** enforce the declared policy as an operating-system boundary around real provider and Tool processes.
+
+**Deliverables:**
+
+1. Linux Landlock filesystem restrictions plus seccomp or an equivalent process/syscall boundary, inherited by child processes.
+2. A macOS Seatbelt profile with semantic parity to canonical policy artifacts and child-process inheritance.
+3. A Windows enforcement strategy selected through [D-047](docs/decisions/open-decisions.html#d-047); no parity claim before that decision and its evidence.
+4. Deny-by-default egress enforcement; CIDR/port grants remain blocked until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven, including DNS, DoH, DoT and child-process escape tests.
+5. An escape matrix covering traversal, symlinks, hardlinks, rename/create races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, protected paths, process spawning, timeout and cancellation termination.
+6. Optional container or microVM hardening that does not replace the OS baseline unless a later accepted decision changes it.
+
+**DoD:**
+
+- Real Tool processes cannot exceed declared read, write, network or process boundaries on every platform for which support is claimed.
+- Negative tests exercise the applied OS boundary, not M1 policy emulation.
+- The canonical policy artifact and applied policy are demonstrably equivalent.
+- Child processes inherit restrictions and fail-open behavior is prevented or remains a release blocker.
+- Platform differences and tested coverage are explicit; no security claim exceeds the evidence.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 

@@ -16,6 +16,7 @@
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
       <a href="#m1">M1</a>
+      <a href="#m1-2">M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
@@ -25,6 +26,28 @@
   <section id="m1">
     <h2>M1 - Flow Agent</h2>
     <p class="muted">No open M1 decisions.</p>
+  </section>
+
+  <section id="m1-2">
+    <h2>M1.2 - Flow Agent OS Isolation</h2>
+    <div class="grid">
+      <article id="d-046" class="decision">
+        <h3>D-046 - Approved Network Address Enforcement</h3>
+        <p><strong>Status:</strong> Open, M1.2 blocker for positive network grants.</p>
+        <p><strong>Question:</strong> After M1's block-all policy, how should Linux allow connections only to approved network addresses and ports?</p>
+        <ul><li><strong>A:</strong> Put the process in an isolated network area with firewall rules. Pro: uses common Linux features. Con: needs extra privileges and CI setup.</li><li><strong>B:</strong> Route connection requests through a checker that approves each one. Pro: precise decisions. Con: more components must work correctly.</li><li><strong>C:</strong> Let Linux itself filter the process's connections. Pro: strong low-level enforcement. Con: harder to operate and also needs privileges.</li></ul>
+        <p><strong>Recommendation:</strong> Keep block-all until one approach is selected and proven.</p>
+        <p><strong>Acceptance criterion:</strong> Record the backend and runner, then pass a finite matrix for allowed and denied TCP/UDP CIDR/port rules, DNS, DoH, DoT, child processes and indirect connection attempts before enabling any positive grant.</p>
+      </article>
+      <article id="d-047" class="decision">
+        <h3>D-047 - Windows Process Isolation</h3>
+        <p><strong>Status:</strong> Open, M1.2 blocker for Windows real-tool support.</p>
+        <p><strong>Question:</strong> Which Windows enforcement boundary must Flow Agent use so real tool processes and their children cannot exceed the declared filesystem, network and process policy?</p>
+        <ul><li><strong>A:</strong> Build a native boundary from restricted tokens or AppContainer, Job Objects, filesystem ACLs and enforceable network controls. Pro: native integration and lower steady-state overhead. Con: several mechanisms must compose correctly and parity is difficult to prove.</li><li><strong>B:</strong> Run tools in a managed Hyper-V, Windows Sandbox or equivalent isolated environment. Pro: a stronger coarse boundary. Con: higher startup cost, optional host features and more file/network plumbing.</li><li><strong>C:</strong> Keep Windows real-tool execution fail-closed until either A or B is proven. Pro: makes no unsupported parity claim. Con: M1.1 remains limited on Windows.</li></ul>
+        <p><strong>Recommendation:</strong> Use C as the release posture while prototyping A; select A or B only after the same automated negative matrix proves read, write, network, process, child-process, policy-artifact parity and fail-closed behavior on the documented Windows runner.</p>
+        <p><strong>Acceptance criterion:</strong> Record the selected backend and runner, then pass that finite matrix before enabling Windows real-tool execution or claiming platform parity.</p>
+      </article>
+    </div>
   </section>
 
   <section id="m2">
@@ -118,13 +141,6 @@
         <p><strong>Question:</strong> Should another Rust application run Flow Agent inside the same program, or start the <code>flow</code> command and communicate through its documented input and output?</p>
         <ul><li><strong>A:</strong> Add a small supported Rust library interface after M1. Pro: direct calls without managing another process. Con: Watershed must keep that interface compatible and tightly couples both programs.</li><li><strong>B:</strong> Keep the current Rust building blocks internal and use the command/protocol boundary. Pro: a smaller public surface and independent crashes/upgrades. Con: the caller must manage a process and adapter.</li></ul>
         <p><strong>Recommendation:</strong> A only when a concrete post-M1 consumer proves the smallest useful interface; see <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
-      </article>
-      <article id="d-046" class="decision">
-        <h3>D-046 - Approved Network Address Enforcement</h3>
-        <p><strong>Status:</strong> Open, post-M1.</p>
-        <p><strong>Question:</strong> After M1's block-all policy, how should Linux allow connections only to approved network addresses and ports?</p>
-        <ul><li><strong>A:</strong> Put the process in an isolated network area with firewall rules. Pro: uses common Linux features. Con: needs extra privileges and CI setup.</li><li><strong>B:</strong> Route connection requests through a checker that approves each one. Pro: precise decisions. Con: more components must work correctly.</li><li><strong>C:</strong> Let Linux itself filter the process's connections. Pro: strong low-level enforcement. Con: harder to operate and also needs privileges.</li></ul>
-        <p><strong>Recommendation:</strong> Keep M1 block-all; choose and prove one approach before allowing any network destinations.</p>
       </article>
     </div>
   </section>

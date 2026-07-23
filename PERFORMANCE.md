@@ -64,6 +64,8 @@ Tool runs are bounded/headless; the harness itself must not be the bottleneck wh
 
 The event budgets measure individual events, not averages of batch averages; ordering and durability semantics are canonical in `PROTOCOL.md`.
 
+M1.1 implementation budgets must be decided before implementation for: provider-adapter overhead; bounded subprocess startup and dispatch; timeout/cancel termination; stdout/stderr cap memory; per-tool Run Log append; typed input/parameter validation; exactly-once plan/apply bookkeeping; and complete-bundle export, delete, prune, retention, quota and storage-status operations. No budget is implied by this category list.
+
 ## Meta-Harness
 
 Product target:
