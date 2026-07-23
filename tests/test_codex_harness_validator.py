@@ -524,7 +524,20 @@ process.stderr.write = (message) => {
                 )
 
                 self.assertEqual(0, result.returncode)
-                self.assertIn('"permissionDecision": "deny"', result.stdout)
+                self.assertEqual(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": (
+                                "Watershed guard: Refusing to delete a protected path "
+                                "(.git / .loop / .clawpatch)."
+                            ),
+                        }
+                    },
+                    json.loads(result.stdout),
+                )
+                self.assertEqual("", result.stderr)
 
     def test_stop_hook_reports_only_ten_conflict_markers(self) -> None:
         stdout = "\n".join(
