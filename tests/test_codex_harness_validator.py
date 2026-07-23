@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -104,6 +105,42 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         self.assertEqual("ok", result.stdout)
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
+
+    def test_python_launcher_flushes_usage_error_before_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            error_path = root / "stderr.txt"
+            preload_path = root / "async-stderr.cjs"
+            preload_path.write_text(
+                """
+const { writeFileSync } = require("node:fs");
+process.stderr.write = (message) => {
+  setTimeout(() => writeFileSync(process.env.ERROR_FILE, message), 0);
+  return false;
+};
+""",
+                encoding="utf-8",
+            )
+            env = os.environ | {"ERROR_FILE": str(error_path)}
+            result = subprocess.run(
+                [
+                    "node",
+                    "--require",
+                    str(preload_path),
+                    str(ROOT / "scripts" / "run-python.mjs"),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                env=env,
+            )
+
+            self.assertEqual(2, result.returncode)
+            self.assertEqual(
+                "usage: node scripts/run-python.mjs <python-args...>\n",
+                error_path.read_text(encoding="utf-8"),
+            )
 
     def test_windows_python_launcher_failure_falls_back_to_python(self) -> None:
         result = run_node_module_test(

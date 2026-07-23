@@ -69,5 +69,5 @@ export function runPython(
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exit(runPython(process.argv.slice(2)));
+  process.exitCode = runPython(process.argv.slice(2));
 }
