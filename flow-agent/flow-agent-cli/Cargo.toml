@@ -1,0 +1,17 @@
+[package]
+name = "flow-agent-cli"
+description = "Flow Agent CLI for the M1 deterministic runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+flow-agent-core.workspace = true
+proto.workspace = true
+
+[[bin]]
+name = "flow"
+path = "src/main.rs"

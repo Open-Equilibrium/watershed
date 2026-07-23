@@ -4,7 +4,7 @@ Non-functional targets. These are **falsifiable budgets**: every target must hav
 
 Rationale for the Rust core: low per-agent memory footprint, true multi-core parallelism, and a post-M1 Wasmtime plugin isolation path — properties a Node runtime cannot meet at the required scale.
 
-## Loop Agent
+## Flow Agent
 
 Product target:
 - **10 parallel top-level loops** on a laptop-class device with at least 4 logical cores, 16 GiB RAM and SSD storage. Their roots and subloops share the process-wide limit of 32 live invocations. Model/provider processes, tool processes, network latency and caller-owned output buffers are excluded.

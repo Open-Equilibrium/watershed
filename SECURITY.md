@@ -8,15 +8,15 @@ Report suspected vulnerabilities privately to **b-weber@gmx.at** — please do n
 
 ## Trust model
 
-Watershed's defensible trust model is the combination across its three layers: structured loops + scoped runtime capabilities + normalized events/transcripts + policy gates + metric feedback + permissioned workspace mutations + action history/revert + AGPL/free-software transparency. Concretely: external-agent actions must be scoped; Liquid workspace mutations must be attributed and revertible; Meta-Harness config changes must be policy-gated and audited; Loop Agent runtime capabilities must be declared and sandboxed. Because Watershed is AGPL/free software, users can **inspect, self-host, fork and verify** core behavior — transparency is part of the trust boundary, not a substitute for it.
+Watershed's defensible trust model is the combination across its three layers: structured loops + scoped runtime capabilities + normalized events/transcripts + policy gates + metric feedback + permissioned workspace mutations + action history/revert + AGPL/free-software transparency. Concretely: external-agent actions must be scoped; Liquid workspace mutations must be attributed and revertible; Meta-Harness config changes must be policy-gated and audited; Flow Agent runtime capabilities must be declared and sandboxed. Because Watershed is AGPL/free software, users can **inspect, self-host, fork and verify** core behavior — transparency is part of the trust boundary, not a substitute for it.
 
 ## Principle: scripts define, sandbox enforces
 
 Scripts are the single human-readable capability policy (allowed commands, parameters, read/write roots, network egress). The harness **compiles** each script into a runtime policy per loop; M1 runs deterministic in-process execution/emulation for the modeled checks, and post-M1 OS backends must apply the same compiled policy. Allowlisting alone is *not* a boundary.
 
-This paragraph governs Loop Agent scripts. Liquid Apps use the parallel principle defined below: App manifests declare capabilities, and the App Runtime plus Role and capability checks enforce them.
+This paragraph governs Flow Agent scripts. Liquid Apps use the parallel principle defined below: App manifests declare capabilities, and the App Runtime plus Role and capability checks enforce them.
 
-Because scripts are human-reviewable security/capability artifacts, they pass through one private `core-script` Safe-YAML parser into one unambiguous model (ADR-0031, ADR-0061). It accepts one YAML 1.2 document and rejects duplicate or merge keys, anchors, aliases, explicit tags, nulls, unknown fields and configured resource-budget violations; there is no fallback parser. The checked-in JSON Schema files document the intended shape, existing semantic and registry validation remains authoritative, and the Loop Agent V-Spec defines canonical bytes.
+Because scripts are human-reviewable security/capability artifacts, they pass through one private `core-script` Safe-YAML parser into one unambiguous model (ADR-0031, ADR-0061). It accepts one YAML 1.2 document and rejects duplicate or merge keys, anchors, aliases, explicit tags, nulls, unknown fields and configured resource-budget violations; there is no fallback parser. The checked-in JSON Schema files document the intended shape, existing semantic and registry validation remains authoritative, and the Flow Agent V-Spec defines canonical bytes.
 
 Registry loading starts from one opened workspace capability and opens every registry directory and YAML leaf without following links. Linux and macOS are the primary targets; the private boundary remains portable to Windows (ADR-0063, ADR-0064).
 
@@ -27,7 +27,7 @@ Registry loading starts from one opened workspace capability and opens every reg
 
 ## MVP VCS boundary
 
-Loop Agent runs inside normal Git projects in the MVP, but it does not own project history and does not implement project VCS behavior. Security and auditability in the MVP come from deterministic loop state, structured logs, protocol events, config-review/audit records and sandbox enforcement. Host Git operations may run only when explicitly declared as Tool commands and sandboxed like any other command.
+Flow Agent runs inside normal Git projects in the MVP, but it does not own project history and does not implement project VCS behavior. Security and auditability in the MVP come from deterministic loop state, structured logs, protocol events, config-review/audit records and sandbox enforcement. Host Git operations may run only when explicitly declared as Tool commands and sandboxed like any other command.
 
 ## Enforcement (per loop)
 
@@ -35,7 +35,7 @@ Loop Agent runs inside normal Git projects in the MVP, but it does not own proje
 2. **Network egress deny-by-default**. M1 Linux-target policy rejects non-empty CIDR allow entries and emulates deny-all network decisions for sandbox-negative tests (ADR-0051, ADR-0052). CIDR allow entries remain part of the policy artifact/schema so reviewed capabilities are explicit, but they are not silently treated as enforced by Landlock/seccomp until a post-M1 egress backend exists.
 3. Filesystem **read/write confined** to declared roots; protect the default protected paths below unless explicitly granted.
 4. **Blast-radius control** via least-capability tools, isolated workspaces when configured, deterministic logs and short-lived bounded runs.
-5. `.loop/logs` now; post-M1 subprocesses must be bounded, headless and timed out — for stability, **not** as a security boundary.
+5. `.flow/logs` now; post-M1 subprocesses must be bounded, headless and timed out — for stability, **not** as a security boundary.
 6. Post-M1 optional **container/microVM per loop** for loops touching untrusted content (web, foreign repos).
 
 ## Meta-Agent configuration writes
@@ -146,7 +146,7 @@ Protected-path matching semantics:
 - Matching is case-sensitive on Linux targets and conservatively ASCII case-insensitive on macOS Seatbelt targets, regardless of the host volume's case setting.
 - Explicit grants are tool-scoped entries in `commands[].filesystem.protected_path_grants`. A grant only removes the protected-path deny for that tool; the path must still be inside the same tool's declared read/write scope.
 
-- repo/runtime metadata: `**/.git`, `**/.git/**`, `**/.loop`, `**/.loop/**`;
+- repo/runtime metadata: `**/.git`, `**/.git/**`, `**/.flow`, `**/.flow/**`;
 - env/credential files: `**/.env`, `**/.env.*`, `**/*.env`, `**/*.local`, `**/.npmrc`, `**/.pypirc`, `**/.netrc`, `**/.git-credentials`;
 - key material: `**/*.pem`, `**/*.key`, `**/*.p12`, `**/*.pfx`, `**/id_rsa`, `**/id_dsa`, `**/id_ecdsa`, `**/id_ed25519`, `**/id_ecdsa_sk`, `**/id_ed25519_sk`;
 - credential stores/directories: `**/.ssh`, `**/.ssh/**`, `**/.gnupg`, `**/.gnupg/**`, `**/.aws`, `**/.aws/**`, `**/.azure`, `**/.azure/**`, `**/.docker`, `**/.docker/**`, `**/.kube`, `**/.kube/**`, `**/.config/gcloud`, `**/.config/gcloud/**`, `**/.config/gh`, `**/.config/gh/**`, `**/credentials`, `**/credentials/**`, `**/credentials.toml`, `**/secrets`, `**/secrets/**`.

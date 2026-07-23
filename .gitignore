@@ -1,10 +1,10 @@
 # Build artifacts (Rust / Cargo workspace). Cargo.lock is intentionally tracked.
 **/target/
 
-# Loop Agent runtime state & logs (see docs/concept/V-Spec_LoopAgent.html, SECURITY.md)
-**/.loop/sessions/
-**/.loop/logs/
-loop-agent/fixtures/**/out/
+# Flow Agent runtime state & logs (see docs/concept/V-Spec_FlowAgent.html, SECURITY.md)
+**/.flow/sessions/
+**/.flow/logs/
+flow-agent/fixtures/**/out/
 # Node is dev tooling only (clawpatch via package.json); the product has no Node runtime (ADR-0001)
 node_modules/
 .pnpm-store/

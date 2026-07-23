@@ -6,7 +6,7 @@ labels: enhancement
 
 **Problem / job-to-be-done**
 
-**Proposed solution** (which platform layer: Loop Agent / Meta-Harness / Liquid / core / proto)
+**Proposed solution** (which platform layer: Flow Agent / Meta-Harness / Liquid / core / proto)
 
 **Scope check**
 - [ ] This does not add project-code VCS/history behavior to the MVP (AGENTS.md “MVP VCS boundary” hard rule)

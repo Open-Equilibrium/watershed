@@ -6,7 +6,7 @@ Defense-in-depth ONLY. Codex PreToolUse currently intercepts just simple Bash
 calls and fails open (the model can bypass by writing a script and running it).
 This is a guardrail, NOT a security boundary. M1's modeled policy enforcement
 and the post-M1 OS sandbox plan are defined in SECURITY.md. Aligns with its
-protected paths (.git, .loop, secrets) and .gitignore. See ADR-0024.
+protected paths (.git, .flow, secrets) and .gitignore. See ADR-0024.
 """
 import json
 import re
@@ -16,8 +16,8 @@ import sys
 DENY = [
     (re.compile(r"\brm\s+(?:-\S+\s+)*(?:/|~|\*|\.)\s*$"),
      "Refusing rm targeting root / home / '*' / '.'."),
-    (re.compile(r"\brm\b[^|;&]*\.(?:git|loop|clawpatch)\b"),
-     "Refusing to delete a protected path (.git / .loop / .clawpatch)."),
+    (re.compile(r"\brm\b[^|;&]*\.(?:git|flow|clawpatch)\b"),
+     "Refusing to delete a protected path (.git / .flow / .clawpatch)."),
     (re.compile(r"(?:^|[\s;&|])>>?\s*\S*\.(?:git|env)\b"),
      "Refusing to redirect/overwrite into a protected path (.git / .env)."),
     (re.compile(r"\b(?:rm|mv|cp|truncate)\b[^|;&]*(?:\.env\b|\.local\b|secret|credential|\.pem\b|\.key\b)"),

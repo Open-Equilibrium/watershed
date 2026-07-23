@@ -100,7 +100,7 @@ proptest! {
 #[test]
 fn registry_loader_resolves_hello_loop_refs_and_canonical_output() {
     let workspace =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../loop-agent/fixtures/hello-loop");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../flow-agent/fixtures/hello-loop");
     let registry =
         load_loop_registry_from_workspace(&workspace, Path::new("registry"), "hello-loop")
             .expect("hello-loop registry loads");
@@ -696,14 +696,14 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
     const INSTRUCTION: &str =
         "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect input\n";
     let tool =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
     let phase =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
     let connection = include_str!(
-        "../../../loop-agent/fixtures/hello-loop/registry/connections/inspect-data.yaml"
+        "../../../flow-agent/fixtures/hello-loop/registry/connections/inspect-data.yaml"
     );
     let loop_block =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
     let network_tool = tool.replace(
         "  network: deny",
         "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443",
@@ -798,14 +798,14 @@ fn parser_rejects_unsafe_yaml_and_unknown_fields() {
 #[test]
 fn parser_enforces_registry_schema() {
     let tool =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
     let instruction = include_str!(
-        "../../../loop-agent/fixtures/hello-loop/registry/instructions/inspect-input.yaml"
+        "../../../flow-agent/fixtures/hello-loop/registry/instructions/inspect-input.yaml"
     );
     let phase =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/phases/inspect.yaml");
     let loop_block =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/loops/hello-loop.yaml");
     let cases = [
         ("invalid-id.yaml", tool.replacen("id: read-file", "id: ReadFile", 1)),
         (
@@ -960,7 +960,7 @@ fn registry_loader_rejects_linked_registry_root() {
 #[test]
 fn parser_handles_block_script_bodies_and_requires_content() {
     let fixture =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/write-summary.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/write-summary.yaml");
     let literal = fixture.replace(
         "    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n",
         "    #!/bin/sh\n    write_scope: [\"literal-only\"]\n    ---\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt\n",
@@ -1583,9 +1583,9 @@ fn parser_rejects_plain_yaml_non_string_scalars_for_string_fields() {
 #[test]
 fn parser_rejects_malformed_or_quoted_typed_scalars() {
     let parameter_tool =
-        include_str!("../../../loop-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
+        include_str!("../../../flow-agent/fixtures/hello-loop/registry/tools/read-file.yaml");
     let network_tool = include_str!(
-        "../../../loop-agent/fixtures/sandbox-negative/registry/tools/network-tool.yaml"
+        "../../../flow-agent/fixtures/sandbox-negative/registry/tools/network-tool.yaml"
     )
     .replace(
         "  network: deny\n",

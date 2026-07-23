@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V-Spec — Flow Agent</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.loop{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.loop{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="toc">
+    <h2>Contents</h2>
+    <a href="#purpose">1. Purpose & scope</a>
+    <a href="#boundary">2. Product boundary</a>
+    <a href="#surfaces">3. Runtime surfaces</a>
+    <a href="#principles">4. Differentiators</a>
+    <a href="#mvp-boundary">5. MVP boundary</a>
+    <a href="#architecture">6. Architecture</a>
+    <a href="#fsm">7. Deterministic FSM</a>
+    <a href="#script">8. Building-block scripts</a>
+    <a href="#events">9. Events & measurement</a>
+    <a href="#m0">10. M0/M1 implementation references</a>
+    <a href="#open">11. Open decisions</a>
+  </aside>
+  <main>
+    <header class="hero">
+      <div class="eyebrow">Watershed visual V-Spec</div>
+      <h1>V-Spec — Flow Agent</h1>
+      <p class="muted">CLI-only, Rust-core, script-driven, event-based deterministic agent-loop harness (CLI binary: <code>flow</code>, ADR-0013). Canonical shared docs: <a href="../../GLOSSARY.md">GLOSSARY.md</a>, <a href="../../VISION.md">VISION.md</a>, <a href="../../PROTOCOL.md">PROTOCOL.md</a>, <a href="../../SECURITY.md">SECURITY.md</a>, <a href="../../PERFORMANCE.md">PERFORMANCE.md</a>, <a href="../../TESTING.md">TESTING.md</a>.</p>
+    </header>
+
+    <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
+      <p>Flow Agent is a <strong>standalone CLI agent product first</strong>: a local harness that runs deterministic, script-defined AI-native processes. It exists for agentic engineers who need control, repeatability, bounded tool execution and measurable loop quality. It is usable on its own by humans at a terminal and headlessly by scripts, CI and automation. Direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">D-020</a>.</p>
+      <p><strong>A Meta-Harness on the same host may integrate through Flow Agent's public runtime surfaces; neither Meta-Harness nor Liquid is required to run Flow Agent.</strong> Flow Agent exposes only its CLI and public event stream. Liquid reaches agent sessions through Meta-Harness and owns the optional UI.</p>
+      <p>Flow Agent is the Watershed platform's <strong>execution layer</strong> and its developer/open-source credibility wedge (see <a href="../../PLAN.md">PLAN.md</a> wedge sequencing and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>run repeatable, auditable AI-agent workflows from my CLI.</em> It is a <strong>deterministic, auditable, reusable agent-loop runtime — not another generic coding agent.</strong></p>
+    </div></section>
+
+    <section id="boundary" class="section"><h2>2. Product boundary</h2><div class="body">
+      <p>Flow Agent is a standalone host-local CLI agent product. Meta-Harness is an optional same-host consumer; Liquid is an optional client of Meta-Harness. Neither is a prerequisite.</p>
+      <div class="grid">
+        <div class="card"><h3 class="good">Flow Agent owns</h3><ul>
+          <li>local execution;</li>
+          <li>deterministic FSM behavior;</li>
+          <li>the building-block / script runtime;</li>
+          <li>sandboxed tool execution;</li>
+          <li>local runtime events;</li>
+          <li>local transcript/session persistence;</li>
+          <li>its standalone CLI integration surfaces.</li>
+        </ul></div>
+        <div class="card"><h3 class="bad">Flow Agent does not own</h3>
+          <p class="muted"><b>Meta-Harness responsibilities:</b> same-host multi-agent process ownership, central config, AgentPulse, scheduling and a local-or-remote client API.</p>
+          <p class="muted"><b>Liquid responsibilities:</b> local-first Pages, Blocks, Views, responsive desktop/mobile UI, workspace data, action history and workspace CLI/API. Liquid may render Flow Agent sessions through Meta-Harness-backed Blocks; neither layer reads Flow Agent storage directly, and Liquid edits use Liquid's mutation pipeline.</p>
+        </div>
+      </div>
+      <p>Meta-Harness consumes Flow Agent's public surfaces from the same host (see <a href="V-Spec_MetaHarness.html">Meta-Harness V-Spec</a>); it does not own the runtime internals. M1 ships the human CLI plus machine-readable event stream. Local machine control is a designed-for seam (ADR-0035); direct Rust embedding remains <a href="../decisions/open-decisions.html#d-020">open</a>.</p>
+    </div></section>
+
+    <section id="surfaces" class="section"><h2>3. Standalone runtime surfaces</h2><div class="body">
+      <p>Flow Agent must expose the M1 surfaces below and preserve the designed-for seams. The CLI owns its output transport. CLI/fixture behavior is decided by ADR-0034; surface scope by ADR-0035.</p>
+      <div class="grid">
+        <div class="card"><h3>A. Human CLI</h3><pre><code>flow run hello-loop
+flow run "hello-loop"
+flow chat
+/hello-loop
+flow resume &lt;session-id&gt;
+flow sessions
+flow tail &lt;session-id&gt;</code></pre><p>Direct human use; nice terminal rendering is allowed. <code>/hello-loop</code> is entered inside the interactive <code>flow chat</code> terminal, not in the OS shell.</p></div>
+        <div class="card"><h3>B. Headless JSONL event stream</h3><pre><code>flow run smoke-loop --emit jsonl
+flow run hello-loop --emit jsonl</code></pre><p>The CLI owns stdout and streams newline-delimited committed events for automation, CI, custom terminal UIs and same-host Meta-Harness ingestion. CI captures and diffs this stream against the ADR-0034 goldens.</p></div>
+        <div class="card"><h3>C. Local machine-control surface (designed-for)</h3><pre><code>flow --mode rpc
+# or: flow rpc</code></pre><p>Bidirectional external control is a post-M1 seam. ADR-0055 selects local JSON-RPC over stdio (ADR-0029) with a minimal <code>flow.start</code>, <code>flow.status</code>, <code>flow.cancel</code>, <code>flow.tail</code> and <code>flow.export</code> command set; it carries the same runtime events instead of adding <code>cmd.*</code> event types.</p></div>
+        <div class="card"><h3>D. Rust integration (open)</h3><p><a href="../decisions/open-decisions.html#d-020">D-020</a> will decide whether other Rust programs call Flow Agent in-process or through its command and protocol surfaces. M1 makes no external embedding commitment.</p></div>
+      </div>
+      <h3>E. Local session/transcript persistence</h3>
+      <p>Flow Agent owns its own local session store, independent of Meta-Harness, mirroring the public event stream:</p>
+      <pre><code>.flow/sessions/&lt;session_id&gt;.jsonl
+.flow/sessions/&lt;session_id&gt;.000002.jsonl
+.flow/sessions/&lt;session_id&gt;.object.sha256-&lt;digest&gt;
+.flow/logs/&lt;session_id&gt;.log
+.flow/logs/&lt;session_id&gt;.contexts.jsonl
+.flow/logs/&lt;session_id&gt;.contexts.000002.jsonl</code></pre>
+      <p>Event and context-manifest streams use the bounded, record-preserving segmentation defined in <a href="../../PROTOCOL.md#m1-local-session-storage">PROTOCOL.md</a>. Each event is appended before a bounded live notification is attempted (ADR-0059, ADR-0062, ADR-0068). The store enables <strong>resume, replay, tail and debugging</strong>. <span class="warn">This is not project VCS/history handling</span>; <code>.flow</code> stays protected per <a href="../../SECURITY.md">SECURITY.md</a>.</p>
+      <p>The <code>.log</code> sidecar records definition identity. Context-manifest segments record each provider turn and reference its exact canonical source bytes through session-owned immutable SHA-256 objects; identical objects are stored once. Events, manifests, objects and metadata form one logical session bundle, and export/deletion must treat them as one unit. Neither metadata nor context manifests are runtime event streams.</p>
+      <p>The <code>&lt;session_id&gt;</code> filename segment is the lowercase path-safe v0 <code>session_id</code> token defined in <a href="../../PROTOCOL.md">PROTOCOL.md</a>. Replay, tail and resume reject invalid, uppercase or path-like IDs before touching <code>.flow/sessions</code>.</p>
+      <p>Minimum local M1 semantics: under <code>--emit jsonl</code>, <code>flow replay &lt;session-id&gt;</code> emits stored event objects unchanged in original <code>sequence</code> order and <code>flow tail &lt;session-id&gt;</code> emits the current valid prefix followed by new events; default human mode renders status. <code>flow resume &lt;session-id&gt;</code> is local-only, valid only for a non-terminal session owned by this Flow Agent instance, rejects selected-definition-closure or loop-definition drift before side effects, reconstructs state from the valid log prefix, then appends a new <code>session.resumed</code> event with the next sequence. Unrelated registry additions do not create drift. None of these commands rewrites prior events. Replay and resume reject corrupt or incomplete logs before tool side effects. Active sessions create <code>.flow/sessions/&lt;session_id&gt;.lock</code>. A new run derives its base session ID from the selected Loop and searches a bounded sequence of suffixed candidates when a bundle member or lock already exists; run APIs do not accept a caller-selected session ID. Resume targets the caller-supplied session ID and refuses any lock. M1 never classifies or auto-steals locks as stale, while replay/tail remains read-only. Manual resume recovery requires verifying no Flow Agent process owns the session, preserving or inspecting the log if needed, removing the lock, then retrying.</p>
+      <p>Canonical storage limits are defined in <a href="../../PERFORMANCE.md#adr-0068-safety-envelope">PERFORMANCE.md</a>. Replay requires complete valid event JSONL; resume additionally requires complete valid context-manifest JSONL and every referenced immutable object. Tail validates complete prefixes across segments, uses a sequence cursor, buffers an incomplete trailing line only in the final active segment and rejects bytes after a terminal event.</p>
+      <p>Ownership is authorship, not crash consistency: local M1 append and notification follow the flush/sync boundaries in <a href="../../PROTOCOL.md">PROTOCOL.md</a> and never expose an event that was not first appended. M1 does not promise power-loss atomicity across filesystem directory entries, sidecars and tool side effects. In ephemeral/cloud runs, replication plus durable storage—not container lifetime—provides survival; a persistent <code>.flow</code> volume covers standalone use. Remote replication cadence, crash recovery and a durable session-ownership lease remain post-M1 under ADR-0039.</p>
+    </div></section>
+
+    <section id="principles" class="section"><h2>4. Differentiators / core principles</h2><div class="body grid">
+      <div class="card"><h3>Recursive building blocks</h3><p>Tools, Instructions, Phases and Loops share one modular configuration model. A Loop is itself a building block, so loops can contain subloops without a second abstraction.</p></div>
+      <div class="card"><h3>Simpler terminology</h3><p>Scripts, instructions, connections and loops replace agent-specific vocabulary such as skills directories, agent markdown files and runtime-tool lists.</p></div>
+      <div class="card"><h3>Deterministic FSM</h3><p>The harness controls phase order, step transitions, available tools, instruction loading and event handling deterministically. LLM/tool outputs are inputs; the state machine remains deterministic. This is determinism of <em>orchestration</em>, not of model output (see §7).</p></div>
+      <div class="card"><h3>Event-driven runtime</h3><p>Normal progress is driven by events, not polling. M1 emits implemented completion and failure events; designed timeout and attention emitters join the same protocol after M1.</p></div>
+      <div class="card"><h3>Loops as AI-native processes</h3><p>Each loop run can be measured and compared. This enables optimizing specific loops rather than endlessly tuning one generalized agent setup.</p></div>
+      <div class="card"><h3>Security by construction</h3><p>Scripts declare capabilities; the runtime compiles them into sandbox policy. Prompt intent never becomes a security boundary.</p></div>
+    </div></section>
+
+    <section id="mvp-boundary" class="section"><h2>5. MVP boundary</h2><div class="body">
+      <p><span class="good">In scope:</span> standalone CLI, scripts, deterministic FSM, public event stream, JSONL headless mode, local session/transcript store, deterministic bounded in-process fixture interpretation, context manifests, sandbox policy, subloops and golden loops.</p>
+      <p><span class="bad">Out of scope:</span> Flow Agent UI, cross-host process control, central Meta-Harness behavior, Liquid Pages/Blocks, marketplace/plugins unless needed for a stub, and any Watershed project-history/VCS engine.</p>
+      <p>A same-host Meta-Harness is an optional consumer; Liquid is an optional client of Meta-Harness. Neither is required to run Flow Agent.</p>
+      <p>Flow Agent may run inside normal Git projects. Git operations are just tool commands when explicitly declared and sandboxed; Flow Agent does not own commits, branches, slices or history in the MVP. The local session store (§3E) is runtime state, not project VCS/history.</p>
+    </div></section>
+
+    <section id="architecture" class="section"><h2>6. Architecture</h2><div class="body">
+      <div class="loop" aria-label="Flow Agent architecture pipeline">
+        <div class="node">CLI</div><div class="arrow">→</div><div class="node">Script parser / registry</div><div class="arrow">→</div><div class="node">FSM engine</div><div class="arrow">→</div>
+        <div class="node">Instruction loader</div><div class="arrow">→</div><div class="node">Runtime kernel + sandbox</div><div class="arrow">→</div><div class="node">Serial writer → session log + wake-up</div>
+      </div>
+      <ul>
+        <li><strong>CLI:</strong> accepts a selected Loop reference and implemented output/event mode (human or JSONL); future RPC/control mode follows ADR-0055 after M1.</li>
+        <li><strong>Building-block registry:</strong> parses Tools, Instructions, Connections, Phases, Loops and Subloops.</li>
+        <li><strong>FSM engine:</strong> owns deterministic state transitions.</li>
+        <li><strong>Instruction loader:</strong> resolves active loop/phase/step instructions; the agent does not self-load them.</li>
+        <li><strong>Context compiler:</strong> produces the bounded, reproducible provider context and manifest defined below.</li>
+        <li><strong>Runtime kernel:</strong> interprets declared fixture tools deterministically in process with bounded inputs and policy checks. External subprocess timeouts, bounded stdout/stderr and per-tool run logs are post-M1.</li>
+        <li><strong>Session manager:</strong> uses one serial writer to append each canonical event before a bounded non-blocking notification; callers replay committed events by sequence and own delivery (§3E; <a href="../../PROTOCOL.md">PROTOCOL.md</a>).</li>
+        <li><strong>Protocol adapter:</strong> emits normalized events per <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</li>
+      </ul>
+      <h3>Crate boundaries (ADR-0033)</h3>
+      <p>The runtime engine and CLI front-end are separate crates so the engine can be tested headlessly and reused by the CLI. Any external embedding contract remains D-020:</p>
+      <ul>
+        <li><code>core/core-script</code> — building-block model, parser, registry and composition rules.</li>
+        <li><code>core/core-policy</code> — capability model and policy→sandbox compiler.</li>
+        <li><code>proto/</code> — <code>proto</code>: event schema and serialization.</li>
+        <li><code>flow-agent/flow-agent-core</code> — FSM engine, runtime kernel, session manager, local log, bounded live notification and runtime entry.</li>
+        <li><code>flow-agent/flow-agent-cli</code> — interactive terminal, slash commands, machine-readable mode, <code>flow run</code>, tail/replay/resume.</li>
+      </ul>
+      <p>The building-block model lives in <code>core-script</code> and is serializable over <code>proto</code>. Same-host Meta-Harness consumes it through <code>core-script</code> as a config resolver; Liquid renders derived state through Meta-Harness-backed Blocks. Neither consumes Flow Agent internals.</p>
+      <h3>Build strategy &amp; reuse</h3>
+      <p>Orchestration is built in-house; non-differentiating <strong>plumbing</strong> (model/provider I/O, tool execution, OS-sandbox wrappers, MCP client and context handling) is reused via general-purpose crates where it fits. Flow Agent is <strong>not built on or forked from Codex</strong>; Codex integrates as a Meta-Harness adapter. Rationale/licensing: <a href="../adr/ADR-LOG.md">ADR-0028</a>.</p>
+      <h3 id="context-compiler">Deterministic Tiered Context Compiler v0 (ADR-0050, ADR-0058)</h3>
+      <p>M1 has one internal context compiler and one public, fixed profile: <code>loop-context-v0</code>. It minimizes model-visible tokens subject to preserving the best achievable task outcome, deterministic orchestration, provenance and replay. M1 exposes neither user-configurable per-source budgets nor a general context-document format.</p>
+      <div class="grid">
+        <div class="card"><h4>Durable session history</h4><p>The complete append-only event history and source artifacts. Its events are authoritative for replay; the full history is authoritative for resume, audit, debugging and future retrieval. Context optimization never deletes either.</p></div>
+        <div class="card"><h4>Resolved loop state</h4><p>The current invocation, phase, step, active instructions/tools, connections and runtime state, plus values supplied by runtime interfaces whose source/schema is defined.</p></div>
+        <div class="card"><h4>Provider context</h4><p>The deterministic, bounded projection compiled for one model turn. It is deliberately smaller than durable session history.</p></div>
+      </div>
+      <h4>Budget, identity and cache-stable order</h4>
+      <p><code>input budget = model context limit - fixed output reserve - fixed safety margin</code>. The selected versioned model/context profile fixes all three values plus tokenizer or estimator identity. An exact provider tokenizer is used when available; otherwise M1 uses the conservative <code>utf8-byte-v0</code> estimator (one estimated token per canonical UTF-8 byte). The same durable state, resolved loop state, loop definition, model profile, runtime version and context-profile version produce the same ordered canonical provider-context bytes and lowercase SHA-256 context hash.</p>
+      <p>Tier 0 is serialized in this exact order:</p>
+      <ol>
+        <li>base runtime and security instructions;</li>
+        <li>active loop instructions;</li>
+        <li>active phase instructions;</li>
+        <li>active step instructions;</li>
+        <li>only tool definitions available to the active phase or step;</li>
+        <li>a compact snapshot of current FSM and loop state;</li>
+        <li>typed inputs arriving through explicit connections to the current step;</li>
+        <li>the current user input;</li>
+        <li>unresolved call/result state required to continue the turn.</li>
+      </ol>
+      <p>Resolved declaration order is preserved for instructions, tools and connections; canonical maps sort keys. Inactive instructions, unavailable tools, unrelated outputs and incidental volatility such as collection iteration order are excluded. The first five, scope-stable sections form the longest reusable provider-cache prefix; turn-specific state and inputs follow, then Tier 1. Cache-boundary metadata is deterministic and recorded in the manifest. Provider-specific cache hints may annotate those boundaries but must not reorder content, alter the logical context or change its context hash.</p>
+      <p>The current M1 CLI/stub runtime has no decided user-input value, predefined-command invocation-value, typed connection-value or artifact/tool-output source schema. The corresponding Tier 0 sections carry deterministic absence markers, and M1 emits no artifact/tool-output projection. Values or projections enter provider context only after their runtime source and schema are decided.</p>
+      <p>All Tier 0 content is mandatory. If it exceeds the input budget, Flow Agent emits the existing typed <code>error</code> event with code <code>context_budget_exceeded</code> and fails before contacting the provider. It never silently drops mandatory content or relies on provider-side truncation.</p>
+      <h4>Tier 1: bounded continuity</h4>
+      <p>Only the remaining budget may be used, in this selection order, for: the current incomplete turn when applicable; at most the most recent complete interaction turn; once their runtime source/schema is defined, bounded projections of directly referenced artifacts or tool outputs not already represented by typed connection inputs; and a compact deterministic checkpoint required to interpret state. Optional units are ordered by source sequence, then by this category order. If they do not fit, the oldest optional unit is omitted first. Ordinary user/assistant messages remain whole, and tool calls stay paired with their results. A directly connected typed output and unresolved continuation state belong to Tier 0, not this historical tail.</p>
+      <h4>Tier 2 and Tier 3: retained, not sent in M1</h4>
+      <p>Older turns beyond the single Tier 1 tail, unrelated phase/step outputs, inactive instructions, unavailable tool schemas, full old tool logs, full large artifacts and diagnostic history are omitted from M1 provider context, never deleted from durable history or artifact storage. M1 does not use model-generated compaction, embeddings, semantic RAG, adaptive relevance ranking, nondeterministic selection or regenerated summaries during resume/replay.</p>
+      <h4>Conditional projections and manifest</h4>
+      <p>When a directly referenced artifact source/schema is defined, it may use only a versioned deterministic projection algorithm registered by <code>loop-context-v0</code>; an unregistered type is omitted rather than heuristically summarized. The algorithm's decided parameters and manifest fields must make the projection byte-reproducible, and the complete source remains outside provider context.</p>
+      <p>Every provider turn stores a reproducible context manifest with its durable session data; this is an implementation artifact, not a new runtime event family. The manifest records context-profile ID/version, model profile/context limit, tokenizer or estimator ID/version, output reserve, safety margin, ordered included source IDs, projection hashes and session-object URIs, deterministic cache boundaries, omitted-source counts by category, estimated input tokens and final context hash. The immutable objects preserve the exact canonical source bytes even if the original workspace source later changes or disappears. Complete ordinary messages are never cut; tool calls/results remain paired; a result never appears without its call; unresolved required calls, current user input and required instructions are never silently removed. Resume verifies every object and uses the recorded context-profile version and compiler.</p>
+      <h4 id="post-m1-context">Post-M1 context architecture</h4>
+      <p>The following evolution is explicitly outside M1. Persisted structured compactions may be generated once, stored with provenance and reused unchanged on resume/replay; originals are never deleted and summaries are never regenerated during replay. Future provider context may combine active typed loop state, a persisted checkpoint/summary, a small raw tail, direct connection inputs and automatically retrieved evidence selected for the turn when relevant. Retrieved memory remains outside the building-block registry; only bounded, provenance-bearing results enter a turn.</p>
+      <p>Retrieval should first use deterministic graph identities and relationships—loop, phase, step, connection, artifact, tool-call and message IDs, tags and content hashes. Optional semantic retrieval may follow only with versioning, recorded queries/results, provenance, quality/token evaluation and a deterministic fallback. A retrieval subloop receives isolated declared inputs/instructions/tools and returns a small typed result with citations; its transcript does not leak into the parent. Later versions retain lazy scoped instructions/tools and are accepted only when evaluation shows token savings without measurable task-quality loss.</p>
+    </div></section>
+
+    <section id="fsm" class="section"><h2>7. Deterministic FSM</h2><div class="body">
+      <p>The FSM is deterministic over declared loop state and inputs — <strong>deterministic orchestration over a non-deterministic generator</strong>, not identical output. The LLM may produce stochastic content; the harness consumes it as data for deterministic transition rules, giving four guarantees: <strong>bounded</strong> (a step can only do what its phase declares), <strong>reproducible structure</strong> (same phases/steps/tool-scopes every run), <strong>measurable</strong> (runs compare because the scaffold is held constant), and <strong>governable</strong> (every transition is attributable). The trade is autonomy for control — strongest for processes run more than once or that must be trusted, wrong for open-ended exploration.</p>
+      <ul>
+        <li>Phase order is declared by the script.</li>
+        <li>Available tools/instructions are a pure function of current phase/step.</li>
+        <li>Subloops start through explicit building-block references.</li>
+        <li>Failures become typed events in M1; designed timeout and attention events remain post-M1.</li>
+        <li>Tests assert transitions, allowed tool sets, instruction loading and event ordering.</li>
+      </ul>
+    </div></section>
+
+    <section id="script" class="section"><h2>8. Building-block scripts</h2><div class="body">
+      <p>Scripts use YAML 1.2 with strict parser validation and canonical serialization (ADR-0031). Checked-in JSON Schema files document the intended shape, but M1 does not run a separate schema engine. They are human-reviewable security/capability artifacts, so the parser must produce one unambiguous model for reviewers, audits and golden tests, including when scripts are machine-generated.</p>
+      <p>Example registry entries below are separate files under one registry root; each file contains exactly one top-level block.</p>
+      <h3>registry/tools/read-file.yaml</h3>
+      <pre><code>tool:
+  id: read-file
+  name: ReadFile
+  tool_kind: predefined-command
+  command:
+    command_id: agent-read
+    argv: []
+  allowed_parameters:
+    - name: "--file"
+      value_type: workspace-relative-path
+      required: true
+  read_scope: ["workspace"]
+  write_scope: []
+  protected_path_grants: []
+  network: deny</code></pre>
+      <h3>registry/instructions/summarize-findings.yaml</h3>
+      <pre><code>instruction:
+  id: summarize-findings
+  name: SummarizeFindings
+  prompt: "Summarize only facts from tool output."</code></pre>
+      <h3>registry/phases/research.yaml</h3>
+      <pre><code>phase:
+  id: research
+  name: Research
+  tool_refs: [read-file]
+  instruction_refs: [summarize-findings]
+  steps:
+    - id: gather
+      name: Gather
+    - id: summarize
+      name: Summarize
+      connection_refs: [research-refresh]</code></pre>
+      <h3>registry/connections/research-refresh.yaml</h3>
+      <pre><code>connection:
+  id: research-refresh
+  name: ResearchRefresh
+  connection_kind: refresh
+  from_ref: research.gather
+  to_ref: research.summarize</code></pre>
+      <h3>registry/loops/hello-loop.yaml</h3>
+      <pre><code>loop:
+  id: hello-loop
+  name: HelloLoop
+  phase_refs: [research]
+  subloop_refs: []
+  connection_refs: [research-refresh]</code></pre>
+      <p>Minimum v0 schema surface: every block requires <code>id</code> and <code>name</code>; references use explicit id/name values and the resolver rejects missing or ambiguous references. Tools require <code>tool_kind</code> (<code>predefined-command</code> or <code>own-script</code>), exact <code>command</code>, <code>allowed_parameters</code>, <code>read_scope</code>, <code>write_scope</code>, <code>protected_path_grants</code> and <code>network</code>. A <code>predefined-command</code> tool uses <code>command</code> as an object with <code>command_id</code> and literal <code>argv</code>; <code>command_id</code> matches <code>^[a-z][a-z0-9_-]{0,63}$</code> and resolves through the predefined-command registry, not PATH lookup, a shell, environment expansion or globbing. Runtime execution uses fixture stubs for predefined commands. Parameter-token validation is canonical in <a href="../../SECURITY.md">SECURITY.md</a>; the current M1 CLI/stub supplies no invocation parameter tokens. An <code>own-script</code> tool uses <code>command: script:&lt;tool-id&gt;</code>, requires <code>script_runtime: posix-sh</code> and <code>script_body</code> as UTF-8 source owned by that Tool block, and forbids host script paths, shebang-selected interpreters and runtime-specific extra args in v0. Flow Agent selects the fixed runner for <code>posix-sh</code>; M1 interprets the fixture write subset and post-M1 sandbox backends apply the compiled policy to runner processes and children. Instructions require <code>prompt</code>. Phases require ordered <code>instruction_refs</code>, <code>tool_refs</code> and <code>steps</code>; every step requires <code>id</code> and <code>name</code>, may declare ordered <code>connection_refs</code>, and <code>step_id</code> events use the step <code>id</code>. Step ids are phase-local; connection endpoint references to steps use <code>&lt;phase_id&gt;.&lt;step_id&gt;</code>. Connections require <code>connection_kind</code> (<code>data</code>, <code>trigger</code> or <code>refresh</code>), <code>from_ref</code> and <code>to_ref</code>, and endpoints may target Tools, Instructions, Phases, Loops or scoped Steps. Loops require ordered <code>phase_refs</code> plus optional <code>subloop_refs</code> and <code>connection_refs</code>; every Step <code>connection_ref</code> must resolve to a Connection also listed by the enclosing Loop. Runtime <code>step.started</code>/<code>step.completed</code> payloads emit <code>connection_ids</code> and <code>connection_kinds</code> in the resolved Step <code>connection_refs</code> order. Checked schema files and parser fixtures enforce this contract; no additional top-level block kind is added without a new decision.</p>
+      <p>Tool <code>network</code> is either scalar <code>deny</code> or <code>{ default: deny, allow: [...] }</code>, with <code>default</code> fixed to <code>deny</code>. Allow entries and enforcement scope are canonical in <a href="../../SECURITY.md">SECURITY.md</a>. <code>core-policy</code> copies the resolved grammar into <code>commands[].network</code> (ADR-0051, ADR-0052).</p>
+      <h3>Workspace configuration</h3>
+      <pre><code>.flow/config.yaml
+registry_root: registry</code></pre>
+      <p><code>registry_root</code> is required and workspace-relative. Checked-in deterministic fixtures additionally pair <code>fixture_profile: stub-model</code> with <code>stub_model: deterministic</code>; normal workspaces omit both.</p>
+      <p>Composition happens through the building-block registry with explicit by-name/id references; Safe-YAML acceptance is canonical in <a href="../../SECURITY.md">SECURITY.md</a>. The v0 registry container is a configured registry root discovered recursively; every <code>.yaml</code>/<code>.yml</code> file is one UTF-8 YAML 1.2 document containing exactly one top-level block key (<code>tool</code>, <code>instruction</code>, <code>phase</code>, <code>connection</code> or <code>loop</code>) and one block object. Multi-document streams, files with multiple blocks, top-level block arrays/maps and non-registry YAML files are rejected. File paths are stable addresses for review and diagnostics only; identity and references come from the block <code>id</code>/<code>name</code>. The loader safely scans every entry into a bounded identity catalog, then materializes and resolves only the selected root Loop's transitive closure: referenced Phases, Subloops, Connections and their endpoints, Instructions and Tools. Each definition is retained once even when referenced repeatedly; unrelated definitions are not retained. The resolver rejects duplicates, ambiguity, missing selected references and cycles, resolves only within the configured root, and rejects nesting deeper than 16 levels, counting the root as level 1. Each Loop may directly reference at most 32 subloops. Later package/archive formats may provide registry entries, but they must normalize to the same one-block entry model before parsing. Connections must make data/control flow explicit instead of hiding it in agent-specific config files.</p>
+      <p>M1 registry limits are 128 KiB per YAML file, 16 MiB and 1,024 visited entries per root, and 1 MiB of source in the selected closure. Registry traversal accepts at most 64 nested directory components below each configured root; this filesystem limit does not constrain Loop composition. Block/Step names allow 256 Unicode characters; Instruction prompts and own-script bodies allow 64 KiB of UTF-8. The runtime safety envelope is defined in <a href="../../PERFORMANCE.md#adr-0068-safety-envelope">PERFORMANCE.md</a>. Limits are fixed M1 safeguards, not configuration.</p>
+      <p>Canonical serialization is deterministic UTF-8 JSON of the strictly parsed, validated and resolved selected closure, not a re-emission of source YAML. Object keys are sorted lexicographically; parser defaults are materialized; optional fields without defaults are omitted; arrays preserve declared order except <code>allowed_parameters</code>, which sorts by <code>name</code>; unordered collections are represented as maps keyed by id/name; strings are NFC-normalized; comments and source formatting are discarded; null is rejected unless explicitly allowed; NaN and infinity are always rejected. Canonical bytes are the review/audit/golden-test form.</p>
+    </div></section>
+
+    <section id="events" class="section"><h2>9. Events &amp; measurement</h2><div class="body">
+      <p>Flow Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition appends one normalized event; JSONL mode (§3B), future RPC mode (§3C) and replay from the local session log (§3E) expose the same events. Live notifications report the earliest pending and highest committed sequences, never a second event copy. Golden loops compare expected event streams, which makes individual loops measurable and optimizable.</p>
+      <p>These are the same normalized events defined in <a href="../../PROTOCOL.md">PROTOCOL.md</a> (single source of truth for the event-envelope fields and runtime event families). Exact v0 names are decided by ADR-0036; do not introduce a competing naming convention. Command/request shape is a separate post-M1 surface selected by ADR-0055.</p>
+      <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted ADR-0034 test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines delivery budgets.</p>
+    </div></section>
+
+    <section id="m0" class="section"><h2>10. M0/M1 implementation references</h2><div class="body">
+      <p>See the canonical M0/M1 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a> and approved implementation decisions in the <a href="../adr/ADR-LOG.md">ADR log</a>.</p>
+    </div></section>
+
+    <section id="open" class="section"><h2>11. Open decisions</h2><div class="body">
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>.</p>
+    </div></section>
+  </main>
+</div>
+</body>
+</html>

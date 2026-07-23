@@ -6,26 +6,26 @@ Created: 2026-06-05
 
 ## MVP boundary
 
-The first MVP is **Loop Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. Project-code-history/VCS questions are deferred until after the Loop Agent + Meta-Harness MVPs validate the core workflow. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3).
+The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git projects but does not own project history, auto-commit, branch management or any Watershed-specific **project-code** VCS engine. Project-code-history/VCS questions are deferred until after the Flow Agent + Meta-Harness MVPs validate the core workflow. This is distinct from Liquid's internal **workspace** action history/VCS (over Liquid's own workspace data), which is in scope for the Liquid MVP (M3).
 
 ## Sequencing and adoption
 
-Build the shared substrate, then Loop Agent, Meta-Harness and Liquid. This dependency/order-of-risk sequence validates execution, then multi-agent governance, then the integrated workspace without letting the broadest surface block earlier validation. All three remain independently usable layers of one platform; integration is canonical in `VISION.md`.
+Build the shared substrate, then Flow Agent, Meta-Harness and Liquid. This dependency/order-of-risk sequence validates execution, then multi-agent governance, then the integrated workspace without letting the broadest surface block earlier validation. All three remain independently usable layers of one platform; integration is canonical in `VISION.md`.
 
-The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Loop Agent and Meta-Harness wedges are validated.
+The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Flow Agent and Meta-Harness wedges are validated.
 
 ## Milestones
 
-### M0 — Loop Agent MVP implementation packet + walking skeleton
+### M0 — Flow Agent MVP implementation packet + walking skeleton
 
-**Wedge:** Loop Agent execution wedge (developer/open-source credibility).
+**Wedge:** Flow Agent execution wedge (developer/open-source credibility).
 
-**Purpose:** establish the implementation packet and walking skeleton needed to build the standalone Loop Agent MVP without inventing architecture.
+**Purpose:** establish the implementation packet and walking skeleton needed to build the standalone Flow Agent MVP without inventing architecture.
 
 **Deliverables:**
 
-- Rust workspace and the `core`, `proto`, `loop-agent`, `meta-harness`, and `liquid` scaffold.
-- Versioned building-block, event, runtime, session, policy, and sandbox contracts. Canonical owners: `PROTOCOL.md`, `SECURITY.md`, and the Loop Agent V-Spec.
+- Rust workspace and the `core`, `proto`, `flow-agent`, `meta-harness`, and `liquid` scaffold.
+- Versioned building-block, event, runtime, session, policy, and sandbox contracts. Canonical owners: `PROTOCOL.md`, `SECURITY.md`, and the Flow Agent V-Spec.
 - Deterministic fixtures and expected streams per `TESTING.md` (ADR-0034).
 - Cross-platform CI, dependency, coverage, link, and render gates per `TESTING.md`, `SECURITY.md`, and `.github/workflows/ci.yml`.
 
@@ -33,15 +33,15 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **DoD:** the scaffold compiles on Linux, macOS, and Windows; its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
 
-### M1 — Loop Agent MVP (standalone CLI)
+### M1 — Flow Agent MVP (standalone CLI)
 
-**Wedge:** Loop Agent execution wedge — prove evented agent loops as a deterministic, auditable, reusable agent-loop runtime (not a generic coding agent).
+**Wedge:** Flow Agent execution wedge — prove evented agent loops as a deterministic, auditable, reusable agent-loop runtime (not a generic coding agent).
 
 **Status:** M1 implementation is in progress. The standalone CLI runtime, JSONL event stream, local session log, replay/tail/resume commands, fixture registry loading and validation gates are in active hardening against the DoD.
 
 **Deliverables:**
 
-- Standalone CLI Loop Agent (human CLI run path).
+- Standalone CLI Flow Agent (human CLI run path).
 - Headless JSONL event stream over stdout.
 - Local append-only session/transcript log (ADR-0037); initial resume/tail/replay behavior over the log.
 - Public runtime events persisted before bounded non-blocking live notification, with caller-owned sequence replay from the authoritative log (ADR-0036, ADR-0059, ADR-0062).
@@ -55,11 +55,11 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Protocol adapter that emits normalized `proto` v0 events.
 - Golden loops and sandbox-negative tests per `TESTING.md` (ADR-0034).
 
-**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; persists every canonical event before any live notification; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Loop Agent M1 budgets in `PERFORMANCE.md`. Loop Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Loop Agent MVP feature depends on a Watershed project-history/VCS engine.
+**DoD:** a multi-phase local loop with a subloop runs headless from the CLI; compiles deterministic, budget-safe provider context and manifests; persists every canonical event before any live notification; emits the expected JSONL stream; persists/replays/tails/resumes the local session log; enforces phase/tool scoping; writes session event and context-manifest logs; and passes context, FSM, event-ordering, transcript-persistence and sandbox-negative policy-emulation tests (with macOS policy-artifact parity checks). It also meets the `TESTING.md` coverage gate (ADR-0022/ADR-0060) and all Flow Agent M1 budgets in `PERFORMANCE.md`. Flow Agent runs standalone with no dependency on Meta-Harness or Liquid, and no Flow Agent MVP feature depends on a Watershed project-history/VCS engine.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 
-**Wedge:** Meta-Harness team/control/governance wedge — turn Loop Agent and external agents into a controllable, observable, measurable system. Emphasize transparent, self-hostable, AGPL-aligned control; do not frame this as a monetization step.
+**Wedge:** Meta-Harness team/control/governance wedge — turn Flow Agent and external agents into a controllable, observable, measurable system. Emphasize transparent, self-hostable, AGPL-aligned control; do not frame this as a monetization step.
 
 M2 delivers Meta-Harness as a **self-contained, host-scoped headless control plane** with CLI/API/service surfaces — usable without Liquid. Each instance controls only CLI agents on its own host. Its public API remains transport-neutral; D-023 selects the local and authenticated remote bindings. Liquid integrates later as a client of one or more instances. Full product/runtime detail: [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html).
 
@@ -68,16 +68,16 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Meta-Harness CLI (headless user/admin: run/session/config/metrics commands).
 - Local service/daemon shape (sidecar for Liquid or standalone daemon) with the transport-neutral API and D-023 bindings.
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, AgentPulse queries, approval/reject/revert (transport: D-023).
-- Central configuration model that resolves shared Watershed building blocks to the correct agent CLI (Loop Agent, Codex CLI, Claude Code, Pi Agent, etc.).
+- Central configuration model that resolves shared Watershed building blocks to the correct agent CLI (Flow Agent, Codex CLI, Claude Code, Pi Agent, etc.).
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Host-local executor that rejects cross-host agent-process control.
-- Adapters: Loop Agent (via its public runtime surfaces) + at least one external CLI adapter.
+- Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - AgentPulse v0 metrics: rework ratio, first-attempt success and cost-per-productive-outcome using formulas decided before M2 implementation; computed and stored by Meta-Harness and queryable through CLI/API.
 - Policy-gated configuration writes with audit trail and review flow.
 - **No rich standalone GUI**; M2 packaging, including whether it adds a small status screen after the headless controller works, remains D-021.
 
-**DoD:** monitor, steer and configure at least two different CLI agents on the Meta-Harness host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol through the bindings selected by D-023; integrate Loop Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; report decided AgentPulse v0 metrics through CLI/API; and require approval plus an audit record for every sensitive config change.
+**DoD:** monitor, steer and configure at least two different CLI agents on the Meta-Harness host from one control surface, with both represented through one normalized session/event model; reject attempts to claim or control a process on another host; run without Liquid; expose the public API/protocol through the bindings selected by D-023; integrate Flow Agent through its public runtime surfaces (not its internals); resolve shared config without duplicated per-agent config directories for the same capability; report decided AgentPulse v0 metrics through CLI/API; and require approval plus an audit record for every sensitive config change.
 
 ### M3 — Liquid (staged standalone workspace product)
 

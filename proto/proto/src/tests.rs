@@ -94,7 +94,7 @@ fn envelope_metadata_validation_reports_invalid_fields() {
         "session001",
         1,
         "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
+        "flow-agent-cli",
         json!({}),
     );
     assert_eq!(valid.validate_metadata(), Ok(()));
@@ -130,7 +130,7 @@ fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
         "smoke001",
         1,
         "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
+        "flow-agent-cli",
         json!({
             "tool_name": "ReadFile",
             "allowed_parameters": [],
@@ -147,7 +147,7 @@ fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
     assert!(jsonl.ends_with('\n'));
     assert_eq!(
         jsonl,
-        "{\"event_id\":\"evt-001\",\"event_type\":\"tool.started\",\"payload\":{\"allowed_parameters\":[],\"network_access\":\"deny\",\"read_scope\":[\"workspace\"],\"tool_id\":\"read-file\",\"tool_kind\":\"predefined-command\",\"tool_name\":\"ReadFile\",\"write_scope\":[]},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"loop-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n"
+        "{\"event_id\":\"evt-001\",\"event_type\":\"tool.started\",\"payload\":{\"allowed_parameters\":[],\"network_access\":\"deny\",\"read_scope\":[\"workspace\"],\"tool_id\":\"read-file\",\"tool_kind\":\"predefined-command\",\"tool_name\":\"ReadFile\",\"write_scope\":[]},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n"
     );
 }
 
@@ -169,7 +169,7 @@ fn canonical_event_output_normalizes_all_string_values_to_nfc() {
         "smoke001",
         1,
         "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
+        "flow-agent-cli",
         json!({
             "loop_name": "Cafe\u{301}",
             "nested": ["e\u{301}"]
@@ -315,7 +315,7 @@ fn test_event(payload: Value) -> EventEnvelope {
         "smoke001",
         1,
         "2026-01-01T00:00:00Z",
-        "loop-agent-cli",
+        "flow-agent-cli",
         payload,
     )
 }
@@ -323,7 +323,7 @@ fn test_event(payload: Value) -> EventEnvelope {
 #[test]
 fn event_envelope_deserialization_rejects_non_object_payload() {
     let err = serde_json::from_str::<EventEnvelope>(
-            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":null,\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"loop-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
+            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":null,\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
         )
         .expect_err("non-object payload must fail");
 
@@ -333,7 +333,7 @@ fn event_envelope_deserialization_rejects_non_object_payload() {
 #[test]
 fn event_envelope_deserialization_rejects_unsupported_protocol_version() {
     let err = serde_json::from_str::<EventEnvelope>(
-            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{},\"protocol_version\":\"1\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"loop-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
+            "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{},\"protocol_version\":\"1\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}",
         )
         .expect_err("unsupported protocol version must fail");
 

@@ -14,7 +14,7 @@
     <h2>Contents</h2>
     <a href="#purpose">1. Purpose & scope</a>
     <a href="#boundary">2. Product boundary</a>
-    <a href="#loop-agent">3. Relationship to Loop Agent</a>
+    <a href="#flow-agent">3. Relationship to Flow Agent</a>
     <a href="#liquid">4. Relationship to Liquid</a>
     <a href="#deployment">5. Deployment modes</a>
     <a href="#surfaces">6. Public surfaces</a>
@@ -34,10 +34,10 @@
     </header>
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
-      <p><strong>Meta-Harness is a self-contained, host-scoped headless control plane.</strong> It centralizes configuration, starts and monitors CLI agents on its own host, normalizes their events, runs agent schedules and triggers, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code, Pi Agent) plug in through adapters — Codex is an adapter/target, not a Loop Agent base or fork (<a href="../adr/ADR-LOG.md">ADR-0028</a>).</p>
-      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its team/control/governance wedge (see <a href="../../PLAN.md">PLAN.md</a> and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>control, observe, measure, and govern many agents.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not a Loop-Agent-only monitor.</p>
+      <p><strong>Meta-Harness is a self-contained, host-scoped headless control plane.</strong> It centralizes configuration, starts and monitors CLI agents on its own host, normalizes their events, runs agent schedules and triggers, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code, Pi Agent) plug in through adapters — Codex is an adapter/target, not a Flow Agent base or fork (<a href="../adr/ADR-LOG.md">ADR-0028</a>).</p>
+      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its team/control/governance wedge (see <a href="../../PLAN.md">PLAN.md</a> and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>control, observe, measure, and govern many agents.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
       <p>The clean product model across the three Watershed tools:</p>
-      <pre><code>Loop Agent    = standalone agent runtime
+      <pre><code>Flow Agent    = standalone agent runtime
 Meta-Harness  = standalone headless many-agent control plane
 Liquid        = standalone native workspace / app-building product</code></pre>
       <p><strong>Meta-Harness can run without Liquid.</strong> Its CLI/API/service may be reached locally or, with authenticated transport, from another device. Remote API reachability never grants ownership of a CLI process on another host. Liquid is the primary rich UI, not a prerequisite; Meta-Harness does not ship a competing rich GUI in the MVP (packaging: <a href="../decisions/open-decisions.html#d-021">D-021</a>).</p>
@@ -64,7 +64,7 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>mobile/desktop app UX;</li>
           <li>PowerBar UX;</li>
           <li>the visual workspace model;</li>
-          <li>Loop Agent runtime internals;</li>
+          <li>Flow Agent runtime internals;</li>
           <li>agent execution on another host;</li>
           <li>a project VCS/history engine;</li>
           <li>a full separate rich GUI in the MVP.</li>
@@ -72,22 +72,22 @@ Liquid        = standalone native workspace / app-building product</code></pre>
       </div>
     </div></section>
 
-    <section id="loop-agent" class="section"><h2>3. Relationship to Loop Agent</h2><div class="body">
-      <p><strong>Meta-Harness consumes Loop Agent; it does not own it.</strong> Loop Agent is a <a href="V-Spec_LoopAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
-      <pre><code>Loop Agent
+    <section id="flow-agent" class="section"><h2>3. Relationship to Flow Agent</h2><div class="body">
+      <p><strong>Meta-Harness consumes Flow Agent; it does not own it.</strong> Flow Agent is a <a href="V-Spec_FlowAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
+      <pre><code>Flow Agent
   owns one local agent runtime
   owns deterministic loop execution
   owns local transcript/session persistence
   owns run/replay/tail/resume and JSONL runtime surfaces
 
 Meta-Harness
-  launches Loop Agent on the same host
+  launches Flow Agent on the same host
   consumes its public runtime surfaces
   manages host-local agents and sessions
   normalizes events across providers
   resolves shared config to target CLIs
   computes cross-agent metrics</code></pre>
-      <p>Meta-Harness integrates through Loop Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. The executor and CLI process share a host, but Meta-Harness never reads <code>.loop/sessions</code> directly or reaches into Loop Agent internals. It does not replace Loop Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence. Cross-host process control is outside the architecture.</p>
+      <p>Meta-Harness integrates through Flow Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. The executor and CLI process share a host, but Meta-Harness never reads <code>.flow/sessions</code> directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence. Cross-host process control is outside the architecture.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">
@@ -109,7 +109,7 @@ Liquid
       <div class="card"><h3>Mode A — local sidecar (default single-user)</h3>
         <pre><code>Liquid Desktop
   starts local Meta-Harness sidecar
-    starts/monitors Loop Agent, Codex CLI, Claude Code, Pi Agent, ...
+    starts/monitors Flow Agent, Codex CLI, Claude Code, Pi Agent, ...
     stores local sessions/config/metrics</code></pre>
         <p class="muted">Liquid starts Meta-Harness locally. PowerBar commands go to the sidecar, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals.</p>
       </div>
@@ -154,7 +154,7 @@ meta approvals</code></pre></div>
         </ul></div>
       </div>
       <h3>Service / daemon surface</h3>
-      <p>The same service can run as a Liquid sidecar, standalone daemon or server-host service. This changes client reachability, not executor ownership. Concrete service/API transport is <a href="../decisions/open-decisions.html#d-023">D-023</a>; state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Loop Agent's designed local control transport baseline is ADR-0029.</p>
+      <p>The same service can run as a Liquid sidecar, standalone daemon or server-host service. This changes client reachability, not executor ownership. Concrete service/API transport is <a href="../decisions/open-decisions.html#d-023">D-023</a>; state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Flow Agent's designed local control transport baseline is ADR-0029.</p>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
@@ -170,7 +170,7 @@ meta approvals</code></pre></div>
   AgentPulse engine, artifact index
 
 meta-harness-adapters
-  Loop Agent adapter, Codex CLI adapter,
+  Flow Agent adapter, Codex CLI adapter,
   Claude Code adapter, Pi Agent adapter, future adapters
 
 meta-harness-service
@@ -193,12 +193,12 @@ liquid integration
     </div></section>
 
     <section id="config" class="section"><h2>8. Central config</h2><div class="body">
-      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Loop Agent, Codex CLI, Claude Code, Pi Agent and future adapters. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
+      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Flow Agent, Codex CLI, Claude Code, Pi Agent and future adapters. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
       <pre><code>shared block: "review-rust-change"
   instructions: ["review safety", "review tests"]
   tools: ["read", "search", "run-tests"]
   targets:
-    loop-agent:  loop script + building blocks
+    flow-agent:  loop script + building blocks
     codex-cli:   instruction pack + command args
     claude-code: instruction pack + command args
     pi-agent:    instruction pack + command args</code></pre>

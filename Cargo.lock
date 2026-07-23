@@ -148,6 +148,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "flow-agent-cli"
+version = "0.0.0"
+dependencies = [
+ "flow-agent-core",
+ "proto",
+]
+
+[[package]]
+name = "flow-agent-core"
+version = "0.0.0"
+dependencies = [
+ "cap-fs-ext",
+ "cap-std",
+ "core-policy",
+ "core-script",
+ "proto",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "fs-set-times"
 version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -242,28 +264,6 @@ name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
-
-[[package]]
-name = "loop-agent-cli"
-version = "0.0.0"
-dependencies = [
- "loop-agent-core",
- "proto",
-]
-
-[[package]]
-name = "loop-agent-core"
-version = "0.0.0"
-dependencies = [
- "cap-fs-ext",
- "cap-std",
- "core-policy",
- "core-script",
- "proto",
- "serde",
- "serde_json",
- "sha2",
-]
 
 [[package]]
 name = "maybe-owned"

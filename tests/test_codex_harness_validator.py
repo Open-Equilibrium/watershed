@@ -521,30 +521,36 @@ process.stderr.write = (message) => {
 
     def test_pre_tool_guard_accepts_command_and_cmd_envelopes(self) -> None:
         for key in ("command", "cmd"):
-            with self.subTest(key=key):
-                result = subprocess.run(
-                    [sys.executable, str(ROOT / ".codex" / "hooks" / "pre_tool_use_guard.py")],
-                    input=json.dumps({"tool_input": {key: "rm -rf .git"}}),
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
+            for protected_path in (".git", ".flow", ".clawpatch"):
+                with self.subTest(key=key, protected_path=protected_path):
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            str(ROOT / ".codex" / "hooks" / "pre_tool_use_guard.py"),
+                        ],
+                        input=json.dumps(
+                            {"tool_input": {key: f"rm -rf {protected_path}"}}
+                        ),
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
 
-                self.assertEqual(0, result.returncode)
-                self.assertEqual(
-                    {
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "deny",
-                            "permissionDecisionReason": (
-                                "Watershed guard: Refusing to delete a protected path "
-                                "(.git / .loop / .clawpatch)."
-                            ),
-                        }
-                    },
-                    json.loads(result.stdout),
-                )
-                self.assertEqual("", result.stderr)
+                    self.assertEqual(0, result.returncode)
+                    self.assertEqual(
+                        {
+                            "hookSpecificOutput": {
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": "deny",
+                                "permissionDecisionReason": (
+                                    "Watershed guard: Refusing to delete a protected path "
+                                    "(.git / .flow / .clawpatch)."
+                                ),
+                            }
+                        },
+                        json.loads(result.stdout),
+                    )
+                    self.assertEqual("", result.stderr)
 
     def test_stop_hook_reports_only_ten_conflict_markers(self) -> None:
         conflicts = [f"file-{index}: leftover conflict marker" for index in range(12)]

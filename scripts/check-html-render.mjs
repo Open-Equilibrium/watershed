@@ -86,8 +86,8 @@ async function assertHeadingExtraction(page) {
   for (const [html, expected] of [
     ["<h1>Plain heading</h1>", "Plain heading"],
     ["<h1>R&amp;D</h1>", "R&D"],
-    ["<h1>Loop <span>Agent</span></h1>", "Loop Agent"],
-    ["<h1>Loop<br>Agent</h1>", "Loop Agent"],
+    ["<h1>Flow <span>Agent</span></h1>", "Flow Agent"],
+    ["<h1>Flow<br>Agent</h1>", "Flow Agent"],
   ]) {
     const actual = await expectedHeading(page, html, "heading extraction assertion");
     if (actual !== expected) {

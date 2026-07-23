@@ -24,7 +24,7 @@ The visual V-Spec files under `docs/concept/` optimize for information quality a
 5. **No secrets.** Never read, print, or commit credentials, tokens, keys, cookies, or `.env` files. Reference CI secrets by name only.
 6. **Tests are sacred.** Write a failing (red) test before new behavior; never weaken, skip, delete, or lower coverage thresholds to make a run pass. Tests must be meaningful, behavior-focused, and proportionate to the behavior under test; implementation-symptom tests do not count.
 7. **Durable artifacts over chat.** Record decisions and state in files, not in conversation history. Human review is the final gate.
-8. **Concurrency awareness.** At any time another agent may be active in any of the other tools (Liquid / Loop Agent / Meta-Harness). Coordinate through Git branches/PRs and the open-decisions flow; never assume exclusive ownership of files or branches; expect and cleanly merge parallel changes.
+8. **Concurrency awareness.** At any time another agent may be active in any of the other tools (Liquid / Flow Agent / Meta-Harness). Coordinate through Git branches/PRs and the open-decisions flow; never assume exclusive ownership of files or branches; expect and cleanly merge parallel changes.
 9. **MVP VCS boundary.** Do not add Watershed-owned project-code VCS/history behavior. Liquid workspace action history over its own data remains in scope (ADR-0011; `SECURITY.md`).
 
 ## Decision flow

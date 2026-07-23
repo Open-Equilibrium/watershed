@@ -16,7 +16,7 @@ use unicode_normalization::UnicodeNormalization;
 /// Protocol version string emitted by all v0 event envelopes.
 pub const PROTOCOL_VERSION_V0: &str = "0";
 
-/// Canonical runtime event envelope shared by Loop Agent, Meta-Harness and Liquid.
+/// Canonical runtime event envelope shared by Flow Agent, Meta-Harness and Liquid.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 pub struct EventEnvelope {
     /// Additive v0 envelope fields not yet understood by this implementation.

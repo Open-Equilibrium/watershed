@@ -71,7 +71,7 @@ jobs:
         run: >-
           cargo nextest run
           --locked
-          -p loop-agent-core
+          -p flow-agent-core
           --release
           --run-ignored ignored-only
           -j 1

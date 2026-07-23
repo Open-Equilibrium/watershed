@@ -8,6 +8,43 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class M1ValidationContractTest(unittest.TestCase):
+    def test_flow_agent_identity_has_no_stale_product_references(self) -> None:
+        expected_paths = [
+            ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml",
+            ROOT / "flow-agent" / "flow-agent-cli" / "Cargo.toml",
+            ROOT / "flow-agent" / "fixtures" / "smoke-loop" / ".flow" / "config.yaml",
+            ROOT / "docs" / "concept" / "V-Spec_FlowAgent.html",
+        ]
+        self.assertEqual(
+            [str(path.relative_to(ROOT)) for path in expected_paths if not path.is_file()],
+            [],
+        )
+
+        stale_tokens = [
+            "Loop" + " Agent",
+            "Loop" + "Agent",
+            "Loop" + "-Agent",
+            "loop" + "-agent",
+            "loop" + "_agent",
+        ]
+        excluded_parts = {".git", ".clawpatch", ".codex-logs", "node_modules", "target"}
+        stale_references: dict[str, list[str]] = {}
+        for path in ROOT.rglob("*"):
+            if not path.is_file() or excluded_parts.intersection(path.parts):
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            matches = [token for token in stale_tokens if token in content]
+            if matches:
+                stale_references[str(path.relative_to(ROOT))] = matches
+
+        self.assertEqual(stale_references, {})
+        cli_manifest = expected_paths[1].read_text(encoding="utf-8")
+        self.assertIn('name = "flow"', cli_manifest)
+        self.assertNotIn('name = "' + "loop" + '"', cli_manifest)
+
     def assert_active_pinned_rust_step(self, workflow: str, version: str) -> None:
         lines = workflow.splitlines()
         marker = "      - name: Select pinned Rust"
@@ -75,12 +112,12 @@ class M1ValidationContractTest(unittest.TestCase):
             )
         self.assertEqual(result.returncode == 0, ignored, path)
 
-    def test_gitignore_keeps_loop_workspace_config_trackable(self) -> None:
+    def test_gitignore_keeps_flow_workspace_config_trackable(self) -> None:
         for path, ignored in [
-            ("loop-agent/fixtures/new-fixture/.loop/config.yaml", False),
-            ("loop-agent/fixtures/new-fixture/.loop/sessions/session.jsonl", True),
-            ("loop-agent/fixtures/new-fixture/.loop/logs/session.log", True),
-            ("loop-agent/fixtures/new-fixture/out/result.txt", True),
+            ("flow-agent/fixtures/new-fixture/.flow/config.yaml", False),
+            ("flow-agent/fixtures/new-fixture/.flow/sessions/session.jsonl", True),
+            ("flow-agent/fixtures/new-fixture/.flow/logs/session.log", True),
+            ("flow-agent/fixtures/new-fixture/out/result.txt", True),
             ("docs/out/example.md", False),
         ]:
             with self.subTest(path=path):

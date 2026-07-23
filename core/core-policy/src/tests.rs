@@ -10,7 +10,7 @@ const POLICY_TARGETS: [PolicyTarget; 2] = [
 
 fn fixture_registry(fixture: &str, loop_ref: &str) -> core_script::ResolvedRegistry {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../loop-agent/fixtures")
+        .join("../../flow-agent/fixtures")
         .join(fixture);
     core_script::load_loop_registry_from_workspace(&workspace, Path::new("registry"), loop_ref)
         .expect("fixture registry loads")
@@ -723,8 +723,8 @@ fn default_protected_paths_have_behavioral_denial_examples() {
         ),
         ("**/.kube", "workspace/home/user/.kube"),
         ("**/.kube/**", "workspace/home/user/.kube/config"),
-        ("**/.loop", "workspace/project/.loop"),
-        ("**/.loop/**", "workspace/project/.loop/sessions/run.jsonl"),
+        ("**/.flow", "workspace/project/.flow"),
+        ("**/.flow/**", "workspace/project/.flow/sessions/run.jsonl"),
         ("**/.netrc", "workspace/home/user/.netrc"),
         ("**/.npmrc", "workspace/project/.npmrc"),
         ("**/.pypirc", "workspace/home/user/.pypirc"),

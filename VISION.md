@@ -5,13 +5,13 @@
 AI-agent work should be **structured, observable, measurable and safely reversible**. Watershed is one **AGPL/free-software AI-native work platform** with three independently useful layers:
 
 ```text
-Execution layer:         Loop Agent
+Execution layer:         Flow Agent
 Control layer:           Meta-Harness
 Workspace/action layer:  Liquid
 ```
 
 ```text
-Loop Agent makes agent work repeatable.
+Flow Agent makes agent work repeatable.
 Meta-Harness makes agent work observable and governable.
 Liquid makes human and agent work visible, composable and reversible.
 ```
@@ -20,7 +20,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 ## Independent products, compound value
 
-- **Loop Agent:** *Run repeatable, auditable AI-agent workflows from my CLI.*
+- **Flow Agent:** *Run repeatable, auditable AI-agent workflows from my CLI.*
 - **Meta-Harness:** *Control, observe, measure and govern agents on one host.*
 - **Liquid:** *Let humans and agents build and safely co-edit a local-first workspace.*
 
@@ -32,7 +32,7 @@ Watershed is AGPL/free software: users can inspect, run, self-host, fork and ver
 
 Watershed is a monorepo, **not** a monolith. The products share `core` libraries and the versioned `proto` contract, but own separate processes and state.
 
-- **Loop Agent** is CLI-only and host-local. Humans, scripts, CI or a Meta-Harness on the same host use its public CLI/event surfaces. Nothing reads its private session store.
+- **Flow Agent** is CLI-only and host-local. Humans, scripts, CI or a Meta-Harness on the same host use its public CLI/event surfaces. Nothing reads its private session store.
 - **Meta-Harness** is a headless, host-scoped controller. It starts and controls only CLI agents on its own host, while authenticated clients may reach its public API remotely. Each instance owns its agent configurations, sessions, transcripts, agent schedules and AgentPulse metrics.
 - **Liquid** is a local-first workspace and app-building product. Every interactive client reads and writes its local replica. A central Sync Server coordinates replicas; an optional headless Liquid replica lets server-hosted agents use the same workspace action boundary while user devices are offline.
 
@@ -56,7 +56,7 @@ Liquid's Page/Block/View UX, Workspace object lifecycle, Roles, logic levels, Ap
 
 Cross-product implications:
 
-- Meta-Harness and Loop Agent never mutate Liquid storage directly; they use the Workspace CLI/API.
+- Meta-Harness and Flow Agent never mutate Liquid storage directly; they use the Workspace CLI/API.
 - App actions and Workspace mutations remain Liquid-owned, permissioned and recorded in History.
 - Meta-Harness agent schedules may invoke Liquid actions only through that boundary; Liquid Automations may invoke authorized Meta-Harness actions through its public API.
 
@@ -74,7 +74,7 @@ Agents never receive authority merely because a Block is visible. They act throu
 
 ## Positioning and non-goals
 
-Position Watershed as structured agent execution + a neutral host-scoped control plane + a safe local-first workspace. Do not position it as another generic coding agent, a Notion clone, three unrelated products, a status UI for Loop Agent or a proprietary/open-core service.
+Position Watershed as structured agent execution + a neutral host-scoped control plane + a safe local-first workspace. Do not position it as another generic coding agent, a Notion clone, three unrelated products, a status UI for Flow Agent or a proprietary/open-core service.
 
 - Liquid is an OS-abstracting app, not an operating system.
 - Watershed does not implement project-code VCS/history in the MVP; normal Git projects remain external. Liquid History covers only Liquid workspace data.
