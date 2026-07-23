@@ -142,6 +142,58 @@ process.stderr.write = (message) => {
                 error_path.read_text(encoding="utf-8"),
             )
 
+    def test_non_windows_python_launcher_fallback_and_failures(self) -> None:
+        result = run_node_module_test(
+            f"""
+            import assert from "node:assert/strict";
+            import {{ runPython }} from {json.dumps((ROOT / "scripts" / "run-python.mjs").as_uri())};
+
+            const missing = () => ({{
+              error: Object.assign(new Error("missing"), {{ code: "ENOENT" }}),
+            }});
+
+            const fallbackCalls = [];
+            const fallbackStatus = runPython(["script.py"], {{
+              platform: "linux",
+              spawnSync(executable) {{
+                fallbackCalls.push(executable);
+                return executable === "python3" ? missing() : {{ status: 0 }};
+              }},
+            }});
+            assert.equal(fallbackStatus, 0);
+            assert.deepEqual(fallbackCalls, ["python3", "python"]);
+
+            const failureCalls = [];
+            const failureStatus = runPython(["script.py"], {{
+              platform: "darwin",
+              spawnSync(executable) {{
+                failureCalls.push(executable);
+                return {{ status: 7 }};
+              }},
+            }});
+            assert.equal(failureStatus, 7);
+            assert.deepEqual(failureCalls, ["python3"]);
+
+            const exhaustionCalls = [];
+            const stderr = {{ text: "", write(chunk) {{ this.text += chunk; }} }};
+            const exhaustionStatus = runPython(["script.py"], {{
+              platform: "linux",
+              stderr,
+              spawnSync(executable) {{
+                exhaustionCalls.push(executable);
+                return missing();
+              }},
+            }});
+            assert.equal(exhaustionStatus, 127);
+            assert.deepEqual(exhaustionCalls, ["python3", "python"]);
+            assert.equal(stderr.text, "missing Python interpreter: tried python3, python\\n");
+            """
+        )
+
+        self.assertEqual("", result.stdout)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+
     def test_windows_python_launcher_failure_falls_back_to_python(self) -> None:
         result = run_node_module_test(
             f"""
