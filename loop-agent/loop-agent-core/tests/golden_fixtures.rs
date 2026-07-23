@@ -140,10 +140,16 @@ fn hello_loop_source_tools_cover_m0_contract() {
 #[test]
 fn sandbox_negative_streams_fail_without_completion_events() {
     let expected_dir = fixture_root().join("sandbox-negative/expected");
-    for stream_path in expected_streams()
+    let stream_paths = expected_streams()
         .into_iter()
         .filter(|path| path.parent() == Some(expected_dir.as_path()))
-    {
+        .collect::<Vec<_>>();
+    assert!(
+        !stream_paths.is_empty(),
+        "{} must contain expected JSONL streams",
+        expected_dir.display()
+    );
+    for stream_path in stream_paths {
         let stream = load_stream_from_path(&stream_path);
         let event_types = event_types(&stream);
 
