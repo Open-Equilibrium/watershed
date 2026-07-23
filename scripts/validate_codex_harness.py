@@ -262,10 +262,11 @@ def validate_skills(root: Path) -> list[str]:
     if not skill_dir.is_dir():
         return [".agents/skills: missing directory"]
 
-    found_skills = {path.name for path in skill_dir.iterdir() if path.is_dir()}
+    found_skill_dirs = {path.name for path in skill_dir.iterdir() if path.is_dir()}
+    found_skills = {path.parent.name for path in skill_dir.glob("*/SKILL.md")}
     for name in sorted(REQUIRED_SKILLS - found_skills):
         errors.append(f".agents/skills/{name}/SKILL.md: missing required skill")
-    for name in sorted(RETIRED_SKILLS & found_skills):
+    for name in sorted(RETIRED_SKILLS & found_skill_dirs):
         errors.append(f".agents/skills/{name}/SKILL.md: retired skill must be absent")
 
     for path in sorted(skill_dir.glob("*/SKILL.md")):

@@ -357,6 +357,17 @@ process.stderr.write = (message) => {
                 validator.validate_repo(root),
             )
 
+    def test_rejects_required_skill_directory_without_skill_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            (root / ".agents" / "skills" / "clawpatch" / "SKILL.md").unlink()
+
+            self.assertIn(
+                ".agents/skills/clawpatch/SKILL.md: missing required skill",
+                validator.validate_repo(root),
+            )
+
     def test_rejects_hook_drift(self) -> None:
         cases = [
             (
