@@ -2,8 +2,13 @@ use core_script::{
     AllowedParameter, LoopBlock, ParameterValueType, PhaseBlock, RegistryBlock, ScriptRuntime,
     StepBlock, ToolBlock, ToolCommand, ToolKind, parse_registry_block,
 };
+use loop_agent_core::{EmitMode, run_loop};
 use proto::{EventEnvelope, EventType};
 use std::{collections::HashSet, fs, path::Path};
+
+#[path = "../../tests/support.rs"]
+mod test_support;
+use test_support::workspace_copy;
 
 #[test]
 fn every_fixture_workspace_has_config_and_expected_stream() {
@@ -37,6 +42,13 @@ fn every_fixture_workspace_has_config_and_expected_stream() {
 
 #[test]
 fn smoke_loop_stream_matches_m0_order_contract() {
+    let workspace = workspace_copy("smoke-loop");
+    let output =
+        run_loop(&workspace, "smoke-loop", EmitMode::Jsonl).expect("smoke-loop fixture executes");
+    let expected = fs::read_to_string(fixture_root().join("smoke-loop/expected/smoke-loop.jsonl"))
+        .expect("smoke-loop golden stream reads");
+    assert_eq!(output.stdout, expected);
+
     let stream = load_stream("smoke-loop", "smoke-loop.jsonl");
     let event_types = event_types(&stream);
 
@@ -57,6 +69,20 @@ fn smoke_loop_stream_matches_m0_order_contract() {
         ]
     );
     assert_smoke_loop_payload_dimensions(&stream);
+}
+
+#[test]
+fn sandbox_negative_runtime_matches_golden_stream() {
+    let workspace = workspace_copy("sandbox-negative");
+    let output = run_loop(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+        .expect("sandbox-negative-write fixture executes");
+    assert!(output.failed);
+    let expected = fs::read_to_string(
+        fixture_root().join("sandbox-negative/expected/sandbox-negative-write.jsonl"),
+    )
+    .expect("sandbox-negative-write golden stream reads");
+
+    assert_eq!(output.stdout, expected);
 }
 
 #[test]
