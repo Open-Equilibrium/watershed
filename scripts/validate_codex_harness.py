@@ -201,7 +201,7 @@ def validate_hook_command(
     if re.search(r"(?:^|\s)(?:bash|sh)\s+-c(?:\s|$)", command):
         errors.append(f"{rel}: hook command must not require a POSIX shell")
     timeout = hook.get("timeout")
-    if not isinstance(timeout, int) or timeout <= 0:
+    if type(timeout) is not int or timeout <= 0:
         errors.append(f"{prefix}.timeout must be a positive integer")
 
     match = HOOK_COMMAND_RE.fullmatch(command)

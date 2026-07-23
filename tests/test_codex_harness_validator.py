@@ -437,6 +437,13 @@ process.stderr.write = (message) => {
                 ".codex/hooks.json: hook command references missing script .codex/hooks/missing.py",
             ),
             (
+                "boolean timeout",
+                "hook",
+                "timeout",
+                True,
+                ".codex/hooks.json: hooks.PreToolUse[0].hooks[0].timeout must be a positive integer",
+            ),
+            (
                 "POSIX shell",
                 "hook",
                 "command",
