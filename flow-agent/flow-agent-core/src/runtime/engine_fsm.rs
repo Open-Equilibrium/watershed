@@ -1,25 +1,81 @@
 use super::*;
 
+#[derive(Debug)]
 pub struct RuntimeExecution {
     pub(crate) context_manifests: RuntimeStreamSignature,
     pub(crate) events: RuntimeStreamSignature,
     pub(crate) failed: bool,
     pub(crate) failure_status: Option<String>,
     pub(crate) terminal_error: Option<RuntimeError>,
+    pub(crate) tool_intents: Vec<PlannedToolIntent>,
 }
 
 impl RuntimeExecution {
-    pub(crate) fn matches_plan(&self, planned: &Self) -> bool {
-        self.events == planned.events
-            && self.context_manifests == planned.context_manifests
-            && self.failed == planned.failed
-            && self.failure_status == planned.failure_status
+    pub(crate) fn matches_plan(&self, plan: &FlowExecutionPlan) -> bool {
+        self.events == plan.execution.events
+            && self.context_manifests == plan.execution.context_manifests
+            && self.failed == plan.execution.failed
+            && self.failure_status == plan.execution.failure_status
+            && self.tool_intents == plan.execution.tool_intents
+            && FlowExecutionPlan::signature_for(self) == plan.signature
     }
 }
 
 pub const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
 pub const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
+pub const FLOW_EXECUTION_PLAN_DOMAIN: &[u8] = b"watershed.runtime.flow-execution-plan.v1";
 pub static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlannedToolIntent {
+    pub(crate) canonical: String,
+    pub(crate) flow_id: String,
+    pub(crate) tool_id: String,
+}
+
+pub struct FlowExecutionPlan {
+    pub(crate) execution: RuntimeExecution,
+    pub(crate) signature: RuntimeStreamSignature,
+}
+
+impl FlowExecutionPlan {
+    pub(crate) fn from_execution(execution: RuntimeExecution) -> Self {
+        let signature = Self::signature_for(&execution);
+        Self {
+            execution,
+            signature,
+        }
+    }
+
+    pub(crate) fn signature_for(execution: &RuntimeExecution) -> RuntimeStreamSignature {
+        let mut signature = RuntimeStreamSignatureBuilder::new(FLOW_EXECUTION_PLAN_DOMAIN);
+        signature.push(&execution.events.digest);
+        signature.push(&execution.context_manifests.digest);
+        signature.push(&execution.events.record_count.to_be_bytes());
+        signature.push(&execution.context_manifests.record_count.to_be_bytes());
+        signature.push(&[u8::from(execution.failed)]);
+        signature.push(
+            execution
+                .failure_status
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        for intent in &execution.tool_intents {
+            signature.push(intent.canonical.as_bytes());
+        }
+        signature.signature()
+    }
+
+    pub(crate) fn validate_integrity(&self) -> Result<(), RuntimeError> {
+        if Self::signature_for(&self.execution) != self.signature {
+            return Err(RuntimeError::Protocol(
+                "flow execution plan signature is invalid".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 pub struct LiveInvocationCounter {
     pub(crate) count: std::sync::atomic::AtomicUsize,
@@ -139,21 +195,21 @@ pub struct RuntimeToolPolicy<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ToolSideEffectMode {
-    ApplyAll,
-    DryRun,
+    Apply,
+    Plan,
     PreflightResume { prefix_event_count: u64 },
     Resume { prefix_event_count: u64 },
 }
 
 impl ToolSideEffectMode {
     pub(crate) fn occupies_live_invocation_slot(self, terminal_in_prefix: bool) -> bool {
-        matches!(self, Self::ApplyAll) || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
+        matches!(self, Self::Apply) || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
     }
 
     pub(crate) fn should_execute_tool(self, completed_sequence: u64) -> bool {
         match self {
-            Self::ApplyAll => true,
-            Self::DryRun => false,
+            Self::Apply => true,
+            Self::Plan => false,
             Self::PreflightResume { .. } => false,
             Self::Resume { prefix_event_count } => completed_sequence > prefix_event_count,
         }
@@ -162,7 +218,7 @@ impl ToolSideEffectMode {
     pub(crate) fn should_preflight_tool(self, completed_sequence: u64) -> bool {
         match self {
             Self::PreflightResume { prefix_event_count } => completed_sequence > prefix_event_count,
-            Self::ApplyAll | Self::DryRun | Self::Resume { .. } => false,
+            Self::Apply | Self::Plan | Self::Resume { .. } => false,
         }
     }
 }
@@ -233,6 +289,7 @@ pub struct RuntimeEventBuilder<'a> {
     pub(crate) session_id: String,
     pub(crate) sink: Option<&'a mut dyn RuntimeEventSink>,
     pub(crate) pending_context_manifest: Option<(ContextManifest, Vec<ContextObject>)>,
+    pub(crate) tool_intents: Vec<PlannedToolIntent>,
     pub(crate) validation: Option<SessionAppendValidationState>,
 }
 
@@ -253,6 +310,7 @@ impl<'a> RuntimeEventBuilder<'a> {
             session_id,
             sink: None,
             pending_context_manifest: None,
+            tool_intents: Vec::new(),
             validation,
         }
     }
@@ -290,6 +348,36 @@ impl<'a> RuntimeEventBuilder<'a> {
     pub(crate) fn next_message_id(&mut self) -> String {
         self.message_counter += 1;
         format!("msg-{:03}", self.message_counter)
+    }
+
+    pub(crate) fn record_tool_intent(
+        &mut self,
+        invocation: &FlowInvocation,
+        tool: &core_script::ToolBlock,
+        policy: RuntimeToolPolicy<'_>,
+    ) -> Result<(), RuntimeError> {
+        let canonical = proto::canonical_json(&serde_json::json!({
+            "allowed_parameters": policy.command.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
+            "command": tool.command,
+            "flow_id": invocation.flow_id,
+            "network_access": tool_network_access_name(&tool.network),
+            "read_scope": policy.command.filesystem.read_roots,
+            "tool_id": tool.identity.id,
+            "tool_kind": policy_tool_kind_name(&policy.command.tool_kind),
+            "write_scope": policy.command.filesystem.write_roots,
+        }))
+        .map_err(|error| {
+            RuntimeError::Protocol(format!(
+                "failed to serialize tool intent {}: {error}",
+                tool.identity.id
+            ))
+        })?;
+        self.tool_intents.push(PlannedToolIntent {
+            canonical,
+            flow_id: invocation.flow_id.clone(),
+            tool_id: tool.identity.id.clone(),
+        });
+        Ok(())
     }
 
     pub(crate) fn record_context_manifest(
@@ -432,21 +520,79 @@ impl<'a> RuntimeEventBuilder<'a> {
             failed,
             failure_status: self.failure_status,
             terminal_error,
+            tool_intents: self.tool_intents,
         }
     }
 }
 
-pub fn execute_flow(
+pub fn plan_flow(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     root_flow: &core_script::FlowBlock,
     session_id: &str,
     options: FlowExecutionOptions,
-) -> Result<RuntimeExecution, RuntimeError> {
-    execute_flow_with_sink(
+) -> Result<FlowExecutionPlan, RuntimeError> {
+    plan_flow_with_sink(
         workspace, registry, policy, root_flow, session_id, options, None,
     )
+}
+
+pub fn plan_flow_with_sink(
+    workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    root_flow: &core_script::FlowBlock,
+    session_id: &str,
+    options: FlowExecutionOptions,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<FlowExecutionPlan, RuntimeError> {
+    if options.side_effect_mode != ToolSideEffectMode::Plan {
+        return Err(RuntimeError::Protocol(
+            "flow planning requires ToolSideEffectMode::Plan".to_owned(),
+        ));
+    }
+    execute_flow_with_sink(
+        workspace, registry, policy, root_flow, session_id, options, sink,
+    )
+    .map(FlowExecutionPlan::from_execution)
+}
+
+pub struct FlowApplication<'a> {
+    pub(crate) workspace: &'a Path,
+    pub(crate) registry: &'a core_script::ResolvedRegistry,
+    pub(crate) policy: &'a core_policy::PolicyArtifact,
+    pub(crate) root_flow: &'a core_script::FlowBlock,
+    pub(crate) session_id: &'a str,
+    pub(crate) options: FlowExecutionOptions,
+    pub(crate) plan: &'a FlowExecutionPlan,
+}
+
+pub fn apply_flow_with_sink(
+    application: FlowApplication<'_>,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<RuntimeExecution, RuntimeError> {
+    if application.options.side_effect_mode == ToolSideEffectMode::Plan {
+        return Err(RuntimeError::Protocol(
+            "flow apply cannot use ToolSideEffectMode::Plan".to_owned(),
+        ));
+    }
+    application.plan.validate_integrity()?;
+    let execution = execute_flow_with_sink(
+        application.workspace,
+        application.registry,
+        application.policy,
+        application.root_flow,
+        application.session_id,
+        application.options,
+        sink,
+    )?;
+    if !execution.failed && !execution.matches_plan(application.plan) {
+        return Err(RuntimeError::Protocol(
+            "flow apply did not match its execution plan".to_owned(),
+        ));
+    }
+    Ok(execution)
 }
 
 pub fn execute_flow_with_sink(
@@ -458,7 +604,7 @@ pub fn execute_flow_with_sink(
     options: FlowExecutionOptions,
     sink: Option<&mut dyn RuntimeEventSink>,
 ) -> Result<RuntimeExecution, RuntimeError> {
-    let validate_plan = options.side_effect_mode == ToolSideEffectMode::DryRun;
+    let validate_plan = options.side_effect_mode == ToolSideEffectMode::Plan;
     let mut builder = match sink {
         Some(sink) => RuntimeEventBuilder::with_sink(
             session_id.to_owned(),
@@ -514,7 +660,7 @@ pub fn execute_flow_with_sink(
 pub fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> bool {
     matches!(
         side_effect_mode,
-        ToolSideEffectMode::ApplyAll | ToolSideEffectMode::Resume { .. }
+        ToolSideEffectMode::Apply | ToolSideEffectMode::Resume { .. }
     )
 }
 

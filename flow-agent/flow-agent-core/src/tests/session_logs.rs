@@ -133,6 +133,48 @@ fn unique_reservation_inventories_orphan_namespaces_before_probing() {
 }
 
 #[test]
+fn session_bundle_inventory_owns_paths_segments_objects_and_byte_counts() {
+    let workspace = empty_workspace("session-bundle-inventory");
+    let reservation =
+        reserve_session_log(&workspace, "inventory001").expect("session bundle reserved");
+    let paths = SessionBundlePaths::from_reservation(&reservation);
+    reservation.activate();
+    drop(reservation);
+    fs::write(paths.events.diagnostic_path(), b"event-one\n").expect("event segment written");
+    fs::write(
+        paths
+            .events
+            .diagnostic_path()
+            .with_file_name("inventory001.000002.jsonl"),
+        b"event-two\n",
+    )
+    .expect("second event segment written");
+    fs::write(paths.contexts.diagnostic_path(), b"context\n").expect("context segment written");
+    fs::write(paths.metadata.diagnostic_path(), b"metadata").expect("metadata written");
+    let object_bytes = b"object";
+    fs::write(
+        paths.sessions.path.join(format!(
+            "inventory001.object.sha256-{}",
+            sha256_hex(object_bytes)
+        )),
+        object_bytes,
+    )
+    .expect("object written");
+
+    let inventory = SessionBundleInventory::inspect(paths).expect("bundle inventory");
+
+    assert_eq!(inventory.event_segments.len(), 2);
+    assert_eq!(inventory.context_segments.len(), 1);
+    assert_eq!(inventory.objects.len(), 1);
+    assert_eq!(inventory.event_bytes, 20);
+    assert_eq!(inventory.context_bytes, 8);
+    assert_eq!(inventory.metadata_bytes, 8);
+    assert_eq!(inventory.object_bytes, 6);
+    assert_eq!(inventory.total_bytes(), 42);
+    assert!(!inventory.lock_present);
+}
+
+#[test]
 fn unique_reservation_marks_every_ordinal_for_a_truncated_candidate_alias() {
     let workspace = empty_workspace("reservation-truncated-candidate");
     let base = format!("{}-2", "a".repeat(126));
@@ -238,6 +280,48 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
 }
 
 #[test]
+fn dropped_active_reservation_preserves_artifacts_and_releases_lock() {
+    let workspace = empty_workspace("reservation-active-drop");
+    let (session_path, log_path, context_path, lock_path) = {
+        let reservation =
+            reserve_session_log(&workspace, "active001").expect("reservation succeeds");
+        let metadata = SessionDefinitionMetadata {
+            flow_definition_id: "smoke-flow".to_owned(),
+            registry_hash: "sha256:registry".to_owned(),
+            flow_definition_hash: "sha256:flow".to_owned(),
+        };
+        write_reserved_session_metadata(&reservation, Some(&metadata))
+            .expect("valid metadata activates the reservation");
+        (
+            reservation.session_path.clone(),
+            reservation.log_path.clone(),
+            reservation.context_path.clone(),
+            reservation.lock_path.clone(),
+        )
+    };
+
+    assert!(session_path.diagnostic_path().exists());
+    assert!(log_path.diagnostic_path().exists());
+    assert!(context_path.diagnostic_path().exists());
+    assert!(!lock_path.diagnostic_path().exists());
+}
+
+#[test]
+fn simulated_abrupt_termination_leaves_a_lock_that_is_not_stolen() {
+    let workspace = empty_workspace("abrupt-session-termination");
+    let reservation =
+        reserve_session_log(&workspace, "abrupt001").expect("session bundle reserved");
+    let lock = reservation.lock_path.diagnostic_path().to_owned();
+
+    reservation.simulate_abrupt_termination();
+
+    assert!(lock.is_file());
+    let err = reserve_session_log(&workspace, "abrupt001")
+        .expect_err("an abrupt termination lock must not be stolen");
+    assert_active_session(err, "abrupt001", "abrupt001.lock");
+}
+
+#[test]
 fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let workspace = empty_workspace("reservation-helper-edges");
     let missing_lock = reserve_session_log(&workspace, "missing001").expect("reservation succeeds");
@@ -253,13 +337,12 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     ));
     missing_lock.rollback();
 
-    let missing_guard = SessionLockGuard {
-        path: ensure_runtime_dirs(&workspace)
+    let missing_guard = SessionLockGuard::new(
+        ensure_runtime_dirs(&workspace)
             .expect("runtime dirs")
             .sessions
             .file("missing-resume.lock"),
-        cleanup_on_drop: std::cell::Cell::new(true),
-    };
+    );
     let err = missing_guard
         .release()
         .expect_err("missing resume lock release reports an IO error");
@@ -1350,10 +1433,17 @@ fn resume_rejects_case_aliased_session_lock_without_side_effects() {
 #[test]
 fn resume_does_not_rerun_tool_after_progress_prefix() {
     let (workspace, path) = workspace_at_write_summary_progress_with_existing_output();
+    reset_fixture_tool_apply_count();
 
     let output =
         resume_session(&workspace, "hello-flow", EmitMode::Jsonl).expect("session resumes");
 
+    assert_no_active_session_lock(&workspace, "hello-flow");
+    assert!(
+        !fixture_tool_applied_ids()
+            .iter()
+            .any(|tool_id| tool_id == "write-summary")
+    );
     assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
     assert!(output.stdout.contains("\"event_type\":\"tool.completed\""));
     assert_eq!(
@@ -1702,6 +1792,7 @@ fn resume_commits_resume_marker_before_apply_side_effects_fail() {
     let err = resume_session(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("apply-time side effect failure must fail the resume");
 
+    assert_no_active_session_lock(&workspace, "hello-flow");
     let RuntimeError::SessionFailed { session_id, source } = err else {
         panic!("expected identified session failure, got {err:?}");
     };

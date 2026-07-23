@@ -104,7 +104,7 @@ fn runtime_executes_subflows_after_all_parent_phases() {
         &policy,
         flow_block,
         "ordering001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
         Some(&mut captured),
     )
     .expect("hello flow executes");

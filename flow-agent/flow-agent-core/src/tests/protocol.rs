@@ -856,8 +856,8 @@ fn live_invocation_counter_rejects_only_the_thirty_third_started_flow() {
 #[test]
 fn only_active_execution_occupies_a_live_invocation_slot() {
     for (mode, terminal_in_prefix, expected) in [
-        (ToolSideEffectMode::ApplyAll, false, true),
-        (ToolSideEffectMode::DryRun, false, false),
+        (ToolSideEffectMode::Apply, false, true),
+        (ToolSideEffectMode::Plan, false, false),
         (
             ToolSideEffectMode::PreflightResume {
                 prefix_event_count: 1,

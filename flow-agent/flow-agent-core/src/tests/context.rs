@@ -528,7 +528,7 @@ fn unhandled_errors_map_to_typed_sanitized_runtime_failures() {
 }
 
 #[test]
-fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
+fn planning_terminalizes_context_budget_failure_as_typed_events() {
     let workspace = workspace_copy("hello-flow");
     let (_, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     exceed_context_budget_with_valid_instructions(&workspace);
@@ -539,20 +539,20 @@ fn dry_run_terminalizes_context_budget_failure_as_typed_events() {
         .clone();
 
     let mut captured = CapturedRuntime::default();
-    let runtime = execute_flow_with_sink(
+    let plan = plan_flow_with_sink(
         &workspace,
         &registry,
         &policy,
         &flow_block,
         "contextbudget001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
         Some(&mut captured),
     )
     .expect("budget failure becomes a deterministic failed stream");
 
-    assert!(runtime.failed);
+    assert!(plan.execution.failed);
     assert!(matches!(
-        runtime.terminal_error,
+        plan.execution.terminal_error,
         Some(RuntimeError::ContextBudgetExceeded { .. })
     ));
     assert!(captured.events.iter().any(|event| {
@@ -620,13 +620,13 @@ fn recorded_context_profile_is_verified_before_object_io_and_resume_replay() {
             .expect("runtime stream validates");
     let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let flow_block = registry.flow_block("hello-flow").expect("flow exists");
-    let planned = execute_flow(
+    let plan = plan_flow(
         &workspace,
         &registry,
         &policy,
         flow_block,
         &output.session_id,
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
     )
     .expect("deterministic replay plans");
     let recorded = read_recorded_context_manifest_signature(
@@ -638,7 +638,7 @@ fn recorded_context_profile_is_verified_before_object_io_and_resume_replay() {
             .count(),
     )
     .expect("recorded manifests match replay");
-    assert_eq!(recorded, planned.context_manifests);
+    assert_eq!(recorded, plan.execution.context_manifests);
 
     let path = workspace
         .join(LOCAL_LOG_DIR)

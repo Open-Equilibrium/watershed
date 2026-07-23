@@ -1,5 +1,26 @@
 use super::*;
 
+#[cfg(test)]
+std::thread_local! {
+    static FIXTURE_TOOL_APPLIED_IDS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+pub fn reset_fixture_tool_apply_count() {
+    FIXTURE_TOOL_APPLIED_IDS.with_borrow_mut(Vec::clear);
+}
+
+#[cfg(test)]
+pub fn fixture_tool_apply_count() -> usize {
+    FIXTURE_TOOL_APPLIED_IDS.with_borrow(Vec::len)
+}
+
+#[cfg(test)]
+pub fn fixture_tool_applied_ids() -> Vec<String> {
+    FIXTURE_TOOL_APPLIED_IDS.with_borrow(Clone::clone)
+}
+
 pub fn emit_tool(
     workspace: &Path,
     tool: &core_script::ToolBlock,
@@ -8,6 +29,7 @@ pub fn emit_tool(
     side_effect_mode: ToolSideEffectMode,
     builder: &mut RuntimeEventBuilder<'_>,
 ) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    builder.record_tool_intent(invocation, tool, policy)?;
     let planned_progress = tool_dispatch_progress(
         tool,
         policy.protected_path_match_mode,
@@ -40,6 +62,8 @@ pub fn emit_tool(
         completed_sequence
     };
     let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
+        #[cfg(test)]
+        FIXTURE_TOOL_APPLIED_IDS.with_borrow_mut(|ids| ids.push(tool.identity.id.clone()));
         match tool_dispatch_progress(
             tool,
             policy.protected_path_match_mode,
@@ -48,7 +72,7 @@ pub fn emit_tool(
         ) {
             Ok(progress) => progress,
             Err(err) => {
-                if matches!(side_effect_mode, ToolSideEffectMode::ApplyAll)
+                if matches!(side_effect_mode, ToolSideEffectMode::Apply)
                     && let Some(failure) = runtime_failure_for_tool_error(&err, &tool.identity.id)
                 {
                     return Ok(Some(failure));

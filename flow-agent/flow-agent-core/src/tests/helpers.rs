@@ -45,6 +45,16 @@ pub(super) fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
     }
 }
 
+pub(super) fn assert_no_active_session_lock(workspace: &Path, session_id: &str) {
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join(format!("{session_id}.lock"))
+            .exists(),
+        "controlled return must release the session lock"
+    );
+}
+
 pub(super) fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
     fs::write(
         workspace.join("registry/tools/bad-write.yaml"),
@@ -210,7 +220,7 @@ pub(super) fn write_definition_hash_metadata(workspace: &Path, session_id: &str,
     let policy = core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())
         .expect("runtime policy compiles");
     let mut captured = CapturedRuntime::default();
-    let planned = execute_flow_with_sink(
+    let plan = plan_flow_with_sink(
         workspace,
         &registry,
         &policy,
@@ -218,13 +228,13 @@ pub(super) fn write_definition_hash_metadata(workspace: &Path, session_id: &str,
         session_id,
         FlowExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
-            ToolSideEffectMode::DryRun,
+            ToolSideEffectMode::Plan,
             config.stub_model_fixture_profile,
         ),
         Some(&mut captured),
     )
     .expect("context fixture replay plans");
-    assert!(completed_turns <= planned.context_manifests.record_count);
+    assert!(completed_turns <= plan.execution.context_manifests.record_count);
     let checkpoints = &captured.context_checkpoints[..completed_turns];
     let context_stream = checkpoints
         .iter()
@@ -500,7 +510,7 @@ pub(super) fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeEr
         &policy,
         root_flow,
         "budget001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
         Some(&mut timings),
     )?;
     if runtime.failed || timings.nanos.len() != runtime.events.record_count {
@@ -543,7 +553,7 @@ pub(super) fn emit_noop_dispatch_for_budget(
         tool,
         policy,
         invocation,
-        ToolSideEffectMode::ApplyAll,
+        ToolSideEffectMode::Apply,
         &mut builder,
     )?;
     Ok(builder.events.record_count)

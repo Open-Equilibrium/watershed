@@ -6,33 +6,7 @@ pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, Runtime
     let Some(dir) = open_runtime_dir(workspace, "sessions")? else {
         return Ok(Vec::new());
     };
-    let mut sessions = Vec::new();
-    for entry in dir
-        .dir
-        .entries()
-        .map_err(|source| path_io_error(&dir.path, source))?
-    {
-        let entry = entry.map_err(|source| path_io_error(&dir.path, source))?;
-        let name = entry.file_name();
-        let path = Path::new(&name);
-        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
-        if proto::is_valid_session_id(stem) {
-            let file_type = entry
-                .file_type()
-                .map_err(|source| path_io_error(&dir.path.join(path), source))?;
-            if file_type.is_symlink() || !file_type.is_file() {
-                continue;
-            }
-            sessions.push(stem.to_owned());
-        }
-    }
-    sessions.sort();
-    Ok(sessions)
+    session_ids(&dir)
 }
 
 /// Resumes a non-terminal persisted session after validating registry drift.
@@ -78,7 +52,7 @@ pub fn resume_session_internal(
         path: workspace.join(LOCAL_SESSION_DIR),
         source: io::Error::from(io::ErrorKind::NotFound),
     })?;
-    let path = sessions.file(format!("{session_id}.jsonl"));
+    let path = SessionBundlePaths::events_in(&sessions, session_id);
     ensure_anchored_non_hardlinked_file(&path)?;
     let lock = acquire_anchored_session_lock(&sessions, session_id)?;
     let inspection = inspect_resume_session(&path, session_id)?;
@@ -91,6 +65,12 @@ pub fn resume_session_internal(
     }
     let logs = open_runtime_dir(workspace, "logs")?
         .ok_or_else(|| missing_definition_metadata(session_id))?;
+    let inventory = SessionBundleInventory::inspect(SessionBundlePaths::new(
+        sessions.clone(),
+        logs.clone(),
+        session_id,
+    ))?;
+    inventory.validate_active_ownership()?;
     let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
     let flow_id = resumable_flow_id(
         path.diagnostic_path(),
@@ -116,7 +96,7 @@ pub fn resume_session_internal(
     )?;
     let mut prefix_sink =
         RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
-    let planned_runtime = execute_flow_with_sink(
+    let plan = plan_flow_with_sink(
         workspace,
         &registry,
         &policy,
@@ -124,13 +104,13 @@ pub fn resume_session_internal(
         session_id,
         FlowExecutionOptions::with_stub_model_fixture_profile(
             clock,
-            ToolSideEffectMode::DryRun,
+            ToolSideEffectMode::Plan,
             config.stub_model_fixture_profile,
         ),
         Some(&mut prefix_sink),
     )?;
-    if inspection.completed_turns > planned_runtime.context_manifests.record_count
-        || recorded_context.record_count > planned_runtime.context_manifests.record_count
+    if inspection.completed_turns > plan.execution.context_manifests.record_count
+        || recorded_context.record_count > plan.execution.context_manifests.record_count
         || !prefix_sink.context_prefix_matches()
     {
         let context_path = workspace
@@ -145,11 +125,11 @@ pub fn resume_session_internal(
         path.diagnostic_path(),
         &inspection,
         &prefix_sink,
-        &planned_runtime,
+        &plan.execution,
         flow_block,
     )?;
     let combined_event_count = checked_resume_event_count(
-        planned_runtime.events.record_count,
+        plan.execution.events.record_count,
         resume_prefix.resume_marker_count,
     )?;
     if let Some(tool_id) = inspection.validation.tool_without_progress() {
@@ -181,7 +161,7 @@ pub fn resume_session_internal(
             ),
             Some(&mut preflight_sink),
         )?;
-        let matches = runtime.matches_plan(&planned_runtime);
+        let matches = runtime.matches_plan(&plan);
         preflight_sink.finish()?;
         matches
     };
@@ -192,7 +172,7 @@ pub fn resume_session_internal(
         )));
     }
     let terminal_flow_ids = inspection.validation.terminal_flow_ids();
-    let context_path = logs.file(format!("{session_id}.contexts.jsonl"));
+    let context_path = SessionBundlePaths::contexts_in(&logs, session_id);
     let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
         context_path,
         path: path.clone(),
@@ -202,7 +182,7 @@ pub fn resume_session_internal(
         notifier,
         timings,
     })?;
-    let (runtime_result, replay_matches) = {
+    let runtime_result = {
         let mut resume_sink = ResumeEventSink {
             clock,
             marker_committed: false,
@@ -212,26 +192,25 @@ pub fn resume_session_internal(
             resume_marker_count: resume_prefix.resume_marker_count,
             writer: &mut serial_writer,
         };
-        let result = execute_flow_with_sink(
-            workspace,
-            &registry,
-            &policy,
-            flow_block,
-            session_id,
-            FlowExecutionOptions::with_stub_model_fixture_profile(
-                clock,
-                ToolSideEffectMode::Resume {
-                    prefix_event_count: resume_prefix.planned_event_count as u64,
-                },
-                config.stub_model_fixture_profile,
-            )
-            .with_terminal_flow_ids(terminal_flow_ids),
+        apply_flow_with_sink(
+            FlowApplication {
+                workspace,
+                registry: &registry,
+                policy: &policy,
+                root_flow: flow_block,
+                session_id,
+                options: FlowExecutionOptions::with_stub_model_fixture_profile(
+                    clock,
+                    ToolSideEffectMode::Resume {
+                        prefix_event_count: resume_prefix.planned_event_count as u64,
+                    },
+                    config.stub_model_fixture_profile,
+                )
+                .with_terminal_flow_ids(terminal_flow_ids),
+                plan: &plan,
+            },
             Some(&mut resume_sink),
-        );
-        let matches = result
-            .as_ref()
-            .is_ok_and(|runtime| runtime.matches_plan(&planned_runtime));
-        (result, matches)
+        )
     };
     let finish_result = serial_writer.finish();
     let resumed_runtime = runtime_result?;
@@ -239,12 +218,6 @@ pub fn resume_session_internal(
     let terminal_error = resumed_runtime.terminal_error;
     let resumed_failed = resumed_runtime.failed;
     let failure_status = resumed_runtime.failure_status;
-    if terminal_error.is_none() && !replay_matches {
-        return Err(RuntimeError::Protocol(format!(
-            "{} resumed runtime did not match deterministic replay",
-            path.diagnostic_path().display()
-        )));
-    }
     let stdout = if capture_jsonl {
         let stream = read_segmented_jsonl(&path, EVENT_STREAM_LIMITS)?;
         let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
@@ -539,7 +512,7 @@ pub fn read_existing_session(
         path: workspace.join(LOCAL_SESSION_DIR),
         source: io::Error::from(io::ErrorKind::NotFound),
     })?;
-    let file = sessions.file(format!("{session_id}.jsonl"));
+    let file = SessionBundlePaths::events_in(&sessions, session_id);
     let path = file.diagnostic_path().to_owned();
     let stream =
         retry_event_segment_discovery(|| read_segmented_jsonl(&file, EVENT_STREAM_LIMITS))?;
@@ -554,68 +527,6 @@ pub fn read_existing_session(
             EmitMode::Human => human_session_status(session_id, "replayed", &events),
         },
     })
-}
-
-#[derive(Debug)]
-pub struct SessionReservation {
-    pub(crate) context_path: AnchoredFile,
-    pub(crate) log_path: AnchoredFile,
-    pub(crate) lock_path: AnchoredFile,
-    pub(crate) session_path: AnchoredFile,
-    pub(crate) session_id: String,
-    pub(crate) cleanup_on_drop: Cell<bool>,
-    pub(crate) committed: Cell<bool>,
-}
-
-impl SessionReservation {
-    pub(crate) fn rollback(&self) {
-        if !self.committed.get() {
-            remove_segmented_jsonl(&self.session_path);
-            let _ = self.log_path.remove();
-            remove_segmented_jsonl(&self.context_path);
-        }
-        let _ = self.lock_path.remove();
-        self.cleanup_on_drop.set(false);
-    }
-
-    pub(crate) fn release_lock(&self) -> Result<(), RuntimeError> {
-        self.lock_path.remove()?;
-        self.cleanup_on_drop.set(false);
-        Ok(())
-    }
-
-    pub(crate) fn mark_committed(&self) {
-        self.committed.set(true);
-    }
-}
-
-impl Drop for SessionReservation {
-    fn drop(&mut self) {
-        if self.cleanup_on_drop.get() {
-            self.rollback();
-        }
-    }
-}
-
-pub struct SessionLockGuard {
-    pub(crate) path: AnchoredFile,
-    pub(crate) cleanup_on_drop: Cell<bool>,
-}
-
-impl SessionLockGuard {
-    pub(crate) fn release(&self) -> Result<(), RuntimeError> {
-        self.path.remove()?;
-        self.cleanup_on_drop.set(false);
-        Ok(())
-    }
-}
-
-impl Drop for SessionLockGuard {
-    fn drop(&mut self) {
-        if self.cleanup_on_drop.get() {
-            let _ = self.path.remove();
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -704,7 +615,7 @@ pub fn require_anchored_session_log_metadata(
     logs: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLogMetadata, RuntimeError> {
-    let path = logs.file(format!("{session_id}.log"));
+    let path = SessionBundlePaths::metadata_in(logs, session_id);
     if let Some(alias) = ascii_case_alias(&path)? {
         return Err(RuntimeError::Protocol(format!(
             "{} contains non-canonical session metadata name {}",
@@ -803,10 +714,11 @@ pub fn reserve_session_log_with_publish_observer(
         )));
     }
     let dirs = ensure_runtime_dirs(workspace)?;
-    let session_path = dirs.sessions.file(format!("{session_id}.jsonl"));
-    let log_path = dirs.logs.file(format!("{session_id}.log"));
-    let context_path = dirs.logs.file(format!("{session_id}.contexts.jsonl"));
-    let lock_path = dirs.sessions.file(format!("{session_id}.lock"));
+    let paths = SessionBundlePaths::from_dirs(&dirs, session_id);
+    let session_path = paths.events;
+    let log_path = paths.metadata;
+    let context_path = paths.contexts;
+    let lock_path = paths.lock;
     ensure_anchored_session_file_available(&session_path, session_id)?;
     reserve_anchored_session_lock_file(&lock_path, session_id)?;
     if let Err(err) = ensure_session_bundle_namespace_available(
@@ -835,18 +747,14 @@ pub fn reserve_session_log_with_publish_observer(
         let _ = lock_path.remove();
         return Err(err);
     }
-    Ok(SessionReservation {
+    Ok(SessionReservation::new(
         context_path,
         log_path,
         lock_path,
         session_path,
-        session_id: session_id.to_owned(),
-        cleanup_on_drop: Cell::new(true),
-        committed: Cell::new(false),
-    })
+        session_id.to_owned(),
+    ))
 }
-
-pub const MAX_UNIQUE_SESSION_CANDIDATES: u32 = 10_000;
 
 pub fn reserve_unique_session_log(
     workspace: &Path,
@@ -884,127 +792,6 @@ pub fn reserve_unique_session_log_with_probe_observer(
     Err(RuntimeError::Protocol(format!(
         "could not allocate a unique session_id for {base_session_id}"
     )))
-}
-
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-pub enum SessionCandidateHint {
-    Free,
-    Occupied,
-    Probe,
-}
-
-pub fn session_candidate_hints(
-    dirs: &RuntimeDirs,
-    base_session_id: &str,
-) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
-    let mut hints = vec![SessionCandidateHint::Free; MAX_UNIQUE_SESSION_CANDIDATES as usize];
-    for (dir, logs) in [(&dirs.sessions, false), (&dirs.logs, true)] {
-        for entry in dir
-            .dir
-            .entries()
-            .map_err(|source| path_io_error(&dir.path, source))?
-        {
-            let entry = entry.map_err(|source| path_io_error(&dir.path, source))?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            let lower = name.to_ascii_lowercase();
-            let classified = if logs {
-                classify_log_candidate_leaf(&lower)
-            } else {
-                classify_session_candidate_leaf(dir, &lower, name == lower)
-            };
-            let Some((session_id, hint)) = classified else {
-                continue;
-            };
-            for index in [
-                (session_id == base_session_id).then_some(0),
-                generated_suffix_candidate_index(base_session_id, session_id),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                hints[index] = hints[index].max(hint);
-            }
-        }
-    }
-    Ok(hints)
-}
-
-pub fn classify_log_candidate_leaf(name: &str) -> Option<(&str, SessionCandidateHint)> {
-    if let Some(id) = name.strip_suffix(".log") {
-        return Some((id, SessionCandidateHint::Occupied));
-    }
-    segmented_candidate_id(name, true)
-        .or_else(|| name.strip_suffix(".contexts.jsonl"))
-        .map(|id| (id, SessionCandidateHint::Occupied))
-}
-
-pub fn classify_session_candidate_leaf<'a>(
-    dir: &AnchoredDir,
-    name: &'a str,
-    canonical: bool,
-) -> Option<(&'a str, SessionCandidateHint)> {
-    if let Some((id, _)) = name.split_once(".object.sha256-") {
-        return Some((id, SessionCandidateHint::Occupied));
-    }
-    if let Some(id) = name.strip_suffix(".lock") {
-        let hint = match dir.file(name).metadata() {
-            Ok(metadata) if !metadata.file_type().is_symlink() => SessionCandidateHint::Occupied,
-            Err(RuntimeError::Io { source, .. })
-                if !canonical && source.kind() == io::ErrorKind::NotFound =>
-            {
-                SessionCandidateHint::Occupied
-            }
-            _ => SessionCandidateHint::Probe,
-        };
-        return Some((id, hint));
-    }
-    if let Some(id) = segmented_candidate_id(name, false) {
-        return Some((id, SessionCandidateHint::Occupied));
-    }
-    name.strip_suffix(".jsonl").map(|id| {
-        let hint = if canonical {
-            SessionCandidateHint::Probe
-        } else {
-            SessionCandidateHint::Occupied
-        };
-        (id, hint)
-    })
-}
-
-pub fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
-    let (stem, ordinal) = name.strip_suffix(".jsonl")?.rsplit_once('.')?;
-    if ordinal.len() != 6 || !ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    if contexts {
-        stem.strip_suffix(".contexts")
-    } else {
-        Some(stem)
-    }
-}
-
-pub fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> Option<usize> {
-    let ordinal = session_id.rsplit_once('-')?.1.parse::<u32>().ok()?;
-    if !(2..=MAX_UNIQUE_SESSION_CANDIDATES).contains(&ordinal) {
-        return None;
-    }
-    (suffixed_session_id(base_session_id, ordinal) == session_id).then_some(ordinal as usize - 1)
-}
-
-pub fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
-    let suffix = format!("-{ordinal}");
-    let prefix_len = 128usize.saturating_sub(suffix.len());
-    let prefix = if base_session_id.len() > prefix_len {
-        &base_session_id[..prefix_len]
-    } else {
-        base_session_id
-    };
-    let candidate = format!("{prefix}{suffix}");
-    debug_assert!(proto::is_valid_session_id(&candidate));
-    candidate
 }
 
 pub fn reserve_anchored_session_file(
@@ -1152,12 +939,9 @@ pub fn acquire_anchored_session_lock(
     sessions: &AnchoredDir,
     session_id: &str,
 ) -> Result<SessionLockGuard, RuntimeError> {
-    let path = sessions.file(format!("{session_id}.lock"));
+    let path = SessionBundlePaths::lock_in(sessions, session_id);
     reserve_anchored_session_lock_file(&path, session_id)?;
-    let guard = SessionLockGuard {
-        path,
-        cleanup_on_drop: Cell::new(true),
-    };
+    let guard = SessionLockGuard::new(path);
     if let Some(alias) = ascii_case_alias(&guard.path)? {
         return Err(RuntimeError::ActiveSession {
             session_id: session_id.to_owned(),
@@ -1174,7 +958,9 @@ pub fn write_reserved_session_metadata(
     replace_anchored_existing_file_atomically(
         &reservation.log_path,
         session_log_metadata_text(definition_metadata).as_bytes(),
-    )
+    )?;
+    reservation.activate();
+    Ok(())
 }
 
 pub fn replace_anchored_existing_file_atomically(

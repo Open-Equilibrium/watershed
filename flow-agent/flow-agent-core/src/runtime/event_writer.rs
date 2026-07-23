@@ -203,7 +203,7 @@ impl<'a> SerialSessionWriter<'a> {
         if outcome.appended
             && let Some(reservation) = self.commit_reservation
         {
-            reservation.mark_committed();
+            reservation.activate();
         }
         if let Some(timings) = self.timings.as_deref_mut() {
             if let Some(append_latency) = outcome.append_latency_nanos {
@@ -618,38 +618,7 @@ pub struct SessionObjectWriter {
 
 impl SessionObjectWriter {
     pub(crate) fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
-        let prefix = format!("{session_id}.object.sha256-");
-        let mut accounted_bytes = 0u64;
-        for entry in object_parent
-            .dir
-            .entries()
-            .map_err(|source| path_io_error(&object_parent.path, source))?
-        {
-            let entry = entry.map_err(|source| path_io_error(&object_parent.path, source))?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            let candidate = name.to_ascii_lowercase();
-            let Some(digest) = candidate.strip_prefix(&prefix) else {
-                continue;
-            };
-            if !is_lowercase_sha256_hex(digest) {
-                continue;
-            }
-            if candidate != name {
-                return Err(RuntimeError::Protocol(format!(
-                    "{} contains non-canonical session object name {name}",
-                    object_parent.path.display()
-                )));
-            }
-            let path = object_parent.file(name);
-            ensure_anchored_real_file(&path)?;
-            let bytes = path.metadata()?.len();
-            ensure_session_object_size(path.diagnostic_path().display(), bytes)?;
-            accounted_bytes = accounted_bytes.saturating_add(bytes);
-            ensure_session_object_total(accounted_bytes)?;
-        }
+        let (_, accounted_bytes) = session_objects(&object_parent, session_id)?;
         Ok(Self {
             accounted_bytes,
             object_parent,

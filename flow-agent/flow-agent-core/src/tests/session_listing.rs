@@ -353,6 +353,7 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
         .expect("later apply-time write is recorded as a failed run");
 
     assert!(output.failed);
+    assert_no_active_session_lock(&workspace, &output.session_id);
     assert!(
         output.stdout.contains("\"reason\":\"write_denied\""),
         "{}",
@@ -477,6 +478,7 @@ fn run_flow_allows_linux_case_variant_of_protected_path_pattern() {
         .expect("linux runtime protected-path matching is case-sensitive");
 
     assert!(!output.failed);
+    assert_no_active_session_lock(&workspace, &output.session_id);
     assert_eq!(
         fs::read_to_string(workspace.join(".ENV")).expect("case variant output is written"),
         "hello\n"

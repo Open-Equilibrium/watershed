@@ -7,9 +7,9 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
     let root_flow = registry
         .flow_block("hello-flow")
         .expect("hello-flow fixture exists");
-    let options =
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::DryRun);
-    let planned = execute_flow(
+    let options = FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan);
+    reset_fixture_tool_apply_count();
+    let plan = plan_flow(
         &workspace,
         &registry,
         &policy,
@@ -18,8 +18,9 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
         options.clone(),
     )
     .expect("runtime plan succeeds");
-    assert!(planned.events.record_count > 0);
-    assert!(planned.context_manifests.record_count > 0);
+    assert_eq!(fixture_tool_apply_count(), 0);
+    assert!(plan.execution.events.record_count > 0);
+    assert!(plan.execution.context_manifests.record_count > 0);
     assert!(std::mem::size_of::<RuntimeStreamSignature>() <= 64);
     assert!(!std::mem::needs_drop::<RuntimeStreamSignature>());
     let mut original = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
@@ -33,7 +34,7 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
     other_stream.push(b"bc");
     assert_ne!(original.signature(), mutated.signature());
     assert_ne!(original.signature(), other_stream.signature());
-    let checked = execute_flow(
+    let equivalent_plan = plan_flow(
         &workspace,
         &registry,
         &policy,
@@ -41,11 +42,76 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
         "planchecked001",
         options,
     )
+    .expect("equivalent runtime plan succeeds");
+    assert_eq!(equivalent_plan.signature, plan.signature);
+    assert_eq!(fixture_tool_apply_count(), 0);
+    let checked = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            registry: &registry,
+            policy: &policy,
+            root_flow,
+            session_id: "planchecked001",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        None,
+    )
     .expect("plan-checked runtime succeeds");
 
-    assert!(checked.matches_plan(&planned));
-    assert_eq!(checked.events, planned.events);
-    assert_eq!(checked.context_manifests, planned.context_manifests);
+    assert_eq!(
+        fixture_tool_apply_count(),
+        plan.execution.tool_intents.len()
+    );
+    assert!(checked.matches_plan(&plan));
+    assert_eq!(checked.events, plan.execution.events);
+    assert_eq!(checked.context_manifests, plan.execution.context_manifests);
+}
+
+#[test]
+fn apply_rejects_plan_drift_without_a_second_apply() {
+    let workspace = workspace_copy("hello-flow");
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let root_flow = registry
+        .flow_block("hello-flow")
+        .expect("hello-flow fixture exists");
+    let mut plan = plan_flow(
+        &workspace,
+        &registry,
+        &policy,
+        root_flow,
+        "plandrift001",
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("runtime plan succeeds");
+    plan.signature.digest[0] ^= 1;
+    reset_fixture_tool_apply_count();
+
+    let err = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            registry: &registry,
+            policy: &policy,
+            root_flow,
+            session_id: "plandrift001",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        None,
+    )
+    .expect_err("plan drift must reject successful completion");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message == "flow execution plan signature is invalid"
+    ));
+    assert_eq!(fixture_tool_apply_count(), 0);
 }
 
 #[test]
@@ -568,7 +634,7 @@ fn write_synthetic_session(
         }
         appender.sync(&path).expect("synthetic session syncs");
     }
-    reservation.mark_committed();
+    reservation.activate();
     reservation.release_lock().expect("session lock releases");
 }
 

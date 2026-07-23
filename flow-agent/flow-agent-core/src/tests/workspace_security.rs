@@ -465,7 +465,7 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
         &policy,
         flow_block,
         "commitfail001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::ApplyAll),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Apply),
         Some(&mut RejectWriteStart),
     ) {
         Err(err) => err,

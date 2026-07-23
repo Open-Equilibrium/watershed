@@ -165,13 +165,13 @@ impl SessionEventReader {
                 path: workspace.join(LOCAL_SESSION_DIR),
                 source: io::Error::from(io::ErrorKind::NotFound),
             })?;
-        let path = sessions.file(format!("{session_id}.jsonl"));
+        let path = SessionBundlePaths::events_in(&sessions, session_id);
         ensure_anchored_real_file(&path)?;
         Ok(Self {
             observed_current_segment_bytes: 0,
             observed_segment_count: 0,
             observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
-            lock_path: sessions.file(format!("{session_id}.lock")),
+            lock_path: SessionBundlePaths::lock_in(&sessions, session_id),
             path,
             validation: SessionAppendValidationState::empty(session_id),
         })

@@ -46,7 +46,7 @@ pub fn run_flow_internal(
     let reservation = reserve_unique_session_log(workspace, base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
     write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-    let planned_runtime = execute_flow(
+    let plan = plan_flow(
         workspace,
         &registry,
         &policy,
@@ -54,40 +54,33 @@ pub fn run_flow_internal(
         &expected_session_id,
         FlowExecutionOptions::with_stub_model_fixture_profile(
             config.event_clock,
-            ToolSideEffectMode::DryRun,
+            ToolSideEffectMode::Plan,
             config.stub_model_fixture_profile,
         ),
     )?;
     let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
-    let (runtime_result, replay_matches) = {
-        let result = execute_flow_with_sink(
-            workspace,
-            &registry,
-            &policy,
-            flow_block,
-            &expected_session_id,
-            FlowExecutionOptions::with_stub_model_fixture_profile(
-                config.event_clock,
-                ToolSideEffectMode::ApplyAll,
-                config.stub_model_fixture_profile,
-            ),
+    let runtime_result = {
+        apply_flow_with_sink(
+            FlowApplication {
+                workspace,
+                registry: &registry,
+                policy: &policy,
+                root_flow: flow_block,
+                session_id: &expected_session_id,
+                options: FlowExecutionOptions::with_stub_model_fixture_profile(
+                    config.event_clock,
+                    ToolSideEffectMode::Apply,
+                    config.stub_model_fixture_profile,
+                ),
+                plan: &plan,
+            },
             Some(&mut serial_writer),
-        );
-        let matches = result
-            .as_ref()
-            .is_ok_and(|runtime| runtime.matches_plan(&planned_runtime));
-        (result, matches)
+        )
     };
     let finish_result = serial_writer.finish();
     let runtime = runtime_result?;
     finish_result?;
     let runtime_failed = runtime.failed;
-    if !runtime_failed && !replay_matches {
-        return Err(RuntimeError::Protocol(format!(
-            "{} runtime did not match deterministic replay",
-            reservation.session_path.diagnostic_path().display()
-        )));
-    }
     let event_count = runtime.events.record_count;
     let outcome = runtime.failure_status.unwrap_or_else(|| {
         if runtime_failed {
