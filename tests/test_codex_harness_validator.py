@@ -493,6 +493,42 @@ process.stderr.write = (message) => {
 
                 self.assertIn(expected, validator.validate_repo(root))
 
+    def test_rejects_symlinked_hooks_directory_outside_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "repo"
+            external_hooks = Path(temp) / "external-hooks"
+            write_valid_harness(root)
+            shutil.copytree(root / ".codex" / "hooks", external_hooks)
+            shutil.rmtree(root / ".codex" / "hooks")
+            try:
+                (root / ".codex" / "hooks").symlink_to(
+                    external_hooks,
+                    target_is_directory=True,
+                )
+            except OSError as error:
+                if os.name != "nt":
+                    self.skipTest(f"directory symlinks unavailable: {error}")
+                result = subprocess.run(
+                    [
+                        "cmd",
+                        "/c",
+                        "mklink",
+                        "/J",
+                        str(root / ".codex" / "hooks"),
+                        str(external_hooks),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                if result.returncode != 0:
+                    self.skipTest(f"directory links unavailable: {result.stderr}")
+
+            self.assertIn(
+                ".codex/hooks.json: hook command script must stay within repository",
+                validator.validate_repo(root),
+            )
+
     def test_rejects_hooks_registered_for_the_wrong_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

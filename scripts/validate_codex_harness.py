@@ -217,9 +217,14 @@ def validate_hook_command(
     expected_script = HOOK_SCRIPT_BY_EVENT[event]
     if script != expected_script:
         errors.append(f"{prefix}.command must run {expected_script}")
+    resolved_root = root.resolve()
     script_path = (root / script).resolve()
     hooks_dir = (root / ".codex" / "hooks").resolve()
-    if not script_path.is_relative_to(hooks_dir):
+    if not hooks_dir.is_relative_to(resolved_root) or not script_path.is_relative_to(
+        resolved_root
+    ):
+        errors.append(f"{rel}: hook command script must stay within repository")
+    elif not script_path.is_relative_to(hooks_dir):
         errors.append(f"{rel}: hook command script must be below .codex/hooks")
     elif not script_path.is_file():
         errors.append(f"{rel}: hook command references missing script {script}")
