@@ -472,18 +472,19 @@ fn protocol_validator_rejects_stream_identity_edges() {
         "after terminal session event",
     );
 
-    let flow_started_without_id = event_line(
+    let flow_started_without_id = EventEnvelope::new(
         "evt-002",
         EventType::FlowStarted,
         "meta001",
         2,
-        None,
+        event_timestamp(2),
+        "flow-agent-cli",
         serde_json::json!({"flow_definition_id":"smoke-flow"}),
     );
-    assert_invalid_stream(
+    assert_invalid_event(
         "flow-started-without-flow-id.jsonl",
-        &format!("{canonical}{flow_started_without_id}"),
-        "flow.started must include flow_id",
+        flow_started_without_id,
+        "flow_id is required for flow events",
     );
 
     let child_with_unknown_parent = event_line_with_parent(
