@@ -267,7 +267,7 @@ class AutoreviewTest(unittest.TestCase):
             search_path = os.pathsep.join((str(repo), ".", str(tools)))
             with mock.patch.dict(os.environ, {"PATH": search_path}):
                 self.assertEqual(
-                    str(external_tool),
+                    str(external_tool.resolve()),
                     autoreview.resolve_command("review-engine", repo),
                 )
                 self.assertEqual(
