@@ -24,18 +24,6 @@ The 155,750-event sizing model is `2 session + 1,024 Flow lifecycle + 1,024 phas
 
 M1 plans the complete deterministic stream before side effects. A future dynamic planner must keep 20 event slots free until clean termination: one active tool/message terminal event, one `step.completed`, up to 16 `flow.failed` events, one `error` and one `session.failed`.
 
-### Storage evidence and profiles
-
-This private, untracked calibration ran on 2026-07-18. The Codex scan covered the reference rollout and every recursively referenced subagent rollout, deduplicated by resolved file path: 538 physical JSONL files. Each physical JSONL line is one record; sizes are UTF-8 bytes including LF. Percentiles sort record sizes and select index `floor(p * (n - 1))`. Codex records size storage only; they are not Flow protocol events and do not change the 155,750-event semantic cap.
-
-| 2026-07-18 sample | Records | Bytes | p50 | p90 | p99 | Max |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Codex reference root `019f5a0b-ad56-7053-b2c9-f933d1e921e8` | 63,757 | 102.65 MiB | 708 B | 2,431 B | 22,755 B | 132,899 B |
-| Complete recursive Codex tree, 538 rollout files | 4,202,848 | 4.799 GiB | 671 B | 747 B | 11,816 B | 286,174 B |
-| Checked-in Flow expected JSONL, 9 files | 129 | 36.24 KiB | 280 B | 359 B | 403 B | 412 B |
-
-The independent Flow sample averages 287.67 B/event, projecting to 42.73 MiB at 155,750 events. The recursive Codex sample includes all discovered subagent rollout files; it is the basis for the rounded 5.5 GiB bundle ceiling. Session-owned hash-addressed immutable objects preserve referenced canonical context bytes without duplicating equal content. Self-containment guarantees durable replay of canonical history even if workspace sources disappear; it does not recreate an external provider, tool, mutable environment or undeclared side effect.
-
 Sixteen MiB is a per-segment rotation boundary, not a session or RAM limit. Rotation occurs before a record would cross it and never splits a record. At the 48 MiB event-data ceiling this normally yields three event segments and at most four when unsplittable event boundaries leave slack; arbitrary unsplit manifest records need at most five. This keeps sequential reads and recovery bounded without the extra file/flush overhead of materially smaller segments or the larger per-read burst of 32/64 MiB segments.
 
 The representative payload distribution is 90% of events at 768 B, the next 9% at 12 KiB, the next 0.9% at 96 KiB and the final 0.1% at 320 KiB. This is a distribution of complete canonical event sizes, not `max payload / 2`. Exactly 16,000 events occupy 48,152,576 B (45.92 MiB).
@@ -43,7 +31,7 @@ The representative payload distribution is 90% of events at 768 B, the next 9% a
 Synthetic event-storage/replay workload:
 
 - Representative: 10 sessions, each with 32 cumulative invocations and 16,000 total events under that payload distribution; aggregate 320 invocations, 160,000 events and 459.22 MiB. The 32-live process cap still applies.
-- Full-cap: one 155,750-event session with the independent 288 B/event profile (42.78 MiB).
+- Full-cap: one 155,750-event session with the synthetic 288 B/event profile (42.78 MiB).
 - Stability: ten sessions each reach 155,750 events with the 288 B/event profile. This does not simultaneously maximize payload sizes, registry size, live model contexts or tool output.
 
 M1 implementation budgets (ADR-0049):
