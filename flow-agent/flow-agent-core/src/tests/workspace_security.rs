@@ -184,6 +184,49 @@ fn non_fixture_workspace_fails_closed_before_runtime_side_effects() {
     );
 }
 
+#[test]
+fn workspace_config_reports_non_regular_config_leaf() {
+    let workspace = workspace_copy("hello-flow");
+    let config_path = workspace.join(".flow/config.yaml");
+    fs::remove_file(&config_path).expect("fixture config removed");
+    fs::create_dir(&config_path).expect("config path replaced with directory");
+
+    let err = load_workspace_config(&workspace).expect_err("config directory must fail");
+
+    assert!(
+        matches!(&err, RuntimeError::Protocol(message)
+            if message.contains("regular file") && !message.contains("symlink")),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn workspace_config_preserves_unrelated_open_errors() {
+    let workspace = workspace_copy("hello-flow");
+    let flow_path = workspace.join(".flow");
+    let config_path = flow_path.join("config.yaml");
+    let workspace_dir =
+        cap_std::fs::Dir::open_ambient_dir(&workspace, cap_std::ambient_authority())
+            .expect("workspace opens");
+    let flow_dir = workspace_dir
+        .open_dir(".flow")
+        .expect("flow directory opens");
+
+    let err = classify_workspace_config_open_error(
+        &flow_dir,
+        "config.yaml",
+        config_path.clone(),
+        io::Error::new(io::ErrorKind::PermissionDenied, "injected access failure"),
+        "file",
+    );
+
+    assert!(matches!(
+        err,
+        RuntimeError::Io { path, source }
+            if path == config_path && source.kind() == io::ErrorKind::PermissionDenied
+    ));
+}
+
 #[cfg(unix)]
 #[test]
 fn workspace_config_rejects_symlinked_config_file() {

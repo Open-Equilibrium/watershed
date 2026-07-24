@@ -90,20 +90,61 @@ pub fn read_workspace_config_to_string(workspace: &Path) -> Result<String, Runti
     let config_path = flow_path.join("config.yaml");
     let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority())
         .map_err(|source| path_io_error(workspace, source))?;
-    let flow_dir = workspace_dir
-        .open_dir_nofollow(".flow")
-        .map_err(|source| unsafe_workspace_config_path(flow_path, source, "directory"))?;
+    let flow_metadata = workspace_dir
+        .symlink_metadata(".flow")
+        .map_err(|source| path_io_error(&flow_path, source))?;
+    if flow_metadata.file_type().is_symlink() {
+        return Err(unsafe_workspace_config_path(flow_path, "directory"));
+    }
+    if !flow_metadata.is_dir() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a directory",
+            flow_path.display()
+        )));
+    }
+    let flow_dir = workspace_dir.open_dir_nofollow(".flow").map_err(|source| {
+        classify_workspace_config_open_error(
+            &workspace_dir,
+            ".flow",
+            flow_path,
+            source,
+            "directory",
+        )
+    })?;
+    let config_metadata = flow_dir
+        .symlink_metadata("config.yaml")
+        .map_err(|source| path_io_error(&config_path, source))?;
+    if config_metadata.file_type().is_symlink() {
+        return Err(unsafe_workspace_config_path(config_path, "file"));
+    }
+    if !config_metadata.is_file() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a regular file",
+            config_path.display()
+        )));
+    }
     let mut options = cap_std::fs::OpenOptions::new();
     options.read(true).follow(FollowSymlinks::No);
     let file = flow_dir
         .open_with("config.yaml", &options)
-        .map_err(|source| unsafe_workspace_config_path(config_path.clone(), source, "file"))?;
+        .map_err(|source| {
+            classify_workspace_config_open_error(
+                &flow_dir,
+                "config.yaml",
+                config_path.clone(),
+                source,
+                "file",
+            )
+        })?;
     let metadata = file
         .metadata()
         .map_err(|source| path_io_error(&config_path, source))?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
+    if metadata.file_type().is_symlink() {
+        return Err(unsafe_workspace_config_path(config_path, "file"));
+    }
+    if !metadata.is_file() {
         return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink or reparse point",
+            "{} must be a regular file",
             config_path.display()
         )));
     }
@@ -116,12 +157,25 @@ pub fn read_workspace_config_to_string(workspace: &Path) -> Result<String, Runti
     decode_utf8(&config_path, bytes)
 }
 
-pub fn unsafe_workspace_config_path(path: PathBuf, source: io::Error, kind: &str) -> RuntimeError {
-    if source.kind() == io::ErrorKind::NotFound {
-        return RuntimeError::Io { path, source };
+pub fn classify_workspace_config_open_error(
+    parent: &Dir,
+    leaf: &str,
+    path: PathBuf,
+    source: io::Error,
+    kind: &str,
+) -> RuntimeError {
+    if parent
+        .symlink_metadata(leaf)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return unsafe_workspace_config_path(path, kind);
     }
+    path_io_error(&path, source)
+}
+
+pub fn unsafe_workspace_config_path(path: PathBuf, kind: &str) -> RuntimeError {
     RuntimeError::Protocol(format!(
-        "{} {kind} must not be a symlink or reparse point: {source}",
+        "{} {kind} must not be a symlink or reparse point",
         path.display()
     ))
 }
