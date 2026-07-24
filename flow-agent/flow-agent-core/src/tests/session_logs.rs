@@ -1718,15 +1718,10 @@ fn resume_rejects_hardlinked_session_log_before_side_effects() {
 }
 
 #[test]
-fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
+fn resume_human_mode_uses_the_fixture_clock_and_reports_status() {
     let workspace = workspace_copy("smoke-flow");
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "registry_root: registry\n",
-    )
-    .expect("live workspace config written");
     let completed =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("live-profile run completes");
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
     let prefix = completed
         .stdout
         .lines()
@@ -1738,7 +1733,7 @@ fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
     write_definition_hash_metadata(&workspace, &completed.session_id, "smoke-flow");
 
     let output = resume_session(&workspace, &completed.session_id, EmitMode::Human)
-        .expect("live-profile session resumes");
+        .expect("fixture session resumes");
 
     assert_eq!(output.stdout, "session smoke-flow resumed\n");
     let resumed_text =
@@ -1748,7 +1743,7 @@ fn resume_human_mode_uses_the_recorded_live_clock_and_reports_status() {
         &completed.session_id,
         &resumed_text,
     )
-    .expect("resumed live-profile stream validates");
+    .expect("resumed fixture stream validates");
     let anchored_clock = EventClock::from_first_event(&resumed_events[0])
         .expect("recorded timestamp anchors the resumed clock");
     assert!(
