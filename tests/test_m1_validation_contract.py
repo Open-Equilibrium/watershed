@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -7,9 +8,99 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_DOMAIN_WORD = bytes((108, 111, 111, 112)).decode("ascii")
 LEGACY_DOMAIN_TYPE = LEGACY_DOMAIN_WORD.capitalize()
+PROTECTED_SCAN_DIRECTORIES = {
+    ".git",
+    ".flow",
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".docker",
+    ".kube",
+    "credentials",
+    "secrets",
+}
+PROTECTED_SCAN_FILES = {
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    ".git-credentials",
+    "credentials.toml",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
+}
+
+
+def is_protected_validation_path(relative_path: Path) -> bool:
+    parts = tuple(part.lower() for part in relative_path.parts)
+    name = parts[-1]
+    if PROTECTED_SCAN_DIRECTORIES.intersection(parts):
+        return True
+    if any(
+        parts[index : index + 2] in ((".config", "gcloud"), (".config", "gh"))
+        for index in range(len(parts) - 1)
+    ):
+        return True
+    return (
+        name in PROTECTED_SCAN_FILES
+        or name == ".env"
+        or name.startswith(".env.")
+        or name.endswith((".env", ".local", ".pem", ".key", ".p12", ".pfx"))
+    )
+
+
+def tracked_validation_paths(repo: Path) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    root = repo.resolve()
+    paths: list[Path] = []
+    for raw_path in result.stdout.split(b"\0"):
+        if not raw_path:
+            continue
+        relative_path = Path(raw_path.decode("utf-8"))
+        path = repo / relative_path
+        if is_protected_validation_path(relative_path) or path.is_symlink():
+            continue
+        resolved = path.resolve()
+        if resolved.is_relative_to(root) and resolved.is_file():
+            paths.append(path)
+    return paths
 
 
 class M1ValidationContractTest(unittest.TestCase):
+    def test_validation_scan_excludes_untracked_and_protected_files(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="watershed-m1-validation-"
+        ) as temp_dir:
+            repo = Path(temp_dir)
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            safe = repo / "safe.txt"
+            safe.write_text("tracked", encoding="utf-8")
+            untracked = repo / "untracked.txt"
+            untracked.write_text("untracked", encoding="utf-8")
+            protected = repo / ".env"
+            protected.write_text("protected", encoding="utf-8")
+            credential = repo / "credentials" / "token.txt"
+            credential.parent.mkdir()
+            credential.write_text("credential", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "--", "safe.txt", ".env", "credentials/token.txt"],
+                cwd=repo,
+                check=True,
+            )
+
+            paths = tracked_validation_paths(repo)
+
+            self.assertEqual(paths, [safe])
+
     def test_flow_agent_identity_has_no_stale_product_references(self) -> None:
         expected_paths = [
             ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml",
@@ -29,11 +120,8 @@ class M1ValidationContractTest(unittest.TestCase):
             LEGACY_DOMAIN_WORD + "-agent",
             LEGACY_DOMAIN_WORD + "_agent",
         ]
-        excluded_parts = {".git", ".clawpatch", ".codex-logs", "node_modules", "target"}
         stale_references: dict[str, list[str]] = {}
-        for path in ROOT.rglob("*"):
-            if not path.is_file() or excluded_parts.intersection(path.parts):
-                continue
+        for path in tracked_validation_paths(ROOT):
             try:
                 content = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
