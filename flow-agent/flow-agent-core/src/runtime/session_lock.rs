@@ -67,13 +67,28 @@ impl SessionReservation {
         }
         let mut failures = Vec::new();
         if self.state.get() == ReservationState::Empty {
-            for (created, path) in [
-                (&self.session_created, &self.session_path),
-                (&self.log_created, &self.log_path),
-                (&self.context_created, &self.context_path),
+            for (created, result) in [
+                (
+                    &self.session_created,
+                    self.session_created
+                        .get()
+                        .then(|| remove_segmented_jsonl(&self.session_path)),
+                ),
+                (
+                    &self.log_created,
+                    self.log_created
+                        .get()
+                        .then(|| remove_anchored_file_if_exists(&self.log_path)),
+                ),
+                (
+                    &self.context_created,
+                    self.context_created
+                        .get()
+                        .then(|| remove_segmented_jsonl(&self.context_path)),
+                ),
             ] {
-                if created.get() {
-                    match remove_anchored_file_if_exists(path) {
+                if let Some(result) = result {
+                    match result {
                         Ok(()) => created.set(false),
                         Err(error) => failures.push(Box::new(error)),
                     }
