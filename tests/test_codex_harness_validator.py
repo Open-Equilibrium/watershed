@@ -88,6 +88,35 @@ class CodexHarnessValidatorTest(unittest.TestCase):
         self.assertIn(".codex/config.toml: [features] must be a table", errors)
         self.assertIn(".codex/hooks.json: root must be an object", errors)
 
+    def test_reports_unreadable_harness_files_without_crashing(self) -> None:
+        cases = [
+            (".codex/hooks.json", "invalid UTF-8"),
+            (".codex/hooks.json", "directory"),
+            (".codex/agents/repo_mapper.toml", "invalid UTF-8"),
+            (".codex/agents/repo_mapper.toml", "directory"),
+            (".agents/skills/git/SKILL.md", "invalid UTF-8"),
+            (".agents/skills/git/SKILL.md", "directory"),
+        ]
+
+        for relative_path, mutation in cases:
+            with self.subTest(path=relative_path, mutation=mutation):
+                with tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    write_valid_harness(root)
+                    path = root / relative_path
+                    if mutation == "invalid UTF-8":
+                        path.write_bytes(b"\xff")
+                    else:
+                        path.unlink()
+                        path.mkdir()
+
+                    errors = validator.validate_repo(root)
+
+                self.assertTrue(
+                    any(error.startswith(f"{relative_path}:") for error in errors),
+                    errors,
+                )
+
     def test_project_python_launcher_runs_python(self) -> None:
         result = subprocess.run(
             [

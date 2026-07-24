@@ -134,10 +134,11 @@ def validate_hooks(root: Path) -> list[str]:
     path = root / ".codex" / "hooks.json"
     rel = ".codex/hooks.json"
     errors: list[str] = []
+    text = read_utf8(path, rel, errors)
+    if text is None:
+        return errors
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return [f"{rel}: missing file"]
+        data = json.loads(text)
     except json.JSONDecodeError as err:
         return [f"{rel}: invalid JSON: {err.msg}"]
 
@@ -283,7 +284,9 @@ def validate_skills(root: Path) -> list[str]:
 
     for path in sorted(skill_dir.glob("*/SKILL.md")):
         rel = f".agents/skills/{path.parent.name}/SKILL.md"
-        text = path.read_text(encoding="utf-8")
+        text = read_utf8(path, rel, errors)
+        if text is None:
+            continue
         metadata = parse_skill_front_matter(text)
         if metadata is None:
             errors.append(f"{rel}: missing front matter")
@@ -299,6 +302,18 @@ def validate_skills(root: Path) -> list[str]:
     return errors
 
 
+def read_utf8(path: Path, rel: str, errors: list[str]) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        errors.append(f"{rel}: missing file")
+    except UnicodeError:
+        errors.append(f"{rel}: file must be valid UTF-8")
+    except OSError:
+        errors.append(f"{rel}: file could not be read")
+    return None
+
+
 def read_toml(path: Path, rel: str, errors: list[str]) -> dict[str, Any] | None:
     try:
         with path.open("rb") as handle:
@@ -306,8 +321,14 @@ def read_toml(path: Path, rel: str, errors: list[str]) -> dict[str, Any] | None:
     except FileNotFoundError:
         errors.append(f"{rel}: missing file")
         return None
+    except UnicodeError:
+        errors.append(f"{rel}: file must be valid UTF-8")
+        return None
     except tomllib.TOMLDecodeError as err:
         errors.append(f"{rel}: invalid TOML: {err}")
+        return None
+    except OSError:
+        errors.append(f"{rel}: file could not be read")
         return None
     return data
 
