@@ -50,6 +50,10 @@ fn run_chat(workspace: &Path, input: &[u8]) -> Output {
 }
 
 fn wait_with_output_before(mut child: Child, timeout: Duration) -> Output {
+    let stdout_reader =
+        read_to_end_in_thread(child.stdout.take().expect("stdout is piped"), "stdout");
+    let stderr_reader =
+        read_to_end_in_thread(child.stderr.take().expect("stderr is piped"), "stderr");
     let started = Instant::now();
     let status = loop {
         if let Some(status) = child.try_wait().expect("child status should be readable") {
@@ -62,25 +66,55 @@ fn wait_with_output_before(mut child: Child, timeout: Duration) -> Output {
         }
         std::thread::sleep(Duration::from_millis(10));
     };
-    let mut stdout = Vec::new();
-    child
-        .stdout
-        .take()
-        .expect("stdout is piped")
-        .read_to_end(&mut stdout)
-        .expect("stdout should be readable");
-    let mut stderr = Vec::new();
-    child
-        .stderr
-        .take()
-        .expect("stderr is piped")
-        .read_to_end(&mut stderr)
-        .expect("stderr should be readable");
     Output {
         status,
-        stdout,
-        stderr,
+        stdout: stdout_reader.join().expect("stdout reader should finish"),
+        stderr: stderr_reader.join().expect("stderr reader should finish"),
     }
+}
+
+fn read_to_end_in_thread(
+    mut reader: impl Read + Send + 'static,
+    stream: &'static str,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut output = Vec::new();
+        reader
+            .read_to_end(&mut output)
+            .unwrap_or_else(|error| panic!("{stream} should be readable: {error}"));
+        output
+    })
+}
+
+#[test]
+fn large_output_child() {
+    if std::env::var_os("WATERSHED_FLOW_CLI_LARGE_OUTPUT_CHILD").is_none() {
+        return;
+    }
+    let output = vec![b'x'; 512 * 1024];
+    std::io::stdout()
+        .write_all(&output)
+        .expect("large stdout should write");
+    std::io::stderr()
+        .write_all(&output)
+        .expect("large stderr should write");
+}
+
+#[test]
+fn wait_with_output_drains_large_captured_streams() {
+    let child = Command::new(std::env::current_exe().expect("test executable should resolve"))
+        .args(["--exact", "large_output_child", "--nocapture"])
+        .env("WATERSHED_FLOW_CLI_LARGE_OUTPUT_CHILD", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("large-output child should spawn");
+
+    let output = wait_with_output_before(child, Duration::from_secs(2));
+
+    assert!(output.status.success());
+    assert!(output.stdout.len() >= 512 * 1024);
+    assert!(output.stderr.len() >= 512 * 1024);
 }
 
 fn replace_seeded_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {
@@ -468,6 +502,8 @@ fn tail_follows_a_growing_session_through_its_terminal_event() {
         .spawn()
         .expect("flow binary should spawn");
     let mut stdout = BufReader::new(child.stdout.take().expect("stdout is piped"));
+    let stderr_reader =
+        read_to_end_in_thread(child.stderr.take().expect("stderr is piped"), "stderr");
     let mut actual = String::new();
     stdout
         .read_line(&mut actual)
@@ -487,13 +523,8 @@ fn tail_follows_a_growing_session_through_its_terminal_event() {
         .read_to_string(&mut actual)
         .expect("tail emits appended events");
     let status = child.wait().expect("flow binary should exit");
-    let mut stderr = String::new();
-    child
-        .stderr
-        .take()
-        .expect("stderr is piped")
-        .read_to_string(&mut stderr)
-        .expect("stderr reads");
+    let stderr = String::from_utf8(stderr_reader.join().expect("stderr reader should finish"))
+        .expect("stderr should be UTF-8");
 
     assert!(status.success(), "{stderr}");
     assert!(stderr.is_empty(), "{stderr}");
