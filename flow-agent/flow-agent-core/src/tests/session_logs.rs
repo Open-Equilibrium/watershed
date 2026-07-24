@@ -249,10 +249,7 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
     let err = reserve_session_log(&workspace, "reserve001")
         .expect_err("second reservation must fail atomically");
 
-    assert!(matches!(
-        err,
-        RuntimeError::SessionLogExists(session_id) if session_id == "reserve001"
-    ));
+    assert_active_session(err, "reserve001", "reserve001.lock");
     assert!(first.session_path.diagnostic_path().exists());
     assert!(first.log_path.diagnostic_path().exists());
     assert!(first.lock_path.diagnostic_path().exists());
