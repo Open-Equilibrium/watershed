@@ -421,7 +421,10 @@ pub(super) fn base_event() -> EventEnvelope {
 }
 
 pub(super) fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
-    let text = event.canonical_jsonl().expect("event serializes");
+    let text = format!(
+        "{}\n",
+        serde_json::to_string(&event).expect("invalid event fixture serializes")
+    );
     assert_invalid_stream(name, &text, expected);
 }
 
