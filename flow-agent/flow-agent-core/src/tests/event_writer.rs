@@ -233,6 +233,31 @@ fn segmented_stream_rejects_case_aliased_names() {
 }
 
 #[test]
+fn segmented_stream_callbacks_do_not_observe_bytes_beyond_total_limit() {
+    let workspace = empty_workspace("segment-callback-total-limit");
+    let reservation =
+        reserve_session_log(&workspace, "segmentcallback001").expect("session reserved");
+    fs::write(reservation.session_path.diagnostic_path(), b"one\n").expect("base segment written");
+    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path resolves");
+    fs::write(second.diagnostic_path(), b"two\n").expect("second segment written");
+    let limits = SessionStreamLimits {
+        max_segments: 2,
+        max_total_bytes: 7,
+    };
+    let mut visited = Vec::new();
+
+    let err = for_each_segmented_jsonl_line(&reservation.session_path, limits, |line| {
+        visited.push(line.to_owned());
+        Ok(())
+    })
+    .expect_err("cumulative stream limit is enforced before callbacks");
+
+    assert!(err.to_string().contains("exceeds max"), "{err}");
+    assert_eq!(visited, vec!["one\n"]);
+    reservation.rollback();
+}
+
+#[test]
 fn session_object_namespace_rejects_case_aliases() {
     let workspace = empty_workspace("session-object-case-alias");
     let sessions = ensure_runtime_dirs(&workspace)

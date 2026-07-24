@@ -345,18 +345,13 @@ pub fn for_each_segmented_jsonl_line(
 ) -> Result<u64, RuntimeError> {
     let mut total = 0u64;
     for file in segmented_jsonl_files(base, limits)? {
-        let segment_bytes =
-            for_each_anchored_file_line_with_limit(&file, MAX_SESSION_SEGMENT_BYTES, |line| {
-                visit(line)
-            })?;
+        let remaining = limits.max_total_bytes.saturating_sub(total);
+        let segment_bytes = for_each_anchored_file_line_with_limit(
+            &file,
+            MAX_SESSION_SEGMENT_BYTES.min(remaining),
+            &mut visit,
+        )?;
         total = total.saturating_add(segment_bytes);
-        if total > limits.max_total_bytes {
-            return Err(RuntimeError::Protocol(format!(
-                "{} segmented JSONL size {total} bytes exceeds max {}",
-                base.diagnostic_path().display(),
-                limits.max_total_bytes
-            )));
-        }
     }
     Ok(total)
 }
