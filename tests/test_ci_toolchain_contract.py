@@ -10,6 +10,23 @@ NODE_VERSION = "22.23.1"
 PNPM_VERSION = "11.15.1"
 SETUP_NODE_RELEASE = "v6.5.0"
 SETUP_NODE_SHA = "249970729cb0ef3589644e2896645e5dc5ba9c38"
+FORBIDDEN_NODE_RUNTIME_DEPENDENCY = re.compile(
+    r"^(?:node|nodejs|node-api|napi|neon)(?:[-_].*)?$"
+)
+
+
+def forbidden_dependency_names(table: dict[str, object]) -> list[str]:
+    return [
+        package_name
+        for dependency, specification in table.items()
+        for package_name in [
+            specification.get("package", dependency)
+            if isinstance(specification, dict)
+            else dependency
+        ]
+        if isinstance(package_name, str)
+        and FORBIDDEN_NODE_RUNTIME_DEPENDENCY.fullmatch(package_name)
+    ]
 
 
 class CiToolchainContractTest(unittest.TestCase):
@@ -57,7 +74,6 @@ class CiToolchainContractTest(unittest.TestCase):
         self.assertLess(corepack_index, pnpm_check_index)
 
     def test_rust_product_manifests_have_no_node_runtime_dependency(self) -> None:
-        forbidden = re.compile(r"^(?:node|nodejs|node-api|napi|neon)(?:[-_].*)?$")
         violations: list[str] = []
 
         def dependency_tables(
@@ -83,14 +99,21 @@ class CiToolchainContractTest(unittest.TestCase):
             with manifest_path.open("rb") as manifest_file:
                 manifest = tomllib.load(manifest_file)
             for table_path, table in dependency_tables(manifest):
-                for dependency in table:
-                    if forbidden.fullmatch(dependency):
-                        violations.append(
-                            f"{manifest_path.relative_to(ROOT)}:"
-                            f"{'.'.join(table_path)}:{dependency}"
-                        )
+                for dependency in forbidden_dependency_names(table):
+                    violations.append(
+                        f"{manifest_path.relative_to(ROOT)}:"
+                        f"{'.'.join(table_path)}:{dependency}"
+                    )
 
         self.assertEqual(violations, [])
+
+    def test_forbidden_dependency_names_checks_cargo_package_aliases(self) -> None:
+        self.assertEqual(
+            forbidden_dependency_names(
+                {"node_bridge": {"package": "node-api", "version": "1"}}
+            ),
+            ["node-api"],
+        )
 
 
 if __name__ == "__main__":
