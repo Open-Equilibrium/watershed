@@ -1,5 +1,7 @@
-use flow_agent_core::{EmitMode, run_flow};
+use flow_agent_core::{EmitMode, RunOutput, run_flow};
+use proto::{EventEnvelope, EventType};
 use std::{
+    collections::HashSet,
     fs,
     sync::{Arc, Barrier, mpsc},
     thread,
@@ -11,6 +13,13 @@ mod test_support;
 use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
 
 #[test]
+fn incomplete_near_limit_stream_fails_completion_check() {
+    let result = std::panic::catch_unwind(|| assert_near_limit_events(&[]));
+
+    assert!(result.is_err(), "an incomplete workload must fail the gate");
+}
+
+#[test]
 #[ignore = "performance gate"]
 fn one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget() {
     let (workspace, active_bytes) = near_limit_registry_workspace();
@@ -20,7 +29,7 @@ fn one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget() {
     let peak_rss_sampler = PeakRssSampler::start();
     let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .unwrap_or_else(|err| panic!("smoke-flow: {err}"));
-    assert!(output.event_count > 0, "smoke-flow must emit events");
+    assert_near_limit_output(&output);
     assert!(!output.failed, "smoke-flow should complete successfully");
 
     if let Some(mut sampler) = peak_rss_sampler {
@@ -53,7 +62,6 @@ fn ten_near_limit_orchestrating_flows_complete_under_m1_runtime_contract() {
             thread::spawn(move || {
                 barrier.wait();
                 let result = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-                    .map(|output| (output.event_count, output.failed))
                     .map_err(|err| err.to_string());
                 tx.send(result).expect("result sent");
             })
@@ -74,9 +82,9 @@ fn ten_near_limit_orchestrating_flows_complete_under_m1_runtime_contract() {
         let result = rx
             .recv_timeout(remaining)
             .expect("10 concurrent orchestrating fixture flows complete before timeout");
-        let (event_count, failed) = result.unwrap_or_else(|err| panic!("smoke-flow: {err}"));
-        assert!(event_count > 0, "smoke-flow must emit events");
-        assert!(!failed, "smoke-flow should complete successfully");
+        let output = result.unwrap_or_else(|err| panic!("smoke-flow: {err}"));
+        assert_near_limit_output(&output);
+        assert!(!output.failed, "smoke-flow should complete successfully");
     }
     for handle in handles {
         handle.join().expect("worker thread joins");
@@ -95,6 +103,88 @@ fn ten_near_limit_orchestrating_flows_complete_under_m1_runtime_contract() {
             "concurrent fixture peak RSS growth must stay <= {per_flow_budget} bytes per active top-level flow ({budget} bytes total): {peak_growth} bytes"
         );
     }
+}
+
+fn assert_near_limit_output(output: &RunOutput) {
+    let events = output
+        .stdout
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<EventEnvelope>(line)
+                .expect("near-limit output must contain valid events")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events.len(),
+        output.event_count,
+        "near-limit output must contain every reported event"
+    );
+    assert_near_limit_events(&events);
+}
+
+fn assert_near_limit_events(events: &[EventEnvelope]) {
+    let root_flow_id = events
+        .iter()
+        .find(|event| {
+            event.event_type == EventType::FlowStarted
+                && event
+                    .payload
+                    .get("flow_definition_id")
+                    .and_then(|id| id.as_str())
+                    == Some("smoke-flow")
+        })
+        .and_then(|event| event.flow_id.as_deref())
+        .expect("near-limit workload must start the root flow");
+    let entered_root_phases = events
+        .iter()
+        .filter(|event| {
+            event.event_type == EventType::PhaseEntered
+                && event.flow_id.as_deref() == Some(root_flow_id)
+        })
+        .filter_map(|event| {
+            event
+                .payload
+                .get("phase_id")
+                .and_then(|phase_id| phase_id.as_str())
+                .map(str::to_owned)
+        })
+        .collect::<HashSet<_>>();
+    let expected_root_phases = (0..16)
+        .map(|index| format!("near-limit-phase-{index:02}"))
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        entered_root_phases, expected_root_phases,
+        "near-limit workload must enter every root phase"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.event_type == EventType::FlowCompleted
+                && event.parent_flow_id.as_deref() == Some(root_flow_id)
+                && event
+                    .payload
+                    .get("flow_definition_id")
+                    .and_then(|id| id.as_str())
+                    == Some("near-limit-child")
+        }),
+        "near-limit workload must complete its child flow"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event.event_type == EventType::FlowCompleted
+                && event.flow_id.as_deref() == Some(root_flow_id)
+                && event
+                    .payload
+                    .get("flow_definition_id")
+                    .and_then(|id| id.as_str())
+                    == Some("smoke-flow")
+        }),
+        "near-limit workload must complete the root flow"
+    );
+    assert_eq!(
+        events.last().map(|event| event.event_type),
+        Some(EventType::SessionCompleted),
+        "near-limit workload must complete its session"
+    );
 }
 
 fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
