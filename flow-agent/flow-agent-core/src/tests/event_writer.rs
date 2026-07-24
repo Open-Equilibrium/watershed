@@ -117,6 +117,7 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
             .len(),
         2
     );
+    drop(appender);
     reservation.rollback().expect("reservation rolls back");
 }
 
@@ -154,6 +155,7 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     }
     ContextManifestWriter::open(&reservation.context_path)
         .expect("five context-manifest segments remain valid");
+    drop(appender);
     reservation.rollback().expect("reservation rolls back");
 }
 
