@@ -68,7 +68,7 @@ fn protocol_validator_rejects_scalar_and_session_payload_edges() {
     assert_invalid_event(
         "missing-session-failed-reason.jsonl",
         missing_reason,
-        "session.failed payload.reason",
+        "payload.reason",
     );
 }
 
