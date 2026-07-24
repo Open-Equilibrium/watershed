@@ -750,12 +750,15 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
         let err = resume_session(&workspace, &output.session_id, EmitMode::Jsonl)
             .expect_err("invalid context audit evidence must block resume");
 
-        assert!(matches!(
-            err,
+        assert!(
+            matches!(
+            &err,
             RuntimeError::Protocol(message)
                 if message.contains(expected)
                     && message.contains(&diagnostic_path.display().to_string())
-        ));
+            ),
+            "{tamper} context manifest returned {err:?}"
+        );
         assert_eq!(
             fs::read_to_string(&output.session_path).expect("session remains readable"),
             before

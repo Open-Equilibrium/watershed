@@ -1136,10 +1136,14 @@ fn test_event(
         sequence,
         format!("2026-01-01T00:00:{:02}Z", sequence - 1),
         "flow-agent-cli",
-        if event_type == EventType::SessionStarted {
-            serde_json::json!({"reason":"test"})
-        } else {
-            serde_json::json!({})
+        match event_type {
+            EventType::SessionStarted => serde_json::json!({"reason":"test"}),
+            EventType::MessageDelta => serde_json::json!({
+                "content_delta": "test",
+                "message_id": "message-test",
+                "role": "assistant"
+            }),
+            _ => serde_json::json!({}),
         },
     )
 }
