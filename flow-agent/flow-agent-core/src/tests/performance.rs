@@ -115,6 +115,51 @@ fn apply_rejects_plan_drift_without_a_second_apply() {
 }
 
 #[test]
+fn apply_rejects_application_drift_before_tool_side_effects() {
+    let workspace = workspace_copy("hello-flow");
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let root_flow = registry
+        .flow_block("hello-flow")
+        .expect("hello-flow fixture exists");
+    let plan = plan_flow(
+        &workspace,
+        &registry,
+        &policy,
+        root_flow,
+        "applicationdrift001",
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("runtime plan succeeds");
+    let mut changed_root_flow = root_flow.clone();
+    changed_root_flow.identity.name = "ChangedHelloFlow".to_owned();
+    reset_fixture_tool_apply_count();
+
+    let err = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            registry: &registry,
+            policy: &policy,
+            root_flow: &changed_root_flow,
+            session_id: "applicationdrift001",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        None,
+    )
+    .expect_err("application drift must reject before applying tools");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message == "flow apply did not match its execution plan"
+    ));
+    assert_eq!(fixture_tool_apply_count(), 0);
+    assert!(!workspace.join("out/summary.txt").exists());
+}
+
+#[test]
 #[ignore = "performance gate"]
 fn hello_flow_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();

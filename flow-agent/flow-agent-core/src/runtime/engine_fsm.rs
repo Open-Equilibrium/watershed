@@ -578,6 +578,24 @@ pub fn apply_flow_with_sink(
         ));
     }
     application.plan.validate_integrity()?;
+    if application.options.side_effect_mode == ToolSideEffectMode::Apply {
+        let mut preflight_options = application.options.clone();
+        preflight_options.side_effect_mode = ToolSideEffectMode::Plan;
+        let preflight = execute_flow_with_sink(
+            application.workspace,
+            application.registry,
+            application.policy,
+            application.root_flow,
+            application.session_id,
+            preflight_options,
+            None,
+        )?;
+        if !preflight.matches_plan(application.plan) {
+            return Err(RuntimeError::Protocol(
+                "flow apply did not match its execution plan".to_owned(),
+            ));
+        }
+    }
     let execution = execute_flow_with_sink(
         application.workspace,
         application.registry,
