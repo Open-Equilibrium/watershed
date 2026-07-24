@@ -123,6 +123,184 @@ fn envelope_metadata_validation_reports_invalid_fields() {
 }
 
 #[test]
+fn event_boundaries_reject_invalid_metadata() {
+    let mut event = test_event(json!({"reason": "fixture-start"}));
+    event.sequence = 0;
+
+    assert!(
+        event
+            .canonical_jsonl()
+            .expect_err("canonical serialization must validate metadata")
+            .to_string()
+            .contains("sequence")
+    );
+    assert!(
+        serde_json::to_string(&event)
+            .expect_err("ordinary serialization must validate metadata")
+            .to_string()
+            .contains("sequence")
+    );
+    let raw = "{\"event_id\":\"evt-001\",\"event_type\":\"session.started\",\"payload\":{\"reason\":\"fixture-start\"},\"protocol_version\":\"0\",\"sequence\":0,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}";
+    assert!(
+        serde_json::from_str::<EventEnvelope>(raw)
+            .expect_err("deserialization must validate metadata")
+            .to_string()
+            .contains("sequence")
+    );
+}
+
+#[test]
+fn event_boundaries_reject_missing_required_payload_fields() {
+    let event = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionFailed,
+        "smoke001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        json!({}),
+    );
+
+    assert!(
+        event
+            .canonical_jsonl()
+            .expect_err("canonical serialization must validate the payload")
+            .to_string()
+            .contains("payload.reason")
+    );
+    assert!(
+        serde_json::to_string(&event)
+            .expect_err("ordinary serialization must validate the payload")
+            .to_string()
+            .contains("payload.reason")
+    );
+    let raw = "{\"event_id\":\"evt-001\",\"event_type\":\"session.failed\",\"payload\":{},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}";
+    assert!(
+        serde_json::from_str::<EventEnvelope>(raw)
+            .expect_err("deserialization must validate the payload")
+            .to_string()
+            .contains("payload.reason")
+    );
+}
+
+#[test]
+fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
+    let cases = [
+        (EventType::SessionStarted, json!({})),
+        (EventType::SessionPaused, json!({"reason": "pause"})),
+        (EventType::SessionResumed, json!({})),
+        (EventType::SessionCompleted, json!({})),
+        (EventType::SessionFailed, json!({"reason": "failed"})),
+        (
+            EventType::FlowStarted,
+            json!({"flow_definition_id": "flow-1"}),
+        ),
+        (
+            EventType::FlowCompleted,
+            json!({"flow_definition_id": "flow-1", "flow_name": "Flow"}),
+        ),
+        (
+            EventType::FlowFailed,
+            json!({"flow_definition_id": "flow-1", "error": "failed"}),
+        ),
+        (
+            EventType::PhaseEntered,
+            json!({
+                "phase_id": "phase-1",
+                "phase_name": "Phase",
+                "instruction_ids": [],
+                "tool_ids": []
+            }),
+        ),
+        (
+            EventType::StepStarted,
+            json!({
+                "step_id": "step-1",
+                "step_name": "Step",
+                "connection_ids": ["connection-1"],
+                "connection_kinds": ["data"]
+            }),
+        ),
+        (
+            EventType::StepCompleted,
+            json!({"step_id": "step-1", "step_name": "Step"}),
+        ),
+        (
+            EventType::MessageDelta,
+            json!({"message_id": "message-1", "role": "assistant", "content_delta": "hi"}),
+        ),
+        (
+            EventType::MessageCompleted,
+            json!({"message_id": "message-1", "role": "assistant"}),
+        ),
+        (
+            EventType::ToolStarted,
+            json!({
+                "tool_id": "tool-1",
+                "tool_name": "Tool",
+                "tool_kind": "predefined-command",
+                "read_scope": [],
+                "write_scope": [],
+                "allowed_parameters": [],
+                "network_access": "deny"
+            }),
+        ),
+        (
+            EventType::ToolProgress,
+            json!({"tool_id": "tool-1", "message": "working"}),
+        ),
+        (
+            EventType::ToolCompleted,
+            json!({"tool_id": "tool-1", "exit_code": 0}),
+        ),
+        (
+            EventType::ToolFailed,
+            json!({"tool_id": "tool-1", "error": "failed"}),
+        ),
+        (
+            EventType::ToolTimedOut,
+            json!({"tool_id": "tool-1", "error": "timed out"}),
+        ),
+        (
+            EventType::ArtifactLogged,
+            json!({"artifact_id": "artifact-1", "artifact_type": "text", "uri": "file.txt"}),
+        ),
+        (
+            EventType::AttentionRequested,
+            json!({"request_id": "request-1", "reason": "approval"}),
+        ),
+        (
+            EventType::MetricSample,
+            json!({"metric_name": "latency", "value": 1.5}),
+        ),
+        (
+            EventType::Error,
+            json!({"code": "runtime_error", "message": "failed", "data": {}}),
+        ),
+    ];
+
+    for (index, (event_type, payload)) in cases.into_iter().enumerate() {
+        let event = EventEnvelope::new(
+            format!("evt-{index}"),
+            event_type,
+            "smoke001",
+            u64::try_from(index + 1).expect("event index fits u64"),
+            "2026-01-01T00:00:00Z",
+            "flow-agent-cli",
+            payload,
+        );
+
+        let canonical = event
+            .canonical_jsonl()
+            .unwrap_or_else(|err| panic!("{}: {err}", event_type.as_str()));
+        let parsed: EventEnvelope = serde_json::from_str(canonical.trim())
+            .unwrap_or_else(|err| panic!("{}: {err}", event_type.as_str()));
+
+        assert_eq!(parsed, event, "{}", event_type.as_str());
+    }
+}
+
+#[test]
 fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
     let event = EventEnvelope::new(
         "evt-001",
@@ -171,6 +349,7 @@ fn canonical_event_output_normalizes_all_string_values_to_nfc() {
         "2026-01-01T00:00:00Z",
         "flow-agent-cli",
         json!({
+            "flow_definition_id": "flow-cafe",
             "flow_name": "Cafe\u{301}",
             "nested": ["e\u{301}"]
         }),

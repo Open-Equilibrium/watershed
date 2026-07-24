@@ -6,7 +6,7 @@ use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     ser::{Error as _, SerializeMap},
 };
-use serde_json::{Number, Value};
+use serde_json::{Map, Number, Value};
 use std::{
     collections::{BTreeMap, HashSet},
     fmt,
@@ -18,6 +18,7 @@ pub const PROTOCOL_VERSION_V0: &str = "0";
 
 /// Canonical runtime event envelope shared by Flow Agent, Meta-Harness and Liquid.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[serde(try_from = "UncheckedEventEnvelope")]
 pub struct EventEnvelope {
     /// Additive v0 envelope fields not yet understood by this implementation.
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -51,6 +52,25 @@ pub struct EventEnvelope {
     pub timestamp: String,
 }
 
+#[derive(Deserialize)]
+struct UncheckedEventEnvelope {
+    #[serde(flatten, default)]
+    additional_fields: BTreeMap<String, Value>,
+    correlation_id: Option<String>,
+    event_id: String,
+    event_type: EventType,
+    flow_id: Option<String>,
+    parent_flow_id: Option<String>,
+    #[serde(deserialize_with = "deserialize_payload_object")]
+    payload: Value,
+    #[serde(deserialize_with = "deserialize_protocol_version_v0")]
+    protocol_version: String,
+    sequence: u64,
+    session_id: String,
+    source: String,
+    timestamp: String,
+}
+
 /// Invalid field in one event envelope's stream-independent metadata.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EventMetadataError {
@@ -73,29 +93,70 @@ impl fmt::Display for EventMetadataError {
 
 impl std::error::Error for EventMetadataError {}
 
+/// Invalid field in one complete v0 event envelope.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventValidationError {
+    field: String,
+    requirement: &'static str,
+}
+
+impl EventValidationError {
+    /// Returns the invalid envelope or payload field.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    fn new(field: impl Into<String>, requirement: &'static str) -> Self {
+        Self {
+            field: field.into(),
+            requirement,
+        }
+    }
+}
+
+impl From<EventMetadataError> for EventValidationError {
+    fn from(value: EventMetadataError) -> Self {
+        Self::new(value.field, value.requirement)
+    }
+}
+
+impl fmt::Display for EventValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.field, self.requirement)
+    }
+}
+
+impl std::error::Error for EventValidationError {}
+
+impl TryFrom<UncheckedEventEnvelope> for EventEnvelope {
+    type Error = EventValidationError;
+
+    fn try_from(value: UncheckedEventEnvelope) -> Result<Self, Self::Error> {
+        let event = Self {
+            additional_fields: value.additional_fields,
+            correlation_id: value.correlation_id,
+            event_id: value.event_id,
+            event_type: value.event_type,
+            flow_id: value.flow_id,
+            parent_flow_id: value.parent_flow_id,
+            payload: value.payload,
+            protocol_version: value.protocol_version,
+            sequence: value.sequence,
+            session_id: value.session_id,
+            source: value.source,
+            timestamp: value.timestamp,
+        };
+        event.validate_v0()?;
+        Ok(event)
+    }
+}
+
 impl Serialize for EventEnvelope {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        if let Some(field) = self
-            .additional_fields
-            .keys()
-            .find(|field| is_reserved_envelope_field(field))
-        {
-            return Err(S::Error::custom(format!(
-                "additional field {field:?} collides with envelope field"
-            )));
-        }
-        if !self.payload.is_object() {
-            return Err(S::Error::custom("payload must be a JSON object"));
-        }
-        if self.protocol_version != PROTOCOL_VERSION_V0 {
-            return Err(S::Error::custom(format!(
-                "unsupported protocol_version {:?}; expected {:?}",
-                self.protocol_version, PROTOCOL_VERSION_V0
-            )));
-        }
+        self.validate_v0().map_err(S::Error::custom)?;
 
         let optional_fields = usize::from(self.correlation_id.is_some())
             + usize::from(self.flow_id.is_some())
@@ -163,6 +224,8 @@ impl EventEnvelope {
                 protocol_version: self.protocol_version.clone(),
             });
         }
+        self.validate_v0()
+            .map_err(CanonicalJsonError::InvalidEvent)?;
 
         let value = serde_json::to_value(self).map_err(CanonicalJsonError::Serialize)?;
         let mut out = canonical_json(&value)?;
@@ -207,6 +270,289 @@ impl EventEnvelope {
             Some((field, requirement)) => Err(EventMetadataError { field, requirement }),
             None => Ok(()),
         }
+    }
+
+    /// Validates all stream-independent v0 envelope and payload requirements.
+    pub fn validate_v0(&self) -> Result<(), EventValidationError> {
+        self.validate_metadata()?;
+        if !self.payload.is_object() {
+            return Err(EventValidationError::new(
+                "payload",
+                "must be a JSON object",
+            ));
+        }
+        if self.protocol_version != PROTOCOL_VERSION_V0 {
+            return Err(EventValidationError::new(
+                "protocol_version",
+                "must be \"0\" (unsupported protocol_version)",
+            ));
+        }
+        if let Some(field) = self
+            .additional_fields
+            .keys()
+            .find(|field| is_reserved_envelope_field(field))
+        {
+            return Err(EventValidationError::new(
+                format!("additional field {field:?}"),
+                "collides with an envelope field",
+            ));
+        }
+        if contains_null(&self.payload) {
+            return Err(EventValidationError::new(
+                "payload",
+                "must not contain null in protocol v0",
+            ));
+        }
+        if self.additional_fields.values().any(contains_null) {
+            return Err(EventValidationError::new(
+                "additional_fields",
+                "must not contain null in protocol v0",
+            ));
+        }
+
+        PayloadValidator::new(self.event_type, &self.payload).validate()
+    }
+}
+
+struct PayloadValidator<'a> {
+    event_type: EventType,
+    payload: &'a Map<String, Value>,
+}
+
+impl<'a> PayloadValidator<'a> {
+    fn new(event_type: EventType, payload: &'a Value) -> Self {
+        Self {
+            event_type,
+            payload: payload
+                .as_object()
+                .expect("EventEnvelope::validate_v0 checks payload objects"),
+        }
+    }
+
+    fn validate(&self) -> Result<(), EventValidationError> {
+        match self.event_type {
+            EventType::SessionStarted
+            | EventType::SessionPaused
+            | EventType::SessionResumed
+            | EventType::SessionCompleted => {
+                self.optional_string("reason")?;
+            }
+            EventType::SessionFailed => {
+                self.require_string("reason")?;
+            }
+            EventType::FlowStarted | EventType::FlowCompleted => {
+                self.require_string("flow_definition_id")?;
+                self.optional_string("flow_name")?;
+            }
+            EventType::FlowFailed => {
+                self.require_string("flow_definition_id")?;
+                self.optional_string("flow_name")?;
+                self.require_string("error")?;
+            }
+            EventType::PhaseEntered => {
+                self.require_string("phase_id")?;
+                self.require_string("phase_name")?;
+                self.require_string_array("instruction_ids")?;
+                self.require_string_array("tool_ids")?;
+            }
+            EventType::StepStarted | EventType::StepCompleted => {
+                self.require_string("step_id")?;
+                self.require_string("step_name")?;
+                self.optional_string("phase_id")?;
+                self.optional_string("instruction_id")?;
+                let connection_ids = self.optional_string_array("connection_ids")?;
+                let connection_kinds = self.optional_string_array("connection_kinds")?;
+                match (connection_ids, connection_kinds) {
+                    (Some(ids), Some(kinds)) => {
+                        if ids.len() != kinds.len() {
+                            return Err(self.error(
+                                "connection_ids",
+                                "must have the same length as payload.connection_kinds",
+                            ));
+                        }
+                        if kinds
+                            .iter()
+                            .any(|kind| !matches!(*kind, "data" | "trigger" | "refresh"))
+                        {
+                            return Err(self.error(
+                                "connection_kinds",
+                                "values must be data, trigger, or refresh",
+                            ));
+                        }
+                    }
+                    (None, None) => {}
+                    _ => {
+                        return Err(self.error(
+                            "connection_ids",
+                            "and payload.connection_kinds must be present together",
+                        ));
+                    }
+                }
+            }
+            EventType::MessageDelta => {
+                self.require_string("message_id")?;
+                self.require_role()?;
+                self.require_string("content_delta")?;
+            }
+            EventType::MessageCompleted => {
+                self.require_string("message_id")?;
+                self.require_role()?;
+            }
+            EventType::ToolStarted => {
+                self.require_string("tool_id")?;
+                self.require_string("tool_name")?;
+                if !matches!(
+                    self.require_string("tool_kind")?,
+                    "predefined-command" | "own-script"
+                ) {
+                    return Err(self.error("tool_kind", "must be predefined-command or own-script"));
+                }
+                self.require_string_array("read_scope")?;
+                self.require_string_array("write_scope")?;
+                self.require_string_array("allowed_parameters")?;
+                if !matches!(self.require_string("network_access")?, "deny" | "declared") {
+                    return Err(self.error("network_access", "must be deny or declared"));
+                }
+            }
+            EventType::ToolProgress => {
+                self.require_string("tool_id")?;
+                self.require_string("message")?;
+            }
+            EventType::ToolCompleted => {
+                self.require_string("tool_id")?;
+                self.optional_integer("exit_code")?;
+            }
+            EventType::ToolFailed | EventType::ToolTimedOut => {
+                self.require_string("tool_id")?;
+                self.require_string("error")?;
+            }
+            EventType::ArtifactLogged => {
+                self.require_string("artifact_id")?;
+                self.require_string("artifact_type")?;
+                self.require_string("uri")?;
+            }
+            EventType::AttentionRequested => {
+                self.require_string("request_id")?;
+                self.require_string("reason")?;
+            }
+            EventType::MetricSample => {
+                self.require_string("metric_name")?;
+                self.require_number("value")?;
+            }
+            EventType::Error => {
+                self.require_string("code")?;
+                self.require_string("message")?;
+                self.optional_object("data")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn require_string(&self, field: &'static str) -> Result<&'a str, EventValidationError> {
+        match self.payload.get(field).and_then(Value::as_str) {
+            Some(value) if !value.is_empty() => Ok(value),
+            _ => Err(self.error(field, "must be a non-empty string")),
+        }
+    }
+
+    fn optional_string(&self, field: &'static str) -> Result<(), EventValidationError> {
+        if self.payload.contains_key(field) {
+            self.require_string(field)?;
+        }
+        Ok(())
+    }
+
+    fn require_role(&self) -> Result<(), EventValidationError> {
+        if matches!(
+            self.require_string("role")?,
+            "system" | "user" | "assistant" | "tool"
+        ) {
+            Ok(())
+        } else {
+            Err(self.error("role", "must be system, user, assistant, or tool"))
+        }
+    }
+
+    fn require_string_array(
+        &self,
+        field: &'static str,
+    ) -> Result<Vec<&'a str>, EventValidationError> {
+        self.payload
+            .get(field)
+            .ok_or_else(|| self.error(field, "must be a string array"))
+            .and_then(|value| self.string_array(field, value))
+    }
+
+    fn optional_string_array(
+        &self,
+        field: &'static str,
+    ) -> Result<Option<Vec<&'a str>>, EventValidationError> {
+        self.payload
+            .get(field)
+            .map(|value| self.string_array(field, value))
+            .transpose()
+    }
+
+    fn string_array(
+        &self,
+        field: &'static str,
+        value: &'a Value,
+    ) -> Result<Vec<&'a str>, EventValidationError> {
+        value
+            .as_array()
+            .ok_or_else(|| self.error(field, "must be a string array"))?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .ok_or_else(|| self.error(field, "must contain only strings"))
+            })
+            .collect()
+    }
+
+    fn optional_integer(&self, field: &'static str) -> Result<(), EventValidationError> {
+        if let Some(value) = self.payload.get(field) {
+            let valid = value
+                .as_number()
+                .is_some_and(|number| number.as_i64().is_some() || number.as_u64().is_some());
+            if !valid {
+                return Err(self.error(field, "must be an integer"));
+            }
+        }
+        Ok(())
+    }
+
+    fn require_number(&self, field: &'static str) -> Result<(), EventValidationError> {
+        if self.payload.get(field).is_some_and(Value::is_number) {
+            Ok(())
+        } else {
+            Err(self.error(field, "must be a number"))
+        }
+    }
+
+    fn optional_object(&self, field: &'static str) -> Result<(), EventValidationError> {
+        if self
+            .payload
+            .get(field)
+            .is_some_and(|value| !value.is_object())
+        {
+            Err(self.error(field, "must be an object"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn error(&self, field: &'static str, requirement: &'static str) -> EventValidationError {
+        EventValidationError::new(format!("payload.{field}"), requirement)
+    }
+}
+
+fn contains_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(values) => values.iter().any(contains_null),
+        Value::Object(values) => values.values().any(contains_null),
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
     }
 }
 
@@ -394,6 +740,8 @@ impl std::error::Error for UnknownEventType {}
 pub enum CanonicalJsonError {
     /// JSON serialization failed before canonicalization.
     Serialize(serde_json::Error),
+    /// Event failed stream-independent v0 envelope or payload validation.
+    InvalidEvent(EventValidationError),
     /// Event payload was not a JSON object.
     NonObjectPayload,
     /// Envelope used a protocol version other than v0.
@@ -412,6 +760,7 @@ impl fmt::Display for CanonicalJsonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Serialize(err) => write!(f, "failed to serialize canonical JSON: {err}"),
+            Self::InvalidEvent(err) => write!(f, "invalid v0 event: {err}"),
             Self::NonObjectPayload => write!(f, "event payload must be a JSON object"),
             Self::UnsupportedProtocolVersion { protocol_version } => write!(
                 f,
