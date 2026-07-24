@@ -61,6 +61,10 @@ class M1ValidationContractTest(unittest.TestCase):
         )
         step = lines[start:end]
         self.assertFalse(any(line.startswith("        if:") for line in step))
+        self.assertEqual(
+            [line for line in step if line.startswith("        shell:")],
+            ["        shell: pwsh"],
+        )
         run = step.index("        run: |")
         script = "\n".join(line[10:] for line in step[run + 1 :])
         commands = script.splitlines()
@@ -96,8 +100,10 @@ class M1ValidationContractTest(unittest.TestCase):
         disabled = active.replace(
             "        shell: pwsh", "        if: ${{ false }}\n        shell: pwsh"
         )
+        wrong_shell = active.replace("        shell: pwsh", "        shell: bash")
+        missing_shell = active.replace("        shell: pwsh\n", "")
 
-        for workflow in (commented, disabled):
+        for workflow in (commented, disabled, wrong_shell, missing_shell):
             with self.subTest(workflow=workflow), self.assertRaises(
                 (AssertionError, ValueError)
             ):
