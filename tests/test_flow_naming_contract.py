@@ -1,7 +1,10 @@
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+
+from test_m1_validation_contract import tracked_validation_paths
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,21 +123,35 @@ LEGACY_TEXT_PATTERNS = {
 }
 
 
-def tracked_paths() -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    )
+def tracked_paths(root: Path = ROOT) -> list[str]:
     return [
-        path.decode("utf-8")
-        for path in result.stdout.split(b"\0")
-        if path
+        path.relative_to(root).as_posix()
+        for path in tracked_validation_paths(root)
     ]
 
 
 class FlowNamingContractTest(unittest.TestCase):
+    def test_tracked_paths_exclude_protected_files_and_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_root = Path(temp)
+            root = temp_root / "repo"
+            root.mkdir()
+            subprocess.run(["git", "init", "--quiet"], cwd=root, check=True)
+            (root / "safe.txt").write_text("safe", encoding="utf-8")
+            (root / ".env").write_text("protected sentinel", encoding="utf-8")
+            tracked = ["safe.txt", ".env"]
+            external = temp_root / "external.txt"
+            external.write_text("external sentinel", encoding="utf-8")
+            try:
+                (root / "external-link.txt").symlink_to(external)
+            except OSError:
+                pass
+            else:
+                tracked.append("external-link.txt")
+            subprocess.run(["git", "add", "--", *tracked], cwd=root, check=True)
+
+            self.assertEqual(["safe.txt"], tracked_paths(root))
+
     def test_tracked_paths_and_text_use_flow_domain_vocabulary(self) -> None:
         violations: list[str] = []
         paths = tracked_paths()
