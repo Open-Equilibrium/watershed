@@ -552,6 +552,29 @@ process.stderr.write = (message) => {
                     )
                     self.assertEqual("", result.stderr)
 
+    def test_pre_tool_guard_fails_open_for_unexpected_json_shapes(self) -> None:
+        cases = [
+            [],
+            {"tool_input": ["unexpected"]},
+            {"tool_input": {"command": ["unexpected"]}},
+        ]
+        for payload in cases:
+            with self.subTest(payload=payload):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / ".codex" / "hooks" / "pre_tool_use_guard.py"),
+                    ],
+                    input=json.dumps(payload),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(0, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual("", result.stderr)
+
     def test_stop_hook_reports_only_ten_conflict_markers(self) -> None:
         conflicts = [f"file-{index}: leftover conflict marker" for index in range(12)]
         stdout = "\n".join(

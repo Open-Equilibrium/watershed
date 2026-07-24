@@ -42,8 +42,14 @@ def main() -> int:
     except Exception:
         return 0  # cannot parse -> fail open (guard is advisory only)
 
+    if not isinstance(data, dict):
+        return 0
     tool_input = data.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return 0
     cmd = tool_input.get("command") or tool_input.get("cmd") or ""
+    if not isinstance(cmd, str):
+        return 0
 
     for rx, reason in DENY:
         if rx.search(cmd):
