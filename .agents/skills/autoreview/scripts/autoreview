@@ -471,7 +471,7 @@ def load_extra_prompt(args: argparse.Namespace) -> str:
     for value in args.prompt or []:
         chunks.append(value)
     for path in args.prompt_file or []:
-        chunks.append(Path(path).read_text())
+        chunks.append(Path(path).read_text(encoding="utf-8"))
     return "\n\n".join(chunks)
 
 
@@ -611,7 +611,7 @@ def run_droid(args: argparse.Namespace, repo: Path, prompt: str) -> str:
     if args.thinking:
         raise SystemExit("--thinking is not supported by the droid engine")
     prompt_path = Path(tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False).name)
-    prompt_path.write_text(prompt)
+    prompt_path.write_text(prompt, encoding="utf-8")
     cmd = [
         resolve_command(args.droid_bin, repo),
         "exec",
@@ -640,7 +640,7 @@ def run_copilot(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         raise SystemExit("--no-tools is not supported by the copilot engine; copilot requires a read-only file view tool to load the review bundle without exposing it in argv")
     with tempfile.TemporaryDirectory(prefix="autoreview-copilot.") as tempdir:
         prompt_path = Path(tempdir) / "prompt.txt"
-        prompt_path.write_text(prompt)
+        prompt_path.write_text(prompt, encoding="utf-8")
         os.chmod(prompt_path, 0o600)
         cmd = [
             resolve_command(args.copilot_bin, repo),
