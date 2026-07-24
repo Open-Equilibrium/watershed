@@ -449,6 +449,25 @@ process.stderr.write = (message) => {
                 validator.validate_repo(root),
             )
 
+    def test_rejects_malformed_skill_front_matter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            skill_path = root / ".agents" / "skills" / "git" / "SKILL.md"
+            skill_path.write_text(
+                skill_path.read_text(encoding="utf-8").replace(
+                    "---\n",
+                    "---\nthis is not valid metadata\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertIn(
+                ".agents/skills/git/SKILL.md: missing or invalid front matter",
+                validator.validate_repo(root),
+            )
+
     def test_rejects_hook_drift(self) -> None:
         cases = [
             (

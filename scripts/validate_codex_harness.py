@@ -289,7 +289,7 @@ def validate_skills(root: Path) -> list[str]:
             continue
         metadata = parse_skill_front_matter(text)
         if metadata is None:
-            errors.append(f"{rel}: missing front matter")
+            errors.append(f"{rel}: missing or invalid front matter")
             continue
         errors.extend(unknown_keys(rel, metadata, SKILL_FRONT_MATTER_KEYS, "front matter key"))
         expected_name = path.parent.name
@@ -341,9 +341,11 @@ def parse_skill_front_matter(text: str) -> dict[str, str] | None:
     for line in lines[1:]:
         if line == "---":
             return metadata
-        key, sep, value = line.partition(":")
-        if not sep:
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
+        key, sep, value = line.partition(":")
+        if not sep or not key.strip():
+            return None
         metadata[key.strip()] = value.strip().strip('"')
     return None
 
