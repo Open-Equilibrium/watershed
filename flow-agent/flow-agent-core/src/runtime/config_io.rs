@@ -136,7 +136,7 @@ pub fn path_io_error(path: &Path, source: io::Error) -> RuntimeError {
 pub fn for_each_anchored_file_line_with_limit(
     path: &AnchoredFile,
     max_bytes: u64,
-    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+    visit: impl FnMut(&str) -> Result<(), RuntimeError>,
 ) -> Result<u64, RuntimeError> {
     let (file, metadata) = open_anchored_file_for_read(path)?;
     if metadata.len() > max_bytes {
@@ -146,13 +146,22 @@ pub fn for_each_anchored_file_line_with_limit(
             metadata.len()
         )));
     }
-    let mut reader = io::BufReader::new(file);
+    for_each_reader_line_with_limit(file, path.diagnostic_path(), max_bytes, visit)
+}
+
+pub fn for_each_reader_line_with_limit(
+    reader: impl Read,
+    path: &Path,
+    max_bytes: u64,
+    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+) -> Result<u64, RuntimeError> {
+    let mut reader = io::BufReader::new(reader.take(max_bytes.saturating_add(1)));
     let mut line = Vec::new();
     let mut total = 0u64;
     loop {
         line.clear();
         let read = io::BufRead::read_until(&mut reader, b'\n', &mut line)
-            .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            .map_err(|source| path_io_error(path, source))?;
         if read == 0 {
             break;
         }
@@ -160,14 +169,11 @@ pub fn for_each_anchored_file_line_with_limit(
         if total > max_bytes {
             return Err(RuntimeError::Protocol(format!(
                 "{} read size {total} bytes exceeds max {max_bytes}",
-                path.diagnostic_path().display()
+                path.display()
             )));
         }
         let line = std::str::from_utf8(&line).map_err(|source| {
-            RuntimeError::Protocol(format!(
-                "{} is not valid UTF-8: {source}",
-                path.diagnostic_path().display()
-            ))
+            RuntimeError::Protocol(format!("{} is not valid UTF-8: {source}", path.display()))
         })?;
         visit(line)?;
     }

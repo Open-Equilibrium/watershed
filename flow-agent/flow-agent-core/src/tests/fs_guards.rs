@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn bounded_line_reader_consumes_at_most_one_byte_beyond_limit() {
+    let mut source = io::Cursor::new(vec![b'x'; 64]);
+    let mut visits = 0usize;
+
+    let err = for_each_reader_line_with_limit(&mut source, Path::new("growing.jsonl"), 8, |_| {
+        visits += 1;
+        Ok(())
+    })
+    .expect_err("newline-free growth beyond the byte limit is rejected");
+
+    assert!(err.to_string().contains("9 bytes exceeds max 8"), "{err}");
+    assert_eq!(source.position(), 9);
+    assert_eq!(visits, 0);
+}
+
+#[test]
 fn event_segment_discovery_retries_one_transient_protocol_error() {
     let mut attempts = 0;
     let stream = retry_event_segment_discovery(|| {
