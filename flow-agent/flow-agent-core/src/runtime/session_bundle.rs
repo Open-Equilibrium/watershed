@@ -62,6 +62,7 @@ pub struct SessionBundleInventory {
     pub(crate) metadata_bytes: u64,
     pub(crate) object_bytes: u64,
     pub(crate) objects: BTreeMap<String, AnchoredFile>,
+    paths: SessionBundlePaths,
 }
 
 impl SessionBundleInventory {
@@ -83,6 +84,7 @@ impl SessionBundleInventory {
             metadata_bytes,
             object_bytes,
             objects,
+            paths,
         };
         if inventory.total_bytes() > MAX_SESSION_BUNDLE_BYTES {
             return Err(RuntimeError::Protocol(format!(
@@ -107,10 +109,17 @@ impl SessionBundleInventory {
                 self.paths_session_id()
             )));
         }
-        if self.event_segments.is_empty() || self.context_segments.is_empty() {
-            return Err(RuntimeError::Protocol(
-                "session bundle is missing a base segment".to_owned(),
-            ));
+        if self.event_segments.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} event stream is missing",
+                self.paths.events.diagnostic_path().display()
+            )));
+        }
+        if self.context_segments.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest stream is missing",
+                self.paths.contexts.diagnostic_path().display()
+            )));
         }
         for (digest, path) in &self.objects {
             let expected = format!("{}.object.sha256-{digest}", self.paths_session_id());
@@ -125,12 +134,7 @@ impl SessionBundleInventory {
     }
 
     fn paths_session_id(&self) -> &str {
-        self.event_segments[0]
-            .leaf
-            .file_name()
-            .and_then(std::ffi::OsStr::to_str)
-            .and_then(|name| name.strip_suffix(".jsonl"))
-            .unwrap_or("<invalid>")
+        &self.paths.session_id
     }
 }
 
