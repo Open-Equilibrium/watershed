@@ -1220,6 +1220,7 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
             .expect("observed prefix remains authoritative"),
         Vec::new()
     );
+    drop(reader);
     reservation.rollback().expect("reservation rolls back");
 }
 
@@ -1266,6 +1267,8 @@ fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
             .collect::<Vec<_>>(),
         [1]
     );
+    drop(reader);
+    drop(appender);
     reservation.rollback().expect("reservation rolls back");
 }
 
@@ -1292,6 +1295,7 @@ fn failed_truncation_reports_no_readable_prefix() {
         .expect_err("partial suffix and truncation fail");
 
     assert_eq!(failure.committed_events, None);
+    drop(appender);
     reservation.rollback().expect("reservation rolls back");
 }
 
