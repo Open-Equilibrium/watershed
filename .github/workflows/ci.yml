@@ -69,9 +69,7 @@ jobs:
 
       - name: Check formatting
         shell: pwsh
-        run: |
-          $rustSources = @(git ls-files -- '*.rs')
-          rustfmt --edition 2024 --check @rustSources
+        run: cargo fmt --all --check
 
       - name: Check lints
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
@@ -125,5 +123,5 @@ jobs:
       - name: Check documentation links
         shell: pwsh
         run: |
-          $docs = @(git ls-files -- '*.md' '*.html')
-          lychee --no-progress --include-fragments @docs
+          $docs = @(node scripts/list-tracked-files.mjs '*.md' '*.html' | ConvertFrom-Json)
+          lychee --no-progress --include-fragments -- @docs

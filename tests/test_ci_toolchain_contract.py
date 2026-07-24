@@ -1,5 +1,8 @@
 import json
+import os
 import re
+import subprocess
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -31,6 +34,56 @@ def forbidden_dependency_names(table: dict[str, object]) -> list[str]:
 
 
 class CiToolchainContractTest(unittest.TestCase):
+    def test_tracked_file_listing_preserves_unusual_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repo = Path(temporary_directory)
+            subprocess.run(
+                ["git", "init", "--quiet"], cwd=repo, check=True
+            )
+            tracked_paths = [
+                "-leading.md",
+                "unicodé.md",
+                "ignored.txt",
+            ]
+            if os.name != "nt":
+                tracked_paths.append("line\nbreak.md")
+            for tracked_path in tracked_paths:
+                blob = subprocess.run(
+                    ["git", "hash-object", "-w", "--stdin"],
+                    cwd=repo,
+                    input=b"tracked\n",
+                    capture_output=True,
+                    check=True,
+                ).stdout.decode("ascii").strip()
+                subprocess.run(
+                    [
+                        "git",
+                        "update-index",
+                        "--add",
+                        "--cacheinfo",
+                        f"100644,{blob},{tracked_path}",
+                    ],
+                    cwd=repo,
+                    check=True,
+                )
+
+            result = subprocess.run(
+                [
+                    "node",
+                    str(ROOT / "scripts" / "list-tracked-files.mjs"),
+                    "*.md",
+                ],
+                cwd=repo,
+                encoding="utf-8",
+                capture_output=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertCountEqual(
+            json.loads(result.stdout),
+            [path for path in tracked_paths if path.endswith(".md")],
+        )
+
     def test_node_and_pnpm_versions_are_pinned(self) -> None:
         self.assertEqual(
             (ROOT / ".node-version").read_text(encoding="utf-8"),
@@ -46,6 +99,16 @@ class CiToolchainContractTest(unittest.TestCase):
             encoding="utf-8"
         )
         self.assert_active_pinned_node_steps(workflow)
+        self.assertIn("run: cargo fmt --all --check", workflow)
+        self.assertIn(
+            "$docs = @(node scripts/list-tracked-files.mjs "
+            "'*.md' '*.html' | ConvertFrom-Json)",
+            workflow,
+        )
+        self.assertIn(
+            "lychee --no-progress --include-fragments -- @docs", workflow
+        )
+        self.assertNotIn("git ls-files", workflow)
 
     def assert_active_pinned_node_steps(self, workflow: str) -> None:
         setup_reference = (
