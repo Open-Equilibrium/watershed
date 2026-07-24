@@ -313,7 +313,7 @@ fn explicit_reservation_rollback_reports_lock_failure_and_remains_retryable() {
     fs::create_dir(&lock_path).expect("lock path replaced with a directory");
 
     let err = reservation
-        .rollback()
+        .cleanup()
         .expect_err("explicit rollback reports lock cleanup failure");
 
     assert!(matches!(
@@ -324,29 +324,301 @@ fn explicit_reservation_rollback_reports_lock_failure_and_remains_retryable() {
     fs::remove_dir(&lock_path).expect("blocking lock directory removed");
     fs::write(&lock_path, b"").expect("lock file restored for retry");
     reservation
-        .rollback()
+        .cleanup()
         .expect("partially completed rollback remains retryable");
     assert!(!lock_path.exists());
 }
 
 #[test]
-fn runtime_and_finalization_failures_remain_visible() {
-    let err = reconcile_runtime_and_finalization::<()>(
-        Err(RuntimeError::Protocol("execution failed".to_owned())),
-        Err(RuntimeError::Protocol("finalization failed".to_owned())),
+fn controlled_stage_failure_combinations_preserve_every_cause() {
+    for (operation_failed, finalization_failed, cleanup_failed) in [
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+        (true, true, true),
+    ] {
+        let operation = if operation_failed {
+            Err(RuntimeError::Protocol("operation failed".to_owned()))
+        } else {
+            Ok(())
+        };
+        let finalization = if finalization_failed {
+            Err(RuntimeError::Protocol("finalization failed".to_owned()))
+        } else {
+            Ok(())
+        };
+        let cleanup = if cleanup_failed {
+            Err(RuntimeError::Protocol("cleanup failed".to_owned()))
+        } else {
+            Ok(())
+        };
+
+        let err = reconcile_controlled_stages(operation, finalization, cleanup)
+            .expect_err("the injected stage failure must be returned");
+        let text = err.to_string();
+
+        assert_eq!(
+            text.contains("operation failed"),
+            operation_failed,
+            "{text}"
+        );
+        assert_eq!(
+            text.contains("finalization failed"),
+            finalization_failed,
+            "{text}"
+        );
+        assert_eq!(text.contains("cleanup failed"), cleanup_failed, "{text}");
+        let expected_source = if operation_failed {
+            "operation failed"
+        } else if finalization_failed {
+            "finalization failed"
+        } else {
+            "cleanup failed"
+        };
+        assert_eq!(
+            std::error::Error::source(&err).map(ToString::to_string),
+            if operation_failed as u8 + finalization_failed as u8 + cleanup_failed as u8 > 1 {
+                Some(expected_source.to_owned())
+            } else {
+                None
+            },
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn runtime_and_writer_finalization_failures_remain_visible() {
+    let workspace = workspace_copy("sandbox-negative");
+    let lock_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("sandbox-negative-write.lock");
+
+    let err = run_flow_internal_with_stage_observers(
+        &workspace,
+        "sandbox-negative-write",
+        false,
+        |_| {
+            Err(RuntimeError::Protocol(
+                "injected writer finalization failure".to_owned(),
+            ))
+        },
+        |_| {},
     )
-    .expect_err("both failures are retained");
+    .expect_err("runtime and finalization failures must be retained");
 
     assert!(matches!(
         &err,
-        RuntimeError::ExecutionAndFinalizationFailed {
-            execution,
-            finalization,
-        } if execution.to_string().contains("execution failed")
-            && finalization.to_string().contains("finalization failed")
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: Some(finalization),
+            cleanup: None,
+        } if matches!(operation.as_ref(), RuntimeError::SessionFailed { .. })
+            && finalization.to_string().contains("injected writer finalization failure")
     ));
-    assert!(err.to_string().contains("execution failed"), "{err}");
-    assert!(err.to_string().contains("finalization failed"), "{err}");
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
+    let workspace = workspace_copy("sandbox-negative");
+    let lock_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("sandbox-negative-write.lock");
+
+    let err = run_flow_internal_with_stage_observers(
+        &workspace,
+        "sandbox-negative-write",
+        false,
+        |_| {
+            Err(RuntimeError::Protocol(
+                "injected writer finalization failure".to_owned(),
+            ))
+        },
+        |lock| {
+            lock.remove().expect("lock file removed");
+            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
+        },
+    )
+    .expect_err("all three failures must be retained");
+
+    assert!(matches!(
+        &err,
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: Some(finalization),
+            cleanup: Some(cleanup),
+        } if matches!(operation.as_ref(), RuntimeError::SessionFailed { .. })
+            && finalization.to_string().contains("injected writer finalization failure")
+            && cleanup.to_string().contains("sandbox-negative-write.lock")
+    ));
+    assert!(
+        err.to_string()
+            .contains("injected writer finalization failure"),
+        "{err}"
+    );
+    assert!(
+        err.to_string().contains("sandbox-negative-write.lock"),
+        "{err}"
+    );
+    assert!(
+        std::error::Error::source(&err).is_some_and(|source| source
+            .to_string()
+            .contains("session sandbox-negative-write failed")),
+        "{err}"
+    );
+
+    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
+}
+
+#[test]
+fn controlled_cleanup_rolls_back_empty_but_preserves_active_reservations() {
+    let workspace = empty_workspace("controlled-reservation-state");
+    let empty =
+        reserve_session_log(&workspace, "emptycontrolled001").expect("empty reservation succeeds");
+    let empty_paths = [
+        empty.session_path.diagnostic_path().to_owned(),
+        empty.log_path.diagnostic_path().to_owned(),
+        empty.context_path.diagnostic_path().to_owned(),
+        empty.lock_path.diagnostic_path().to_owned(),
+    ];
+
+    let empty_err = reconcile_controlled_stages::<()>(
+        Err(RuntimeError::Protocol("controlled failure".to_owned())),
+        Ok(()),
+        empty.cleanup(),
+    )
+    .expect_err("operation failure remains visible");
+
+    assert!(
+        matches!(empty_err, RuntimeError::Protocol(message) if message == "controlled failure")
+    );
+    assert!(empty_paths.iter().all(|path| !path.exists()));
+
+    let active = reserve_session_log(&workspace, "activecontrolled001")
+        .expect("active reservation succeeds");
+    write_reserved_session_metadata(&active, None).expect("metadata activates reservation");
+    let active_paths = [
+        active.session_path.diagnostic_path().to_owned(),
+        active.log_path.diagnostic_path().to_owned(),
+        active.context_path.diagnostic_path().to_owned(),
+    ];
+    let active_lock = active.lock_path.diagnostic_path().to_owned();
+
+    let active_err = reconcile_controlled_stages::<()>(
+        Err(RuntimeError::Protocol("controlled failure".to_owned())),
+        Ok(()),
+        active.cleanup(),
+    )
+    .expect_err("operation failure remains visible");
+
+    assert!(
+        matches!(active_err, RuntimeError::Protocol(message) if message == "controlled failure")
+    );
+    assert!(active_paths.iter().all(|path| path.is_file()));
+    assert!(!active_lock.exists());
+}
+
+#[test]
+fn controlled_run_cleanup_failure_is_returned_and_keeps_valid_artifacts() {
+    let workspace = workspace_copy("smoke-flow");
+    let lock_path = workspace.join(LOCAL_SESSION_DIR).join("smoke-flow.lock");
+
+    let err = run_flow_internal_with_cleanup_observer(&workspace, "smoke-flow", true, |lock| {
+        lock.remove().expect("lock file removed");
+        fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
+    })
+    .expect_err("cleanup failure must replace a successful return");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Io { path, .. } if path == lock_path
+    ));
+    assert!(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("smoke-flow.jsonl")
+            .is_file()
+    );
+    assert!(lock_path.is_dir());
+    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
+}
+
+#[test]
+fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
+    let workspace = workspace_copy("sandbox-negative");
+    let lock_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("sandbox-negative-write.lock");
+
+    let err = run_flow_internal_with_cleanup_observer(
+        &workspace,
+        "sandbox-negative-write",
+        false,
+        |lock| {
+            lock.remove().expect("lock file removed");
+            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
+        },
+    )
+    .expect_err("operation and cleanup failures must both be returned");
+
+    assert!(matches!(
+        &err,
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: None,
+            cleanup: Some(cleanup),
+        } if matches!(operation.as_ref(), RuntimeError::SessionFailed { .. })
+            && cleanup.to_string().contains("sandbox-negative-write.lock")
+    ));
+    assert!(
+        workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("sandbox-negative-write.jsonl")
+            .is_file()
+    );
+    assert!(lock_path.is_dir());
+    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
+}
+
+#[test]
+fn resume_validation_and_cleanup_failures_are_both_returned() {
+    let workspace = workspace_copy("smoke-flow");
+    let completed =
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
+    fs::write(&completed.session_path, "{not-json}\n").expect("session log corrupted");
+    let lock_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join(format!("{}.lock", completed.session_id));
+
+    let err = resume_session_internal_with_cleanup_observer(
+        &workspace,
+        &completed.session_id,
+        true,
+        |lock| {
+            lock.remove().expect("lock file removed");
+            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
+        },
+    )
+    .expect_err("validation and cleanup failures must both be returned");
+
+    assert!(matches!(
+        &err,
+        RuntimeError::ControlledStageFailures {
+            operation: Some(_),
+            finalization: None,
+            cleanup: Some(cleanup),
+        } if cleanup.to_string().contains(".lock")
+    ));
+    assert!(
+        err.to_string().contains("ownership cleanup failed"),
+        "{err}"
+    );
+    assert!(lock_path.is_dir());
+    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
 }
 
 #[test]
@@ -379,7 +651,7 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         RuntimeError::Io { path, .. } if path.ends_with("missing001.lock")
     ));
     missing_lock
-        .rollback()
+        .cleanup()
         .expect_err("missing lock rollback reports an IO error");
 
     let missing_guard = SessionLockGuard::new(

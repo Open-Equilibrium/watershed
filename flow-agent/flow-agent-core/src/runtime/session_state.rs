@@ -40,6 +40,41 @@ pub fn resume_session_internal(
     timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
 ) -> Result<RunOutput, RuntimeError> {
+    resume_session_internal_with_cleanup_observer_impl(
+        workspace,
+        session_id,
+        notifier,
+        timings,
+        capture_jsonl,
+        |_| {},
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn resume_session_internal_with_cleanup_observer(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    capture_jsonl: bool,
+    before_cleanup: impl FnOnce(&AnchoredFile),
+) -> Result<RunOutput, RuntimeError> {
+    resume_session_internal_with_cleanup_observer_impl(
+        workspace,
+        session_id,
+        None,
+        None,
+        capture_jsonl,
+        before_cleanup,
+    )
+}
+
+fn resume_session_internal_with_cleanup_observer_impl(
+    workspace: impl AsRef<Path>,
+    session_id: &str,
+    notifier: Option<LiveEventNotifier>,
+    timings: Option<&mut EventWriterTimings>,
+    capture_jsonl: bool,
+    before_cleanup: impl FnOnce(&AnchoredFile),
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     if !proto::is_valid_session_id(session_id) {
         return Err(RuntimeError::Usage(format!(
@@ -55,98 +90,53 @@ pub fn resume_session_internal(
     let path = SessionBundlePaths::events_in(&sessions, session_id);
     ensure_anchored_non_hardlinked_file(&path)?;
     let lock = acquire_anchored_session_lock(&sessions, session_id)?;
-    let inspection = inspect_resume_session(&path, session_id)?;
-    let prior_event_count = inspection.validation.line_count;
-    if matches!(
-        inspection.last_event_type,
-        EventType::SessionFailed | EventType::SessionCompleted
-    ) {
-        return Err(RuntimeError::TerminalSession(session_id.to_owned()));
-    }
-    let logs = open_runtime_dir(workspace, "logs")?
-        .ok_or_else(|| missing_definition_metadata(session_id))?;
-    let inventory = SessionBundleInventory::inspect(SessionBundlePaths::new(
-        sessions.clone(),
-        logs.clone(),
-        session_id,
-    ))?;
-    inventory.validate_active_ownership()?;
-    let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
-    let flow_id = resumable_flow_id(
-        path.diagnostic_path(),
-        session_id,
-        inspection.root_flow_definition_id.as_deref(),
-        &metadata,
-    )?;
+    let mut finalization_result = Ok(());
+    let operation_result = (|| {
+        let inspection = inspect_resume_session(&path, session_id)?;
+        let prior_event_count = inspection.validation.line_count;
+        if matches!(
+            inspection.last_event_type,
+            EventType::SessionFailed | EventType::SessionCompleted
+        ) {
+            return Err(RuntimeError::TerminalSession(session_id.to_owned()));
+        }
+        let logs = open_runtime_dir(workspace, "logs")?
+            .ok_or_else(|| missing_definition_metadata(session_id))?;
+        let inventory = SessionBundleInventory::inspect(SessionBundlePaths::new(
+            sessions.clone(),
+            logs.clone(),
+            session_id,
+        ))?;
+        inventory.validate_active_ownership()?;
+        let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
+        let flow_id = resumable_flow_id(
+            path.diagnostic_path(),
+            session_id,
+            inspection.root_flow_definition_id.as_deref(),
+            &metadata,
+        )?;
 
-    let registry =
-        core_script::load_flow_registry_from_workspace(workspace, &config.registry_root, &flow_id)?;
-    let flow_block = registry.flow_block(&flow_id).ok_or_else(|| {
-        RuntimeError::Protocol(format!("resolved registry missing flow {flow_id}"))
-    })?;
-    verify_resume_definition_metadata_values(session_id, &metadata, &registry, flow_block)?;
-    let policy =
-        core_policy::compile_policy_artifact(&registry, &flow_id, runtime_policy_target())?;
-    let clock = resume_event_clock(&config, inspection.clock)?;
-    let recorded_context = read_anchored_context_manifest_signature(
-        &logs,
-        &sessions,
-        session_id,
-        inspection.completed_turns,
-    )?;
-    let mut prefix_sink =
-        RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
-    let plan = plan_flow_with_sink(
-        workspace,
-        &registry,
-        &policy,
-        flow_block,
-        session_id,
-        FlowExecutionOptions::with_stub_model_fixture_profile(
-            clock,
-            ToolSideEffectMode::Plan,
-            config.stub_model_fixture_profile,
-        ),
-        Some(&mut prefix_sink),
-    )?;
-    if inspection.completed_turns > plan.execution.context_manifests.record_count
-        || recorded_context.record_count > plan.execution.context_manifests.record_count
-        || !prefix_sink.context_prefix_matches()
-    {
-        let context_path = workspace
-            .join(LOCAL_LOG_DIR)
-            .join(format!("{session_id}.contexts.jsonl"));
-        return Err(RuntimeError::Protocol(format!(
-            "{} context manifests do not match deterministic replay",
-            context_path.display()
-        )));
-    }
-    let resume_prefix = validate_resume_replay_prefix(
-        path.diagnostic_path(),
-        &inspection,
-        &prefix_sink,
-        &plan.execution,
-        flow_block,
-    )?;
-    let combined_event_count = checked_resume_event_count(
-        plan.execution.events.record_count,
-        resume_prefix.resume_marker_count,
-    )?;
-    if let Some(tool_id) = inspection.validation.tool_without_progress() {
-        return Err(RuntimeError::Protocol(format!(
-            "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
-        )));
-    }
-    let append_plan = resume_append_plan(session_id, &inspection.validation, clock)?;
-    let preflight_matches = {
-        let mut preflight_sink = ResumePreflightSink {
-            appended_bytes: append_plan.marker_stream.len(),
-            clock,
-            path: &path,
-            planned_event_count: resume_prefix.planned_event_count,
-            resume_marker_count: resume_prefix.resume_marker_count,
-        };
-        let runtime = execute_flow_with_sink(
+        let registry = core_script::load_flow_registry_from_workspace(
+            workspace,
+            &config.registry_root,
+            &flow_id,
+        )?;
+        let flow_block = registry.flow_block(&flow_id).ok_or_else(|| {
+            RuntimeError::Protocol(format!("resolved registry missing flow {flow_id}"))
+        })?;
+        verify_resume_definition_metadata_values(session_id, &metadata, &registry, flow_block)?;
+        let policy =
+            core_policy::compile_policy_artifact(&registry, &flow_id, runtime_policy_target())?;
+        let clock = resume_event_clock(&config, inspection.clock)?;
+        let recorded_context = read_anchored_context_manifest_signature(
+            &logs,
+            &sessions,
+            session_id,
+            inspection.completed_turns,
+        )?;
+        let mut prefix_sink =
+            RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
+        let plan = plan_flow_with_sink(
             workspace,
             &registry,
             &policy,
@@ -154,88 +144,141 @@ pub fn resume_session_internal(
             session_id,
             FlowExecutionOptions::with_stub_model_fixture_profile(
                 clock,
-                ToolSideEffectMode::PreflightResume {
-                    prefix_event_count: resume_prefix.planned_event_count as u64,
-                },
+                ToolSideEffectMode::Plan,
                 config.stub_model_fixture_profile,
             ),
-            Some(&mut preflight_sink),
+            Some(&mut prefix_sink),
         )?;
-        let matches = runtime.matches_plan(&plan);
-        preflight_sink.finish()?;
-        matches
-    };
-    if !preflight_matches {
-        return Err(RuntimeError::Protocol(format!(
-            "{} resume preflight did not match deterministic replay",
-            path.diagnostic_path().display()
-        )));
-    }
-    let terminal_flow_ids = inspection.validation.terminal_flow_ids();
-    let context_path = SessionBundlePaths::contexts_in(&logs, session_id);
-    let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
-        context_path,
-        path: path.clone(),
-        session_id: session_id.to_owned(),
-        validation: inspection.validation,
-        commit_reservation: None,
-        notifier,
-        timings,
-    })?;
-    let runtime_result = {
-        let mut resume_sink = ResumeEventSink {
-            clock,
-            marker_committed: false,
-            marker_event: append_plan.marker_event,
-            marker_stream: append_plan.marker_stream,
-            planned_event_count: resume_prefix.planned_event_count,
-            resume_marker_count: resume_prefix.resume_marker_count,
-            writer: &mut serial_writer,
-        };
-        apply_flow_with_sink(
-            FlowApplication {
+        if inspection.completed_turns > plan.execution.context_manifests.record_count
+            || recorded_context.record_count > plan.execution.context_manifests.record_count
+            || !prefix_sink.context_prefix_matches()
+        {
+            let context_path = workspace
+                .join(LOCAL_LOG_DIR)
+                .join(format!("{session_id}.contexts.jsonl"));
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifests do not match deterministic replay",
+                context_path.display()
+            )));
+        }
+        let resume_prefix = validate_resume_replay_prefix(
+            path.diagnostic_path(),
+            &inspection,
+            &prefix_sink,
+            &plan.execution,
+            flow_block,
+        )?;
+        let combined_event_count = checked_resume_event_count(
+            plan.execution.events.record_count,
+            resume_prefix.resume_marker_count,
+        )?;
+        if let Some(tool_id) = inspection.validation.tool_without_progress() {
+            return Err(RuntimeError::Protocol(format!(
+                "cannot resume session {session_id} with in-flight tool {tool_id:?} before progress or terminal event"
+            )));
+        }
+        let append_plan = resume_append_plan(session_id, &inspection.validation, clock)?;
+        let preflight_matches = {
+            let mut preflight_sink = ResumePreflightSink {
+                appended_bytes: append_plan.marker_stream.len(),
+                clock,
+                path: &path,
+                planned_event_count: resume_prefix.planned_event_count,
+                resume_marker_count: resume_prefix.resume_marker_count,
+            };
+            let runtime = execute_flow_with_sink(
                 workspace,
-                registry: &registry,
-                policy: &policy,
-                root_flow: flow_block,
+                &registry,
+                &policy,
+                flow_block,
                 session_id,
-                options: FlowExecutionOptions::with_stub_model_fixture_profile(
+                FlowExecutionOptions::with_stub_model_fixture_profile(
                     clock,
-                    ToolSideEffectMode::Resume {
+                    ToolSideEffectMode::PreflightResume {
                         prefix_event_count: resume_prefix.planned_event_count as u64,
                     },
                     config.stub_model_fixture_profile,
-                )
-                .with_terminal_flow_ids(terminal_flow_ids),
-                plan: &plan,
-            },
-            Some(&mut resume_sink),
-        )
-    };
-    let finish_result = serial_writer.finish();
-    let resumed_runtime = reconcile_runtime_and_finalization(runtime_result, finish_result)?;
-    let terminal_error = resumed_runtime.terminal_error;
-    let resumed_failed = resumed_runtime.failed;
-    let failure_status = resumed_runtime.failure_status;
-    let stdout = if capture_jsonl {
-        let stream = read_segmented_jsonl(&path, EVENT_STREAM_LIMITS)?;
-        let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
-        canonical_event_stream(&events[prior_event_count..])?
-    } else {
-        human_session_status_from_failure(session_id, "resumed", failure_status.as_deref())
-    };
-    lock.release()?;
-    if let Some(err) = terminal_error {
-        return Err(RuntimeError::session_failed(session_id, err));
-    }
+                ),
+                Some(&mut preflight_sink),
+            )?;
+            let matches = runtime.matches_plan(&plan);
+            preflight_sink.finish()?;
+            matches
+        };
+        if !preflight_matches {
+            return Err(RuntimeError::Protocol(format!(
+                "{} resume preflight did not match deterministic replay",
+                path.diagnostic_path().display()
+            )));
+        }
+        let terminal_flow_ids = inspection.validation.terminal_flow_ids();
+        let context_path = SessionBundlePaths::contexts_in(&logs, session_id);
+        let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
+            context_path,
+            path: path.clone(),
+            session_id: session_id.to_owned(),
+            validation: inspection.validation,
+            commit_reservation: None,
+            notifier,
+            timings,
+        })?;
+        let runtime_result = {
+            let mut resume_sink = ResumeEventSink {
+                clock,
+                marker_committed: false,
+                marker_event: append_plan.marker_event,
+                marker_stream: append_plan.marker_stream,
+                planned_event_count: resume_prefix.planned_event_count,
+                resume_marker_count: resume_prefix.resume_marker_count,
+                writer: &mut serial_writer,
+            };
+            apply_flow_with_sink(
+                FlowApplication {
+                    workspace,
+                    registry: &registry,
+                    policy: &policy,
+                    root_flow: flow_block,
+                    session_id,
+                    options: FlowExecutionOptions::with_stub_model_fixture_profile(
+                        clock,
+                        ToolSideEffectMode::Resume {
+                            prefix_event_count: resume_prefix.planned_event_count as u64,
+                        },
+                        config.stub_model_fixture_profile,
+                    )
+                    .with_terminal_flow_ids(terminal_flow_ids),
+                    plan: &plan,
+                },
+                Some(&mut resume_sink),
+            )
+        };
+        finalization_result = serial_writer.finish();
+        let resumed_runtime = runtime_result?;
+        let terminal_error = resumed_runtime.terminal_error;
+        let resumed_failed = resumed_runtime.failed;
+        let failure_status = resumed_runtime.failure_status;
+        let stdout = if capture_jsonl {
+            let stream = read_segmented_jsonl(&path, EVENT_STREAM_LIMITS)?;
+            let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
+            canonical_event_stream(&events[prior_event_count..])?
+        } else {
+            human_session_status_from_failure(session_id, "resumed", failure_status.as_deref())
+        };
+        if let Some(err) = terminal_error {
+            return Err(RuntimeError::session_failed(session_id, err));
+        }
 
-    Ok(RunOutput {
-        event_count: combined_event_count,
-        failed: resumed_failed,
-        session_id: session_id.to_owned(),
-        session_path: path.diagnostic_path().to_owned(),
-        stdout,
-    })
+        Ok(RunOutput {
+            event_count: combined_event_count,
+            failed: resumed_failed,
+            session_id: session_id.to_owned(),
+            session_path: path.diagnostic_path().to_owned(),
+            stdout,
+        })
+    })();
+    before_cleanup(&lock.path);
+    let cleanup_result = lock.release();
+    reconcile_controlled_stages(operation_result, finalization_result, cleanup_result)
 }
 
 pub struct ResumeReplayPrefix {
@@ -719,43 +762,32 @@ pub fn reserve_session_log_with_publish_observer(
     let context_path = paths.contexts;
     let lock_path = paths.lock;
     reserve_anchored_session_lock_file(&lock_path, session_id)?;
-    if let Err(err) = ensure_anchored_session_file_available(&session_path, session_id) {
-        let _ = lock_path.remove();
-        return Err(err);
-    }
-    if let Err(err) = ensure_session_bundle_namespace_available(
-        &dirs,
-        &session_path,
-        &log_path,
-        &context_path,
-        &lock_path,
-        session_id,
-    ) {
-        let _ = lock_path.remove();
-        return Err(err);
-    }
-    if let Err(err) = reserve_anchored_session_file(&session_path, session_id, after_publish) {
-        let _ = lock_path.remove();
-        return Err(err);
-    }
-    if let Err(err) = reserve_anchored_bundle_file(&log_path, session_id) {
-        let _ = session_path.remove();
-        let _ = lock_path.remove();
-        return Err(err);
-    }
-    if let Err(err) = reserve_anchored_bundle_file(&context_path, session_id) {
-        let _ = session_path.remove();
-        let _ = log_path.remove();
-        let _ = lock_path.remove();
-        return Err(err);
-    }
-    Ok(SessionReservation::new(
+    let reservation = SessionReservation::new(
         context_path,
         log_path,
         lock_path,
         session_path,
         session_id.to_owned(),
-    ))
+    );
+    let operation = (|| {
+        ensure_anchored_session_file_available(&reservation.session_path, session_id)?;
+        ensure_session_bundle_namespace_available(
+            &dirs,
+            &reservation.session_path,
+            &reservation.log_path,
+            &reservation.context_path,
+            &reservation.lock_path,
+            session_id,
+        )?;
+        reserve_anchored_session_file(&reservation.session_path, session_id, after_publish)?;
+        reserve_anchored_bundle_file(&reservation.log_path, session_id)?;
+        reserve_anchored_bundle_file(&reservation.context_path, session_id)?;
+        Ok(())
+    })();
+    match operation {
+        Ok(()) => Ok(reservation),
+        Err(error) => reconcile_controlled_stages(Err(error), Ok(()), reservation.cleanup()),
+    }
 }
 
 pub fn reserve_unique_session_log(
@@ -944,13 +976,15 @@ pub fn acquire_anchored_session_lock(
     let path = SessionBundlePaths::lock_in(sessions, session_id);
     reserve_anchored_session_lock_file(&path, session_id)?;
     let guard = SessionLockGuard::new(path);
-    if let Some(alias) = ascii_case_alias(&guard.path)? {
-        return Err(RuntimeError::ActiveSession {
+    let operation = match ascii_case_alias(&guard.path) {
+        Ok(Some(alias)) => Err(RuntimeError::ActiveSession {
             session_id: session_id.to_owned(),
             lock_path: alias.path,
-        });
-    }
-    Ok(guard)
+        }),
+        Ok(None) => return Ok(guard),
+        Err(error) => Err(error),
+    };
+    reconcile_controlled_stages(operation, Ok(()), guard.release())
 }
 
 pub fn write_reserved_session_metadata(

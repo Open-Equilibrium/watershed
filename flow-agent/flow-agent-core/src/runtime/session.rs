@@ -1,15 +1,19 @@
 use super::*;
 
-pub(crate) fn reconcile_runtime_and_finalization<T>(
-    runtime: Result<T, RuntimeError>,
+pub(crate) fn reconcile_controlled_stages<T>(
+    operation: Result<T, RuntimeError>,
     finalization: Result<(), RuntimeError>,
+    cleanup: Result<(), RuntimeError>,
 ) -> Result<T, RuntimeError> {
-    match (runtime, finalization) {
-        (Ok(runtime), Ok(())) => Ok(runtime),
-        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
-        (Err(execution), Err(finalization)) => Err(RuntimeError::ExecutionAndFinalizationFailed {
-            execution: Box::new(execution),
-            finalization: Box::new(finalization),
+    match (operation, finalization, cleanup) {
+        (Ok(value), Ok(()), Ok(())) => Ok(value),
+        (Err(error), Ok(()), Ok(()))
+        | (Ok(_), Err(error), Ok(()))
+        | (Ok(_), Ok(()), Err(error)) => Err(error),
+        (operation, finalization, cleanup) => Err(RuntimeError::ControlledStageFailures {
+            operation: operation.err().map(Box::new),
+            finalization: finalization.err().map(Box::new),
+            cleanup: cleanup.err().map(Box::new),
         }),
     }
 }
@@ -44,6 +48,63 @@ pub fn run_flow_internal(
     timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
 ) -> Result<RunOutput, RuntimeError> {
+    run_flow_internal_with_cleanup_observer_impl(
+        workspace,
+        flow_ref,
+        notifier,
+        timings,
+        capture_jsonl,
+        |result| result,
+        |_| {},
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn run_flow_internal_with_cleanup_observer(
+    workspace: impl AsRef<Path>,
+    flow_ref: &str,
+    capture_jsonl: bool,
+    before_cleanup: impl FnOnce(&AnchoredFile),
+) -> Result<RunOutput, RuntimeError> {
+    run_flow_internal_with_cleanup_observer_impl(
+        workspace,
+        flow_ref,
+        None,
+        None,
+        capture_jsonl,
+        |result| result,
+        before_cleanup,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn run_flow_internal_with_stage_observers(
+    workspace: impl AsRef<Path>,
+    flow_ref: &str,
+    capture_jsonl: bool,
+    after_finalization: impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
+    before_cleanup: impl FnOnce(&AnchoredFile),
+) -> Result<RunOutput, RuntimeError> {
+    run_flow_internal_with_cleanup_observer_impl(
+        workspace,
+        flow_ref,
+        None,
+        None,
+        capture_jsonl,
+        after_finalization,
+        before_cleanup,
+    )
+}
+
+fn run_flow_internal_with_cleanup_observer_impl(
+    workspace: impl AsRef<Path>,
+    flow_ref: &str,
+    notifier: Option<LiveEventNotifier>,
+    timings: Option<&mut EventWriterTimings>,
+    capture_jsonl: bool,
+    after_finalization: impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
+    before_cleanup: impl FnOnce(&AnchoredFile),
+) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
     require_fixture_execution_backend(&config)?;
@@ -59,22 +120,23 @@ pub fn run_flow_internal(
     let base_session_id = &flow_block.identity.id;
     let reservation = reserve_unique_session_log(workspace, base_session_id)?;
     let expected_session_id = reservation.session_id.clone();
-    write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-    let plan = plan_flow(
-        workspace,
-        &registry,
-        &policy,
-        flow_block,
-        &expected_session_id,
-        FlowExecutionOptions::with_stub_model_fixture_profile(
-            config.event_clock,
-            ToolSideEffectMode::Plan,
-            config.stub_model_fixture_profile,
-        ),
-    )?;
-    let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
-    let runtime_result = {
-        apply_flow_with_sink(
+    let mut finalization_result = Ok(());
+    let operation_result = (|| {
+        write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
+        let plan = plan_flow(
+            workspace,
+            &registry,
+            &policy,
+            flow_block,
+            &expected_session_id,
+            FlowExecutionOptions::with_stub_model_fixture_profile(
+                config.event_clock,
+                ToolSideEffectMode::Plan,
+                config.stub_model_fixture_profile,
+            ),
+        )?;
+        let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
+        let runtime_result = apply_flow_with_sink(
             FlowApplication {
                 workspace,
                 registry: &registry,
@@ -89,38 +151,40 @@ pub fn run_flow_internal(
                 plan: &plan,
             },
             Some(&mut serial_writer),
-        )
-    };
-    let finish_result = serial_writer.finish();
-    let runtime = reconcile_runtime_and_finalization(runtime_result, finish_result)?;
-    let runtime_failed = runtime.failed;
-    let event_count = runtime.events.record_count;
-    let outcome = runtime.failure_status.unwrap_or_else(|| {
-        if runtime_failed {
-            "failed"
-        } else {
-            "completed"
+        );
+        finalization_result = serial_writer.finish();
+        let runtime = runtime_result?;
+        let runtime_failed = runtime.failed;
+        let event_count = runtime.events.record_count;
+        let outcome = runtime.failure_status.unwrap_or_else(|| {
+            if runtime_failed {
+                "failed"
+            } else {
+                "completed"
+            }
+            .to_owned()
+        });
+        if let Some(err) = runtime.terminal_error {
+            return Err(RuntimeError::session_failed(&expected_session_id, err));
         }
-        .to_owned()
-    });
-    let terminal_error = runtime.terminal_error;
-    reservation.release_lock()?;
-    if let Some(err) = terminal_error {
-        return Err(RuntimeError::session_failed(&expected_session_id, err));
-    }
-    let stdout = if capture_jsonl {
-        read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)?
-    } else {
-        format!(
-            "flow {} (session {expected_session_id}) {outcome}\n",
-            flow_block.identity.id
-        )
-    };
-    Ok(RunOutput {
-        event_count,
-        failed: runtime_failed,
-        session_id: expected_session_id,
-        session_path: reservation.session_path.diagnostic_path().to_owned(),
-        stdout,
-    })
+        let stdout = if capture_jsonl {
+            read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)?
+        } else {
+            format!(
+                "flow {} (session {expected_session_id}) {outcome}\n",
+                flow_block.identity.id
+            )
+        };
+        Ok(RunOutput {
+            event_count,
+            failed: runtime_failed,
+            session_id: expected_session_id,
+            session_path: reservation.session_path.diagnostic_path().to_owned(),
+            stdout,
+        })
+    })();
+    finalization_result = after_finalization(finalization_result);
+    before_cleanup(&reservation.lock_path);
+    let cleanup_result = reservation.cleanup();
+    reconcile_controlled_stages(operation_result, finalization_result, cleanup_result)
 }

@@ -199,13 +199,17 @@ pub enum RuntimeError {
     ExecutionBackendUnavailable,
     /// The per-session event writer failed after event construction.
     EventWriter(Box<RuntimeError>),
-    /// Runtime execution and event-writer finalization both failed.
-    ExecutionAndFinalizationFailed {
-        /// Runtime execution failure.
-        execution: Box<RuntimeError>,
+    /// Multiple controlled operation stages failed.
+    ControlledStageFailures {
+        /// Runtime, validation, or output-generation failure.
+        operation: Option<Box<RuntimeError>>,
         /// Event-writer finalization failure.
-        finalization: Box<RuntimeError>,
+        finalization: Option<Box<RuntimeError>>,
+        /// Session ownership or lock-cleanup failure.
+        cleanup: Option<Box<RuntimeError>>,
     },
+    /// Multiple reservation-cleanup operations failed.
+    SessionCleanupFailures(Vec<Box<RuntimeError>>),
     /// A persisted session failed during runtime execution.
     SessionFailed {
         /// Identifier of the authoritative failed session.
@@ -266,13 +270,32 @@ impl fmt::Display for RuntimeError {
                 "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile",
             ),
             Self::EventWriter(source) => write!(f, "event writer: {source}"),
-            Self::ExecutionAndFinalizationFailed {
-                execution,
+            Self::ControlledStageFailures {
+                operation,
                 finalization,
-            } => write!(
-                f,
-                "runtime execution failed: {execution}; event writer finalization also failed: {finalization}"
-            ),
+                cleanup,
+            } => {
+                let mut separator = "";
+                if let Some(error) = operation {
+                    write!(f, "operation failed: {error}")?;
+                    separator = "; ";
+                }
+                if let Some(error) = finalization {
+                    write!(f, "{separator}event writer finalization failed: {error}")?;
+                    separator = "; ";
+                }
+                if let Some(error) = cleanup {
+                    write!(f, "{separator}ownership cleanup failed: {error}")?;
+                }
+                Ok(())
+            }
+            Self::SessionCleanupFailures(failures) => {
+                f.write_str("session reservation cleanup failed")?;
+                for (index, error) in failures.iter().enumerate() {
+                    write!(f, "; cleanup failure {}: {error}", index + 1)?;
+                }
+                Ok(())
+            }
             Self::SessionFailed { session_id, source } => {
                 write!(f, "session {session_id} failed: {source}")
             }
@@ -305,12 +328,19 @@ impl std::error::Error for RuntimeError {
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
-            Self::EventWriter(source)
-            | Self::ExecutionAndFinalizationFailed {
-                finalization: source,
-                ..
-            }
-            | Self::SessionFailed { source, .. } => Some(source.as_ref()),
+            Self::EventWriter(source) | Self::SessionFailed { source, .. } => Some(source.as_ref()),
+            Self::ControlledStageFailures {
+                operation,
+                finalization,
+                cleanup,
+            } => operation
+                .as_deref()
+                .or(finalization.as_deref())
+                .or(cleanup.as_deref())
+                .map(|source| source as &(dyn std::error::Error + 'static)),
+            Self::SessionCleanupFailures(failures) => failures
+                .first()
+                .map(|source| source.as_ref() as &(dyn std::error::Error + 'static)),
         }
     }
 }
