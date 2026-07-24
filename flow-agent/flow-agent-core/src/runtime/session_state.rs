@@ -718,8 +718,11 @@ pub fn reserve_session_log_with_publish_observer(
     let log_path = paths.metadata;
     let context_path = paths.contexts;
     let lock_path = paths.lock;
-    ensure_anchored_session_file_available(&session_path, session_id)?;
     reserve_anchored_session_lock_file(&lock_path, session_id)?;
+    if let Err(err) = ensure_anchored_session_file_available(&session_path, session_id) {
+        let _ = lock_path.remove();
+        return Err(err);
+    }
     if let Err(err) = ensure_session_bundle_namespace_available(
         &dirs,
         &session_path,
