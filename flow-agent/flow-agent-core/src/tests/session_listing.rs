@@ -428,7 +428,7 @@ fn run_flow_preserves_metadata_after_planning_lifecycle_error() {
     assert!(
         fs::read_to_string(workspace.join(LOCAL_LOG_DIR).join("smoke-flow.log"))
             .expect("valid definition metadata remains")
-            .contains("definition_hash_sha256")
+            .contains("flow_definition_hash=sha256:")
     );
     assert_no_active_session_lock(&workspace, "smoke-flow");
 }
