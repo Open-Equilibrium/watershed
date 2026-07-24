@@ -45,6 +45,9 @@ class CiToolchainContractTest(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
+        self.assert_active_pinned_node_steps(workflow)
+
+    def assert_active_pinned_node_steps(self, workflow: str) -> None:
         setup_reference = (
             f"uses: actions/setup-node@{SETUP_NODE_SHA} # {SETUP_NODE_RELEASE}"
         )
@@ -59,20 +62,115 @@ class CiToolchainContractTest(unittest.TestCase):
         )
         self.assertNotRegex(workflow, r"actions/setup-node@(?![0-9a-f]{40}\b)")
         self.assertNotIn("check-latest:", workflow)
-        self.assertIn(
-            "if ((node --version) -ne 'v22.23.1') {",
-            workflow,
-        )
-        self.assertIn(
-            "if ((pnpm --version) -ne '11.15.1') {",
-            workflow,
-        )
 
         setup_index = workflow.index(setup_reference)
-        corepack_index = workflow.index("corepack enable")
-        pnpm_check_index = workflow.index("pnpm --version")
-        self.assertLess(setup_index, corepack_index)
-        self.assertLess(corepack_index, pnpm_check_index)
+        node_step_index, node_commands = self.active_pwsh_step_commands(
+            workflow, "Check Node version"
+        )
+        corepack_step_index, corepack_commands = self.active_pwsh_step_commands(
+            workflow, "Enable Corepack"
+        )
+        self.assertIn(
+            "if ((node --version) -ne 'v22.23.1') {",
+            node_commands,
+        )
+        self.assertIn("corepack enable", corepack_commands)
+        self.assertIn(
+            "if ((pnpm --version) -ne '11.15.1') {",
+            corepack_commands,
+        )
+        self.assertLess(setup_index, node_step_index)
+        self.assertLess(node_step_index, corepack_step_index)
+
+    def active_pwsh_step_commands(
+        self, workflow: str, step_name: str
+    ) -> tuple[int, list[str]]:
+        lines = workflow.splitlines()
+        marker = f"      - name: {step_name}"
+        step_start = lines.index(marker)
+        step_end = next(
+            (
+                index
+                for index in range(step_start + 1, len(lines))
+                if lines[index].startswith("      - ")
+            ),
+            len(lines),
+        )
+        step_lines = lines[step_start:step_end]
+
+        self.assertFalse(
+            any(line.startswith("        if:") for line in step_lines)
+        )
+        self.assertEqual(
+            [line for line in step_lines if line.startswith("        shell:")],
+            ["        shell: pwsh"],
+        )
+        run_index = step_lines.index("        run: |")
+        commands = [
+            line.strip()
+            for line in step_lines[run_index + 1 :]
+            if line.startswith("          ")
+            and line.strip()
+            and not line.lstrip().startswith("#")
+        ]
+        return workflow.index(marker), commands
+
+    def test_node_toolchain_contract_rejects_inert_commands(self) -> None:
+        active = """      - name: Checkout
+        uses: actions/checkout@1111111111111111111111111111111111111111 # v7.0.0
+
+      - name: Install pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .node-version
+
+      - name: Check Node version
+        shell: pwsh
+        run: |
+          if ((node --version) -ne 'v22.23.1') {
+            throw "wrong Node"
+          }
+
+      - name: Enable Corepack
+        shell: pwsh
+        run: |
+          corepack enable
+          if ((pnpm --version) -ne '11.15.1') {
+            throw "wrong pnpm"
+          }
+"""
+        commented = active.replace("          corepack", "          # corepack").replace(
+            "          if ((pnpm", "          # if ((pnpm"
+        )
+        commented_node = active.replace(
+            "          if ((node", "          # if ((node"
+        )
+        disabled = active.replace(
+            "      - name: Enable Corepack\n        shell: pwsh",
+            "      - name: Enable Corepack\n"
+            "        if: ${{ false }}\n"
+            "        shell: pwsh",
+        )
+        wrong_shell = active.replace(
+            "      - name: Enable Corepack\n        shell: pwsh",
+            "      - name: Enable Corepack\n        shell: bash",
+        )
+        missing_shell = active.replace(
+            "      - name: Enable Corepack\n        shell: pwsh\n",
+            "      - name: Enable Corepack\n",
+        )
+
+        for workflow in (
+            commented,
+            commented_node,
+            disabled,
+            wrong_shell,
+            missing_shell,
+        ):
+            with self.subTest(workflow=workflow), self.assertRaises(
+                (AssertionError, ValueError)
+            ):
+                self.assert_active_pinned_node_steps(workflow)
 
     def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
