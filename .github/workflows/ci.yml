@@ -39,8 +39,8 @@ jobs:
       - name: Check Node version
         shell: pwsh
         run: |
-          if ((node --version) -ne 'v22.23.1') {
-            throw "Node 22.23.1 must be active for CI gates"
+          if ((node --version) -ne 'v24.18.0') {
+            throw "Node 24.18.0 must be active for CI gates"
           }
 
       - name: Validate Codex harness

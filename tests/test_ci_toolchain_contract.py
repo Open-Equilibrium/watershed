@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NODE_VERSION = "22.23.1"
+NODE_VERSION = "24.18.0"
 PNPM_VERSION = "11.15.1"
 SETUP_NODE_RELEASE = "v6.5.0"
 SETUP_NODE_SHA = "249970729cb0ef3589644e2896645e5dc5ba9c38"
@@ -169,7 +169,7 @@ class CiToolchainContractTest(unittest.TestCase):
             workflow, "Enable Corepack"
         )
         self.assertIn(
-            "if ((node --version) -ne 'v22.23.1') {",
+            "if ((node --version) -ne 'v24.18.0') {",
             node_commands,
         )
         self.assertIn("corepack enable", corepack_commands)
@@ -225,7 +225,7 @@ class CiToolchainContractTest(unittest.TestCase):
       - name: Check Node version
         shell: pwsh
         run: |
-          if ((node --version) -ne 'v22.23.1') {
+          if ((node --version) -ne 'v24.18.0') {
             throw "wrong Node"
           }
 

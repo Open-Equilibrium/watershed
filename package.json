@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@11.15.1",
   "engines": {
-    "node": "22.23.1",
+    "node": "24.18.0",
     "pnpm": "11.15.1"
   },
   "description": "Dev-only tooling manifest. Not part of the product: Watershed ships no Node runtime (ADR-0001). clawpatch is the PR-readiness review gate (see .agents/skills/clawpatch).",
