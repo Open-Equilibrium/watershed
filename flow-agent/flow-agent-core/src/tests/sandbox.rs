@@ -89,20 +89,15 @@ fn sandbox_negative_dispatch_requires_stub_model_fixture_profile() {
     )
     .expect("config rewritten without fixture profile");
 
-    let output = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
-        .expect("non-fixture workspace runs");
+    let error = run_flow(&workspace, "sandbox-negative-write", EmitMode::Jsonl)
+        .expect_err("non-fixture workspace fails closed");
 
-    let events =
-        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
-            .expect("non-fixture stream validates");
-    assert_eq!(events[0].payload, serde_json::json!({}));
-    assert!(!output.failed);
+    assert!(matches!(error, RuntimeError::ExecutionBackendUnavailable));
     assert!(
-        output
-            .stdout
-            .contains("\"event_type\":\"session.completed\"")
+        !workspace.join(LOCAL_SESSION_DIR).exists(),
+        "backend rejection must precede session persistence"
     );
-    assert!(!output.stdout.contains("write_denied"));
+    assert!(!workspace.join("out/forbidden.txt").exists());
 }
 
 #[test]
@@ -268,20 +263,18 @@ fn sandbox_out_of_phase_denial_requires_stub_model_fixture_profile() {
     )
     .expect("config rewritten without fixture profile");
 
-    let output = run_flow(
+    let error = run_flow(
         &workspace,
         "sandbox-negative-tool-out-of-phase",
         EmitMode::Jsonl,
     )
-    .expect("non-fixture workspace runs");
+    .expect_err("non-fixture workspace fails closed");
 
-    assert!(!output.failed);
+    assert!(matches!(error, RuntimeError::ExecutionBackendUnavailable));
     assert!(
-        output
-            .stdout
-            .contains("\"event_type\":\"session.completed\"")
+        !workspace.join(LOCAL_SESSION_DIR).exists(),
+        "backend rejection must precede session persistence"
     );
-    assert!(!output.stdout.contains("tool_out_of_phase"));
 }
 
 #[test]
