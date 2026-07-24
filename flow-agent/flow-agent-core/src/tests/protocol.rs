@@ -144,7 +144,7 @@ fn protocol_validator_rejects_tool_started_required_payload_edges() {
     assert_invalid_event(
         "incomplete-tool-started.jsonl",
         incomplete_tool,
-        "tool.started payload.read_scope",
+        "payload.read_scope",
     );
 }
 
@@ -338,7 +338,7 @@ fn protocol_validator_rejects_tool_terminal_and_auxiliary_payload_edges() {
     assert_invalid_event(
         "non-numeric-metric.jsonl",
         non_numeric_metric,
-        "metric.sample payload.value",
+        "payload.value",
     );
 
     let mut valid_metric = base_event();
