@@ -76,7 +76,7 @@ fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
 
 #[test]
 fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
-    let workspace = empty_workspace("reserve-in-progress-collision");
+    let workspace = workspace_copy("hello-flow");
     let sessions = ensure_runtime_dirs(&workspace)
         .expect("runtime dirs")
         .sessions;
