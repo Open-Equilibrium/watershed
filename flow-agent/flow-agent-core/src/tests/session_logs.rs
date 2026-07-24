@@ -1474,7 +1474,7 @@ fn resume_rejects_case_aliased_session_lock_without_side_effects() {
         "{err}"
     );
     assert!(!workspace.join("out/summary.txt").exists());
-    fs::remove_file(alias).expect("lock alias removed");
+    fs::rename(&alias, reservation.lock_path.diagnostic_path()).expect("canonical lock restored");
     reservation.rollback().expect("reservation rolls back");
 }
 
