@@ -621,6 +621,8 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
         .read_to_string(&mut text)
         .expect("existing file remains readable");
     assert_eq!(text, "{\"turn\":1}\n{\"turn\":2}\n");
+    drop(observed);
+    drop(writer);
     reservation.rollback().expect("reservation rolls back");
 }
 
