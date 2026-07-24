@@ -1,3 +1,5 @@
+use flow_agent_core::validate_protocol_jsonl_text;
+use proto::EventType;
 use std::{
     ffi::OsString,
     fs,
@@ -10,6 +12,66 @@ use std::{
 #[path = "../../tests/support.rs"]
 mod test_support;
 use test_support::{expected_stream, workspace_copy};
+
+fn assert_append_only_resume<'a>(
+    prefix: &str,
+    resumed: &'a str,
+    expected_terminal: EventType,
+) -> &'a str {
+    let suffix = resumed
+        .strip_prefix(prefix)
+        .expect("resume must preserve the exact seeded prefix");
+    let events = validate_protocol_jsonl_text(Path::new("resumed-session.jsonl"), resumed)
+        .expect("resumed session history must be valid");
+    let prefix_event_count = prefix.lines().count();
+    let appended_events = &events[prefix_event_count..];
+    assert_eq!(
+        appended_events.first().map(|event| event.event_type),
+        Some(EventType::SessionResumed),
+        "resume marker must be the first appended event"
+    );
+    assert_eq!(
+        appended_events.last().map(|event| event.event_type),
+        Some(expected_terminal),
+        "expected terminal event must end the resumed history"
+    );
+    assert_eq!(
+        appended_events
+            .iter()
+            .filter(|event| event.event_type == EventType::SessionResumed)
+            .count(),
+        1,
+        "resume suffix must contain one resume marker"
+    );
+    assert_eq!(
+        appended_events
+            .iter()
+            .filter(|event| event.event_type == expected_terminal)
+            .count(),
+        1,
+        "resume suffix must contain one expected terminal event"
+    );
+    for (offset, event) in appended_events.iter().enumerate() {
+        assert_eq!(
+            event.sequence,
+            prefix_event_count as u64 + offset as u64 + 1,
+            "appended resume events must continue the prefix sequence"
+        );
+    }
+    suffix
+}
+
+#[test]
+fn append_only_resume_check_rejects_a_rewritten_prefix() {
+    let result = std::panic::catch_unwind(|| {
+        assert_append_only_resume("original\n", "rewritten\n", EventType::SessionCompleted);
+    });
+
+    assert!(
+        result.is_err(),
+        "rewritten history must fail the resume check"
+    );
+}
 
 fn flow_command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_flow"))
@@ -619,11 +681,9 @@ fn resume_partial_session_prints_human_status() {
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         "session smoke-flow resumed\n"
     );
-    assert!(
-        fs::read_to_string(session_dir.join("smoke-flow.jsonl"))
-            .expect("resumed log readable")
-            .contains("\"event_type\":\"session.completed\"")
-    );
+    let resumed =
+        fs::read_to_string(session_dir.join("smoke-flow.jsonl")).expect("resumed log readable");
+    assert_append_only_resume(&prefix, &resumed, EventType::SessionCompleted);
 }
 
 #[test]
@@ -658,6 +718,10 @@ fn failed_jsonl_resume_exits_with_failed_status() {
     let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
     assert!(stdout.contains("\"event_type\":\"session.resumed\""));
     assert!(stdout.contains("\"event_type\":\"session.failed\""));
+    let resumed = fs::read_to_string(session_dir.join("sandbox-negative-write.jsonl"))
+        .expect("failed resumed log readable");
+    let suffix = assert_append_only_resume(&prefix, &resumed, EventType::SessionFailed);
+    assert_eq!(stdout, suffix);
     assert!(!workspace.join("out/forbidden.txt").exists());
 }
 
