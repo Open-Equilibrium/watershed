@@ -43,6 +43,7 @@ struct RegistryCatalogEntry {
     identity: BlockIdentity,
     kind: &'static str,
     file: RegistryFile,
+    step_ids: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -54,6 +55,12 @@ struct RegistryCatalog {
 impl RegistryCatalog {
     fn insert(&mut self, block: &RegistryBlock, file: RegistryFile) -> Result<(), RegistryError> {
         let (kind, identity) = registry_block_identity(block);
+        let step_ids = match block {
+            RegistryBlock::Phase(phase) => {
+                phase.steps.iter().map(|step| step.id.clone()).collect()
+            }
+            _ => BTreeSet::new(),
+        };
         insert_named_block(
             kind,
             identity.clone(),
@@ -63,6 +70,7 @@ impl RegistryCatalog {
                 identity: identity.clone(),
                 kind,
                 file,
+                step_ids,
             },
         )
     }
@@ -98,31 +106,33 @@ impl RegistryCatalog {
         reference: &str,
         connection_id: &str,
     ) -> Result<&RegistryCatalogEntry, RegistryError> {
-        let matches = ["tool", "instruction", "phase", "flow"]
+        let mut matches = ["tool", "instruction", "phase", "flow"]
             .into_iter()
             .filter_map(|kind| self.resolve(kind, reference))
             .collect::<Vec<_>>();
-        match matches.as_slice() {
-            [entry] => return Ok(entry),
-            [] => {}
-            _ => {
-                return Err(RegistryError::AmbiguousReference {
-                    kind: "endpoint",
-                    reference: reference.to_owned(),
-                });
+        let mut missing_step = false;
+        if let Some((phase_reference, step_id)) = reference.rsplit_once('.')
+            && let Some(phase) = self.resolve("phase", phase_reference)
+        {
+            if phase.step_ids.contains(step_id) {
+                matches.push(phase);
+            } else {
+                missing_step = true;
             }
         }
-        let phase_reference = reference
-            .split_once('.')
-            .map(|(phase, _)| phase)
-            .unwrap_or(reference);
-        self.require("phase", phase_reference, "connection", connection_id)
-            .map_err(|_| RegistryError::MissingReference {
+        match matches.as_slice() {
+            [entry] => Ok(entry),
+            [] => Err(RegistryError::MissingReference {
                 from_kind: "connection",
                 from_id: connection_id.to_owned(),
-                reference_kind: "endpoint",
+                reference_kind: if missing_step { "step" } else { "endpoint" },
                 reference: reference.to_owned(),
-            })
+            }),
+            _ => Err(RegistryError::AmbiguousReference {
+                    kind: "endpoint",
+                    reference: reference.to_owned(),
+                }),
+        }
     }
 }
 

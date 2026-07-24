@@ -1,3 +1,12 @@
+#[derive(Clone, Copy)]
+enum ResolvedEndpoint<'a> {
+    Direct(&'a BlockIdentity),
+    Step {
+        phase: &'a PhaseBlock,
+        step: &'a StepBlock,
+    },
+}
+
 impl ResolvedRegistry {
     fn load_for_flow_with_limits(
         workspace: &Path,
@@ -211,34 +220,23 @@ impl ResolvedRegistry {
         reference: &str,
         connection_id: &str,
     ) -> Result<String, RegistryError> {
-        self.require_endpoint(reference, connection_id)?;
-        let direct_target = self
-            .tool_block(reference)
-            .map(|block| &block.identity)
-            .or_else(|| {
-                self.instruction_block(reference)
-                    .map(|block| &block.identity)
-            })
-            .or_else(|| self.phase_block(reference).map(|block| &block.identity))
-            .or_else(|| self.flow_block(reference).map(|block| &block.identity));
-        if let Some(identity) = direct_target {
-            return Ok(if self.direct_endpoint_match_count(&identity.id) == 1 {
+        match self.require_endpoint(reference, connection_id)? {
+            ResolvedEndpoint::Direct(identity) => {
+                Ok(if self.direct_endpoint_match_count(&identity.id) == 1 {
                 identity.id.clone()
             } else {
                 normalize_string(&identity.name)
-            });
+                })
+            }
+            ResolvedEndpoint::Step { phase, step } => {
+                let by_id = format!("{}.{}", phase.identity.id, step.id);
+                Ok(if self.direct_endpoint_match_count(&by_id) == 0 {
+                    by_id
+                } else {
+                    format!("{}.{}", normalize_string(&phase.identity.name), step.id)
+                })
+            }
         }
-
-        let (phase_ref, step_id) = reference
-            .split_once('.')
-            .expect("validated step endpoint contains a phase and step");
-        let phase = self.require_phase(phase_ref, "connection", connection_id)?;
-        let by_id = format!("{}.{step_id}", phase.identity.id);
-        Ok(if self.direct_endpoint_match_count(&by_id) == 0 {
-            by_id
-        } else {
-            format!("{}.{step_id}", normalize_string(&phase.identity.name))
-        })
     }
 
     /// Resolves a flow by id or unambiguous name.
@@ -477,14 +475,40 @@ impl ResolvedRegistry {
             })
     }
 
-    fn require_endpoint(&self, reference: &str, connection_id: &str) -> Result<(), RegistryError> {
-        let matches = self.direct_endpoint_match_count(reference);
-        match matches {
-            1 => Ok(()),
-            0 => Err(RegistryError::MissingReference {
+    fn require_endpoint<'a>(
+        &'a self,
+        reference: &str,
+        connection_id: &str,
+    ) -> Result<ResolvedEndpoint<'a>, RegistryError> {
+        let mut matches = [
+            self.tool_block(reference)
+                .map(|block| ResolvedEndpoint::Direct(&block.identity)),
+            self.instruction_block(reference)
+                .map(|block| ResolvedEndpoint::Direct(&block.identity)),
+            self.phase_block(reference)
+                .map(|block| ResolvedEndpoint::Direct(&block.identity)),
+            self.flow_block(reference)
+                .map(|block| ResolvedEndpoint::Direct(&block.identity)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        let mut missing_step = false;
+        if let Some((phase_reference, step_id)) = reference.rsplit_once('.')
+            && let Some(phase) = self.phase_block(phase_reference)
+        {
+            if let Some(step) = phase.steps.iter().find(|step| step.id == step_id) {
+                matches.push(ResolvedEndpoint::Step { phase, step });
+            } else {
+                missing_step = true;
+            }
+        }
+        match matches.as_slice() {
+            [endpoint] => Ok(*endpoint),
+            [] => Err(RegistryError::MissingReference {
                 from_kind: "connection",
                 from_id: connection_id.to_owned(),
-                reference_kind: "endpoint",
+                reference_kind: if missing_step { "step" } else { "endpoint" },
                 reference: reference.to_owned(),
             }),
             _ => Err(RegistryError::AmbiguousReference {
@@ -492,24 +516,6 @@ impl ResolvedRegistry {
                 reference: reference.to_owned(),
             }),
         }
-        .or_else(|err| {
-            if !matches!(err, RegistryError::MissingReference { .. }) {
-                return Err(err);
-            }
-            let Some((phase_ref, step_id)) = reference.split_once('.') else {
-                return Err(err);
-            };
-            let phase = self.require_phase(phase_ref, "connection", connection_id)?;
-            if phase.steps.iter().any(|step| step.id == step_id) {
-                return Ok(());
-            }
-            Err(RegistryError::MissingReference {
-                from_kind: "connection",
-                from_id: connection_id.to_owned(),
-                reference_kind: "step",
-                reference: reference.to_owned(),
-            })
-        })
     }
 
     fn direct_endpoint_match_count(&self, reference: &str) -> usize {

@@ -1170,6 +1170,78 @@ fn connection_endpoint_resolves_dotted_block_name_before_step_syntax() {
 }
 
 #[test]
+fn connection_endpoint_rejects_direct_and_scoped_step_collision() {
+    let mut blocks = step_endpoint_blocks("phase", "phase.run");
+    let mut tool = own_script_tool("direct-tool", "script:direct-tool");
+    tool.identity.name = "phase.run".to_owned();
+    blocks.push(RegistryBlock::Tool(tool));
+
+    let err = ResolvedRegistry::from_blocks(blocks)
+        .expect_err("direct and scoped-step endpoint collision is rejected");
+
+    assert!(matches!(
+        err,
+        RegistryError::AmbiguousReference {
+            kind: "endpoint",
+            reference,
+        } if reference == "phase.run"
+    ));
+}
+
+#[test]
+fn connection_endpoint_resolves_step_of_dotted_phase_name() {
+    let registry =
+        ResolvedRegistry::from_blocks(step_endpoint_blocks("Review.Stage", "Review.Stage.run"))
+            .expect("step of dotted phase name resolves");
+
+    assert_eq!(
+        registry
+            .connection_block("step-link")
+            .expect("connection exists")
+            .from_ref,
+        "review-phase.run"
+    );
+}
+
+#[test]
+fn filesystem_registry_resolves_step_of_dotted_phase_name() {
+    let root = temp_registry_dir("dotted-phase-step-endpoint");
+    write_step_endpoint_registry(&root, "Review.Stage", "Review.Stage.run");
+
+    let registry = load_registry(&root).expect("filesystem registry resolves dotted phase step");
+
+    assert_eq!(
+        registry
+            .connection_block("step-link")
+            .expect("connection exists")
+            .from_ref,
+        "review-phase.run"
+    );
+}
+
+#[test]
+fn filesystem_registry_rejects_direct_and_scoped_step_collision() {
+    let root = temp_registry_dir("ambiguous-step-endpoint");
+    write_step_endpoint_registry(&root, "phase", "phase.run");
+    std::fs::write(
+        root.join("tool.yaml"),
+        "tool:\n  id: direct-tool\n  name: phase.run\n  tool_kind: own-script\n  command: script:direct-tool\n  script_runtime: posix-sh\n  script_body: echo reviewed\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+    )
+    .expect("direct endpoint tool written");
+
+    let err = load_registry(&root)
+        .expect_err("filesystem direct and scoped-step endpoint collision is rejected");
+
+    assert!(matches!(
+        err,
+        RegistryError::AmbiguousReference {
+            kind: "endpoint",
+            reference,
+        } if reference == "phase.run"
+    ));
+}
+
+#[test]
 fn registry_reference_validation_rejects_flow_cycles() {
     let err = ResolvedRegistry::from_blocks([
         simple_phase_block("phase"),
@@ -2013,6 +2085,67 @@ fn simple_phase_block(id: &str) -> RegistryBlock {
         },
         ..test_phase()
     })
+}
+
+fn step_endpoint_blocks(phase_name: &str, from_ref: &str) -> Vec<RegistryBlock> {
+    vec![
+        RegistryBlock::Phase(PhaseBlock {
+            identity: BlockIdentity {
+                id: "review-phase".to_owned(),
+                name: phase_name.to_owned(),
+            },
+            instruction_refs: Vec::new(),
+            tool_refs: Vec::new(),
+            steps: vec![StepBlock {
+                id: "run".to_owned(),
+                name: "Run".to_owned(),
+                connection_refs: Vec::new(),
+            }],
+        }),
+        RegistryBlock::Instruction(InstructionBlock {
+            identity: BlockIdentity {
+                id: "sink".to_owned(),
+                name: "Sink".to_owned(),
+            },
+            prompt: "Consume".to_owned(),
+        }),
+        RegistryBlock::Connection(ConnectionBlock {
+            identity: BlockIdentity {
+                id: "step-link".to_owned(),
+                name: "StepLink".to_owned(),
+            },
+            connection_kind: ConnectionKind::Data,
+            from_ref: from_ref.to_owned(),
+            to_ref: "sink".to_owned(),
+        }),
+    ]
+}
+
+fn write_step_endpoint_registry(root: &Path, phase_name: &str, from_ref: &str) {
+    for (path, source) in [
+        (
+            "root.yaml",
+            "flow:\n  id: root\n  name: Root\n  phase_refs: [review-phase]\n  subflow_refs: []\n  connection_refs: [step-link]\n".to_owned(),
+        ),
+        (
+            "phase.yaml",
+            format!(
+                "phase:\n  id: review-phase\n  name: {phase_name}\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: run\n      name: Run\n      connection_refs: []\n"
+            ),
+        ),
+        (
+            "instruction.yaml",
+            "instruction:\n  id: sink\n  name: Sink\n  prompt: Consume\n".to_owned(),
+        ),
+        (
+            "connection.yaml",
+            format!(
+                "connection:\n  id: step-link\n  name: StepLink\n  connection_kind: data\n  from_ref: {from_ref}\n  to_ref: sink\n"
+            ),
+        ),
+    ] {
+        std::fs::write(root.join(path), source).expect("registry block written");
+    }
 }
 
 fn test_phase() -> PhaseBlock {
