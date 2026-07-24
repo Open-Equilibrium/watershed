@@ -7,6 +7,7 @@ import copy
 import json
 import os
 import queue
+import stat
 import subprocess
 import sys
 import tempfile
@@ -365,6 +366,43 @@ def read_text(path: Path, limit: int = 40_000) -> str:
     return bounded(text, limit)
 
 
+def read_untracked_text(repo: Path, path: Path, limit: int = 40_000) -> str:
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or (
+            getattr(before, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        ):
+            return "[non-regular file omitted]"
+        if not is_within(path.resolve(strict=True), repo.resolve(strict=True)):
+            return "[outside repository omitted]"
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        return f"[unreadable: {exc}]"
+    try:
+        after = os.fstat(descriptor)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            stat.S_IFMT(value.st_mode),
+            value.st_size,
+            value.st_mtime_ns,
+        )
+        if not stat.S_ISREG(after.st_mode) or identity(before) != identity(after):
+            return "[file changed during read; omitted]"
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            data = stream.read()
+    except OSError as exc:
+        return f"[unreadable: {exc}]"
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if b"\0" in data:
+        return "[binary file omitted]"
+    return bounded(data.decode("utf-8", errors="replace"), limit)
+
+
 def local_bundle(repo: Path) -> str:
     parts = [
         "# Git Status",
@@ -381,7 +419,7 @@ def local_bundle(repo: Path) -> str:
         parts.append("# Untracked Files")
         for rel in untracked:
             path = repo / rel
-            parts.append(f"## {rel}\n{read_text(path)}")
+            parts.append(f"## {rel}\n{read_untracked_text(repo, path)}")
     return "\n\n".join(parts)
 
 
