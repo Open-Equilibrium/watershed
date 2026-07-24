@@ -75,6 +75,10 @@ HOOK_COMMAND_RE = re.compile(
     rf'(?:"(?P<quoted_script>{HOOK_SCRIPT_PATH_PATTERN})"|'
     rf'(?P<script>{HOOK_SCRIPT_PATH_PATTERN}))$'
 )
+HOOK_SCRIPT_BY_EVENT = {
+    "PreToolUse": ".codex/hooks/pre_tool_use_guard.py",
+    "Stop": ".codex/hooks/stop_closeout_check.py",
+}
 
 
 def validate_repo(root: Path) -> list[str]:
@@ -210,6 +214,9 @@ def validate_hook_command(
         return errors
 
     script = match.group("quoted_script") or match.group("script")
+    expected_script = HOOK_SCRIPT_BY_EVENT[event]
+    if script != expected_script:
+        errors.append(f"{prefix}.command must run {expected_script}")
     script_path = (root / script).resolve()
     hooks_dir = (root / ".codex" / "hooks").resolve()
     if not script_path.is_relative_to(hooks_dir):

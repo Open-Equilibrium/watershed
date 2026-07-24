@@ -493,6 +493,33 @@ process.stderr.write = (message) => {
 
                 self.assertIn(expected, validator.validate_repo(root))
 
+    def test_rejects_hooks_registered_for_the_wrong_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            hooks_path = root / ".codex" / "hooks.json"
+            payload = json.loads(hooks_path.read_text(encoding="utf-8"))
+            pre_tool_hook = payload["hooks"]["PreToolUse"][0]["hooks"][0]
+            stop_hook = payload["hooks"]["Stop"][0]["hooks"][0]
+            pre_tool_hook["command"], stop_hook["command"] = (
+                stop_hook["command"],
+                pre_tool_hook["command"],
+            )
+            hooks_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = validator.validate_repo(root)
+
+            self.assertIn(
+                ".codex/hooks.json: hooks.PreToolUse[0].hooks[0].command must run "
+                ".codex/hooks/pre_tool_use_guard.py",
+                errors,
+            )
+            self.assertIn(
+                ".codex/hooks.json: hooks.Stop[0].hooks[0].command must run "
+                ".codex/hooks/stop_closeout_check.py",
+                errors,
+            )
+
     def test_rejects_shell_metacharacters_in_hook_script_paths(self) -> None:
         commands = [
             'node "scripts/run-python.mjs" ".codex/hooks/$(touch pwn).py"',
