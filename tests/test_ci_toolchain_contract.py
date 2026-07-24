@@ -10,6 +10,7 @@ NODE_VERSION = "22.23.1"
 PNPM_VERSION = "11.15.1"
 SETUP_NODE_RELEASE = "v6.5.0"
 SETUP_NODE_SHA = "249970729cb0ef3589644e2896645e5dc5ba9c38"
+TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 FORBIDDEN_NODE_RUNTIME_DEPENDENCY = re.compile(
     r"^(?:node|nodejs|node-api|napi|neon)(?:[-_].*)?$"
 )
@@ -72,6 +73,16 @@ class CiToolchainContractTest(unittest.TestCase):
         pnpm_check_index = workflow.index("pnpm --version")
         self.assertLess(setup_index, corepack_index)
         self.assertLess(corepack_index, pnpm_check_index)
+
+    def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        push_section = workflow.split("  push:\n", 1)[1].split("\n\n", 1)[0]
+
+        for branch_type in TOPIC_BRANCH_TYPES:
+            with self.subTest(branch_type=branch_type):
+                self.assertIn(f'"{branch_type}/**"', push_section)
 
     def test_rust_product_manifests_have_no_node_runtime_dependency(self) -> None:
         violations: list[str] = []

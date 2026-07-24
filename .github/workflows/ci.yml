@@ -5,7 +5,15 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "feat/**"]
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "docs/**"
+      - "test/**"
+      - "ci/**"
+      - "chore/**"
+      - "refactor/**"
 
 permissions:
   contents: read
