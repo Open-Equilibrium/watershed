@@ -33,6 +33,41 @@ def forbidden_dependency_names(table: dict[str, object]) -> list[str]:
     ]
 
 
+def cargo_dependency_tables(
+    manifest: object,
+) -> list[tuple[tuple[str, ...], dict[str, object]]]:
+    if not isinstance(manifest, dict):
+        return []
+
+    dependency_table_names = (
+        "dependencies",
+        "build-dependencies",
+        "dev-dependencies",
+    )
+    tables: list[tuple[tuple[str, ...], dict[str, object]]] = []
+    for name in dependency_table_names:
+        table = manifest.get(name)
+        if isinstance(table, dict):
+            tables.append(((name,), table))
+
+    workspace = manifest.get("workspace")
+    if isinstance(workspace, dict):
+        table = workspace.get("dependencies")
+        if isinstance(table, dict):
+            tables.append((("workspace", "dependencies"), table))
+
+    targets = manifest.get("target")
+    if isinstance(targets, dict):
+        for selector, target in targets.items():
+            if not isinstance(target, dict):
+                continue
+            for name in dependency_table_names:
+                table = target.get(name)
+                if isinstance(table, dict):
+                    tables.append((("target", selector, name), table))
+    return tables
+
+
 class CiToolchainContractTest(unittest.TestCase):
     def test_tracked_file_listing_preserves_unusual_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -248,29 +283,12 @@ class CiToolchainContractTest(unittest.TestCase):
     def test_rust_product_manifests_have_no_node_runtime_dependency(self) -> None:
         violations: list[str] = []
 
-        def dependency_tables(
-            value: object, parents: tuple[str, ...] = ()
-        ) -> list[tuple[tuple[str, ...], dict[str, object]]]:
-            if not isinstance(value, dict):
-                return []
-            tables: list[tuple[tuple[str, ...], dict[str, object]]] = []
-            for key, child in value.items():
-                path = (*parents, key)
-                if key in {
-                    "dependencies",
-                    "build-dependencies",
-                    "dev-dependencies",
-                } and isinstance(child, dict):
-                    tables.append((path, child))
-                tables.extend(dependency_tables(child, path))
-            return tables
-
         for manifest_path in sorted(ROOT.rglob("Cargo.toml")):
             if "target" in manifest_path.parts:
                 continue
             with manifest_path.open("rb") as manifest_file:
                 manifest = tomllib.load(manifest_file)
-            for table_path, table in dependency_tables(manifest):
+            for table_path, table in cargo_dependency_tables(manifest):
                 for dependency in forbidden_dependency_names(table):
                     violations.append(
                         f"{manifest_path.relative_to(ROOT)}:"
@@ -278,6 +296,41 @@ class CiToolchainContractTest(unittest.TestCase):
                     )
 
         self.assertEqual(violations, [])
+
+    def test_cargo_dependency_tables_exclude_metadata(self) -> None:
+        manifest = {
+            "dependencies": {"node-api": "1"},
+            "workspace": {
+                "dependencies": {"nodejs": "1"},
+                "metadata": {
+                    "reporter": {"dependencies": {"node": "display only"}}
+                },
+            },
+            "package": {
+                "metadata": {
+                    "reporter": {"dependencies": {"napi": "display only"}}
+                }
+            },
+            "target": {
+                "cfg(unix)": {
+                    "build-dependencies": {"neon": "1"},
+                    "metadata": {
+                        "reporter": {
+                            "dependencies": {"node_bridge": "display only"}
+                        }
+                    },
+                }
+            },
+        }
+
+        self.assertEqual(
+            [path for path, _ in cargo_dependency_tables(manifest)],
+            [
+                ("dependencies",),
+                ("workspace", "dependencies"),
+                ("target", "cfg(unix)", "build-dependencies"),
+            ],
+        )
 
     def test_forbidden_dependency_names_checks_cargo_package_aliases(self) -> None:
         self.assertEqual(
