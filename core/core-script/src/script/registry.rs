@@ -223,9 +223,9 @@ impl ResolvedRegistry {
         match self.require_endpoint(reference, connection_id)? {
             ResolvedEndpoint::Direct(identity) => {
                 Ok(if self.direct_endpoint_match_count(&identity.id) == 1 {
-                identity.id.clone()
-            } else {
-                normalize_string(&identity.name)
+                    identity.id.clone()
+                } else {
+                    normalize_string(&identity.name)
                 })
             }
             ResolvedEndpoint::Step { phase, step } => {

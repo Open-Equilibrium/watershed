@@ -56,9 +56,7 @@ impl RegistryCatalog {
     fn insert(&mut self, block: &RegistryBlock, file: RegistryFile) -> Result<(), RegistryError> {
         let (kind, identity) = registry_block_identity(block);
         let step_ids = match block {
-            RegistryBlock::Phase(phase) => {
-                phase.steps.iter().map(|step| step.id.clone()).collect()
-            }
+            RegistryBlock::Phase(phase) => phase.steps.iter().map(|step| step.id.clone()).collect(),
             _ => BTreeSet::new(),
         };
         insert_named_block(
@@ -129,9 +127,9 @@ impl RegistryCatalog {
                 reference: reference.to_owned(),
             }),
             _ => Err(RegistryError::AmbiguousReference {
-                    kind: "endpoint",
-                    reference: reference.to_owned(),
-                }),
+                kind: "endpoint",
+                reference: reference.to_owned(),
+            }),
         }
     }
 }
@@ -279,10 +277,7 @@ fn open_registry_regular_file(
     path: &Path,
 ) -> Result<cap_std::fs::File, RegistryError> {
     let mut options = cap_std::fs::OpenOptions::new();
-    options
-        .read(true)
-        .follow(FollowSymlinks::No)
-        .nonblock(true);
+    options.read(true).follow(FollowSymlinks::No).nonblock(true);
     let opened = dir
         .open_with(name, &options)
         .map_err(|source| unsafe_file(path.to_path_buf(), source))?;
