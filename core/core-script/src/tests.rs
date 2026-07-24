@@ -4,6 +4,11 @@ use std::{
     ops::Deref,
     path::{Path, PathBuf},
 };
+#[cfg(unix)]
+use std::{
+    process::Command,
+    time::{Duration, Instant},
+};
 
 fn registry_location(root: &Path) -> (&Path, &Path) {
     (
@@ -439,6 +444,63 @@ fn registry_file_reader_reports_leaf_removed_after_collection() {
             if error_path.as_path() == path && source.kind() == std::io::ErrorKind::NotFound),
         "unexpected error: {err:?}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn registry_file_reader_rejects_fifo_replacement_without_blocking() {
+    const CHILD_MARKER: &str = "WATERSHED_CORE_SCRIPT_FIFO_CHILD";
+    if let Some(marker) = std::env::var_os(CHILD_MARKER) {
+        std::fs::write(marker, "started").expect("child marker written");
+        let root = temp_registry_dir("registry-fifo-replacement-child");
+        let path = root.join("instruction.yaml");
+        std::fs::write(
+            &path,
+            "instruction:\n  id: inspect\n  name: Inspect\n  prompt: Inspect\n",
+        )
+        .expect("registry file written");
+        let (opened_root, files) = collect_registry_files(&root).expect("registry file collected");
+        std::fs::remove_file(&path).expect("registry file removed");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&path)
+                .status()
+                .expect("mkfifo runs")
+                .success(),
+            "mkfifo must create the replacement"
+        );
+
+        let err = read_registry_file_to_string(&opened_root, &files[0], MAX_REGISTRY_FILE_BYTES)
+            .expect_err("FIFO replacement must be rejected");
+        assert!(matches!(err, RegistryError::UnsafePath { .. }));
+        return;
+    }
+
+    let marker_dir = temp_registry_dir("registry-fifo-replacement-parent");
+    let marker = marker_dir.join("child-started");
+    let mut child = Command::new(std::env::current_exe().expect("test binary path"))
+        .args([
+            "--exact",
+            "tests::registry_file_reader_rejects_fifo_replacement_without_blocking",
+            "--nocapture",
+        ])
+        .env(CHILD_MARKER, &marker)
+        .spawn()
+        .expect("child test starts");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("child status is readable") {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(3) {
+            child.kill().expect("blocked child stops");
+            child.wait().expect("blocked child is reaped");
+            panic!("registry reader blocked while opening a FIFO replacement");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(marker.is_file(), "child regression path must run");
+    assert!(status.success(), "child regression path must pass");
 }
 
 #[cfg(any(unix, windows))]

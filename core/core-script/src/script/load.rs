@@ -1,4 +1,4 @@
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
 use cap_std::{ambient_authority, fs::Dir};
 
 /// Loads the unique transitive registry closure for one top-level Flow.
@@ -263,6 +263,32 @@ fn unsafe_file(path: PathBuf, source: io::Error) -> RegistryError {
     }
 }
 
+fn open_registry_regular_file(
+    dir: &Dir,
+    name: &std::ffi::OsStr,
+    path: &Path,
+) -> Result<cap_std::fs::File, RegistryError> {
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .nonblock(true);
+    let opened = dir
+        .open_with(name, &options)
+        .map_err(|source| unsafe_file(path.to_path_buf(), source))?;
+    let metadata = opened.metadata().map_err(|source| RegistryError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(RegistryError::UnsafePath {
+            path: path.to_path_buf(),
+            message: "registry files must not be symlinks or reparse points".to_owned(),
+        });
+    }
+    Ok(opened)
+}
+
 fn read_registry_file_to_string(
     root: &RegistryRoot,
     file: &RegistryFile,
@@ -284,26 +310,13 @@ fn read_registry_file_to_string(
     }
     let dir = opened_dir.as_ref().unwrap_or(&root.dir);
 
-    let mut options = cap_std::fs::OpenOptions::new();
-    options.read(true).follow(FollowSymlinks::No);
-    let opened = dir
-        .open_with(
-            file.path
-                .file_name()
-                .expect("collected registry files have names"),
-            &options,
-        )
-        .map_err(|source| unsafe_file(path.clone(), source))?;
-    let metadata = opened.metadata().map_err(|source| RegistryError::Io {
-        path: path.clone(),
-        source,
-    })?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(RegistryError::UnsafePath {
-            path,
-            message: "registry files must not be symlinks or reparse points".to_owned(),
-        });
-    }
+    let opened = open_registry_regular_file(
+        dir,
+        file.path
+            .file_name()
+            .expect("collected registry files have names"),
+        &path,
+    )?;
 
     let mut bytes = Vec::new();
     opened
@@ -394,11 +407,7 @@ fn collect_registry_files_with_limits(
                 .and_then(|ext| ext.to_str())
                 .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
         {
-            let mut options = cap_std::fs::OpenOptions::new();
-            options.read(true).follow(FollowSymlinks::No);
-            let opened = dir
-                .open_with(&name, &options)
-                .map_err(|source| unsafe_file(path.clone(), source))?;
+            let opened = open_registry_regular_file(dir, &name, &path)?;
             let metadata = opened.metadata().map_err(|source| RegistryError::Io {
                 path: path.clone(),
                 source,
