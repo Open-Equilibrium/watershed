@@ -184,6 +184,73 @@ fn event_boundaries_reject_missing_required_payload_fields() {
 }
 
 #[test]
+fn flow_event_boundaries_require_runtime_invocation_id() {
+    let cases = [
+        (
+            EventType::FlowStarted,
+            json!({"flow_definition_id": "flow-1"}),
+        ),
+        (
+            EventType::FlowCompleted,
+            json!({"flow_definition_id": "flow-1"}),
+        ),
+        (
+            EventType::FlowFailed,
+            json!({"flow_definition_id": "flow-1", "error": "failed"}),
+        ),
+    ];
+
+    for (event_type, payload) in cases {
+        let event = EventEnvelope::new(
+            "evt-001",
+            event_type,
+            "smoke001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "flow-agent-cli",
+            payload.clone(),
+        );
+
+        assert_eq!(
+            event
+                .validate_v0()
+                .expect_err("flow event without flow_id must fail")
+                .field(),
+            "flow_id"
+        );
+        assert!(
+            event
+                .canonical_jsonl()
+                .expect_err("canonical serialization must require flow_id")
+                .to_string()
+                .contains("flow_id")
+        );
+        assert!(
+            serde_json::to_string(&event)
+                .expect_err("ordinary serialization must require flow_id")
+                .to_string()
+                .contains("flow_id")
+        );
+        let raw = json!({
+            "event_id": "evt-001",
+            "event_type": event_type.as_str(),
+            "payload": payload,
+            "protocol_version": "0",
+            "sequence": 1,
+            "session_id": "smoke001",
+            "source": "flow-agent-cli",
+            "timestamp": "2026-01-01T00:00:00Z"
+        });
+        assert!(
+            serde_json::from_value::<EventEnvelope>(raw)
+                .expect_err("deserialization must require flow_id")
+                .to_string()
+                .contains("flow_id")
+        );
+    }
+}
+
+#[test]
 fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
     let cases = [
         (EventType::SessionStarted, json!({})),
@@ -280,7 +347,7 @@ fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
     ];
 
     for (index, (event_type, payload)) in cases.into_iter().enumerate() {
-        let event = EventEnvelope::new(
+        let mut event = EventEnvelope::new(
             format!("evt-{index}"),
             event_type,
             "smoke001",
@@ -289,6 +356,12 @@ fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
             "flow-agent-cli",
             payload,
         );
+        if matches!(
+            event_type,
+            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
+        ) {
+            event.flow_id = Some(format!("flow-{index}"));
+        }
 
         let canonical = event
             .canonical_jsonl()

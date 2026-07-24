@@ -275,6 +275,16 @@ impl EventEnvelope {
     /// Validates all stream-independent v0 envelope and payload requirements.
     pub fn validate_v0(&self) -> Result<(), EventValidationError> {
         self.validate_metadata()?;
+        if matches!(
+            self.event_type,
+            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
+        ) && self.flow_id.is_none()
+        {
+            return Err(EventValidationError::new(
+                "flow_id",
+                "is required for flow events",
+            ));
+        }
         if !self.payload.is_object() {
             return Err(EventValidationError::new(
                 "payload",
