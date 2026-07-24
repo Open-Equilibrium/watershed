@@ -449,6 +449,12 @@ fn runtime_and_writer_finalization_failures_remain_visible() {
         &workspace,
         "sandbox-negative-write",
         false,
+        |result| {
+            result?;
+            Err(RuntimeError::Protocol(
+                "injected runtime operation failure".to_owned(),
+            ))
+        },
         |_| {
             Err(RuntimeError::Protocol(
                 "injected writer finalization failure".to_owned(),
@@ -464,7 +470,7 @@ fn runtime_and_writer_finalization_failures_remain_visible() {
             operation: Some(operation),
             finalization: Some(finalization),
             cleanup: None,
-        } if matches!(operation.as_ref(), RuntimeError::SessionFailed { .. })
+        } if operation.to_string().contains("injected runtime operation failure")
             && finalization.to_string().contains("injected writer finalization failure")
     ));
     assert!(!lock_path.exists());
@@ -481,6 +487,12 @@ fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
         &workspace,
         "sandbox-negative-write",
         false,
+        |result| {
+            result?;
+            Err(RuntimeError::Protocol(
+                "injected runtime operation failure".to_owned(),
+            ))
+        },
         |_| {
             Err(RuntimeError::Protocol(
                 "injected writer finalization failure".to_owned(),
@@ -499,7 +511,7 @@ fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
             operation: Some(operation),
             finalization: Some(finalization),
             cleanup: Some(cleanup),
-        } if matches!(operation.as_ref(), RuntimeError::SessionFailed { .. })
+        } if operation.to_string().contains("injected runtime operation failure")
             && finalization.to_string().contains("injected writer finalization failure")
             && cleanup.to_string().contains("sandbox-negative-write.lock")
     ));
@@ -515,7 +527,7 @@ fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
     assert!(
         std::error::Error::source(&err).is_some_and(|source| source
             .to_string()
-            .contains("session sandbox-negative-write failed")),
+            .contains("injected runtime operation failure")),
         "{err}"
     );
 
@@ -602,10 +614,17 @@ fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
         .join(LOCAL_SESSION_DIR)
         .join("sandbox-negative-write.lock");
 
-    let err = run_flow_internal_with_cleanup_observer(
+    let err = run_flow_internal_with_stage_observers(
         &workspace,
         "sandbox-negative-write",
         false,
+        |result| {
+            result?;
+            Err(RuntimeError::Protocol(
+                "injected runtime operation failure".to_owned(),
+            ))
+        },
+        |result| result,
         |lock| {
             lock.remove().expect("lock file removed");
             fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
@@ -619,7 +638,7 @@ fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
             operation: Some(operation),
             finalization: None,
             cleanup: Some(cleanup),
-        } if matches!(operation.as_ref(), RuntimeError::SessionFailed { .. })
+        } if operation.to_string().contains("injected runtime operation failure")
             && cleanup.to_string().contains("sandbox-negative-write.lock")
     ));
     assert!(

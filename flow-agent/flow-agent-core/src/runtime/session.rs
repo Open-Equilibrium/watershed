@@ -54,7 +54,7 @@ pub fn run_flow_internal(
         notifier,
         timings,
         capture_jsonl,
-        |result| result,
+        (|result| result, |result| result),
         |_| {},
     )
 }
@@ -72,7 +72,7 @@ pub(crate) fn run_flow_internal_with_cleanup_observer(
         None,
         None,
         capture_jsonl,
-        |result| result,
+        (|result| result, |result| result),
         before_cleanup,
     )
 }
@@ -82,6 +82,7 @@ pub(crate) fn run_flow_internal_with_stage_observers(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
     capture_jsonl: bool,
+    after_operation: impl FnOnce(Result<RunOutput, RuntimeError>) -> Result<RunOutput, RuntimeError>,
     after_finalization: impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
     before_cleanup: impl FnOnce(&AnchoredFile),
 ) -> Result<RunOutput, RuntimeError> {
@@ -91,7 +92,7 @@ pub(crate) fn run_flow_internal_with_stage_observers(
         None,
         None,
         capture_jsonl,
-        after_finalization,
+        (after_operation, after_finalization),
         before_cleanup,
     )
 }
@@ -102,9 +103,13 @@ fn run_flow_internal_with_cleanup_observer_impl(
     notifier: Option<LiveEventNotifier>,
     timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
-    after_finalization: impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
+    stage_observers: (
+        impl FnOnce(Result<RunOutput, RuntimeError>) -> Result<RunOutput, RuntimeError>,
+        impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
+    ),
     before_cleanup: impl FnOnce(&AnchoredFile),
 ) -> Result<RunOutput, RuntimeError> {
+    let (after_operation, after_finalization) = stage_observers;
     let workspace = workspace.as_ref();
     let config = load_workspace_config(workspace)?;
     require_fixture_execution_backend(&config)?;
@@ -183,6 +188,7 @@ fn run_flow_internal_with_cleanup_observer_impl(
             stdout,
         })
     })();
+    let operation_result = after_operation(operation_result);
     finalization_result = after_finalization(finalization_result);
     before_cleanup(&reservation.lock_path);
     let cleanup_result = reservation.cleanup();
