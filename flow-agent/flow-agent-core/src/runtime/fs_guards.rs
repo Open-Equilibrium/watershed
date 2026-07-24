@@ -356,17 +356,6 @@ pub fn for_each_segmented_jsonl_line(
     Ok(total)
 }
 
-pub fn remove_segmented_jsonl(base: &AnchoredFile) -> Result<(), RuntimeError> {
-    for_each_segmented_jsonl_member(base, |member| {
-        let file = match member {
-            SegmentedJsonlMember::Canonical(_, file) | SegmentedJsonlMember::Alias(file) => file,
-        };
-        remove_anchored_file_if_exists(&file)?;
-        Ok(())
-    })?;
-    remove_anchored_file_if_exists(base)
-}
-
 pub fn remove_anchored_file_if_exists(file: &AnchoredFile) -> Result<(), RuntimeError> {
     match file.remove() {
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),

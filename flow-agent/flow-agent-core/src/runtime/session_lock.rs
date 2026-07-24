@@ -14,7 +14,10 @@ pub struct SessionReservation {
     pub(crate) lock_path: AnchoredFile,
     pub(crate) session_path: AnchoredFile,
     pub(crate) session_id: String,
+    context_created: Cell<bool>,
+    log_created: Cell<bool>,
     lock_released: Cell<bool>,
+    session_created: Cell<bool>,
     state: Cell<ReservationState>,
 }
 
@@ -32,9 +35,24 @@ impl SessionReservation {
             lock_path,
             session_path,
             session_id,
+            context_created: Cell::new(false),
+            log_created: Cell::new(false),
             lock_released: Cell::new(false),
+            session_created: Cell::new(false),
             state: Cell::new(ReservationState::Empty),
         }
+    }
+
+    pub(crate) fn mark_context_created(&self) {
+        self.context_created.set(true);
+    }
+
+    pub(crate) fn mark_log_created(&self) {
+        self.log_created.set(true);
+    }
+
+    pub(crate) fn mark_session_created(&self) {
+        self.session_created.set(true);
     }
 
     pub(crate) fn activate(&self) {
@@ -49,13 +67,16 @@ impl SessionReservation {
         }
         let mut failures = Vec::new();
         if self.state.get() == ReservationState::Empty {
-            for result in [
-                remove_segmented_jsonl(&self.session_path),
-                remove_anchored_file_if_exists(&self.log_path),
-                remove_segmented_jsonl(&self.context_path),
+            for (created, path) in [
+                (&self.session_created, &self.session_path),
+                (&self.log_created, &self.log_path),
+                (&self.context_created, &self.context_path),
             ] {
-                if let Err(error) = result {
-                    failures.push(Box::new(error));
+                if created.get() {
+                    match remove_anchored_file_if_exists(path) {
+                        Ok(()) => created.set(false),
+                        Err(error) => failures.push(Box::new(error)),
+                    }
                 }
             }
         }

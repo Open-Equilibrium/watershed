@@ -79,6 +79,54 @@ fn run_flow_allocates_next_session_id_when_base_log_is_corrupt() {
 }
 
 #[test]
+fn reservation_collision_preserves_existing_session_log() {
+    let workspace = empty_workspace("reservation-existing-session");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("existing001.jsonl");
+    fs::write(&session_path, b"existing session").expect("existing session written");
+
+    let err = reserve_session_log(&workspace, "existing001")
+        .expect_err("existing session must reject reservation");
+
+    assert!(matches!(
+        err,
+        RuntimeError::SessionLogExists(session_id) if session_id == "existing001"
+    ));
+    assert_eq!(
+        fs::read(&session_path).expect("existing session remains"),
+        b"existing session"
+    );
+    assert!(!dirs.sessions.path.join("existing001.lock").exists());
+}
+
+#[test]
+fn partial_reservation_rollback_preserves_context_collision() {
+    let workspace = empty_workspace("reservation-context-race");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("context001.jsonl");
+    let lock_path = dirs.sessions.path.join("context001.lock");
+    let metadata_path = dirs.logs.path.join("context001.log");
+    let context_path = dirs.logs.path.join("context001.contexts.jsonl");
+
+    let err = reserve_session_log_with_publish_observer(&workspace, "context001", || {
+        fs::write(&context_path, b"existing context").expect("racing context written");
+    })
+    .expect_err("context collision must reject reservation");
+
+    assert!(matches!(
+        err,
+        RuntimeError::SessionLogExists(session_id) if session_id == "context001"
+    ));
+    assert_eq!(
+        fs::read(&context_path).expect("racing context remains"),
+        b"existing context"
+    );
+    assert!(!session_path.exists());
+    assert!(!metadata_path.exists());
+    assert!(!lock_path.exists());
+}
+
+#[test]
 fn resume_event_capacity_counts_prior_markers_and_the_new_marker() {
     let max = usize::try_from(MAX_FLOW_EVENTS).expect("event limit fits usize");
 

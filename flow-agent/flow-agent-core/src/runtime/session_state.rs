@@ -779,9 +779,14 @@ pub fn reserve_session_log_with_publish_observer(
             &reservation.lock_path,
             session_id,
         )?;
-        reserve_anchored_session_file(&reservation.session_path, session_id, after_publish)?;
+        reserve_anchored_session_file(&reservation.session_path, session_id, || {
+            reservation.mark_session_created();
+            after_publish();
+        })?;
         reserve_anchored_bundle_file(&reservation.log_path, session_id)?;
+        reservation.mark_log_created();
         reserve_anchored_bundle_file(&reservation.context_path, session_id)?;
+        reservation.mark_context_created();
         Ok(())
     })();
     match operation {
