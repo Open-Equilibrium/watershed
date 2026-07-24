@@ -721,7 +721,7 @@ fn resume_rejects_invalid_context_manifest_streams_before_side_effects() {
     for (tamper, expected) in [
         ("missing", "context manifest stream is missing"),
         ("missing-lf", "context manifest stream must end with LF"),
-        ("malformed-json", "line 2: invalid context manifest JSON"),
+        ("malformed-json", "line 3: invalid context manifest JSON"),
         ("whitespace", "context manifest is not canonical JSONL"),
     ] {
         let workspace = workspace_copy("hello-flow");
