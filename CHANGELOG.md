@@ -13,6 +13,9 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Changed
 
+- Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback (ADR-0077).
+- Dev/CI uses exact Node 22.23.1 and pnpm 11.15.1 pins without adding a product Node runtime (ADR-0078).
+- M1.1 provider and general subprocess work is blocked on the architecture-hardening entry criteria in `PLAN.md`, completed through small PRs (ADR-0079).
 - M1 provider context fixed as deterministic, cache-stable `flow-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved (ADR-0058).
 - M1 local events use serial authoritative append before a capacity-one, caller-owned, non-blocking high-watermark notification; receivers replay by sequence and the core owns no arbitrary output transport (ADR-0059, ADR-0062).
 - M1 is the Flow Agent deterministic runtime foundation: fixture-bounded execution and in-process policy emulation are explicit; real providers and tools belong to M1.1, and OS isolation belongs to M1.2 (ADR-0075, ADR-0076).

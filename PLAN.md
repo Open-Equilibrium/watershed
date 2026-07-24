@@ -55,6 +55,19 @@ M1 does not provide a real provider adapter, general external process execution,
 
 ### M1.1 — Flow Agent practical execution
 
+#### M1.1 entry criteria — architecture hardening
+
+The following criteria are mandatory before real provider integration or general subprocess execution begins (ADR-0079):
+
+1. **Protocol validation ownership:** `proto` alone owns Event-envelope and Event-payload structure validation; `flow-agent-core` delegates it. Runtime retains only stream, sequence, budget and lifecycle invariants, without parallel payload schemas or duplicated `EventType` matches.
+2. **Real `core-script` modules:** production uses no `include!` assembly. `model`, `registry`, `naming`, `semantics`, `load`, `parser`, `canonical` and `paths` are real Rust modules with explicit visibility/imports and a minimal public API.
+3. **Explicit Flow Agent runtime boundaries:** internal structure does not depend primarily on flat `pub use module::*` namespaces or systematic `use super::*`; imports, re-exports and security-critical interfaces are targeted.
+4. **Responsibility-based module split:** separate planning/apply; Event construction/persistence; Protocol lifecycle validation; Session reservation/locks; Session bundle inventory; Session reader/replay/tail; Resume orchestration; Context compilation; fixture Tool execution; capability-relative filesystem operations; CLI parsing/dispatch; CLI live streaming; and CLI tail. Do not split by line count alone.
+5. **Explicit finite execution-plan IR:** `FlowExecutionPlan` is a typed finite IR. Planning has no provider/Tool adapter and cannot constructively perform side effects; invocation IDs are planned; Apply consumes only the plan; Resume distinguishes pending from completed intents; a second full FSM pass is not a substitute for the IR.
+6. **Test architecture:** split large tests along the same responsibilities, including Protocol payload versus lifecycle and Session reservation versus bundle, corruption and Resume. Tests remain behavior-focused and the coverage threshold is unchanged.
+7. **CLI architecture:** `main.rs` is only the composition root; argument/usage parsing, dispatch, streaming and tail are separate internal modules, without requiring a product-framework decision.
+8. **Completion rule:** complete these criteria through small, separate PRs before provider/subprocess work. Split M1.1 into small issues and PRs; do not use one `/goal M1.1` mega-run.
+
 **Purpose:** turn the deterministic M1 foundation into a useful local Flow Agent without claiming the OS isolation reserved for M1.2.
 
 **Deliverables:**

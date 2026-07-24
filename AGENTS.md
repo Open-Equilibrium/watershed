@@ -41,6 +41,9 @@ Open milestone-relevant question → add it to `docs/decisions/open-decisions.ht
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior without duplicating code, tests, docs or abstractions.
 - **Meaningful tests:** follow the test-economy rules in `TESTING.md`; protect all established behavior, including prior milestones, through distinct functional, contract, risk or regression cases—never line-by-line coverage tests.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
+- **Work partitioning:** one Goal/PR addresses one clear risk boundary; keep mechanical renames separate from behavior changes; split M1.1 into small issues and PRs.
+- **Agent economy:** use the least-cost capable tier for small mapping and documentation tasks.
+- **Independent runtime audit:** before merging a large runtime PR, run a fresh read-only session with no implementation mandate.
 - **Definition of Done:** code + tests and coverage per `TESTING.md` + relevant budget checks per `PERFORMANCE.md` + green CI gates (`rustfmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
 
 ## Session workflow
