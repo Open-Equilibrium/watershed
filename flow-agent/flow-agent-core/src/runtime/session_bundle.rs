@@ -67,10 +67,14 @@ pub struct SessionBundleInventory {
 
 impl SessionBundleInventory {
     pub(crate) fn inspect(paths: SessionBundlePaths) -> Result<Self, RuntimeError> {
-        let event_segments = segmented_jsonl_files(&paths.events, EVENT_STREAM_LIMITS)?;
+        let event_segments =
+            required_segmented_jsonl_files(&paths.events, EVENT_STREAM_LIMITS, "event stream")?;
         let event_bytes = segment_bytes(&event_segments, MAX_SESSION_EVENT_BYTES)?;
-        let context_segments =
-            segmented_jsonl_files(&paths.contexts, CONTEXT_MANIFEST_STREAM_LIMITS)?;
+        let context_segments = required_segmented_jsonl_files(
+            &paths.contexts,
+            CONTEXT_MANIFEST_STREAM_LIMITS,
+            "context manifest stream",
+        )?;
         let context_bytes = segment_bytes(&context_segments, MAX_SESSION_CONTEXT_MANIFEST_BYTES)?;
         let metadata_bytes = anchored_file_bytes(&paths.metadata, MAX_SESSION_METADATA_BYTES)?;
         let (objects, object_bytes) = session_objects(&paths.sessions, &paths.session_id)?;
@@ -135,6 +139,22 @@ impl SessionBundleInventory {
 
     fn paths_session_id(&self) -> &str {
         &self.paths.session_id
+    }
+}
+
+fn required_segmented_jsonl_files(
+    base: &AnchoredFile,
+    limits: SessionStreamLimits,
+    stream_name: &str,
+) -> Result<Vec<AnchoredFile>, RuntimeError> {
+    match segmented_jsonl_files(base, limits) {
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            Err(RuntimeError::Protocol(format!(
+                "{} {stream_name} is missing",
+                base.diagnostic_path().display()
+            )))
+        }
+        result => result,
     }
 }
 
