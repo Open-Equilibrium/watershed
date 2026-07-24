@@ -213,8 +213,7 @@ pub fn resume_session_internal(
         )
     };
     let finish_result = serial_writer.finish();
-    let resumed_runtime = runtime_result?;
-    finish_result?;
+    let resumed_runtime = reconcile_runtime_and_finalization(runtime_result, finish_result)?;
     let terminal_error = resumed_runtime.terminal_error;
     let resumed_failed = resumed_runtime.failed;
     let failure_status = resumed_runtime.failure_status;

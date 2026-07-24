@@ -124,7 +124,7 @@ fn unique_reservation_inventories_orphan_namespaces_before_probing() {
 
     assert_eq!(reservation.session_id, "bundle001-14");
     assert_eq!(probed, ["bundle001-14"]);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
     assert!(
         sentinels
             .iter()
@@ -192,7 +192,7 @@ fn unique_reservation_marks_every_ordinal_for_a_truncated_candidate_alias() {
 
     assert_eq!(reservation.session_id, suffixed_session_id(&base, 3));
     assert_eq!(probed, [suffixed_session_id(&base, 3)]);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn unique_reservation_inventories_case_alias_symlink_locks_before_probing() {
 
     assert_eq!(reservation.session_id, "bundle001-5");
     assert_eq!(probed, ["bundle001-5"]);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
     assert!(first.session_path.diagnostic_path().exists());
     assert!(first.log_path.diagnostic_path().exists());
     assert!(first.lock_path.diagnostic_path().exists());
-    first.rollback();
+    first.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -307,6 +307,52 @@ fn dropped_active_reservation_preserves_artifacts_and_releases_lock() {
 }
 
 #[test]
+fn explicit_reservation_rollback_reports_lock_failure_and_remains_retryable() {
+    let workspace = empty_workspace("reservation-rollback-failure");
+    let reservation =
+        reserve_session_log(&workspace, "rollbackfailure001").expect("reservation succeeds");
+    let lock_path = reservation.lock_path.diagnostic_path().to_owned();
+    reservation.lock_path.remove().expect("lock file removed");
+    fs::create_dir(&lock_path).expect("lock path replaced with a directory");
+
+    let err = reservation
+        .rollback()
+        .expect_err("explicit rollback reports lock cleanup failure");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Io { path, .. } if path == lock_path
+    ));
+    assert!(lock_path.is_dir());
+    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
+    fs::write(&lock_path, b"").expect("lock file restored for retry");
+    reservation
+        .rollback()
+        .expect("partially completed rollback remains retryable");
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn runtime_and_finalization_failures_remain_visible() {
+    let err = reconcile_runtime_and_finalization::<()>(
+        Err(RuntimeError::Protocol("execution failed".to_owned())),
+        Err(RuntimeError::Protocol("finalization failed".to_owned())),
+    )
+    .expect_err("both failures are retained");
+
+    assert!(matches!(
+        &err,
+        RuntimeError::ExecutionAndFinalizationFailed {
+            execution,
+            finalization,
+        } if execution.to_string().contains("execution failed")
+            && finalization.to_string().contains("finalization failed")
+    ));
+    assert!(err.to_string().contains("execution failed"), "{err}");
+    assert!(err.to_string().contains("finalization failed"), "{err}");
+}
+
+#[test]
 fn simulated_abrupt_termination_leaves_a_lock_that_is_not_stolen() {
     let workspace = empty_workspace("abrupt-session-termination");
     let reservation =
@@ -335,7 +381,9 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         err,
         RuntimeError::Io { path, .. } if path.ends_with("missing001.lock")
     ));
-    missing_lock.rollback();
+    missing_lock
+        .rollback()
+        .expect_err("missing lock rollback reports an IO error");
 
     let missing_guard = SessionLockGuard::new(
         ensure_runtime_dirs(&workspace)
@@ -1407,7 +1455,7 @@ fn resume_rejects_active_session_lock_without_side_effects() {
 
     assert_active_session(err, "hello001", "hello001.lock");
     assert!(!workspace.join("out/summary.txt").exists());
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -1427,7 +1475,7 @@ fn resume_rejects_case_aliased_session_lock_without_side_effects() {
     );
     assert!(!workspace.join("out/summary.txt").exists());
     fs::remove_file(alias).expect("lock alias removed");
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]

@@ -568,7 +568,7 @@ fn incremental_tail_reads_max_events_under_d068_latency_budget() {
     assert_retained_rss_growth_budget(baseline_rss, 64, "incremental tail retained state");
     drop(reader);
     drop(appender);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
     fs::remove_dir_all(workspace).expect("tail workspace removed");
 }
 

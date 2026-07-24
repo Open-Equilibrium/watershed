@@ -199,6 +199,13 @@ pub enum RuntimeError {
     ExecutionBackendUnavailable,
     /// The per-session event writer failed after event construction.
     EventWriter(Box<RuntimeError>),
+    /// Runtime execution and event-writer finalization both failed.
+    ExecutionAndFinalizationFailed {
+        /// Runtime execution failure.
+        execution: Box<RuntimeError>,
+        /// Event-writer finalization failure.
+        finalization: Box<RuntimeError>,
+    },
     /// A persisted session failed during runtime execution.
     SessionFailed {
         /// Identifier of the authoritative failed session.
@@ -259,6 +266,13 @@ impl fmt::Display for RuntimeError {
                 "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile",
             ),
             Self::EventWriter(source) => write!(f, "event writer: {source}"),
+            Self::ExecutionAndFinalizationFailed {
+                execution,
+                finalization,
+            } => write!(
+                f,
+                "runtime execution failed: {execution}; event writer finalization also failed: {finalization}"
+            ),
             Self::SessionFailed { session_id, source } => {
                 write!(f, "session {session_id} failed: {source}")
             }
@@ -291,7 +305,12 @@ impl std::error::Error for RuntimeError {
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
-            Self::EventWriter(source) | Self::SessionFailed { source, .. } => Some(source.as_ref()),
+            Self::EventWriter(source)
+            | Self::ExecutionAndFinalizationFailed {
+                finalization: source,
+                ..
+            }
+            | Self::SessionFailed { source, .. } => Some(source.as_ref()),
         }
     }
 }

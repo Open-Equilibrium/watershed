@@ -127,7 +127,7 @@ fn incremental_reader_does_not_skip_an_append_after_reading_a_new_segment() {
 
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]

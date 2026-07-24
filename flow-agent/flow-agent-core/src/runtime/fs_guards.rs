@@ -356,15 +356,22 @@ pub fn for_each_segmented_jsonl_line(
     Ok(total)
 }
 
-pub fn remove_segmented_jsonl(base: &AnchoredFile) {
-    let _ = for_each_segmented_jsonl_member(base, |member| {
+pub fn remove_segmented_jsonl(base: &AnchoredFile) -> Result<(), RuntimeError> {
+    for_each_segmented_jsonl_member(base, |member| {
         let file = match member {
             SegmentedJsonlMember::Canonical(_, file) | SegmentedJsonlMember::Alias(file) => file,
         };
-        let _ = file.remove();
+        remove_anchored_file_if_exists(&file)?;
         Ok(())
-    });
-    let _ = base.remove();
+    })?;
+    remove_anchored_file_if_exists(base)
+}
+
+pub fn remove_anchored_file_if_exists(file: &AnchoredFile) -> Result<(), RuntimeError> {
+    match file.remove() {
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
 }
 
 pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {

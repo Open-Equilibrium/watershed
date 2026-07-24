@@ -71,7 +71,7 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
         assert_active_session(err, "publish001", "publish001.lock");
     })
     .expect("session published under lock");
-    published.rollback();
+    published.rollback().expect("reservation rolls back");
 
     let held_lock = sessions.file("smoke001.lock");
     reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
@@ -83,7 +83,7 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     assert!(held_lock.diagnostic_path().exists());
     assert_eq!(second.session_id, "smoke001-2");
     assert!(second.session_path.diagnostic_path().exists());
-    second.rollback();
+    second.rollback().expect("reservation rolls back");
     held_lock.remove().expect("held lock removed");
 }
 
@@ -104,7 +104,7 @@ fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
         symlink(&outside, &session_dir).expect("replacement session symlink created");
     })
     .expect("reservation survives directory rename");
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 
     assert_eq!(
         fs::read_to_string(outside_session).expect("outside session remains readable"),
@@ -154,7 +154,7 @@ fn live_reader_stays_bound_to_the_opened_session_directory() {
     let observed = reader.read_after(0).expect("anchored session reads");
 
     assert_eq!(observed, vec![event]);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[cfg(unix)]

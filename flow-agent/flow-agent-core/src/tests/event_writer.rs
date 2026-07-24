@@ -72,7 +72,7 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
             b"replacement\n"
         );
         assert!(!second.diagnostic_path().exists());
-        reservation.rollback();
+        reservation.rollback().expect("reservation rolls back");
     }
 }
 
@@ -117,7 +117,7 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
             .len(),
         2
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     }
     ContextManifestWriter::open(&reservation.context_path)
         .expect("five context-manifest segments remain valid");
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn segmented_stream_rejects_invalid_ordinal_layouts() {
         let err = segmented_jsonl_files(&reservation.session_path, EVENT_STREAM_LIMITS)
             .expect_err("invalid segment layout is rejected");
         assert!(err.to_string().contains(expected), "{err}");
-        reservation.rollback();
+        reservation.rollback().expect("reservation rolls back");
         drop(reservation);
         fs::remove_dir_all(workspace).expect("invalid segment workspace removed");
     }
@@ -228,7 +228,7 @@ fn segmented_stream_rejects_case_aliased_names() {
             err.to_string().contains("non-canonical"),
             "base_alias={base_alias}: {err}"
         );
-        reservation.rollback();
+        reservation.rollback().expect("reservation rolls back");
     }
 }
 
@@ -254,7 +254,7 @@ fn segmented_stream_callbacks_do_not_observe_bytes_beyond_total_limit() {
 
     assert!(err.to_string().contains("exceeds max"), "{err}");
     assert_eq!(visited, vec!["one\n"]);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -312,7 +312,7 @@ fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
             .diagnostic_path()
             .with_extension("JSONL");
         fs::write(&alias, b"\n").expect("case-aliased segment fixture writes");
-        reservation.rollback();
+        reservation.rollback().expect("reservation rolls back");
         assert!(
             !high.diagnostic_path().exists(),
             "{label} high segment must be cleaned up"
@@ -368,7 +368,7 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
             matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")),
             "{kind} hardlink was not rejected"
         );
-        reservation.rollback();
+        reservation.rollback().expect("reservation rolls back");
         drop(reservation);
         fs::remove_dir_all(workspace).expect("workspace removed");
     }
@@ -470,7 +470,7 @@ fn session_object_retry_and_reopen_preserve_accounting() {
         .expect("existing object deduplicates");
     assert_eq!(writer.accounted_bytes, accounted_bytes);
     drop(writer);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
     drop(reservation);
     fs::remove_dir_all(workspace).expect("workspace removed");
 }
@@ -571,7 +571,7 @@ fn notification_is_observable_only_after_the_sequence_is_persisted() {
         [jsonl.into_bytes()]
     );
     drop(writer);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[cfg(any(unix, windows))]
@@ -621,7 +621,7 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
         .read_to_string(&mut text)
         .expect("existing file remains readable");
     assert_eq!(text, "{\"turn\":1}\n{\"turn\":2}\n");
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[cfg(unix)]
@@ -664,7 +664,7 @@ fn context_writer_stays_bound_to_the_opened_log_directory() {
             .expect("anchored context readable"),
         "{\"turn\":1}\n"
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -784,7 +784,7 @@ fn validation_failure_closes_the_writer_without_notifying() {
         fs::read(reservation.session_path.diagnostic_path()).expect("log reads"),
         b""
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 struct SyncFailAppender {
@@ -967,7 +967,7 @@ fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
             .highest_committed_sequence,
         terminal.sequence
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -999,7 +999,7 @@ fn lone_progress_flushes_on_a_non_sliding_deadline() {
         [jsonl.into_bytes()]
     );
     writer.finish().expect("writer finishes");
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
@@ -1061,7 +1061,7 @@ fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
             );
         }
         writer.finish().expect("failed writer shuts down cleanly");
-        reservation.rollback();
+        reservation.rollback().expect("reservation rolls back");
     }
 }
 
@@ -1120,7 +1120,7 @@ fn appended_checkpoint_notifies_but_sync_failure_remains_visible() {
         *appended.lock().expect("appended bytes lock"),
         format!("{started_jsonl}{completed_jsonl}").into_bytes()
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 fn test_event(
@@ -1216,7 +1216,7 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
             .expect("observed prefix remains authoritative"),
         Vec::new()
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[cfg(any(unix, windows))]
@@ -1262,7 +1262,7 @@ fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
             .collect::<Vec<_>>(),
         [1]
     );
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[cfg(any(unix, windows))]
@@ -1288,7 +1288,7 @@ fn failed_truncation_reports_no_readable_prefix() {
         .expect_err("partial suffix and truncation fail");
 
     assert_eq!(failure.committed_events, None);
-    reservation.rollback();
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]

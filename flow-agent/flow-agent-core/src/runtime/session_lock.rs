@@ -41,15 +41,18 @@ impl SessionReservation {
         }
     }
 
-    pub(crate) fn rollback(&self) {
+    pub(crate) fn rollback(&self) -> Result<(), RuntimeError> {
+        if self.state.get() == ReservationState::Released {
+            return Ok(());
+        }
         if self.state.get() == ReservationState::Empty {
-            remove_segmented_jsonl(&self.session_path);
-            let _ = self.log_path.remove();
-            remove_segmented_jsonl(&self.context_path);
+            remove_segmented_jsonl(&self.session_path)?;
+            remove_anchored_file_if_exists(&self.log_path)?;
+            remove_segmented_jsonl(&self.context_path)?;
         }
-        if self.state.replace(ReservationState::Released) != ReservationState::Released {
-            let _ = self.lock_path.remove();
-        }
+        self.lock_path.remove()?;
+        self.state.set(ReservationState::Released);
+        Ok(())
     }
 
     pub(crate) fn release_lock(&self) -> Result<(), RuntimeError> {
@@ -70,7 +73,7 @@ impl SessionReservation {
 impl Drop for SessionReservation {
     fn drop(&mut self) {
         if self.state.get() != ReservationState::Released {
-            self.rollback();
+            let _ = self.rollback();
         }
     }
 }

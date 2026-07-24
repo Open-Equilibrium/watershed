@@ -1,5 +1,19 @@
 use super::*;
 
+pub(crate) fn reconcile_runtime_and_finalization<T>(
+    runtime: Result<T, RuntimeError>,
+    finalization: Result<(), RuntimeError>,
+) -> Result<T, RuntimeError> {
+    match (runtime, finalization) {
+        (Ok(runtime), Ok(())) => Ok(runtime),
+        (Err(error), Ok(())) | (Ok(_), Err(error)) => Err(error),
+        (Err(execution), Err(finalization)) => Err(RuntimeError::ExecutionAndFinalizationFailed {
+            execution: Box::new(execution),
+            finalization: Box::new(finalization),
+        }),
+    }
+}
+
 /// Runs a flow from a workspace registry and captures its output.
 pub fn run_flow(
     workspace: impl AsRef<Path>,
@@ -78,8 +92,7 @@ pub fn run_flow_internal(
         )
     };
     let finish_result = serial_writer.finish();
-    let runtime = runtime_result?;
-    finish_result?;
+    let runtime = reconcile_runtime_and_finalization(runtime_result, finish_result)?;
     let runtime_failed = runtime.failed;
     let event_count = runtime.events.record_count;
     let outcome = runtime.failure_status.unwrap_or_else(|| {
