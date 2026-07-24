@@ -160,7 +160,7 @@ fn protocol_validator_rejects_step_connection_payload_edges() {
     assert_invalid_event(
         "mismatched-step-connections.jsonl",
         mismatched_connections,
-        "connection arrays",
+        "payload.connection_ids and payload.connection_kinds must be present together",
     );
 
     let mut unequal_connections = base_event();
