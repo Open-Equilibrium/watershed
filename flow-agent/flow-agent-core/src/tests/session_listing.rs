@@ -405,7 +405,7 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
 }
 
 #[test]
-fn run_flow_rejects_lifecycle_invalid_output_before_persisting_session() {
+fn run_flow_preserves_valid_prefix_after_lifecycle_error() {
     let workspace = workspace_copy("smoke-flow");
     replace_registry_text(
         &workspace,
@@ -420,7 +420,11 @@ fn run_flow_rejects_lifecycle_invalid_output_before_persisting_session() {
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
     );
-    assert_no_session_artifacts(&workspace, "smoke-flow");
+    let session_path = workspace.join(LOCAL_SESSION_DIR).join("smoke-flow.jsonl");
+    let prefix = fs::read_to_string(&session_path).expect("valid event prefix remains");
+    assert!(prefix.contains("\"event_type\":\"session.started\""));
+    assert!(!prefix.contains("\"event_type\":\"session.completed\""));
+    assert_no_active_session_lock(&workspace, "smoke-flow");
 }
 
 #[test]
