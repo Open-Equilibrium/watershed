@@ -981,26 +981,7 @@ fn normalize_protected_path_match_input(
     match_mode: ProtectedPathMatchMode,
     value: &str,
 ) -> Option<String> {
-    let normalized = value.replace('\\', "/");
-    if normalized.is_empty()
-        || normalized.starts_with('/')
-        || normalized.contains('$')
-        || normalized.split('/').any(|segment| {
-            segment == "." || segment == ".." || segment.contains("**") && segment != "**"
-        })
-        || normalized
-            .as_bytes()
-            .get(1)
-            .is_some_and(|byte| *byte == b':')
-        || core_script::relative_path_has_windows_alias(&normalized)
-    {
-        return None;
-    }
-    let normalized = normalized
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join("/");
+    let normalized = core_script::normalize_protected_path_pattern(value)?;
     match match_mode {
         ProtectedPathMatchMode::CaseSensitive => Some(normalized),
         ProtectedPathMatchMode::CaseInsensitive => Some(normalized.to_ascii_lowercase()),

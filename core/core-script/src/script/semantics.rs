@@ -197,6 +197,30 @@ fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationErr
         }
     }
 
+    for (field, scopes) in [
+        ("read_scope", &tool.read_scope),
+        ("write_scope", &tool.write_scope),
+    ] {
+        for scope in scopes {
+            if normalize_safe_relative_path(scope).is_none() {
+                return Err(invalid_tool(
+                    tool,
+                    &format!("{field} entry {scope:?} must be a safe relative path"),
+                ));
+            }
+        }
+    }
+    for grant in &tool.protected_path_grants {
+        if normalize_protected_path_pattern(grant).is_none() {
+            return Err(invalid_tool(
+                tool,
+                &format!(
+                    "protected_path_grants entry {grant:?} must be a safe relative path or pattern"
+                ),
+            ));
+        }
+    }
+
     if let NetworkPolicy::Declared { allow, .. } = &tool.network {
         for entry in allow {
             if entry.port == 0 {

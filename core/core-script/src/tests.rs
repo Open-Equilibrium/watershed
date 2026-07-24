@@ -2059,6 +2059,66 @@ fn semantic_validation_rejects_noncanonical_network_cidr() {
     validate_registry_block_semantics(&RegistryBlock::Tool(tool)).expect("canonical CIDR accepted");
 }
 
+#[test]
+fn registry_boundaries_reject_unsafe_tool_filesystem_paths() {
+    for (field, value) in [
+        ("read_scope", "../outside"),
+        ("read_scope", "/tmp"),
+        ("read_scope", r"workspace\out"),
+        ("write_scope", "C:/temp"),
+        ("write_scope", "workspace/./out"),
+        ("write_scope", "workspace/NUL"),
+        ("protected_path_grants", "../**"),
+        ("protected_path_grants", "$HOME/**"),
+        ("protected_path_grants", "workspace/**suffix"),
+    ] {
+        let mut tool = own_script_tool("unsafe-path", "script:unsafe-path");
+        match field {
+            "read_scope" => tool.read_scope.push(value.to_owned()),
+            "write_scope" => tool.write_scope.push(value.to_owned()),
+            "protected_path_grants" => tool.protected_path_grants.push(value.to_owned()),
+            _ => unreachable!(),
+        }
+
+        let err = ResolvedRegistry::from_blocks([RegistryBlock::Tool(tool)])
+            .expect_err("unsafe tool filesystem path is rejected");
+
+        assert!(err.to_string().contains(field), "{field} {value:?}: {err}");
+    }
+}
+
+#[test]
+fn parser_rejects_unsafe_tool_filesystem_paths() {
+    let fixture =
+        include_str!("../../../flow-agent/fixtures/hello-flow/registry/tools/write-summary.yaml");
+    for source in [
+        fixture.replace(
+            "  read_scope: [\"workspace\"]",
+            "  read_scope: [\"../outside\"]",
+        ),
+        fixture.replace(
+            "  protected_path_grants: []",
+            "  protected_path_grants: [\"../**\"]",
+        ),
+    ] {
+        parse_registry_block("unsafe-tool-path.yaml", &source)
+            .expect_err("unsafe YAML tool filesystem path is rejected");
+    }
+}
+
+#[test]
+fn semantic_validation_accepts_safe_tool_filesystem_paths_and_patterns() {
+    let mut tool = own_script_tool("safe-path", "script:safe-path");
+    tool.read_scope = vec!["workspace".to_owned()];
+    tool.write_scope = vec!["workspace/out".to_owned()];
+    tool.protected_path_grants = vec![
+        "workspace/.env".to_owned(),
+        "workspace/secrets/**".to_owned(),
+    ];
+
+    validate_tool_semantics(&tool).expect("safe filesystem paths and patterns are accepted");
+}
+
 fn own_script_tool(id: &str, command: &str) -> ToolBlock {
     ToolBlock {
         allowed_parameters: Vec::new(),
