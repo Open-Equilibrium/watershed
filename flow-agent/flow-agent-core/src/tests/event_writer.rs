@@ -76,6 +76,33 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
     }
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn event_appender_rejects_an_in_place_length_change() {
+    let workspace = empty_workspace("event-writer-length-change");
+    let reservation = reserve_session_log(&workspace, "lengthchange001").expect("session reserved");
+    let path = reservation.session_path.diagnostic_path();
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    appender
+        .file
+        .try_clone()
+        .expect("active segment handle duplicates")
+        .write_all(b"external\n")
+        .expect("active segment changes in place");
+
+    let err = appender
+        .append(path, b"lost event\n")
+        .expect_err("the stale writer must fail closed");
+
+    assert!(err.to_string().contains("changed outside"), "{err}");
+    assert_eq!(
+        fs::read(path).expect("external bytes remain"),
+        b"external\n"
+    );
+    drop(appender);
+    reservation.rollback().expect("reservation rolls back");
+}
+
 #[test]
 fn event_appender_rotates_before_crossing_the_segment_limit() {
     let workspace = empty_workspace("event-segment-rotation");
@@ -624,6 +651,41 @@ fn context_manifest_growth_is_visible_through_the_existing_file() {
         .expect("existing file remains readable");
     assert_eq!(text, "{\"turn\":1}\n{\"turn\":2}\n");
     drop(observed);
+    drop(writer);
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn context_manifest_replay_rejects_an_in_place_length_change() {
+    let workspace = empty_workspace("context-manifest-length-change");
+    let reservation =
+        reserve_session_log(&workspace, "manifestlength001").expect("session reserved");
+    let manifest = ContextManifestCheckpoint {
+        manifest: ContextManifest {
+            line: "{\"turn\":1}\n".to_owned(),
+        },
+        objects: Vec::new(),
+        ordinal: 1,
+    };
+    let mut writer = ContextManifestWriter::open(&reservation.context_path)
+        .expect("context manifest writer opens");
+    writer
+        .persist(&reservation.context_path, &manifest)
+        .expect("first manifest persists");
+    writer
+        .appender
+        .file
+        .try_clone()
+        .expect("context manifest handle duplicates")
+        .write_all(b"external\n")
+        .expect("context manifest changes in place");
+
+    let err = writer
+        .persist(&reservation.context_path, &manifest)
+        .expect_err("the replay sync must fail closed");
+
+    assert!(err.to_string().contains("changed outside"), "{err}");
     drop(writer);
     reservation.rollback().expect("reservation rolls back");
 }

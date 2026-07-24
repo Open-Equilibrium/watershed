@@ -1148,6 +1148,7 @@ impl SessionLogAppender {
     }
 
     pub(crate) fn len(&self, _path: &Path) -> Result<u64, RuntimeError> {
+        self.verify_current_segment()?;
         Ok(self.total_bytes)
     }
 
@@ -1155,7 +1156,27 @@ impl SessionLogAppender {
         segmented_jsonl_path(&self.base_path, self.current_ordinal)
     }
 
+    fn verify_current_segment(&self) -> Result<AnchoredFile, RuntimeError> {
+        let current = self.current_path()?;
+        let path = current.diagnostic_path();
+        validate_open_session_log_append_file(path, &self.file)?;
+        let actual = self.file.metadata().map_err(|source| RuntimeError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+        if actual.len() != self.current_bytes {
+            return Err(RuntimeError::Protocol(format!(
+                "{} changed outside append semantics: expected {} bytes, found {}",
+                path.display(),
+                self.current_bytes,
+                actual.len()
+            )));
+        }
+        Ok(current)
+    }
+
     pub(crate) fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
+        let current_path = self.verify_current_segment()?;
         let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
         if appended_bytes > MAX_SESSION_SEGMENT_BYTES {
             return Err(RuntimeError::Protocol(format!(
@@ -1183,8 +1204,6 @@ impl SessionLogAppender {
                 self.limits.max_segments
             )));
         }
-        let current_path = self.current_path()?;
-        validate_open_session_log_append_file(current_path.diagnostic_path(), &self.file)?;
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: current_path.diagnostic_path().to_owned(),
             source,
@@ -1210,21 +1229,10 @@ impl SessionLogAppender {
         C: FnOnce(&mut fs::File, u64) -> io::Result<()>,
     {
         let current_path = self
-            .current_path()
+            .verify_current_segment()
             .map_err(BatchAppendFailure::none_committed)?;
         let path = current_path.diagnostic_path();
-        validate_open_session_log_append_file(path, &self.file)
-            .map_err(BatchAppendFailure::none_committed)?;
-
-        let original_len = self
-            .file
-            .metadata()
-            .map_err(|source| RuntimeError::Io {
-                path: path.to_owned(),
-                source,
-            })
-            .map_err(BatchAppendFailure::none_committed)?
-            .len();
+        let original_len = self.current_bytes;
         self.file
             .seek(SeekFrom::End(0))
             .map_err(|source| RuntimeError::Io {
@@ -1340,9 +1348,8 @@ impl EventLogAppender for SessionLogAppender {
     }
 
     fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
-        let current = self.current_path()?;
+        let current = self.verify_current_segment()?;
         let path = current.diagnostic_path();
-        validate_open_session_log_append_file(path, &self.file)?;
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
