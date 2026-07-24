@@ -45,6 +45,10 @@ In addition to the staged M3 DoD in `PLAN.md`, Liquid must prove: deterministic 
 
 The same metrics AgentPulse reports (rework ratio, first-attempt success rate, cost-per-productive-outcome) are tracked in CI on golden flows once their formulas are decided. The formulas are an open decision until M2 planning.
 
+## Development toolchain
+
+Node is a dev/CI-only toolchain for the Playwright HTML render gate, Clawpatch review gate and cross-platform Python launcher. [`.node-version`](.node-version) is the canonical Node version; `package.json#packageManager` pins pnpm. Watershed and Flow Agent have no Node product-runtime dependency.
+
 ## CI
 
 - Run on Linux + macOS + Windows.

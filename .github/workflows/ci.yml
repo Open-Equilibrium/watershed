@@ -23,8 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Install pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .node-version
+
       - name: Check Node version
-        run: node -e "if (Number.parseInt(process.versions.node, 10) < 22) throw new Error('Node 22 or newer is required')"
+        shell: pwsh
+        run: |
+          if ((node --version) -ne 'v22.23.1') {
+            throw "Node 22.23.1 must be active for CI gates"
+          }
 
       - name: Validate Codex harness
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
@@ -92,7 +101,12 @@ jobs:
         run: cargo deny check
 
       - name: Enable Corepack
-        run: corepack enable
+        shell: pwsh
+        run: |
+          corepack enable
+          if ((pnpm --version) -ne '11.15.1') {
+            throw "pnpm 11.15.1 must be active for CI gates"
+          }
 
       - name: Install Node dev tools
         run: pnpm install --frozen-lockfile
