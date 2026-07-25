@@ -1,7 +1,10 @@
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -118,6 +121,68 @@ class CiToolchainContractTest(unittest.TestCase):
             json.loads(result.stdout),
             [path for path in tracked_paths if path.endswith(".md")],
         )
+
+    def test_tracked_file_listing_forwards_complete_git_failure(self) -> None:
+        diagnostic = "git failure: " + ("x" * 1_000_000)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            emitter = temporary_path / "emit_error.py"
+            preload = temporary_path / "async_stderr.cjs"
+            emitter.write_text(
+                "import sys\n"
+                f"sys.stderr.write({diagnostic!r})\n"
+                "sys.exit(23)\n",
+                encoding="utf-8",
+            )
+            preload.write_text(
+                "if (process.env.WATERSHED_TEST_ASYNC_STDERR === '1') {\n"
+                "  delete process.env.WATERSHED_TEST_ASYNC_STDERR;\n"
+                "  const write = process.stderr.write.bind(process.stderr);\n"
+                "  process.stderr.write = (...args) => {\n"
+                "    setTimeout(() => write(...args), 10);\n"
+                "    return false;\n"
+                "  };\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            if os.name == "nt":
+                node_executable = shutil.which("node")
+                self.assertIsNotNone(node_executable)
+                fake_git = temporary_path / "git.exe"
+                shutil.copy2(node_executable, fake_git)
+                (temporary_path / "ls-files").write_text(
+                    f"process.stderr.write({json.dumps(diagnostic)});\n"
+                    "process.exit(23);\n",
+                    encoding="utf-8",
+                )
+            else:
+                fake_git = temporary_path / "git"
+                fake_git.write_text(
+                    "#!/bin/sh\n"
+                    f"exec {shlex.quote(sys.executable)} "
+                    f"{shlex.quote(str(emitter))}\n",
+                    encoding="utf-8",
+                )
+                fake_git.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = (
+                str(temporary_path)
+                + os.pathsep
+                + environment.get("PATH", "")
+            )
+            environment["NODE_OPTIONS"] = f"--require={preload}"
+            environment["WATERSHED_TEST_ASYNC_STDERR"] = "1"
+
+            result = subprocess.run(
+                ["node", str(ROOT / "scripts" / "list-tracked-files.mjs")],
+                cwd=temporary_path,
+                env=environment,
+                encoding="utf-8",
+                capture_output=True,
+            )
+
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(result.stderr, diagnostic)
 
     def test_node_and_pnpm_versions_are_pinned(self) -> None:
         self.assertEqual(

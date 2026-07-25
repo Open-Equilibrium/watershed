@@ -7,11 +7,11 @@ if (result.error) {
 }
 if (result.status !== 0) {
   process.stderr.write(result.stderr);
-  process.exit(result.status ?? 1);
+  process.exitCode = result.status ?? 1;
+} else {
+  const paths = result.stdout
+    .toString("utf8")
+    .split("\0")
+    .filter((path) => path !== "");
+  process.stdout.write(`${JSON.stringify(paths)}\n`);
 }
-
-const paths = result.stdout
-  .toString("utf8")
-  .split("\0")
-  .filter((path) => path !== "");
-process.stdout.write(`${JSON.stringify(paths)}\n`);
