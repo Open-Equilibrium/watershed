@@ -47,11 +47,9 @@ pub(super) fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
 
 pub(super) fn assert_no_active_session_lock(workspace: &Path, session_id: &str) {
     assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join(format!("{session_id}.lock"))
-            .exists(),
-        "controlled return must release the session lock"
+        !session_ownership_is_active(workspace, session_id)
+            .expect("host-local session ownership reads"),
+        "controlled return must release host-local session ownership"
     );
 }
 

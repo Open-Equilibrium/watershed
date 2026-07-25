@@ -107,7 +107,7 @@ fn resume_session_internal_with_cleanup_observer_impl(
             logs.clone(),
             session_id,
         ))?;
-        inventory.validate_active_ownership()?;
+        inventory.validate_resumable_bundle()?;
         let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
         let flow_id = resumable_flow_id(
             path.diagnostic_path(),
@@ -755,18 +755,26 @@ pub fn reserve_session_log_with_publish_observer(
             "invalid session_id {session_id:?}"
         )));
     }
-    let dirs = ensure_runtime_dirs(workspace)?;
+    let marker_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join(format!("{session_id}.lock"));
+    let ownership = SessionOwnershipLease::acquire(workspace, session_id, &marker_path)?;
+    let dirs = match ensure_runtime_dirs(workspace) {
+        Ok(dirs) => dirs,
+        Err(error) => {
+            return reconcile_controlled_stages(Err(error), Ok(()), ownership.release());
+        }
+    };
     let paths = SessionBundlePaths::from_dirs(&dirs, session_id);
     let session_path = paths.events;
     let log_path = paths.metadata;
     let context_path = paths.contexts;
     let lock_path = paths.lock;
-    let lock_file = reserve_anchored_session_lock_file(&lock_path, session_id)?;
     let reservation = SessionReservation::new(
         context_path,
         log_path,
-        lock_file,
         lock_path,
+        ownership,
         session_path,
         session_id.to_owned(),
     );
@@ -811,6 +819,7 @@ pub fn reserve_unique_session_log_with_probe_observer(
     if !proto::is_valid_session_id(base_session_id) {
         return reserve_session_log(workspace, base_session_id);
     }
+    SessionOwnershipLease::ensure_coordinator_available(workspace)?;
     let hints = session_candidate_hints(&ensure_runtime_dirs(workspace)?, base_session_id)?;
     for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
         if hints[(ordinal - 1) as usize] == SessionCandidateHint::Occupied {
@@ -882,6 +891,17 @@ pub fn ensure_session_bundle_namespace_available(
             lock_path: alias.path,
         });
     }
+    match lock_path.metadata() {
+        Ok(_) => {
+            ensure_anchored_non_hardlinked_file(lock_path)?;
+            return Err(RuntimeError::ActiveSession {
+                session_id: session_id.to_owned(),
+                lock_path: lock_path.diagnostic_path().to_owned(),
+            });
+        }
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
 
     let object_prefix = format!("{session_id}.object.sha256-");
     for entry in dirs
@@ -950,27 +970,31 @@ pub fn reserve_new_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError
     create_anchored_file(path).map(|_| ())
 }
 
+#[cfg(test)]
 pub fn reserve_anchored_session_lock_file(
     path: &AnchoredFile,
-    session_id: &str,
+    _session_id: &str,
+) -> Result<fs::File, RuntimeError> {
+    open_or_create_anchored_session_marker(path)
+}
+
+pub fn open_or_create_anchored_session_marker(
+    path: &AnchoredFile,
 ) -> Result<fs::File, RuntimeError> {
     match create_anchored_file(path) {
         Ok(file) => Ok(file),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
-            Err(RuntimeError::ActiveSession {
-                session_id: session_id.to_owned(),
-                lock_path: path.diagnostic_path().to_owned(),
-            })
+            let (file, metadata) = open_anchored_file_for_read(path)?;
+            validate_real_file(path.diagnostic_path(), &metadata)?;
+            Ok(file)
         }
         Err(error) => Err(error),
     }
 }
 
 pub fn active_session_lock_message(path: &Path, session_id: &str) -> String {
-    // WHY: M1 cannot safely prove stale lock ownership, so report the exact manual clear
-    // path instead of stealing the lock.
     format!(
-        "session {session_id} is already active; lock file {} exists. If the previous process crashed, verify no Flow Agent process owns this session, then remove that lock file and retry.",
+        "session {session_id} is already active under a host-local ownership lease; {} is its non-authoritative workspace marker. Retry after the owning Flow Agent process exits.",
         path.display()
     )
 }
@@ -980,17 +1004,37 @@ pub fn acquire_anchored_session_lock(
     session_id: &str,
 ) -> Result<SessionLockGuard, RuntimeError> {
     let path = SessionBundlePaths::lock_in(sessions, session_id);
-    let file = reserve_anchored_session_lock_file(&path, session_id)?;
-    let guard = SessionLockGuard::new(path, file);
-    let operation = match ascii_case_alias(&guard.path) {
-        Ok(Some(alias)) => Err(RuntimeError::ActiveSession {
-            session_id: session_id.to_owned(),
-            lock_path: alias.path,
-        }),
-        Ok(None) => return Ok(guard),
+    let workspace = sessions
+        .path
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| {
+            RuntimeError::Protocol("session directory has no workspace parent".into())
+        })?;
+    let ownership = SessionOwnershipLease::acquire(workspace, session_id, path.diagnostic_path())?;
+    let operation = match ascii_case_alias(&path) {
+        Ok(Some(alias)) => Err(RuntimeError::Protocol(format!(
+            "{} conflicts with session marker {}",
+            alias.diagnostic_path().display(),
+            path.diagnostic_path().display()
+        ))),
+        Ok(None) => match open_or_create_anchored_session_marker(&path) {
+            Ok(file) => return Ok(SessionLockGuard::new(path, file, ownership)),
+            Err(error) => Err(error),
+        },
         Err(error) => Err(error),
     };
-    reconcile_controlled_stages(operation, Ok(()), guard.release())
+    let release = ownership.release();
+    let operation = match operation {
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
+            Err(RuntimeError::ActiveSession {
+                session_id: session_id.to_owned(),
+                lock_path: path.diagnostic_path().to_owned(),
+            })
+        }
+        result => result,
+    };
+    reconcile_controlled_stages(operation, Ok(()), release)
 }
 
 pub fn write_reserved_session_metadata(
@@ -1001,7 +1045,7 @@ pub fn write_reserved_session_metadata(
         &reservation.log_path,
         session_log_metadata_text(definition_metadata).as_bytes(),
     )?;
-    reservation.activate();
+    reservation.activate()?;
     Ok(())
 }
 

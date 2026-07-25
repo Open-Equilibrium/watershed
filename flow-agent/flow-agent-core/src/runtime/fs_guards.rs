@@ -29,16 +29,50 @@ impl AnchoredDir {
         create: bool,
         error_mode: DirectoryErrorMode,
     ) -> Result<Option<Self>, RuntimeError> {
+        self.child_with_privacy(leaf, create, error_mode, false)
+    }
+
+    pub(crate) fn private_child(
+        &self,
+        leaf: &str,
+        create: bool,
+        error_mode: DirectoryErrorMode,
+    ) -> Result<Option<Self>, RuntimeError> {
+        self.child_with_privacy(leaf, create, error_mode, true)
+    }
+
+    fn child_with_privacy(
+        &self,
+        leaf: &str,
+        create: bool,
+        error_mode: DirectoryErrorMode,
+        private: bool,
+    ) -> Result<Option<Self>, RuntimeError> {
         let path = self.path.join(leaf);
         match self.dir.symlink_metadata(leaf) {
-            Ok(metadata) => validate_anchored_directory(&path, &metadata, error_mode)?,
+            Ok(_) => {}
             Err(err) if err.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => match self.dir.create_dir(leaf) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(source) => return Err(path_io_error(&path, source)),
-            },
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                let result = if private {
+                    create_private_anchored_directory(&self.dir, leaf)
+                } else {
+                    self.dir.create_dir(leaf)
+                };
+                match result {
+                    Ok(()) => {}
+                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(source) => return Err(path_io_error(&path, source)),
+                }
+            }
             Err(source) => return Err(path_io_error(&path, source)),
+        }
+        let metadata = self
+            .dir
+            .symlink_metadata(leaf)
+            .map_err(|source| path_io_error(&path, source))?;
+        validate_anchored_directory(&path, &metadata, error_mode)?;
+        if private {
+            validate_private_anchored_directory(&path, &metadata)?;
         }
         let dir = self
             .dir
@@ -58,6 +92,42 @@ impl AnchoredDir {
             leaf,
         }
     }
+}
+
+fn create_private_anchored_directory(parent: &Dir, leaf: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use cap_std::fs::DirBuilderExt as _;
+
+        let mut builder = cap_std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        parent.create_dir_with(leaf, &builder)
+    }
+    #[cfg(not(unix))]
+    {
+        parent.create_dir(leaf)
+    }
+}
+
+fn validate_private_anchored_directory(
+    path: &Path,
+    metadata: &cap_std::fs::Metadata,
+) -> Result<(), RuntimeError> {
+    #[cfg(unix)]
+    {
+        use cap_std::fs::PermissionsExt as _;
+
+        let mode = metadata.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err(RuntimeError::Protocol(format!(
+                "{} must not grant group or other access",
+                path.display()
+            )));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (path, metadata);
+    Ok(())
 }
 
 impl AnchoredFile {
@@ -384,7 +454,7 @@ pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeErro
     file.open(&options)
 }
 
-pub fn remove_owned_anchored_lock(
+pub fn verify_owned_anchored_marker(
     path: &AnchoredFile,
     acquired: &fs::File,
 ) -> Result<(), RuntimeError> {
@@ -397,11 +467,11 @@ pub fn remove_owned_anchored_lock(
     ensure_not_hardlinked_open_file(path.diagnostic_path(), acquired, &acquired_metadata)?;
     if !open_files_share_identity(path.diagnostic_path(), acquired, &current)? {
         return Err(RuntimeError::Protocol(format!(
-            "{} lock ownership changed before release",
+            "{} session marker identity changed while ownership was active",
             path.diagnostic_path().display()
         )));
     }
-    path.remove()
+    Ok(())
 }
 
 #[cfg(unix)]

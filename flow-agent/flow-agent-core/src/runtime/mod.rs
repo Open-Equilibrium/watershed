@@ -4,7 +4,7 @@ use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
 use proto::{EventEnvelope, EventType};
 use sha2::{Digest, Sha256};
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     fmt, fs,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -22,6 +22,7 @@ mod fixture_executor;
 mod fs_guards;
 mod live_events;
 mod session;
+mod session_authority;
 mod session_bundle;
 mod session_lock;
 mod session_state;
@@ -39,6 +40,7 @@ pub use fixture_executor::*;
 pub use fs_guards::*;
 pub use live_events::*;
 pub use session::*;
+pub use session_authority::*;
 pub use session_bundle::*;
 pub use session_lock::*;
 pub use session_state::*;

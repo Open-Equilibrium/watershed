@@ -16,8 +16,8 @@ pub struct SessionReservation {
     pub(crate) session_id: String,
     context_created: Cell<bool>,
     log_created: Cell<bool>,
-    lock_file: fs::File,
-    lock_released: Cell<bool>,
+    marker_file: RefCell<Option<fs::File>>,
+    ownership: SessionOwnershipLease,
     session_created: Cell<bool>,
     state: Cell<ReservationState>,
 }
@@ -26,8 +26,8 @@ impl SessionReservation {
     pub(crate) fn new(
         context_path: AnchoredFile,
         log_path: AnchoredFile,
-        lock_file: fs::File,
         lock_path: AnchoredFile,
+        ownership: SessionOwnershipLease,
         session_path: AnchoredFile,
         session_id: String,
     ) -> Self {
@@ -39,8 +39,8 @@ impl SessionReservation {
             session_id,
             context_created: Cell::new(false),
             log_created: Cell::new(false),
-            lock_file,
-            lock_released: Cell::new(false),
+            marker_file: RefCell::new(None),
+            ownership,
             session_created: Cell::new(false),
             state: Cell::new(ReservationState::Empty),
         }
@@ -58,10 +58,15 @@ impl SessionReservation {
         self.session_created.set(true);
     }
 
-    pub(crate) fn activate(&self) {
+    pub(crate) fn activate(&self) -> Result<(), RuntimeError> {
         if self.state.get() == ReservationState::Empty {
             self.state.set(ReservationState::Active);
         }
+        if self.state.get() == ReservationState::Active && self.marker_file.borrow().is_none() {
+            let file = open_or_create_anchored_session_marker(&self.lock_path)?;
+            self.marker_file.replace(Some(file));
+        }
+        Ok(())
     }
 
     pub(crate) fn cleanup(&self) -> Result<(), RuntimeError> {
@@ -98,11 +103,13 @@ impl SessionReservation {
                 }
             }
         }
-        if !self.lock_released.get() {
-            match remove_owned_anchored_lock(&self.lock_path, &self.lock_file) {
-                Ok(()) => self.lock_released.set(true),
-                Err(error) => failures.push(Box::new(error)),
-            }
+        if let Some(marker_file) = self.marker_file.borrow().as_ref()
+            && let Err(error) = verify_owned_anchored_marker(&self.lock_path, marker_file)
+        {
+            failures.push(Box::new(error));
+        }
+        if let Err(error) = self.ownership.release() {
+            failures.push(Box::new(error));
         }
         match failures.len() {
             0 => {
@@ -124,10 +131,15 @@ impl SessionReservation {
         if self.state.get() == ReservationState::Released {
             return Ok(());
         }
-        remove_owned_anchored_lock(&self.lock_path, &self.lock_file)?;
-        self.lock_released.set(true);
-        self.state.set(ReservationState::Released);
-        Ok(())
+        let marker_result = self.marker_file.borrow().as_ref().map_or(Ok(()), |file| {
+            verify_owned_anchored_marker(&self.lock_path, file)
+        });
+        let ownership_result = self.ownership.release();
+        let result = reconcile_controlled_stages(marker_result, Ok(()), ownership_result);
+        if result.is_ok() {
+            self.state.set(ReservationState::Released);
+        }
+        result
     }
 
     #[cfg(test)]
@@ -153,14 +165,20 @@ enum LockState {
 
 pub struct SessionLockGuard {
     pub(crate) file: fs::File,
+    ownership: SessionOwnershipLease,
     pub(crate) path: AnchoredFile,
     state: Cell<LockState>,
 }
 
 impl SessionLockGuard {
-    pub(crate) fn new(path: AnchoredFile, file: fs::File) -> Self {
+    pub(crate) fn new(
+        path: AnchoredFile,
+        file: fs::File,
+        ownership: SessionOwnershipLease,
+    ) -> Self {
         Self {
             file,
+            ownership,
             path,
             state: Cell::new(LockState::Active),
         }
@@ -170,9 +188,13 @@ impl SessionLockGuard {
         if self.state.get() == LockState::Released {
             return Ok(());
         }
-        remove_owned_anchored_lock(&self.path, &self.file)?;
-        self.state.set(LockState::Released);
-        Ok(())
+        let marker_result = verify_owned_anchored_marker(&self.path, &self.file);
+        let ownership_result = self.ownership.release();
+        let result = reconcile_controlled_stages(marker_result, Ok(()), ownership_result);
+        if result.is_ok() {
+            self.state.set(LockState::Released);
+        }
+        result
     }
 }
 
@@ -180,7 +202,8 @@ impl Drop for SessionLockGuard {
     fn drop(&mut self) {
         if self.state.replace(LockState::Released) == LockState::Active {
             // Panic and uncontrolled unwinding cannot report cleanup errors.
-            let _ = remove_owned_anchored_lock(&self.path, &self.file);
+            let _ = verify_owned_anchored_marker(&self.path, &self.file);
+            let _ = self.ownership.release();
         }
     }
 }

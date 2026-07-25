@@ -186,7 +186,7 @@ fn session_bundle_inventory_owns_paths_segments_objects_and_byte_counts() {
     let reservation =
         reserve_session_log(&workspace, "inventory001").expect("session bundle reserved");
     let paths = SessionBundlePaths::from_reservation(&reservation);
-    reservation.activate();
+    reservation.activate().expect("reservation activates");
     drop(reservation);
     fs::write(paths.events.diagnostic_path(), b"event-one\n").expect("event segment written");
     fs::write(
@@ -219,7 +219,7 @@ fn session_bundle_inventory_owns_paths_segments_objects_and_byte_counts() {
     assert_eq!(inventory.metadata_bytes, 8);
     assert_eq!(inventory.object_bytes, 6);
     assert_eq!(inventory.total_bytes(), 42);
-    assert!(!inventory.lock_present);
+    assert!(inventory.lock_present);
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
     assert_active_session(err, "reserve001", "reserve001.lock");
     assert!(first.session_path.diagnostic_path().exists());
     assert!(first.log_path.diagnostic_path().exists());
-    assert!(first.lock_path.diagnostic_path().exists());
+    assert!(!first.lock_path.diagnostic_path().exists());
     first.rollback().expect("reservation rolls back");
 }
 
@@ -311,7 +311,7 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
         let reservation = reserve_session_log(&workspace, "drop001").expect("reservation succeeds");
         assert!(reservation.session_path.diagnostic_path().exists());
         assert!(reservation.log_path.diagnostic_path().exists());
-        assert!(reservation.lock_path.diagnostic_path().exists());
+        assert!(!reservation.lock_path.diagnostic_path().exists());
         (
             reservation.session_path.clone(),
             reservation.log_path.clone(),
@@ -348,7 +348,7 @@ fn dropped_active_reservation_preserves_artifacts_and_releases_lock() {
     assert!(session_path.diagnostic_path().exists());
     assert!(log_path.diagnostic_path().exists());
     assert!(context_path.diagnostic_path().exists());
-    assert!(!lock_path.diagnostic_path().exists());
+    assert!(lock_path.diagnostic_path().exists());
 }
 
 #[test]
@@ -356,6 +356,7 @@ fn explicit_reservation_rollback_never_accepts_a_foreign_replacement_lock() {
     let workspace = empty_workspace("reservation-rollback-failure");
     let reservation =
         reserve_session_log(&workspace, "rollbackfailure001").expect("reservation succeeds");
+    reservation.activate().expect("reservation activates");
     let lock_path = reservation.lock_path.diagnostic_path().to_owned();
     reservation.lock_path.remove().expect("lock file removed");
     fs::create_dir(&lock_path).expect("lock path replaced with a directory");
@@ -379,7 +380,8 @@ fn explicit_reservation_rollback_never_accepts_a_foreign_replacement_lock() {
         .expect_err("a path-shaped replacement cannot satisfy ownership cleanup");
     assert!(
         err.to_string().contains("lock ownership changed")
-            || err.to_string().contains("unlinked while open"),
+            || err.to_string().contains("unlinked while open")
+            || err.to_string().contains("marker identity changed"),
         "{err}"
     );
     assert_eq!(
@@ -492,7 +494,7 @@ fn runtime_and_writer_finalization_failures_remain_visible() {
         } if operation.to_string().contains("injected runtime operation failure")
             && finalization.to_string().contains("injected writer finalization failure")
     ));
-    assert!(!lock_path.exists());
+    assert!(lock_path.exists());
 }
 
 #[test]
@@ -598,7 +600,7 @@ fn controlled_cleanup_rolls_back_empty_but_preserves_active_reservations() {
         matches!(active_err, RuntimeError::Protocol(message) if message == "controlled failure")
     );
     assert!(active_paths.iter().all(|path| path.is_file()));
-    assert!(!active_lock.exists());
+    assert!(active_lock.exists());
 }
 
 #[test]
@@ -711,24 +713,27 @@ fn resume_validation_and_cleanup_failures_are_both_returned() {
 }
 
 #[test]
-fn simulated_abrupt_termination_leaves_a_lock_that_is_not_stolen() {
+fn simulated_abrupt_termination_releases_authority_without_removing_the_marker() {
     let workspace = empty_workspace("abrupt-session-termination");
     let reservation =
         reserve_session_log(&workspace, "abrupt001").expect("session bundle reserved");
     let lock = reservation.lock_path.diagnostic_path().to_owned();
+    reservation.activate().expect("reservation activates");
 
     reservation.simulate_abrupt_termination();
 
     assert!(lock.is_file());
-    let err = reserve_session_log(&workspace, "abrupt001")
-        .expect_err("an abrupt termination lock must not be stolen");
-    assert_active_session(err, "abrupt001", "abrupt001.lock");
+    assert!(
+        !session_ownership_is_active(&workspace, "abrupt001")
+            .expect("host-local session ownership reads")
+    );
 }
 
 #[test]
 fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
     let workspace = empty_workspace("reservation-helper-edges");
     let missing_lock = reserve_session_log(&workspace, "missing001").expect("reservation succeeds");
+    missing_lock.activate().expect("reservation activates");
     missing_lock.lock_path.remove().expect("lock removed");
 
     let err = missing_lock
@@ -743,14 +748,11 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         .cleanup()
         .expect_err("missing lock rollback reports an IO error");
 
-    let missing_guard_path = ensure_runtime_dirs(&workspace)
+    let sessions = ensure_runtime_dirs(&workspace)
         .expect("runtime dirs")
-        .sessions
-        .file("missing-resume.lock");
-    let missing_guard_file =
-        reserve_anchored_session_lock_file(&missing_guard_path, "missing-resume")
-            .expect("resume lock reserved");
-    let missing_guard = SessionLockGuard::new(missing_guard_path, missing_guard_file);
+        .sessions;
+    let missing_guard =
+        acquire_anchored_session_lock(&sessions, "missing-resume").expect("resume lock reserved");
     missing_guard.path.remove().expect("resume lock removed");
     let err = missing_guard
         .release()
@@ -785,24 +787,271 @@ fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
     let first =
         acquire_anchored_session_lock(&sessions, "sequential001").expect("first owner acquires");
     first.path.remove().expect("first lock unlinked externally");
+    let second = match acquire_anchored_session_lock(&sessions, "sequential001") {
+        Ok(_) => panic!("workspace marker deletion cannot grant ownership"),
+        Err(error) => error,
+    };
+    assert_active_session(second, "sequential001", "sequential001.lock");
+
+    first
+        .release()
+        .expect_err("marker deletion remains visible when authority releases");
     let second =
         acquire_anchored_session_lock(&sessions, "sequential001").expect("second owner acquires");
-
-    let err = first
-        .release()
-        .expect_err("first owner must not release the second owner's lock");
-
-    assert!(
-        err.to_string().contains("lock ownership changed")
-            || err.to_string().contains("unlinked while open"),
-        "{err}"
-    );
     assert!(second.path.diagnostic_path().is_file());
+    assert!(
+        session_ownership_is_active(&workspace, "sequential001")
+            .expect("second owner's authority reads")
+    );
+    drop(first);
+    assert!(
+        session_ownership_is_active(&workspace, "sequential001")
+            .expect("second owner's authority survives earlier guard drop")
+    );
     second
         .release()
         .expect("second owner releases its own lock");
-    drop(first);
-    assert!(!second.path.diagnostic_path().exists());
+    assert!(second.path.diagnostic_path().exists());
+}
+
+const OWNERSHIP_CHILD_WORKSPACE: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_WORKSPACE";
+const OWNERSHIP_CHILD_SESSION_ID: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_SESSION_ID";
+
+#[test]
+fn session_ownership_child_process() {
+    let Some(workspace) = std::env::var_os(OWNERSHIP_CHILD_WORKSPACE) else {
+        return;
+    };
+    let session_id =
+        std::env::var(OWNERSHIP_CHILD_SESSION_ID).expect("child session id is configured");
+    let workspace = PathBuf::from(workspace);
+    let reservation =
+        reserve_session_log(&workspace, &session_id).expect("child reserves session ownership");
+    write_reserved_session_metadata(&reservation, None).expect("child activates session ownership");
+    fs::write(workspace.join("ownership-child-ready"), b"ready")
+        .expect("child readiness marker written");
+    while !workspace.join("ownership-child-release").exists() {
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn host_local_owner_survives_deleted_workspace_marker_across_processes() {
+    let workspace = empty_workspace("cross-process-marker-deletion");
+    let session_id = "crossprocess001";
+    let mut child = spawn_session_ownership_child(&workspace, session_id);
+    wait_for_ownership_child(&workspace, &mut child);
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    fs::remove_file(sessions.path.join(format!("{session_id}.lock")))
+        .expect("workspace marker removed directly");
+
+    let second = acquire_anchored_session_lock(&sessions, session_id);
+    release_ownership_child(&workspace, &mut child);
+    let violated_exclusivity = match second {
+        Ok(guard) => {
+            drop(guard);
+            true
+        }
+        Err(error) => {
+            assert_active_session(error, session_id, &format!("{session_id}.lock"));
+            false
+        }
+    };
+
+    assert!(
+        !violated_exclusivity,
+        "deleting the workspace marker must not grant a second process ownership"
+    );
+}
+
+#[test]
+fn crashed_owner_releases_host_local_authority_without_marker_cleanup() {
+    let workspace = empty_workspace("cross-process-crash-recovery");
+    let session_id = "crossprocess002";
+    let mut child = spawn_session_ownership_child(&workspace, session_id);
+    wait_for_ownership_child(&workspace, &mut child);
+    child.kill().expect("ownership child terminates abruptly");
+    child.wait().expect("terminated ownership child reaped");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    assert!(
+        sessions.path.join(format!("{session_id}.lock")).is_file(),
+        "abrupt termination leaves the workspace marker"
+    );
+
+    let recovered = acquire_anchored_session_lock(&sessions, session_id)
+        .expect("kernel-released authority permits crash recovery");
+
+    recovered
+        .release()
+        .expect("recovered owner releases its authority");
+}
+
+#[test]
+fn host_local_authority_is_independent_of_process_temp_environment() {
+    let workspace = empty_workspace("cross-process-temp-environment");
+    let alternate_temp = workspace.join("alternate-process-temp");
+    fs::create_dir(&alternate_temp).expect("alternate process temp directory created");
+    let session_id = "crossprocess003";
+    let mut child =
+        spawn_session_ownership_child_with_temp(&workspace, session_id, &alternate_temp);
+    wait_for_ownership_child(&workspace, &mut child);
+
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let second = acquire_anchored_session_lock(&sessions, session_id);
+    release_ownership_child(&workspace, &mut child);
+    let violated_exclusivity = match second {
+        Ok(guard) => {
+            drop(guard);
+            true
+        }
+        Err(error) => {
+            assert_active_session(error, session_id, &format!("{session_id}.lock"));
+            false
+        }
+    };
+
+    assert!(
+        !violated_exclusivity,
+        "process temp configuration must not select a different ownership authority"
+    );
+}
+
+#[test]
+fn unavailable_workspace_adjacent_coordinator_fails_before_workspace_side_effects() {
+    let parent = empty_workspace("unavailable-adjacent-coordinator");
+    let workspace = parent.join("workspace");
+    fs::create_dir(&workspace).expect("nested workspace created");
+    fs::write(
+        parent.join(".watershed-flow-agent"),
+        b"coordinator path obstruction",
+    )
+    .expect("coordinator obstruction written");
+
+    let result = reserve_unique_session_log(&workspace, "coordinator001");
+    if let Ok(reservation) = result {
+        reservation
+            .rollback()
+            .expect("unexpected reservation rolls back");
+        panic!("unavailable coordinator must reject the reservation");
+    }
+
+    assert!(
+        !workspace.join(".flow").exists(),
+        "coordinator access must fail before runtime directories are created"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn unsafe_workspace_adjacent_coordinator_mode_fails_closed() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let parent = empty_workspace("unsafe-adjacent-coordinator-mode");
+    let workspace = parent.join("workspace");
+    fs::create_dir(&workspace).expect("nested workspace created");
+    let coordinator = parent.join(".watershed-flow-agent");
+    fs::create_dir(&coordinator).expect("coordinator directory created");
+    fs::set_permissions(&coordinator, fs::Permissions::from_mode(0o777))
+        .expect("unsafe coordinator mode installed");
+
+    let result = reserve_unique_session_log(&workspace, "coordinator002");
+    if let Ok(reservation) = result {
+        reservation
+            .rollback()
+            .expect("unexpected reservation rolls back");
+        panic!("unsafe coordinator mode must reject the reservation");
+    }
+
+    assert!(
+        !workspace.join(".flow").exists(),
+        "unsafe coordinator mode must fail before runtime directories are created"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn session_authority_keys_preserve_native_unix_path_bytes() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let path = PathBuf::from(std::ffi::OsString::from_vec(vec![b'a', 0xff, b'z']));
+
+    assert_eq!(stable_native_path_bytes(&path), [b'a', 0xff, b'z']);
+}
+
+#[cfg(windows)]
+#[test]
+fn session_authority_keys_use_stable_little_endian_utf16() {
+    use std::os::windows::ffi::OsStringExt;
+
+    let path = PathBuf::from(std::ffi::OsString::from_wide(&[0x0061, 0xd800, 0x20ac]));
+
+    assert_eq!(
+        stable_native_path_bytes(&path),
+        [0x61, 0x00, 0x00, 0xd8, 0xac, 0x20]
+    );
+}
+
+fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> std::process::Child {
+    session_ownership_child_command(workspace, session_id)
+        .spawn()
+        .expect("ownership child starts")
+}
+
+fn spawn_session_ownership_child_with_temp(
+    workspace: &Path,
+    session_id: &str,
+    temp: &Path,
+) -> std::process::Child {
+    session_ownership_child_command(workspace, session_id)
+        .env("TMPDIR", temp)
+        .env("TMP", temp)
+        .env("TEMP", temp)
+        .spawn()
+        .expect("ownership child starts")
+}
+
+fn session_ownership_child_command(workspace: &Path, session_id: &str) -> std::process::Command {
+    let mut command =
+        std::process::Command::new(std::env::current_exe().expect("current test executable"));
+    command
+        .args([
+            "--exact",
+            "tests::session_logs::session_ownership_child_process",
+            "--nocapture",
+        ])
+        .env(OWNERSHIP_CHILD_WORKSPACE, workspace)
+        .env(OWNERSHIP_CHILD_SESSION_ID, session_id);
+    command
+}
+
+fn wait_for_ownership_child(workspace: &Path, child: &mut std::process::Child) {
+    let ready = workspace.join("ownership-child-ready");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if ready.is_file() {
+            return;
+        }
+        if let Some(status) = child.try_wait().expect("ownership child status reads") {
+            panic!("ownership child exited before readiness: {status}");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    child.kill().expect("timed-out ownership child terminates");
+    child.wait().expect("timed-out ownership child reaped");
+    panic!("ownership child did not become ready");
+}
+
+fn release_ownership_child(workspace: &Path, child: &mut std::process::Child) {
+    fs::write(workspace.join("ownership-child-release"), b"release")
+        .expect("ownership child release marker written");
+    let status = child.wait().expect("ownership child exits");
+    assert!(status.success(), "ownership child failed: {status}");
 }
 
 #[cfg(windows)]
@@ -1963,6 +2212,7 @@ fn resume_rejects_case_aliased_session_lock_without_side_effects() {
     let workspace = workspace_copy("hello-flow");
     let reservation = reserve_session_log(&workspace, "hello001").expect("reservation succeeds");
     write_initial_session_log(&reservation, "hello001").expect("initial log writes");
+    reservation.activate().expect("session marker activates");
     let alias = workspace.join(LOCAL_SESSION_DIR).join("HELLO001.LOCK");
     fs::rename(reservation.lock_path.diagnostic_path(), &alias).expect("lock alias installed");
 

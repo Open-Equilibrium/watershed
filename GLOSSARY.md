@@ -62,6 +62,8 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Transcript** — The ordered record of a session's messages and runtime events; part of durable session history and reconstructable by replay.
 - **Durable session history** — The complete append-only session event history plus referenced source artifacts; its events are authoritative for replay, while the full history is authoritative for resume, audit, debugging and future retrieval. Provider-context optimization never deletes either.
 - **Session bundle** — All session-owned event and context-manifest segments, immutable hash-addressed objects and definition metadata; export and deletion treat them as one unit.
+- **Host-local session ownership lease** — The exclusive operating-system file lease keyed by canonical workspace and `session_id` that alone authorizes one active Flow Agent session on a host. Process exit releases it; it is neither durable nor transferable across hosts.
+- **Session marker** — The persistent `.flow/sessions/<session_id>.lock` observability leaf. It is not ownership authority, and creating, deleting or replacing it cannot grant or revoke the host-local session ownership lease.
 - **Event segment** — One append-only canonical JSONL file within a session bundle; segment rotation bounds individual I/O without starting a new session or resetting sequence/budgets.
 - **Resolved flow state** — The current flow invocation, phase, step, active instructions/tools, connections and runtime state, plus values exposed by defined runtime interfaces.
 - **Provider context** — The deterministic, bounded projection compiled from resolved flow state and narrowly selected durable history for one model turn; not the full transcript.

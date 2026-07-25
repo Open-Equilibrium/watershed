@@ -77,7 +77,11 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
     let mut initial = started.as_bytes().to_vec();
     initial.extend_from_slice(&completed.as_bytes()[..split]);
     fs::write(&path, initial).expect("partial stream written");
-    fs::write(session_dir.join("tailpartial001.lock"), b"").expect("session lock written");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let ownership = acquire_anchored_session_lock(&sessions, "tailpartial001")
+        .expect("session ownership acquired");
     let mut reader = SessionEventReader::open(&workspace, "tailpartial001").expect("reader opens");
 
     let prefix = reader.read_after(0).expect("prefix reads");
@@ -94,6 +98,7 @@ fn reader_buffers_partial_jsonl_and_utf8_until_the_line_is_complete() {
         .expect("completed suffix reads without replaying the prefix");
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].event_type, EventType::SessionCompleted);
+    ownership.release().expect("session ownership releases");
 }
 
 #[test]
@@ -401,12 +406,11 @@ fn reader_rejects_cursors_ahead_of_authoritative_history_and_recovers() {
 }
 
 #[test]
-fn reader_rejects_an_incomplete_suffix_after_the_session_lock_disappears() {
+fn reader_rejects_an_incomplete_suffix_after_session_ownership_ends() {
     let workspace = empty_workspace("tail-inactive-partial");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("tailinactivepartial001.jsonl");
-    let lock_path = session_dir.join("tailinactivepartial001.lock");
     let started = session_event_line(
         "tailinactivepartial001",
         "evt-inactive-partial-started",
@@ -414,7 +418,11 @@ fn reader_rejects_an_incomplete_suffix_after_the_session_lock_disappears() {
         1,
     );
     fs::write(&path, format!("{started}{{\"event_id\":")).expect("incomplete stream written");
-    fs::write(&lock_path, b"").expect("session lock written");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let ownership = acquire_anchored_session_lock(&sessions, "tailinactivepartial001")
+        .expect("session ownership acquired");
     let mut reader =
         SessionEventReader::open(&workspace, "tailinactivepartial001").expect("reader opens");
     assert_eq!(
@@ -425,7 +433,7 @@ fn reader_rejects_an_incomplete_suffix_after_the_session_lock_disappears() {
         1
     );
 
-    fs::remove_file(&lock_path).expect("session lock removed");
+    ownership.release().expect("session ownership releases");
     let existing_err = reader
         .read_incremental_after(1)
         .expect_err("existing reader rejects inactive incomplete suffix");

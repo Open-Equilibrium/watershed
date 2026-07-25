@@ -58,6 +58,7 @@ pub struct SessionBundleInventory {
     pub(crate) context_segments: Vec<AnchoredFile>,
     pub(crate) event_bytes: u64,
     pub(crate) event_segments: Vec<AnchoredFile>,
+    #[cfg(test)]
     pub(crate) lock_present: bool,
     pub(crate) metadata_bytes: u64,
     pub(crate) object_bytes: u64,
@@ -78,12 +79,14 @@ impl SessionBundleInventory {
         let context_bytes = segment_bytes(&context_segments, MAX_SESSION_CONTEXT_MANIFEST_BYTES)?;
         let metadata_bytes = anchored_file_bytes(&paths.metadata, MAX_SESSION_METADATA_BYTES)?;
         let (objects, object_bytes) = session_objects(&paths.sessions, &paths.session_id)?;
+        #[cfg(test)]
         let lock_present = anchored_leaf_present(&paths.lock)?;
         let inventory = Self {
             context_bytes,
             context_segments,
             event_bytes,
             event_segments,
+            #[cfg(test)]
             lock_present,
             metadata_bytes,
             object_bytes,
@@ -106,13 +109,7 @@ impl SessionBundleInventory {
             .saturating_add(self.object_bytes)
     }
 
-    pub(crate) fn validate_active_ownership(&self) -> Result<(), RuntimeError> {
-        if !self.lock_present {
-            return Err(RuntimeError::Protocol(format!(
-                "session {} lost its active lock",
-                self.paths_session_id()
-            )));
-        }
+    pub(crate) fn validate_resumable_bundle(&self) -> Result<(), RuntimeError> {
         if self.event_segments.is_empty() {
             return Err(RuntimeError::Protocol(format!(
                 "{} event stream is missing",
@@ -184,6 +181,7 @@ fn anchored_file_bytes(file: &AnchoredFile, maximum: u64) -> Result<u64, Runtime
     Ok(bytes)
 }
 
+#[cfg(test)]
 fn anchored_leaf_present(file: &AnchoredFile) -> Result<bool, RuntimeError> {
     match file.metadata() {
         Ok(_) => {

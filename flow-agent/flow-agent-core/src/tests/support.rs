@@ -95,7 +95,7 @@ pub(super) fn assert_active_session(err: RuntimeError, session_id: &str, lock_na
             );
             let message = active_session_lock_message(&lock_path, &actual);
             assert!(message.contains("already active"));
-            assert!(message.contains("verify no Flow Agent process"));
+            assert!(message.contains("host-local ownership lease"));
         }
         other => panic!("expected active session error, got {other:?}"),
     }

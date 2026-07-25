@@ -1129,6 +1129,7 @@ fn finish_reports_shutdown_sync_panic_and_channel_failure_together() {
 fn append_panic_remains_visible_with_operation_and_cleanup_failures() {
     let workspace = empty_workspace("event-writer-panic-stages");
     let reservation = reserve_session_log(&workspace, "panicstages001").expect("session reserved");
+    reservation.activate().expect("reservation activates");
     let mut writer = SerialSessionWriter::start_with_appender(
         SerialWriterStart {
             context_path: reservation.context_path.clone(),

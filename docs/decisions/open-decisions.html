@@ -15,29 +15,12 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1">M1</a>
       <a href="#m1-2">M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1">
-    <h2>M1 - Flow Agent</h2>
-    <div class="grid">
-      <article id="d-049" class="decision">
-        <h3>D-049 - Flow Agent Session-Lock Ownership Boundary</h3>
-        <p><strong>Status:</strong> Open, M1 blocker for session-lock closeout.</p>
-        <p><strong>Question:</strong> What ownership guarantee must an M1 <code>.flow/sessions/&lt;session_id&gt;.lock</code> provide when another local writer can mutate that directory?</p>
-        <p><strong>Why this is open:</strong> The current capability-relative removal verifies file identity before an unconditional path unlink. A writer can replace the lock after that check, so a timing-specific test cannot prove that a later owner is never removed. The fixed cases are replacement before cleanup (regular file), hard link, Unix symlink and Windows directory junction; the unresolved case is replacement between validation and unlink.</p>
-        <ul><li><strong>A:</strong> Define direct mutation of <code>.flow</code> by other local writers as outside M1's ownership guarantee. Pro: keeps the current portable file-lock design. Con: Flow Agent cannot promise exclusivity against such a writer.</li><li><strong>B:</strong> Add a platform-native ownership mechanism that prevents or atomically compares deletion on every supported OS. Pro: retains workspace-local locks with a stronger guarantee. Con: portability, permissions and test support must be designed and proven.</li><li><strong>C:</strong> Move active ownership to a dedicated local coordinator or lease store with atomic compare-and-delete, leaving workspace locks as observable markers. Pro: gives one portable, testable ownership authority. Con: adds a runtime component and changes the M1 boundary.</li></ul>
-        <p><strong>Recommendation:</strong> C if M1 must guarantee exclusivity against direct local filesystem mutation; otherwise explicitly select A and narrow the published guarantee.</p>
-        <p><strong>Maintainer decision required:</strong> Select A, B or C and state whether a direct local writer is in the M1 ownership threat model.</p>
-        <p><strong>Acceptance criterion:</strong> After the decision is recorded in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>, implement one finite invariant: either document and test the A boundary, or force a replacement immediately after the final ownership check and prove the later owner remains active for each supported platform under B/C.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m1-2">
     <h2>M1.2 - Flow Agent OS Isolation</h2>

@@ -769,7 +769,7 @@ fn write_synthetic_session(
         }
         appender.sync(&path).expect("synthetic session syncs");
     }
-    reservation.activate();
+    reservation.activate().expect("reservation activates");
     reservation.release_lock().expect("session lock releases");
 }
 

@@ -140,15 +140,16 @@ pub fn live_event_channel() -> (LiveEventNotifier, LiveEventReceiver) {
 /// Validated, append-only reader for one authoritative session log.
 ///
 /// Each read is bounded by the per-segment and per-session event-data limits. The reader
-/// tolerates an incomplete final JSONL line while the session lock is present, rejects
+/// tolerates an incomplete final JSONL line while session ownership is active, rejects
 /// mutation of an already observed event, and leaves cursor advancement to the caller.
 pub struct SessionEventReader {
     pub(crate) observed_current_segment_bytes: u64,
     pub(crate) observed_segment_count: usize,
     pub(crate) observed_signature: RuntimeStreamSignatureBuilder,
-    pub(crate) lock_path: AnchoredFile,
     pub(crate) path: AnchoredFile,
+    pub(crate) session_id: String,
     pub(crate) validation: SessionAppendValidationState,
+    pub(crate) workspace: PathBuf,
 }
 
 impl SessionEventReader {
@@ -171,9 +172,10 @@ impl SessionEventReader {
             observed_current_segment_bytes: 0,
             observed_segment_count: 0,
             observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
-            lock_path: SessionBundlePaths::lock_in(&sessions, session_id),
             path,
+            session_id: session_id.to_owned(),
             validation: SessionAppendValidationState::empty(session_id),
+            workspace: workspace.to_owned(),
         })
     }
 
@@ -217,7 +219,7 @@ impl SessionEventReader {
             }
             let complete_len = complete_jsonl_prefix_len(&bytes);
             let has_partial_line = complete_len != bytes.len();
-            let inactive_partial = has_partial_line && !self.session_lock_present()?;
+            let inactive_partial = has_partial_line && !self.session_ownership_active()?;
             if inactive_partial && !retried_inactive_partial {
                 retried_inactive_partial = true;
                 continue;
@@ -345,7 +347,7 @@ impl SessionEventReader {
             after_read();
             let complete_len = complete_jsonl_prefix_len(&suffix);
             let has_partial_line = complete_len != suffix.len();
-            let inactive_partial = has_partial_line && !self.session_lock_present()?;
+            let inactive_partial = has_partial_line && !self.session_ownership_active()?;
             if inactive_partial && !retried_inactive_partial {
                 retried_inactive_partial = true;
                 continue;
@@ -415,19 +417,13 @@ impl SessionEventReader {
         Ok(segments)
     }
 
-    pub(crate) fn session_lock_present(&self) -> Result<bool, RuntimeError> {
-        match ensure_anchored_real_file(&self.lock_path) {
-            Ok(()) => Ok(true),
-            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                Ok(false)
-            }
-            Err(error) => Err(error),
-        }
+    pub(crate) fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
+        session_ownership_is_active(&self.workspace, &self.session_id)
     }
 
     pub(crate) fn inactive_partial(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
-            "{} contains an incomplete final JSONL line without an active session lock",
+            "{} contains an incomplete final JSONL line without active session ownership",
             self.path.diagnostic_path().display()
         ))
     }

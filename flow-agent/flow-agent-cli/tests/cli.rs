@@ -364,9 +364,7 @@ fn tail_timeout_exits_after_current_non_terminal_prefix() {
         .to_owned()
         + "\n";
     let session_path = session_dir.join("smoke-flow.jsonl");
-    let lock_path = session_dir.join("smoke-flow.lock");
     fs::write(&session_path, &prefix).expect("partial session written");
-    fs::write(&lock_path, "").expect("active-session lock written");
 
     let child = flow_command()
         .current_dir(&fixture)
@@ -394,7 +392,6 @@ fn tail_timeout_exits_after_current_non_terminal_prefix() {
         fs::read_to_string(session_path).expect("partial session remains readable"),
         prefix
     );
-    assert!(lock_path.is_file(), "tail must not own the session lock");
 }
 
 #[test]
@@ -516,9 +513,7 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
         .expect("golden has session.started")
         .to_owned()
         + "\n";
-    let lock_path = session_dir.join("smoke-flow.lock");
     fs::write(session_dir.join("smoke-flow.jsonl"), &prefix).expect("partial session written");
-    fs::write(&lock_path, "").expect("active-session lock written");
 
     let child = flow_command()
         .current_dir(&fixture)
@@ -535,7 +530,6 @@ fn tail_no_follow_exits_after_current_non_terminal_prefix() {
         String::from_utf8(output.stdout).expect("stdout should be UTF-8"),
         prefix
     );
-    assert!(lock_path.is_file(), "tail must not own the session lock");
 }
 
 #[test]
@@ -546,9 +540,7 @@ fn tail_follows_a_growing_session_through_its_terminal_event() {
     let expected = expected_stream("smoke-flow", "smoke-flow.jsonl");
     let split = expected.find('\n').expect("golden has a first event") + 1;
     let session_path = session_dir.join("smoke-flow.jsonl");
-    let lock_path = session_dir.join("smoke-flow.lock");
     fs::write(&session_path, &expected[..split]).expect("initial prefix written");
-    fs::write(&lock_path, "").expect("active-session lock written");
     let mut child = flow_command()
         .current_dir(&fixture)
         .args([
@@ -580,7 +572,6 @@ fn tail_follows_a_growing_session_through_its_terminal_event() {
         .expect("remaining events appended");
     session.flush().expect("remaining events flushed");
     drop(session);
-    fs::remove_file(lock_path).expect("active-session lock removed");
     stdout
         .read_to_string(&mut actual)
         .expect("tail emits appended events");

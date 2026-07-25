@@ -200,10 +200,12 @@ impl<'a> SerialSessionWriter<'a> {
     }
 
     pub(crate) fn apply_outcome(&mut self, outcome: WriterOutcome) -> Result<(), RuntimeError> {
+        let mut failures = Vec::new();
         if outcome.appended
             && let Some(reservation) = self.commit_reservation
+            && let Err(error) = reservation.activate()
         {
-            reservation.activate();
+            failures.push(error);
         }
         if let Some(timings) = self.timings.as_deref_mut() {
             if let Some(append_latency) = outcome.append_latency_nanos {
@@ -215,9 +217,12 @@ impl<'a> SerialSessionWriter<'a> {
         }
         if let Some(err) = outcome.error {
             self.failed = true;
-            return Err(event_writer_failure(err));
+            failures.push(event_writer_failure(err));
         }
-        Ok(())
+        if !failures.is_empty() {
+            self.failed = true;
+        }
+        writer_failures_result(failures)
     }
 
     pub(crate) fn drain_deferred(&mut self) -> Result<(), RuntimeError> {

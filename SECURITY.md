@@ -20,6 +20,8 @@ Because scripts are human-reviewable security/capability artifacts, they pass th
 
 Registry loading starts from one opened workspace capability and opens every registry directory and YAML leaf without following links. Linux and macOS are the primary targets; the private boundary remains portable to Windows (ADR-0063, ADR-0064).
 
+M1 session ownership treats direct local mutation of `.flow` as in scope. The sole authority is an exclusive OS-held lease in the workspace-adjacent coordinator defined by `PROTOCOL.md`; the workspace `.lock` leaf is only a persistent observable marker. Marker mutation cannot grant or revoke ownership, and process exit releases the lease automatically. This is concurrency control, not OS isolation: the canonical workspace parent is trusted, a peer with the same OS identity can still corrupt workspace data or tamper with the coordinator, and cross-host/durable ownership remains post-M1.
+
 - **Command allowlisting limits names, not effects.** Interpreters and deploy commands (`python`, `cf push`, build scripts, git hooks) are Turing-complete escapes; argument filters are bypassable via path traversal, symlinks and shell metacharacters.
 - **Agent intent is untrusted (prompt injection / confused-deputy).** Reading untrusted content + holding private data + an exfiltration path is unconditionally exploitable regardless of prompt hardening ("lethal trifecta"). The fix is architectural separation, not a longer allowlist.
 

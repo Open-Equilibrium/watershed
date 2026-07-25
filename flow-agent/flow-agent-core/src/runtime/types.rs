@@ -226,7 +226,7 @@ pub enum RuntimeError {
         /// Typed runtime cause recorded by the session.
         source: Box<RuntimeError>,
     },
-    /// A session lock already exists for the requested session.
+    /// A host-local ownership lease is already held for the requested session.
     ActiveSession {
         /// Requested session id.
         session_id: String,
