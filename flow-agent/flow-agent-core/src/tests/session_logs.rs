@@ -352,7 +352,7 @@ fn dropped_active_reservation_preserves_artifacts_and_releases_lock() {
 }
 
 #[test]
-fn explicit_reservation_rollback_reports_lock_failure_and_remains_retryable() {
+fn explicit_reservation_rollback_never_accepts_a_foreign_replacement_lock() {
     let workspace = empty_workspace("reservation-rollback-failure");
     let reservation =
         reserve_session_log(&workspace, "rollbackfailure001").expect("reservation succeeds");
@@ -364,17 +364,36 @@ fn explicit_reservation_rollback_reports_lock_failure_and_remains_retryable() {
         .cleanup()
         .expect_err("explicit rollback reports lock cleanup failure");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Io { path, .. } if path == lock_path
-    ));
+    assert!(
+        matches!(
+            err,
+            RuntimeError::Io { ref path, .. } if path == &lock_path
+        ) || err.to_string().contains("must be a file"),
+        "{err}"
+    );
     assert!(lock_path.is_dir());
     fs::remove_dir(&lock_path).expect("blocking lock directory removed");
-    fs::write(&lock_path, b"").expect("lock file restored for retry");
+    fs::write(&lock_path, b"foreign owner").expect("foreign lock installed");
+    let err = reservation
+        .cleanup()
+        .expect_err("a path-shaped replacement cannot satisfy ownership cleanup");
+    assert!(
+        err.to_string().contains("lock ownership changed")
+            || err.to_string().contains("unlinked while open"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read(&lock_path).expect("foreign lock remains readable"),
+        b"foreign owner"
+    );
     reservation
         .cleanup()
-        .expect("partially completed rollback remains retryable");
-    assert!(!lock_path.exists());
+        .expect_err("ownership mismatch remains retryable");
+    assert_eq!(
+        fs::read(&lock_path).expect("retry preserves foreign lock"),
+        b"foreign owner"
+    );
+    fs::remove_file(&lock_path).expect("foreign owner releases its lock");
 }
 
 #[test]
@@ -593,10 +612,13 @@ fn controlled_run_cleanup_failure_is_returned_and_keeps_valid_artifacts() {
     })
     .expect_err("cleanup failure must replace a successful return");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Io { path, .. } if path == lock_path
-    ));
+    assert!(
+        matches!(
+            err,
+            RuntimeError::Io { ref path, .. } if path == &lock_path
+        ) || err.to_string().contains("must be a file"),
+        "{err}"
+    );
     assert!(
         workspace
             .join(LOCAL_SESSION_DIR)
@@ -721,12 +743,15 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         .cleanup()
         .expect_err("missing lock rollback reports an IO error");
 
-    let missing_guard = SessionLockGuard::new(
-        ensure_runtime_dirs(&workspace)
-            .expect("runtime dirs")
-            .sessions
-            .file("missing-resume.lock"),
-    );
+    let missing_guard_path = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions
+        .file("missing-resume.lock");
+    let missing_guard_file =
+        reserve_anchored_session_lock_file(&missing_guard_path, "missing-resume")
+            .expect("resume lock reserved");
+    let missing_guard = SessionLockGuard::new(missing_guard_path, missing_guard_file);
+    missing_guard.path.remove().expect("resume lock removed");
     let err = missing_guard
         .release()
         .expect_err("missing resume lock release reports an IO error");
@@ -749,6 +774,118 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         err,
         RuntimeError::Protocol(message) if message.contains("must be a file")
     ));
+}
+
+#[test]
+fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
+    let workspace = empty_workspace("sequential-lock-owners");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let first =
+        acquire_anchored_session_lock(&sessions, "sequential001").expect("first owner acquires");
+    first.path.remove().expect("first lock unlinked externally");
+    let second =
+        acquire_anchored_session_lock(&sessions, "sequential001").expect("second owner acquires");
+
+    let err = first
+        .release()
+        .expect_err("first owner must not release the second owner's lock");
+
+    assert!(
+        err.to_string().contains("lock ownership changed")
+            || err.to_string().contains("unlinked while open"),
+        "{err}"
+    );
+    assert!(second.path.diagnostic_path().is_file());
+    second
+        .release()
+        .expect("second owner releases its own lock");
+    drop(first);
+    assert!(!second.path.diagnostic_path().exists());
+}
+
+#[test]
+fn released_lock_guard_drop_does_not_touch_a_later_owner() {
+    let workspace = empty_workspace("released-lock-owner");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let guard =
+        acquire_anchored_session_lock(&sessions, "released001").expect("lock owner acquires");
+    let lock_path = guard.path.diagnostic_path().to_owned();
+    guard.release().expect("owner releases its lock");
+    fs::write(&lock_path, b"later owner").expect("later owner installs its lock");
+
+    drop(guard);
+
+    assert_eq!(
+        fs::read(&lock_path).expect("later owner's lock remains readable"),
+        b"later owner"
+    );
+    fs::remove_file(lock_path).expect("later owner releases its lock");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn lock_release_rejects_hardlinked_ownership_without_removing_either_name() {
+    let workspace = empty_workspace("hardlinked-lock-owner");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let guard =
+        acquire_anchored_session_lock(&sessions, "hardlock001").expect("lock owner acquires");
+    let alias = workspace.join("lock-alias");
+    fs::hard_link(guard.path.diagnostic_path(), &alias).expect("lock hard link created");
+
+    let err = guard
+        .release()
+        .expect_err("hard-linked ownership must fail closed");
+
+    assert!(err.to_string().contains("hard-linked"), "{err}");
+    assert!(guard.path.diagnostic_path().is_file());
+    assert!(alias.is_file());
+    fs::remove_file(&alias).expect("hard-link alias removed");
+    guard.release().expect("owner releases after alias removal");
+}
+
+#[cfg(unix)]
+#[test]
+fn lock_release_rejects_symlink_replacement_without_touching_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = empty_workspace("symlink-lock-owner");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let guard =
+        acquire_anchored_session_lock(&sessions, "symlinklock001").expect("lock owner acquires");
+    let target = workspace.join("foreign-lock-target");
+    fs::write(&target, b"foreign").expect("foreign target written");
+    guard.path.remove().expect("owned lock unlinked externally");
+    symlink(&target, guard.path.diagnostic_path()).expect("foreign symlink installed");
+
+    let err = guard
+        .release()
+        .expect_err("symlink replacement must fail closed");
+
+    assert!(
+        err.to_string()
+            .contains("must not be a symlink or reparse point")
+            || err.to_string().contains("unlinked while open"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read(&target).expect("foreign target remains readable"),
+        b"foreign"
+    );
+    assert!(
+        fs::symlink_metadata(guard.path.diagnostic_path())
+            .expect("foreign symlink remains")
+            .file_type()
+            .is_symlink()
+    );
+    fs::remove_file(guard.path.diagnostic_path()).expect("foreign symlink removed");
 }
 
 #[cfg(any(unix, windows))]

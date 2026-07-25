@@ -23,7 +23,8 @@ impl RuntimeExecution {
 
 pub const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
 pub const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
-pub const FLOW_EXECUTION_PLAN_DOMAIN: &[u8] = b"watershed.runtime.flow-execution-plan.v1";
+pub const FLOW_EXECUTION_PLAN_DOMAIN: &[u8] = b"watershed.runtime.flow-execution-plan.v2";
+pub const TOOL_EXECUTION_INTENT_DOMAIN: &str = "watershed.runtime.tool-execution-intent.v1";
 pub static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -356,15 +357,17 @@ impl<'a> RuntimeEventBuilder<'a> {
         tool: &core_script::ToolBlock,
         policy: RuntimeToolPolicy<'_>,
     ) -> Result<(), RuntimeError> {
+        let protected_path_match_mode = match policy.protected_path_match_mode {
+            ProtectedPathMatchMode::CaseSensitive => "case-sensitive",
+            ProtectedPathMatchMode::CaseInsensitive => "case-insensitive",
+        };
         let canonical = proto::canonical_json(&serde_json::json!({
-            "allowed_parameters": policy.command.allowed_parameters.iter().map(|parameter| parameter.name.clone()).collect::<Vec<_>>(),
-            "command": tool.command,
+            "command_policy": policy.command,
+            "domain": TOOL_EXECUTION_INTENT_DOMAIN,
             "flow_id": invocation.flow_id,
-            "network_access": tool_network_access_name(&tool.network),
-            "read_scope": policy.command.filesystem.read_roots,
-            "tool_id": tool.identity.id,
-            "tool_kind": policy_tool_kind_name(&policy.command.tool_kind),
-            "write_scope": policy.command.filesystem.write_roots,
+            "protected_path_match_mode": protected_path_match_mode,
+            "stub_model_fixture_profile": policy.stub_model_fixture_profile,
+            "tool": tool,
         }))
         .map_err(|error| {
             RuntimeError::Protocol(format!(
@@ -683,9 +686,11 @@ pub fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) ->
 }
 
 pub fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &RuntimeError) -> bool {
-    !matches!(err, RuntimeError::EventWriter(_))
-        && (should_terminalize_runtime_error(side_effect_mode)
-            || matches!(err, RuntimeError::ContextBudgetExceeded { .. }))
+    !matches!(
+        err,
+        RuntimeError::EventWriter(_) | RuntimeError::EventWriterFailures(_)
+    ) && (should_terminalize_runtime_error(side_effect_mode)
+        || matches!(err, RuntimeError::ContextBudgetExceeded { .. }))
 }
 
 pub fn preflight_flow_tools(

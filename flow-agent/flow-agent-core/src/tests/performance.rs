@@ -160,6 +160,96 @@ fn apply_rejects_application_drift_before_tool_side_effects() {
 }
 
 #[test]
+fn apply_rejects_own_script_body_drift_before_tool_side_effects() {
+    let workspace = workspace_copy("hello-flow");
+    replace_registry_text(
+        &workspace,
+        "flows/hello-flow.yaml",
+        "phase_refs: [inspect, summarize]",
+        "phase_refs: [summarize]",
+    );
+    replace_registry_text(
+        &workspace,
+        "flows/hello-flow.yaml",
+        "subflow_refs: [hello-subflow, hello-subflow]",
+        "subflow_refs: []",
+    );
+    replace_registry_text(
+        &workspace,
+        "flows/hello-flow.yaml",
+        "connection_refs: [inspect-data, inspect-trigger, summary-refresh]",
+        "connection_refs: []",
+    );
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "instruction_refs: [write-output]",
+        "instruction_refs: []",
+    );
+    replace_registry_text(
+        &workspace,
+        "phases/summarize.yaml",
+        "connection_refs: [inspect-trigger, summary-refresh]",
+        "connection_refs: []",
+    );
+    let registry_a = load_test_registry(&workspace, "hello-flow");
+    let policy_a =
+        core_policy::compile_policy_artifact(&registry_a, "hello-flow", runtime_policy_target())
+            .expect("plan policy compiles");
+    let root_flow_a = registry_a
+        .flow_block("hello-flow")
+        .expect("hello-flow fixture exists");
+    let plan = plan_flow(
+        &workspace,
+        &registry_a,
+        &policy_a,
+        root_flow_a,
+        "scriptdrift001",
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("runtime plan succeeds");
+
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf 'changed\\n' > out/summary.txt",
+    );
+    let registry_b = load_test_registry(&workspace, "hello-flow");
+    let policy_b =
+        core_policy::compile_policy_artifact(&registry_b, "hello-flow", runtime_policy_target())
+            .expect("apply policy compiles");
+    let root_flow_b = registry_b
+        .flow_block("hello-flow")
+        .expect("changed hello-flow fixture exists");
+    reset_fixture_tool_apply_count();
+
+    let err = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            registry: &registry_b,
+            policy: &policy_b,
+            root_flow: root_flow_b,
+            session_id: "scriptdrift001",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        None,
+    )
+    .expect_err("own-script drift must reject before applying tools");
+
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message == "flow apply did not match its execution plan"
+    ));
+    assert_eq!(fixture_tool_apply_count(), 0);
+    assert!(!workspace.join("out/summary.txt").exists());
+}
+
+#[test]
 #[ignore = "performance gate"]
 fn hello_flow_runtime_emit_p95_stays_under_m1_budget() {
     let mut append_nanos = Vec::new();

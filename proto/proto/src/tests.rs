@@ -123,6 +123,48 @@ fn envelope_metadata_validation_reports_invalid_fields() {
 }
 
 #[test]
+fn optional_envelope_ids_distinguish_absence_from_invalid_present_values() {
+    let fields = ["correlation_id", "flow_id", "parent_flow_id"];
+
+    for field in fields {
+        let mut missing =
+            serde_json::to_value(test_event(json!({"reason": "fixture-start"}))).unwrap();
+        missing.as_object_mut().unwrap().remove(field);
+        let parsed = serde_json::from_value::<EventEnvelope>(missing)
+            .unwrap_or_else(|err| panic!("missing {field} must remain optional: {err}"));
+        let parsed_value = match field {
+            "correlation_id" => &parsed.correlation_id,
+            "flow_id" => &parsed.flow_id,
+            "parent_flow_id" => &parsed.parent_flow_id,
+            _ => unreachable!(),
+        };
+        assert_eq!(parsed_value, &None);
+
+        for (value, expectation) in [
+            (json!("id-001"), "string"),
+            (json!(""), "empty string"),
+            (Value::Null, "null"),
+            (json!(42), "wrong type"),
+        ] {
+            let mut raw =
+                serde_json::to_value(test_event(json!({"reason": "fixture-start"}))).unwrap();
+            raw[field] = value;
+            let result = serde_json::from_value::<EventEnvelope>(raw);
+            match expectation {
+                "string" => assert!(
+                    result.is_ok(),
+                    "{field} must accept a non-empty string: {result:?}"
+                ),
+                _ => assert!(
+                    result.is_err(),
+                    "{field} must reject a present {expectation}"
+                ),
+            }
+        }
+    }
+}
+
+#[test]
 fn event_boundaries_reject_invalid_metadata() {
     let mut event = test_event(json!({"reason": "fixture-start"}));
     event.sequence = 0;

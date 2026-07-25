@@ -287,6 +287,8 @@ pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Opti
         | RuntimeError::ContextBudgetExceeded { .. }
         | RuntimeError::ExecutionBackendUnavailable
         | RuntimeError::EventWriter(_)
+        | RuntimeError::EventWriterFailures(_)
+        | RuntimeError::TemporaryReplacementFailures { .. }
         | RuntimeError::ControlledStageFailures { .. }
         | RuntimeError::SessionCleanupFailures(_)
         | RuntimeError::SessionFailed { .. }

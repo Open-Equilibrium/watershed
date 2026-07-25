@@ -481,6 +481,36 @@ fn session_object_retry_and_reopen_preserve_accounting() {
         .expect_err("partial object write fails");
 
     assert!(!object_path.exists(), "failed reservation is removed");
+    let mut blocked_temp = None;
+    let err = writer
+        .persist_with(&object, |path, bytes| {
+            let mut file = open_anchored_session_log_append_file(path)?;
+            file.write_all(&bytes[..5])
+                .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            drop(file);
+            path.remove()?;
+            fs::create_dir(path.diagnostic_path())
+                .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+            blocked_temp = Some(path.diagnostic_path().to_owned());
+            Err(path_io_error(
+                path.diagnostic_path(),
+                io::Error::other("injected object write failure before cleanup"),
+            ))
+        })
+        .expect_err("object write and temp cleanup both fail");
+    let message = err.to_string();
+    assert!(
+        message.contains("injected object write failure before cleanup"),
+        "{message}"
+    );
+    assert!(
+        message.contains("temporary replacement cleanup failed"),
+        "{message}"
+    );
+    let blocked_temp = blocked_temp.expect("blocked temp path captured");
+    assert!(blocked_temp.is_dir());
+    fs::remove_dir(blocked_temp).expect("cleanup blocker removed");
+
     writer.persist(&object).expect("clean retry succeeds");
     assert_eq!(fs::read(&object_path).expect("object reads"), object.bytes);
     assert_eq!(
@@ -874,6 +904,30 @@ impl EventLogAppender for SyncFailAppender {
     }
 }
 
+struct PanicAppendAppender;
+
+impl EventLogAppender for PanicAppendAppender {
+    fn append(&mut self, _path: &Path, _bytes: &[u8]) -> Result<(), RuntimeError> {
+        panic!("injected append panic");
+    }
+
+    fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+struct PanicShutdownSyncAppender;
+
+impl EventLogAppender for PanicShutdownSyncAppender {
+    fn append(&mut self, _path: &Path, _bytes: &[u8]) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn sync(&mut self, _path: &Path) -> Result<(), RuntimeError> {
+        panic!("injected shutdown sync panic");
+    }
+}
+
 struct BatchProbeAppender {
     appends: Arc<Mutex<Vec<Vec<u8>>>>,
     failure_prefix: Option<Option<usize>>,
@@ -994,6 +1048,157 @@ fn enqueue_test_event(writer: &mut SerialSessionWriter<'_>, event: &EventEnvelop
 }
 
 #[test]
+fn finish_reports_append_panic_and_channel_failure_together() {
+    let workspace = empty_workspace("event-writer-append-panic");
+    let reservation = reserve_session_log(&workspace, "panicappend001").expect("session reserved");
+    let mut writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(&reservation),
+            notifier: None,
+            timings: None,
+        },
+        PanicAppendAppender,
+    )
+    .expect("writer starts");
+    let event = test_event("panicappend001", "evt-first", EventType::SessionStarted, 1);
+    let jsonl = event.canonical_jsonl().expect("event serializes");
+
+    writer
+        .commit(&event, &jsonl, None, Some(Instant::now()))
+        .expect_err("append panic closes the response channel");
+    let err = writer
+        .finish()
+        .expect_err("finish must retain the channel and panic causes");
+    let message = err.to_string();
+    assert!(
+        message.contains("session event writer channel closed unexpectedly"),
+        "{message}"
+    );
+    assert!(
+        message.contains("session event writer panicked"),
+        "{message}"
+    );
+
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn finish_reports_shutdown_sync_panic_and_channel_failure_together() {
+    let workspace = empty_workspace("event-writer-shutdown-panic");
+    let reservation = reserve_session_log(&workspace, "panicsync001").expect("session reserved");
+    let mut writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(&reservation),
+            notifier: None,
+            timings: None,
+        },
+        PanicShutdownSyncAppender,
+    )
+    .expect("writer starts");
+    let event = test_event("panicsync001", "evt-first", EventType::SessionStarted, 1);
+    let jsonl = event.canonical_jsonl().expect("event serializes");
+    writer
+        .commit(&event, &jsonl, None, Some(Instant::now()))
+        .expect("append succeeds before shutdown sync");
+
+    let err = writer
+        .finish()
+        .expect_err("finish must retain the channel and panic causes");
+    let message = err.to_string();
+    assert!(
+        message.contains("session event writer channel closed unexpectedly"),
+        "{message}"
+    );
+    assert!(
+        message.contains("session event writer panicked"),
+        "{message}"
+    );
+
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn append_panic_remains_visible_with_operation_and_cleanup_failures() {
+    let workspace = empty_workspace("event-writer-panic-stages");
+    let reservation = reserve_session_log(&workspace, "panicstages001").expect("session reserved");
+    let mut writer = SerialSessionWriter::start_with_appender(
+        SerialWriterStart {
+            context_path: reservation.context_path.clone(),
+            path: reservation.session_path.clone(),
+            session_id: reservation.session_id.clone(),
+            validation: SessionAppendValidationState::empty(&reservation.session_id),
+            commit_reservation: Some(&reservation),
+            notifier: None,
+            timings: None,
+        },
+        PanicAppendAppender,
+    )
+    .expect("writer starts");
+    let event = test_event("panicstages001", "evt-first", EventType::SessionStarted, 1);
+    let jsonl = event.canonical_jsonl().expect("event serializes");
+    let operation = writer.commit(&event, &jsonl, None, Some(Instant::now()));
+    let finalization = writer.finish();
+    reservation
+        .lock_path
+        .remove()
+        .expect("owned lock removed externally");
+    fs::create_dir(reservation.lock_path.diagnostic_path())
+        .expect("directory blocks ownership cleanup");
+
+    let err = reconcile_controlled_stages(operation, finalization, reservation.cleanup())
+        .expect_err("operation, panic, and cleanup failures must remain visible");
+    let message = err.to_string();
+    assert!(
+        message.contains("session event writer channel closed unexpectedly"),
+        "{message}"
+    );
+    assert!(
+        message.contains("session event writer panicked"),
+        "{message}"
+    );
+    assert!(message.contains("ownership cleanup failed"), "{message}");
+
+    fs::remove_dir(reservation.lock_path.diagnostic_path())
+        .expect("cleanup blocker directory removed");
+}
+
+#[test]
+fn finish_preserves_every_deferred_batch_failure() {
+    let workspace = empty_workspace("event-writer-deferred-failures");
+    let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
+    let appends = Arc::new(Mutex::new(Vec::new()));
+    let (notifier, _receiver) = live_event_channel();
+    let (mut writer, progress, _) =
+        progress_writer(&reservation, 2, notifier, appends, Some(Some(0)), None);
+    for event in &progress {
+        enqueue_test_event(&mut writer, event);
+    }
+
+    let err = writer
+        .finish()
+        .expect_err("every deferred failure must remain visible");
+    let message = err.to_string();
+    assert!(
+        message.contains("injected batch append failure"),
+        "{message}"
+    );
+    assert!(
+        message.contains("event discarded after a prior session writer failure"),
+        "{message}"
+    );
+
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
 fn progress_batches_stay_bounded_and_flush_before_semantic_events() {
     let workspace = empty_workspace("event-writer-batch-bound");
     let reservation = reserve_session_log(&workspace, "hello001").expect("session reserved");
@@ -1100,12 +1305,15 @@ fn failed_progress_batch_retains_and_notifies_only_its_complete_prefix() {
             )
             .expect_err("batch suffix failure blocks the terminal event");
 
-        assert!(matches!(
-            error,
-            RuntimeError::EventWriter(source)
-                if matches!(source.as_ref(), RuntimeError::Io { source, .. }
-                    if source.to_string().contains("injected batch append failure"))
-        ));
+        let message = error.to_string();
+        assert!(
+            message.contains("injected batch append failure"),
+            "{message}"
+        );
+        assert!(
+            message.contains("event discarded after a prior session writer failure"),
+            "{message}"
+        );
         assert_eq!(
             appends.lock().expect("batch append probe lock").concat(),
             progress_jsonl[..readable_prefix.unwrap_or(0)]

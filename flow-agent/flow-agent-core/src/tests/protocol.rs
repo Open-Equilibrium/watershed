@@ -131,6 +131,25 @@ fn protocol_validator_rejects_nulls_recursively_but_keeps_additive_values() {
 }
 
 #[test]
+fn protocol_and_runtime_boundaries_both_reject_null_optional_ids() {
+    for field in ["correlation_id", "flow_id", "parent_flow_id"] {
+        let mut raw = serde_json::to_value(base_event()).expect("event converts to JSON");
+        raw[field] = serde_json::Value::Null;
+        assert!(
+            serde_json::from_value::<EventEnvelope>(raw.clone()).is_err(),
+            "proto boundary must reject null {field}"
+        );
+
+        let mut jsonl = proto::canonical_json(&raw).expect("raw envelope canonicalizes");
+        jsonl.push('\n');
+        assert!(
+            validate_protocol_jsonl_text(Path::new("null-optional-id.jsonl"), &jsonl).is_err(),
+            "runtime boundary must reject null {field}"
+        );
+    }
+}
+
+#[test]
 fn protocol_validator_rejects_tool_started_required_payload_edges() {
     let mut incomplete_tool = base_event();
     incomplete_tool.event_type = EventType::ToolStarted;

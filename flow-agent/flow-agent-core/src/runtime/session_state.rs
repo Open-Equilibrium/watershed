@@ -761,10 +761,11 @@ pub fn reserve_session_log_with_publish_observer(
     let log_path = paths.metadata;
     let context_path = paths.contexts;
     let lock_path = paths.lock;
-    reserve_anchored_session_lock_file(&lock_path, session_id)?;
+    let lock_file = reserve_anchored_session_lock_file(&lock_path, session_id)?;
     let reservation = SessionReservation::new(
         context_path,
         log_path,
+        lock_file,
         lock_path,
         session_path,
         session_id.to_owned(),
@@ -952,9 +953,9 @@ pub fn reserve_new_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError
 pub fn reserve_anchored_session_lock_file(
     path: &AnchoredFile,
     session_id: &str,
-) -> Result<(), RuntimeError> {
+) -> Result<fs::File, RuntimeError> {
     match create_anchored_file(path) {
-        Ok(_) => Ok(()),
+        Ok(file) => Ok(file),
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
             Err(RuntimeError::ActiveSession {
                 session_id: session_id.to_owned(),
@@ -979,8 +980,8 @@ pub fn acquire_anchored_session_lock(
     session_id: &str,
 ) -> Result<SessionLockGuard, RuntimeError> {
     let path = SessionBundlePaths::lock_in(sessions, session_id);
-    reserve_anchored_session_lock_file(&path, session_id)?;
-    let guard = SessionLockGuard::new(path);
+    let file = reserve_anchored_session_lock_file(&path, session_id)?;
+    let guard = SessionLockGuard::new(path, file);
     let operation = match ascii_case_alias(&guard.path) {
         Ok(Some(alias)) => Err(RuntimeError::ActiveSession {
             session_id: session_id.to_owned(),

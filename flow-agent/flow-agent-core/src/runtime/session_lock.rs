@@ -16,6 +16,7 @@ pub struct SessionReservation {
     pub(crate) session_id: String,
     context_created: Cell<bool>,
     log_created: Cell<bool>,
+    lock_file: fs::File,
     lock_released: Cell<bool>,
     session_created: Cell<bool>,
     state: Cell<ReservationState>,
@@ -25,6 +26,7 @@ impl SessionReservation {
     pub(crate) fn new(
         context_path: AnchoredFile,
         log_path: AnchoredFile,
+        lock_file: fs::File,
         lock_path: AnchoredFile,
         session_path: AnchoredFile,
         session_id: String,
@@ -37,6 +39,7 @@ impl SessionReservation {
             session_id,
             context_created: Cell::new(false),
             log_created: Cell::new(false),
+            lock_file,
             lock_released: Cell::new(false),
             session_created: Cell::new(false),
             state: Cell::new(ReservationState::Empty),
@@ -96,7 +99,7 @@ impl SessionReservation {
             }
         }
         if !self.lock_released.get() {
-            match self.lock_path.remove() {
+            match remove_owned_anchored_lock(&self.lock_path, &self.lock_file) {
                 Ok(()) => self.lock_released.set(true),
                 Err(error) => failures.push(Box::new(error)),
             }
@@ -121,7 +124,7 @@ impl SessionReservation {
         if self.state.get() == ReservationState::Released {
             return Ok(());
         }
-        self.lock_path.remove()?;
+        remove_owned_anchored_lock(&self.lock_path, &self.lock_file)?;
         self.lock_released.set(true);
         self.state.set(ReservationState::Released);
         Ok(())
@@ -149,13 +152,15 @@ enum LockState {
 }
 
 pub struct SessionLockGuard {
+    pub(crate) file: fs::File,
     pub(crate) path: AnchoredFile,
     state: Cell<LockState>,
 }
 
 impl SessionLockGuard {
-    pub(crate) fn new(path: AnchoredFile) -> Self {
+    pub(crate) fn new(path: AnchoredFile, file: fs::File) -> Self {
         Self {
+            file,
             path,
             state: Cell::new(LockState::Active),
         }
@@ -165,7 +170,7 @@ impl SessionLockGuard {
         if self.state.get() == LockState::Released {
             return Ok(());
         }
-        self.path.remove()?;
+        remove_owned_anchored_lock(&self.path, &self.file)?;
         self.state.set(LockState::Released);
         Ok(())
     }
@@ -175,7 +180,7 @@ impl Drop for SessionLockGuard {
     fn drop(&mut self) {
         if self.state.replace(LockState::Released) == LockState::Active {
             // Panic and uncontrolled unwinding cannot report cleanup errors.
-            let _ = self.path.remove();
+            let _ = remove_owned_anchored_lock(&self.path, &self.file);
         }
     }
 }

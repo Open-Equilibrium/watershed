@@ -221,17 +221,22 @@ impl<'a> SerialSessionWriter<'a> {
     }
 
     pub(crate) fn drain_deferred(&mut self) -> Result<(), RuntimeError> {
-        let mut first_error = None;
+        writer_failures_result(self.take_deferred_failures())
+    }
+
+    pub(crate) fn take_deferred_failures(&mut self) -> Vec<RuntimeError> {
+        let mut failures = Vec::new();
         for response in std::mem::take(&mut self.deferred) {
-            let result = response
-                .recv()
-                .map_err(|_| event_writer_failure(writer_channel_closed_error()))
-                .and_then(|outcome| self.apply_outcome(outcome));
-            if first_error.is_none() {
-                first_error = result.err();
+            match response.recv() {
+                Ok(outcome) => {
+                    if let Err(error) = self.apply_outcome(outcome) {
+                        failures.push(error);
+                    }
+                }
+                Err(_) => failures.push(event_writer_failure(writer_channel_closed_error())),
             }
         }
-        first_error.map_or(Ok(()), Err)
+        failures
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), RuntimeError> {
@@ -241,20 +246,47 @@ impl<'a> SerialSessionWriter<'a> {
         let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
         let send_result = sender.send(SessionWriterCommand::Shutdown(acknowledgement));
         drop(sender);
-        let deferred_result = self.drain_deferred();
-        let outcome = send_result
-            .map_err(|_| writer_channel_closed_error())
-            .and_then(|()| response.recv().map_err(|_| writer_channel_closed_error()));
-        let join_result = self
+        let mut failures = self.take_deferred_failures();
+        let outcome = match send_result {
+            Ok(()) => match response.recv() {
+                Ok(outcome) => Some(outcome),
+                Err(_) => {
+                    failures.push(event_writer_failure(writer_channel_closed_error()));
+                    None
+                }
+            },
+            Err(_) => {
+                failures.push(event_writer_failure(writer_channel_closed_error()));
+                None
+            }
+        };
+        if self
             .worker
             .take()
             .expect("started event writer owns a worker")
             .join()
-            .map_err(|_| RuntimeError::Protocol("session event writer panicked".to_owned()));
-        deferred_result?;
-        let outcome = outcome.map_err(event_writer_failure)?;
-        join_result?;
-        self.apply_outcome(outcome)
+            .is_err()
+        {
+            failures.push(event_writer_failure(RuntimeError::Protocol(
+                "session event writer panicked".to_owned(),
+            )));
+        }
+        if let Some(outcome) = outcome
+            && let Err(error) = self.apply_outcome(outcome)
+        {
+            failures.push(error);
+        }
+        writer_failures_result(failures)
+    }
+}
+
+pub fn writer_failures_result(failures: Vec<RuntimeError>) -> Result<(), RuntimeError> {
+    match failures.len() {
+        0 => Ok(()),
+        1 => Err(failures.into_iter().next().expect("one failure exists")),
+        _ => Err(RuntimeError::EventWriterFailures(
+            failures.into_iter().map(Box::new).collect(),
+        )),
     }
 }
 
@@ -283,27 +315,33 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
             RuntimeError::Protocol("session event writer is already closed".to_owned())
         })?;
         let (acknowledgement, response) = std::sync::mpsc::sync_channel(1);
-        sender
-            .send(SessionWriterCommand::Commit(QueuedEvent {
-                acknowledgement,
-                canonical_jsonl: canonical_jsonl.to_owned(),
-                context_manifest,
-                measurement_started_at,
-                event: Box::new(event.clone()),
-                pre_batch_latency_nanos: None,
-            }))
-            .map_err(|_| event_writer_failure(writer_channel_closed_error()))?;
+        let send_result = sender.send(SessionWriterCommand::Commit(QueuedEvent {
+            acknowledgement,
+            canonical_jsonl: canonical_jsonl.to_owned(),
+            context_manifest,
+            measurement_started_at,
+            event: Box::new(event.clone()),
+            pre_batch_latency_nanos: None,
+        }));
+        if send_result.is_err() {
+            let mut failures = self.take_deferred_failures();
+            failures.push(event_writer_failure(writer_channel_closed_error()));
+            return writer_failures_result(failures);
+        }
         if is_batchable {
             self.deferred.push(response);
             return Ok(());
         }
-        let deferred_result = self.drain_deferred();
-        let outcome = response
-            .recv()
-            .map_err(|_| event_writer_failure(writer_channel_closed_error()))?;
-        let outcome_result = self.apply_outcome(outcome);
-        deferred_result?;
-        outcome_result
+        let mut failures = self.take_deferred_failures();
+        match response.recv() {
+            Ok(outcome) => {
+                if let Err(error) = self.apply_outcome(outcome) {
+                    failures.push(error);
+                }
+            }
+            Err(_) => failures.push(event_writer_failure(writer_channel_closed_error())),
+        }
+        writer_failures_result(failures)
     }
 }
 

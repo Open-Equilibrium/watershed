@@ -90,7 +90,8 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     published.rollback().expect("reservation rolls back");
 
     let held_lock = sessions.file("smoke001.lock");
-    reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
+    let held_lock_file =
+        reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
 
     let second = reserve_unique_session_log(&workspace, "smoke001")
         .expect("locked unpublished candidate must allocate the next suffix");
@@ -101,6 +102,7 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     assert!(second.session_path.diagnostic_path().exists());
     second.rollback().expect("reservation rolls back");
     held_lock.remove().expect("held lock removed");
+    drop(held_lock_file);
 }
 
 #[cfg(unix)]
@@ -204,5 +206,48 @@ fn script_publish_stays_bound_to_the_opened_target_directory() {
     assert_eq!(
         fs::read_to_string(moved_output.join("result.txt")).expect("output readable"),
         "new"
+    );
+}
+
+#[test]
+fn replacement_temp_cleanup_failure_preserves_both_causes_and_allows_retry() {
+    let workspace = empty_workspace("replacement-temp-cleanup");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+    let mut blocked_temp = None;
+
+    let err = with_anchored_replacement_temp(&target, None, |temp, file| {
+        drop(file);
+        temp.remove().expect("created temp file removed");
+        fs::create_dir(temp.diagnostic_path()).expect("directory blocks temp-file cleanup");
+        blocked_temp = Some(temp.diagnostic_path().to_owned());
+        Err::<(), _>(RuntimeError::Protocol(
+            "injected replacement operation failure".to_owned(),
+        ))
+    })
+    .expect_err("operation and cleanup failure must be returned");
+
+    let message = err.to_string();
+    assert!(
+        message.contains(
+            "temporary replacement operation failed: injected replacement operation failure"
+        ),
+        "{message}"
+    );
+    assert!(
+        message.contains("temporary replacement cleanup failed:"),
+        "{message}"
+    );
+    let blocked_temp = blocked_temp.expect("blocked temp path captured");
+    assert!(blocked_temp.is_dir(), "failed cleanup remains observable");
+
+    fs::remove_dir(&blocked_temp).expect("cleanup blocker removed");
+    replace_script_output_atomically(&target, b"clean retry")
+        .expect("clean replacement retry succeeds");
+    assert_eq!(
+        fs::read(target.diagnostic_path()).expect("replacement output reads"),
+        b"clean retry"
     );
 }

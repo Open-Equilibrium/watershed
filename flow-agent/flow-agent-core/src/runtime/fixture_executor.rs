@@ -280,11 +280,16 @@ pub fn with_anchored_replacement_temp<T>(
     operation: impl FnOnce(&AnchoredFile, fs::File) -> Result<T, RuntimeError>,
 ) -> Result<T, RuntimeError> {
     let (temp_path, temp_file) = create_anchored_replacement_temp(path, denied_reason)?;
-    let result = operation(&temp_path, temp_file);
-    if result.is_err() {
-        let _ = temp_path.remove();
+    match operation(&temp_path, temp_file) {
+        Ok(value) => Ok(value),
+        Err(operation) => match temp_path.remove() {
+            Ok(()) => Err(operation),
+            Err(cleanup) => Err(RuntimeError::TemporaryReplacementFailures {
+                operation: Box::new(operation),
+                cleanup: Box::new(cleanup),
+            }),
+        },
     }
-    result
 }
 
 pub fn create_anchored_replacement_temp(

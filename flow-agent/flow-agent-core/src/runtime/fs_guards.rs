@@ -384,6 +384,64 @@ pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeErro
     file.open(&options)
 }
 
+pub fn remove_owned_anchored_lock(
+    path: &AnchoredFile,
+    acquired: &fs::File,
+) -> Result<(), RuntimeError> {
+    let (current, current_metadata) = open_anchored_real_file_for_read(path)?;
+    ensure_not_hardlinked_open_file(path.diagnostic_path(), &current, &current_metadata)?;
+    let acquired_metadata = acquired
+        .metadata()
+        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+    validate_real_file(path.diagnostic_path(), &acquired_metadata)?;
+    ensure_not_hardlinked_open_file(path.diagnostic_path(), acquired, &acquired_metadata)?;
+    if !open_files_share_identity(path.diagnostic_path(), acquired, &current)? {
+        return Err(RuntimeError::Protocol(format!(
+            "{} lock ownership changed before release",
+            path.diagnostic_path().display()
+        )));
+    }
+    path.remove()
+}
+
+#[cfg(unix)]
+pub fn open_files_share_identity(
+    _path: &Path,
+    left: &fs::File,
+    right: &fs::File,
+) -> Result<bool, RuntimeError> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let left = left
+        .metadata()
+        .map_err(|source| path_io_error(_path, source))?;
+    let right = right
+        .metadata()
+        .map_err(|source| path_io_error(_path, source))?;
+    Ok(left.dev() == right.dev() && left.ino() == right.ino())
+}
+
+#[cfg(windows)]
+pub fn open_files_share_identity(
+    path: &Path,
+    left: &fs::File,
+    right: &fs::File,
+) -> Result<bool, RuntimeError> {
+    let left = windows_open_file_information(path, left)?;
+    let right = windows_open_file_information(path, right)?;
+    Ok(left.volume_serial_number == right.volume_serial_number
+        && left.file_index == right.file_index)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn open_files_share_identity(
+    _path: &Path,
+    _left: &fs::File,
+    _right: &fs::File,
+) -> Result<bool, RuntimeError> {
+    Ok(false)
+}
+
 pub fn ensure_anchored_non_hardlinked_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
     open_anchored_file_for_read(file).map(|_| ())
 }

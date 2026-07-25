@@ -56,10 +56,13 @@ pub struct EventEnvelope {
 struct UncheckedEventEnvelope {
     #[serde(flatten, default)]
     additional_fields: BTreeMap<String, Value>,
+    #[serde(default, deserialize_with = "deserialize_present_optional")]
     correlation_id: Option<String>,
     event_id: String,
     event_type: EventType,
+    #[serde(default, deserialize_with = "deserialize_present_optional")]
     flow_id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_present_optional")]
     parent_flow_id: Option<String>,
     #[serde(deserialize_with = "deserialize_payload_object")]
     payload: Value,
@@ -934,6 +937,14 @@ where
     } else {
         Err(serde::de::Error::custom("payload must be a JSON object"))
     }
+}
+
+fn deserialize_present_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 fn deserialize_protocol_version_v0<'de, D>(deserializer: D) -> Result<String, D::Error>

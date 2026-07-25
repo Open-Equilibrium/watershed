@@ -199,6 +199,15 @@ pub enum RuntimeError {
     ExecutionBackendUnavailable,
     /// The per-session event writer failed after event construction.
     EventWriter(Box<RuntimeError>),
+    /// Multiple independent event-writer failures occurred.
+    EventWriterFailures(Vec<Box<RuntimeError>>),
+    /// A temporary replacement operation and its cleanup both failed.
+    TemporaryReplacementFailures {
+        /// Failure from writing or publishing the replacement.
+        operation: Box<RuntimeError>,
+        /// Failure from removing the temporary replacement path.
+        cleanup: Box<RuntimeError>,
+    },
     /// Multiple controlled operation stages failed.
     ControlledStageFailures {
         /// Runtime, validation, or output-generation failure.
@@ -270,6 +279,17 @@ impl fmt::Display for RuntimeError {
                 "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile",
             ),
             Self::EventWriter(source) => write!(f, "event writer: {source}"),
+            Self::EventWriterFailures(failures) => {
+                f.write_str("event writer failures")?;
+                for (index, error) in failures.iter().enumerate() {
+                    write!(f, "; failure {}: {error}", index + 1)?;
+                }
+                Ok(())
+            }
+            Self::TemporaryReplacementFailures { operation, cleanup } => write!(
+                f,
+                "temporary replacement operation failed: {operation}; temporary replacement cleanup failed: {cleanup}"
+            ),
             Self::ControlledStageFailures {
                 operation,
                 finalization,
@@ -328,7 +348,14 @@ impl std::error::Error for RuntimeError {
             | Self::SessionLogExists(_)
             | Self::TerminalSession(_)
             | Self::Usage(_) => None,
-            Self::EventWriter(source) | Self::SessionFailed { source, .. } => Some(source.as_ref()),
+            Self::EventWriter(source)
+            | Self::SessionFailed { source, .. }
+            | Self::TemporaryReplacementFailures {
+                operation: source, ..
+            } => Some(source.as_ref()),
+            Self::EventWriterFailures(failures) => failures
+                .first()
+                .map(|source| source.as_ref() as &(dyn std::error::Error + 'static)),
             Self::ControlledStageFailures {
                 operation,
                 finalization,

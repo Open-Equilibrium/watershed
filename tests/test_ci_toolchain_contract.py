@@ -129,6 +129,14 @@ class CiToolchainContractTest(unittest.TestCase):
         self.assertEqual(package["engines"]["pnpm"], PNPM_VERSION)
         self.assertEqual(package["packageManager"], f"pnpm@{PNPM_VERSION}")
 
+    def test_node_toolchain_docs_cover_every_documentation_gate(self) -> None:
+        testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "documentation gates (HTML rendering and link-manifest generation)",
+            testing,
+        )
+
     def test_ci_installs_and_verifies_the_pinned_node_toolchain(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"

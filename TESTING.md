@@ -47,7 +47,7 @@ The same metrics AgentPulse reports (rework ratio, first-attempt success rate, c
 
 ## Development toolchain
 
-Node is a dev/CI-only toolchain for the Playwright HTML render gate, runtime package review gate and cross-platform Python launcher. [`.node-version`](.node-version) is the canonical Node version; `package.json#packageManager` pins pnpm. Watershed and Flow Agent have no Node product-runtime dependency.
+Node is a dev/CI-only toolchain for documentation gates (HTML rendering and link-manifest generation), the runtime package review gate and the cross-platform Python launcher. [`.node-version`](.node-version) is the canonical Node version; `package.json#packageManager` pins pnpm. Watershed and Flow Agent have no Node product-runtime dependency.
 
 ## CI
 
