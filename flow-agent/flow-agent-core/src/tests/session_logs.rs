@@ -805,6 +805,33 @@ fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
     assert!(!second.path.diagnostic_path().exists());
 }
 
+#[cfg(windows)]
+#[test]
+fn lock_release_rejects_junction_replacement_without_touching_its_target() {
+    let workspace = empty_workspace("junction-lock-owner");
+    let outside = empty_workspace("junction-lock-owner-outside");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let guard =
+        acquire_anchored_session_lock(&sessions, "junctionlock001").expect("lock owner acquires");
+    let lock_path = guard.path.diagnostic_path().to_owned();
+    let outside_marker = outside.join("foreign-owner");
+    fs::write(&outside_marker, b"foreign owner").expect("foreign marker written");
+    guard.path.remove().expect("lock file removed");
+    create_windows_junction(&lock_path, &outside);
+
+    guard
+        .release()
+        .expect_err("junction replacement must not be released as the original lock");
+
+    assert_eq!(
+        fs::read(&outside_marker).expect("foreign marker remains readable"),
+        b"foreign owner"
+    );
+    fs::remove_dir(&lock_path).expect("junction removed");
+}
+
 #[test]
 fn released_lock_guard_drop_does_not_touch_a_later_owner() {
     let workspace = empty_workspace("released-lock-owner");
