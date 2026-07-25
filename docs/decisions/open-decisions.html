@@ -81,6 +81,14 @@
         <ul><li><strong>A:</strong> SQLite plus append-only transcript/log files. Pro: queryable and local. Con: migration discipline needed.</li><li><strong>B:</strong> JSONL/files only. Pro: transparent. Con: weaker queries and concurrency.</li></ul>
         <p><strong>Recommendation:</strong> A for registry/config/metrics, while keeping transcripts append-only and exportable.</p>
       </article>
+      <article id="d-048" class="decision">
+        <h3>D-048 - HerdR Execution-Backend Integration</h3>
+        <p><strong>Status:</strong> Open, M2 blocker before executor implementation.</p>
+        <p><strong>Question:</strong> Should Meta-Harness reuse HerdR for host-local terminals, processes and session persistence while retaining policy, normalized records, shared config, schedules, audit and AgentPulse?</p>
+        <ul><li><strong>A:</strong> Integrate HerdR as an optional executor through its versioned CLI/socket API. Pro: reuses terminal multiplexing, process persistence, agent detection and remote attachment while preserving Meta-Harness boundaries. Con: requires stable identity mapping, failure recovery and a maintained adapter.</li><li><strong>B:</strong> Require HerdR as the runtime for all external CLI agents. Pro: one execution path and an existing terminal UI. Con: couples M2 availability and semantics to HerdR's platform support, protocol and roadmap.</li><li><strong>C:</strong> Build the Meta-Harness executor independently and use HerdR only as a comparison. Pro: complete control over the runtime boundary. Con: duplicates substantial terminal, process and persistence work.</li></ul>
+        <p><strong>Recommendation:</strong> A behind a backend-neutral executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
+        <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported Linux, macOS or Windows capabilities.</p>
+      </article>
     </div>
   </section>
 
