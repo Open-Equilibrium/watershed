@@ -4,8 +4,8 @@ const SESSION_OWNERSHIP_AUTHORITY_DIR: &str = "session-ownership-v1";
 const SESSION_OWNERSHIP_AUTHORITY_ROOT: &str = ".watershed-flow-agent";
 const SESSION_OWNERSHIP_AUTHORITY_ROOT_ALTERNATE: &str = ".watershed-flow-agent-coordinator";
 const SESSION_OWNERSHIP_DOMAIN: &[u8] = b"watershed-session-ownership-v2\0";
-const SESSION_OWNERSHIP_WORKSPACE_DIR: &str = "workspace-v1";
-const SESSION_OWNERSHIP_WORKSPACE_DOMAIN: &[u8] = b"watershed-session-ownership-workspace-v1\0";
+const SESSION_OWNERSHIP_WORKSPACE_DIR: &str = "workspace-v2";
+const SESSION_OWNERSHIP_WORKSPACE_DOMAIN: &[u8] = b"watershed-session-ownership-workspace-v2\0";
 
 #[derive(Debug)]
 pub struct SessionOwnershipLease {
@@ -14,12 +14,65 @@ pub struct SessionOwnershipLease {
     released: Cell<bool>,
 }
 
+#[derive(Debug)]
+pub(crate) struct SessionOwnershipObserver {
+    path: Option<AnchoredFile>,
+}
+
+impl SessionOwnershipObserver {
+    #[cfg(test)]
+    pub(crate) fn open(workspace: &Path, session_id: &str) -> Result<Self, RuntimeError> {
+        let workspace = open_session_ownership_workspace(workspace)?;
+        Self::open_anchored(&workspace, session_id)
+    }
+
+    pub(crate) fn open_anchored(
+        workspace: &AnchoredWorkspace,
+        session_id: &str,
+    ) -> Result<Self, RuntimeError> {
+        Ok(Self {
+            path: session_ownership_authority_path(workspace, session_id, false)?,
+        })
+    }
+
+    pub(crate) fn is_active(&self) -> Result<bool, RuntimeError> {
+        let Some(path) = self.path.as_ref() else {
+            return Ok(false);
+        };
+        let file = match open_existing_authority_file(path) {
+            Ok(file) => file,
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
+        };
+        match file.try_lock() {
+            Ok(()) => {
+                file.unlock()
+                    .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
+                Ok(false)
+            }
+            Err(fs::TryLockError::WouldBlock) => Ok(true),
+            Err(fs::TryLockError::Error(source)) => {
+                Err(path_io_error(path.diagnostic_path(), source))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn session_ownership_is_active(
+    workspace: &Path,
+    session_id: &str,
+) -> Result<bool, RuntimeError> {
+    SessionOwnershipObserver::open(workspace, session_id)?.is_active()
+}
+
 impl SessionOwnershipLease {
     pub(crate) fn ensure_coordinator_available(workspace: &Path) -> Result<(), RuntimeError> {
-        let workspace =
-            fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
+        let workspace = open_session_ownership_workspace(workspace)?;
         let workspace_key = session_ownership_workspace_key(&workspace);
-        session_ownership_authority_dir(&workspace, &workspace_key, true).map(|_| ())
+        session_ownership_authority_dir(&workspace.root().path, &workspace_key, true).map(|_| ())
     }
 
     pub(crate) fn acquire(
@@ -27,7 +80,8 @@ impl SessionOwnershipLease {
         session_id: &str,
         marker_path: &Path,
     ) -> Result<Self, RuntimeError> {
-        let path = session_ownership_authority_path(workspace, session_id, true)?
+        let workspace = open_session_ownership_workspace(workspace)?;
+        let path = session_ownership_authority_path(&workspace, session_id, true)?
             .expect("created session ownership authority path");
         let file = open_or_create_authority_file(&path)?;
         match file.try_lock() {
@@ -66,39 +120,12 @@ impl Drop for SessionOwnershipLease {
     }
 }
 
-pub(crate) fn session_ownership_is_active(
-    workspace: &Path,
-    session_id: &str,
-) -> Result<bool, RuntimeError> {
-    let Some(path) = session_ownership_authority_path(workspace, session_id, false)? else {
-        return Ok(false);
-    };
-    let file = match open_existing_authority_file(&path) {
-        Ok(file) => file,
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-            return Ok(false);
-        }
-        Err(error) => return Err(error),
-    };
-    match file.try_lock() {
-        Ok(()) => {
-            file.unlock()
-                .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
-            Ok(false)
-        }
-        Err(fs::TryLockError::WouldBlock) => Ok(true),
-        Err(fs::TryLockError::Error(source)) => Err(path_io_error(path.diagnostic_path(), source)),
-    }
-}
-
 fn session_ownership_authority_path(
-    workspace: &Path,
+    workspace: &AnchoredWorkspace,
     session_id: &str,
     create: bool,
 ) -> Result<Option<AnchoredFile>, RuntimeError> {
-    let workspace =
-        fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
-    let workspace_key = session_ownership_workspace_key(&workspace);
+    let workspace_key = session_ownership_workspace_key(workspace);
     let mut key =
         Vec::with_capacity(SESSION_OWNERSHIP_DOMAIN.len() + workspace_key.len() + session_id.len());
     key.extend_from_slice(SESSION_OWNERSHIP_DOMAIN);
@@ -106,7 +133,8 @@ fn session_ownership_authority_path(
     append_length_prefixed(&mut key, session_id.as_bytes());
     let leaf = format!("{}.lease", sha256_hex(&key));
 
-    let Some(authority) = session_ownership_authority_dir(&workspace, &workspace_key, create)?
+    let Some(authority) =
+        session_ownership_authority_dir(&workspace.root().path, &workspace_key, create)?
     else {
         return Ok(None);
     };
@@ -151,11 +179,20 @@ fn session_ownership_authority_dir(
     )
 }
 
-fn session_ownership_workspace_key(workspace: &Path) -> Vec<u8> {
-    let path = stable_native_path_bytes(workspace);
-    let mut key = Vec::with_capacity(SESSION_OWNERSHIP_WORKSPACE_DOMAIN.len() + path.len() + 8);
+fn open_session_ownership_workspace(workspace: &Path) -> Result<AnchoredWorkspace, RuntimeError> {
+    let workspace =
+        fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
+    AnchoredWorkspace::open(&workspace)
+}
+
+fn session_ownership_workspace_key(workspace: &AnchoredWorkspace) -> Vec<u8> {
+    let path = stable_native_path_bytes(&workspace.root().path);
+    let identity = workspace.identity();
+    let mut key = Vec::with_capacity(SESSION_OWNERSHIP_WORKSPACE_DOMAIN.len() + path.len() + 24);
     key.extend_from_slice(SESSION_OWNERSHIP_WORKSPACE_DOMAIN);
     append_length_prefixed(&mut key, &path);
+    key.extend_from_slice(&identity.device.to_le_bytes());
+    key.extend_from_slice(&identity.inode.to_le_bytes());
     key
 }
 

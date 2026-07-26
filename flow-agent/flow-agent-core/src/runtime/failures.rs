@@ -289,6 +289,7 @@ pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Opti
         | RuntimeError::EventWriter(_)
         | RuntimeError::EventWriterFailures(_)
         | RuntimeError::TemporaryReplacementFailures { .. }
+        | RuntimeError::PublishedOutputCleanupFailure { .. }
         | RuntimeError::ControlledStageFailures { .. }
         | RuntimeError::SessionCleanupFailures(_)
         | RuntimeError::SessionFailed { .. }

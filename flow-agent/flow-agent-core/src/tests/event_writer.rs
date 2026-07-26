@@ -76,6 +76,31 @@ fn event_appender_rejects_a_leaf_replaced_while_open() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn event_appender_rejects_a_canonical_path_replaced_while_handle_remains_linked() {
+    let workspace = empty_workspace("event-writer-relinked-handle");
+    let reservation = reserve_session_log(&workspace, "relinked001").expect("session reserved");
+    let path = reservation.session_path.diagnostic_path();
+    let moved = path.with_extension("moved");
+    let mut appender = SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+    fs::rename(path, &moved).expect("canonical segment moves while remaining linked");
+    fs::write(path, b"replacement\n").expect("replacement segment writes");
+
+    let err = appender
+        .append(path, b"lost event\n")
+        .expect_err("replaced canonical segment must fail closed");
+
+    assert!(err.to_string().contains("identity changed"), "{err}");
+    assert_eq!(fs::read(&moved).expect("moved segment remains"), b"");
+    assert_eq!(
+        fs::read(path).expect("replacement segment remains"),
+        b"replacement\n"
+    );
+    drop(appender);
+    reservation.simulate_abrupt_termination();
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn event_appender_rejects_an_in_place_length_change() {
@@ -175,6 +200,8 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     let fifth = segmented_jsonl_path(&reservation.session_path, 5).expect("segment path resolves");
     assert!(!fifth.diagnostic_path().exists());
 
+    fs::write(reservation.context_path.diagnostic_path(), b"\n")
+        .expect("base manifest segment completed");
     for ordinal in 2..=CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
         let path = segmented_jsonl_path(&reservation.context_path, ordinal)
             .expect("manifest segment path resolves");
@@ -183,6 +210,148 @@ fn event_and_manifest_appenders_enforce_distinct_segment_caps() {
     ContextManifestWriter::open(&reservation.context_path)
         .expect("five context-manifest segments remain valid");
     drop(appender);
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn resume_preflight_rejects_a_fifth_event_segment_before_side_effects() {
+    let workspace = empty_workspace("resume-preflight-event-segment-cap");
+    let reservation =
+        reserve_session_log(&workspace, "resumeeventsegments001").expect("session reserved");
+    for ordinal in 1..=EVENT_STREAM_LIMITS.max_segments {
+        let path = segmented_jsonl_path(&reservation.session_path, ordinal)
+            .expect("segment path resolves");
+        let bytes = if ordinal == EVENT_STREAM_LIMITS.max_segments {
+            vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES - 1).expect("size fits")]
+        } else {
+            vec![b'x']
+        };
+        fs::write(path.diagnostic_path(), bytes).expect("fragmented segment written");
+    }
+    let marker = b"\n";
+    let event = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionStarted,
+        "resumeeventsegments001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({"reason":"fixture-start"}),
+    );
+    let canonical = event.canonical_jsonl().expect("event serializes");
+    let preflight_result = ResumePreflightSink::open(
+        &reservation.session_path,
+        &reservation.context_path,
+        &reservation.session_id,
+        marker.len(),
+        EventClock::fixed_fixture(),
+        0,
+        0,
+    )
+    .and_then(|mut preflight| {
+        preflight.commit(&event, &canonical, None, None)?;
+        preflight.finish()
+    });
+
+    let side_effect = workspace.join("published.txt");
+    if preflight_result.is_ok() {
+        let mut appender =
+            SessionLogAppender::open(&reservation.session_path).expect("appender opens");
+        appender
+            .append(reservation.session_path.diagnostic_path(), marker)
+            .expect("resume marker fills the fourth segment");
+        fs::write(&side_effect, b"published").expect("side effect published");
+        let err = appender
+            .append(
+                reservation.session_path.diagnostic_path(),
+                canonical.as_bytes(),
+            )
+            .expect_err("the real writer rejects the later event");
+        assert!(
+            err.to_string().contains("segment count exceeds max 4"),
+            "{err}"
+        );
+    }
+
+    let err = preflight_result.expect_err("preflight must reject before the side effect");
+    assert!(
+        err.to_string().contains("segment count exceeds max 4"),
+        "{err}"
+    );
+    assert!(!side_effect.exists());
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn resume_preflight_rejects_a_sixth_context_segment_before_prior_side_effects() {
+    let workspace = empty_workspace("resume-preflight-context-segment-cap");
+    let reservation =
+        reserve_session_log(&workspace, "resumecontextsegments001").expect("session reserved");
+    for ordinal in 1..=CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
+        let path = segmented_jsonl_path(&reservation.context_path, ordinal)
+            .expect("context segment path resolves");
+        let bytes = if ordinal == CONTEXT_MANIFEST_STREAM_LIMITS.max_segments {
+            let mut bytes =
+                vec![b'x'; usize::try_from(MAX_SESSION_SEGMENT_BYTES - 1).expect("size fits")];
+            *bytes.last_mut().expect("record is non-empty") = b'\n';
+            bytes
+        } else {
+            vec![b'\n']
+        };
+        fs::write(path.diagnostic_path(), bytes).expect("fragmented context segment written");
+    }
+    let checkpoint = ContextManifestCheckpoint {
+        manifest: ContextManifest {
+            line: "{}\n".to_owned(),
+        },
+        objects: Vec::new(),
+        ordinal: usize::try_from(CONTEXT_MANIFEST_STREAM_LIMITS.max_segments + 1)
+            .expect("segment count fits"),
+    };
+    let event = EventEnvelope::new(
+        "evt-001",
+        EventType::MessageCompleted,
+        "resumecontextsegments001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+    );
+    let canonical = event.canonical_jsonl().expect("event serializes");
+    let preflight_result = ResumePreflightSink::open(
+        &reservation.session_path,
+        &reservation.context_path,
+        &reservation.session_id,
+        0,
+        EventClock::fixed_fixture(),
+        0,
+        0,
+    )
+    .and_then(|mut preflight| {
+        preflight.commit(&event, &canonical, Some(checkpoint.clone()), None)?;
+        preflight.finish()
+    });
+
+    let side_effect = workspace.join("published.txt");
+    if preflight_result.is_ok() {
+        fs::write(&side_effect, b"published").expect("prior side effect published");
+        let mut writer =
+            ContextManifestWriter::open(&reservation.context_path).expect("context writer opens");
+        let err = writer
+            .persist(&reservation.context_path, &checkpoint)
+            .expect_err("the real writer rejects the later manifest");
+        assert!(
+            err.to_string().contains("segment count exceeds max 5"),
+            "{err}"
+        );
+    }
+
+    let err = preflight_result.expect_err("preflight must reject before the side effect");
+    assert!(
+        err.to_string().contains("segment count exceeds max 5"),
+        "{err}"
+    );
+    assert!(!side_effect.exists());
     reservation.rollback().expect("reservation rolls back");
 }
 
@@ -287,6 +456,70 @@ fn segmented_stream_callbacks_do_not_observe_bytes_beyond_total_limit() {
 }
 
 #[test]
+fn segmented_stream_callbacks_reject_unterminated_non_final_segment() {
+    let workspace = empty_workspace("segment-callback-non-final-lf");
+    let reservation =
+        reserve_session_log(&workspace, "segmentboundary001").expect("session reserved");
+    fs::write(reservation.session_path.diagnostic_path(), b"{}")
+        .expect("unterminated base segment written");
+    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path resolves");
+    fs::write(second.diagnostic_path(), b"{}\n").expect("second segment written");
+
+    let bulk_err = read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)
+        .expect_err("bulk reader rejects the non-final boundary");
+    assert!(
+        bulk_err.to_string().contains("must end with LF"),
+        "{bulk_err}"
+    );
+
+    let mut visited = Vec::new();
+    let stream_err =
+        for_each_segmented_jsonl_line(&reservation.session_path, EVENT_STREAM_LIMITS, |line| {
+            visited.push(line.to_owned());
+            Ok(())
+        })
+        .expect_err("streaming reader rejects the non-final boundary");
+
+    assert!(
+        stream_err.to_string().contains("must end with LF"),
+        "{stream_err}"
+    );
+    assert!(visited.is_empty());
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn segmented_stream_callbacks_reject_empty_non_final_segment() {
+    let workspace = empty_workspace("segment-callback-empty-non-final");
+    let reservation = reserve_session_log(&workspace, "segmentempty001").expect("session reserved");
+    fs::write(reservation.session_path.diagnostic_path(), b"").expect("empty base segment written");
+    let second = segmented_jsonl_path(&reservation.session_path, 2).expect("segment path resolves");
+    fs::write(second.diagnostic_path(), b"{}\n").expect("second segment written");
+
+    let bulk_err = read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)
+        .expect_err("bulk reader rejects the empty non-final segment");
+    assert!(
+        bulk_err.to_string().contains("must end with LF"),
+        "{bulk_err}"
+    );
+
+    let mut visited = Vec::new();
+    let stream_err =
+        for_each_segmented_jsonl_line(&reservation.session_path, EVENT_STREAM_LIMITS, |line| {
+            visited.push(line.to_owned());
+            Ok(())
+        })
+        .expect_err("streaming reader rejects the empty non-final segment");
+
+    assert!(
+        stream_err.to_string().contains("must end with LF"),
+        "{stream_err}"
+    );
+    assert!(visited.is_empty());
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
 fn session_object_namespace_rejects_case_aliases() {
     let workspace = empty_workspace("session-object-case-alias");
     let sessions = ensure_runtime_dirs(&workspace)
@@ -307,7 +540,7 @@ fn session_object_namespace_rejects_case_aliases() {
 }
 
 #[test]
-fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
+fn segmented_stream_consumers_reject_high_ordinals_and_rollback_preserves_foreign_siblings() {
     for (label, context) in [("event", false), ("context", true)] {
         let workspace = empty_workspace(&format!("high-ordinal-{label}"));
         let reservation =
@@ -342,11 +575,21 @@ fn segmented_stream_consumers_reject_and_cleanup_high_ordinals() {
             .with_extension("JSONL");
         fs::write(&alias, b"\n").expect("case-aliased segment fixture writes");
         reservation.rollback().expect("reservation rolls back");
-        assert!(
-            !high.diagnostic_path().exists(),
-            "{label} high segment must be cleaned up"
+        assert_eq!(
+            fs::read(high.diagnostic_path()).expect("foreign high segment remains"),
+            b"\n",
+            "{label} foreign high segment bytes must be preserved"
         );
-        assert!(!alias.exists(), "{label} alias must be cleaned up");
+        assert_eq!(
+            fs::read(&alias).expect("foreign alias remains"),
+            b"\n",
+            "{label} foreign alias bytes must be preserved"
+        );
+        assert_eq!(
+            fs::read(base.diagnostic_path()).expect("owned base orphan remains readable"),
+            b"",
+            "{label} owned base must remain an inventory-visible empty orphan"
+        );
     }
 }
 
@@ -370,6 +613,8 @@ fn rotated_stream_segments_and_objects_reject_hardlinks() {
                 read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS).map(|_| ())
             }
             "context" => {
+                fs::write(reservation.context_path.diagnostic_path(), b"{}\n")
+                    .expect("base context segment completed");
                 let segment = segmented_jsonl_path(&reservation.context_path, 2)
                     .expect("segment path resolves");
                 fs::hard_link(&target, segment.diagnostic_path()).expect("context segment linked");
@@ -532,6 +777,160 @@ fn session_object_retry_and_reopen_preserve_accounting() {
     reservation.rollback().expect("reservation rolls back");
     drop(reservation);
     fs::remove_dir_all(workspace).expect("workspace removed");
+}
+
+#[test]
+fn session_object_preflight_rejects_the_persisted_total_before_writing() {
+    let workspace = empty_workspace("session-object-preflight-total");
+    let reservation =
+        reserve_session_log(&workspace, "objectpreflight001").expect("session reserved");
+    let bytes = b"xx".to_vec();
+    let object = ContextObject {
+        digest: sha256_hex(&bytes),
+        bytes,
+    };
+    let object_path = workspace.join(LOCAL_SESSION_DIR).join(format!(
+        "{}.object.sha256-{}",
+        reservation.session_id, object.digest
+    ));
+    let mut writer = SessionObjectWriter::open(
+        reservation.session_path.parent.clone(),
+        &reservation.session_id,
+    )
+    .expect("object writer opens");
+    writer.accounted_bytes = MAX_SESSION_OBJECT_TOTAL_BYTES - 1;
+
+    let preflight_error = writer
+        .preflight_all(std::slice::from_ref(&object))
+        .expect_err("preflight rejects an object above the persisted total budget");
+
+    assert!(
+        preflight_error.to_string().contains("object data size"),
+        "{preflight_error}"
+    );
+    assert_eq!(writer.accounted_bytes, MAX_SESSION_OBJECT_TOTAL_BYTES - 1);
+    let mut write_attempted = false;
+    let persist_error = writer
+        .persist_with(&object, |_path, _bytes| {
+            write_attempted = true;
+            Ok(())
+        })
+        .expect_err("persistence rejects the same total budget");
+    assert_eq!(persist_error.to_string(), preflight_error.to_string());
+    assert!(!write_attempted, "the rejected object must not be written");
+    assert!(!object_path.exists());
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn invalid_context_checkpoint_does_not_persist_objects() {
+    let workspace = empty_workspace("context-object-invalid-checkpoint");
+    let reservation =
+        reserve_session_log(&workspace, "objectinvalid001").expect("session reserved");
+    let bytes = b"unreferenced context object".to_vec();
+    let object = ContextObject {
+        digest: sha256_hex(&bytes),
+        bytes,
+    };
+    let object_path = workspace.join(LOCAL_SESSION_DIR).join(format!(
+        "{}.object.sha256-{}",
+        reservation.session_id, object.digest
+    ));
+    let mut writer = ContextManifestWriter::open_for_session(
+        &reservation.context_path,
+        reservation.session_path.parent.clone(),
+        &reservation.session_id,
+    )
+    .expect("context writer opens");
+    let accounted_bytes = writer
+        .object_writer
+        .as_ref()
+        .expect("object writer exists")
+        .accounted_bytes;
+
+    let err = writer
+        .persist(
+            &reservation.context_path,
+            &ContextManifestCheckpoint {
+                manifest: ContextManifest {
+                    line: "{\"turn\":2}\n".to_owned(),
+                },
+                objects: vec![object],
+                ordinal: 2,
+            },
+        )
+        .expect_err("invalid checkpoint ordinal rejects before object persistence");
+
+    assert!(err.to_string().contains("ordinal 2"), "{err}");
+    assert!(!object_path.exists());
+    assert_eq!(
+        writer
+            .object_writer
+            .as_ref()
+            .expect("object writer exists")
+            .accounted_bytes,
+        accounted_bytes
+    );
+    drop(writer);
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
+fn invalid_context_object_batch_does_not_persist_valid_prefix() {
+    let workspace = empty_workspace("context-object-invalid-batch");
+    let reservation = reserve_session_log(&workspace, "objectbatch001").expect("session reserved");
+    let bytes = b"valid context object".to_vec();
+    let object = ContextObject {
+        digest: sha256_hex(&bytes),
+        bytes,
+    };
+    let object_path = workspace.join(LOCAL_SESSION_DIR).join(format!(
+        "{}.object.sha256-{}",
+        reservation.session_id, object.digest
+    ));
+    let mut writer = ContextManifestWriter::open_for_session(
+        &reservation.context_path,
+        reservation.session_path.parent.clone(),
+        &reservation.session_id,
+    )
+    .expect("context writer opens");
+    let accounted_bytes = writer
+        .object_writer
+        .as_ref()
+        .expect("object writer exists")
+        .accounted_bytes;
+
+    let err = writer
+        .persist(
+            &reservation.context_path,
+            &ContextManifestCheckpoint {
+                manifest: ContextManifest {
+                    line: "{\"turn\":1}\n".to_owned(),
+                },
+                objects: vec![
+                    object,
+                    ContextObject {
+                        digest: "0".repeat(64),
+                        bytes: b"invalid context object".to_vec(),
+                    },
+                ],
+                ordinal: 1,
+            },
+        )
+        .expect_err("invalid object batch rejects before prefix persistence");
+
+    assert!(err.to_string().contains("content hash"), "{err}");
+    assert!(!object_path.exists());
+    assert_eq!(
+        writer
+            .object_writer
+            .as_ref()
+            .expect("object writer exists")
+            .accounted_bytes,
+        accounted_bytes
+    );
+    drop(writer);
+    reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]

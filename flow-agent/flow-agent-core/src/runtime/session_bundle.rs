@@ -199,17 +199,36 @@ pub(crate) fn session_objects(
     sessions: &AnchoredDir,
     session_id: &str,
 ) -> Result<(BTreeMap<String, AnchoredFile>, u64), RuntimeError> {
-    let prefix = format!("{session_id}.object.sha256-");
-    let mut objects = BTreeMap::new();
-    let mut total = 0u64;
-    for entry in sessions
+    let names = sessions
         .dir
         .entries()
         .map_err(|source| path_io_error(&sessions.path, source))?
-    {
-        let entry = entry.map_err(|source| path_io_error(&sessions.path, source))?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
+        .map(|entry| {
+            entry
+                .map(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .map(std::borrow::ToOwned::to_owned)
+                })
+                .map_err(|source| path_io_error(&sessions.path, source))
+        });
+    collect_session_objects(sessions, session_id, names, |path| {
+        anchored_file_bytes(path, MAX_SESSION_OBJECT_BYTES)
+    })
+}
+
+fn collect_session_objects(
+    sessions: &AnchoredDir,
+    session_id: &str,
+    names: impl Iterator<Item = Result<Option<String>, RuntimeError>>,
+    mut file_bytes: impl FnMut(&AnchoredFile) -> Result<u64, RuntimeError>,
+) -> Result<(BTreeMap<String, AnchoredFile>, u64), RuntimeError> {
+    let prefix = format!("{session_id}.object.sha256-");
+    let mut objects = BTreeMap::new();
+    let mut total = 0u64;
+    for name in names {
+        let Some(name) = name? else {
             continue;
         };
         let candidate = name.to_ascii_lowercase();
@@ -222,13 +241,34 @@ pub(crate) fn session_objects(
                 sessions.path.display()
             )));
         }
-        let path = sessions.file(name);
-        let bytes = anchored_file_bytes(&path, MAX_SESSION_OBJECT_BYTES)?;
+        if objects.len() == MAX_SESSION_OBJECTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} session object count exceeds max {MAX_SESSION_OBJECTS}",
+                sessions.path.display()
+            )));
+        }
+        let path = sessions.file(&name);
+        let bytes = file_bytes(&path)?;
         total = total.saturating_add(bytes);
         ensure_session_object_total(total)?;
         objects.insert(digest.to_owned(), path);
     }
     Ok((objects, total))
+}
+
+#[cfg(test)]
+pub(crate) fn generated_zero_byte_session_objects_for_test(
+    sessions: &AnchoredDir,
+    session_id: &str,
+    count: usize,
+    opened: &Cell<usize>,
+) -> Result<(BTreeMap<String, AnchoredFile>, u64), RuntimeError> {
+    let names =
+        (0..count).map(|index| Ok(Some(format!("{session_id}.object.sha256-{index:064x}"))));
+    collect_session_objects(sessions, session_id, names, |_| {
+        opened.set(opened.get() + 1);
+        Ok(0)
+    })
 }
 
 pub(crate) fn session_ids(sessions: &AnchoredDir) -> Result<Vec<String>, RuntimeError> {

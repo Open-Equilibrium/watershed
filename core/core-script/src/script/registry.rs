@@ -30,6 +30,30 @@ impl ResolvedRegistry {
         )
     }
 
+    fn load_for_flow_from_workspace_dir_with_limits(
+        workspace_dir: &Dir,
+        workspace: &Path,
+        registry_root: &Path,
+        flow_reference: &str,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+        max_active_bytes: u64,
+    ) -> Result<Self, RegistryError> {
+        let root =
+            open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        Self::load_for_flow_from_root(
+            root,
+            flow_reference,
+            max_active_bytes,
+            RegistryTraversalLimits {
+                max_file_bytes,
+                max_total_bytes,
+                max_entries: MAX_REGISTRY_ENTRIES,
+                max_depth: MAX_REGISTRY_TRAVERSAL_DEPTH,
+            },
+        )
+    }
+
     fn load_for_flow_with_all_limits(
         workspace: &Path,
         registry_root: &Path,
@@ -38,6 +62,15 @@ impl ResolvedRegistry {
         limits: RegistryTraversalLimits,
     ) -> Result<Self, RegistryError> {
         let root = open_registry_root(workspace, registry_root)?;
+        Self::load_for_flow_from_root(root, flow_reference, max_active_bytes, limits)
+    }
+
+    fn load_for_flow_from_root(
+        root: RegistryRoot,
+        flow_reference: &str,
+        max_active_bytes: u64,
+        limits: RegistryTraversalLimits,
+    ) -> Result<Self, RegistryError> {
         let mut paths = Vec::new();
         let mut state = RegistryTraversalState::default();
         collect_registry_files_with_limits(

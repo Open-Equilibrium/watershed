@@ -27,6 +27,8 @@ pub const CONTEXT_MANIFEST_STREAM_LIMITS: SessionStreamLimits = SessionStreamLim
 };
 /// Maximum bytes stored in one immutable session-owned object chunk.
 pub const MAX_SESSION_OBJECT_BYTES: u64 = 16 * 1024 * 1024;
+/// Maximum canonically named immutable objects owned by one session.
+pub const MAX_SESSION_OBJECTS: usize = 131_072;
 /// Maximum stored content bytes in one complete self-contained session bundle.
 pub const MAX_SESSION_BUNDLE_BYTES: u64 = 11 * 512 * 1024 * 1024;
 pub const MAX_SESSION_METADATA_BYTES: u64 = 16 * 1024 * 1024;
@@ -208,6 +210,15 @@ pub enum RuntimeError {
         /// Failure from removing the temporary replacement path.
         cleanup: Box<RuntimeError>,
     },
+    /// An own-script output was published, but its temporary hard link remains.
+    PublishedOutputCleanupFailure {
+        /// Committed output path.
+        output: PathBuf,
+        /// Residual temporary hard-link path.
+        temporary: PathBuf,
+        /// Final temporary-link cleanup failure.
+        source: Box<RuntimeError>,
+    },
     /// Multiple controlled operation stages failed.
     ControlledStageFailures {
         /// Runtime, validation, or output-generation failure.
@@ -290,6 +301,16 @@ impl fmt::Display for RuntimeError {
                 f,
                 "temporary replacement operation failed: {operation}; temporary replacement cleanup failed: {cleanup}"
             ),
+            Self::PublishedOutputCleanupFailure {
+                output,
+                temporary,
+                source,
+            } => write!(
+                f,
+                "own-script output {} was published, but temporary path {} cleanup failed: {source}",
+                output.display(),
+                temporary.display()
+            ),
             Self::ControlledStageFailures {
                 operation,
                 finalization,
@@ -350,6 +371,7 @@ impl std::error::Error for RuntimeError {
             | Self::Usage(_) => None,
             Self::EventWriter(source)
             | Self::SessionFailed { source, .. }
+            | Self::PublishedOutputCleanupFailure { source, .. }
             | Self::TemporaryReplacementFailures {
                 operation: source, ..
             } => Some(source.as_ref()),

@@ -337,6 +337,12 @@ fn reader_rejects_partial_non_final_segments_and_recovers() {
         reader.read_after(0).expect("repaired prefix reads").len(),
         1
     );
+    fs::write(&second_path, "").expect("empty second segment written");
+    fs::write(&third_path, &completed).expect("valid third segment written");
+    assert_protocol_contains(
+        reader.read_incremental_after(1),
+        "non-final segment must end with LF",
+    );
     fs::write(&second_path, completed.trim_end_matches('\n'))
         .expect("partial second segment written");
     fs::write(&third_path, "").expect("third segment written");
@@ -349,6 +355,53 @@ fn reader_rejects_partial_non_final_segments_and_recovers() {
         .read_incremental_after(1)
         .expect("repaired segment reads");
     assert_eq!(sequences(&recovered), [2]);
+}
+
+#[test]
+fn reader_bounds_empty_streams_by_segment_position_and_live_ownership() {
+    let workspace = empty_workspace("tail-empty-stream");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let session_id = "tailempty001";
+    let path = sessions.path.join(format!("{session_id}.jsonl"));
+    let second_path = sessions.path.join(format!("{session_id}.000002.jsonl"));
+    let started = session_event_line(
+        session_id,
+        "evt-empty-started",
+        EventType::SessionStarted,
+        1,
+    );
+    fs::write(&path, "").expect("empty base segment written");
+    fs::write(&second_path, &started).expect("valid second segment written");
+    let mut reader = SessionEventReader::open(&workspace, session_id).expect("reader opens");
+    assert_protocol_contains(reader.read_after(0), "non-final segment must end with LF");
+
+    fs::remove_file(&second_path).expect("second segment removed");
+    assert_protocol_contains(
+        reader.read_after(0),
+        "is empty without active session ownership",
+    );
+
+    let ownership =
+        acquire_anchored_session_lock(&sessions, session_id).expect("session ownership acquired");
+    let mut active_reader =
+        SessionEventReader::open(&workspace, session_id).expect("active reader opens");
+    assert!(
+        active_reader
+            .read_after(0)
+            .expect("active empty stream remains pending")
+            .is_empty()
+    );
+    fs::write(&path, &started).expect("first event committed");
+    assert_eq!(
+        active_reader
+            .read_incremental_after(0)
+            .expect("first committed event reads")
+            .len(),
+        1
+    );
+    ownership.release().expect("session ownership releases");
 }
 
 #[test]
@@ -451,6 +504,102 @@ fn reader_rejects_an_incomplete_suffix_after_session_ownership_ends() {
         fresh_err,
         RuntimeError::Protocol(message) if message.contains("incomplete final JSONL line")
     ));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn reader_ownership_remains_bound_when_workspace_alias_is_retargeted() {
+    let source = empty_workspace("tail-ownership-source");
+    let replacement = empty_workspace("tail-ownership-replacement");
+    let alias_parent = empty_workspace("tail-ownership-alias-parent");
+    let alias = alias_parent.join("workspace");
+    let session_id = "tailownershiprebind001";
+    let session_dir = source.join(LOCAL_SESSION_DIR);
+    fs::create_dir_all(&session_dir).expect("source session dir created");
+    let started = session_event_line(session_id, "evt-started", EventType::SessionStarted, 1);
+    fs::write(
+        session_dir.join(format!("{session_id}.jsonl")),
+        format!("{started}{{\"event_id\":"),
+    )
+    .expect("active partial source stream written");
+    let sessions = ensure_runtime_dirs(&source)
+        .expect("source runtime dirs")
+        .sessions;
+    let ownership = acquire_anchored_session_lock(&sessions, session_id)
+        .expect("source session ownership acquired");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&*source, &alias).expect("source workspace symlink created");
+    #[cfg(windows)]
+    create_windows_junction(&alias, &source);
+    let mut reader = SessionEventReader::open(&alias, session_id).expect("reader opens on source");
+
+    #[cfg(unix)]
+    fs::remove_file(&alias).expect("source workspace symlink removed");
+    #[cfg(windows)]
+    fs::remove_dir(&alias).expect("source workspace junction removed");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&*replacement, &alias)
+        .expect("replacement workspace symlink created");
+    #[cfg(windows)]
+    create_windows_junction(&alias, &replacement);
+
+    let result = reader.read_after(0);
+    #[cfg(unix)]
+    fs::remove_file(&alias).expect("replacement workspace symlink removed");
+    #[cfg(windows)]
+    fs::remove_dir(&alias).expect("replacement workspace junction removed");
+    ownership.release().expect("source ownership releases");
+    let events = result.expect("source ownership still authorizes its incomplete suffix");
+
+    assert_eq!(sequences(&events), [1]);
+}
+
+#[cfg(unix)]
+#[test]
+fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path() {
+    let parent = empty_workspace("tail-ownership-root-replacement");
+    let workspace = parent.join("workspace");
+    let moved_workspace = parent.join("workspace-moved");
+    let replacement = parent.join("replacement");
+    fs::create_dir(&workspace).expect("source workspace created");
+    fs::create_dir(&replacement).expect("replacement workspace created");
+    let session_id = "tailownershipreplace001";
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("source runtime dirs")
+        .sessions;
+    let started = session_event_line(session_id, "evt-started", EventType::SessionStarted, 1);
+    fs::write(
+        sessions.path.join(format!("{session_id}.jsonl")),
+        format!("{started}{{\"event_id\":"),
+    )
+    .expect("inactive partial source stream written");
+    let source_ownership = acquire_anchored_session_lock(&sessions, session_id)
+        .expect("source ownership authority seeded");
+    source_ownership
+        .release()
+        .expect("source ownership becomes inactive");
+    let mut reader = SessionEventReader::open(&workspace, session_id).expect("source reader opens");
+
+    fs::rename(&workspace, &moved_workspace).expect("source workspace moved aside");
+    fs::rename(&replacement, &workspace).expect("replacement installed at original path");
+    let replacement_sessions = ensure_runtime_dirs(&workspace)
+        .expect("replacement runtime dirs")
+        .sessions;
+    let replacement_ownership = acquire_anchored_session_lock(&replacement_sessions, session_id)
+        .expect("replacement ownership acquired");
+
+    let result = reader.read_after(0);
+    replacement_ownership
+        .release()
+        .expect("replacement ownership releases");
+    drop(reader);
+    fs::rename(&workspace, &replacement).expect("replacement moved aside");
+    fs::rename(&moved_workspace, &workspace).expect("source workspace restored");
+
+    assert_protocol_contains(
+        result,
+        "contains an incomplete final JSONL line without active session ownership",
+    );
 }
 
 #[test]

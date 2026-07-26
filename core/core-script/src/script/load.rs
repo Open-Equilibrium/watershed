@@ -17,6 +17,24 @@ pub fn load_flow_registry_from_workspace(
     )
 }
 
+/// Loads one Flow registry from an already opened workspace capability.
+pub fn load_flow_registry_from_workspace_dir(
+    workspace_dir: &Dir,
+    workspace_path: impl AsRef<Path>,
+    registry_root: impl AsRef<Path>,
+    flow_reference: &str,
+) -> Result<ResolvedRegistry, RegistryError> {
+    ResolvedRegistry::load_for_flow_from_workspace_dir_with_limits(
+        workspace_dir,
+        workspace_path.as_ref(),
+        registry_root.as_ref(),
+        flow_reference,
+        MAX_REGISTRY_FILE_BYTES,
+        MAX_REGISTRY_TOTAL_BYTES,
+        MAX_ACTIVE_REGISTRY_BYTES,
+    )
+}
+
 /// Parses one registry block from a named YAML source.
 pub fn parse_registry_block(
     source_name: &str,
@@ -209,6 +227,21 @@ fn open_registry_root(
     workspace: &Path,
     registry_root: &Path,
 ) -> Result<RegistryRoot, RegistryError> {
+    let workspace_dir =
+        Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
+            RegistryError::Io {
+                path: workspace.to_path_buf(),
+                source,
+            }
+        })?;
+    open_registry_root_from_workspace_dir(&workspace_dir, workspace, registry_root)
+}
+
+fn open_registry_root_from_workspace_dir(
+    workspace_dir: &Dir,
+    workspace: &Path,
+    registry_root: &Path,
+) -> Result<RegistryRoot, RegistryError> {
     if registry_root.components().any(|component| {
         matches!(
             component,
@@ -223,7 +256,7 @@ fn open_registry_root(
         });
     }
 
-    let mut dir = Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
+    let mut dir = workspace_dir.try_clone().map_err(|source| {
         RegistryError::Io {
             path: workspace.to_path_buf(),
             source,

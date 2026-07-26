@@ -1,7 +1,52 @@
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    static SCRIPT_OUTPUT_PUBLISH_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> =
+        RefCell::new(None);
+    static SCRIPT_OUTPUT_CLEANUP_ERRORS: RefCell<std::collections::VecDeque<io::ErrorKind>> =
+        const { RefCell::new(std::collections::VecDeque::new()) };
+}
+
+#[cfg(test)]
+pub fn set_script_output_publish_observer(observer: impl FnOnce() + 'static) {
+    SCRIPT_OUTPUT_PUBLISH_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(test)]
+fn observe_script_output_publish() {
+    if let Some(observer) = SCRIPT_OUTPUT_PUBLISH_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
+    }
+}
+
+#[cfg(test)]
+pub fn set_script_output_cleanup_error_once(kind: io::ErrorKind) {
+    set_script_output_cleanup_errors([kind]);
+}
+
+#[cfg(test)]
+pub fn set_script_output_cleanup_errors(errors: impl IntoIterator<Item = io::ErrorKind>) {
+    SCRIPT_OUTPUT_CLEANUP_ERRORS.with_borrow_mut(|pending| {
+        pending.clear();
+        pending.extend(errors);
+    });
+}
+
+fn remove_published_script_temp(path: &AnchoredFile) -> Result<(), RuntimeError> {
+    #[cfg(test)]
+    if let Some(kind) = SCRIPT_OUTPUT_CLEANUP_ERRORS.with_borrow_mut(|pending| pending.pop_front())
+    {
+        return Err(RuntimeError::Io {
+            path: path.diagnostic_path().to_owned(),
+            source: io::Error::new(kind, "injected own-script output cleanup failure"),
+        });
+    }
+    path.remove()
+}
+
 pub fn execute_own_script(
-    workspace: &Path,
+    workspace: &AnchoredDir,
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
@@ -186,51 +231,77 @@ pub fn script_replacement_temp_parent_scope(relative: &str) -> String {
 }
 
 pub fn write_script_output(
-    workspace: &Path,
+    workspace: &AnchoredDir,
     target: &str,
     contents: &[u8],
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
-    ensure_resolved_script_target_not_protected(
-        workspace,
-        target,
-        protected_path_match_mode,
-        policy,
-    )?;
-    let path = anchored_workspace_write_path(workspace, target, true)?
+    let resolved_target = resolved_anchored_workspace_scoped_target(workspace, target)?;
+    ensure_script_target_not_protected(protected_path_match_mode, policy, &resolved_target)?;
+    let path = anchored_workspace_write_path_from(workspace, target, true)?
         .expect("created script target parent is present");
-    replace_script_output_atomically(&path, contents)
+    replace_script_output_atomically_checked(&path, contents, |temp_path| {
+        let temp_name = temp_path
+            .diagnostic_path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                RuntimeError::Protocol(
+                    "own-script replacement temp must have a UTF-8 file name".to_owned(),
+                )
+            })?;
+        let (resolved_parent, _) = resolved_target.rsplit_once('/').ok_or_else(|| {
+            RuntimeError::Protocol(
+                "resolved own-script target must include a workspace-relative file name".to_owned(),
+            )
+        })?;
+        ensure_script_target_not_protected(
+            protected_path_match_mode,
+            policy,
+            &format!("{resolved_parent}/{temp_name}"),
+        )
+    })
 }
 
 pub fn preflight_own_script_outputs(
-    workspace: &Path,
+    workspace: &AnchoredDir,
     write: Option<&ScriptWrite>,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
     if let Some(write) = write {
-        ensure_resolved_script_target_not_protected(
+        ensure_resolved_anchored_script_target_not_protected(
             workspace,
             &write.target,
             protected_path_match_mode,
             policy,
         )?;
-        if let Some(path) = anchored_workspace_write_path(workspace, &write.target, false)? {
-            ensure_anchored_writable_regular_leaf(&path)?;
+        if let Some(path) = anchored_workspace_write_path_from(workspace, &write.target, false)? {
+            ensure_script_output_target_available(&path)?;
         }
     }
     Ok(())
 }
 
+#[cfg(test)]
 pub fn replace_script_output_atomically(
     path: &AnchoredFile,
     contents: &[u8],
 ) -> Result<(), RuntimeError> {
-    let initial_leaf_existed = ensure_anchored_writable_regular_leaf(path)?;
-    with_anchored_replacement_temp(
+    replace_script_output_atomically_checked(path, contents, |_| Ok(()))
+}
+
+fn replace_script_output_atomically_checked(
+    path: &AnchoredFile,
+    contents: &[u8],
+    candidate_check: impl Fn(&AnchoredFile) -> Result<(), RuntimeError>,
+) -> Result<(), RuntimeError> {
+    ensure_script_output_target_available(path)?;
+    with_anchored_replacement_temp_checked(
         path,
         Some(core_policy::DenyReasonCode::WriteDenied),
+        candidate_check,
         |temp_path, mut temp_file| {
             temp_file
                 .write_all(contents)
@@ -238,28 +309,81 @@ pub fn replace_script_output_atomically(
                     path: temp_path.diagnostic_path().to_owned(),
                     source,
                 })?;
-            // Keep the created file open through the capability-relative rename. A peer with
+            // Keep the created file open through capability-relative publication. A peer with
             // write access to this exact directory can already replace the destination itself.
 
-            if initial_leaf_existed {
-                if ensure_anchored_writable_regular_leaf(path)? {
-                    return temp_path.rename_to(path);
+            ensure_script_output_target_available(path)?;
+            #[cfg(test)]
+            observe_script_output_publish();
+            match temp_path.hard_link_to(path) {
+                Ok(()) => {}
+                Err(RuntimeError::Io { source, .. })
+                    if source.kind() == io::ErrorKind::AlreadyExists =>
+                {
+                    return Err(runtime_denied(
+                        core_policy::DenyReasonCode::WriteDenied,
+                        format!(
+                            "own-script output {} already exists; existing outputs are not replaceable",
+                            path.diagnostic_path().display()
+                        ),
+                    ));
                 }
-            } else {
-                ensure_anchored_new_leaf_available(path)?;
+                Err(error) => return Err(error),
             }
-            temp_path.rename_to(path)
+            drop(temp_file);
+            for attempt in 0..2 {
+                match remove_published_script_temp(temp_path) {
+                    Ok(()) => break,
+                    Err(RuntimeError::Io { source, .. })
+                        if source.kind() == io::ErrorKind::NotFound =>
+                    {
+                        break;
+                    }
+                    Err(_) if attempt == 0 => {}
+                    Err(source) => {
+                        return Err(RuntimeError::PublishedOutputCleanupFailure {
+                            output: path.diagnostic_path().to_owned(),
+                            temporary: temp_path.diagnostic_path().to_owned(),
+                            source: Box::new(source),
+                        });
+                    }
+                }
+            }
+            Ok(())
         },
     )
 }
 
+fn ensure_script_output_target_available(path: &AnchoredFile) -> Result<(), RuntimeError> {
+    if ensure_anchored_writable_regular_leaf(path)? {
+        return Err(runtime_denied(
+            core_policy::DenyReasonCode::WriteDenied,
+            format!(
+                "own-script output {} already exists; existing outputs are not replaceable",
+                path.diagnostic_path().display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 pub fn anchored_workspace_write_path(
     workspace: &Path,
     target: &str,
     create: bool,
 ) -> Result<Option<AnchoredFile>, RuntimeError> {
+    let workspace = AnchoredDir::workspace(workspace)?;
+    anchored_workspace_write_path_from(&workspace, target, create)
+}
+
+pub fn anchored_workspace_write_path_from(
+    workspace: &AnchoredDir,
+    target: &str,
+    create: bool,
+) -> Result<Option<AnchoredFile>, RuntimeError> {
     let mut parts = target.split('/').peekable();
-    let mut parent = AnchoredDir::workspace(workspace)?;
+    let mut parent = workspace.clone();
     while let Some(part) = parts.next() {
         if parts.peek().is_none() {
             return Ok(Some(parent.file(part)));
@@ -279,9 +403,20 @@ pub fn with_anchored_replacement_temp<T>(
     denied_reason: Option<core_policy::DenyReasonCode>,
     operation: impl FnOnce(&AnchoredFile, fs::File) -> Result<T, RuntimeError>,
 ) -> Result<T, RuntimeError> {
-    let (temp_path, temp_file) = create_anchored_replacement_temp(path, denied_reason)?;
+    with_anchored_replacement_temp_checked(path, denied_reason, |_| Ok(()), operation)
+}
+
+fn with_anchored_replacement_temp_checked<T>(
+    path: &AnchoredFile,
+    denied_reason: Option<core_policy::DenyReasonCode>,
+    candidate_check: impl Fn(&AnchoredFile) -> Result<(), RuntimeError>,
+    operation: impl FnOnce(&AnchoredFile, fs::File) -> Result<T, RuntimeError>,
+) -> Result<T, RuntimeError> {
+    let (temp_path, temp_file) =
+        create_anchored_replacement_temp(path, denied_reason, candidate_check)?;
     match operation(&temp_path, temp_file) {
         Ok(value) => Ok(value),
+        Err(operation @ RuntimeError::PublishedOutputCleanupFailure { .. }) => Err(operation),
         Err(operation) => match temp_path.remove() {
             Ok(()) => Err(operation),
             Err(cleanup) => Err(RuntimeError::TemporaryReplacementFailures {
@@ -292,9 +427,10 @@ pub fn with_anchored_replacement_temp<T>(
     }
 }
 
-pub fn create_anchored_replacement_temp(
+fn create_anchored_replacement_temp(
     path: &AnchoredFile,
     denied_reason: Option<core_policy::DenyReasonCode>,
+    candidate_check: impl Fn(&AnchoredFile) -> Result<(), RuntimeError>,
 ) -> Result<(AnchoredFile, fs::File), RuntimeError> {
     for attempt in 0..100 {
         let temp_path = path.parent.file(
@@ -302,11 +438,19 @@ pub fn create_anchored_replacement_temp(
                 .file_name()
                 .expect("replacement temp path has a file name"),
         );
+        candidate_check(&temp_path)?;
         let mut options = cap_std::fs::OpenOptions::new();
         options
             .create_new(true)
             .write(true)
             .follow(FollowSymlinks::No);
+        #[cfg(windows)]
+        {
+            use cap_std::fs::OpenOptionsExt as _;
+            use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_WRITE, WRITE_DAC};
+
+            options.access_mode(FILE_GENERIC_WRITE | WRITE_DAC);
+        }
         match temp_path.open(&options) {
             Ok(file) => return Ok((temp_path, file)),
             Err(RuntimeError::Io { source, .. })
@@ -365,25 +509,21 @@ pub fn ensure_script_target_not_protected(
     ))
 }
 
-pub fn ensure_resolved_script_target_not_protected(
-    workspace: &Path,
+pub fn ensure_resolved_anchored_script_target_not_protected(
+    workspace: &AnchoredDir,
     target: &str,
     protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
-    let resolved_target = resolved_workspace_scoped_target(workspace, target)?;
+    let resolved_target = resolved_anchored_workspace_scoped_target(workspace, target)?;
     ensure_script_target_not_protected(protected_path_match_mode, policy, &resolved_target)
 }
 
-pub fn resolved_workspace_scoped_target(
-    workspace: &Path,
+pub fn resolved_anchored_workspace_scoped_target(
+    workspace: &AnchoredDir,
     target: &str,
 ) -> Result<String, RuntimeError> {
-    let canonical_workspace = fs::canonicalize(workspace).map_err(|source| RuntimeError::Io {
-        path: workspace.to_owned(),
-        source,
-    })?;
-    let mut resolved = canonical_workspace.clone();
+    let mut resolved = PathBuf::new();
     let mut unresolved_suffix = false;
     let mut components = target.split('/').peekable();
     while let Some(component) = components.next() {
@@ -392,31 +532,36 @@ pub fn resolved_workspace_scoped_target(
             continue;
         }
         let candidate = resolved.join(component);
-        match fs::symlink_metadata(&candidate) {
+        match workspace.dir.symlink_metadata(&candidate) {
             Ok(_) => {
-                resolved = fs::canonicalize(&candidate).map_err(|source| RuntimeError::Io {
-                    path: candidate,
-                    source,
-                })?;
-                if !resolved.starts_with(&canonical_workspace) {
-                    return Err(runtime_denied(
+                resolved = workspace.dir.canonicalize(&candidate).map_err(|source| {
+                    runtime_denied(
                         core_policy::DenyReasonCode::SymlinkEscapeDenied,
                         format!(
-                            "own-script write target {target:?} follows a symlink or reparse point outside the workspace"
+                            "own-script write target {target:?} cannot be resolved within {} without following a symlink or reparse point: {source}",
+                            workspace.path.display()
                         ),
-                    ));
+                    )
+                })?;
+                #[cfg(windows)]
+                {
+                    resolved = windows_long_anchored_relative_path(workspace, &resolved)?;
                 }
                 if components.peek().is_some() {
-                    let metadata = fs::metadata(&resolved).map_err(|source| RuntimeError::Io {
-                        path: resolved.clone(),
-                        source,
-                    })?;
+                    let metadata =
+                        workspace
+                            .dir
+                            .metadata(&resolved)
+                            .map_err(|source| RuntimeError::Io {
+                                path: workspace.path.join(&resolved),
+                                source,
+                            })?;
                     if !metadata.is_dir() {
                         return Err(runtime_denied(
                             core_policy::DenyReasonCode::WriteDenied,
                             format!(
                                 "own-script write target {target:?} component {} must be a directory",
-                                resolved.display()
+                                workspace.path.join(&resolved).display()
                             ),
                         ));
                     }
@@ -428,18 +573,13 @@ pub fn resolved_workspace_scoped_target(
             }
             Err(source) => {
                 return Err(RuntimeError::Io {
-                    path: candidate,
+                    path: workspace.path.join(candidate),
                     source,
                 });
             }
         }
     }
-    let relative = resolved.strip_prefix(&canonical_workspace).map_err(|_| {
-        RuntimeError::Protocol(format!(
-            "own-script write target {target:?} resolves outside the workspace"
-        ))
-    })?;
-    let relative = relative
+    let relative = resolved
         .components()
         .map(|component| {
             component.as_os_str().to_str().ok_or_else(|| {
@@ -453,11 +593,82 @@ pub fn resolved_workspace_scoped_target(
     Ok(format!("workspace/{relative}"))
 }
 
+#[cfg(windows)]
+fn windows_long_anchored_relative_path(
+    workspace: &AnchoredDir,
+    relative: &Path,
+) -> Result<PathBuf, RuntimeError> {
+    let mut parent = workspace.clone();
+    let mut long_path = PathBuf::new();
+    let mut components = relative.components().peekable();
+    while let Some(component) = components.next() {
+        let std::path::Component::Normal(requested) = component else {
+            return Err(RuntimeError::Protocol(format!(
+                "own-script resolved path {} must stay relative to {}",
+                relative.display(),
+                workspace.path.display()
+            )));
+        };
+        let target = parent
+            .dir
+            .symlink_metadata(requested)
+            .map_err(|source| path_io_error(&parent.path.join(requested), source))?;
+        let mut matching_name = None;
+        for entry in parent
+            .dir
+            .entries()
+            .map_err(|source| path_io_error(&parent.path, source))?
+        {
+            let entry = entry.map_err(|source| path_io_error(&parent.path, source))?;
+            let name = entry.file_name();
+            let metadata = parent
+                .dir
+                .symlink_metadata(&name)
+                .map_err(|source| path_io_error(&parent.path.join(&name), source))?;
+            if metadata.dev() != target.dev() || metadata.ino() != target.ino() {
+                continue;
+            }
+            if name == requested {
+                matching_name = Some(name);
+                break;
+            }
+            if matching_name.replace(name).is_some() {
+                return Err(runtime_denied(
+                    core_policy::DenyReasonCode::WriteDenied,
+                    format!(
+                        "own-script resolved path {} has an ambiguous Windows alias",
+                        relative.display()
+                    ),
+                ));
+            }
+        }
+        let name = matching_name.ok_or_else(|| {
+            runtime_denied(
+                core_policy::DenyReasonCode::WriteDenied,
+                format!(
+                    "own-script resolved path {} has no inventory-visible Windows name",
+                    relative.display()
+                ),
+            )
+        })?;
+        long_path.push(&name);
+        if components.peek().is_some() {
+            let dir = parent
+                .dir
+                .open_dir_nofollow(&name)
+                .map_err(|source| path_io_error(&parent.path.join(&name), source))?;
+            parent = AnchoredDir {
+                dir: std::sync::Arc::new(dir),
+                path: workspace.path.join(&long_path),
+            };
+        }
+    }
+    Ok(long_path)
+}
+
 #[cfg(unix)]
 pub fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
-    use std::os::unix::fs::MetadataExt;
-
-    Ok(metadata.nlink())
+    Ok(std::os::unix::fs::MetadataExt::nlink(metadata))
 }
 
 #[cfg(windows)]
@@ -541,16 +752,46 @@ pub fn evaluate_script_command(command: &str) -> Result<Vec<u8>, RuntimeError> {
 pub fn evaluate_printf_command(rest: &str) -> Result<Vec<u8>, RuntimeError> {
     let (format, rest) = parse_single_quoted_argument(rest.trim())?;
     let rest = rest.trim();
-    let formatted = if rest.is_empty() {
-        decode_printf_escapes(&format)?
+    let argument = if rest.is_empty() {
+        None
     } else if matches!(rest, "\"$SUMMARY\"" | "$SUMMARY") {
-        decode_printf_escapes(&format)?.replacen("%s", "hello", 1)
+        Some("hello")
     } else {
         return Err(RuntimeError::Protocol(format!(
             "unsupported own-script printf argument {rest:?}"
         )));
     };
+    let formatted = evaluate_printf_string_format(&decode_printf_escapes(&format)?, argument)?;
     Ok(formatted.into_bytes())
+}
+
+pub fn evaluate_printf_string_format(
+    format: &str,
+    mut argument: Option<&str>,
+) -> Result<String, RuntimeError> {
+    let mut formatted = String::new();
+    let mut chars = format.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            formatted.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('%') => formatted.push('%'),
+            Some('s') => formatted.push_str(argument.take().unwrap_or_default()),
+            Some(conversion) => {
+                return Err(RuntimeError::Protocol(format!(
+                    "unsupported own-script printf conversion %{conversion}"
+                )));
+            }
+            None => {
+                return Err(RuntimeError::Protocol(
+                    "unsupported own-script printf conversion at end of format".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(formatted)
 }
 
 pub fn parse_single_quoted_argument(value: &str) -> Result<(String, &str), RuntimeError> {

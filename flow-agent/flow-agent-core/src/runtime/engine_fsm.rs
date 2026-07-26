@@ -37,14 +37,19 @@ pub struct PlannedToolIntent {
 pub struct FlowExecutionPlan {
     pub(crate) execution: RuntimeExecution,
     pub(crate) signature: RuntimeStreamSignature,
+    workspace_identity: AnchoredDirectoryIdentity,
 }
 
 impl FlowExecutionPlan {
-    pub(crate) fn from_execution(execution: RuntimeExecution) -> Self {
+    pub(crate) fn from_execution(
+        execution: RuntimeExecution,
+        workspace_identity: AnchoredDirectoryIdentity,
+    ) -> Self {
         let signature = Self::signature_for(&execution);
         Self {
             execution,
             signature,
+            workspace_identity,
         }
     }
 
@@ -528,6 +533,7 @@ impl<'a> RuntimeEventBuilder<'a> {
     }
 }
 
+#[cfg(test)]
 pub fn plan_flow(
     workspace: &Path,
     registry: &core_script::ResolvedRegistry,
@@ -541,8 +547,24 @@ pub fn plan_flow(
     )
 }
 
+#[cfg(test)]
 pub fn plan_flow_with_sink(
     workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    root_flow: &core_script::FlowBlock,
+    session_id: &str,
+    options: FlowExecutionOptions,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<FlowExecutionPlan, RuntimeError> {
+    let workspace = AnchoredWorkspace::open(workspace)?;
+    plan_flow_with_workspace(
+        &workspace, registry, policy, root_flow, session_id, options, sink,
+    )
+}
+
+pub(crate) fn plan_flow_with_workspace(
+    workspace: &AnchoredWorkspace,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     root_flow: &core_script::FlowBlock,
@@ -555,13 +577,14 @@ pub fn plan_flow_with_sink(
             "flow planning requires ToolSideEffectMode::Plan".to_owned(),
         ));
     }
-    execute_flow_with_sink(
+    execute_flow_with_workspace(
         workspace, registry, policy, root_flow, session_id, options, sink,
     )
-    .map(FlowExecutionPlan::from_execution)
+    .map(|execution| FlowExecutionPlan::from_execution(execution, workspace.identity()))
 }
 
 pub struct FlowApplication<'a> {
+    #[cfg(test)]
     pub(crate) workspace: &'a Path,
     pub(crate) registry: &'a core_script::ResolvedRegistry,
     pub(crate) policy: &'a core_policy::PolicyArtifact,
@@ -571,6 +594,7 @@ pub struct FlowApplication<'a> {
     pub(crate) plan: &'a FlowExecutionPlan,
 }
 
+#[cfg(test)]
 pub fn apply_flow_with_sink(
     application: FlowApplication<'_>,
     sink: Option<&mut dyn RuntimeEventSink>,
@@ -581,11 +605,35 @@ pub fn apply_flow_with_sink(
         ));
     }
     application.plan.validate_integrity()?;
+    let execution_workspace = AnchoredWorkspace::open(application.workspace)?;
+    apply_flow_with_workspace(application, &execution_workspace, sink)
+}
+
+pub(crate) fn apply_flow_with_anchored_workspace(
+    application: FlowApplication<'_>,
+    execution_workspace: &AnchoredWorkspace,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<RuntimeExecution, RuntimeError> {
+    if application.options.side_effect_mode == ToolSideEffectMode::Plan {
+        return Err(RuntimeError::Protocol(
+            "flow apply cannot use ToolSideEffectMode::Plan".to_owned(),
+        ));
+    }
+    application.plan.validate_integrity()?;
+    apply_flow_with_workspace(application, execution_workspace, sink)
+}
+
+fn apply_flow_with_workspace(
+    application: FlowApplication<'_>,
+    execution_workspace: &AnchoredWorkspace,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<RuntimeExecution, RuntimeError> {
+    execution_workspace.verify_identity(application.plan.workspace_identity)?;
     if application.options.side_effect_mode == ToolSideEffectMode::Apply {
         let mut preflight_options = application.options.clone();
         preflight_options.side_effect_mode = ToolSideEffectMode::Plan;
-        let preflight = execute_flow_with_sink(
-            application.workspace,
+        let preflight = execute_flow_with_workspace(
+            execution_workspace,
             application.registry,
             application.policy,
             application.root_flow,
@@ -599,8 +647,8 @@ pub fn apply_flow_with_sink(
             ));
         }
     }
-    let execution = execute_flow_with_sink(
-        application.workspace,
+    let execution = execute_flow_with_workspace(
+        execution_workspace,
         application.registry,
         application.policy,
         application.root_flow,
@@ -616,8 +664,24 @@ pub fn apply_flow_with_sink(
     Ok(execution)
 }
 
+#[cfg(test)]
 pub fn execute_flow_with_sink(
     workspace: &Path,
+    registry: &core_script::ResolvedRegistry,
+    policy: &core_policy::PolicyArtifact,
+    root_flow: &core_script::FlowBlock,
+    session_id: &str,
+    options: FlowExecutionOptions,
+    sink: Option<&mut dyn RuntimeEventSink>,
+) -> Result<RuntimeExecution, RuntimeError> {
+    let workspace = AnchoredWorkspace::open(workspace)?;
+    execute_flow_with_workspace(
+        &workspace, registry, policy, root_flow, session_id, options, sink,
+    )
+}
+
+pub(crate) fn execute_flow_with_workspace(
+    workspace: &AnchoredWorkspace,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     root_flow: &core_script::FlowBlock,
@@ -694,7 +758,7 @@ pub fn should_terminalize_error(side_effect_mode: ToolSideEffectMode, err: &Runt
 }
 
 pub fn preflight_flow_tools(
-    workspace: &Path,
+    workspace: &AnchoredDir,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     flow_block: &core_script::FlowBlock,
@@ -711,7 +775,7 @@ pub fn preflight_flow_tools(
 }
 
 pub fn preflight_flow_tools_at_depth(
-    workspace: &Path,
+    workspace: &AnchoredDir,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     flow_block: &core_script::FlowBlock,
@@ -759,7 +823,7 @@ pub fn preflight_flow_tools_at_depth(
 }
 
 pub fn preflight_phase_tools(
-    workspace: &Path,
+    workspace: &AnchoredDir,
     registry: &core_script::ResolvedRegistry,
     policy: &core_policy::PolicyArtifact,
     phase: &core_script::PhaseBlock,
@@ -789,7 +853,7 @@ pub fn emit_flow_block(
 }
 
 pub struct FlowEmitContext<'a> {
-    pub(crate) workspace: &'a Path,
+    pub(crate) workspace: &'a AnchoredWorkspace,
     pub(crate) registry: &'a core_script::ResolvedRegistry,
     pub(crate) policy: &'a core_policy::PolicyArtifact,
     pub(crate) side_effect_mode: ToolSideEffectMode,

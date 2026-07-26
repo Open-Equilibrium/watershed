@@ -81,26 +81,29 @@ fn resume_session_internal_with_cleanup_observer_impl(
             "invalid session_id {session_id:?}"
         )));
     }
-    let config = load_workspace_config(workspace)?;
+    let execution_workspace = AnchoredWorkspace::open(workspace)?;
+    let config = load_workspace_config_from(execution_workspace.root())?;
     require_fixture_execution_backend(&config)?;
-    let sessions = open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
-        path: workspace.join(LOCAL_SESSION_DIR),
-        source: io::Error::from(io::ErrorKind::NotFound),
-    })?;
+    let sessions =
+        open_anchored_runtime_dir(&execution_workspace, "sessions")?.ok_or_else(|| {
+            RuntimeError::Io {
+                path: workspace.join(LOCAL_SESSION_DIR),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            }
+        })?;
     let path = SessionBundlePaths::events_in(&sessions, session_id);
     ensure_anchored_non_hardlinked_file(&path)?;
     let lock = acquire_anchored_session_lock(&sessions, session_id)?;
     let mut finalization_result = Ok(());
     let operation_result = (|| {
         let inspection = inspect_resume_session(&path, session_id)?;
-        let prior_event_count = inspection.validation.line_count;
         if matches!(
             inspection.last_event_type,
             EventType::SessionFailed | EventType::SessionCompleted
         ) {
             return Err(RuntimeError::TerminalSession(session_id.to_owned()));
         }
-        let logs = open_runtime_dir(workspace, "logs")?
+        let logs = open_anchored_runtime_dir(&execution_workspace, "logs")?
             .ok_or_else(|| missing_definition_metadata(session_id))?;
         let inventory = SessionBundleInventory::inspect(SessionBundlePaths::new(
             sessions.clone(),
@@ -116,7 +119,8 @@ fn resume_session_internal_with_cleanup_observer_impl(
             &metadata,
         )?;
 
-        let registry = core_script::load_flow_registry_from_workspace(
+        let registry = core_script::load_flow_registry_from_workspace_dir(
+            &execution_workspace.root().dir,
             workspace,
             &config.registry_root,
             &flow_id,
@@ -136,8 +140,8 @@ fn resume_session_internal_with_cleanup_observer_impl(
         )?;
         let mut prefix_sink =
             RuntimePrefixSink::new(inspection.event_prefix.clone(), recorded_context.clone());
-        let plan = plan_flow_with_sink(
-            workspace,
+        let plan = plan_flow_with_workspace(
+            &execution_workspace,
             &registry,
             &policy,
             flow_block,
@@ -168,7 +172,7 @@ fn resume_session_internal_with_cleanup_observer_impl(
             &plan.execution,
             flow_block,
         )?;
-        let combined_event_count = checked_resume_event_count(
+        checked_resume_event_count(
             plan.execution.events.record_count,
             resume_prefix.resume_marker_count,
         )?;
@@ -178,16 +182,19 @@ fn resume_session_internal_with_cleanup_observer_impl(
             )));
         }
         let append_plan = resume_append_plan(session_id, &inspection.validation, clock)?;
+        let context_path = SessionBundlePaths::contexts_in(&logs, session_id);
         let preflight_matches = {
-            let mut preflight_sink = ResumePreflightSink {
-                appended_bytes: append_plan.marker_stream.len(),
+            let mut preflight_sink = ResumePreflightSink::open(
+                &path,
+                &context_path,
+                session_id,
+                append_plan.marker_stream.len(),
                 clock,
-                path: &path,
-                planned_event_count: resume_prefix.planned_event_count,
-                resume_marker_count: resume_prefix.resume_marker_count,
-            };
-            let runtime = execute_flow_with_sink(
-                workspace,
+                resume_prefix.planned_event_count,
+                resume_prefix.resume_marker_count,
+            )?;
+            let runtime = execute_flow_with_workspace(
+                &execution_workspace,
                 &registry,
                 &policy,
                 flow_block,
@@ -212,7 +219,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
             )));
         }
         let terminal_flow_ids = inspection.validation.terminal_flow_ids();
-        let context_path = SessionBundlePaths::contexts_in(&logs, session_id);
         let mut serial_writer = SerialSessionWriter::start_prevalidated(SerialWriterStart {
             context_path,
             path: path.clone(),
@@ -222,6 +228,9 @@ fn resume_session_internal_with_cleanup_observer_impl(
             notifier,
             timings,
         })?;
+        if capture_jsonl {
+            serial_writer.enable_jsonl_capture();
+        }
         let runtime_result = {
             let mut resume_sink = ResumeEventSink {
                 clock,
@@ -232,8 +241,9 @@ fn resume_session_internal_with_cleanup_observer_impl(
                 resume_marker_count: resume_prefix.resume_marker_count,
                 writer: &mut serial_writer,
             };
-            apply_flow_with_sink(
+            apply_flow_with_anchored_workspace(
                 FlowApplication {
+                    #[cfg(test)]
                     workspace,
                     registry: &registry,
                     policy: &policy,
@@ -249,24 +259,29 @@ fn resume_session_internal_with_cleanup_observer_impl(
                     .with_terminal_flow_ids(terminal_flow_ids),
                     plan: &plan,
                 },
+                &execution_workspace,
                 Some(&mut resume_sink),
             )
         };
         finalization_result = serial_writer.finish();
+        #[cfg(test)]
+        post_writer_finish_observer(&path);
+        let captured_jsonl = serial_writer.take_captured_jsonl();
         let resumed_runtime = runtime_result?;
         let terminal_error = resumed_runtime.terminal_error;
         let resumed_failed = resumed_runtime.failed;
+        let resumed_event_count = resumed_runtime.events.record_count;
         let failure_status = resumed_runtime.failure_status;
         let stdout = if capture_jsonl {
-            let stream = read_segmented_jsonl(&path, EVENT_STREAM_LIMITS)?;
-            let events = validate_session_log_text(path.diagnostic_path(), session_id, &stream)?;
-            canonical_event_stream(&events[prior_event_count..])?
+            captured_jsonl.expect("JSONL capture enabled before resumed runtime application")
         } else {
             human_session_status_from_failure(session_id, "resumed", failure_status.as_deref())
         };
         if let Some(err) = terminal_error {
             return Err(RuntimeError::session_failed(session_id, err));
         }
+        let combined_event_count =
+            checked_resume_event_count(resumed_event_count, resume_prefix.resume_marker_count)?;
 
         Ok(RunOutput {
             event_count: combined_event_count,
@@ -478,35 +493,6 @@ pub fn resume_append_plan(
         marker_event: resume_event,
         marker_stream,
     })
-}
-
-pub fn prepare_session_log_append(
-    path: &AnchoredFile,
-    appended_bytes: usize,
-) -> Result<(), RuntimeError> {
-    ensure_anchored_session_log_growth_within_limit(path, appended_bytes)?;
-    open_anchored_session_log_append_file(path).map(|_| ())
-}
-
-pub fn ensure_anchored_session_log_growth_within_limit(
-    path: &AnchoredFile,
-    appended_bytes: usize,
-) -> Result<u64, RuntimeError> {
-    let existing_bytes = segmented_jsonl_files(path, EVENT_STREAM_LIMITS)?
-        .into_iter()
-        .try_fold(0u64, |total, segment| {
-            Ok::<_, RuntimeError>(total.saturating_add(segment.metadata()?.len()))
-        })?;
-    let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
-    let total = existing_bytes.saturating_add(appended_bytes);
-    if total > MAX_SESSION_EVENT_BYTES {
-        return Err(RuntimeError::Protocol(format!(
-            "{} session log size {total} bytes exceeds max {}",
-            path.diagnostic_path().display(),
-            MAX_SESSION_EVENT_BYTES
-        )));
-    }
-    Ok(existing_bytes)
 }
 
 pub fn shift_resumed_event(
@@ -738,6 +724,7 @@ pub fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, Runt
     Ok(metadata)
 }
 
+#[cfg(test)]
 pub fn reserve_session_log(
     workspace: &Path,
     session_id: &str,
@@ -745,6 +732,7 @@ pub fn reserve_session_log(
     reserve_session_log_with_publish_observer(workspace, session_id, || {})
 }
 
+#[cfg(test)]
 pub fn reserve_session_log_with_publish_observer(
     workspace: &Path,
     session_id: &str,
@@ -755,11 +743,26 @@ pub fn reserve_session_log_with_publish_observer(
             "invalid session_id {session_id:?}"
         )));
     }
-    let marker_path = workspace
+    let anchored_workspace = AnchoredWorkspace::open(workspace)?;
+    reserve_session_log_with_anchored_workspace(&anchored_workspace, session_id, after_publish)
+}
+
+pub(crate) fn reserve_session_log_with_anchored_workspace(
+    workspace: &AnchoredWorkspace,
+    session_id: &str,
+    after_publish: impl FnOnce(),
+) -> Result<SessionReservation, RuntimeError> {
+    if !proto::is_valid_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    let workspace_path = &workspace.root().path;
+    let marker_path = workspace_path
         .join(LOCAL_SESSION_DIR)
         .join(format!("{session_id}.lock"));
-    let ownership = SessionOwnershipLease::acquire(workspace, session_id, &marker_path)?;
-    let dirs = match ensure_runtime_dirs(workspace) {
+    let ownership = SessionOwnershipLease::acquire(workspace_path, session_id, &marker_path)?;
+    let dirs = match ensure_anchored_runtime_dirs(workspace) {
         Ok(dirs) => dirs,
         Err(error) => {
             return reconcile_controlled_stages(Err(error), Ok(()), ownership.release());
@@ -788,14 +791,14 @@ pub fn reserve_session_log_with_publish_observer(
             &reservation.lock_path,
             session_id,
         )?;
-        reserve_anchored_session_file(&reservation.session_path, session_id, || {
-            reservation.mark_session_created();
-            after_publish();
-        })?;
-        reserve_anchored_bundle_file(&reservation.log_path, session_id)?;
-        reservation.mark_log_created();
-        reserve_anchored_bundle_file(&reservation.context_path, session_id)?;
-        reservation.mark_context_created();
+        let session_identity =
+            reserve_anchored_session_file(&reservation.session_path, session_id)?;
+        reservation.mark_session_created(session_identity);
+        after_publish();
+        let log_identity = reserve_anchored_bundle_file(&reservation.log_path, session_id)?;
+        reservation.mark_log_created(log_identity);
+        let context_identity = reserve_anchored_bundle_file(&reservation.context_path, session_id)?;
+        reservation.mark_context_created(context_identity);
         Ok(())
     })();
     match operation {
@@ -804,6 +807,7 @@ pub fn reserve_session_log_with_publish_observer(
     }
 }
 
+#[cfg(test)]
 pub fn reserve_unique_session_log(
     workspace: &Path,
     base_session_id: &str,
@@ -811,16 +815,34 @@ pub fn reserve_unique_session_log(
     reserve_unique_session_log_with_probe_observer(workspace, base_session_id, |_| {})
 }
 
+#[cfg(test)]
 pub fn reserve_unique_session_log_with_probe_observer(
     workspace: &Path,
     base_session_id: &str,
-    mut before_probe: impl FnMut(&str),
+    before_probe: impl FnMut(&str),
 ) -> Result<SessionReservation, RuntimeError> {
     if !proto::is_valid_session_id(base_session_id) {
         return reserve_session_log(workspace, base_session_id);
     }
-    SessionOwnershipLease::ensure_coordinator_available(workspace)?;
-    let hints = session_candidate_hints(&ensure_runtime_dirs(workspace)?, base_session_id)?;
+    let anchored_workspace = AnchoredWorkspace::open(workspace)?;
+    reserve_unique_session_log_with_anchored_workspace(
+        &anchored_workspace,
+        base_session_id,
+        before_probe,
+    )
+}
+
+pub(crate) fn reserve_unique_session_log_with_anchored_workspace(
+    workspace: &AnchoredWorkspace,
+    base_session_id: &str,
+    mut before_probe: impl FnMut(&str),
+) -> Result<SessionReservation, RuntimeError> {
+    if !proto::is_valid_session_id(base_session_id) {
+        return reserve_session_log_with_anchored_workspace(workspace, base_session_id, || {});
+    }
+    SessionOwnershipLease::ensure_coordinator_available(&workspace.root().path)?;
+    let hints =
+        session_candidate_hints(&ensure_anchored_runtime_dirs(workspace)?, base_session_id)?;
     for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
         if hints[(ordinal - 1) as usize] == SessionCandidateHint::Occupied {
             continue;
@@ -831,7 +853,7 @@ pub fn reserve_unique_session_log_with_probe_observer(
             suffixed_session_id(base_session_id, ordinal)
         };
         before_probe(&candidate);
-        match reserve_session_log(workspace, &candidate) {
+        match reserve_session_log_with_anchored_workspace(workspace, &candidate, || {}) {
             Ok(reservation) => return Ok(reservation),
             Err(RuntimeError::SessionLogExists(_) | RuntimeError::ActiveSession { .. }) => continue,
             Err(err) => return Err(err),
@@ -846,17 +868,14 @@ pub fn reserve_unique_session_log_with_probe_observer(
 pub fn reserve_anchored_session_file(
     path: &AnchoredFile,
     session_id: &str,
-    after_publish: impl FnOnce(),
-) -> Result<(), RuntimeError> {
+) -> Result<AnchoredFileIdentity, RuntimeError> {
     ensure_anchored_session_file_available(path, session_id)?;
     reserve_new_anchored_file(path).map_err(|err| match err {
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
             RuntimeError::SessionLogExists(session_id.to_owned())
         }
         other => other,
-    })?;
-    after_publish();
-    Ok(())
+    })
 }
 
 pub fn ensure_session_bundle_namespace_available(
@@ -936,7 +955,7 @@ pub fn ensure_anchored_bundle_leaf_available(
 pub fn reserve_anchored_bundle_file(
     path: &AnchoredFile,
     session_id: &str,
-) -> Result<(), RuntimeError> {
+) -> Result<AnchoredFileIdentity, RuntimeError> {
     reserve_new_anchored_file(path).map_err(|err| match err {
         RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::AlreadyExists => {
             RuntimeError::SessionLogExists(session_id.to_owned())
@@ -966,8 +985,11 @@ pub fn ensure_anchored_session_file_available(
     }
 }
 
-pub fn reserve_new_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError> {
-    create_anchored_file(path).map(|_| ())
+pub fn reserve_new_anchored_file(
+    path: &AnchoredFile,
+) -> Result<AnchoredFileIdentity, RuntimeError> {
+    let file = create_anchored_file(path)?;
+    anchored_file_identity(path.diagnostic_path(), &file)
 }
 
 #[cfg(test)]

@@ -32,6 +32,70 @@ fn event_segment_discovery_retries_one_transient_protocol_error() {
     assert_eq!((stream, attempts), ("complete", 2));
 }
 
+#[cfg(unix)]
+#[test]
+fn private_child_revalidates_permissions_on_the_opened_directory() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let workspace = empty_workspace("private-directory-open-race");
+    let private = workspace.join("private");
+    let moved = workspace.join("private-checked");
+    fs::create_dir(&private).expect("private directory created");
+    fs::set_permissions(&private, fs::Permissions::from_mode(0o700))
+        .expect("private permissions set");
+    let checked = private.clone();
+    let replacement = private.clone();
+    set_private_directory_open_observer(move || {
+        fs::rename(checked, moved).expect("checked directory moved");
+        fs::create_dir(&replacement).expect("replacement directory created");
+        fs::set_permissions(&replacement, fs::Permissions::from_mode(0o777))
+            .expect("replacement permissions set");
+    });
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+
+    let err = parent
+        .private_child("private", false, DirectoryErrorMode::Protocol)
+        .expect_err("permissive replacement must be rejected");
+
+    assert!(err.to_string().contains("group or other access"), "{err}");
+}
+
+#[cfg(windows)]
+#[test]
+fn private_child_rejects_a_preexisting_world_accessible_directory() {
+    let workspace = empty_workspace("private-directory-windows-existing");
+    let private = workspace.join("private");
+    fs::create_dir(&private).expect("private directory created");
+    set_windows_directory_world_access_for_test(&private).expect("world access configured");
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+
+    let err = parent
+        .private_child("private", false, DirectoryErrorMode::Protocol)
+        .expect_err("world-accessible private directory must be rejected");
+
+    assert!(
+        err.to_string().contains("current Windows user only"),
+        "{err}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn private_child_creation_overrides_a_world_accessible_parent_dacl() {
+    let workspace = empty_workspace("private-directory-windows-create");
+    set_windows_directory_world_access_for_test(&workspace).expect("world access configured");
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+
+    parent
+        .private_child("private", true, DirectoryErrorMode::Protocol)
+        .expect("private directory creation succeeds");
+
+    let private = AnchoredDir::workspace(&workspace.join("private")).expect("private dir opens");
+    private
+        .private_child("nested", true, DirectoryErrorMode::Protocol)
+        .expect("validated private directory creates a private child");
+}
+
 #[test]
 fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
     let log_conflict = empty_workspace("reserve-log-conflict");
@@ -128,7 +192,11 @@ fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
         fs::read_to_string(outside_session).expect("outside session remains readable"),
         "outside"
     );
-    assert!(!moved_session_dir.join("swap001.jsonl").exists());
+    assert_eq!(
+        fs::read(moved_session_dir.join("swap001.jsonl"))
+            .expect("owned session orphan remains readable"),
+        b""
+    );
     assert!(!moved_session_dir.join("swap001.lock").exists());
 }
 
@@ -206,6 +274,199 @@ fn script_publish_stays_bound_to_the_opened_target_directory() {
     assert_eq!(
         fs::read_to_string(moved_output.join("result.txt")).expect("output readable"),
         "new"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn script_output_rejects_existing_unix_target_without_changing_mode() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let workspace = empty_workspace("script-replacement-mode");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let output = workspace.join("out/result.txt");
+    fs::write(&output, "old").expect("original output written");
+    fs::set_permissions(&output, fs::Permissions::from_mode(0o600))
+        .expect("restrictive output mode configured");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+
+    let err =
+        replace_script_output_atomically(&target, b"new").expect_err("existing output must reject");
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "already exists",
+    );
+
+    let mode = fs::metadata(&output)
+        .expect("original metadata reads")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+    assert_eq!(fs::read(output).expect("original output reads"), b"old");
+}
+
+#[cfg(windows)]
+#[test]
+fn script_output_rejects_existing_windows_target_without_changing_dacl() {
+    let workspace = empty_workspace("script-replacement-dacl");
+    set_windows_directory_world_access_for_test(&workspace).expect("broad parent DACL configured");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let output = workspace.join("out/result.txt");
+    fs::write(&output, "old").expect("original output written");
+    set_windows_file_current_user_only_for_test(&output)
+        .expect("restrictive output DACL configured");
+    assert!(
+        windows_file_is_current_user_only_for_test(&output).expect("original output DACL reads")
+    );
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+
+    let err =
+        replace_script_output_atomically(&target, b"new").expect_err("existing output must reject");
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "already exists",
+    );
+
+    assert!(
+        windows_file_is_current_user_only_for_test(&output).expect("original output DACL reads"),
+        "rejected output must retain its restrictive DACL"
+    );
+    assert_eq!(fs::read(output).expect("original output reads"), b"old");
+}
+
+#[test]
+fn script_output_rejects_stale_target_before_temp_creation() {
+    let workspace = empty_workspace("script-output-stale-target");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let output = workspace.join("out/result.txt");
+    fs::write(&output, "stale").expect("stale output written");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+    let temp = replacement_temp_path(&output, 0).expect("temp path derives");
+
+    let err = replace_script_output_atomically(&target, b"new")
+        .expect_err("stale target must reject before replacement allocation");
+
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "already exists",
+    );
+    assert_eq!(fs::read(output).expect("stale output reads"), b"stale");
+    assert!(!temp.exists(), "replacement temp must not be created");
+}
+
+#[test]
+fn concurrent_script_output_publication_is_create_only() {
+    use std::sync::{Arc, Barrier};
+
+    let workspace = empty_workspace("script-output-create-only-race");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+    let barrier = Arc::new(Barrier::new(2));
+    let handles = [b"first".as_slice(), b"second".as_slice()].map(|contents| {
+        let target = target.clone();
+        let barrier = Arc::clone(&barrier);
+        thread::spawn(move || {
+            set_script_output_publish_observer(move || {
+                barrier.wait();
+            });
+            replace_script_output_atomically(&target, contents).map(|()| contents)
+        })
+    });
+    let results = handles.map(|handle| handle.join().expect("writer thread joins"));
+    let winner = results
+        .iter()
+        .filter_map(|result| result.as_ref().ok().copied())
+        .collect::<Vec<_>>();
+
+    assert_eq!(winner.len(), 1, "exactly one create-only publish must win");
+    let loser = results
+        .into_iter()
+        .find_map(Result::err)
+        .expect("one publication must reject");
+    assert_denied(
+        loser,
+        core_policy::DenyReasonCode::WriteDenied,
+        "already exists",
+    );
+    assert_eq!(
+        fs::read(target.diagnostic_path()).expect("winning output reads"),
+        winner[0]
+    );
+}
+
+#[test]
+fn transient_post_publication_cleanup_failure_still_reports_success() {
+    let workspace = empty_workspace("script-output-published-cleanup-retry");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let output = workspace.join("out/result.txt");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+    let temp = replacement_temp_path(&output, 0).expect("temp path derives");
+    set_script_output_cleanup_error_once(io::ErrorKind::PermissionDenied);
+
+    replace_script_output_atomically(&target, b"published")
+        .expect("committed publication survives transient temp cleanup failure");
+
+    assert_eq!(
+        fs::read(output).expect("published output reads"),
+        b"published"
+    );
+    assert!(!temp.exists(), "cleanup retry removes the replacement temp");
+}
+
+#[test]
+fn persistent_post_publication_cleanup_failure_is_reported_with_committed_paths() {
+    let workspace = empty_workspace("script-output-published-cleanup-failure");
+    fs::create_dir(workspace.join("out")).expect("output directory created");
+    let output = workspace.join("out/result.txt");
+    let target = anchored_workspace_write_path(&workspace, "out/result.txt", true)
+        .expect("target resolves")
+        .expect("target parent exists");
+    let temp = replacement_temp_path(&output, 0).expect("temp path derives");
+    set_script_output_cleanup_errors([
+        io::ErrorKind::PermissionDenied,
+        io::ErrorKind::PermissionDenied,
+    ]);
+
+    let err = replace_script_output_atomically(&target, b"published")
+        .expect_err("persistent committed-output cleanup failure must be reported");
+
+    let RuntimeError::PublishedOutputCleanupFailure {
+        output: committed_output,
+        temporary,
+        source,
+    } = err
+    else {
+        panic!("unexpected persistent cleanup error: {err}");
+    };
+    assert_eq!(committed_output, output);
+    assert_eq!(temporary, temp);
+    assert!(
+        source
+            .to_string()
+            .contains("injected own-script output cleanup failure"),
+        "{source}"
+    );
+    assert_eq!(
+        fs::read(&output).expect("published output reads"),
+        b"published"
+    );
+    assert_eq!(
+        fs::read(&temp).expect("residual temporary link reads"),
+        b"published"
     );
 }
 

@@ -1,4 +1,4 @@
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt as _, OpenOptionsFollowExt};
 use cap_std::{ambient_authority, fs::Dir};
 use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
 use proto::{EventEnvelope, EventType};
@@ -30,6 +30,8 @@ mod tail;
 mod tool_exec;
 mod types;
 mod validate;
+#[cfg(windows)]
+mod windows_private_dir;
 
 pub use config_io::*;
 pub use context::*;

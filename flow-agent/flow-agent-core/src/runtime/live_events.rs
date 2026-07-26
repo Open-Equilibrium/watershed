@@ -146,10 +146,9 @@ pub struct SessionEventReader {
     pub(crate) observed_current_segment_bytes: u64,
     pub(crate) observed_segment_count: usize,
     pub(crate) observed_signature: RuntimeStreamSignatureBuilder,
+    pub(crate) ownership: SessionOwnershipObserver,
     pub(crate) path: AnchoredFile,
-    pub(crate) session_id: String,
     pub(crate) validation: SessionAppendValidationState,
-    pub(crate) workspace: PathBuf,
 }
 
 impl SessionEventReader {
@@ -161,9 +160,13 @@ impl SessionEventReader {
                 "invalid session_id {session_id:?}"
             )));
         }
+        let workspace_path =
+            fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
+        let workspace = AnchoredWorkspace::open(&workspace_path)?;
+        let ownership = SessionOwnershipObserver::open_anchored(&workspace, session_id)?;
         let sessions =
-            open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
-                path: workspace.join(LOCAL_SESSION_DIR),
+            open_anchored_runtime_dir(&workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+                path: workspace_path.join(LOCAL_SESSION_DIR),
                 source: io::Error::from(io::ErrorKind::NotFound),
             })?;
         let path = SessionBundlePaths::events_in(&sessions, session_id);
@@ -172,10 +175,9 @@ impl SessionEventReader {
             observed_current_segment_bytes: 0,
             observed_segment_count: 0,
             observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            ownership,
             path,
-            session_id: session_id.to_owned(),
             validation: SessionAppendValidationState::empty(session_id),
-            workspace: workspace.to_owned(),
         })
     }
 
@@ -195,7 +197,8 @@ impl SessionEventReader {
                 let segment_bytes =
                     read_anchored_file_with_limit(segment, MAX_SESSION_SEGMENT_BYTES)?;
                 if index + 1 != segments.len()
-                    && complete_jsonl_prefix_len(&segment_bytes) != segment_bytes.len()
+                    && (segment_bytes.is_empty()
+                        || complete_jsonl_prefix_len(&segment_bytes) != segment_bytes.len())
                 {
                     return Err(RuntimeError::Protocol(format!(
                         "{} non-final segment must end with LF",
@@ -219,8 +222,11 @@ impl SessionEventReader {
             }
             let complete_len = complete_jsonl_prefix_len(&bytes);
             let has_partial_line = complete_len != bytes.len();
-            let inactive_partial = has_partial_line && !self.session_ownership_active()?;
-            if inactive_partial && !retried_inactive_partial {
+            let ownership_inactive =
+                (has_partial_line || bytes.is_empty()) && !self.session_ownership_active()?;
+            let inactive_partial = has_partial_line && ownership_inactive;
+            let inactive_empty = bytes.is_empty() && ownership_inactive;
+            if (inactive_partial || inactive_empty) && !retried_inactive_partial {
                 retried_inactive_partial = true;
                 continue;
             }
@@ -255,6 +261,9 @@ impl SessionEventReader {
             }
             if inactive_partial {
                 return Err(self.inactive_partial());
+            }
+            if inactive_empty {
+                return Err(self.inactive_empty());
             }
             self.ensure_cursor(cursor, validation.previous_sequence)?;
             self.observed_current_segment_bytes = final_complete_bytes;
@@ -333,7 +342,9 @@ impl SessionEventReader {
                         self.path.diagnostic_path().display()
                     )));
                 }
-                if index + 1 != segments.len() && segment_complete_len != segment_suffix.len() {
+                if index + 1 != segments.len()
+                    && (metadata.len() == 0 || segment_complete_len != segment_suffix.len())
+                {
                     return Err(RuntimeError::Protocol(format!(
                         "{} non-final segment must end with LF",
                         segment.diagnostic_path().display()
@@ -418,12 +429,19 @@ impl SessionEventReader {
     }
 
     pub(crate) fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
-        session_ownership_is_active(&self.workspace, &self.session_id)
+        self.ownership.is_active()
     }
 
     pub(crate) fn inactive_partial(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} contains an incomplete final JSONL line without active session ownership",
+            self.path.diagnostic_path().display()
+        ))
+    }
+
+    pub(crate) fn inactive_empty(&self) -> RuntimeError {
+        RuntimeError::Protocol(format!(
+            "{} is empty without active session ownership",
             self.path.diagnostic_path().display()
         ))
     }

@@ -311,7 +311,7 @@ fn run_flow_keeps_quoted_redirection_markers_in_own_script_output() {
 }
 
 #[test]
-fn run_flow_replaces_existing_own_script_output_on_repeat_run() {
+fn run_flow_rejects_existing_own_script_output_on_repeat_run() {
     let workspace = workspace_copy("hello-flow");
 
     let first = run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("first run succeeds");
@@ -323,14 +323,72 @@ fn run_flow_replaces_existing_own_script_output_on_repeat_run() {
     );
     fs::write(&summary_path, "stale\n").expect("stale summary written");
 
-    let second = run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("second run succeeds");
+    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
+        .expect_err("repeat run must reject the existing output before runtime setup");
 
-    assert!(!second.failed);
-    assert_eq!(second.session_id, "hello-flow-2");
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::WriteDenied,
+        "already exists",
+    );
     assert_eq!(
         fs::read_to_string(summary_path).expect("summary is replaced"),
-        "hello\n"
+        "stale\n"
     );
+    assert!(
+        !workspace
+            .join(LOCAL_SESSION_DIR)
+            .join("hello-flow-2.jsonl")
+            .exists()
+    );
+    assert!(
+        !workspace
+            .join(LOCAL_LOG_DIR)
+            .join("hello-flow-2.log")
+            .exists()
+    );
+}
+
+#[test]
+fn own_script_atomic_replacement_rejects_protected_temp_path() {
+    let workspace = workspace_copy("hello-flow");
+    fs::create_dir(workspace.join(".git")).expect("protected target parent created");
+    let target = workspace.join(".git/allowed.txt");
+    let anchored_workspace = AnchoredDir::workspace(&workspace).expect("workspace anchors");
+    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let mut write_policy = policy
+        .commands
+        .iter()
+        .find(|command| command.tool_id == "write-summary")
+        .expect("write-summary policy exists")
+        .clone();
+    write_policy.filesystem.write_roots = vec!["workspace".to_owned()];
+    write_policy.filesystem.protected_path_grants = vec!["workspace/.git/allowed.txt".to_owned()];
+    let temp_path = replacement_temp_path(Path::new(".git/allowed.txt"), 0)
+        .expect("replacement temp path is valid");
+    let match_mode = runtime_protected_path_match_mode(&policy.target);
+    assert_eq!(
+        validate_script_write_target(match_mode, &write_policy, ".git/allowed.txt")
+            .expect("final protected target has an exact grant"),
+        ".git/allowed.txt"
+    );
+
+    let err = write_script_output(
+        &anchored_workspace,
+        ".git/allowed.txt",
+        b"new\n",
+        match_mode,
+        &write_policy,
+    )
+    .expect_err("protected replacement temp must reject before creation");
+
+    assert_denied(
+        err,
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        "protected path",
+    );
+    assert!(!workspace.join(temp_path).exists());
+    assert!(!target.exists());
 }
 
 #[test]
@@ -486,6 +544,35 @@ fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
 }
 
 #[test]
+fn own_script_printf_uses_bounded_posix_string_conversions() {
+    for (command, expected) in [
+        ("printf '%s:%s\\n' \"$SUMMARY\"", b"hello:\n".as_slice()),
+        ("printf '%%:%s\\n' $SUMMARY", b"%:hello\n".as_slice()),
+        ("printf '[%s]\\n'", b"[]\n".as_slice()),
+    ] {
+        assert_eq!(
+            evaluate_script_command(command).expect("supported printf evaluates"),
+            expected,
+            "{command}"
+        );
+    }
+    for command in [
+        "printf '%d' $SUMMARY",
+        "printf '%'",
+        "printf '%1$s' $SUMMARY",
+    ] {
+        assert!(
+            matches!(
+                evaluate_script_command(command),
+                Err(RuntimeError::Protocol(message))
+                    if message.contains("unsupported own-script printf conversion")
+            ),
+            "{command}"
+        );
+    }
+}
+
+#[test]
 fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
     let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let command_policy = policy
@@ -579,7 +666,13 @@ fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
     ));
     assert!(matches!(
         execute_predefined_command(read_policy, "agent-read", &["extra".to_owned()]),
-        Err(RuntimeError::Protocol(message)) if message.contains("trusted command")
+        Err(RuntimeError::Protocol(message)) if message.contains("arguments")
+    ));
+    let mut wrong_executable = (*read_policy).clone();
+    wrong_executable.executable = "registry:agent-echo".to_owned();
+    assert!(matches!(
+        execute_predefined_command(&wrong_executable, "agent-read", &[]),
+        Err(RuntimeError::Protocol(message)) if message.contains("executable")
     ));
     let mut wrong_runtime = write_tool.clone();
     wrong_runtime.script_runtime = None;

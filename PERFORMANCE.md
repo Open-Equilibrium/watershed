@@ -18,7 +18,7 @@ These hard limits always apply and are not multiplied into one promised workload
 - Cumulative invocations: 512 per session, root-inclusive. Every start counts, including repeated definitions, retries and failed starts.
 - Live invocations: 32 process-wide across all sessions. A started non-terminal root or subflow counts while running or waiting for model, tool or child work; queued, terminal and fully paused work does not.
 - Canonical events: 155,750 per session across all segments, resumes, errors and future event families.
-- Canonical storage: 320 KiB per event including LF, 16 MiB per event segment or context-manifest segment, 48 MiB total event data, 48 MiB total context-manifest data, 16 MiB per immutable object and 5.5 GiB for the complete logical session bundle. Object data may use at most 5,520 MiB, reserving the other 112 MiB for the two JSONL streams and metadata. The former 10 MiB event-stream limit is removed.
+- Canonical storage: 320 KiB per event including LF, 16 MiB per event segment or context-manifest segment, 48 MiB total event data, 48 MiB total context-manifest data, 16 MiB per immutable object, at most 131,072 immutable objects per session and 5.5 GiB for the complete logical session bundle. Object data may use at most 5,520 MiB, reserving the other 112 MiB for the two JSONL streams and metadata. The former 10 MiB event-stream limit is removed.
 
 The 155,750-event sizing model is `2 session + 1,024 Flow lifecycle + 1,024 phase + 102,400 model-cycle + 100 non-model step-lifecycle + 51,200 tool lifecycle`. It assumes 25,600 model cycles and 25,600 tool calls. Four model-cycle events mean one enclosing `step.started`/`step.completed` pair plus `message.delta`/`message.completed`; the 100 non-model step-lifecycle events represent 50 turns. These are capacity assumptions, not independent product limits.
 
@@ -42,7 +42,7 @@ M1 implementation budgets (ADR-0049):
 - Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
 - `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
 - Concurrency smoke: 10 fixture top-level flows complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 100 MiB aggregate RSS budget.
-- Initial full-session replay <= 10 s and full-session inspection <= 15 s at the ADR-0068 event cap, with <= 256 MiB RSS growth.
+- Initial full-session replay <= 10 s at the ADR-0068 event cap; full-session inspection with a retained maximum object inventory <= 15 s. Each allows <= 256 MiB RSS growth.
 - Incremental tail read p95 <= 100 ms for one newly committed event up to 320 KiB, with <= 64 MiB retained-reader RSS growth.
 - The representative ten-session and ten-full-cap event-storage/replay gates each complete <= 120 s; they are not end-to-end runtime gates.
 

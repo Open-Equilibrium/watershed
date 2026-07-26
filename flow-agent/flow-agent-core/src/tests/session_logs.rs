@@ -1,6 +1,89 @@
 use super::*;
 
 #[test]
+fn run_jsonl_capture_uses_writer_accepted_stream_after_path_replacement() {
+    let workspace = workspace_copy("smoke-flow");
+    let accepted_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("smoke-flow.writer-accepted");
+    let accepted_path_for_observer = accepted_path.clone();
+    let replacement = "{\"forged\":\"run-path-replacement\"}\n";
+    set_post_writer_finish_observer(move |path| {
+        fs::rename(path.diagnostic_path(), &accepted_path_for_observer)
+            .expect("writer-accepted run stream retained");
+        fs::write(path.diagnostic_path(), replacement).expect("run path replaced");
+    });
+
+    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("run capture remains available after path replacement");
+
+    assert_eq!(
+        output.stdout,
+        fs::read_to_string(&accepted_path).expect("writer-accepted run stream readable")
+    );
+    assert_eq!(
+        fs::read_to_string(&output.session_path).expect("replacement run path readable"),
+        replacement
+    );
+}
+
+#[test]
+fn resume_jsonl_capture_uses_new_writer_accepted_events_after_path_replacement() {
+    let workspace = workspace_copy("smoke-flow");
+    let completed =
+        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
+    let prefix = completed
+        .stdout
+        .lines()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let prior_event_count = prefix.lines().count();
+    fs::write(&completed.session_path, &prefix).expect("partial live session written");
+    write_definition_hash_metadata(&workspace, &completed.session_id, "smoke-flow");
+    let replacement = prefix
+        .lines()
+        .next()
+        .map(|line| format!("{line}\n"))
+        .expect("prefix contains an event");
+    let replacement_for_observer = replacement.clone();
+    let accepted_path = workspace
+        .join(LOCAL_SESSION_DIR)
+        .join("smoke-flow.resume-writer-accepted");
+    let accepted_path_for_observer = accepted_path.clone();
+    set_post_writer_finish_observer(move |path| {
+        fs::rename(path.diagnostic_path(), &accepted_path_for_observer)
+            .expect("writer-accepted resumed stream retained");
+        fs::write(path.diagnostic_path(), replacement_for_observer)
+            .expect("resumed path replaced with a shorter valid stream");
+    });
+
+    let resumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
+    }));
+    let output = resumed
+        .expect("resume capture must not panic after path replacement")
+        .expect("resume capture remains available after path replacement");
+    let accepted = fs::read_to_string(&accepted_path).expect("accepted resumed stream readable");
+    let accepted_events =
+        validate_session_log_text(&accepted_path, &completed.session_id, &accepted)
+            .expect("accepted resumed stream validates");
+    let expected = canonical_event_stream(
+        accepted_events
+            .get(prior_event_count..)
+            .expect("accepted resumed stream retains its prefix"),
+    )
+    .expect("accepted resumed suffix is canonical");
+
+    assert_eq!(output.stdout, expected);
+    assert_eq!(
+        fs::read_to_string(&completed.session_path).expect("replacement resume path readable"),
+        replacement
+    );
+}
+
+#[test]
 fn corrupted_session_log_is_rejected_without_rewrite() {
     let workspace = workspace_copy("smoke-flow");
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
@@ -113,17 +196,162 @@ fn partial_reservation_rollback_preserves_context_collision() {
     })
     .expect_err("context collision must reject reservation");
 
-    assert!(matches!(
-        err,
-        RuntimeError::SessionLogExists(session_id) if session_id == "context001"
-    ));
+    match err {
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: None,
+            cleanup: Some(cleanup),
+        } => {
+            assert!(matches!(
+                *operation,
+                RuntimeError::SessionLogExists(session_id) if session_id == "context001"
+            ));
+            assert!(
+                cleanup.to_string().contains("cannot safely remove"),
+                "{cleanup}"
+            );
+        }
+        other => panic!("unexpected reservation failure: {other}"),
+    }
     assert_eq!(
         fs::read(&context_path).expect("racing context remains"),
         b"existing context"
     );
-    assert!(!session_path.exists());
-    assert!(!metadata_path.exists());
+    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
+    assert_eq!(
+        fs::read(metadata_path).expect("metadata orphan remains"),
+        b""
+    );
     assert!(!lock_path.exists());
+}
+
+#[test]
+fn partial_reservation_rollback_preserves_concurrent_event_segment() {
+    let workspace = empty_workspace("reservation-segment-race");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("segment001.jsonl");
+    let segment_path = dirs.sessions.path.join("segment001.000002.jsonl");
+    let lock_path = dirs.sessions.path.join("segment001.lock");
+    let metadata_path = dirs.logs.path.join("segment001.log");
+    let context_path = dirs.logs.path.join("segment001.contexts.jsonl");
+
+    let err = reserve_session_log_with_publish_observer(&workspace, "segment001", || {
+        fs::write(&segment_path, b"foreign event segment").expect("racing event segment written");
+        fs::write(&context_path, b"existing context").expect("racing context written");
+    })
+    .expect_err("context collision must reject reservation");
+
+    match err {
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: None,
+            cleanup: Some(cleanup),
+        } => {
+            assert!(matches!(
+                *operation,
+                RuntimeError::SessionLogExists(session_id) if session_id == "segment001"
+            ));
+            assert!(
+                cleanup.to_string().contains("cannot safely remove"),
+                "{cleanup}"
+            );
+        }
+        other => panic!("unexpected reservation failure: {other}"),
+    }
+    assert_eq!(
+        fs::read(&segment_path).expect("racing event segment remains"),
+        b"foreign event segment"
+    );
+    assert_eq!(
+        fs::read(&context_path).expect("racing context remains"),
+        b"existing context"
+    );
+    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
+    assert_eq!(
+        fs::read(metadata_path).expect("metadata orphan remains"),
+        b""
+    );
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn unactivated_reservation_rollback_preserves_concurrent_segment_siblings() {
+    let workspace = empty_workspace("reservation-segment-rollback");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("segment002.jsonl");
+    let event_segment_path = dirs.sessions.path.join("segment002.000002.jsonl");
+    let lock_path = dirs.sessions.path.join("segment002.lock");
+    let metadata_path = dirs.logs.path.join("segment002.log");
+    let context_path = dirs.logs.path.join("segment002.contexts.jsonl");
+    let context_segment_path = dirs.logs.path.join("segment002.contexts.000002.jsonl");
+    let reservation =
+        reserve_session_log(&workspace, "segment002").expect("session reservation succeeds");
+    fs::write(&event_segment_path, b"foreign event segment")
+        .expect("foreign event segment written");
+    fs::write(&context_segment_path, b"foreign context segment")
+        .expect("foreign context segment written");
+
+    reservation.rollback().expect("reservation rolls back");
+
+    assert_eq!(
+        fs::read(&event_segment_path).expect("foreign event segment remains"),
+        b"foreign event segment"
+    );
+    assert_eq!(
+        fs::read(&context_segment_path).expect("foreign context segment remains"),
+        b"foreign context segment"
+    );
+    for orphan in [session_path, metadata_path, context_path] {
+        assert_eq!(
+            fs::read(&orphan).expect("owned orphan remains readable"),
+            b"",
+            "{} must remain inventory-visible and empty",
+            orphan.display()
+        );
+    }
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn reservation_rollback_never_unlinks_a_replacement_after_identity_check() {
+    let workspace = empty_workspace("reservation-replacement-cleanup");
+    let reservation =
+        reserve_session_log(&workspace, "replacement001").expect("session reservation succeeds");
+    let session_path = reservation.session_path.diagnostic_path().to_owned();
+    let moved_owned_path = session_path.with_extension("owned");
+    let replacement = b"foreign replacement";
+    let moved_for_observer = moved_owned_path.clone();
+    set_owned_file_remove_observer(move |path| {
+        fs::rename(path.diagnostic_path(), &moved_for_observer)
+            .expect("owned file moves after identity check");
+        fs::write(path.diagnostic_path(), replacement).expect("foreign replacement writes");
+    });
+
+    let err = reservation
+        .cleanup()
+        .expect_err("unsafe rollback cleanup must remain visible");
+
+    assert!(err.to_string().contains("cannot safely remove"), "{err}");
+    assert_eq!(
+        fs::read(&session_path).expect("foreign replacement remains"),
+        replacement
+    );
+    assert_eq!(
+        fs::read(&moved_owned_path).expect("owned orphan remains"),
+        b""
+    );
+    assert!(
+        reservation.log_path.diagnostic_path().exists(),
+        "owned log orphan remains inventory-visible"
+    );
+    assert!(
+        reservation.context_path.diagnostic_path().exists(),
+        "owned context orphan remains inventory-visible"
+    );
+    let next = reserve_unique_session_log(&workspace, "replacement001")
+        .expect("orphan inventory advances the unique reservation suffix");
+    assert_eq!(next.session_id, "replacement001-2");
+    next.simulate_abrupt_termination();
 }
 
 #[test]
@@ -223,6 +451,52 @@ fn session_bundle_inventory_owns_paths_segments_objects_and_byte_counts() {
 }
 
 #[test]
+fn session_object_inventory_bounds_zero_byte_entries_before_opening_the_excess() {
+    let workspace = empty_workspace("session-object-count");
+    let reservation =
+        reserve_session_log(&workspace, "objectcount001").expect("session bundle reserved");
+    let sessions = SessionBundlePaths::from_reservation(&reservation).sessions;
+    let opened = std::cell::Cell::new(0);
+
+    let (accepted, bytes) = generated_zero_byte_session_objects_for_test(
+        &sessions,
+        "objectcount001",
+        MAX_SESSION_OBJECTS,
+        &opened,
+    )
+    .expect("the maximum zero-byte object count is accepted");
+    assert_eq!(accepted.len(), MAX_SESSION_OBJECTS);
+    assert_eq!(opened.get(), MAX_SESSION_OBJECTS);
+    assert_eq!(bytes, 0);
+    drop(accepted);
+
+    opened.set(0);
+    let excess = generated_zero_byte_session_objects_for_test(
+        &sessions,
+        "objectcount001",
+        MAX_SESSION_OBJECTS + 1,
+        &opened,
+    );
+    let err = match excess {
+        Err(err) => err,
+        Ok(_) => panic!("the 131,073rd object must be rejected"),
+    };
+    assert!(
+        matches!(
+            err,
+            RuntimeError::Protocol(message)
+                if message.ends_with("session object count exceeds max 131072")
+        ),
+        "unexpected object-count error"
+    );
+    assert_eq!(
+        opened.get(),
+        MAX_SESSION_OBJECTS,
+        "the excess object must be rejected before it is opened"
+    );
+}
+
+#[test]
 fn unique_reservation_marks_every_ordinal_for_a_truncated_candidate_alias() {
     let workspace = empty_workspace("reservation-truncated-candidate");
     let base = format!("{}-2", "a".repeat(126));
@@ -305,9 +579,9 @@ fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
 }
 
 #[test]
-fn dropped_session_reservation_rolls_back_reserved_files() {
+fn dropped_session_reservation_retains_inventory_visible_orphans() {
     let workspace = empty_workspace("reservation-drop");
-    let (session_path, log_path, lock_path) = {
+    let (session_path, log_path, context_path, lock_path) = {
         let reservation = reserve_session_log(&workspace, "drop001").expect("reservation succeeds");
         assert!(reservation.session_path.diagnostic_path().exists());
         assert!(reservation.log_path.diagnostic_path().exists());
@@ -315,12 +589,17 @@ fn dropped_session_reservation_rolls_back_reserved_files() {
         (
             reservation.session_path.clone(),
             reservation.log_path.clone(),
+            reservation.context_path.clone(),
             reservation.lock_path.clone(),
         )
     };
 
-    assert!(!session_path.diagnostic_path().exists());
-    assert!(!log_path.diagnostic_path().exists());
+    for orphan in [session_path, log_path, context_path] {
+        assert_eq!(
+            fs::read(orphan.diagnostic_path()).expect("owned orphan remains readable"),
+            b""
+        );
+    }
     assert!(!lock_path.diagnostic_path().exists());
 }
 
@@ -556,7 +835,7 @@ fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
 }
 
 #[test]
-fn controlled_cleanup_rolls_back_empty_but_preserves_active_reservations() {
+fn controlled_cleanup_retains_empty_orphans_and_preserves_active_reservations() {
     let workspace = empty_workspace("controlled-reservation-state");
     let empty =
         reserve_session_log(&workspace, "emptycontrolled001").expect("empty reservation succeeds");
@@ -574,10 +853,30 @@ fn controlled_cleanup_rolls_back_empty_but_preserves_active_reservations() {
     )
     .expect_err("operation failure remains visible");
 
-    assert!(
-        matches!(empty_err, RuntimeError::Protocol(message) if message == "controlled failure")
-    );
-    assert!(empty_paths.iter().all(|path| !path.exists()));
+    match empty_err {
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: None,
+            cleanup: Some(cleanup),
+        } => {
+            assert!(matches!(
+                *operation,
+                RuntimeError::Protocol(message) if message == "controlled failure"
+            ));
+            assert!(
+                cleanup.to_string().contains("cannot safely remove"),
+                "{cleanup}"
+            );
+        }
+        other => panic!("unexpected controlled failure: {other}"),
+    }
+    for orphan in &empty_paths[..3] {
+        assert_eq!(
+            fs::read(orphan).expect("owned orphan remains readable"),
+            b""
+        );
+    }
+    assert!(!empty_paths[3].exists());
 
     let active = reserve_session_log(&workspace, "activecontrolled001")
         .expect("active reservation succeeds");
@@ -726,6 +1025,44 @@ fn simulated_abrupt_termination_releases_authority_without_removing_the_marker()
     assert!(
         !session_ownership_is_active(&workspace, "abrupt001")
             .expect("host-local session ownership reads")
+    );
+}
+
+#[test]
+fn ownership_observer_ignores_an_active_replacement_workspace() {
+    let parent = empty_workspace("ownership-observer-root-replacement");
+    let workspace = parent.join("workspace");
+    let moved_workspace = parent.join("workspace-moved");
+    let replacement = parent.join("replacement");
+    fs::create_dir(&workspace).expect("source workspace created");
+    fs::create_dir(&replacement).expect("replacement workspace created");
+    let session_id = "ownershipobserverreplace001";
+    let source_marker = workspace.join("source.lock");
+    let source_ownership = SessionOwnershipLease::acquire(&workspace, session_id, &source_marker)
+        .expect("source ownership authority seeded");
+    source_ownership
+        .release()
+        .expect("source ownership becomes inactive");
+    let observer =
+        SessionOwnershipObserver::open(&workspace, session_id).expect("source observer opens");
+
+    fs::rename(&workspace, &moved_workspace).expect("source workspace moved aside");
+    fs::rename(&replacement, &workspace).expect("replacement installed at original path");
+    let replacement_marker = workspace.join("replacement.lock");
+    let replacement_ownership =
+        SessionOwnershipLease::acquire(&workspace, session_id, &replacement_marker)
+            .expect("replacement ownership acquired");
+
+    let source_active = observer.is_active();
+    replacement_ownership
+        .release()
+        .expect("replacement ownership releases");
+    fs::rename(&workspace, &replacement).expect("replacement moved aside");
+    fs::rename(&moved_workspace, &workspace).expect("source workspace restored");
+
+    assert!(
+        !source_active.expect("source ownership reads"),
+        "replacement ownership must not authorize the source workspace"
     );
 }
 
@@ -2230,27 +2567,64 @@ fn resume_rejects_case_aliased_session_lock_without_side_effects() {
 
 #[test]
 fn resume_does_not_rerun_tool_after_progress_prefix() {
-    let (workspace, path) = workspace_at_write_summary_progress_with_existing_output();
+    let workspace = workspace_copy("hello-flow");
     reset_fixture_tool_apply_count();
-
-    let output =
-        resume_session(&workspace, "hello-flow", EmitMode::Jsonl).expect("session resumes");
-
-    assert_no_active_session_lock(&workspace, "hello-flow");
-    assert!(
-        !fixture_tool_applied_ids()
+    let completed =
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("initial run completes");
+    let prefix = prefix_through_tool_progress(&completed.stdout, "write-summary");
+    fs::write(&completed.session_path, &prefix).expect("progress prefix remains durable");
+    write_definition_hash_metadata(&workspace, &completed.session_id, "hello-flow");
+    let summary_path = workspace.join("out/summary.txt");
+    assert_eq!(
+        fs::read_to_string(&summary_path).expect("initial summary remains readable"),
+        "hello\n"
+    );
+    fs::write(&summary_path, "sentinel\n").expect("sentinel summary replaces first output");
+    assert_eq!(
+        fixture_tool_applied_ids()
             .iter()
-            .any(|tool_id| tool_id == "write-summary")
+            .filter(|tool_id| tool_id.as_str() == "write-summary")
+            .count(),
+        1,
+        "the initial write side effect must occur exactly once"
+    );
+
+    let output = resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
+        .expect("session resumes after the durable progress checkpoint");
+
+    assert_no_active_session_lock(&workspace, &completed.session_id);
+    assert_eq!(
+        fixture_tool_applied_ids()
+            .iter()
+            .filter(|tool_id| tool_id.as_str() == "write-summary")
+            .count(),
+        1,
+        "resume must not apply write-summary after its durable progress checkpoint"
     );
     assert!(output.stdout.contains("\"event_type\":\"session.resumed\""));
-    assert!(output.stdout.contains("\"event_type\":\"tool.completed\""));
     assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary remains readable"),
-        "already-written\n"
+        fs::read_to_string(&summary_path).expect("sentinel summary remains readable"),
+        "sentinel\n"
     );
-    let resumed = fs::read_to_string(&path).expect("resumed log readable");
-    let events = validate_session_log_text(&path, "hello-flow", &resumed)
-        .expect("resumed log remains valid");
+    let resumed = fs::read_to_string(&completed.session_path).expect("resumed log readable");
+    let events =
+        validate_session_log_text(&completed.session_path, &completed.session_id, &resumed)
+            .expect("resumed log remains valid");
+    assert_eq!(
+        events[prefix.lines().count()..]
+            .iter()
+            .filter(|event| {
+                event
+                    .payload
+                    .get("tool_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("write-summary")
+            })
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>(),
+        vec![EventType::ToolCompleted],
+        "resume may append only the missing terminal event for write-summary"
+    );
     assert!(stream_is_completed(&events));
 }
 
@@ -2494,6 +2868,7 @@ fn resume_human_mode_uses_the_fixture_clock_and_reports_status() {
         &resumed_text,
     )
     .expect("resumed fixture stream validates");
+    assert_eq!(output.event_count, resumed_events.len());
     let anchored_clock = EventClock::from_first_event(&resumed_events[0])
         .expect("recorded timestamp anchors the resumed clock");
     assert!(
@@ -2529,17 +2904,21 @@ fn resume_human_mode_reports_the_terminal_failure_reason() {
 
     let output = resume_session(&workspace, "sandbox-negative-write", EmitMode::Human)
         .expect("session resumes to its deterministic failed terminal state");
+    let resumed = fs::read_to_string(&path).expect("resumed log readable");
+    let events = validate_session_log_text(&path, "sandbox-negative-write", &resumed)
+        .expect("resumed failure stream validates");
 
     assert!(output.failed);
+    assert_eq!(
+        output.event_count,
+        events.len(),
+        "reported count must match the validated persisted events"
+    );
     assert_eq!(
         output.stdout,
         "session sandbox-negative-write resumed: failed (write_denied): write outside declared roots denied\n"
     );
-    assert!(
-        fs::read_to_string(&path)
-            .expect("resumed log readable")
-            .contains("\"event_type\":\"session.failed\"")
-    );
+    assert!(resumed.contains("\"event_type\":\"session.failed\""));
 }
 
 #[test]
@@ -2654,6 +3033,7 @@ fn resume_retries_prior_resume_marker_tail_without_duplicate_side_effects() {
     let resumed = fs::read_to_string(&path).expect("resumed log remains readable");
     let events = validate_session_log_text(&path, "hello-flow", &resumed)
         .expect("resumed log remains valid");
+    assert_eq!(output.event_count, events.len());
     assert_eq!(
         events
             .iter()

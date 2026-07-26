@@ -110,6 +110,7 @@ pub enum SessionWriterCommand {
 }
 
 pub struct SerialSessionWriter<'a> {
+    pub(crate) captured_jsonl: Option<String>,
     pub(crate) commit_reservation: Option<&'a SessionReservation>,
     pub(crate) deferred: Vec<std::sync::mpsc::Receiver<WriterOutcome>>,
     pub(crate) failed: bool,
@@ -190,6 +191,7 @@ impl<'a> SerialSessionWriter<'a> {
                 source,
             })?;
         Ok(Self {
+            captured_jsonl: None,
             commit_reservation,
             deferred: Vec::new(),
             failed: false,
@@ -223,6 +225,14 @@ impl<'a> SerialSessionWriter<'a> {
             self.failed = true;
         }
         writer_failures_result(failures)
+    }
+
+    pub(crate) fn enable_jsonl_capture(&mut self) {
+        self.captured_jsonl = Some(String::new());
+    }
+
+    pub(crate) fn take_captured_jsonl(&mut self) -> Option<String> {
+        self.captured_jsonl.take()
     }
 
     pub(crate) fn drain_deferred(&mut self) -> Result<(), RuntimeError> {
@@ -333,6 +343,9 @@ impl RuntimeEventSink for SerialSessionWriter<'_> {
             failures.push(event_writer_failure(writer_channel_closed_error()));
             return writer_failures_result(failures);
         }
+        if let Some(captured_jsonl) = self.captured_jsonl.as_mut() {
+            captured_jsonl.push_str(canonical_jsonl);
+        }
         if is_batchable {
             self.deferred.push(response);
             return Ok(());
@@ -360,17 +373,151 @@ pub struct ResumeEventSink<'writer, 'session> {
     pub(crate) writer: &'writer mut SerialSessionWriter<'session>,
 }
 
-pub struct ResumePreflightSink<'path> {
-    pub(crate) appended_bytes: usize,
-    pub(crate) clock: EventClock,
+pub struct SessionStreamPreflight<'path> {
+    pub(crate) current_bytes: u64,
+    pub(crate) current_ordinal: u64,
+    pub(crate) limits: SessionStreamLimits,
     pub(crate) path: &'path AnchoredFile,
+    pub(crate) total_bytes: u64,
+}
+
+impl<'path> SessionStreamPreflight<'path> {
+    pub(crate) fn open(
+        path: &'path AnchoredFile,
+        limits: SessionStreamLimits,
+    ) -> Result<Self, RuntimeError> {
+        let segments = segmented_jsonl_files(path, limits)?;
+        let mut total_bytes = 0u64;
+        for segment in &segments {
+            let bytes = segment.metadata()?.len();
+            if bytes > MAX_SESSION_SEGMENT_BYTES {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} segment size {bytes} bytes exceeds max {MAX_SESSION_SEGMENT_BYTES}",
+                    segment.diagnostic_path().display()
+                )));
+            }
+            total_bytes = total_bytes.saturating_add(bytes);
+        }
+        if total_bytes > limits.max_total_bytes {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segmented JSONL size {total_bytes} bytes exceeds max {}",
+                path.diagnostic_path().display(),
+                limits.max_total_bytes
+            )));
+        }
+        let current_ordinal = u64::try_from(segments.len()).unwrap_or(u64::MAX);
+        let current_bytes = segments
+            .last()
+            .expect("segmented streams contain their base file")
+            .metadata()?
+            .len();
+        Ok(Self {
+            current_bytes,
+            current_ordinal,
+            limits,
+            path,
+            total_bytes,
+        })
+    }
+
+    pub(crate) fn record(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
+        let rotate = session_stream_record_requires_rotation(
+            self.path,
+            self.limits,
+            self.current_bytes,
+            self.current_ordinal,
+            self.total_bytes,
+            appended_bytes,
+        )?;
+        if rotate {
+            self.current_ordinal = self.current_ordinal.saturating_add(1);
+            self.current_bytes = 0;
+        }
+        let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
+        self.current_bytes = self.current_bytes.saturating_add(appended_bytes);
+        self.total_bytes = self.total_bytes.saturating_add(appended_bytes);
+        Ok(())
+    }
+}
+
+pub struct ContextManifestPreflight<'path> {
+    pub(crate) last_manifest: Option<String>,
+    pub(crate) manifest_count: usize,
+    pub(crate) object_writer: SessionObjectWriter,
+    pub(crate) stream: SessionStreamPreflight<'path>,
+}
+
+impl<'path> ContextManifestPreflight<'path> {
+    pub(crate) fn open(
+        path: &'path AnchoredFile,
+        object_parent: AnchoredDir,
+        session_id: &str,
+    ) -> Result<Self, RuntimeError> {
+        let (last_manifest, manifest_count, _) = context_manifest_inventory(path)?;
+        Ok(Self {
+            last_manifest,
+            manifest_count,
+            object_writer: SessionObjectWriter::open(object_parent, session_id)?,
+            stream: SessionStreamPreflight::open(path, CONTEXT_MANIFEST_STREAM_LIMITS)?,
+        })
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        checkpoint: &ContextManifestCheckpoint,
+    ) -> Result<(), RuntimeError> {
+        let replay = validate_context_manifest_checkpoint(
+            self.stream.path.diagnostic_path(),
+            self.manifest_count,
+            self.last_manifest.as_deref(),
+            checkpoint,
+        )?;
+        if replay {
+            return Ok(());
+        }
+        self.object_writer.preflight_all(&checkpoint.objects)?;
+        self.stream.record(checkpoint.manifest.line.len())?;
+        self.last_manifest = Some(checkpoint.manifest.line.clone());
+        self.manifest_count = checkpoint.ordinal;
+        Ok(())
+    }
+}
+
+pub struct ResumePreflightSink<'path> {
+    pub(crate) clock: EventClock,
+    pub(crate) contexts: ContextManifestPreflight<'path>,
+    pub(crate) events: SessionStreamPreflight<'path>,
     pub(crate) planned_event_count: usize,
     pub(crate) resume_marker_count: usize,
 }
 
-impl ResumePreflightSink<'_> {
+impl<'path> ResumePreflightSink<'path> {
+    pub(crate) fn open(
+        path: &'path AnchoredFile,
+        context_path: &'path AnchoredFile,
+        session_id: &str,
+        marker_bytes: usize,
+        clock: EventClock,
+        planned_event_count: usize,
+        resume_marker_count: usize,
+    ) -> Result<Self, RuntimeError> {
+        let mut events = SessionStreamPreflight::open(path, EVENT_STREAM_LIMITS)?;
+        events.record(marker_bytes)?;
+        Ok(Self {
+            clock,
+            contexts: ContextManifestPreflight::open(
+                context_path,
+                path.parent.clone(),
+                session_id,
+            )?,
+            events,
+            planned_event_count,
+            resume_marker_count,
+        })
+    }
+
     pub(crate) fn finish(self) -> Result<(), RuntimeError> {
-        prepare_session_log_append(self.path, self.appended_bytes).map(|_| ())
+        Ok(())
     }
 }
 
@@ -383,11 +530,14 @@ impl RuntimeEventSink for ResumePreflightSink<'_> {
         &mut self,
         event: &EventEnvelope,
         _canonical_jsonl: &str,
-        _context_manifest: Option<ContextManifestCheckpoint>,
+        context_manifest: Option<ContextManifestCheckpoint>,
         _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.sequence <= self.planned_event_count as u64 {
             return Ok(());
+        }
+        if let Some(checkpoint) = context_manifest.as_ref() {
+            self.contexts.record(checkpoint)?;
         }
         let shifted = shift_resumed_event(
             event.clone(),
@@ -397,8 +547,7 @@ impl RuntimeEventSink for ResumePreflightSink<'_> {
         let canonical = shifted.canonical_jsonl().map_err(|err| {
             RuntimeError::Protocol(format!("failed to serialize resumed runtime event: {err}"))
         })?;
-        self.appended_bytes = self.appended_bytes.saturating_add(canonical.len());
-        Ok(())
+        self.events.record(canonical.len())
     }
 }
 
@@ -555,6 +704,54 @@ pub struct ContextManifestWriter {
     pub(crate) object_writer: Option<SessionObjectWriter>,
 }
 
+fn context_manifest_inventory(
+    path: &AnchoredFile,
+) -> Result<(Option<String>, usize, u64), RuntimeError> {
+    let mut last_manifest = None;
+    let mut manifest_count = 0usize;
+    let byte_count = for_each_segmented_jsonl_line(path, CONTEXT_MANIFEST_STREAM_LIMITS, |line| {
+        if !line.ends_with('\n') {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest stream must end with LF",
+                path.diagnostic_path().display()
+            )));
+        }
+        last_manifest = Some(line.to_owned());
+        manifest_count = manifest_count.saturating_add(1);
+        Ok(())
+    })?;
+    Ok((last_manifest, manifest_count, byte_count))
+}
+
+fn validate_context_manifest_checkpoint(
+    path: &Path,
+    manifest_count: usize,
+    last_manifest: Option<&str>,
+    checkpoint: &ContextManifestCheckpoint,
+) -> Result<bool, RuntimeError> {
+    let replay = checkpoint.ordinal == manifest_count;
+    if replay && last_manifest != Some(&checkpoint.manifest.line) {
+        return Err(RuntimeError::Protocol(format!(
+            "{} in-flight context manifest does not match deterministic replay",
+            path.display()
+        )));
+    }
+    if !replay && checkpoint.ordinal != manifest_count.saturating_add(1) {
+        return Err(RuntimeError::Protocol(format!(
+            "{} context manifest ordinal {} does not follow persisted ordinal {}",
+            path.display(),
+            checkpoint.ordinal,
+            manifest_count
+        )));
+    }
+    if checkpoint.manifest.line.is_empty() || !checkpoint.manifest.line.ends_with('\n') {
+        return Err(RuntimeError::Protocol(
+            "context manifest must be one LF-terminated JSONL record".to_owned(),
+        ));
+    }
+    Ok(replay)
+}
+
 impl ContextManifestWriter {
     #[cfg(test)]
     pub(crate) fn open(path: &AnchoredFile) -> Result<Self, RuntimeError> {
@@ -576,20 +773,7 @@ impl ContextManifestWriter {
         path: &AnchoredFile,
         object_writer: Option<SessionObjectWriter>,
     ) -> Result<Self, RuntimeError> {
-        let mut last_manifest = None;
-        let mut manifest_count = 0usize;
-        let byte_count =
-            for_each_segmented_jsonl_line(path, CONTEXT_MANIFEST_STREAM_LIMITS, |line| {
-                if !line.ends_with('\n') {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} context manifest stream must end with LF",
-                        path.diagnostic_path().display()
-                    )));
-                }
-                last_manifest = Some(line.to_owned());
-                manifest_count = manifest_count.saturating_add(1);
-                Ok(())
-            })?;
+        let (last_manifest, manifest_count, byte_count) = context_manifest_inventory(path)?;
         Ok(Self {
             appender: SessionLogAppender::open_with_limits(path, CONTEXT_MANIFEST_STREAM_LIMITS)?,
             byte_count,
@@ -605,42 +789,33 @@ impl ContextManifestWriter {
         checkpoint: &ContextManifestCheckpoint,
     ) -> Result<(), RuntimeError> {
         let path = path.diagnostic_path();
-        if let Some(object_writer) = self.object_writer.as_mut() {
-            object_writer.persist_all(&checkpoint.objects)?;
-        }
-        if checkpoint.ordinal == self.manifest_count {
-            if self.last_manifest.as_deref() == Some(&checkpoint.manifest.line) {
-                return self.appender.sync(path);
-            }
-            return Err(RuntimeError::Protocol(format!(
-                "{} in-flight context manifest does not match deterministic replay",
-                path.display()
-            )));
-        }
-        if checkpoint.ordinal != self.manifest_count.saturating_add(1) {
-            return Err(RuntimeError::Protocol(format!(
-                "{} context manifest ordinal {} does not follow persisted ordinal {}",
-                path.display(),
-                checkpoint.ordinal,
-                self.manifest_count
-            )));
-        }
-        if checkpoint.manifest.line.is_empty() || !checkpoint.manifest.line.ends_with('\n') {
-            return Err(RuntimeError::Protocol(
-                "context manifest must be one LF-terminated JSONL record".to_owned(),
-            ));
-        }
-        let total = ensure_context_manifest_growth_within_limit(
+        let replay = validate_context_manifest_checkpoint(
             path,
-            self.byte_count,
-            checkpoint.manifest.line.len(),
+            self.manifest_count,
+            self.last_manifest.as_deref(),
+            checkpoint,
         )?;
+        let total = if replay {
+            self.byte_count
+        } else {
+            ensure_context_manifest_growth_within_limit(
+                path,
+                self.byte_count,
+                checkpoint.manifest.line.len(),
+            )?
+        };
         let actual = self.appender.len(path)?;
         if actual != self.byte_count {
             return Err(RuntimeError::Protocol(format!(
                 "{} changed outside context manifest append semantics",
                 path.display()
             )));
+        }
+        if let Some(object_writer) = self.object_writer.as_mut() {
+            object_writer.persist_all(&checkpoint.objects)?;
+        }
+        if replay {
+            return self.appender.sync(path);
         }
         self.appender
             .append(path, checkpoint.manifest.line.as_bytes())?;
@@ -671,10 +846,67 @@ impl SessionObjectWriter {
     }
 
     pub(crate) fn persist_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
+        self.validate_all(objects)?;
         for object in objects {
             self.persist(object)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn preflight_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
+        let (accounted_bytes, verified) = self.validate_all(objects)?;
+        self.accounted_bytes = accounted_bytes;
+        self.verified = verified;
+        Ok(())
+    }
+
+    fn validate_all(
+        &self,
+        objects: &[ContextObject],
+    ) -> Result<(u64, BTreeSet<String>), RuntimeError> {
+        let mut accounted_bytes = self.accounted_bytes;
+        let mut verified = self.verified.clone();
+        for object in objects {
+            let object_bytes = Self::validate_object(object)?;
+            if !verified.insert(object.digest.clone()) {
+                continue;
+            }
+            let path = self.object_parent.file(format!(
+                "{}.object.sha256-{}",
+                self.session_id, object.digest
+            ));
+            match path.metadata() {
+                Ok(_) => {
+                    let existing = read_anchored_file_with_limit(&path, MAX_SESSION_OBJECT_BYTES)?;
+                    if existing != object.bytes {
+                        return Err(RuntimeError::Protocol(format!(
+                            "{} does not match referenced session object bytes",
+                            path.diagnostic_path().display()
+                        )));
+                    }
+                }
+                Err(RuntimeError::Io { source, .. })
+                    if source.kind() == io::ErrorKind::NotFound =>
+                {
+                    accounted_bytes = accounted_bytes.saturating_add(object_bytes);
+                    ensure_session_object_total(accounted_bytes)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok((accounted_bytes, verified))
+    }
+
+    fn validate_object(object: &ContextObject) -> Result<u64, RuntimeError> {
+        let object_bytes = u64::try_from(object.bytes.len()).unwrap_or(u64::MAX);
+        ensure_session_object_size(&object.digest, object_bytes)?;
+        if sha256_hex(&object.bytes) != object.digest {
+            return Err(RuntimeError::Protocol(format!(
+                "session object {} does not match its content hash",
+                object.digest
+            )));
+        }
+        Ok(object_bytes)
     }
 
     pub(crate) fn persist(&mut self, object: &ContextObject) -> Result<(), RuntimeError> {
@@ -692,14 +924,7 @@ impl SessionObjectWriter {
         object: &ContextObject,
         write_new: impl FnOnce(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
-        let object_bytes = u64::try_from(object.bytes.len()).unwrap_or(u64::MAX);
-        ensure_session_object_size(&object.digest, object_bytes)?;
-        if sha256_hex(&object.bytes) != object.digest {
-            return Err(RuntimeError::Protocol(format!(
-                "session object {} does not match its content hash",
-                object.digest
-            )));
-        }
+        let object_bytes = Self::validate_object(object)?;
         if self.verified.contains(&object.digest) {
             return Ok(());
         }
@@ -1138,6 +1363,44 @@ pub fn is_event_sync_checkpoint(event_type: &EventType) -> bool {
     )
 }
 
+fn session_stream_record_requires_rotation(
+    path: &AnchoredFile,
+    limits: SessionStreamLimits,
+    current_bytes: u64,
+    current_ordinal: u64,
+    total_bytes: u64,
+    appended_bytes: usize,
+) -> Result<bool, RuntimeError> {
+    let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
+    if appended_bytes > MAX_SESSION_SEGMENT_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "{} JSONL record is {appended_bytes} bytes; max segment size is {MAX_SESSION_SEGMENT_BYTES}",
+            path.diagnostic_path().display()
+        )));
+    }
+    let total = total_bytes.saturating_add(appended_bytes);
+    if total > limits.max_total_bytes {
+        return Err(RuntimeError::Protocol(format!(
+            "{} segmented JSONL size {total} bytes exceeds max {}",
+            path.diagnostic_path().display(),
+            limits.max_total_bytes
+        )));
+    }
+    if current_bytes == 0
+        || current_bytes.saturating_add(appended_bytes) <= MAX_SESSION_SEGMENT_BYTES
+    {
+        return Ok(false);
+    }
+    if current_ordinal >= limits.max_segments {
+        return Err(RuntimeError::Protocol(format!(
+            "{} segment count exceeds max {}",
+            path.diagnostic_path().display(),
+            limits.max_segments
+        )));
+    }
+    Ok(true)
+}
+
 pub struct SessionLogAppender {
     pub(crate) base_path: AnchoredFile,
     pub(crate) current_bytes: u64,
@@ -1203,6 +1466,7 @@ impl SessionLogAppender {
         let current = self.current_path()?;
         let path = current.diagnostic_path();
         validate_open_session_log_append_file(path, &self.file)?;
+        verify_owned_anchored_file(&current, &self.file, "session log segment")?;
         let actual = self.file.metadata().map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
@@ -1220,37 +1484,21 @@ impl SessionLogAppender {
 
     pub(crate) fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
         let current_path = self.verify_current_segment()?;
-        let appended_bytes = u64::try_from(appended_bytes).unwrap_or(u64::MAX);
-        if appended_bytes > MAX_SESSION_SEGMENT_BYTES {
-            return Err(RuntimeError::Protocol(format!(
-                "{} JSONL record is {appended_bytes} bytes; max segment size is {MAX_SESSION_SEGMENT_BYTES}",
-                self.base_path.diagnostic_path().display()
-            )));
-        }
-        let total = self.total_bytes.saturating_add(appended_bytes);
-        if total > self.limits.max_total_bytes {
-            return Err(RuntimeError::Protocol(format!(
-                "{} segmented JSONL size {total} bytes exceeds max {}",
-                self.base_path.diagnostic_path().display(),
-                self.limits.max_total_bytes
-            )));
-        }
-        if self.current_bytes == 0
-            || self.current_bytes.saturating_add(appended_bytes) <= MAX_SESSION_SEGMENT_BYTES
-        {
+        if !session_stream_record_requires_rotation(
+            &self.base_path,
+            self.limits,
+            self.current_bytes,
+            self.current_ordinal,
+            self.total_bytes,
+            appended_bytes,
+        )? {
             return Ok(());
-        }
-        if self.current_ordinal >= self.limits.max_segments {
-            return Err(RuntimeError::Protocol(format!(
-                "{} segment count exceeds max {}",
-                self.base_path.diagnostic_path().display(),
-                self.limits.max_segments
-            )));
         }
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: current_path.diagnostic_path().to_owned(),
             source,
         })?;
+        self.verify_current_segment()?;
         let next_ordinal = self.current_ordinal.saturating_add(1);
         let next = segmented_jsonl_path(&self.base_path, next_ordinal)?;
         reserve_new_anchored_file(&next)?;
@@ -1396,7 +1644,9 @@ impl EventLogAppender for SessionLogAppender {
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: path.to_owned(),
             source,
-        })
+        })?;
+        self.verify_current_segment()?;
+        Ok(())
     }
 }
 

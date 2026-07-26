@@ -1,7 +1,15 @@
 use super::*;
 
+#[cfg(test)]
 pub fn load_workspace_config(workspace: &Path) -> Result<WorkspaceConfig, RuntimeError> {
-    let text = read_workspace_config_to_string(workspace)?;
+    let workspace = AnchoredDir::workspace(workspace)?;
+    load_workspace_config_from(&workspace)
+}
+
+pub(crate) fn load_workspace_config_from(
+    workspace: &AnchoredDir,
+) -> Result<WorkspaceConfig, RuntimeError> {
+    let text = read_workspace_config_to_string_from(workspace)?;
     let source: WorkspaceConfigSource =
         core_script::parse_safe_yaml_config(".flow/config.yaml", &text)
             .map_err(|error| RuntimeError::Usage(error.to_string()))?;
@@ -85,12 +93,17 @@ pub fn resume_event_clock(
     Ok(recorded_clock)
 }
 
+#[cfg(test)]
 pub fn read_workspace_config_to_string(workspace: &Path) -> Result<String, RuntimeError> {
-    let flow_path = workspace.join(".flow");
+    let workspace = AnchoredDir::workspace(workspace)?;
+    read_workspace_config_to_string_from(&workspace)
+}
+
+fn read_workspace_config_to_string_from(workspace: &AnchoredDir) -> Result<String, RuntimeError> {
+    let flow_path = workspace.path.join(".flow");
     let config_path = flow_path.join("config.yaml");
-    let workspace_dir = Dir::open_ambient_dir(workspace, ambient_authority())
-        .map_err(|source| path_io_error(workspace, source))?;
-    let flow_metadata = workspace_dir
+    let flow_metadata = workspace
+        .dir
         .symlink_metadata(".flow")
         .map_err(|source| path_io_error(&flow_path, source))?;
     if flow_metadata.file_type().is_symlink() {
@@ -102,9 +115,9 @@ pub fn read_workspace_config_to_string(workspace: &Path) -> Result<String, Runti
             flow_path.display()
         )));
     }
-    let flow_dir = workspace_dir.open_dir_nofollow(".flow").map_err(|source| {
+    let flow_dir = workspace.dir.open_dir_nofollow(".flow").map_err(|source| {
         classify_workspace_config_open_error(
-            &workspace_dir,
+            &workspace.dir,
             ".flow",
             flow_path,
             source,
@@ -190,6 +203,7 @@ pub fn path_io_error(path: &Path, source: io::Error) -> RuntimeError {
 pub fn for_each_anchored_file_line_with_limit(
     path: &AnchoredFile,
     max_bytes: u64,
+    require_trailing_lf: bool,
     visit: impl FnMut(&str) -> Result<(), RuntimeError>,
 ) -> Result<u64, RuntimeError> {
     let (file, metadata) = open_anchored_file_for_read(path)?;
@@ -200,13 +214,30 @@ pub fn for_each_anchored_file_line_with_limit(
             metadata.len()
         )));
     }
-    for_each_reader_line_with_limit(file, path.diagnostic_path(), max_bytes, visit)
+    for_each_reader_line_with_limit_inner(
+        file,
+        path.diagnostic_path(),
+        max_bytes,
+        require_trailing_lf,
+        visit,
+    )
 }
 
+#[cfg(test)]
 pub fn for_each_reader_line_with_limit(
     reader: impl Read,
     path: &Path,
     max_bytes: u64,
+    visit: impl FnMut(&str) -> Result<(), RuntimeError>,
+) -> Result<u64, RuntimeError> {
+    for_each_reader_line_with_limit_inner(reader, path, max_bytes, false, visit)
+}
+
+fn for_each_reader_line_with_limit_inner(
+    reader: impl Read,
+    path: &Path,
+    max_bytes: u64,
+    require_trailing_lf: bool,
     mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
 ) -> Result<u64, RuntimeError> {
     let mut reader = io::BufReader::new(reader.take(max_bytes.saturating_add(1)));
@@ -217,12 +248,24 @@ pub fn for_each_reader_line_with_limit(
         let read = io::BufRead::read_until(&mut reader, b'\n', &mut line)
             .map_err(|source| path_io_error(path, source))?;
         if read == 0 {
+            if require_trailing_lf && total == 0 {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} non-final segment must end with LF",
+                    path.display()
+                )));
+            }
             break;
         }
         total = total.saturating_add(u64::try_from(read).unwrap_or(u64::MAX));
         if total > max_bytes {
             return Err(RuntimeError::Protocol(format!(
                 "{} read size {total} bytes exceeds max {max_bytes}",
+                path.display()
+            )));
+        }
+        if require_trailing_lf && !line.ends_with(b"\n") {
+            return Err(RuntimeError::Protocol(format!(
+                "{} non-final segment must end with LF",
                 path.display()
             )));
         }

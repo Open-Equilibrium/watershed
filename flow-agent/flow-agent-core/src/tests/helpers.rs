@@ -591,8 +591,9 @@ pub(super) fn emit_noop_dispatch_for_budget(
         EventClock::fixed_fixture(),
         false,
     );
+    let workspace = AnchoredWorkspace::open(workspace).expect("benchmark workspace anchors");
     emit_tool(
-        workspace,
+        &workspace,
         tool,
         policy,
         invocation,

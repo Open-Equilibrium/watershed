@@ -565,6 +565,98 @@ fn protocol_validator_rejects_stream_identity_edges() {
 }
 
 #[test]
+fn constructed_event_payload_failure_preserves_state_for_corrected_retry() {
+    let path = Path::new("constructed-payload-retry.jsonl");
+    let mut validation = SessionAppendValidationState::empty("meta001");
+    let started = base_event();
+    validation
+        .validate_constructed_event(
+            path,
+            &started,
+            started.canonical_jsonl().expect("start serializes").len(),
+        )
+        .expect("session start validates");
+
+    let mut failed = EventEnvelope::new(
+        "evt-002",
+        EventType::SessionFailed,
+        "meta001",
+        2,
+        event_timestamp(2),
+        "flow-agent-cli",
+        serde_json::json!({}),
+    );
+    let err = validation
+        .validate_constructed_event(path, &failed, 1)
+        .expect_err("missing failure reason must fail");
+    assert!(err.to_string().contains("payload.reason"), "{err}");
+
+    failed.payload = serde_json::json!({"reason":"fixture-failure"});
+    validation
+        .validate_constructed_event(
+            path,
+            &failed,
+            failed.canonical_jsonl().expect("retry serializes").len(),
+        )
+        .expect("corrected event must reuse its sequence and event id");
+}
+
+#[test]
+fn appended_event_visitor_failure_preserves_state_for_identical_retry() {
+    let path = Path::new("visitor-retry.jsonl");
+    let mut validation = SessionAppendValidationState::empty("meta001");
+    validation
+        .validate_appended(
+            path,
+            &base_event().canonical_jsonl().expect("start serializes"),
+        )
+        .expect("session start validates");
+    let paused = session_event_line("meta001", "evt-002", EventType::SessionPaused, 2);
+
+    let err = validation
+        .validate_appended_with(path, &paused, |_| {
+            Err(RuntimeError::Protocol(
+                "injected visitor failure".to_owned(),
+            ))
+        })
+        .expect_err("visitor failure must remain visible");
+    assert!(
+        err.to_string().contains("injected visitor failure"),
+        "{err}"
+    );
+
+    validation
+        .validate_appended_with(path, &paused, |_| Ok(()))
+        .expect("identical event must be retryable after visitor failure");
+}
+
+#[test]
+fn terminal_lifecycle_failure_preserves_state_for_corrected_retry() {
+    let path = Path::new("terminal-lifecycle-retry.jsonl");
+    let mut validation = SessionAppendValidationState::empty("meta001");
+    validation
+        .validate_appended(
+            path,
+            &[
+                base_event().canonical_jsonl().expect("start serializes"),
+                flow_started_line("evt-002", 2),
+            ]
+            .concat(),
+        )
+        .expect("open flow prefix validates");
+    let completed = session_event_line("meta001", "evt-003", EventType::SessionCompleted, 3);
+
+    let err = validation
+        .validate_appended(path, &completed)
+        .expect_err("terminal session with open flow must fail");
+    assert!(err.to_string().contains("open flow"), "{err}");
+
+    validation
+        .validate_appended(path, &flow_completed_line("evt-003", 3))
+        .expect("corrected lifecycle event must reuse its sequence and event id");
+}
+
+#[test]
 fn sandbox_helper_negatives_and_display_names_cover_m1_edges() {
     let (registry, policy) = fixture_runtime_policy("sandbox-negative", "sandbox-negative-write");
     let phase = registry

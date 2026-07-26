@@ -22,7 +22,7 @@ pub fn fixture_tool_applied_ids() -> Vec<String> {
 }
 
 pub fn emit_tool(
-    workspace: &Path,
+    workspace: &AnchoredWorkspace,
     tool: &core_script::ToolBlock,
     policy: RuntimeToolPolicy<'_>,
     invocation: &FlowInvocation,
@@ -62,13 +62,16 @@ pub fn emit_tool(
         completed_sequence
     };
     let progress = if side_effect_mode.should_execute_tool(replay_guard_sequence) {
+        workspace.verify_binding()?;
         #[cfg(test)]
         FIXTURE_TOOL_APPLIED_IDS.with_borrow_mut(|ids| ids.push(tool.identity.id.clone()));
         match tool_dispatch_progress(
             tool,
             policy.protected_path_match_mode,
             policy.command,
-            ToolDispatchMode::Execute { workspace },
+            ToolDispatchMode::Execute {
+                workspace: workspace.root(),
+            },
         ) {
             Ok(progress) => progress,
             Err(err) => {
@@ -85,7 +88,9 @@ pub fn emit_tool(
             tool,
             policy.protected_path_match_mode,
             policy.command,
-            ToolDispatchMode::Preflight { workspace },
+            ToolDispatchMode::Preflight {
+                workspace: workspace.root(),
+            },
         )?
     } else {
         planned_progress
@@ -108,8 +113,8 @@ pub fn emit_tool(
 
 pub enum ToolDispatchMode<'a> {
     Plan,
-    Preflight { workspace: &'a Path },
-    Execute { workspace: &'a Path },
+    Preflight { workspace: &'a AnchoredDir },
+    Execute { workspace: &'a AnchoredDir },
 }
 
 pub fn tool_dispatch_progress(
@@ -157,9 +162,14 @@ pub fn execute_predefined_command(
 ) -> Result<Option<&'static str>, RuntimeError> {
     let progress = trusted_predefined_command_progress(command_id)?;
     let executable = format!("registry:{command_id}");
-    if policy.executable != executable || policy.argv != argv {
+    if policy.executable != executable {
         return Err(RuntimeError::Protocol(format!(
             "runtime policy executable does not match trusted command {command_id:?}"
+        )));
+    }
+    if policy.argv != argv {
+        return Err(RuntimeError::Protocol(format!(
+            "runtime policy arguments do not match trusted command {command_id:?}"
         )));
     }
     Ok(progress)

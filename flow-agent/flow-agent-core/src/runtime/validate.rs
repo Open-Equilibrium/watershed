@@ -423,6 +423,7 @@ impl SessionAppendValidationState {
             self.validate_budget(path, line_number, canonical_bytes)?;
             self.validate_event(path, line_number, &event)?;
             visit(&event)?;
+            self.record_event(line_number, &event, canonical_bytes);
         }
         Ok(())
     }
@@ -436,11 +437,13 @@ impl SessionAppendValidationState {
         let line_number = self.line_count + 1;
         validate_event_size(path, line_number, canonical_bytes)?;
         self.validate_budget(path, line_number, canonical_bytes)?;
-        self.validate_event(path, line_number, event)
+        self.validate_event(path, line_number, event)?;
+        self.record_event(line_number, event, canonical_bytes);
+        Ok(())
     }
 
     pub(crate) fn validate_budget(
-        &mut self,
+        &self,
         path: &Path,
         line_number: usize,
         canonical_bytes: usize,
@@ -458,12 +461,11 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        self.stream_bytes = stream_bytes;
         Ok(())
     }
 
     pub(crate) fn validate_event(
-        &mut self,
+        &self,
         path: &Path,
         line_number: usize,
         event: &EventEnvelope,
@@ -491,8 +493,7 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        self.previous_sequence = event.sequence;
-        if !self.event_ids.insert(event.event_id.clone()) {
+        if self.event_ids.contains(&event.event_id) {
             return Err(RuntimeError::Protocol(format!(
                 "{} line {line_number} must use a unique event_id",
                 path.display()
@@ -526,7 +527,6 @@ impl SessionAppendValidationState {
                     path.display()
                 )));
             }
-            self.flow_started_ids.insert(flow_id.to_owned());
         }
         match &self.stream_session_id {
             Some(existing) if existing != &event.session_id => {
@@ -535,8 +535,7 @@ impl SessionAppendValidationState {
                     path.display()
                 )));
             }
-            None => self.stream_session_id = Some(event.session_id.clone()),
-            Some(_) => {}
+            None | Some(_) => {}
         }
         if line_number == 1 && event.event_type != EventType::SessionStarted {
             return Err(RuntimeError::Protocol(format!(
@@ -549,17 +548,40 @@ impl SessionAppendValidationState {
             event.event_type,
             EventType::SessionCompleted | EventType::SessionFailed
         ) {
-            self.terminal_line = Some(line_number);
-        }
-        self.line_count = line_number;
-        if matches!(
-            event.event_type,
-            EventType::SessionCompleted | EventType::SessionFailed
-        ) {
             self.lifecycle
                 .validate_terminal_session(path, Some(event))?;
         }
         Ok(())
+    }
+
+    pub(crate) fn record_event(
+        &mut self,
+        line_number: usize,
+        event: &EventEnvelope,
+        canonical_bytes: usize,
+    ) {
+        self.stream_bytes = self.stream_bytes.saturating_add(canonical_bytes);
+        self.previous_sequence = event.sequence;
+        let inserted = self.event_ids.insert(event.event_id.clone());
+        debug_assert!(inserted, "validated event ids are unique");
+        if event.event_type == EventType::FlowStarted {
+            let flow_id = event
+                .flow_id
+                .as_ref()
+                .expect("validated flow.started events include flow_id");
+            let inserted = self.flow_started_ids.insert(flow_id.clone());
+            debug_assert!(inserted, "validated flow.started ids are unique");
+        }
+        self.stream_session_id
+            .get_or_insert_with(|| event.session_id.clone());
+        self.lifecycle.record_event(line_number, event);
+        if matches!(
+            event.event_type,
+            EventType::SessionCompleted | EventType::SessionFailed
+        ) {
+            self.terminal_line = Some(line_number);
+        }
+        self.line_count = line_number;
     }
 }
 
@@ -646,7 +668,7 @@ pub struct SessionLifecycleState {
 
 impl SessionLifecycleState {
     pub(crate) fn validate_event(
-        &mut self,
+        &self,
         path: &Path,
         line_number: usize,
         event: &EventEnvelope,
@@ -683,14 +705,7 @@ impl SessionLifecycleState {
 
         match event.event_type {
             EventType::FlowStarted => {
-                let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                self.flow_definition_ids.insert(
-                    flow_id.clone(),
-                    lifecycle_payload_string(event, "flow_definition_id"),
-                );
-                self.flow_parents
-                    .insert(flow_id.clone(), event.parent_flow_id.clone());
-                self.flows.start(flow_id);
+                require_lifecycle_flow_id(path, line_number, event)?;
             }
             EventType::FlowCompleted | EventType::FlowFailed => {
                 let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
@@ -730,7 +745,6 @@ impl SessionLifecycleState {
                         child,
                     ));
                 }
-                self.flows.finish(flow_id, line_number);
             }
             EventType::PhaseEntered => {
                 let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
@@ -742,8 +756,6 @@ impl SessionLifecycleState {
                         active_step.step_id
                     )));
                 }
-                self.active_phases
-                    .insert(flow_id, lifecycle_payload_string(event, "phase_id"));
             }
             EventType::StepStarted => {
                 let active_phase =
@@ -776,7 +788,6 @@ impl SessionLifecycleState {
                         active_step.step_id
                     )));
                 }
-                self.active_steps.insert(flow_id, step.clone());
             }
             EventType::StepCompleted => {
                 let step = lifecycle_step_key(event, &self.active_phases);
@@ -824,8 +835,6 @@ impl SessionLifecycleState {
                         &message.message_id,
                     ));
                 }
-                self.active_steps.remove(&flow_id);
-                self.terminal_steps.insert(step, line_number);
             }
             EventType::ToolStarted => {
                 require_active_step(path, line_number, event, &self.active_steps)?;
@@ -847,8 +856,6 @@ impl SessionLifecycleState {
                         tool.tool_id
                     )));
                 }
-                self.tools_without_progress.insert(tool.clone());
-                self.tools.start(tool);
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
                 let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
@@ -870,13 +877,6 @@ impl SessionLifecycleState {
                         tool.tool_id
                     )));
                 }
-                if matches!(
-                    event.event_type,
-                    EventType::ToolCompleted | EventType::ToolTimedOut
-                ) {
-                    self.tools.finish(tool.clone(), line_number);
-                }
-                self.tools_without_progress.remove(&tool);
             }
             EventType::ToolFailed => {
                 let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
@@ -897,8 +897,6 @@ impl SessionLifecycleState {
                         path.display()
                     )));
                 }
-                self.tools_without_progress.remove(&tool);
-                self.tools.finish(tool, line_number);
             }
             EventType::MessageDelta => {
                 require_active_step(path, line_number, event, &self.active_steps)?;
@@ -925,9 +923,7 @@ impl SessionLifecycleState {
                         )));
                     }
                     Some(_) => {}
-                    None => {
-                        self.active_message_roles.insert(message, role);
-                    }
+                    None => {}
                 }
             }
             EventType::MessageCompleted => {
@@ -960,6 +956,106 @@ impl SessionLifecycleState {
                         message.message_id
                     )));
                 }
+            }
+            EventType::SessionStarted
+            | EventType::SessionPaused
+            | EventType::SessionResumed
+            | EventType::SessionCompleted
+            | EventType::SessionFailed
+            | EventType::ArtifactLogged
+            | EventType::AttentionRequested
+            | EventType::MetricSample
+            | EventType::Error => {}
+        }
+        Ok(())
+    }
+
+    pub(crate) fn record_event(&mut self, line_number: usize, event: &EventEnvelope) {
+        match event.event_type {
+            EventType::FlowStarted => {
+                let flow_id = event
+                    .flow_id
+                    .clone()
+                    .expect("validated flow.started events include flow_id");
+                self.flow_definition_ids.insert(
+                    flow_id.clone(),
+                    lifecycle_payload_string(event, "flow_definition_id"),
+                );
+                self.flow_parents
+                    .insert(flow_id.clone(), event.parent_flow_id.clone());
+                self.flows.start(flow_id);
+            }
+            EventType::FlowCompleted | EventType::FlowFailed => {
+                let flow_id = event
+                    .flow_id
+                    .clone()
+                    .expect("validated terminal flow events include flow_id");
+                self.flows.finish(flow_id, line_number);
+            }
+            EventType::PhaseEntered => {
+                let flow_id = event
+                    .flow_id
+                    .clone()
+                    .expect("validated phase.entered events include flow_id");
+                self.active_phases
+                    .insert(flow_id, lifecycle_payload_string(event, "phase_id"));
+            }
+            EventType::StepStarted => {
+                let flow_id = event
+                    .flow_id
+                    .clone()
+                    .expect("validated step.started events include flow_id");
+                let step = lifecycle_step_key(event, &self.active_phases);
+                self.active_steps.insert(flow_id, step);
+            }
+            EventType::StepCompleted => {
+                let flow_id = event
+                    .flow_id
+                    .clone()
+                    .expect("validated step.completed events include flow_id");
+                let step = lifecycle_step_key(event, &self.active_phases);
+                self.active_steps.remove(&flow_id);
+                self.terminal_steps.insert(step, line_number);
+            }
+            EventType::ToolStarted => {
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                self.tools_without_progress.insert(tool.clone());
+                self.tools.start(tool);
+            }
+            EventType::ToolProgress => {
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                self.tools_without_progress.remove(&tool);
+            }
+            EventType::ToolCompleted | EventType::ToolTimedOut => {
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                self.tools.finish(tool.clone(), line_number);
+                self.tools_without_progress.remove(&tool);
+            }
+            EventType::ToolFailed => {
+                let tool = lifecycle_tool_key(event, &self.active_phases, &self.active_steps);
+                self.tools_without_progress.remove(&tool);
+                self.tools.finish(tool, line_number);
+            }
+            EventType::MessageDelta => {
+                let message = MessageLifecycleKey {
+                    flow_id: event
+                        .flow_id
+                        .clone()
+                        .expect("validated message.delta events include flow_id"),
+                    message_id: lifecycle_payload_string(event, "message_id"),
+                };
+                self.active_message_roles
+                    .entry(message)
+                    .or_insert_with(|| lifecycle_payload_string(event, "role"));
+            }
+            EventType::MessageCompleted => {
+                let message = MessageLifecycleKey {
+                    flow_id: event
+                        .flow_id
+                        .clone()
+                        .expect("validated message.completed events include flow_id"),
+                    message_id: lifecycle_payload_string(event, "message_id"),
+                };
                 self.active_message_roles.remove(&message);
                 self.terminal_messages.insert(message, line_number);
             }
@@ -973,7 +1069,6 @@ impl SessionLifecycleState {
             | EventType::MetricSample
             | EventType::Error => {}
         }
-        Ok(())
     }
 
     pub(crate) fn validate_terminal_session(

@@ -364,6 +364,33 @@ fn context_array_source_stops_materializing_repeated_content_at_its_budget() {
 }
 
 #[test]
+fn empty_context_array_source_enforces_its_canonical_wrapper_budget() {
+    let source_id = "empty-source";
+    let expected = context_source(source_id, serde_json::json!([]));
+    let required_bytes = context_source_bytes(&expected)
+        .expect("empty source serializes")
+        .len();
+    let empty_items = || std::iter::empty::<Result<Option<serde_json::Value>, RuntimeError>>();
+
+    let err = match bounded_context_array_source(source_id, empty_items(), required_bytes - 1) {
+        Err(err) => err,
+        Ok(_) => panic!("the canonical empty wrapper must fit its source budget"),
+    };
+    assert!(matches!(
+        err,
+        RuntimeError::ContextBudgetExceeded {
+            input_budget_tokens,
+            required_bytes: actual_required,
+        } if input_budget_tokens == required_bytes - 1 && actual_required == required_bytes
+    ));
+
+    let actual = bounded_context_array_source(source_id, empty_items(), required_bytes)
+        .expect("the exact empty-wrapper boundary must fit");
+    assert_eq!(actual.source_id, expected.source_id);
+    assert_eq!(actual.content, expected.content);
+}
+
+#[test]
 fn context_history_selects_the_latest_interaction_and_omits_it_whole() {
     let events = [
         (EventType::MessageDelta, "old"),
@@ -868,6 +895,57 @@ fn context_object_verification_checks_the_aggregate_before_hashing() {
     )
     .expect_err("aggregate overflow must precede hash validation");
     assert!(err.to_string().contains("object data size"), "{err}");
+}
+
+#[test]
+fn context_object_verification_bounds_unique_digests_before_opening_the_excess() {
+    let workspace = empty_workspace("context-object-count");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let session_id = "contextcount001";
+    let mut verified = (0..MAX_SESSION_OBJECTS)
+        .map(|index| format!("{index:064x}"))
+        .collect::<BTreeSet<_>>();
+    let mut verified_bytes = 0;
+    let duplicate = format!("{:064x}", 0);
+    let manifest = |digest: &str| {
+        serde_json::json!({
+            "ordered_sources": [{
+                "object_uri": format!("session-object:sha256:{digest}"),
+                "projection_hash": digest,
+            }],
+        })
+    };
+
+    verify_context_manifest_objects(
+        &sessions,
+        session_id,
+        &manifest(&duplicate),
+        &mut verified,
+        &mut verified_bytes,
+    )
+    .expect("a duplicate digest does not consume the object-count budget");
+
+    let novel = "f".repeat(64);
+    let err = verify_context_manifest_objects(
+        &sessions,
+        session_id,
+        &manifest(&novel),
+        &mut verified,
+        &mut verified_bytes,
+    )
+    .expect_err("a novel digest beyond the object-count budget must be rejected");
+
+    assert!(
+        matches!(
+            err,
+            RuntimeError::Protocol(message)
+                if message.ends_with("session object count exceeds max 131072")
+        ),
+        "the excess digest must be rejected before its missing object is opened"
+    );
+    assert_eq!(verified.len(), MAX_SESSION_OBJECTS);
 }
 
 #[test]

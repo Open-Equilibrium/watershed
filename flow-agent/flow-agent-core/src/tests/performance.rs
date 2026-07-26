@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signatures() {
-    let workspace = fixture_dir("hello-flow");
+    let workspace = workspace_copy("hello-flow");
     let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let root_flow = registry
         .flow_block("hello-flow")
@@ -63,8 +63,12 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
     .expect("plan-checked runtime succeeds");
 
     assert_eq!(
-        fixture_tool_apply_count(),
-        plan.execution.tool_intents.len()
+        fixture_tool_applied_ids(),
+        plan.execution
+            .tool_intents
+            .iter()
+            .map(|intent| intent.tool_id.clone())
+            .collect::<Vec<_>>()
     );
     assert!(checked.matches_plan(&plan));
     assert_eq!(checked.events, plan.execution.events);
@@ -590,7 +594,7 @@ fn full_event_cap_replay_stays_within_d068_budgets() {
 
 #[test]
 #[ignore = "performance gate"]
-fn full_event_cap_inspection_stays_within_d068_budgets() {
+fn full_event_cap_and_max_object_inventory_inspection_stays_within_d068_budgets() {
     let workspace = empty_workspace("d068-inspection");
     write_synthetic_session(&workspace, "inspection001", MAX_FLOW_EVENTS, 0, |_| 288);
     let sessions = open_runtime_dir(&workspace, "sessions")
@@ -599,11 +603,23 @@ fn full_event_cap_inspection_stays_within_d068_budgets() {
     let session_path = sessions.file("inspection001.jsonl");
     let peak_rss_sampler = PeakRssSampler::start();
     let started = Instant::now();
+    let opened = std::cell::Cell::new(0);
+    let (objects, object_bytes) = generated_zero_byte_session_objects_for_test(
+        &sessions,
+        "inspection001",
+        MAX_SESSION_OBJECTS,
+        &opened,
+    )
+    .expect("maximum zero-byte object inventory collects");
     let inspection =
         inspect_resume_session(&session_path, "inspection001").expect("full-cap session inspects");
+    assert_eq!(objects.len(), MAX_SESSION_OBJECTS);
+    assert_eq!(opened.get(), MAX_SESSION_OBJECTS);
+    assert_eq!(object_bytes, 0);
     assert_eq!(inspection.validation.line_count, MAX_FLOW_EVENTS as usize);
     assert!(inspection.prefix_metadata_valid);
     assert_eq!(inspection.last_event_type, EventType::SessionCompleted);
+    std::hint::black_box(&objects);
     assert_duration_budget(started.elapsed(), 15, "full-cap full-session inspection");
     assert_peak_rss_growth_budget(peak_rss_sampler, 256, "full-cap full-session inspection");
 }

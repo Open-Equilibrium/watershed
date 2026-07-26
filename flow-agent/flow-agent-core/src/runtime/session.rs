@@ -1,5 +1,51 @@
 use super::*;
 
+#[cfg(test)]
+type PostWriterFinishObserver = Box<dyn FnOnce(&AnchoredFile)>;
+
+#[cfg(test)]
+std::thread_local! {
+    static POST_WRITER_FINISH_OBSERVER: RefCell<Option<PostWriterFinishObserver>> = RefCell::new(None);
+    static RUN_POST_CONFIG_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
+    static RUN_PRE_PLAN_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
+}
+
+#[cfg(test)]
+pub(crate) fn set_post_writer_finish_observer(observer: impl FnOnce(&AnchoredFile) + 'static) {
+    POST_WRITER_FINISH_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(test)]
+pub(crate) fn set_run_post_config_observer(observer: impl FnOnce() + 'static) {
+    RUN_POST_CONFIG_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(all(test, any(unix, windows)))]
+pub(crate) fn set_run_pre_plan_observer(observer: impl FnOnce() + 'static) {
+    RUN_PRE_PLAN_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(test)]
+fn run_pre_plan_observer() {
+    if let Some(observer) = RUN_PRE_PLAN_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn post_writer_finish_observer(path: &AnchoredFile) {
+    if let Some(observer) = POST_WRITER_FINISH_OBSERVER.with_borrow_mut(Option::take) {
+        observer(path);
+    }
+}
+
+#[cfg(test)]
+fn run_post_config_observer() {
+    if let Some(observer) = RUN_POST_CONFIG_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
+    }
+}
+
 pub(crate) fn reconcile_controlled_stages<T>(
     operation: Result<T, RuntimeError>,
     finalization: Result<(), RuntimeError>,
@@ -111,25 +157,38 @@ fn run_flow_internal_with_cleanup_observer_impl(
 ) -> Result<RunOutput, RuntimeError> {
     let (after_operation, after_finalization) = stage_observers;
     let workspace = workspace.as_ref();
-    let config = load_workspace_config(workspace)?;
+    let execution_workspace = AnchoredWorkspace::open(workspace)?;
+    let config = load_workspace_config_from(execution_workspace.root())?;
+    #[cfg(test)]
+    run_post_config_observer();
     require_fixture_execution_backend(&config)?;
-    let registry =
-        core_script::load_flow_registry_from_workspace(workspace, &config.registry_root, flow_ref)?;
+    let registry = core_script::load_flow_registry_from_workspace_dir(
+        &execution_workspace.root().dir,
+        workspace,
+        &config.registry_root,
+        flow_ref,
+    )?;
     let flow_block = registry
         .flow_block(flow_ref)
         .ok_or_else(|| RuntimeError::Usage(format!("unknown flow {flow_ref}")))?;
     let definition_metadata = session_definition_metadata(&registry, flow_block)?;
     let policy =
         core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())?;
-    preflight_flow_tools(workspace, &registry, &policy, flow_block)?;
+    preflight_flow_tools(execution_workspace.root(), &registry, &policy, flow_block)?;
     let base_session_id = &flow_block.identity.id;
-    let reservation = reserve_unique_session_log(workspace, base_session_id)?;
+    let reservation = reserve_unique_session_log_with_anchored_workspace(
+        &execution_workspace,
+        base_session_id,
+        |_| {},
+    )?;
     let expected_session_id = reservation.session_id.clone();
     let mut finalization_result = Ok(());
     let operation_result = (|| {
         write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-        let plan = plan_flow(
-            workspace,
+        #[cfg(test)]
+        run_pre_plan_observer();
+        let plan = plan_flow_with_workspace(
+            &execution_workspace,
             &registry,
             &policy,
             flow_block,
@@ -139,10 +198,15 @@ fn run_flow_internal_with_cleanup_observer_impl(
                 ToolSideEffectMode::Plan,
                 config.stub_model_fixture_profile,
             ),
+            None,
         )?;
         let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
-        let runtime_result = apply_flow_with_sink(
+        if capture_jsonl {
+            serial_writer.enable_jsonl_capture();
+        }
+        let runtime_result = apply_flow_with_anchored_workspace(
             FlowApplication {
+                #[cfg(test)]
                 workspace,
                 registry: &registry,
                 policy: &policy,
@@ -155,9 +219,13 @@ fn run_flow_internal_with_cleanup_observer_impl(
                 ),
                 plan: &plan,
             },
+            &execution_workspace,
             Some(&mut serial_writer),
         );
         finalization_result = serial_writer.finish();
+        #[cfg(test)]
+        post_writer_finish_observer(&reservation.session_path);
+        let captured_jsonl = serial_writer.take_captured_jsonl();
         let runtime = runtime_result?;
         let runtime_failed = runtime.failed;
         let event_count = runtime.events.record_count;
@@ -173,7 +241,7 @@ fn run_flow_internal_with_cleanup_observer_impl(
             return Err(RuntimeError::session_failed(&expected_session_id, err));
         }
         let stdout = if capture_jsonl {
-            read_segmented_jsonl(&reservation.session_path, EVENT_STREAM_LIMITS)?
+            captured_jsonl.expect("JSONL capture enabled before runtime application")
         } else {
             format!(
                 "flow {} (session {expected_session_id}) {outcome}\n",

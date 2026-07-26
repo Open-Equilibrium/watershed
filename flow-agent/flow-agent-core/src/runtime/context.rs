@@ -221,6 +221,12 @@ pub fn bounded_context_array_source(
     let source_id = source_id.into();
     let empty_source = context_source(source_id.clone(), serde_json::json!([]));
     let mut required_bytes = context_source_bytes(&empty_source)?.len();
+    if required_bytes > input_budget_tokens {
+        return Err(RuntimeError::ContextBudgetExceeded {
+            input_budget_tokens,
+            required_bytes,
+        });
+    }
     let mut content = Vec::new();
     for item in items {
         let Some(item) = item? else {
@@ -625,6 +631,12 @@ pub fn verify_context_manifest_objects(
         }
         if verified.contains(digest) {
             continue;
+        }
+        if verified.len() >= MAX_SESSION_OBJECTS {
+            return Err(RuntimeError::Protocol(format!(
+                "{} session object count exceeds max {MAX_SESSION_OBJECTS}",
+                sessions.path.display()
+            )));
         }
         let path = sessions.file(format!("{session_id}.object.sha256-{digest}"));
         let bytes =

@@ -144,6 +144,15 @@
         <ul><li><strong>A:</strong> Add a small supported Rust library interface after M1. Pro: direct calls without managing another process. Con: Watershed must keep that interface compatible and tightly couples both programs.</li><li><strong>B:</strong> Keep the current Rust building blocks internal and use the command/protocol boundary. Pro: a smaller public surface and independent crashes/upgrades. Con: the caller must manage a process and adapter.</li></ul>
         <p><strong>Recommendation:</strong> A only when a concrete post-M1 consumer proves the smallest useful interface; see <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
       </article>
+      <article id="d-056" class="decision">
+        <h3>D-056 - Existing Output Security-Metadata Matrix</h3>
+        <p><strong>Status:</strong> Open before post-M1 existing-output replacement; not an M1.1 blocker.</p>
+        <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Linux, macOS and Windows, and what happens when a required field cannot be read or applied?</p>
+        <p><strong>Decided direction:</strong> D-055 requires a finite per-platform field matrix; M1.1 rejects every existing output target until that matrix is decided and implemented.</p>
+        <ul><li><strong>A:</strong> Preserve a maintainer-selected native field set and fail when any selected field is unavailable. Pro: explicit, testable preservation. Con: replacements can fail because of privileges or platform support.</li><li><strong>B:</strong> Preserve a smaller maintainer-selected field set and reject targets carrying selected unsupported metadata. Pro: a narrower implementation. Con: detection and rejection rules remain platform-specific.</li></ul>
+        <p><strong>Recommendation:</strong> A; choose the exact fields and unavailable-field behavior only with platform evidence.</p>
+        <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass Linux, macOS and Windows fixtures for every required field before restoring existing-output replacement.</p>
+      </article>
     </div>
   </section>
 </main>

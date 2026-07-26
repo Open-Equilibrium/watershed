@@ -14,11 +14,11 @@ pub struct SessionReservation {
     pub(crate) lock_path: AnchoredFile,
     pub(crate) session_path: AnchoredFile,
     pub(crate) session_id: String,
-    context_created: Cell<bool>,
-    log_created: Cell<bool>,
+    context_file: Cell<Option<AnchoredFileIdentity>>,
+    log_file: Cell<Option<AnchoredFileIdentity>>,
     marker_file: RefCell<Option<fs::File>>,
     ownership: SessionOwnershipLease,
-    session_created: Cell<bool>,
+    session_file: Cell<Option<AnchoredFileIdentity>>,
     state: Cell<ReservationState>,
 }
 
@@ -37,25 +37,25 @@ impl SessionReservation {
             lock_path,
             session_path,
             session_id,
-            context_created: Cell::new(false),
-            log_created: Cell::new(false),
+            context_file: Cell::new(None),
+            log_file: Cell::new(None),
             marker_file: RefCell::new(None),
             ownership,
-            session_created: Cell::new(false),
+            session_file: Cell::new(None),
             state: Cell::new(ReservationState::Empty),
         }
     }
 
-    pub(crate) fn mark_context_created(&self) {
-        self.context_created.set(true);
+    pub(crate) fn mark_context_created(&self, identity: AnchoredFileIdentity) {
+        self.context_file.set(Some(identity));
     }
 
-    pub(crate) fn mark_log_created(&self) {
-        self.log_created.set(true);
+    pub(crate) fn mark_log_created(&self, identity: AnchoredFileIdentity) {
+        self.log_file.set(Some(identity));
     }
 
-    pub(crate) fn mark_session_created(&self) {
-        self.session_created.set(true);
+    pub(crate) fn mark_session_created(&self, identity: AnchoredFileIdentity) {
+        self.session_file.set(Some(identity));
     }
 
     pub(crate) fn activate(&self) -> Result<(), RuntimeError> {
@@ -75,47 +75,40 @@ impl SessionReservation {
         }
         let mut failures = Vec::new();
         if self.state.get() == ReservationState::Empty {
-            for (created, result) in [
-                (
-                    &self.session_created,
-                    self.session_created
-                        .get()
-                        .then(|| remove_segmented_jsonl(&self.session_path)),
-                ),
-                (
-                    &self.log_created,
-                    self.log_created
-                        .get()
-                        .then(|| remove_anchored_file_if_exists(&self.log_path)),
-                ),
-                (
-                    &self.context_created,
-                    self.context_created
-                        .get()
-                        .then(|| remove_segmented_jsonl(&self.context_path)),
-                ),
+            for (created, path) in [
+                (&self.session_file, &self.session_path),
+                (&self.log_file, &self.log_path),
+                (&self.context_file, &self.context_path),
             ] {
-                if let Some(result) = result {
-                    match result {
-                        Ok(()) => created.set(false),
-                        Err(error) => failures.push(Box::new(error)),
+                let result = created
+                    .get()
+                    .map(|identity| remove_owned_anchored_file(path, identity));
+                match result {
+                    Some(Ok(())) => {
+                        created.set(None);
                     }
+                    Some(Err(error)) => failures.push(Box::new(error)),
+                    None => {}
                 }
             }
         }
-        if let Some(marker_file) = self.marker_file.borrow().as_ref()
-            && let Err(error) = verify_owned_anchored_marker(&self.lock_path, marker_file)
-        {
-            failures.push(Box::new(error));
-        }
-        if let Err(error) = self.ownership.release() {
-            failures.push(Box::new(error));
+        let marker_valid = match self.marker_file.borrow().as_ref() {
+            Some(marker_file) => match verify_owned_anchored_marker(&self.lock_path, marker_file) {
+                Ok(()) => true,
+                Err(error) => {
+                    failures.push(Box::new(error));
+                    false
+                }
+            },
+            None => true,
+        };
+        match self.ownership.release() {
+            Ok(()) if marker_valid => self.state.set(ReservationState::Released),
+            Ok(()) => {}
+            Err(error) => failures.push(Box::new(error)),
         }
         match failures.len() {
-            0 => {
-                self.state.set(ReservationState::Released);
-                Ok(())
-            }
+            0 => Ok(()),
             1 => Err(*failures.pop().expect("one cleanup failure exists")),
             _ => Err(RuntimeError::SessionCleanupFailures(failures)),
         }
@@ -123,7 +116,13 @@ impl SessionReservation {
 
     #[cfg(test)]
     pub(crate) fn rollback(&self) -> Result<(), RuntimeError> {
-        self.cleanup()
+        let was_empty = self.state.get() == ReservationState::Empty;
+        let result = self.cleanup();
+        if was_empty && self.state.get() == ReservationState::Released {
+            Ok(())
+        } else {
+            result
+        }
     }
 
     #[cfg(test)]
