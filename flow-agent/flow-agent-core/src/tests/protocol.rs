@@ -52,7 +52,7 @@ fn protocol_validator_rejects_scalar_and_session_payload_edges() {
     scalar_payload.payload = serde_json::json!("bad");
     let err = validate_event_payload(Path::new("scalar-payload.jsonl"), 1, &scalar_payload)
         .expect_err("scalar payload must fail");
-    assert!(err.to_string().contains("payload must be an object"));
+    assert!(err.to_string().contains("payload must be a JSON object"));
 
     let mut invalid_session_reason = base_event();
     invalid_session_reason.payload = serde_json::json!({"reason": 42});
@@ -135,18 +135,72 @@ fn protocol_and_runtime_boundaries_both_reject_null_optional_ids() {
     for field in ["correlation_id", "flow_id", "parent_flow_id"] {
         let mut raw = serde_json::to_value(base_event()).expect("event converts to JSON");
         raw[field] = serde_json::Value::Null;
+        let proto_error = serde_json::from_value::<EventEnvelope>(raw.clone())
+            .expect_err("proto boundary must reject a null optional id")
+            .to_string();
         assert!(
-            serde_json::from_value::<EventEnvelope>(raw.clone()).is_err(),
-            "proto boundary must reject null {field}"
+            proto_error.contains(&format!("{field} must not be null in protocol v0")),
+            "{proto_error}"
         );
 
         let mut jsonl = proto::canonical_json(&raw).expect("raw envelope canonicalizes");
         jsonl.push('\n');
+        let runtime_error =
+            validate_protocol_jsonl_text(Path::new("null-optional-id.jsonl"), &jsonl)
+                .expect_err("runtime boundary must reject a null optional id")
+                .to_string();
         assert!(
-            validate_protocol_jsonl_text(Path::new("null-optional-id.jsonl"), &jsonl).is_err(),
-            "runtime boundary must reject null {field}"
+            runtime_error.contains(&format!("{field} must not be null in protocol v0")),
+            "{runtime_error}"
         );
     }
+}
+
+#[test]
+fn proto_jsonl_and_constructed_event_paths_report_the_same_structure_error() {
+    let invalid = EventEnvelope::new(
+        "evt-001",
+        EventType::SessionFailed,
+        "consistent001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        serde_json::json!({}),
+    );
+    let protocol_error = invalid
+        .validate_v0()
+        .expect_err("direct protocol validation rejects the event")
+        .to_string();
+    let raw = serde_json::json!({
+        "event_id": "evt-001",
+        "event_type": "session.failed",
+        "payload": {},
+        "protocol_version": "0",
+        "sequence": 1,
+        "session_id": "consistent001",
+        "source": "flow-agent-cli",
+        "timestamp": "2026-01-01T00:00:00Z"
+    });
+    let jsonl = format!(
+        "{}\n",
+        proto::canonical_json(&raw).expect("raw invalid event canonicalizes")
+    );
+    let jsonl_error = validate_protocol_jsonl_text(Path::new("consistent.jsonl"), &jsonl)
+        .expect_err("runtime JSONL validation rejects the event")
+        .to_string();
+    let mut validation = SessionAppendValidationState::empty("consistent001");
+    let constructed_error = validation
+        .validate_constructed_event(Path::new("constructed.jsonl"), &invalid, jsonl.len())
+        .expect_err("constructed-event validation rejects the event")
+        .to_string();
+
+    assert!(jsonl_error.contains(&protocol_error), "{jsonl_error}");
+    assert!(
+        constructed_error.contains(&protocol_error),
+        "{constructed_error}"
+    );
+    assert_eq!(validation.line_count, 0);
+    assert_eq!(validation.previous_sequence, 0);
 }
 
 #[test]
@@ -848,7 +902,7 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
             serde_json::json!({"code":"write_denied","data":{"tool_id":"tool"},"message":"denied"}),
         ),
     ] {
-        let event = EventEnvelope::new(
+        let mut event = EventEnvelope::new(
             "evt-001",
             event_type,
             "meta001",
@@ -857,6 +911,12 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
             "flow-agent-cli",
             payload,
         );
+        if matches!(
+            event_type,
+            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
+        ) {
+            event.flow_id = Some("flow-001".to_owned());
+        }
         validate_event_payload(Path::new("valid-payload.jsonl"), 1, &event)
             .unwrap_or_else(|err| panic!("{}: {err}", event.event_type.as_str()));
     }

@@ -30,292 +30,18 @@ pub fn validate_protocol_jsonl_text(
     Ok(events)
 }
 
-pub fn validate_event_metadata(
-    path: &Path,
-    line_number: usize,
-    event: &EventEnvelope,
-) -> Result<(), RuntimeError> {
-    event.validate_metadata().map_err(|err| {
-        RuntimeError::Protocol(format!(
-            "{} line {line_number} has invalid envelope metadata: {err}",
-            path.display()
-        ))
-    })
-}
-
 pub fn validate_event_payload(
     path: &Path,
     line_number: usize,
     event: &EventEnvelope,
 ) -> Result<(), RuntimeError> {
-    let payload = event.payload.as_object().ok_or_else(|| {
+    event.validate_v0().map_err(|error| {
         RuntimeError::Protocol(format!(
-            "{} line {line_number} {} payload must be an object",
+            "{} line {line_number} {} has invalid event structure: {error}",
             path.display(),
             event.event_type.as_str()
         ))
-    })?;
-    let validator = PayloadValidator {
-        path,
-        line_number,
-        event_type: event.event_type,
-        payload,
-    };
-    validator.reject_nulls(&event.payload, "payload")?;
-    for (field, value) in &event.additional_fields {
-        validator.reject_nulls(value, field)?;
-    }
-
-    match event.event_type {
-        EventType::SessionStarted
-        | EventType::SessionPaused
-        | EventType::SessionResumed
-        | EventType::SessionCompleted => {
-            validator.optional_string("reason")?;
-        }
-        EventType::SessionFailed => {
-            validator.require_string("reason")?;
-        }
-        EventType::FlowStarted | EventType::FlowCompleted => {
-            validator.require_string("flow_definition_id")?;
-            validator.optional_string("flow_name")?;
-        }
-        EventType::FlowFailed => {
-            validator.require_string("flow_definition_id")?;
-            validator.optional_string("flow_name")?;
-            validator.require_string("error")?;
-        }
-        EventType::PhaseEntered => {
-            validator.require_string("phase_id")?;
-            validator.require_string("phase_name")?;
-            validator.require_string_array("instruction_ids")?;
-            validator.require_string_array("tool_ids")?;
-        }
-        EventType::StepStarted | EventType::StepCompleted => {
-            validator.require_string("step_id")?;
-            validator.require_string("step_name")?;
-            validator.optional_string("phase_id")?;
-            validator.optional_string("instruction_id")?;
-            let connection_ids = validator.optional_string_array("connection_ids")?;
-            let connection_kinds = validator.optional_string_array("connection_kinds")?;
-            match (connection_ids, connection_kinds) {
-                (Some(ids), Some(kinds)) => {
-                    if ids.len() != kinds.len() {
-                        return Err(
-                            validator.error("payload connection arrays must have the same length")
-                        );
-                    }
-                    for kind in kinds {
-                        if !matches!(kind, "data" | "trigger" | "refresh") {
-                            return Err(validator.error(
-                                "payload.connection_kinds values must be data, trigger, or refresh",
-                            ));
-                        }
-                    }
-                }
-                (None, None) => {}
-                _ => {
-                    return Err(
-                        validator.error("payload connection arrays must be present together")
-                    );
-                }
-            }
-        }
-        EventType::MessageDelta => {
-            validator.require_string("message_id")?;
-            validator.require_role()?;
-            validator.require_string("content_delta")?;
-        }
-        EventType::MessageCompleted => {
-            validator.require_string("message_id")?;
-            validator.require_role()?;
-        }
-        EventType::ToolStarted => {
-            validator.require_string("tool_id")?;
-            validator.require_string("tool_name")?;
-            let tool_kind = validator.require_string("tool_kind")?;
-            if !matches!(tool_kind, "predefined-command" | "own-script") {
-                return Err(
-                    validator.error("payload.tool_kind must be predefined-command or own-script")
-                );
-            }
-            validator.require_string_array("read_scope")?;
-            validator.require_string_array("write_scope")?;
-            validator.require_string_array("allowed_parameters")?;
-            let network_access = validator.require_string("network_access")?;
-            if !matches!(network_access, "deny" | "declared") {
-                return Err(validator.error("payload.network_access must be deny or declared"));
-            }
-        }
-        EventType::ToolProgress => {
-            validator.require_string("tool_id")?;
-            validator.require_string("message")?;
-        }
-        EventType::ToolCompleted => {
-            validator.require_string("tool_id")?;
-            validator.optional_integer("exit_code")?;
-        }
-        EventType::ToolFailed | EventType::ToolTimedOut => {
-            validator.require_string("tool_id")?;
-            validator.require_string("error")?;
-        }
-        EventType::ArtifactLogged => {
-            validator.require_string("artifact_id")?;
-            validator.require_string("artifact_type")?;
-            validator.require_string("uri")?;
-        }
-        EventType::AttentionRequested => {
-            validator.require_string("request_id")?;
-            validator.require_string("reason")?;
-        }
-        EventType::MetricSample => {
-            validator.require_string("metric_name")?;
-            validator.require_number("value")?;
-        }
-        EventType::Error => {
-            validator.require_string("code")?;
-            validator.require_string("message")?;
-            validator.optional_object("data")?;
-        }
-    }
-
-    Ok(())
-}
-
-pub struct PayloadValidator<'a> {
-    pub(crate) path: &'a Path,
-    pub(crate) line_number: usize,
-    pub(crate) event_type: EventType,
-    pub(crate) payload: &'a serde_json::Map<String, serde_json::Value>,
-}
-
-pub fn null_location(value: &serde_json::Value, location: &str) -> Option<String> {
-    match value {
-        serde_json::Value::Null => Some(location.to_owned()),
-        serde_json::Value::Array(values) => values
-            .iter()
-            .enumerate()
-            .find_map(|(index, value)| null_location(value, &format!("{location}[{index}]"))),
-        serde_json::Value::Object(values) => values
-            .iter()
-            .find_map(|(field, value)| null_location(value, &format!("{location}.{field}"))),
-        _ => None,
-    }
-}
-
-impl PayloadValidator<'_> {
-    pub(crate) fn reject_nulls(
-        &self,
-        value: &serde_json::Value,
-        location: &str,
-    ) -> Result<(), RuntimeError> {
-        null_location(value, location)
-            .map(|location| self.error(&format!("{location} must not be null in protocol v0")))
-            .map_or(Ok(()), Err)
-    }
-
-    pub(crate) fn require_string(&self, field: &str) -> Result<&str, RuntimeError> {
-        match self.payload.get(field).and_then(serde_json::Value::as_str) {
-            Some(value) if !value.is_empty() => Ok(value),
-            _ => Err(self.error(&format!("payload.{field} must be a non-empty string"))),
-        }
-    }
-
-    pub(crate) fn optional_string(&self, field: &str) -> Result<(), RuntimeError> {
-        if self.payload.contains_key(field) {
-            self.require_string(field)?;
-        }
-        Ok(())
-    }
-
-    pub(crate) fn require_role(&self) -> Result<(), RuntimeError> {
-        let role = self.require_string("role")?;
-        if matches!(role, "system" | "user" | "assistant" | "tool") {
-            Ok(())
-        } else {
-            Err(self.error("payload.role must be system, user, assistant, or tool"))
-        }
-    }
-
-    pub(crate) fn require_string_array(&self, field: &str) -> Result<Vec<&str>, RuntimeError> {
-        let Some(value) = self.payload.get(field) else {
-            return Err(self.error(&format!("payload.{field} must be a string array")));
-        };
-        self.string_array(field, value)
-    }
-
-    pub(crate) fn optional_string_array(
-        &self,
-        field: &str,
-    ) -> Result<Option<Vec<&str>>, RuntimeError> {
-        self.payload
-            .get(field)
-            .map(|value| self.string_array(field, value))
-            .transpose()
-    }
-
-    pub(crate) fn string_array<'a>(
-        &self,
-        field: &str,
-        value: &'a serde_json::Value,
-    ) -> Result<Vec<&'a str>, RuntimeError> {
-        let Some(values) = value.as_array() else {
-            return Err(self.error(&format!("payload.{field} must be a string array")));
-        };
-        values
-            .iter()
-            .map(|value| {
-                value.as_str().ok_or_else(|| {
-                    self.error(&format!("payload.{field} must contain only strings"))
-                })
-            })
-            .collect()
-    }
-
-    pub(crate) fn optional_integer(&self, field: &str) -> Result<(), RuntimeError> {
-        if let Some(value) = self.payload.get(field) {
-            let Some(number) = value.as_number() else {
-                return Err(self.error(&format!("payload.{field} must be an integer")));
-            };
-            if number.as_i64().is_none() && number.as_u64().is_none() {
-                return Err(self.error(&format!("payload.{field} must be an integer")));
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn require_number(&self, field: &str) -> Result<(), RuntimeError> {
-        if self
-            .payload
-            .get(field)
-            .is_some_and(serde_json::Value::is_number)
-        {
-            Ok(())
-        } else {
-            Err(self.error(&format!("payload.{field} must be a number")))
-        }
-    }
-
-    pub(crate) fn optional_object(&self, field: &str) -> Result<(), RuntimeError> {
-        if self
-            .payload
-            .get(field)
-            .is_some_and(|value| !value.is_object())
-        {
-            Err(self.error(&format!("payload.{field} must be an object")))
-        } else {
-            Ok(())
-        }
-    }
-
-    pub(crate) fn error(&self, message: &str) -> RuntimeError {
-        RuntimeError::Protocol(format!(
-            "{} line {} {} {message}",
-            self.path.display(),
-            self.line_number,
-            self.event_type.as_str()
-        ))
-    }
+    })
 }
 
 pub struct SessionAppendValidationState {
@@ -435,6 +161,7 @@ impl SessionAppendValidationState {
         canonical_bytes: usize,
     ) -> Result<(), RuntimeError> {
         let line_number = self.line_count + 1;
+        validate_event_payload(path, line_number, event)?;
         validate_event_size(path, line_number, canonical_bytes)?;
         self.validate_budget(path, line_number, canonical_bytes)?;
         self.validate_event(path, line_number, event)?;
@@ -480,7 +207,6 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        validate_event_metadata(path, line_number, event)?;
         if line_number == 1 && event.sequence != 1 {
             return Err(RuntimeError::Protocol(format!(
                 "{} first sequence must be 1",
@@ -505,7 +231,6 @@ impl SessionAppendValidationState {
                 path.display()
             )));
         }
-        validate_event_payload(path, line_number, event)?;
         if event.event_type == EventType::FlowStarted {
             let flow_id = event.flow_id.as_deref().ok_or_else(|| {
                 RuntimeError::Protocol(format!(
@@ -616,12 +341,6 @@ pub fn parse_canonical_event(
     if canonical != line {
         return Err(RuntimeError::Protocol(format!(
             "{} line {line_number} must use canonical JSONL bytes",
-            path.display()
-        )));
-    }
-    if let Some(location) = null_location(&value, "event") {
-        return Err(RuntimeError::Protocol(format!(
-            "{} line {line_number} {location} must not be null in protocol v0",
             path.display()
         )));
     }

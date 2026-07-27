@@ -56,13 +56,13 @@ pub struct EventEnvelope {
 struct UncheckedEventEnvelope {
     #[serde(flatten, default)]
     additional_fields: BTreeMap<String, Value>,
-    #[serde(default, deserialize_with = "deserialize_present_optional")]
+    #[serde(default, deserialize_with = "deserialize_present_correlation_id")]
     correlation_id: Option<String>,
     event_id: String,
     event_type: EventType,
-    #[serde(default, deserialize_with = "deserialize_present_optional")]
+    #[serde(default, deserialize_with = "deserialize_present_flow_id")]
     flow_id: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_present_optional")]
+    #[serde(default, deserialize_with = "deserialize_present_parent_flow_id")]
     parent_flow_id: Option<String>,
     #[serde(deserialize_with = "deserialize_payload_object")]
     payload: Value,
@@ -107,6 +107,11 @@ impl EventValidationError {
     /// Returns the invalid envelope or payload field.
     pub fn field(&self) -> &str {
         &self.field
+    }
+
+    /// Returns the stable requirement violated by the field.
+    pub const fn requirement(&self) -> &'static str {
+        self.requirement
     }
 
     fn new(field: impl Into<String>, requirement: &'static str) -> Self {
@@ -310,17 +315,19 @@ impl EventEnvelope {
                 "collides with an envelope field",
             ));
         }
-        if contains_null(&self.payload) {
+        if let Some(field) = null_location(&self.payload, "payload") {
             return Err(EventValidationError::new(
-                "payload",
-                "must not contain null in protocol v0",
+                field,
+                "must not be null in protocol v0",
             ));
         }
-        if self.additional_fields.values().any(contains_null) {
-            return Err(EventValidationError::new(
-                "additional_fields",
-                "must not contain null in protocol v0",
-            ));
+        for (field, value) in &self.additional_fields {
+            if let Some(field) = null_location(value, field) {
+                return Err(EventValidationError::new(
+                    field,
+                    "must not be null in protocol v0",
+                ));
+            }
         }
 
         PayloadValidator::new(self.event_type, &self.payload).validate()
@@ -560,12 +567,17 @@ impl<'a> PayloadValidator<'a> {
     }
 }
 
-fn contains_null(value: &Value) -> bool {
+fn null_location(value: &Value, location: &str) -> Option<String> {
     match value {
-        Value::Null => true,
-        Value::Array(values) => values.iter().any(contains_null),
-        Value::Object(values) => values.values().any(contains_null),
-        Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
+        Value::Null => Some(location.to_owned()),
+        Value::Array(values) => values
+            .iter()
+            .enumerate()
+            .find_map(|(index, value)| null_location(value, &format!("{location}[{index}]"))),
+        Value::Object(values) => values
+            .iter()
+            .find_map(|(field, value)| null_location(value, &format!("{location}.{field}"))),
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => None,
     }
 }
 
@@ -939,12 +951,43 @@ where
     }
 }
 
-fn deserialize_present_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+fn deserialize_present_correlation_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_present_optional(deserializer, "correlation_id")
+}
+
+fn deserialize_present_flow_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_present_optional(deserializer, "flow_id")
+}
+
+fn deserialize_present_parent_flow_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_present_optional(deserializer, "parent_flow_id")
+}
+
+fn deserialize_present_optional<'de, D, T>(
+    deserializer: D,
+    field: &'static str,
+) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
 {
-    T::deserialize(deserializer).map(Some)
+    Option::<T>::deserialize(deserializer)?.map_or_else(
+        || {
+            Err(serde::de::Error::custom(format_args!(
+                "{field} must not be null in protocol v0"
+            )))
+        },
+        |value| Ok(Some(value)),
+    )
 }
 
 fn deserialize_protocol_version_v0<'de, D>(deserializer: D) -> Result<String, D::Error>

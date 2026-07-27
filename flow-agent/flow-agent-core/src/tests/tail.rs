@@ -22,10 +22,13 @@ fn reader_fixture(
 }
 
 fn assert_protocol_contains(result: Result<Vec<EventEnvelope>, RuntimeError>, expected: &str) {
-    assert!(matches!(
-        result.expect_err("reader must reject invalid authoritative state"),
-        RuntimeError::Protocol(message) if message.contains(expected)
-    ));
+    let error = result.expect_err("reader must reject invalid authoritative state");
+    match error {
+        RuntimeError::Protocol(message) => {
+            assert!(message.contains(expected), "{message}");
+        }
+        other => panic!("expected protocol error, got {other}"),
+    }
 }
 
 fn sequences(events: &[EventEnvelope]) -> Vec<u64> {
@@ -316,7 +319,7 @@ fn replay_and_reader_reject_lossy_null_envelope_metadata() {
         replay_session(&workspace, "tailnull001", EmitMode::Jsonl).map(|_| Vec::new()),
         reader.read_after(0),
     ] {
-        assert_protocol_contains(result, "event.correlation_id must not be null");
+        assert_protocol_contains(result, "correlation_id must not be null in protocol v0");
     }
 }
 

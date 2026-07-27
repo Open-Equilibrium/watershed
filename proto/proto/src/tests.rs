@@ -416,6 +416,188 @@ fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
 }
 
 #[test]
+fn every_v0_event_payload_rejects_missing_required_and_wrong_typed_fields() {
+    let cases = [
+        (EventType::SessionStarted, json!({}), None, "reason"),
+        (EventType::SessionPaused, json!({}), None, "reason"),
+        (EventType::SessionResumed, json!({}), None, "reason"),
+        (EventType::SessionCompleted, json!({}), None, "reason"),
+        (
+            EventType::SessionFailed,
+            json!({"reason": "failed"}),
+            Some("reason"),
+            "reason",
+        ),
+        (
+            EventType::FlowStarted,
+            json!({"flow_definition_id": "flow-1"}),
+            Some("flow_definition_id"),
+            "flow_definition_id",
+        ),
+        (
+            EventType::FlowCompleted,
+            json!({"flow_definition_id": "flow-1"}),
+            Some("flow_definition_id"),
+            "flow_definition_id",
+        ),
+        (
+            EventType::FlowFailed,
+            json!({"flow_definition_id": "flow-1", "error": "failed"}),
+            Some("error"),
+            "error",
+        ),
+        (
+            EventType::PhaseEntered,
+            json!({
+                "phase_id": "phase-1",
+                "phase_name": "Phase",
+                "instruction_ids": [],
+                "tool_ids": []
+            }),
+            Some("phase_id"),
+            "phase_id",
+        ),
+        (
+            EventType::StepStarted,
+            json!({"step_id": "step-1", "step_name": "Step"}),
+            Some("step_id"),
+            "step_id",
+        ),
+        (
+            EventType::StepCompleted,
+            json!({"step_id": "step-1", "step_name": "Step"}),
+            Some("step_id"),
+            "step_id",
+        ),
+        (
+            EventType::MessageDelta,
+            json!({"message_id": "message-1", "role": "assistant", "content_delta": "hi"}),
+            Some("content_delta"),
+            "content_delta",
+        ),
+        (
+            EventType::MessageCompleted,
+            json!({"message_id": "message-1", "role": "assistant"}),
+            Some("message_id"),
+            "message_id",
+        ),
+        (
+            EventType::ToolStarted,
+            json!({
+                "tool_id": "tool-1",
+                "tool_name": "Tool",
+                "tool_kind": "predefined-command",
+                "read_scope": [],
+                "write_scope": [],
+                "allowed_parameters": [],
+                "network_access": "deny"
+            }),
+            Some("tool_id"),
+            "tool_id",
+        ),
+        (
+            EventType::ToolProgress,
+            json!({"tool_id": "tool-1", "message": "working"}),
+            Some("message"),
+            "message",
+        ),
+        (
+            EventType::ToolCompleted,
+            json!({"tool_id": "tool-1"}),
+            Some("tool_id"),
+            "tool_id",
+        ),
+        (
+            EventType::ToolFailed,
+            json!({"tool_id": "tool-1", "error": "failed"}),
+            Some("error"),
+            "error",
+        ),
+        (
+            EventType::ToolTimedOut,
+            json!({"tool_id": "tool-1", "error": "timed out"}),
+            Some("error"),
+            "error",
+        ),
+        (
+            EventType::ArtifactLogged,
+            json!({"artifact_id": "artifact-1", "artifact_type": "text", "uri": "file.txt"}),
+            Some("artifact_type"),
+            "artifact_type",
+        ),
+        (
+            EventType::AttentionRequested,
+            json!({"request_id": "request-1", "reason": "approval"}),
+            Some("reason"),
+            "reason",
+        ),
+        (
+            EventType::MetricSample,
+            json!({"metric_name": "latency", "value": 1.5}),
+            Some("metric_name"),
+            "metric_name",
+        ),
+        (
+            EventType::Error,
+            json!({"code": "runtime_error", "message": "failed"}),
+            Some("code"),
+            "code",
+        ),
+    ];
+
+    for (event_type, valid_payload, required_field, typed_field) in cases {
+        let mut event = EventEnvelope::new(
+            "evt-001",
+            event_type,
+            "smoke001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "flow-agent-cli",
+            valid_payload,
+        );
+        if matches!(
+            event_type,
+            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
+        ) {
+            event.flow_id = Some("flow-1".to_owned());
+        }
+        event
+            .validate_v0()
+            .unwrap_or_else(|err| panic!("{} valid payload: {err}", event_type.as_str()));
+
+        if let Some(required_field) = required_field {
+            let mut missing = event.clone();
+            missing
+                .payload
+                .as_object_mut()
+                .expect("payload is an object")
+                .remove(required_field);
+            let error = missing
+                .validate_v0()
+                .expect_err("required payload field must be rejected");
+            assert_eq!(
+                error.field(),
+                format!("payload.{required_field}"),
+                "{}",
+                event_type.as_str()
+            );
+        }
+
+        let mut wrong_type = event;
+        wrong_type.payload[typed_field] = json!(42);
+        let error = wrong_type
+            .validate_v0()
+            .expect_err("wrong payload field type must be rejected");
+        assert_eq!(
+            error.field(),
+            format!("payload.{typed_field}"),
+            "{}",
+            event_type.as_str()
+        );
+    }
+}
+
+#[test]
 fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
     let event = EventEnvelope::new(
         "evt-001",
