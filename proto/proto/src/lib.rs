@@ -1035,6 +1035,9 @@ fn canonical_number(value: &Number) -> String {
     }
 
     let decimal = value.to_string();
+    if value.fract() == 0.0 {
+        return decimal;
+    }
     let scientific = format!("{value:e}");
     if scientific.len() < decimal.len() {
         scientific

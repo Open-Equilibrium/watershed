@@ -757,6 +757,26 @@ fn canonical_json_serializes_scalars_in_shortest_form() {
 }
 
 #[test]
+fn canonical_json_normalizes_equivalent_integer_and_exponent_numbers() {
+    for (integer, exponent, expected) in [
+        ("1000000", "1e6", "1000000"),
+        ("-1000000", "-1e6", "-1000000"),
+    ] {
+        let integer: Value = serde_json::from_str(integer).expect("valid integer JSON number");
+        let exponent: Value = serde_json::from_str(exponent).expect("valid exponent JSON number");
+
+        assert_eq!(
+            canonical_json(&integer).expect("integer canonicalizes"),
+            expected
+        );
+        assert_eq!(
+            canonical_json(&exponent).expect("exponent canonicalizes"),
+            expected
+        );
+    }
+}
+
+#[test]
 fn canonical_json_normalizes_object_keys_to_nfc() {
     let decomposed = json!({ "e\u{301}": 1 });
 
