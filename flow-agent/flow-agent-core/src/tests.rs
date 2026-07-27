@@ -15,7 +15,12 @@ use std::{
 
 #[path = "../../tests/support.rs"]
 mod test_support;
-use crate::runtime::*;
+use crate::runtime::{
+    apply::*, config_io::*, context::*, context_persistence::*, event_construction::*,
+    event_writer::*, failures::*, fixture_effects::*, fixture_tools::*, fs_guards::*,
+    live_events::*, planning::*, resume::*, session::*, session_authority::*, session_bundle::*,
+    session_lock::*, session_reading::*, session_reservation::*, tail::*, types::*, validate::*,
+};
 use test_support::{
     PeakRssSampler, TempWorkspace, copy_dir, current_resident_set_size, expected_stream,
     fixture_dir, workspace_copy,
@@ -31,11 +36,15 @@ mod context;
 mod event_writer;
 mod fs_guards;
 mod performance;
-mod protocol;
+mod protocol_lifecycle;
+mod protocol_payload;
 mod registry_runtime;
 mod sandbox;
+mod session_bundle;
+mod session_corruption;
 mod session_listing;
-mod session_logs;
+mod session_reservation;
+mod session_resume;
 mod surface_contracts;
 mod tail;
 mod workspace_security;

@@ -97,20 +97,26 @@ fn runtime_executes_subflows_after_all_parent_phases() {
         .flow_block("hello-flow")
         .expect("hello flow exists");
 
-    let mut captured = CapturedRuntime::default();
-    execute_flow_with_sink(
-        Path::new("."),
+    let workspace = fixture_dir("hello-flow");
+    let plan = plan_flow(
+        &workspace,
         &registry,
         &policy,
         flow_block,
         "ordering001",
         FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-        Some(&mut captured),
     )
     .expect("hello flow executes");
-    let root_flow_id = flow_id_for_definition(&captured.events, "hello-flow");
-    let summarize_completed = captured
-        .events
+    let events = plan
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            FlowExecutionAction::Event(action) => Some(action.event.clone()),
+            FlowExecutionAction::Fixture(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let root_flow_id = flow_id_for_definition(&events, "hello-flow");
+    let summarize_completed = events
         .iter()
         .position(|event| {
             event.event_type == EventType::StepCompleted
@@ -122,8 +128,7 @@ fn runtime_executes_subflows_after_all_parent_phases() {
                     == Some("summarize")
         })
         .expect("parent summarize phase completes");
-    let first_subflow_started = captured
-        .events
+    let first_subflow_started = events
         .iter()
         .position(|event| {
             event.event_type == EventType::FlowStarted
@@ -691,11 +696,10 @@ fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
     let mut mismatched_shape = write_tool.clone();
     mismatched_shape.tool_kind = core_script::ToolKind::PredefinedCommand;
     assert!(matches!(
-        tool_dispatch_progress(
+        compile_fixture_tool_effect(
             &mismatched_shape,
             match_mode,
             write_policy,
-            ToolDispatchMode::Plan,
         ),
         Err(RuntimeError::Protocol(message)) if message.contains("command shape")
     ));

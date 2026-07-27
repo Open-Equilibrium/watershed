@@ -502,13 +502,25 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
     let flow_block = registry
         .flow_block("hello-flow")
         .expect("hello flow exists");
-    let err = match execute_flow_with_sink(
+    let plan = plan_flow(
         &workspace,
         &registry,
         &policy,
         flow_block,
         "commitfail001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Apply),
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("flow planning succeeds");
+    let err = match apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            session_id: "commitfail001",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
         Some(&mut RejectWriteStart),
     ) {
         Err(err) => err,
@@ -591,13 +603,25 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
             workspace: &workspace,
         };
 
-        let result = execute_flow_with_sink(
+        let plan = plan_flow(
             &workspace,
             &registry,
             &policy,
             flow_block,
             &format!("rebound{label}001"),
-            FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Apply),
+            FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+        )
+        .expect("flow planning succeeds");
+        let result = apply_flow_with_sink(
+            FlowApplication {
+                workspace: &workspace,
+                session_id: &format!("rebound{label}001"),
+                options: FlowExecutionOptions::new(
+                    EventClock::fixed_fixture(),
+                    ToolSideEffectMode::Apply,
+                ),
+                plan: &plan,
+            },
             Some(&mut sink),
         );
 
@@ -658,9 +682,6 @@ fn apply_rejects_a_workspace_root_rebound_after_planning() {
     let result = apply_flow_with_sink(
         FlowApplication {
             workspace: &workspace,
-            registry: &registry,
-            policy: &policy,
-            root_flow: flow_block,
             session_id: "reboundplan001",
             options: FlowExecutionOptions::new(
                 EventClock::fixed_fixture(),

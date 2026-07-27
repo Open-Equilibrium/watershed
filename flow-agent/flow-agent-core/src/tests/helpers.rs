@@ -217,8 +217,7 @@ pub(super) fn write_definition_hash_metadata(workspace: &Path, session_id: &str,
     let config = load_workspace_config(workspace).expect("workspace config loads");
     let policy = core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())
         .expect("runtime policy compiles");
-    let mut captured = CapturedRuntime::default();
-    let plan = plan_flow_with_sink(
+    let plan = plan_flow(
         workspace,
         &registry,
         &policy,
@@ -229,11 +228,18 @@ pub(super) fn write_definition_hash_metadata(workspace: &Path, session_id: &str,
             ToolSideEffectMode::Plan,
             config.stub_model_fixture_profile,
         ),
-        Some(&mut captured),
     )
     .expect("context fixture replay plans");
     assert!(completed_turns <= plan.execution.context_manifests.record_count);
-    let checkpoints = &captured.context_checkpoints[..completed_turns];
+    let checkpoints = plan
+        .actions
+        .iter()
+        .filter_map(|action| match action {
+            FlowExecutionAction::Event(action) => action.context_checkpoint.as_ref(),
+            FlowExecutionAction::Fixture(_) => None,
+        })
+        .take(completed_turns)
+        .collect::<Vec<_>>();
     let context_stream = checkpoints
         .iter()
         .map(|checkpoint| checkpoint.manifest.line.as_str())
@@ -482,86 +488,29 @@ pub(super) fn assert_invalid_session_log(name: &str, session_id: &str, text: &st
     assert!(err.to_string().contains(expected), "{err}");
 }
 
-pub(super) struct FsmTransitionTimings {
-    pub(super) completed_at: Instant,
-    pub(super) nanos: Vec<u128>,
-}
-
-#[derive(Default)]
-pub(super) struct CapturedRuntime {
-    pub(super) context_checkpoints: Vec<ContextManifestCheckpoint>,
-    pub(super) events: Vec<EventEnvelope>,
-}
-
-impl RuntimeEventSink for CapturedRuntime {
-    fn measurement_started_at(&self) -> Option<Instant> {
-        None
-    }
-
-    fn commit(
-        &mut self,
-        event: &EventEnvelope,
-        _canonical_jsonl: &str,
-        context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
-    ) -> Result<(), RuntimeError> {
-        self.events.push(event.clone());
-        if let Some(checkpoint) = context_manifest {
-            self.context_checkpoints.push(checkpoint);
-        }
-        Ok(())
-    }
-}
-
-impl FsmTransitionTimings {
-    pub(super) fn new() -> Self {
-        Self {
-            completed_at: Instant::now(),
-            nanos: Vec::new(),
-        }
-    }
-}
-
-impl RuntimeEventSink for FsmTransitionTimings {
-    fn measurement_started_at(&self) -> Option<Instant> {
-        None
-    }
-
-    fn commit(
-        &mut self,
-        _event: &EventEnvelope,
-        _canonical_jsonl: &str,
-        _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
-    ) -> Result<(), RuntimeError> {
-        self.nanos.push(self.completed_at.elapsed().as_nanos());
-        self.completed_at = Instant::now();
-        Ok(())
-    }
-}
-
 pub(super) fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeError> {
     let workspace = fixture_dir("smoke-flow");
     let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
     let root_flow = registry
         .flow_block("smoke-flow")
         .ok_or_else(|| RuntimeError::Protocol("smoke-flow fixture is missing".to_owned()))?;
-    let mut timings = FsmTransitionTimings::new();
-    let runtime = execute_flow_with_sink(
+    let started = Instant::now();
+    let plan = plan_flow(
         &workspace,
         &registry,
         &policy,
         root_flow,
         "budget001",
         FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-        Some(&mut timings),
     )?;
-    if runtime.failed || timings.nanos.len() != runtime.events.record_count {
+    if plan.execution.failed || plan.execution.events.record_count == 0 {
         return Err(RuntimeError::Protocol(
-            "smoke-flow transition timing did not cover a successful runtime".to_owned(),
+            "smoke-flow planning did not produce a successful event sequence".to_owned(),
         ));
     }
-    Ok(timings.nanos)
+    let per_transition = started.elapsed().as_nanos()
+        / u128::try_from(plan.execution.events.record_count).unwrap_or(u128::MAX);
+    Ok(vec![per_transition; plan.execution.events.record_count])
 }
 
 pub(super) fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {
@@ -582,6 +531,8 @@ pub(super) fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &s
 
 pub(super) fn emit_noop_dispatch_for_budget(
     workspace: &Path,
+    flow_block: &core_script::FlowBlock,
+    phase: &core_script::PhaseBlock,
     tool: &core_script::ToolBlock,
     policy: RuntimeToolPolicy<'_>,
     invocation: &FlowInvocation,
@@ -592,14 +543,31 @@ pub(super) fn emit_noop_dispatch_for_budget(
         false,
     );
     let workspace = AnchoredWorkspace::open(workspace).expect("benchmark workspace anchors");
-    emit_tool(
-        &workspace,
-        tool,
-        policy,
-        invocation,
-        ToolSideEffectMode::Apply,
+    emit_planned_tool(
+        PlannedToolContext {
+            ancestor_flows: &[],
+            flow_block,
+            invocation,
+            phase,
+            policy,
+            step_payload: &serde_json::json!({
+            "phase_id": phase.identity.id,
+            "step_id": "dispatch-probe",
+            "step_name": "DispatchProbe",
+            }),
+            tool,
+        },
         &mut builder,
     )?;
+    let action = builder
+        .actions
+        .iter()
+        .find_map(|action| match action {
+            FlowExecutionAction::Fixture(action) => Some(action),
+            FlowExecutionAction::Event(_) => None,
+        })
+        .expect("planned fixture action exists");
+    apply_planned_fixture_effect(workspace.root(), action)?;
     Ok(builder.events.record_count)
 }
 

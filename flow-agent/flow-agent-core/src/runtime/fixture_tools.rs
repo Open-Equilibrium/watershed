@@ -1,4 +1,24 @@
-use super::*;
+use crate::runtime::{
+    config_io::path_io_error,
+    context::sha256_hex,
+    event_construction::{FlowInvocation, RuntimeEventBuilder},
+    failures::{runtime_denied, runtime_protocol_or_denied},
+    fs_guards::{
+        AnchoredDir, AnchoredFile, DirectoryErrorMode, ensure_not_hardlinked_open_file,
+        open_anchored_real_file_for_read,
+    },
+    types::RuntimeError,
+};
+use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt as _, OpenOptionsFollowExt};
+use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
+use proto::EventType;
+#[cfg(test)]
+use std::cell::RefCell;
+use std::{
+    fs,
+    io::{self, Write},
+    path::{Path, PathBuf},
+};
 
 #[cfg(test)]
 thread_local! {
@@ -45,24 +65,6 @@ fn remove_published_script_temp(path: &AnchoredFile) -> Result<(), RuntimeError>
     path.remove()
 }
 
-pub fn execute_own_script(
-    workspace: &AnchoredDir,
-    tool: &core_script::ToolBlock,
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
-) -> Result<(), RuntimeError> {
-    if let Some(write) = plan_own_script(tool, protected_path_match_mode, policy)? {
-        write_script_output(
-            workspace,
-            &write.target,
-            &write.contents,
-            protected_path_match_mode,
-            policy,
-        )?;
-    }
-    Ok(())
-}
-
 pub fn plan_own_script(
     tool: &core_script::ToolBlock,
     protected_path_match_mode: ProtectedPathMatchMode,
@@ -83,6 +85,7 @@ pub fn plan_own_script(
     compile_own_script_operations(protected_path_match_mode, policy, script_body)
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScriptWrite {
     pub(crate) contents: Vec<u8>,
     pub(crate) target: String,
@@ -856,7 +859,7 @@ pub fn emit_tool_progress(
     message: &'static str,
     tool: &core_script::ToolBlock,
     invocation: &FlowInvocation,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),

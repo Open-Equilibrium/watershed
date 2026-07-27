@@ -1,4 +1,24 @@
-use super::*;
+use crate::runtime::{
+    config_io::path_io_error,
+    context::is_lowercase_sha256_hex,
+    context_persistence::ensure_session_object_total,
+    fs_guards::{
+        AnchoredDir, AnchoredFile, RuntimeDirs, open_anchored_file_for_read, segmented_jsonl_files,
+    },
+    types::{
+        CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_SESSION_BUNDLE_BYTES,
+        MAX_SESSION_CONTEXT_MANIFEST_BYTES, MAX_SESSION_EVENT_BYTES, MAX_SESSION_METADATA_BYTES,
+        MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECTS, MAX_SESSION_SEGMENT_BYTES, RuntimeError,
+        SessionStreamLimits,
+    },
+};
+#[cfg(test)]
+use crate::runtime::{
+    fs_guards::ensure_anchored_non_hardlinked_file, session_lock::SessionReservation,
+};
+#[cfg(test)]
+use std::cell::Cell;
+use std::{collections::BTreeMap, io, path::Path};
 
 #[derive(Clone, Debug)]
 pub struct SessionBundlePaths {
@@ -315,12 +335,24 @@ pub enum SessionCandidateHint {
     Probe,
 }
 
+#[cfg(test)]
 pub fn session_candidate_hints(
     dirs: &RuntimeDirs,
     base_session_id: &str,
 ) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
+    session_candidate_hints_from_dirs(Some(&dirs.sessions), Some(&dirs.logs), base_session_id)
+}
+
+pub(crate) fn session_candidate_hints_from_dirs(
+    sessions: Option<&AnchoredDir>,
+    logs: Option<&AnchoredDir>,
+    base_session_id: &str,
+) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
     let mut hints = vec![SessionCandidateHint::Free; MAX_UNIQUE_SESSION_CANDIDATES as usize];
-    for (dir, logs) in [(&dirs.sessions, false), (&dirs.logs, true)] {
+    for (dir, logs) in [(sessions, false), (logs, true)] {
+        let Some(dir) = dir else {
+            continue;
+        };
         for entry in dir
             .dir
             .entries()

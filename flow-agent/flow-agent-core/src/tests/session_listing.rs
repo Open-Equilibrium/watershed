@@ -405,7 +405,60 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
 }
 
 #[test]
-fn run_flow_preserves_metadata_after_planning_lifecycle_error() {
+fn nested_partial_apply_failure_terminalizes_child_and_parent_flows() {
+    let workspace = workspace_copy("hello-flow");
+    replace_registry_text(
+        &workspace,
+        "flows/hello-flow.yaml",
+        "phase_refs: [inspect, summarize]",
+        "phase_refs: [inspect]",
+    );
+    replace_registry_text(
+        &workspace,
+        "flows/hello-subflow.yaml",
+        "phase_refs: [inspect]",
+        "phase_refs: [summarize]",
+    );
+    replace_registry_text(
+        &workspace,
+        "flows/hello-subflow.yaml",
+        "connection_refs: [inspect-data]",
+        "connection_refs: [inspect-trigger, summary-refresh]",
+    );
+    replace_registry_text(
+        &workspace,
+        "tools/write-summary.yaml",
+        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
+        "printf 'partial\\n' > out/blocker",
+    );
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
+
+    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
+        .expect("nested apply-time denial is recorded as a failed run");
+    let events = validate_session_log_text(
+        Path::new("nested-apply-denial-after-partial-write.jsonl"),
+        &output.session_id,
+        &output.stdout,
+    )
+    .expect("nested failed apply stream validates");
+    let failed_definitions = events
+        .iter()
+        .filter(|event| event.event_type == EventType::FlowFailed)
+        .map(|event| {
+            event
+                .payload
+                .get("flow_definition_id")
+                .and_then(serde_json::Value::as_str)
+                .expect("flow.failed carries flow_definition_id")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(failed_definitions, ["hello-subflow", "hello-flow"]);
+    assert_eq!(terminal_failure_reason(&events), Some("write_denied"));
+}
+
+#[test]
+fn run_flow_leaves_no_session_artifacts_after_planning_lifecycle_error() {
     let workspace = workspace_copy("smoke-flow");
     replace_registry_text(
         &workspace,
@@ -420,16 +473,19 @@ fn run_flow_preserves_metadata_after_planning_lifecycle_error() {
     assert!(
         matches!(err, RuntimeError::Protocol(message) if message.contains("after terminal step"))
     );
-    let session_path = workspace.join(LOCAL_SESSION_DIR).join("smoke-flow.jsonl");
-    assert_eq!(
-        fs::read_to_string(&session_path).expect("reserved event stream remains"),
-        ""
-    );
-    assert!(
-        fs::read_to_string(workspace.join(LOCAL_LOG_DIR).join("smoke-flow.log"))
-            .expect("valid definition metadata remains")
-            .contains("flow_definition_hash=sha256:")
-    );
+    assert_no_session_artifacts(&workspace, "smoke-flow");
+    for path in [
+        workspace
+            .join(LOCAL_LOG_DIR)
+            .join("smoke-flow.contexts.jsonl"),
+        workspace.join(LOCAL_SESSION_DIR).join("smoke-flow.lock"),
+    ] {
+        assert!(
+            !path.exists(),
+            "pure planning failure created {}",
+            path.display()
+        );
+    }
     assert_no_active_session_lock(&workspace, "smoke-flow");
 }
 

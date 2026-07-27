@@ -1,4 +1,28 @@
-use super::*;
+use crate::runtime::{
+    context_persistence::ensure_session_object_total,
+    event_construction::{FlowInvocation, RuntimeStreamSignature, RuntimeStreamSignatureBuilder},
+    fs_guards::{
+        AnchoredDir, ensure_anchored_real_file, for_each_segmented_jsonl_line,
+        read_anchored_file_with_limit,
+    },
+    planning::CONTEXT_PLAN_DOMAIN,
+    types::{
+        CONTEXT_MANIFEST_STREAM_LIMITS, MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECTS, RuntimeError,
+    },
+};
+#[cfg(test)]
+use crate::runtime::{
+    fs_guards::open_runtime_dir,
+    types::{LOCAL_LOG_DIR, LOCAL_SESSION_DIR},
+};
+use proto::{EventEnvelope, EventType};
+use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::path::Path;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io,
+};
 
 pub const CONTEXT_PROFILE_ID: &str = "flow-context-v0";
 pub const CONTEXT_PROFILE_VERSION: &str = "0";
@@ -76,7 +100,7 @@ pub struct ContextManifest {
     pub(crate) line: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextManifestCheckpoint {
     pub(crate) manifest: ContextManifest,
     pub(crate) objects: Vec<ContextObject>,

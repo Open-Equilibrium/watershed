@@ -1,4 +1,22 @@
-use super::*;
+use crate::runtime::{
+    apply::{FlowApplication, apply_flow_with_anchored_workspace, preflight_flow_execution_plan},
+    config_io::{load_workspace_config_from, require_fixture_execution_backend},
+    event_writer::{EventWriterTimings, SerialSessionWriter},
+    fs_guards::{AnchoredFile, AnchoredWorkspace},
+    live_events::LiveEventNotifier,
+    planning::{
+        FlowExecutionOptions, ToolSideEffectMode, plan_flow_with_workspace, runtime_policy_target,
+    },
+    resume::session_definition_metadata,
+    session_reservation::{
+        materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
+        write_reserved_session_metadata,
+    },
+    types::{EmitMode, RunOutput, RuntimeError},
+};
+#[cfg(test)]
+use std::cell::RefCell;
+use std::path::Path;
 
 #[cfg(test)]
 type PostWriterFinishObserver = Box<dyn FnOnce(&AnchoredFile)>;
@@ -76,7 +94,7 @@ pub fn run_flow(
 /// Runs a flow with bounded, non-blocking committed-event notifications.
 ///
 /// The caller owns the receiver and any blocking transport. Notifications carry only a
-/// high-watermark wake-up; read event payloads from [`SessionEventReader`] by sequence.
+/// high-watermark wake-up; read event payloads from [`crate::SessionEventReader`] by sequence.
 pub fn run_flow_with_live_events(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
@@ -174,32 +192,31 @@ fn run_flow_internal_with_cleanup_observer_impl(
     let definition_metadata = session_definition_metadata(&registry, flow_block)?;
     let policy =
         core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())?;
-    preflight_flow_tools(execution_workspace.root(), &registry, &policy, flow_block)?;
     let base_session_id = &flow_block.identity.id;
-    let reservation = reserve_unique_session_log_with_anchored_workspace(
+    let candidate = reserve_unique_session_candidate_with_anchored_workspace(
         &execution_workspace,
         base_session_id,
-        |_| {},
     )?;
-    let expected_session_id = reservation.session_id.clone();
+    let expected_session_id = candidate.session_id.clone();
+    #[cfg(test)]
+    run_pre_plan_observer();
+    let plan = plan_flow_with_workspace(
+        &execution_workspace,
+        &registry,
+        &policy,
+        flow_block,
+        &expected_session_id,
+        FlowExecutionOptions::with_stub_model_fixture_profile(
+            config.event_clock,
+            ToolSideEffectMode::Plan,
+            config.stub_model_fixture_profile,
+        ),
+    )?;
+    preflight_flow_execution_plan(&plan, &execution_workspace, ToolSideEffectMode::Apply)?;
+    let reservation = materialize_session_candidate(&execution_workspace, candidate)?;
     let mut finalization_result = Ok(());
     let operation_result = (|| {
         write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-        #[cfg(test)]
-        run_pre_plan_observer();
-        let plan = plan_flow_with_workspace(
-            &execution_workspace,
-            &registry,
-            &policy,
-            flow_block,
-            &expected_session_id,
-            FlowExecutionOptions::with_stub_model_fixture_profile(
-                config.event_clock,
-                ToolSideEffectMode::Plan,
-                config.stub_model_fixture_profile,
-            ),
-            None,
-        )?;
         let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
         if capture_jsonl {
             serial_writer.enable_jsonl_capture();
@@ -208,9 +225,6 @@ fn run_flow_internal_with_cleanup_observer_impl(
             FlowApplication {
                 #[cfg(test)]
                 workspace,
-                registry: &registry,
-                policy: &policy,
-                root_flow: flow_block,
                 session_id: &expected_session_id,
                 options: FlowExecutionOptions::with_stub_model_fixture_profile(
                     config.event_clock,

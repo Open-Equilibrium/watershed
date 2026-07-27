@@ -1,4 +1,12 @@
-use super::*;
+use crate::runtime::{
+    session_reservation::active_session_lock_message, validate::format_unix_timestamp,
+};
+use proto::{EventEnvelope, EventType};
+use std::{
+    fmt, io,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 /// Workspace-relative directory containing persisted session JSONL logs.
 pub const LOCAL_SESSION_DIR: &str = ".flow/sessions";
@@ -99,8 +107,8 @@ pub struct RunOutput {
     pub failed: bool,
     /// Session id.
     pub session_id: String,
-    /// Path to the first persisted session segment; use [`replay_session`] or
-    /// [`SessionEventReader`] for the complete history.
+    /// Path to the first persisted session segment; use
+    /// [`crate::replay_session`] or [`crate::SessionEventReader`] for the complete history.
     pub(crate) session_path: PathBuf,
     /// Rendered status or event output; empty for live-event operations.
     pub stdout: String,

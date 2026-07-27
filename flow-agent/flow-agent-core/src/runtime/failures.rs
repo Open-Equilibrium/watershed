@@ -1,10 +1,16 @@
-use super::*;
+use crate::runtime::{
+    event_construction::{FlowInvocation, RuntimeEventBuilder},
+    planning::RuntimeFailure,
+    types::{RUNTIME_ERROR_REASON, RuntimeError},
+};
+use proto::{EventEnvelope, EventType};
+use std::io;
 
 pub fn emit_runtime_failure(
     flow_block: &core_script::FlowBlock,
     invocation: &FlowInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     if failure.emit_tool_failed {
         emit_runtime_tool_failure(invocation, failure, builder)?;
@@ -16,7 +22,7 @@ pub fn emit_runtime_failure(
 pub fn emit_runtime_error(
     invocation: &FlowInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     let mut error_payload = serde_json::json!({
         "code": failure.reason,
@@ -42,7 +48,7 @@ pub fn emit_runtime_flow_failure(
     flow_block: &core_script::FlowBlock,
     invocation: &FlowInvocation,
     reason: &str,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     builder.emit(
         Some(invocation),
@@ -57,7 +63,7 @@ pub fn emit_runtime_flow_failure(
 pub fn emit_runtime_tool_failure(
     invocation: &FlowInvocation,
     failure: &RuntimeFailure,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     if let Some(tool_id) = &failure.tool_id {
         builder.emit(
@@ -76,7 +82,7 @@ pub fn emit_runtime_error_failure(
     flow_block: &core_script::FlowBlock,
     invocation: &FlowInvocation,
     err: &RuntimeError,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     let failure = runtime_failure_for_unhandled_error(err);
     complete_active_step(invocation, builder)?;
@@ -86,7 +92,7 @@ pub fn emit_runtime_error_failure(
 
 pub fn complete_active_step(
     invocation: &FlowInvocation,
-    builder: &mut RuntimeEventBuilder<'_>,
+    builder: &mut RuntimeEventBuilder,
 ) -> Result<(), RuntimeError> {
     let payload = builder
         .active_step_payloads

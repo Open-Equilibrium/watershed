@@ -48,9 +48,6 @@ fn deterministic_plan_and_checked_execution_retain_only_compact_stream_signature
     let checked = apply_flow_with_sink(
         FlowApplication {
             workspace: &workspace,
-            registry: &registry,
-            policy: &policy,
-            root_flow,
             session_id: "planchecked001",
             options: FlowExecutionOptions::new(
                 EventClock::fixed_fixture(),
@@ -97,9 +94,6 @@ fn apply_rejects_plan_drift_without_a_second_apply() {
     let err = apply_flow_with_sink(
         FlowApplication {
             workspace: &workspace,
-            registry: &registry,
-            policy: &policy,
-            root_flow,
             session_id: "plandrift001",
             options: FlowExecutionOptions::new(
                 EventClock::fixed_fixture(),
@@ -119,7 +113,7 @@ fn apply_rejects_plan_drift_without_a_second_apply() {
 }
 
 #[test]
-fn apply_rejects_application_drift_before_tool_side_effects() {
+fn apply_consumes_the_compiled_plan_without_retraversing_changed_definitions() {
     let workspace = workspace_copy("hello-flow");
     let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let root_flow = registry
@@ -134,16 +128,17 @@ fn apply_rejects_application_drift_before_tool_side_effects() {
         FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
     )
     .expect("runtime plan succeeds");
-    let mut changed_root_flow = root_flow.clone();
-    changed_root_flow.identity.name = "ChangedHelloFlow".to_owned();
+    replace_registry_text(
+        &workspace,
+        "flows/hello-flow.yaml",
+        "name: HelloFlow",
+        "name: ChangedHelloFlow",
+    );
     reset_fixture_tool_apply_count();
 
-    let err = apply_flow_with_sink(
+    let execution = apply_flow_with_sink(
         FlowApplication {
             workspace: &workspace,
-            registry: &registry,
-            policy: &policy,
-            root_flow: &changed_root_flow,
             session_id: "applicationdrift001",
             options: FlowExecutionOptions::new(
                 EventClock::fixed_fixture(),
@@ -153,18 +148,22 @@ fn apply_rejects_application_drift_before_tool_side_effects() {
         },
         None,
     )
-    .expect_err("application drift must reject before applying tools");
+    .expect("apply consumes the already compiled plan");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message == "flow apply did not match its execution plan"
-    ));
-    assert_eq!(fixture_tool_apply_count(), 0);
-    assert!(!workspace.join("out/summary.txt").exists());
+    assert!(execution.matches_plan(&plan));
+    assert_eq!(
+        fixture_tool_apply_count(),
+        plan.execution.tool_intents.len()
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt"))
+            .expect("the planned fixture effect is applied"),
+        "hello\n"
+    );
 }
 
 #[test]
-fn apply_rejects_own_script_body_drift_before_tool_side_effects() {
+fn apply_uses_the_planned_fixture_effect_snapshot() {
     let workspace = workspace_copy("hello-flow");
     replace_registry_text(
         &workspace,
@@ -219,21 +218,11 @@ fn apply_rejects_own_script_body_drift_before_tool_side_effects() {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'changed\\n' > out/summary.txt",
     );
-    let registry_b = load_test_registry(&workspace, "hello-flow");
-    let policy_b =
-        core_policy::compile_policy_artifact(&registry_b, "hello-flow", runtime_policy_target())
-            .expect("apply policy compiles");
-    let root_flow_b = registry_b
-        .flow_block("hello-flow")
-        .expect("changed hello-flow fixture exists");
     reset_fixture_tool_apply_count();
 
-    let err = apply_flow_with_sink(
+    let execution = apply_flow_with_sink(
         FlowApplication {
             workspace: &workspace,
-            registry: &registry_b,
-            policy: &policy_b,
-            root_flow: root_flow_b,
             session_id: "scriptdrift001",
             options: FlowExecutionOptions::new(
                 EventClock::fixed_fixture(),
@@ -243,14 +232,15 @@ fn apply_rejects_own_script_body_drift_before_tool_side_effects() {
         },
         None,
     )
-    .expect_err("own-script drift must reject before applying tools");
+    .expect("apply uses the signed fixture-effect snapshot");
 
-    assert!(matches!(
-        err,
-        RuntimeError::Protocol(message) if message == "flow apply did not match its execution plan"
-    ));
-    assert_eq!(fixture_tool_apply_count(), 0);
-    assert!(!workspace.join("out/summary.txt").exists());
+    assert!(execution.matches_plan(&plan));
+    assert_eq!(fixture_tool_apply_count(), 1);
+    assert_eq!(
+        fs::read_to_string(workspace.join("out/summary.txt"))
+            .expect("the planned fixture effect is applied"),
+        "hello\n"
+    );
 }
 
 #[test]
@@ -377,6 +367,9 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
     let workspace = empty_workspace("noop-dispatch-budget");
     let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
     let phase = registry.phase_block("smoke").expect("smoke phase exists");
+    let flow_block = registry
+        .flow_block("smoke-flow")
+        .expect("smoke flow exists");
     let tool = registry.tool_block("echo").expect("echo tool exists");
     let command_policy =
         command_policy_for_phase(&policy, &phase.identity.id, tool).expect("tool in phase policy");
@@ -393,15 +386,29 @@ fn noop_dispatch_p95_stays_under_m1_budget() {
 
     for _ in 0..30 {
         assert_eq!(
-            emit_noop_dispatch_for_budget(&workspace, tool, tool_policy, &invocation)
-                .expect("no-op dispatch succeeds"),
+            emit_noop_dispatch_for_budget(
+                &workspace,
+                flow_block,
+                phase,
+                tool,
+                tool_policy,
+                &invocation,
+            )
+            .expect("no-op dispatch succeeds"),
             2
         );
     }
     for _ in 0..100 {
         let started = Instant::now();
-        let event_count = emit_noop_dispatch_for_budget(&workspace, tool, tool_policy, &invocation)
-            .expect("no-op dispatch succeeds");
+        let event_count = emit_noop_dispatch_for_budget(
+            &workspace,
+            flow_block,
+            phase,
+            tool,
+            tool_policy,
+            &invocation,
+        )
+        .expect("no-op dispatch succeeds");
         nanos.push(started.elapsed().as_nanos());
         assert_eq!(event_count, 2);
     }

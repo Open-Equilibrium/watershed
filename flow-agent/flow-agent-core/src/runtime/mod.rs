@@ -1,52 +1,35 @@
-use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt as _, OpenOptionsFollowExt};
-use cap_std::{ambient_authority, fs::Dir};
-use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
-use proto::{EventEnvelope, EventType};
-use sha2::{Digest, Sha256};
-use std::{
-    cell::{Cell, RefCell},
-    collections::{BTreeMap, BTreeSet},
-    fmt, fs,
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
-
-mod config_io;
-mod context;
-mod engine_fsm;
-mod event_writer;
-mod failures;
-mod fixture_executor;
-mod fs_guards;
-mod live_events;
-mod session;
-mod session_authority;
-mod session_bundle;
-mod session_lock;
-mod session_state;
-mod tail;
-mod tool_exec;
-mod types;
-mod validate;
+pub(crate) mod apply;
+pub(crate) mod config_io;
+pub(crate) mod context;
+pub(crate) mod context_persistence;
+pub(crate) mod event_construction;
+pub(crate) mod event_writer;
+pub(crate) mod failures;
+pub(crate) mod fixture_effects;
+pub(crate) mod fixture_tools;
+pub(crate) mod fs_guards;
+pub(crate) mod live_events;
+pub(crate) mod planning;
+pub(crate) mod resume;
+pub(crate) mod session;
+pub(crate) mod session_authority;
+pub(crate) mod session_bundle;
+pub(crate) mod session_lock;
+pub(crate) mod session_reading;
+pub(crate) mod session_reservation;
+pub(crate) mod tail;
+pub(crate) mod types;
+pub(crate) mod validate;
 #[cfg(windows)]
-mod windows_private_dir;
+pub(crate) mod windows_private_dir;
 
-pub use config_io::*;
-pub use context::*;
-pub use engine_fsm::*;
-pub use event_writer::*;
-pub use failures::*;
-pub use fixture_executor::*;
-pub use fs_guards::*;
-pub use live_events::*;
-pub use session::*;
-pub use session_authority::*;
-pub use session_bundle::*;
-pub use session_lock::*;
-pub use session_state::*;
-pub use tail::*;
-pub use tool_exec::*;
-pub use types::*;
-pub use validate::*;
+pub use live_events::{
+    LiveEventNotification, LiveEventNotifier, LiveEventNotifyStatus, LiveEventReceiveError,
+    LiveEventReceiver, live_event_channel,
+};
+pub use resume::{resume_session, resume_session_with_live_events};
+pub use session::{run_flow, run_flow_with_live_events};
+pub use session_reading::{SessionEventReader, list_sessions};
+pub use tail::replay_session;
+pub use types::{EmitMode, RunOutput, RuntimeError, render_human_failure_status};
+pub use validate::validate_protocol_jsonl_text;

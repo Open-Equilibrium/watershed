@@ -599,15 +599,13 @@ fn planning_terminalizes_context_budget_failure_as_typed_events() {
         .expect("flow exists")
         .clone();
 
-    let mut captured = CapturedRuntime::default();
-    let plan = plan_flow_with_sink(
+    let plan = plan_flow(
         &workspace,
         &registry,
         &policy,
         &flow_block,
         "contextbudget001",
         FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-        Some(&mut captured),
     )
     .expect("budget failure becomes a deterministic failed stream");
 
@@ -616,11 +614,15 @@ fn planning_terminalizes_context_budget_failure_as_typed_events() {
         plan.execution.terminal_error,
         Some(RuntimeError::ContextBudgetExceeded { .. })
     ));
-    assert!(captured.events.iter().any(|event| {
+    let mut planned_events = plan.actions.iter().filter_map(|action| match action {
+        FlowExecutionAction::Event(action) => Some(&action.event),
+        FlowExecutionAction::Fixture(_) => None,
+    });
+    assert!(planned_events.clone().any(|event| {
         event.event_type == EventType::Error && event.payload["code"] == "context_budget_exceeded"
     }));
     assert_eq!(
-        captured.events.last().map(|event| &event.event_type),
+        planned_events.next_back().map(|event| &event.event_type),
         Some(&EventType::SessionFailed)
     );
 }
