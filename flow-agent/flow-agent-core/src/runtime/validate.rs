@@ -52,6 +52,7 @@ pub fn validate_event_payload(
     })
 }
 
+#[derive(Clone)]
 pub struct SessionAppendValidationState {
     pub(crate) expected_session_id: Option<String>,
     pub(crate) stream_session_id: Option<String>,
@@ -375,7 +376,7 @@ pub fn validate_session_log_text(
     Ok(events)
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SessionLifecycleState {
     pub(crate) flows: LifecycleTracker<String>,
     pub(crate) flow_definition_ids: BTreeMap<String, String>,
@@ -837,6 +838,7 @@ pub fn open_lifecycle_error(path: &Path, kind: &str, id: &str) -> RuntimeError {
     ))
 }
 
+#[derive(Clone)]
 pub struct LifecycleTracker<K: Ord> {
     pub(crate) active: BTreeSet<K>,
     pub(crate) terminal: BTreeMap<K, usize>,

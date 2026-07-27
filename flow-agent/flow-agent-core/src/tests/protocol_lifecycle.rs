@@ -378,6 +378,120 @@ fn runtime_builder_budget_and_id_helpers_cover_edge_paths() {
 }
 
 #[test]
+fn planner_reserves_event_capacity_for_fixture_failure_transition() {
+    let mut builder = RuntimeEventBuilder::with_clock(
+        "failureevents001".to_owned(),
+        EventClock::fixed_fixture(),
+        false,
+    );
+    builder.sequence = MAX_FLOW_EVENTS - 3;
+
+    let err = match emit_hello_fixture_for_failure_budget(&mut builder) {
+        Ok(_) => {
+            panic!("the successful suffix fits but its failure transition exceeds the event cap")
+        }
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string()
+            .contains("runtime failure transition event budget"),
+        "{err}"
+    );
+    assert_eq!(
+        builder
+            .actions
+            .iter()
+            .filter(|action| matches!(action, FlowExecutionAction::Fixture(_)))
+            .count(),
+        0,
+        "capacity must be reserved before the fixture side-effect action is accepted"
+    );
+}
+
+#[test]
+fn planner_reserves_byte_capacity_for_fixture_failure_transition() {
+    let mut probe = RuntimeEventBuilder::with_clock(
+        "failurebytes001".to_owned(),
+        EventClock::fixed_fixture(),
+        false,
+    );
+    emit_hello_fixture_for_failure_budget(&mut probe).expect("fixture probe plans");
+    let successful_suffix_bytes = probe.events.byte_count;
+    let mut builder = RuntimeEventBuilder::with_clock(
+        "failurebytes001".to_owned(),
+        EventClock::fixed_fixture(),
+        false,
+    );
+    builder.events.byte_count = usize::try_from(MAX_SESSION_EVENT_BYTES)
+        .expect("session event budget fits usize")
+        - successful_suffix_bytes;
+
+    let err = match emit_hello_fixture_for_failure_budget(&mut builder) {
+        Ok(_) => {
+            panic!("the successful suffix fits but its failure transition exceeds the byte cap")
+        }
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string()
+            .contains("runtime failure transition data budget"),
+        "{err}"
+    );
+    assert_eq!(
+        builder
+            .actions
+            .iter()
+            .filter(|action| matches!(action, FlowExecutionAction::Fixture(_)))
+            .count(),
+        0,
+        "capacity must be reserved before the fixture side-effect action is accepted"
+    );
+}
+
+fn emit_hello_fixture_for_failure_budget(
+    builder: &mut RuntimeEventBuilder,
+) -> Result<Option<RuntimeFailure>, RuntimeError> {
+    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    let flow = registry
+        .flow_block("hello-flow")
+        .expect("hello flow exists");
+    let phase = registry
+        .phase_block("summarize")
+        .expect("summarize phase exists");
+    let tool = registry
+        .tool_block("write-summary")
+        .expect("write-summary tool exists");
+    let command = command_policy_for_phase(&policy, &phase.identity.id, tool)?;
+    let invocation = FlowInvocation {
+        flow_id: "flow-001".to_owned(),
+        parent_flow_id: None,
+    };
+    let step_payload = serde_json::json!({
+        "phase_id": phase.identity.id,
+        "step_id": "write",
+        "step_name": "Write",
+    });
+    emit_planned_tool(
+        PlannedToolContext {
+            ancestor_flows: &[],
+            flow_block: flow,
+            invocation: &invocation,
+            phase,
+            policy: RuntimeToolPolicy {
+                command,
+                protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
+                stub_model_fixture_profile: false,
+            },
+            step_payload: &step_payload,
+            tool,
+        },
+        builder,
+    )
+}
+
+#[test]
 fn canonical_event_size_has_an_independent_hard_limit() {
     let event = EventEnvelope::new(
         "evt-001",

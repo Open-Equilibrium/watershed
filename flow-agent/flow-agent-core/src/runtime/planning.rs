@@ -2,11 +2,12 @@ use crate::runtime::{
     context::{ContextManifestCheckpoint, compile_provider_turn_context},
     event_construction::{
         FlowInvocation, RuntimeEventBuilder, RuntimeStreamSignature, RuntimeStreamSignatureBuilder,
+        fixture_failure_transition_events, live_invocation_failure_transition_events,
     },
     failures::{
         connection_kind_name, emit_runtime_error_failure, emit_runtime_failure,
-        emit_runtime_flow_failure, emit_runtime_tool_failure, policy_tool_kind_name,
-        runtime_failure_for_unhandled_error, sandbox_out_of_phase_failure,
+        emit_runtime_flow_failure, emit_runtime_tool_failure, fixture_failure_capacity_candidates,
+        policy_tool_kind_name, runtime_failure_for_unhandled_error, sandbox_out_of_phase_failure,
         sandbox_tool_dispatch_failure, tool_network_access_name,
     },
     fixture_effects::compile_fixture_tool_effect,
@@ -472,6 +473,13 @@ pub fn emit_flow_block_at_depth(
         flow_id: invocation.flow_id.clone(),
         parent_flow_id: invocation.parent_flow_id.clone(),
     };
+    let live_invocation_failure = runtime_failure_for_unhandled_error(&RuntimeError::Protocol(
+        "global live flow invocation limit reached".to_owned(),
+    ));
+    builder.validate_alternative_transition(
+        "live invocation failure transition",
+        live_invocation_failure_transition_events(ancestor_flows, &live_invocation_failure),
+    )?;
     builder.emit(
         Some(&invocation),
         EventType::FlowStarted,
@@ -736,20 +744,23 @@ pub fn emit_planned_tool(
     } else {
         completed_sequence
     };
-    builder.record_fixture_action(
-        PlannedFailureTransition {
-            ancestor_flows: ancestor_flows.to_vec(),
-            flow_definition_id: flow_block.identity.id.clone(),
-            flow_id: invocation.flow_id.clone(),
-            parent_flow_id: invocation.parent_flow_id.clone(),
-            phase_id: phase.identity.id.clone(),
-            step_payload: step_payload.clone(),
-            tool_id: tool.identity.id.clone(),
-        },
-        policy,
-        replay_guard_sequence,
-        effect,
-    );
+    let failure_transition = PlannedFailureTransition {
+        ancestor_flows: ancestor_flows.to_vec(),
+        flow_definition_id: flow_block.identity.id.clone(),
+        flow_id: invocation.flow_id.clone(),
+        parent_flow_id: invocation.parent_flow_id.clone(),
+        phase_id: phase.identity.id.clone(),
+        step_payload: step_payload.clone(),
+        tool_id: tool.identity.id.clone(),
+    };
+    builder.validate_lifecycle_equivalent_alternatives(
+        "runtime failure transition",
+        fixture_failure_capacity_candidates()
+            .iter()
+            .map(|failure| fixture_failure_transition_events(&failure_transition, failure))
+            .collect(),
+    )?;
+    builder.record_fixture_action(failure_transition, policy, replay_guard_sequence, effect);
     if let Some(message) = planned_progress {
         emit_tool_progress(message, tool, invocation, builder)?;
     }

@@ -279,6 +279,69 @@ pub fn runtime_failure_for_unhandled_error(err: &RuntimeError) -> RuntimeFailure
     }
 }
 
+pub(crate) fn fixture_failure_capacity_candidates() -> Vec<RuntimeFailure> {
+    let mut candidates = [
+        core_policy::DenyReasonCode::WriteDenied,
+        core_policy::DenyReasonCode::NetworkDenied,
+        core_policy::DenyReasonCode::EnvironmentDenied,
+        core_policy::DenyReasonCode::ToolOutOfPhase,
+        core_policy::DenyReasonCode::ProtectedPathDenied,
+        core_policy::DenyReasonCode::SymlinkEscapeDenied,
+        core_policy::DenyReasonCode::InterpreterEscapeDenied,
+    ]
+    .into_iter()
+    .map(|reason| runtime_failure_for_reason(reason, None))
+    .collect::<Vec<_>>();
+    candidates.push(RuntimeFailure {
+        reason: "context_budget_exceeded".to_owned(),
+        message: "mandatory context exceeds the model input budget",
+        data: serde_json::Map::from_iter([
+            ("input_budget_tokens".to_owned(), u64::MAX.into()),
+            ("required_bytes".to_owned(), u64::MAX.into()),
+        ]),
+        tool_id: None,
+        phase_id: None,
+        emit_tool_failed: false,
+    });
+    candidates.push(RuntimeFailure {
+        reason: RUNTIME_ERROR_REASON.to_owned(),
+        message: "runtime execution failed",
+        data: serde_json::Map::new(),
+        tool_id: None,
+        phase_id: None,
+        emit_tool_failed: false,
+    });
+    candidates.extend(
+        [
+            "not_found",
+            "permission_denied",
+            "already_exists",
+            "invalid_input",
+            "invalid_data",
+            "timed_out",
+            "write_zero",
+            "storage_full",
+            "read_only_filesystem",
+            "file_too_large",
+            "resource_busy",
+            "interrupted",
+            "unexpected_eof",
+            "out_of_memory",
+            "other",
+        ]
+        .into_iter()
+        .map(|io_kind| RuntimeFailure {
+            reason: RUNTIME_ERROR_REASON.to_owned(),
+            message: "runtime execution failed",
+            data: serde_json::Map::from_iter([("io_kind".to_owned(), serde_json::json!(io_kind))]),
+            tool_id: None,
+            phase_id: None,
+            emit_tool_failed: false,
+        }),
+    );
+    candidates
+}
+
 pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Option<RuntimeFailure> {
     let reason = match err {
         RuntimeError::Denied { reason, .. } => reason.clone(),

@@ -4,7 +4,9 @@ use crate::runtime::{
         ContextManifestWriter, SessionObjectWriter, context_manifest_inventory,
         validate_context_manifest_checkpoint,
     },
-    event_construction::{RuntimeStreamSignature, RuntimeStreamSignatureBuilder},
+    event_construction::{
+        RuntimeEventAlternative, RuntimeStreamSignature, RuntimeStreamSignatureBuilder,
+    },
     fs_guards::{
         AnchoredDir, AnchoredFile, open_anchored_session_log_append_file, segmented_jsonl_files,
         segmented_jsonl_path, validate_open_session_log_append_file, verify_owned_anchored_file,
@@ -15,10 +17,10 @@ use crate::runtime::{
     session_lock::SessionReservation,
     session_reservation::reserve_new_anchored_file,
     types::{
-        CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, EventClock, MAX_SESSION_SEGMENT_BYTES,
-        RuntimeError, SessionStreamLimits,
+        CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, EventClock, MAX_FLOW_EVENTS,
+        MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits,
     },
-    validate::SessionAppendValidationState,
+    validate::{SessionAppendValidationState, validate_event_size},
 };
 use proto::{EventEnvelope, EventType};
 use std::{
@@ -44,6 +46,17 @@ pub trait RuntimeEventSink {
         context_manifest: Option<ContextManifestCheckpoint>,
         measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError>;
+
+    fn needs_alternative_preflight(&self) -> bool {
+        false
+    }
+
+    fn preflight_alternatives(
+        &mut self,
+        _alternatives: &[RuntimeEventAlternative],
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
 }
 
 pub struct RuntimePrefixSink {
@@ -402,6 +415,7 @@ pub struct ResumeEventSink<'writer, 'session> {
     pub(crate) writer: &'writer mut SerialSessionWriter<'session>,
 }
 
+#[derive(Clone)]
 pub struct SessionStreamPreflight<'path> {
     pub(crate) current_bytes: u64,
     pub(crate) current_ordinal: u64,
@@ -577,6 +591,52 @@ impl RuntimeEventSink for ResumePreflightSink<'_> {
             RuntimeError::Protocol(format!("failed to serialize resumed runtime event: {err}"))
         })?;
         self.events.record(canonical.len())
+    }
+
+    fn needs_alternative_preflight(&self) -> bool {
+        true
+    }
+
+    fn preflight_alternatives(
+        &mut self,
+        alternatives: &[RuntimeEventAlternative],
+    ) -> Result<(), RuntimeError> {
+        for alternative in alternatives {
+            let mut events = self.events.clone();
+            for event in &alternative.events {
+                let shifted = shift_resumed_event(
+                    event.event.clone(),
+                    self.resume_marker_count as u64 + 1,
+                    self.clock,
+                );
+                if shifted.sequence > MAX_FLOW_EVENTS {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} event budget exceeded: prospective event count {} exceeds max {MAX_FLOW_EVENTS}",
+                        alternative.label, shifted.sequence
+                    )));
+                }
+                let canonical = shifted.canonical_jsonl().map_err(|err| {
+                    RuntimeError::Protocol(format!(
+                        "failed to serialize resumed runtime event: {err}"
+                    ))
+                })?;
+                validate_event_size(
+                    events.path.diagnostic_path(),
+                    usize::try_from(shifted.sequence).unwrap_or(usize::MAX),
+                    canonical.len(),
+                )?;
+                events
+                    .record(canonical.len())
+                    .map_err(|error| match error {
+                        RuntimeError::Protocol(message) => RuntimeError::Protocol(format!(
+                            "{} data budget exceeded: {message}",
+                            alternative.label
+                        )),
+                        error => error,
+                    })?;
+            }
+        }
+        Ok(())
     }
 }
 

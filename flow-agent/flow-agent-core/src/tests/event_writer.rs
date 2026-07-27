@@ -283,6 +283,62 @@ fn resume_preflight_rejects_a_fifth_event_segment_before_side_effects() {
 }
 
 #[test]
+fn resume_preflight_checks_failure_alternatives_without_mutating_success_state() {
+    let workspace = empty_workspace("resume-preflight-failure-alternative");
+    let reservation =
+        reserve_session_log(&workspace, "resumefailurecap001").expect("session reserved");
+    let mut preflight = ResumePreflightSink::open(
+        &reservation.session_path,
+        &reservation.context_path,
+        &reservation.session_id,
+        0,
+        EventClock::fixed_fixture(),
+        0,
+        0,
+    )
+    .expect("resume preflight opens");
+    let capacity_event = |starting_sequence| RuntimeEventAlternative {
+        events: construct_runtime_transition(
+            &reservation.session_id,
+            EventClock::fixed_fixture(),
+            starting_sequence,
+            vec![PlannedRuntimeEvent {
+                invocation: None,
+                event_type: EventType::SessionFailed,
+                payload: serde_json::json!({"reason":"runtime_error"}),
+            }],
+        )
+        .expect("failure transition constructs"),
+        label: "runtime failure transition",
+    };
+
+    let count_err = preflight
+        .preflight_alternatives(&[capacity_event(MAX_FLOW_EVENTS - 1)])
+        .expect_err("the resume marker shift must apply to failure event capacity");
+    assert!(
+        count_err
+            .to_string()
+            .contains("runtime failure transition event budget"),
+        "{count_err}"
+    );
+
+    preflight.events.total_bytes = MAX_SESSION_EVENT_BYTES - 1;
+    let before = preflight.events.total_bytes;
+    let byte_err = preflight
+        .preflight_alternatives(&[capacity_event(1)])
+        .expect_err("the shifted failure event must fit the persisted byte budget");
+    assert!(
+        byte_err
+            .to_string()
+            .contains("runtime failure transition data budget"),
+        "{byte_err}"
+    );
+    assert_eq!(preflight.events.total_bytes, before);
+    drop(preflight);
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
 fn resume_preflight_rejects_a_sixth_context_segment_before_prior_side_effects() {
     let workspace = empty_workspace("resume-preflight-context-segment-cap");
     let reservation =
