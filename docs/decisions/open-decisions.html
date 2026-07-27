@@ -15,12 +15,31 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1">M1</a>
       <a href="#m1-2">M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1">
+    <h2>M1 - Runtime Closeout</h2>
+    <div class="grid">
+      <article id="d-057" class="decision">
+        <h3>D-057 - Protocol JSON Nesting Limit</h3>
+        <p><strong>Status:</strong> Open, M1 blocker for safe protocol JSON construction and serialization.</p>
+        <p><strong>Affected boundary:</strong> Protocol event payloads, additive top-level fields and the public canonical-JSON helper accept caller-constructed JSON values. Wire deserialization already has the JSON library's finite recursion limit, but programmatic values can bypass it.</p>
+        <p><strong>Why review cannot finish:</strong> Normalization, null checking, canonical JSON generation and generic serialization each walk nested JSON recursively. Without one maximum depth or a requirement that every path be stack-safe, fixing one walk does not prove that another equivalent path cannot exhaust the process stack.</p>
+        <p><strong>Known safe and unresolved examples:</strong> Ordinary wire JSON is bounded by the current parser. Shallow payloads and additive fields are covered. Deep values built in memory remain unbounded in <code>EventEnvelope::new</code>, validation, canonical serialization, ordinary Serde serialization and <code>canonical_json</code>.</p>
+        <p><strong>Question:</strong> Which finite contract should all protocol JSON entry points enforce?</p>
+        <ul><li><strong>A:</strong> Set the v0 maximum to 128 nested arrays or objects, matching the current JSON parser's default boundary, and reject deeper values before any recursive walk. Pro: preserves the effective wire boundary and gives one small, testable rule. Con: makes an implicit dependency limit part of the public protocol.</li><li><strong>B:</strong> Select another finite depth and configure parsing plus every programmatic entry point to match it. Pro: chooses a product-specific envelope. Con: needs evidence for the number and may change currently accepted wire input.</li><li><strong>C:</strong> Promise no nesting limit and replace every recursive normalization, validation, canonicalization and serialization path with a stack-safe implementation. Pro: accepts every value within the byte limit. Con: substantially enlarges the custom serialization boundary and still needs a finite memory/work acceptance rule.</li></ul>
+        <p><strong>Recommendation:</strong> A. It aligns programmatic construction with the parser already used at the public wire boundary and provides one invariant for all serializers.</p>
+        <p><strong>Maintainer decision required:</strong> Choose A, B with an exact depth, or C with an exact memory/work bound, and decide whether a fallible constructor or validated JSON wrapper may change the public Rust API.</p>
+        <p><strong>Acceptance criterion:</strong> Record the selected contract in <a href="../../PROTOCOL.md">PROTOCOL.md</a>; expose one canonical implementation limit; test the accepted boundary and the next rejected value for payloads, additive fields and <code>canonical_json</code> through construction, deserialization, validation, ordinary serialization and canonical serialization; and prove the rejected cases return errors without panic or process abort.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m1-2">
     <h2>M1.2 - Flow Agent OS Isolation</h2>
