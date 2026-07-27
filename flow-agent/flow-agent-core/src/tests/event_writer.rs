@@ -308,15 +308,18 @@ fn resume_preflight_rejects_a_sixth_context_segment_before_prior_side_effects() 
         ordinal: usize::try_from(CONTEXT_MANIFEST_STREAM_LIMITS.max_segments + 1)
             .expect("segment count fits"),
     };
-    let event = EventEnvelope::new(
-        "evt-001",
-        EventType::MessageCompleted,
-        "resumecontextsegments001",
-        1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({"message_id":"msg-001","role":"assistant"}),
-    );
+    let event = EventEnvelope {
+        flow_id: Some("flow-001".to_owned()),
+        ..EventEnvelope::new(
+            "evt-001",
+            EventType::MessageCompleted,
+            "resumecontextsegments001",
+            1,
+            "2026-01-01T00:00:00Z",
+            "flow-agent-cli",
+            serde_json::json!({"message_id":"msg-001","role":"assistant"}),
+        )
+    };
     let canonical = event.canonical_jsonl().expect("event serializes");
     let preflight_result = ResumePreflightSink::open(
         &reservation.session_path,
@@ -2065,7 +2068,7 @@ fn test_event(
     event_type: EventType,
     sequence: u64,
 ) -> EventEnvelope {
-    EventEnvelope::new(
+    let mut event = EventEnvelope::new(
         event_id,
         event_type,
         session_id,
@@ -2081,7 +2084,11 @@ fn test_event(
             }),
             _ => serde_json::json!({}),
         },
-    )
+    );
+    if event_type == EventType::MessageDelta {
+        event.flow_id = Some("flow-test".to_owned());
+    }
+    event
 }
 
 fn test_event_pair(session_id: &str, second_type: EventType) -> [EventEnvelope; 2] {

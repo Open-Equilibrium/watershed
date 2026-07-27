@@ -163,18 +163,21 @@ fn resume_rejects_session_log_without_started_event() {
     let session_dir = workspace.join(LOCAL_SESSION_DIR);
     fs::create_dir_all(&session_dir).expect("session dir");
     let path = session_dir.join("missing-start.jsonl");
-    let event = EventEnvelope::new(
-        "evt-001",
-        EventType::ToolCompleted,
-        "missing-start",
-        1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({
-            "exit_code": 0,
-            "tool_id": "read-fixture",
-        }),
-    )
+    let event = EventEnvelope {
+        flow_id: Some("flow-001".to_owned()),
+        ..EventEnvelope::new(
+            "evt-001",
+            EventType::ToolCompleted,
+            "missing-start",
+            1,
+            "2026-01-01T00:00:00Z",
+            "flow-agent-cli",
+            serde_json::json!({
+                "exit_code": 0,
+                "tool_id": "read-fixture",
+            }),
+        )
+    }
     .canonical_jsonl()
     .expect("tool event serializes");
     fs::write(&path, &event).expect("malformed lifecycle log written");
