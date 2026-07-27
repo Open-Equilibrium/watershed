@@ -1,4 +1,9 @@
-fn insert_named_block<T>(
+use crate::script::model::{BlockIdentity, ToolKind};
+use crate::script::paths::is_valid_block_id;
+use std::{collections::BTreeMap, fmt, path::PathBuf};
+use unicode_normalization::UnicodeNormalization;
+
+pub(super) fn insert_named_block<T>(
     kind: &'static str,
     identity: BlockIdentity,
     blocks: &mut BTreeMap<String, T>,
@@ -45,7 +50,7 @@ fn insert_named_block<T>(
     Ok(())
 }
 
-fn normalize_string(value: &str) -> String {
+pub(super) fn normalize_string(value: &str) -> String {
     value.nfc().collect()
 }
 

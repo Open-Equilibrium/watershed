@@ -1,11 +1,17 @@
-fn canonicalize_registry_block(block: RegistryBlock) -> Result<RegistryBlock, RegistryError> {
+use crate::script::model::RegistryBlock;
+use crate::script::naming::RegistryError;
+use serde_json::Value;
+
+pub(super) fn canonicalize_registry_block(
+    block: RegistryBlock,
+) -> Result<RegistryBlock, RegistryError> {
     let mut value = serde_json::to_value(block).map_err(RegistryError::Serialize)?;
     canonicalize_registry_value(&mut value);
     let canonical = proto::canonical_json(&value).map_err(RegistryError::CanonicalJson)?;
     serde_json::from_str(&canonical).map_err(RegistryError::Serialize)
 }
 
-fn canonicalize_registry_value(value: &mut Value) {
+pub(super) fn canonicalize_registry_value(value: &mut Value) {
     match value {
         Value::Array(items) => items.iter_mut().for_each(canonicalize_registry_value),
         Value::Object(map) => {
@@ -38,13 +44,13 @@ fn canonicalize_registry_value(value: &mut Value) {
     }
 }
 
-fn parse_error(source_name: &str, message: String) -> RegistryError {
+pub(super) fn parse_error(source_name: &str, message: String) -> RegistryError {
     RegistryError::Parse {
         source_name: source_name.to_owned(),
         message,
     }
 }
 
-fn registry_source_error(source_name: &str, error: RegistryError) -> RegistryError {
+pub(super) fn registry_source_error(source_name: &str, error: RegistryError) -> RegistryError {
     parse_error(source_name, error.to_string())
 }

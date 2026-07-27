@@ -1,5 +1,18 @@
+use crate::script::canonical::{parse_error, registry_source_error};
+use crate::script::model::{
+    BlockIdentity, MAX_ACTIVE_REGISTRY_BYTES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES,
+    RegistryBlock, ResolvedRegistry,
+};
+use crate::script::naming::{RegistryError, insert_named_block, normalize_string};
+use crate::script::parser::deserialize_registry_block;
+use crate::script::semantics::{validate_registry_block_semantics, validate_registry_block_shape};
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
 use cap_std::{ambient_authority, fs::Dir};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::{self, Read},
+    path::{Path, PathBuf},
+};
 
 /// Loads the unique transitive registry closure for one top-level Flow.
 pub fn load_flow_registry_from_workspace(
@@ -47,31 +60,35 @@ pub fn parse_registry_block(
     Ok(block)
 }
 
-struct RegistryRoot {
-    dir: Dir,
-    path: PathBuf,
+pub(super) struct RegistryRoot {
+    pub(super) dir: Dir,
+    pub(super) path: PathBuf,
 }
 
 #[derive(Clone)]
-struct RegistryFile {
-    path: PathBuf,
+pub(super) struct RegistryFile {
+    pub(super) path: PathBuf,
 }
 
-struct RegistryCatalogEntry {
-    identity: BlockIdentity,
-    kind: &'static str,
-    file: RegistryFile,
-    step_ids: BTreeSet<String>,
+pub(super) struct RegistryCatalogEntry {
+    pub(super) identity: BlockIdentity,
+    pub(super) kind: &'static str,
+    pub(super) file: RegistryFile,
+    pub(super) step_ids: BTreeSet<String>,
 }
 
 #[derive(Default)]
-struct RegistryCatalog {
+pub(super) struct RegistryCatalog {
     entries: BTreeMap<&'static str, BTreeMap<String, RegistryCatalogEntry>>,
     name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
 }
 
 impl RegistryCatalog {
-    fn insert(&mut self, block: &RegistryBlock, file: RegistryFile) -> Result<(), RegistryError> {
+    pub(super) fn insert(
+        &mut self,
+        block: &RegistryBlock,
+        file: RegistryFile,
+    ) -> Result<(), RegistryError> {
         let (kind, identity) = registry_block_identity(block);
         let step_ids = match block {
             RegistryBlock::Phase(phase) => phase.steps.iter().map(|step| step.id.clone()).collect(),
@@ -91,7 +108,11 @@ impl RegistryCatalog {
         )
     }
 
-    fn resolve(&self, kind: &'static str, reference: &str) -> Option<&RegistryCatalogEntry> {
+    pub(super) fn resolve(
+        &self,
+        kind: &'static str,
+        reference: &str,
+    ) -> Option<&RegistryCatalogEntry> {
         let entries = self.entries.get(kind)?;
         entries.get(reference).or_else(|| {
             self.name_ids
@@ -101,7 +122,7 @@ impl RegistryCatalog {
         })
     }
 
-    fn require(
+    pub(super) fn require(
         &self,
         kind: &'static str,
         reference: &str,
@@ -152,7 +173,7 @@ impl RegistryCatalog {
     }
 }
 
-fn registry_block_identity(block: &RegistryBlock) -> (&'static str, &BlockIdentity) {
+pub(super) fn registry_block_identity(block: &RegistryBlock) -> (&'static str, &BlockIdentity) {
     match block {
         RegistryBlock::Tool(block) => ("tool", &block.identity),
         RegistryBlock::Instruction(block) => ("instruction", &block.identity),
@@ -162,7 +183,7 @@ fn registry_block_identity(block: &RegistryBlock) -> (&'static str, &BlockIdenti
     }
 }
 
-fn enqueue_dependencies(
+pub(super) fn enqueue_dependencies(
     catalog: &RegistryCatalog,
     block: &RegistryBlock,
     pending: &mut Vec<(&'static str, String)>,
@@ -210,20 +231,20 @@ fn enqueue_dependencies(
 }
 
 #[derive(Clone, Copy)]
-struct RegistryTraversalLimits {
-    max_file_bytes: u64,
-    max_total_bytes: u64,
-    max_entries: usize,
-    max_depth: usize,
+pub(super) struct RegistryTraversalLimits {
+    pub(super) max_file_bytes: u64,
+    pub(super) max_total_bytes: u64,
+    pub(super) max_entries: usize,
+    pub(super) max_depth: usize,
 }
 
 #[derive(Default)]
-struct RegistryTraversalState {
+pub(super) struct RegistryTraversalState {
     entries: usize,
     bytes: u64,
 }
 
-fn open_registry_root(
+pub(super) fn open_registry_root(
     workspace: &Path,
     registry_root: &Path,
 ) -> Result<RegistryRoot, RegistryError> {
@@ -237,7 +258,7 @@ fn open_registry_root(
     open_registry_root_from_workspace_dir(&workspace_dir, workspace, registry_root)
 }
 
-fn open_registry_root_from_workspace_dir(
+pub(super) fn open_registry_root_from_workspace_dir(
     workspace_dir: &Dir,
     workspace: &Path,
     registry_root: &Path,
@@ -256,12 +277,12 @@ fn open_registry_root_from_workspace_dir(
         });
     }
 
-    let mut dir = workspace_dir.try_clone().map_err(|source| {
-        RegistryError::Io {
+    let mut dir = workspace_dir
+        .try_clone()
+        .map_err(|source| RegistryError::Io {
             path: workspace.to_path_buf(),
             source,
-        }
-    })?;
+        })?;
     let mut path = workspace.to_path_buf();
     for component in registry_root.components() {
         match component {
@@ -327,7 +348,7 @@ fn open_registry_regular_file(
     Ok(opened)
 }
 
-fn read_registry_file_to_string(
+pub(super) fn read_registry_file_to_string(
     root: &RegistryRoot,
     file: &RegistryFile,
     max_bytes: u64,
@@ -378,7 +399,7 @@ fn read_registry_file_to_string(
     })
 }
 
-fn collect_registry_files_with_limits(
+pub(super) fn collect_registry_files_with_limits(
     root: &RegistryRoot,
     dir: &Dir,
     relative_dir: &Path,

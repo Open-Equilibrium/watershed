@@ -1,8 +1,11 @@
+use crate::script::canonical::parse_error;
+use crate::script::model::{MAX_REGISTRY_FILE_BYTES, RegistryBlock};
+use crate::script::naming::RegistryError;
 use noyalib::policy::{DenyAnchors, MaxScalarLength, Policy, PolicyEvent};
 use noyalib::{DuplicateKeyPolicy, MergeKeyPolicy, ParserConfig, RequireIndent, YamlVersion};
 
-const MAX_YAML_BYTES: usize = MAX_REGISTRY_FILE_BYTES as usize;
-const MAX_YAML_DEPTH: usize = 64;
+pub(super) const MAX_YAML_BYTES: usize = MAX_REGISTRY_FILE_BYTES as usize;
+pub(super) const MAX_YAML_DEPTH: usize = 64;
 const MAX_YAML_EVENTS: usize = MAX_YAML_BYTES * 2;
 
 #[derive(Debug)]
@@ -42,7 +45,7 @@ fn safe_yaml_config() -> ParserConfig {
         .with_policy(MaxScalarLength(MAX_YAML_BYTES))
 }
 
-fn deserialize_registry_block(
+pub(super) fn deserialize_registry_block(
     source_name: &str,
     source: &str,
 ) -> Result<RegistryBlock, RegistryError> {
@@ -74,7 +77,7 @@ fn deserialize_registry_block(
 /// Parses one Safe-YAML document into a configuration model.
 ///
 /// The target type owns its structural field contract. Registry callers must use
-/// [`parse_registry_block`], which also validates flattened registry fields.
+/// [`crate::parse_registry_block`], which also validates flattened registry fields.
 pub fn parse_safe_yaml_config<T>(source_name: &str, source: &str) -> Result<T, RegistryError>
 where
     T: serde::de::DeserializeOwned,

@@ -1,3 +1,26 @@
+use crate::script::canonical::{
+    canonicalize_registry_block, canonicalize_registry_value, parse_error,
+};
+use crate::script::load::{
+    RegistryCatalog, RegistryRoot, RegistryTraversalLimits, RegistryTraversalState,
+    collect_registry_files_with_limits, enqueue_dependencies, open_registry_root,
+    open_registry_root_from_workspace_dir, parse_registry_block, read_registry_file_to_string,
+    registry_block_identity,
+};
+use crate::script::model::{
+    BlockIdentity, ConnectionBlock, FlowBlock, InstructionBlock, MAX_FLOW_FANOUT,
+    MAX_FLOW_NESTING_DEPTH, MAX_REGISTRY_ENTRIES, MAX_REGISTRY_TRAVERSAL_DEPTH, PhaseBlock,
+    RegistryBlock, ResolvedRegistry, StepBlock, ToolBlock,
+};
+use crate::script::naming::{RegistryError, insert_named_block, normalize_string};
+use crate::script::paths::is_valid_block_id;
+use crate::script::semantics::{validate_registry_block_semantics, validate_registry_block_shape};
+use cap_std::fs::Dir;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
+
 #[derive(Clone, Copy)]
 enum ResolvedEndpoint<'a> {
     Direct(&'a BlockIdentity),
@@ -8,7 +31,7 @@ enum ResolvedEndpoint<'a> {
 }
 
 impl ResolvedRegistry {
-    fn load_for_flow_with_limits(
+    pub(super) fn load_for_flow_with_limits(
         workspace: &Path,
         registry_root: &Path,
         flow_reference: &str,
@@ -30,7 +53,7 @@ impl ResolvedRegistry {
         )
     }
 
-    fn load_for_flow_from_workspace_dir_with_limits(
+    pub(super) fn load_for_flow_from_workspace_dir_with_limits(
         workspace_dir: &Dir,
         workspace: &Path,
         registry_root: &Path,
@@ -39,8 +62,7 @@ impl ResolvedRegistry {
         max_total_bytes: u64,
         max_active_bytes: u64,
     ) -> Result<Self, RegistryError> {
-        let root =
-            open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
         Self::load_for_flow_from_root(
             root,
             flow_reference,
@@ -54,7 +76,7 @@ impl ResolvedRegistry {
         )
     }
 
-    fn load_for_flow_with_all_limits(
+    pub(super) fn load_for_flow_with_all_limits(
         workspace: &Path,
         registry_root: &Path,
         flow_reference: &str,

@@ -1,11 +1,5 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
-use std::io::{self, Read};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::path::{Path, PathBuf};
-use unicode_normalization::UnicodeNormalization;
+use std::collections::BTreeMap;
 
 /// Maximum allowed recursive flow nesting depth, counting the root as depth one.
 pub const MAX_FLOW_NESTING_DEPTH: usize = 16;
@@ -349,15 +343,15 @@ pub struct FlowBlock {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ResolvedRegistry {
     /// Connection blocks keyed by id.
-    connections: BTreeMap<String, ConnectionBlock>,
+    pub(super) connections: BTreeMap<String, ConnectionBlock>,
     /// Instruction blocks keyed by id.
-    instructions: BTreeMap<String, InstructionBlock>,
+    pub(super) instructions: BTreeMap<String, InstructionBlock>,
     /// Flow blocks keyed by id.
-    flows: BTreeMap<String, FlowBlock>,
+    pub(super) flows: BTreeMap<String, FlowBlock>,
     /// Phase blocks keyed by id.
-    phases: BTreeMap<String, PhaseBlock>,
+    pub(super) phases: BTreeMap<String, PhaseBlock>,
     /// Tool blocks keyed by id.
-    tools: BTreeMap<String, ToolBlock>,
+    pub(super) tools: BTreeMap<String, ToolBlock>,
     #[serde(skip)]
-    name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
+    pub(super) name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
 }

@@ -6,6 +6,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RustArchitectureContractTest(unittest.TestCase):
+    def test_core_script_uses_explicit_rust_modules(self) -> None:
+        source_root = ROOT / "core" / "core-script" / "src"
+        production_sources = [
+            path
+            for path in source_root.rglob("*.rs")
+            if path.name != "tests.rs"
+        ]
+
+        for path in production_sources:
+            source = path.read_text(encoding="utf-8")
+            relative = path.relative_to(ROOT)
+            self.assertNotIn("include!(", source, str(relative))
+            self.assertNotIn("use super::*", source, str(relative))
+            self.assertNotRegex(source, r"pub use [^;]+::\*", str(relative))
+
+        module_root = (source_root / "script" / "mod.rs").read_text(encoding="utf-8")
+        for module in [
+            "canonical",
+            "load",
+            "model",
+            "naming",
+            "parser",
+            "paths",
+            "registry",
+            "semantics",
+        ]:
+            self.assertIn(f"mod {module};", module_root)
+
     def test_proto_is_the_only_event_payload_schema_owner(self) -> None:
         runtime_root = ROOT / "flow-agent" / "flow-agent-core" / "src" / "runtime"
         runtime_sources = "\n".join(

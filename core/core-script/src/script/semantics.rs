@@ -1,4 +1,17 @@
-fn validate_registry_block_semantics(block: &RegistryBlock) -> Result<(), SemanticValidationError> {
+use crate::script::model::{
+    FlowBlock, MAX_BLOCK_NAME_CHARS, MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy,
+    ParameterValueType, RegistryBlock, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
+};
+use crate::script::naming::SemanticValidationError;
+use crate::script::paths::{
+    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_canonical_cidr,
+    is_valid_command_id, normalize_protected_path_pattern, normalize_safe_relative_path,
+};
+use std::collections::BTreeSet;
+
+pub(super) fn validate_registry_block_semantics(
+    block: &RegistryBlock,
+) -> Result<(), SemanticValidationError> {
     match block {
         RegistryBlock::Tool(tool) => validate_tool_semantics(tool),
         RegistryBlock::Flow(flow_block) => validate_flow_semantics(flow_block),
@@ -8,7 +21,7 @@ fn validate_registry_block_semantics(block: &RegistryBlock) -> Result<(), Semant
     }
 }
 
-fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
+pub(super) fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
     let (kind, identity) = match block {
         RegistryBlock::Tool(block) => ("tool", &block.identity),
         RegistryBlock::Instruction(block) => ("instruction", &block.identity),
@@ -86,7 +99,7 @@ fn validate_flow_semantics(flow_block: &FlowBlock) -> Result<(), SemanticValidat
     Ok(())
 }
 
-fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
+pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
     match (&tool.tool_kind, &tool.command) {
         (ToolKind::OwnScript, ToolCommand::OwnScript(command)) => {
             let expected = format!("script:{}", tool.identity.id);
