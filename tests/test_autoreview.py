@@ -161,6 +161,31 @@ class AutoreviewTest(unittest.TestCase):
             self.assertNotIn(sentinel, bundle)
             self.assertIn("## untracked-link.txt\n[non-regular file omitted]", bundle)
 
+    def test_local_bundle_does_not_read_untracked_hardlinks(self) -> None:
+        with (
+            tempfile.TemporaryDirectory(prefix="watershed-autoreview-repo-") as repo_dir,
+            tempfile.TemporaryDirectory(
+                prefix="watershed-autoreview-external-"
+            ) as external_dir,
+        ):
+            repo = Path(repo_dir)
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            sentinel = "external-hardlink-autoreview-sentinel"
+            external = Path(external_dir) / "secret.txt"
+            external.write_text(sentinel, encoding="utf-8")
+            link = repo / "untracked-hardlink.txt"
+            try:
+                os.link(external, link)
+            except OSError as exc:
+                self.skipTest(f"hard-link creation unavailable: {exc}")
+
+            bundle = autoreview.local_bundle(repo)
+
+            self.assertNotIn(sentinel, bundle)
+            self.assertIn(
+                "## untracked-hardlink.txt\n[hard-linked file omitted]", bundle
+            )
+
     def test_local_bundle_omits_non_regular_untracked_entries(self) -> None:
         with tempfile.TemporaryDirectory(
             prefix="watershed-autoreview-repo-"

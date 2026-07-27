@@ -374,6 +374,8 @@ def read_untracked_text(repo: Path, path: Path, limit: int = 40_000) -> str:
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
         ):
             return "[non-regular file omitted]"
+        if before.st_nlink != 1:
+            return "[hard-linked file omitted]"
         if not is_within(path.resolve(strict=True), repo.resolve(strict=True)):
             return "[outside repository omitted]"
         descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
@@ -388,11 +390,18 @@ def read_untracked_text(repo: Path, path: Path, limit: int = 40_000) -> str:
             value.st_size,
             value.st_mtime_ns,
         )
+        if after.st_nlink != 1:
+            return "[hard-linked file omitted]"
         if not stat.S_ISREG(after.st_mode) or identity(before) != identity(after):
             return "[file changed during read; omitted]"
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
             data = stream.read()
+            final = os.fstat(stream.fileno())
+            if final.st_nlink != 1:
+                return "[hard-linked file omitted]"
+            if identity(after) != identity(final):
+                return "[file changed during read; omitted]"
     except OSError as exc:
         return f"[unreadable: {exc}]"
     finally:
