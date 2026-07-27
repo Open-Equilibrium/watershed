@@ -95,6 +95,23 @@ pub(crate) struct RuntimeEventAlternative {
     pub(crate) label: &'static str,
 }
 
+fn runtime_error_payload(failure: &RuntimeFailure) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "code": failure.reason,
+        "message": failure.message,
+    });
+    if !failure.data.is_empty() {
+        payload
+            .as_object_mut()
+            .expect("planned error payload is an object")
+            .insert(
+                "data".to_owned(),
+                serde_json::Value::Object(failure.data.clone()),
+            );
+    }
+    payload
+}
+
 pub(crate) fn fixture_failure_transition_events(
     transition: &PlannedFailureTransition,
     failure: &RuntimeFailure,
@@ -103,19 +120,6 @@ pub(crate) fn fixture_failure_transition_events(
         flow_id: transition.flow_id.clone(),
         parent_flow_id: transition.parent_flow_id.clone(),
     };
-    let mut error_payload = serde_json::json!({
-        "code": failure.reason,
-        "message": failure.message,
-    });
-    if !failure.data.is_empty() {
-        error_payload
-            .as_object_mut()
-            .expect("planned error payload is an object")
-            .insert(
-                "data".to_owned(),
-                serde_json::Value::Object(failure.data.clone()),
-            );
-    }
     let mut events = vec![
         PlannedRuntimeEvent {
             invocation: Some(invocation.clone()),
@@ -133,7 +137,7 @@ pub(crate) fn fixture_failure_transition_events(
         PlannedRuntimeEvent {
             invocation: Some(invocation.clone()),
             event_type: EventType::Error,
-            payload: error_payload,
+            payload: runtime_error_payload(failure),
         },
         PlannedRuntimeEvent {
             invocation: Some(invocation),
@@ -173,21 +177,31 @@ pub(crate) fn live_invocation_failure_transition_events(
     active_boundaries: &[PlannedFlowFailureBoundary],
     failure: &RuntimeFailure,
 ) -> Vec<PlannedRuntimeEvent> {
-    let mut events = active_boundaries
-        .iter()
-        .rev()
-        .map(|boundary| PlannedRuntimeEvent {
-            invocation: Some(FlowInvocation {
-                flow_id: boundary.flow_id.clone(),
-                parent_flow_id: boundary.parent_flow_id.clone(),
+    let error_invocation = active_boundaries.last().map(|boundary| FlowInvocation {
+        flow_id: boundary.flow_id.clone(),
+        parent_flow_id: boundary.parent_flow_id.clone(),
+    });
+    let mut events = vec![PlannedRuntimeEvent {
+        invocation: error_invocation,
+        event_type: EventType::Error,
+        payload: runtime_error_payload(failure),
+    }];
+    events.extend(
+        active_boundaries
+            .iter()
+            .rev()
+            .map(|boundary| PlannedRuntimeEvent {
+                invocation: Some(FlowInvocation {
+                    flow_id: boundary.flow_id.clone(),
+                    parent_flow_id: boundary.parent_flow_id.clone(),
+                }),
+                event_type: EventType::FlowFailed,
+                payload: serde_json::json!({
+                    "error": failure.reason,
+                    "flow_definition_id": boundary.flow_definition_id,
+                }),
             }),
-            event_type: EventType::FlowFailed,
-            payload: serde_json::json!({
-                "error": failure.reason,
-                "flow_definition_id": boundary.flow_definition_id,
-            }),
-        })
-        .collect::<Vec<_>>();
+    );
     events.push(PlannedRuntimeEvent {
         invocation: None,
         event_type: EventType::SessionFailed,

@@ -553,6 +553,28 @@ impl RuntimeEventSink for BlockingFlowStartedSink {
     }
 }
 
+#[derive(Default)]
+struct CollectingEventSink {
+    events: Vec<EventEnvelope>,
+}
+
+impl RuntimeEventSink for CollectingEventSink {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        None
+    }
+
+    fn commit(
+        &mut self,
+        event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        _context_manifest: Option<ContextManifestCheckpoint>,
+        _measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        self.events.push(event.clone());
+        Ok(())
+    }
+}
+
 fn smoke_apply_plan(session_id: &str) -> (PathBuf, FlowExecutionPlan) {
     let workspace = fixture_dir("smoke-flow");
     let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
@@ -612,6 +634,7 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
             .expect("the first 32 applies reach flow.started");
     }
     let (workspace, plan) = smoke_apply_plan("liveapplyoverflow");
+    let mut overflow_sink = CollectingEventSink::default();
     let overflow = apply_flow_with_sink(
         FlowApplication {
             workspace: &workspace,
@@ -622,7 +645,7 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
             ),
             plan: &plan,
         },
-        None,
+        Some(&mut overflow_sink),
     );
     let (resume_workspace, resume_plan) = smoke_apply_plan("liveresumeoverflow");
     let resume_overflow = apply_flow_with_sink(
@@ -655,6 +678,21 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
         .expect("thirty-third production apply records the failure");
     assert!(overflow.failed);
     assert!(error.to_string().contains("max 32"), "{error}");
+    assert_eq!(
+        overflow_sink
+            .events
+            .iter()
+            .map(|event| event.event_type)
+            .collect::<Vec<_>>(),
+        vec![
+            EventType::SessionStarted,
+            EventType::Error,
+            EventType::SessionFailed,
+        ],
+    );
+    let diagnostic = &overflow_sink.events[1];
+    assert_eq!(diagnostic.payload["code"], "runtime_error");
+    assert_eq!(diagnostic.payload["message"], "runtime execution failed");
     let error = resume_overflow.expect_err("resume must reacquire every active prefix flow");
     assert!(error.to_string().contains("max 32"), "{error}");
 
