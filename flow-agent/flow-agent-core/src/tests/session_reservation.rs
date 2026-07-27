@@ -1019,6 +1019,22 @@ fn host_local_authority_is_independent_of_process_temp_environment() {
 }
 
 #[test]
+fn authority_root_case_alias_uses_the_alternate_adjacent_coordinator() {
+    let parent = empty_workspace("case-aliased-adjacent-coordinator");
+    let workspace = parent.join(".Watershed-Flow-Agent");
+    fs::create_dir(&workspace).expect("case-aliased workspace created");
+
+    let reservation = reserve_unique_session_log(&workspace, "coordinatoralias001")
+        .expect("case alias selects the alternate adjacent coordinator");
+
+    assert!(
+        parent.join(".watershed-flow-agent-coordinator").is_dir(),
+        "the ownership coordinator must remain outside the workspace"
+    );
+    reservation.rollback().expect("reservation rolls back");
+}
+
+#[test]
 fn unavailable_workspace_adjacent_coordinator_fails_before_workspace_side_effects() {
     let parent = empty_workspace("unavailable-adjacent-coordinator");
     let workspace = parent.join("workspace");

@@ -168,12 +168,15 @@ fn session_ownership_authority_dir(
         ))
     })?;
     let parent = AnchoredDir::workspace(parent)?;
-    let root_name =
-        if workspace.file_name() == Some(std::ffi::OsStr::new(SESSION_OWNERSHIP_AUTHORITY_ROOT)) {
-            SESSION_OWNERSHIP_AUTHORITY_ROOT_ALTERNATE
-        } else {
-            SESSION_OWNERSHIP_AUTHORITY_ROOT
-        };
+    let root_name = if workspace
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|name| name.eq_ignore_ascii_case(SESSION_OWNERSHIP_AUTHORITY_ROOT))
+    {
+        SESSION_OWNERSHIP_AUTHORITY_ROOT_ALTERNATE
+    } else {
+        SESSION_OWNERSHIP_AUTHORITY_ROOT
+    };
     let Some(root) = parent.private_child(root_name, create, DirectoryErrorMode::Protocol)? else {
         return Ok(None);
     };
