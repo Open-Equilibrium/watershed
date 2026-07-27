@@ -293,15 +293,31 @@ fn event_clock_and_payload_helpers_cover_success_paths() {
             "flow-agent-cli",
             payload,
         );
-        if matches!(
-            event_type,
-            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
-        ) {
+        if requires_flow_id(event_type) {
             event.flow_id = Some("flow-001".to_owned());
         }
         validate_event_payload(Path::new("valid-payload.jsonl"), 1, &event)
             .unwrap_or_else(|err| panic!("{}: {err}", event.event_type.as_str()));
     }
+}
+
+fn requires_flow_id(event_type: EventType) -> bool {
+    matches!(
+        event_type,
+        EventType::FlowStarted
+            | EventType::FlowCompleted
+            | EventType::FlowFailed
+            | EventType::PhaseEntered
+            | EventType::StepStarted
+            | EventType::StepCompleted
+            | EventType::MessageDelta
+            | EventType::MessageCompleted
+            | EventType::ToolStarted
+            | EventType::ToolProgress
+            | EventType::ToolCompleted
+            | EventType::ToolFailed
+            | EventType::ToolTimedOut
+    )
 }
 
 #[test]

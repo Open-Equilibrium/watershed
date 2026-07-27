@@ -138,6 +138,8 @@ fn apply_flow_with_workspace(
     Ok(RuntimeExecution {
         actions: application.plan.actions.clone(),
         context_manifests: context_signature.signature(),
+        #[cfg(test)]
+        event_transition_nanos: Vec::new(),
         events: event_signature.signature(),
         failed: application.plan.execution.failed,
         failure_status: application.plan.execution.failure_status.clone(),
@@ -266,6 +268,8 @@ fn terminalize_planned_fixture_error(
     Ok(RuntimeExecution {
         actions: application.plan.actions.clone(),
         context_manifests: context_signature.signature(),
+        #[cfg(test)]
+        event_transition_nanos: Vec::new(),
         events: event_signature.signature(),
         failed: true,
         failure_status,

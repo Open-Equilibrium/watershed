@@ -362,6 +362,37 @@ fn fsm_transition_p95_stays_under_m1_budget() {
 }
 
 #[test]
+fn fsm_transition_samples_record_each_planned_event() {
+    let workspace = fixture_dir("smoke-flow");
+    let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
+    let root_flow = registry
+        .flow_block("smoke-flow")
+        .expect("smoke-flow fixture exists");
+    let plan = plan_flow(
+        &workspace,
+        &registry,
+        &policy,
+        root_flow,
+        "budgettrace001",
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("runtime plan succeeds");
+
+    assert_eq!(
+        plan.execution.event_transition_nanos.len(),
+        plan.execution.events.record_count,
+        "each planned event must retain its own transition measurement"
+    );
+    assert!(
+        plan.execution
+            .event_transition_nanos
+            .iter()
+            .all(|sample| *sample > 0),
+        "each planned event measurement must have elapsed time"
+    );
+}
+
+#[test]
 #[ignore = "performance gate"]
 fn noop_dispatch_p95_stays_under_m1_budget() {
     let workspace = empty_workspace("noop-dispatch-budget");

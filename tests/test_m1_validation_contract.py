@@ -2,6 +2,7 @@ import subprocess
 import tempfile
 import tomllib
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -65,7 +66,10 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
     for raw_path in result.stdout.split(b"\0"):
         if not raw_path:
             continue
-        relative_path = Path(raw_path.decode("utf-8"))
+        try:
+            relative_path = Path(raw_path.decode("utf-8"))
+        except UnicodeDecodeError:
+            continue
         path = repo / relative_path
         if is_protected_validation_path(relative_path) or path.is_symlink():
             continue
@@ -100,6 +104,18 @@ class M1ValidationContractTest(unittest.TestCase):
             paths = tracked_validation_paths(repo)
 
             self.assertEqual(paths, [safe])
+
+    def test_validation_scan_skips_non_utf8_tracked_path_bytes(self) -> None:
+        result = subprocess.CompletedProcess(
+            ["git", "ls-files", "-z"],
+            0,
+            stdout=b"README.md\0non-utf8-\xff.txt\0",
+        )
+
+        with mock.patch("subprocess.run", return_value=result):
+            paths = tracked_validation_paths(ROOT)
+
+        self.assertEqual(paths, [ROOT / "README.md"])
 
     def test_flow_agent_identity_has_no_stale_product_references(self) -> None:
         expected_paths = [

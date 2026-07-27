@@ -23,6 +23,8 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct RuntimeExecution {
     pub(crate) context_manifests: RuntimeStreamSignature,
+    #[cfg(test)]
+    pub(crate) event_transition_nanos: Vec<u128>,
     pub(crate) events: RuntimeStreamSignature,
     pub(crate) failed: bool,
     pub(crate) failure_status: Option<String>,
@@ -147,6 +149,21 @@ impl FlowExecutionPlan {
                 .unwrap_or_default()
                 .as_bytes(),
         );
+        match execution.terminal_error.as_ref() {
+            None => signature.push(b"terminal-error:none"),
+            Some(RuntimeError::ContextBudgetExceeded {
+                input_budget_tokens,
+                required_bytes,
+            }) => {
+                signature.push(b"terminal-error:context-budget-exceeded");
+                signature.push(&input_budget_tokens.to_be_bytes());
+                signature.push(&required_bytes.to_be_bytes());
+            }
+            Some(error) => {
+                signature.push(b"terminal-error:other");
+                signature.push(error.to_string().as_bytes());
+            }
+        }
         for intent in &execution.tool_intents {
             signature.push(intent.canonical.as_bytes());
         }

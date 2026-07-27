@@ -424,6 +424,12 @@ pub(super) fn base_event() -> EventEnvelope {
     )
 }
 
+pub(super) fn flow_scoped_event() -> EventEnvelope {
+    let mut event = base_event();
+    event.flow_id = Some("flow-001".to_owned());
+    event
+}
+
 pub(super) fn assert_invalid_event(name: &str, event: EventEnvelope, expected: &str) {
     let mut envelope = serde_json::Map::new();
     for (field, value) in event.additional_fields {
@@ -494,7 +500,6 @@ pub(super) fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeEr
     let root_flow = registry
         .flow_block("smoke-flow")
         .ok_or_else(|| RuntimeError::Protocol("smoke-flow fixture is missing".to_owned()))?;
-    let started = Instant::now();
     let plan = plan_flow(
         &workspace,
         &registry,
@@ -508,9 +513,12 @@ pub(super) fn fsm_transition_samples_for_budget() -> Result<Vec<u128>, RuntimeEr
             "smoke-flow planning did not produce a successful event sequence".to_owned(),
         ));
     }
-    let per_transition = started.elapsed().as_nanos()
-        / u128::try_from(plan.execution.events.record_count).unwrap_or(u128::MAX);
-    Ok(vec![per_transition; plan.execution.events.record_count])
+    if plan.execution.event_transition_nanos.len() != plan.execution.events.record_count {
+        return Err(RuntimeError::Protocol(
+            "smoke-flow planning did not measure every event transition".to_owned(),
+        ));
+    }
+    Ok(plan.execution.event_transition_nanos)
 }
 
 pub(super) fn flow_id_for_definition(events: &[EventEnvelope], definition_id: &str) -> String {

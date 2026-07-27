@@ -628,6 +628,37 @@ fn planning_terminalizes_context_budget_failure_as_typed_events() {
 }
 
 #[test]
+fn flow_execution_plan_rejects_a_mutated_terminal_error() {
+    let workspace = workspace_copy("hello-flow");
+    let (_, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
+    exceed_context_budget_with_valid_instructions(&workspace);
+    let registry = load_test_registry(&workspace, "hello-flow");
+    let flow_block = registry
+        .flow_block("hello-flow")
+        .expect("flow exists")
+        .clone();
+
+    let mut plan = plan_flow(
+        &workspace,
+        &registry,
+        &policy,
+        &flow_block,
+        "contextplanintegrity001",
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("budget failure becomes a deterministic failed stream");
+    plan.execution.terminal_error = None;
+
+    let err = plan
+        .validate_integrity()
+        .expect_err("mutated terminal outcome invalidates the plan signature");
+    assert!(matches!(
+        err,
+        RuntimeError::Protocol(message) if message == "flow execution plan signature is invalid"
+    ));
+}
+
+#[test]
 fn persisted_terminal_error_identifies_its_session_and_typed_cause() {
     let workspace = workspace_copy("hello-flow");
     exceed_context_budget_with_valid_instructions(&workspace);

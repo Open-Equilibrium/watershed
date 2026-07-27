@@ -205,7 +205,7 @@ fn proto_jsonl_and_constructed_event_paths_report_the_same_structure_error() {
 
 #[test]
 fn protocol_validator_rejects_tool_started_required_payload_edges() {
-    let mut incomplete_tool = base_event();
+    let mut incomplete_tool = flow_scoped_event();
     incomplete_tool.event_type = EventType::ToolStarted;
     incomplete_tool.payload = serde_json::json!({
         "allowed_parameters": [],
@@ -223,7 +223,7 @@ fn protocol_validator_rejects_tool_started_required_payload_edges() {
 
 #[test]
 fn protocol_validator_rejects_step_connection_payload_edges() {
-    let mut mismatched_connections = base_event();
+    let mut mismatched_connections = flow_scoped_event();
     mismatched_connections.event_type = EventType::StepStarted;
     mismatched_connections.payload = serde_json::json!({
         "connection_ids": ["inspect-data"],
@@ -236,7 +236,7 @@ fn protocol_validator_rejects_step_connection_payload_edges() {
         "payload.connection_ids and payload.connection_kinds must be present together",
     );
 
-    let mut unequal_connections = base_event();
+    let mut unequal_connections = flow_scoped_event();
     unequal_connections.event_type = EventType::StepStarted;
     unequal_connections.payload = serde_json::json!({
         "connection_ids": ["inspect-data", "inspect-trigger"],
@@ -250,7 +250,7 @@ fn protocol_validator_rejects_step_connection_payload_edges() {
         "same length",
     );
 
-    let mut invalid_connection_kind = base_event();
+    let mut invalid_connection_kind = flow_scoped_event();
     invalid_connection_kind.event_type = EventType::StepStarted;
     invalid_connection_kind.payload = serde_json::json!({
         "connection_ids": ["inspect-data"],
@@ -267,7 +267,7 @@ fn protocol_validator_rejects_step_connection_payload_edges() {
 
 #[test]
 fn protocol_validator_rejects_message_payload_edges() {
-    let mut invalid_role = base_event();
+    let mut invalid_role = flow_scoped_event();
     invalid_role.event_type = EventType::MessageDelta;
     invalid_role.payload = serde_json::json!({
         "content_delta": "hi",
@@ -279,7 +279,7 @@ fn protocol_validator_rejects_message_payload_edges() {
 
 #[test]
 fn protocol_validator_rejects_tool_started_enum_and_scope_payload_edges() {
-    let mut invalid_tool_kind = base_event();
+    let mut invalid_tool_kind = flow_scoped_event();
     invalid_tool_kind.event_type = EventType::ToolStarted;
     invalid_tool_kind.payload = serde_json::json!({
         "allowed_parameters": [],
@@ -296,7 +296,7 @@ fn protocol_validator_rejects_tool_started_enum_and_scope_payload_edges() {
         "payload.tool_kind",
     );
 
-    let mut invalid_network = base_event();
+    let mut invalid_network = flow_scoped_event();
     invalid_network.event_type = EventType::ToolStarted;
     invalid_network.payload = serde_json::json!({
         "allowed_parameters": [],
@@ -313,7 +313,7 @@ fn protocol_validator_rejects_tool_started_enum_and_scope_payload_edges() {
         "payload.network_access",
     );
 
-    let mut non_array_read_scope = base_event();
+    let mut non_array_read_scope = flow_scoped_event();
     non_array_read_scope.event_type = EventType::ToolStarted;
     non_array_read_scope.payload = serde_json::json!({
         "allowed_parameters": [],
@@ -330,7 +330,7 @@ fn protocol_validator_rejects_tool_started_enum_and_scope_payload_edges() {
         "payload.read_scope",
     );
 
-    let mut non_string_allowed_parameter = base_event();
+    let mut non_string_allowed_parameter = flow_scoped_event();
     non_string_allowed_parameter.event_type = EventType::ToolStarted;
     non_string_allowed_parameter.payload = serde_json::json!({
         "allowed_parameters": [1],
@@ -350,7 +350,7 @@ fn protocol_validator_rejects_tool_started_enum_and_scope_payload_edges() {
 
 #[test]
 fn protocol_validator_rejects_tool_terminal_and_auxiliary_payload_edges() {
-    let mut non_integer_exit_code = base_event();
+    let mut non_integer_exit_code = flow_scoped_event();
     non_integer_exit_code.event_type = EventType::ToolCompleted;
     non_integer_exit_code.payload = serde_json::json!({"exit_code": 1.5, "tool_id": "read-file"});
     assert_invalid_event(
@@ -359,7 +359,7 @@ fn protocol_validator_rejects_tool_terminal_and_auxiliary_payload_edges() {
         "payload.exit_code",
     );
 
-    let mut string_exit_code = base_event();
+    let mut string_exit_code = flow_scoped_event();
     string_exit_code.event_type = EventType::ToolCompleted;
     string_exit_code.payload = serde_json::json!({"exit_code": "0", "tool_id": "read-file"});
     assert_invalid_event(
@@ -557,7 +557,7 @@ fn protocol_validator_rejects_stream_identity_edges() {
     assert_invalid_event(
         "flow-started-without-flow-id.jsonl",
         flow_started_without_id,
-        "flow_id is required for flow events",
+        "flow_id is required for flow-scoped events",
     );
 
     let child_with_unknown_parent = event_line_with_parent(
@@ -592,18 +592,24 @@ fn protocol_validator_rejects_stream_identity_edges() {
         "parent_flow_id",
     );
 
-    let parent_without_flow_id = event_line_with_parent(
-        "evt-003",
-        EventType::MessageDelta,
-        "meta001",
-        3,
-        None,
-        Some("flow-001"),
-        serde_json::json!({
+    let parent_without_flow_id = format!(
+        "{}\n",
+        proto::canonical_json(&serde_json::json!({
+            "event_id": "evt-003",
+            "event_type": "message.delta",
+            "parent_flow_id": "flow-001",
+            "payload": {
             "content_delta": "hello",
             "message_id": "msg-001",
             "role": "assistant",
-        }),
+            },
+            "protocol_version": "0",
+            "sequence": 3,
+            "session_id": "meta001",
+            "source": "flow-agent-cli",
+            "timestamp": event_timestamp(3),
+        }))
+        .expect("raw event canonicalizes")
     );
     assert_invalid_session_log(
         "parent-without-flow-id.jsonl",
@@ -614,6 +620,6 @@ fn protocol_validator_rejects_stream_identity_edges() {
             flow_started_line("evt-002", 2),
             parent_without_flow_id
         ),
-        "parent_flow_id",
+        "flow_id is required for flow-scoped events",
     );
 }

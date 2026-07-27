@@ -226,7 +226,7 @@ fn event_boundaries_reject_missing_required_payload_fields() {
 }
 
 #[test]
-fn flow_event_boundaries_require_runtime_invocation_id() {
+fn flow_scoped_event_boundaries_require_runtime_invocation_id() {
     let cases = [
         (
             EventType::FlowStarted,
@@ -239,6 +239,64 @@ fn flow_event_boundaries_require_runtime_invocation_id() {
         (
             EventType::FlowFailed,
             json!({"flow_definition_id": "flow-1", "error": "failed"}),
+        ),
+        (
+            EventType::PhaseEntered,
+            json!({
+                "phase_id": "phase-1",
+                "phase_name": "Phase",
+                "instruction_ids": [],
+                "tool_ids": []
+            }),
+        ),
+        (
+            EventType::StepStarted,
+            json!({
+                "step_id": "step-1",
+                "step_name": "Step",
+                "connection_ids": [],
+                "connection_kinds": []
+            }),
+        ),
+        (
+            EventType::StepCompleted,
+            json!({"step_id": "step-1", "step_name": "Step"}),
+        ),
+        (
+            EventType::MessageDelta,
+            json!({"message_id": "message-1", "role": "assistant", "content_delta": "hi"}),
+        ),
+        (
+            EventType::MessageCompleted,
+            json!({"message_id": "message-1", "role": "assistant"}),
+        ),
+        (
+            EventType::ToolStarted,
+            json!({
+                "tool_id": "tool-1",
+                "tool_name": "Tool",
+                "tool_kind": "predefined-command",
+                "read_scope": [],
+                "write_scope": [],
+                "allowed_parameters": [],
+                "network_access": "deny"
+            }),
+        ),
+        (
+            EventType::ToolProgress,
+            json!({"tool_id": "tool-1", "message": "working"}),
+        ),
+        (
+            EventType::ToolCompleted,
+            json!({"tool_id": "tool-1", "exit_code": 0}),
+        ),
+        (
+            EventType::ToolFailed,
+            json!({"tool_id": "tool-1", "error": "failed"}),
+        ),
+        (
+            EventType::ToolTimedOut,
+            json!({"tool_id": "tool-1", "error": "timed out"}),
         ),
     ];
 
@@ -256,7 +314,7 @@ fn flow_event_boundaries_require_runtime_invocation_id() {
         assert_eq!(
             event
                 .validate_v0()
-                .expect_err("flow event without flow_id must fail")
+                .expect_err("flow-scoped event without flow_id must fail")
                 .field(),
             "flow_id"
         );
@@ -398,10 +456,7 @@ fn every_v0_event_payload_shape_round_trips_through_validated_boundaries() {
             "flow-agent-cli",
             payload,
         );
-        if matches!(
-            event_type,
-            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
-        ) {
+        if requires_flow_id(event_type) {
             event.flow_id = Some(format!("flow-{index}"));
         }
 
@@ -555,10 +610,7 @@ fn every_v0_event_payload_rejects_missing_required_and_wrong_typed_fields() {
             "flow-agent-cli",
             valid_payload,
         );
-        if matches!(
-            event_type,
-            EventType::FlowStarted | EventType::FlowCompleted | EventType::FlowFailed
-        ) {
+        if requires_flow_id(event_type) {
             event.flow_id = Some("flow-1".to_owned());
         }
         event
@@ -597,9 +649,28 @@ fn every_v0_event_payload_rejects_missing_required_and_wrong_typed_fields() {
     }
 }
 
+fn requires_flow_id(event_type: EventType) -> bool {
+    matches!(
+        event_type,
+        EventType::FlowStarted
+            | EventType::FlowCompleted
+            | EventType::FlowFailed
+            | EventType::PhaseEntered
+            | EventType::StepStarted
+            | EventType::StepCompleted
+            | EventType::MessageDelta
+            | EventType::MessageCompleted
+            | EventType::ToolStarted
+            | EventType::ToolProgress
+            | EventType::ToolCompleted
+            | EventType::ToolFailed
+            | EventType::ToolTimedOut
+    )
+}
+
 #[test]
 fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
-    let event = EventEnvelope::new(
+    let mut event = EventEnvelope::new(
         "evt-001",
         EventType::ToolStarted,
         "smoke001",
@@ -616,13 +687,14 @@ fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
             "tool_kind": "predefined-command"
         }),
     );
+    event.flow_id = Some("flow-001".to_owned());
 
     let jsonl = event.canonical_jsonl().expect("event serializes");
 
     assert!(jsonl.ends_with('\n'));
     assert_eq!(
         jsonl,
-        "{\"event_id\":\"evt-001\",\"event_type\":\"tool.started\",\"payload\":{\"allowed_parameters\":[],\"network_access\":\"deny\",\"read_scope\":[\"workspace\"],\"tool_id\":\"read-file\",\"tool_kind\":\"predefined-command\",\"tool_name\":\"ReadFile\",\"write_scope\":[]},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n"
+        "{\"event_id\":\"evt-001\",\"event_type\":\"tool.started\",\"flow_id\":\"flow-001\",\"payload\":{\"allowed_parameters\":[],\"network_access\":\"deny\",\"read_scope\":[\"workspace\"],\"tool_id\":\"read-file\",\"tool_kind\":\"predefined-command\",\"tool_name\":\"ReadFile\",\"write_scope\":[]},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n"
     );
 }
 

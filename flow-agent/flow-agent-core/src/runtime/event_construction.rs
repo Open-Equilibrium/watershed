@@ -15,6 +15,8 @@ use crate::runtime::{
 use core_policy::ProtectedPathMatchMode;
 use proto::{EventEnvelope, EventType};
 use sha2::{Digest, Sha256};
+#[cfg(test)]
+use std::time::Instant;
 use std::{collections::BTreeMap, path::Path};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +81,8 @@ pub struct RuntimeEventBuilder {
     pub(crate) clock: EventClock,
     pub(crate) context_manifests: RuntimeStreamSignatureBuilder,
     pub(crate) events: RuntimeStreamSignatureBuilder,
+    #[cfg(test)]
+    pub(crate) event_transition_nanos: Vec<u128>,
     pub(crate) failure_messages: BTreeMap<String, String>,
     pub(crate) failure_status: Option<String>,
     pub(crate) history: ContextHistory,
@@ -100,6 +104,8 @@ impl RuntimeEventBuilder {
             clock,
             context_manifests: RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN),
             events: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            #[cfg(test)]
+            event_transition_nanos: Vec::new(),
             failure_messages: BTreeMap::new(),
             failure_status: None,
             history: ContextHistory::default(),
@@ -215,6 +221,8 @@ impl RuntimeEventBuilder {
         event_type: EventType,
         payload: serde_json::Value,
     ) -> Result<(), RuntimeError> {
+        #[cfg(test)]
+        let transition_started_at = Instant::now();
         let sequence = self.sequence + 1;
         // WHY: enforce event budgets before storing the event so oversized in-cap flows
         // cannot accumulate unbounded memory.
@@ -304,6 +312,9 @@ impl RuntimeEventBuilder {
             })));
         self.sequence = sequence;
         self.history.record(&event);
+        #[cfg(test)]
+        self.event_transition_nanos
+            .push(transition_started_at.elapsed().as_nanos());
         if let Some(invocation) = invocation {
             match event.event_type {
                 EventType::StepStarted => {
@@ -327,6 +338,8 @@ impl RuntimeEventBuilder {
         RuntimeExecution {
             actions: self.actions,
             context_manifests: self.context_manifests.signature(),
+            #[cfg(test)]
+            event_transition_nanos: self.event_transition_nanos,
             events: self.events.signature(),
             failed,
             failure_status: self.failure_status,
