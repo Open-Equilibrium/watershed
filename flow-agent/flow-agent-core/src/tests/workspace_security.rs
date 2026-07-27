@@ -618,10 +618,11 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
         );
         fs::rename(&*workspace, &*outside).expect("outside workspace restores");
         fs::rename(&moved, &*workspace).expect("original workspace root restores");
-        let err = match result {
-            Err(err) => err,
-            Ok(_) => panic!("{label}-rebound workspace root must stop tool dispatch"),
-        };
+        let execution = result.expect("workspace rebind is recorded as a terminal execution");
+        assert!(execution.failed, "{label} workspace rebind must fail");
+        let err = execution
+            .terminal_error
+            .expect("workspace rebind preserves its terminal error");
         assert!(
             err.to_string().contains("workspace root identity changed"),
             "{err}"

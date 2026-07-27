@@ -256,16 +256,16 @@ pub(super) fn file_is_current_user_only(path: &Path) -> io::Result<bool> {
 pub(super) fn set_file_current_user_only(path: &Path) -> io::Result<()> {
     let current_user = CurrentUserSid::get()?;
     let sid = current_user.as_sddl()?;
-    set_named_dacl(path, &format!("D:P(A;;FA;;;{sid})"))
+    set_named_dacl(path, &format!("D:P(A;;FA;;;{sid})"), current_user.as_ptr())
 }
 
 #[cfg(test)]
 pub(super) fn set_world_access(path: &Path) -> io::Result<()> {
-    set_named_dacl(path, "D:P(A;OICI;FA;;;WD)")
+    set_named_dacl(path, "D:P(A;OICI;FA;;;WD)", ptr::null_mut())
 }
 
 #[cfg(test)]
-fn set_named_dacl(path: &Path, sddl: &str) -> io::Result<()> {
+fn set_named_dacl(path: &Path, sddl: &str, owner: PSID) -> io::Result<()> {
     let descriptor = security_descriptor(sddl)?;
     let mut present = 0;
     let mut defaulted = 0;
@@ -281,12 +281,16 @@ fn set_named_dacl(path: &Path, sddl: &str) -> io::Result<()> {
         ));
     }
     let path = wide(path.as_os_str());
+    let mut security_information = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+    if !owner.is_null() {
+        security_information |= OWNER_SECURITY_INFORMATION;
+    }
     let status = unsafe {
         SetNamedSecurityInfoW(
             path.as_ptr(),
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            ptr::null_mut(),
+            security_information,
+            owner,
             ptr::null_mut(),
             dacl,
             ptr::null_mut(),
