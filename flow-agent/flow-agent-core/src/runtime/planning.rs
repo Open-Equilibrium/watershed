@@ -12,11 +12,10 @@ use crate::runtime::{
     fixture_effects::compile_fixture_tool_effect,
     fixture_tools::{ScriptWrite, emit_tool_progress},
     fs_guards::{AnchoredDirectoryIdentity, AnchoredWorkspace},
-    types::{EventClock, MAX_LIVE_FLOW_INVOCATIONS, RuntimeError},
+    types::{EventClock, RuntimeError},
 };
 use core_policy::ProtectedPathMatchMode;
 use proto::{EventEnvelope, EventType};
-use std::collections::BTreeSet;
 #[cfg(test)]
 use std::path::Path;
 
@@ -49,8 +48,6 @@ pub const EVENT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.event-plan.v1";
 pub const CONTEXT_PLAN_DOMAIN: &[u8] = b"watershed.runtime.context-plan.v1";
 pub const FLOW_EXECUTION_PLAN_DOMAIN: &[u8] = b"watershed.runtime.flow-execution-plan.v2";
 pub const TOOL_EXECUTION_INTENT_DOMAIN: &str = "watershed.runtime.tool-execution-intent.v1";
-pub static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlannedToolIntent {
     pub(crate) canonical: String,
@@ -248,50 +245,6 @@ impl FlowExecutionPlan {
     }
 }
 
-pub struct LiveInvocationCounter {
-    pub(crate) count: std::sync::atomic::AtomicUsize,
-}
-
-impl LiveInvocationCounter {
-    pub(crate) const fn new() -> Self {
-        Self {
-            count: std::sync::atomic::AtomicUsize::new(0),
-        }
-    }
-
-    pub(crate) fn acquire(&self) -> Result<LiveInvocationGuard<'_>, RuntimeError> {
-        let mut observed = self.count.load(std::sync::atomic::Ordering::Acquire);
-        loop {
-            if observed >= MAX_LIVE_FLOW_INVOCATIONS {
-                return Err(RuntimeError::Protocol(format!(
-                    "global live flow invocation limit reached: max {MAX_LIVE_FLOW_INVOCATIONS}"
-                )));
-            }
-            match self.count.compare_exchange_weak(
-                observed,
-                observed + 1,
-                std::sync::atomic::Ordering::AcqRel,
-                std::sync::atomic::Ordering::Acquire,
-            ) {
-                Ok(_) => return Ok(LiveInvocationGuard { counter: self }),
-                Err(actual) => observed = actual,
-            }
-        }
-    }
-}
-
-pub struct LiveInvocationGuard<'a> {
-    pub(crate) counter: &'a LiveInvocationCounter,
-}
-
-impl Drop for LiveInvocationGuard<'_> {
-    fn drop(&mut self) {
-        self.counter
-            .count
-            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
-    }
-}
-
 pub struct RuntimeFailure {
     pub(crate) reason: String,
     pub(crate) message: &'static str,
@@ -327,10 +280,6 @@ pub enum ToolSideEffectMode {
 }
 
 impl ToolSideEffectMode {
-    pub(crate) fn occupies_live_invocation_slot(self, terminal_in_prefix: bool) -> bool {
-        matches!(self, Self::Apply) || matches!(self, Self::Resume { .. }) && !terminal_in_prefix
-    }
-
     pub(crate) fn should_execute_tool(self, completed_sequence: u64) -> bool {
         match self {
             Self::Apply => true,
@@ -353,7 +302,6 @@ pub struct FlowExecutionOptions {
     pub(crate) clock: EventClock,
     pub(crate) side_effect_mode: ToolSideEffectMode,
     pub(crate) stub_model_fixture_profile: bool,
-    pub(crate) terminal_flow_ids: BTreeSet<String>,
 }
 
 impl FlowExecutionOptions {
@@ -366,13 +314,7 @@ impl FlowExecutionOptions {
             clock,
             side_effect_mode,
             stub_model_fixture_profile,
-            terminal_flow_ids: BTreeSet::new(),
         }
-    }
-
-    pub(crate) fn with_terminal_flow_ids(mut self, terminal_flow_ids: BTreeSet<String>) -> Self {
-        self.terminal_flow_ids = terminal_flow_ids;
-        self
     }
 }
 
@@ -450,7 +392,6 @@ fn compile_flow_plan(
         policy,
         side_effect_mode: options.side_effect_mode,
         stub_model_fixture_profile: options.stub_model_fixture_profile,
-        terminal_flow_ids: &options.terminal_flow_ids,
     };
     let failed = match emit_flow_block(&context, root_flow, None, &mut builder) {
         Ok(failed) => failed,
@@ -507,7 +448,6 @@ pub struct FlowEmitContext<'a> {
     pub(crate) policy: &'a core_policy::PolicyArtifact,
     pub(crate) side_effect_mode: ToolSideEffectMode,
     pub(crate) stub_model_fixture_profile: bool,
-    pub(crate) terminal_flow_ids: &'a BTreeSet<String>,
 }
 
 pub fn emit_flow_block_at_depth(
@@ -532,13 +472,6 @@ pub fn emit_flow_block_at_depth(
         flow_id: invocation.flow_id.clone(),
         parent_flow_id: invocation.parent_flow_id.clone(),
     };
-    // A parent remains live while it waits for a nested invocation; queued but not started,
-    // terminal and fully paused invocations do not hold this process-wide slot.
-    let _live_invocation = context
-        .side_effect_mode
-        .occupies_live_invocation_slot(context.terminal_flow_ids.contains(&invocation.flow_id))
-        .then(|| LIVE_FLOW_INVOCATIONS.acquire())
-        .transpose()?;
     builder.emit(
         Some(&invocation),
         EventType::FlowStarted,

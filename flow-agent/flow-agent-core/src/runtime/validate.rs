@@ -91,10 +91,6 @@ impl SessionAppendValidationState {
         self.lifecycle.tool_without_progress()
     }
 
-    pub(crate) fn terminal_flow_ids(&self) -> BTreeSet<String> {
-        self.lifecycle.flows.terminal.keys().cloned().collect()
-    }
-
     #[cfg(test)]
     pub(crate) fn from_prior_events(
         path: &Path,

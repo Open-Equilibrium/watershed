@@ -407,54 +407,158 @@ fn canonical_event_size_has_an_independent_hard_limit() {
     assert!(err.to_string().contains("canonical event"), "{err}");
 }
 
-#[test]
-fn live_invocation_counter_rejects_only_the_thirty_third_started_flow() {
-    let counter = LiveInvocationCounter::new();
-    let guards = (0..MAX_LIVE_FLOW_INVOCATIONS)
-        .map(|_| counter.acquire().expect("first 32 live flows fit"))
-        .collect::<Vec<_>>();
+struct BlockingFlowStartedSink {
+    blocked: bool,
+    release: Arc<(Mutex<bool>, Condvar)>,
+    started: mpsc::Sender<()>,
+}
 
-    let err = counter
-        .acquire()
-        .err()
-        .expect("thirty-third live flow is rejected");
-    assert!(err.to_string().contains("max 32"), "{err}");
-    drop(guards);
-    assert!(counter.acquire().is_ok());
+impl RuntimeEventSink for BlockingFlowStartedSink {
+    fn measurement_started_at(&self) -> Option<Instant> {
+        None
+    }
+
+    fn commit(
+        &mut self,
+        event: &EventEnvelope,
+        _canonical_jsonl: &str,
+        _context_manifest: Option<ContextManifestCheckpoint>,
+        _measurement_started_at: Option<Instant>,
+    ) -> Result<(), RuntimeError> {
+        if event.event_type == EventType::FlowStarted && !self.blocked {
+            self.blocked = true;
+            self.started.send(()).expect("live apply start is observed");
+            let (released, wake) = &*self.release;
+            let released = released.lock().expect("release lock is available");
+            drop(
+                wake.wait_while(released, |released| !*released)
+                    .expect("release wait succeeds"),
+            );
+        }
+        Ok(())
+    }
+}
+
+fn smoke_apply_plan(session_id: &str) -> (PathBuf, FlowExecutionPlan) {
+    let workspace = fixture_dir("smoke-flow");
+    let (registry, policy) = fixture_runtime_policy("smoke-flow", "smoke-flow");
+    let root_flow = registry
+        .flow_block("smoke-flow")
+        .expect("smoke-flow fixture exists");
+    let plan = plan_flow(
+        &workspace,
+        &registry,
+        &policy,
+        root_flow,
+        session_id,
+        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
+    )
+    .expect("smoke-flow plan compiles");
+    (workspace, plan)
 }
 
 #[test]
-fn only_active_execution_occupies_a_live_invocation_slot() {
-    for (mode, terminal_in_prefix, expected) in [
-        (ToolSideEffectMode::Apply, false, true),
-        (ToolSideEffectMode::Plan, false, false),
-        (
-            ToolSideEffectMode::PreflightResume {
-                prefix_event_count: 1,
-            },
-            false,
-            false,
-        ),
-        (
-            ToolSideEffectMode::Resume {
-                prefix_event_count: 1,
-            },
-            false,
-            true,
-        ),
-        (
-            ToolSideEffectMode::Resume {
-                prefix_event_count: 1,
-            },
-            true,
-            false,
-        ),
-    ] {
-        assert_eq!(
-            mode.occupies_live_invocation_slot(terminal_in_prefix),
-            expected
-        );
+fn production_apply_and_resume_reject_live_flow_overflow() {
+    let (started, observed) = mpsc::channel();
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    let workers = (0..MAX_LIVE_FLOW_INVOCATIONS)
+        .map(|ordinal| {
+            let started = started.clone();
+            let release = Arc::clone(&release);
+            thread::spawn(move || {
+                let session_id = format!("liveapply{ordinal:03}");
+                let (workspace, plan) = smoke_apply_plan(&session_id);
+                let mut sink = BlockingFlowStartedSink {
+                    blocked: false,
+                    release,
+                    started,
+                };
+                apply_flow_with_sink(
+                    FlowApplication {
+                        workspace: &workspace,
+                        session_id: &session_id,
+                        options: FlowExecutionOptions::new(
+                            EventClock::fixed_fixture(),
+                            ToolSideEffectMode::Apply,
+                        ),
+                        plan: &plan,
+                    },
+                    Some(&mut sink),
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            })
+        })
+        .collect::<Vec<_>>();
+
+    drop(started);
+    for _ in 0..MAX_LIVE_FLOW_INVOCATIONS {
+        observed
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the first 32 applies reach flow.started");
     }
+    let (workspace, plan) = smoke_apply_plan("liveapplyoverflow");
+    let overflow = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            session_id: "liveapplyoverflow",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        None,
+    );
+    let (resume_workspace, resume_plan) = smoke_apply_plan("liveresumeoverflow");
+    let resume_overflow = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &resume_workspace,
+            session_id: "liveresumeoverflow",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Resume {
+                    prefix_event_count: 2,
+                },
+            ),
+            plan: &resume_plan,
+        },
+        None,
+    );
+    let (released, wake) = &*release;
+    *released.lock().expect("release lock is available") = true;
+    wake.notify_all();
+    for worker in workers {
+        worker
+            .join()
+            .expect("live apply worker joins")
+            .expect("first 32 production applies complete");
+    }
+
+    let overflow = overflow.expect("live invocation failure is terminalized");
+    let error = overflow
+        .terminal_error
+        .expect("thirty-third production apply records the failure");
+    assert!(overflow.failed);
+    assert!(error.to_string().contains("max 32"), "{error}");
+    let error = resume_overflow.expect_err("resume must reacquire every active prefix flow");
+    assert!(error.to_string().contains("max 32"), "{error}");
+
+    let (workspace, plan) = smoke_apply_plan("liveapplyreleased");
+    let execution = apply_flow_with_sink(
+        FlowApplication {
+            workspace: &workspace,
+            session_id: "liveapplyreleased",
+            options: FlowExecutionOptions::new(
+                EventClock::fixed_fixture(),
+                ToolSideEffectMode::Apply,
+            ),
+            plan: &plan,
+        },
+        None,
+    )
+    .expect("completed applies release their live invocation slots");
+    assert!(!execution.failed);
 }
 
 #[test]
