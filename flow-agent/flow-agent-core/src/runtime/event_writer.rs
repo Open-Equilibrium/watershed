@@ -829,17 +829,37 @@ impl ContextManifestWriter {
 
 pub struct SessionObjectWriter {
     pub(crate) accounted_bytes: u64,
+    pub(crate) known: BTreeSet<String>,
+    pub(crate) object_count: usize,
     pub(crate) object_parent: AnchoredDir,
+    pub(crate) preflight_accounted_bytes: u64,
+    pub(crate) preflight_known: BTreeSet<String>,
+    pub(crate) preflight_object_count: usize,
     pub(crate) session_id: String,
     pub(crate) verified: BTreeSet<String>,
 }
 
+struct ValidatedObjectBatch {
+    accounted_bytes: u64,
+    known: BTreeSet<String>,
+    object_count: usize,
+    verified: BTreeSet<String>,
+}
+
 impl SessionObjectWriter {
     pub(crate) fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
-        let (_, accounted_bytes) = session_objects(&object_parent, session_id)?;
+        let (objects, accounted_bytes) = session_objects(&object_parent, session_id)?;
+        let known = objects.into_keys().collect::<BTreeSet<_>>();
+        let object_count = known.len();
+        ensure_session_object_count(&object_parent, object_count)?;
         Ok(Self {
             accounted_bytes,
+            known: known.clone(),
+            object_count,
             object_parent,
+            preflight_accounted_bytes: accounted_bytes,
+            preflight_known: known,
+            preflight_object_count: object_count,
             session_id: session_id.to_owned(),
             verified: BTreeSet::new(),
         })
@@ -854,47 +874,84 @@ impl SessionObjectWriter {
     }
 
     pub(crate) fn preflight_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
-        let (accounted_bytes, verified) = self.validate_all(objects)?;
-        self.accounted_bytes = accounted_bytes;
-        self.verified = verified;
+        let validated = self.validate_all_from(
+            objects,
+            self.preflight_accounted_bytes.max(self.accounted_bytes),
+            self.preflight_object_count.max(self.object_count),
+            &self.preflight_known,
+        )?;
+        self.preflight_accounted_bytes = validated.accounted_bytes;
+        self.preflight_known = validated.known;
+        self.preflight_object_count = validated.object_count;
+        self.verified = validated.verified;
         Ok(())
     }
 
     fn validate_all(
         &self,
         objects: &[ContextObject],
-    ) -> Result<(u64, BTreeSet<String>), RuntimeError> {
-        let mut accounted_bytes = self.accounted_bytes;
+    ) -> Result<ValidatedObjectBatch, RuntimeError> {
+        self.validate_all_from(
+            objects,
+            self.accounted_bytes,
+            self.object_count,
+            &self.known,
+        )
+    }
+
+    fn validate_all_from(
+        &self,
+        objects: &[ContextObject],
+        mut accounted_bytes: u64,
+        mut object_count: usize,
+        known: &BTreeSet<String>,
+    ) -> Result<ValidatedObjectBatch, RuntimeError> {
+        let mut prospective_known = known.clone();
         let mut verified = self.verified.clone();
+        let mut unique = BTreeMap::new();
         for object in objects {
             let object_bytes = Self::validate_object(object)?;
-            if !verified.insert(object.digest.clone()) {
+            if unique.contains_key(&object.digest) {
+                continue;
+            }
+            if prospective_known.insert(object.digest.clone()) {
+                object_count = object_count.saturating_add(1);
+                ensure_session_object_count(&self.object_parent, object_count)?;
+                accounted_bytes = accounted_bytes.saturating_add(object_bytes);
+                ensure_session_object_total(accounted_bytes)?;
+            }
+            unique.insert(object.digest.clone(), object);
+        }
+
+        for object in unique.into_values() {
+            if verified.contains(&object.digest) {
                 continue;
             }
             let path = self.object_parent.file(format!(
                 "{}.object.sha256-{}",
                 self.session_id, object.digest
             ));
+            if self.known.contains(&object.digest) {
+                Self::verify_existing(&path, object)?;
+                verified.insert(object.digest.clone());
+                continue;
+            }
             match path.metadata() {
                 Ok(_) => {
-                    let existing = read_anchored_file_with_limit(&path, MAX_SESSION_OBJECT_BYTES)?;
-                    if existing != object.bytes {
-                        return Err(RuntimeError::Protocol(format!(
-                            "{} does not match referenced session object bytes",
-                            path.diagnostic_path().display()
-                        )));
-                    }
+                    Self::verify_existing(&path, object)?;
+                    verified.insert(object.digest.clone());
                 }
                 Err(RuntimeError::Io { source, .. })
-                    if source.kind() == io::ErrorKind::NotFound =>
-                {
-                    accounted_bytes = accounted_bytes.saturating_add(object_bytes);
-                    ensure_session_object_total(accounted_bytes)?;
-                }
+                    if source.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
             }
         }
-        Ok((accounted_bytes, verified))
+        Ok(ValidatedObjectBatch {
+            accounted_bytes,
+            known: prospective_known,
+            object_count,
+            verified,
+        })
     }
 
     fn validate_object(object: &ContextObject) -> Result<u64, RuntimeError> {
@@ -907,6 +964,17 @@ impl SessionObjectWriter {
             )));
         }
         Ok(object_bytes)
+    }
+
+    fn verify_existing(path: &AnchoredFile, object: &ContextObject) -> Result<(), RuntimeError> {
+        let existing = read_anchored_file_with_limit(path, MAX_SESSION_OBJECT_BYTES)?;
+        if existing != object.bytes {
+            return Err(RuntimeError::Protocol(format!(
+                "{} does not match referenced session object bytes",
+                path.diagnostic_path().display()
+            )));
+        }
+        Ok(())
     }
 
     pub(crate) fn persist(&mut self, object: &ContextObject) -> Result<(), RuntimeError> {
@@ -924,39 +992,57 @@ impl SessionObjectWriter {
         object: &ContextObject,
         write_new: impl FnOnce(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
-        let object_bytes = Self::validate_object(object)?;
+        let validated = self.validate_all(std::slice::from_ref(object))?;
         if self.verified.contains(&object.digest) {
             return Ok(());
         }
+        let object_bytes = Self::validate_object(object)?;
+        let was_known = self.known.contains(&object.digest);
         let path = self.object_parent.file(format!(
             "{}.object.sha256-{}",
             self.session_id, object.digest
         ));
         match path.metadata() {
             Ok(_) => {
-                let existing = read_anchored_file_with_limit(&path, MAX_SESSION_OBJECT_BYTES)?;
-                if existing != object.bytes {
-                    return Err(RuntimeError::Protocol(format!(
-                        "{} does not match referenced session object bytes",
-                        path.diagnostic_path().display()
-                    )));
+                Self::verify_existing(&path, object)?;
+                if !was_known {
+                    self.record_publication(&object.digest, object_bytes);
                 }
             }
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                let total = self.accounted_bytes.saturating_add(object_bytes);
-                ensure_session_object_total(total)?;
+                if was_known {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} known session object is unavailable",
+                        path.diagnostic_path().display()
+                    )));
+                }
                 with_anchored_replacement_temp(&path, None, |temp_path, temp_file| {
                     drop(temp_file);
                     write_new(temp_path, &object.bytes)?;
                     ensure_anchored_new_leaf_available(&path)?;
                     temp_path.rename_to(&path)
                 })?;
-                self.accounted_bytes = total;
+                self.record_publication(&object.digest, object_bytes);
             }
             Err(error) => return Err(error),
         }
         self.verified.insert(object.digest.clone());
+        debug_assert_eq!(self.accounted_bytes, validated.accounted_bytes);
+        debug_assert_eq!(self.object_count, validated.object_count);
+        debug_assert_eq!(self.known, validated.known);
         Ok(())
+    }
+
+    fn record_publication(&mut self, digest: &str, object_bytes: u64) {
+        if self.known.insert(digest.to_owned()) {
+            self.object_count = self.object_count.saturating_add(1);
+            self.accounted_bytes = self.accounted_bytes.saturating_add(object_bytes);
+        }
+        if self.preflight_known.insert(digest.to_owned()) {
+            self.preflight_object_count = self.preflight_object_count.saturating_add(1);
+            self.preflight_accounted_bytes =
+                self.preflight_accounted_bytes.saturating_add(object_bytes);
+        }
     }
 }
 

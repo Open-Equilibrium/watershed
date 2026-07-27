@@ -241,12 +241,7 @@ fn collect_session_objects(
                 sessions.path.display()
             )));
         }
-        if objects.len() == MAX_SESSION_OBJECTS {
-            return Err(RuntimeError::Protocol(format!(
-                "{} session object count exceeds max {MAX_SESSION_OBJECTS}",
-                sessions.path.display()
-            )));
-        }
+        ensure_session_object_count(sessions, objects.len().saturating_add(1))?;
         let path = sessions.file(&name);
         let bytes = file_bytes(&path)?;
         total = total.saturating_add(bytes);
@@ -254,6 +249,19 @@ fn collect_session_objects(
         objects.insert(digest.to_owned(), path);
     }
     Ok((objects, total))
+}
+
+pub(crate) fn ensure_session_object_count(
+    sessions: &AnchoredDir,
+    count: usize,
+) -> Result<(), RuntimeError> {
+    if count > MAX_SESSION_OBJECTS {
+        return Err(RuntimeError::Protocol(format!(
+            "{} session object count exceeds max {MAX_SESSION_OBJECTS}",
+            sessions.path.display()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
