@@ -7,6 +7,12 @@ WILDCARD_IMPORT_LINT = "#![cfg_attr(not(test), deny(clippy::wildcard_imports))]"
 
 
 class RustArchitectureContractTest(unittest.TestCase):
+    def test_wildcard_lint_includes_public_imports(self) -> None:
+        self.assertEqual(
+            (ROOT / "clippy.toml").read_text(encoding="utf-8"),
+            "warn-on-all-wildcard-imports = true\n",
+        )
+
     def test_flow_agent_runtime_uses_explicit_module_boundaries(self) -> None:
         source_root = (
             ROOT / "flow-agent" / "flow-agent-core" / "src" / "runtime"
