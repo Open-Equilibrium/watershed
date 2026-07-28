@@ -187,7 +187,8 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
     let hints =
         session_candidate_hints_from_dirs(sessions.as_ref(), logs.as_ref(), base_session_id)?;
     for ordinal in 1..=MAX_UNIQUE_SESSION_CANDIDATES {
-        if hints[(ordinal - 1) as usize] != SessionCandidateHint::Free {
+        let hint = hints[(ordinal - 1) as usize];
+        if hint == SessionCandidateHint::Occupied {
             continue;
         }
         let session_id = if ordinal == 1 {
@@ -195,6 +196,18 @@ pub(crate) fn reserve_unique_session_candidate_with_anchored_workspace(
         } else {
             suffixed_session_id(base_session_id, ordinal)
         };
+        if hint == SessionCandidateHint::Probe
+            && let Some(sessions) = sessions.as_ref()
+        {
+            match ensure_anchored_session_file_available(
+                &sessions.file(format!("{session_id}.jsonl")),
+                &session_id,
+            ) {
+                Ok(()) => {}
+                Err(RuntimeError::SessionLogExists(_)) => continue,
+                Err(error) => return Err(error),
+            }
+        }
         let marker_path = workspace
             .root()
             .path
