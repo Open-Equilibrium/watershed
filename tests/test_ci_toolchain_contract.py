@@ -300,6 +300,10 @@ class CiToolchainContractTest(unittest.TestCase):
         self, workflow: str, step_name: str
     ) -> tuple[int, list[str]]:
         lines = workflow.splitlines()
+        self.assertFalse(any(line.startswith("    if:") for line in lines))
+        self.assertFalse(
+            any(line.startswith("    continue-on-error:") for line in lines)
+        )
         marker = f"      - name: {step_name}"
         step_start = lines.index(marker)
         step_end = next(
@@ -382,6 +386,10 @@ class CiToolchainContractTest(unittest.TestCase):
             "        continue-on-error: true\n"
             "        shell: pwsh",
         )
+        job_disabled = "jobs:\n  m1:\n    if: false\n    steps:\n" + active
+        job_continue_on_error = (
+            "jobs:\n  m1:\n    continue-on-error: true\n    steps:\n" + active
+        )
         early_success = active.replace(
             "          corepack enable", "          exit 0\n          corepack enable"
         )
@@ -393,6 +401,8 @@ class CiToolchainContractTest(unittest.TestCase):
             wrong_shell,
             missing_shell,
             continue_on_error,
+            job_disabled,
+            job_continue_on_error,
             early_success,
         ):
             with self.subTest(workflow=workflow), self.assertRaises(
