@@ -50,11 +50,23 @@ fn environment() -> Value {
     })
 }
 
+pub(crate) fn memory_report(before: u64, sampled_peak: u64, after: u64, boundary: &str) -> Value {
+    let peak = sampled_peak.max(after);
+    json!({
+        "after_bytes": after,
+        "before_bytes": before,
+        "boundary": boundary,
+        "peak_bytes": peak,
+        "peak_growth_bytes": peak.saturating_sub(before),
+        "retained_growth_bytes": after.saturating_sub(before),
+    })
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
-    use super::{BaselineReport, environment};
+    use super::{BaselineReport, environment, memory_report};
     use crate::test_support::{PeakRssSampler, current_resident_set_size};
-    use serde_json::{Value, json};
+    use serde_json::json;
     use sha2::{Digest, Sha256};
     use std::{
         fs::{self, File},
@@ -102,6 +114,8 @@ mod linux {
             let copy_started = Instant::now();
             copy_bundle(&source, &destination);
             copy_nanos.push(copy_started.elapsed().as_nanos());
+            let (copied_files, copied_bytes) = inventory_bundle(&destination);
+            assert_eq!((copied_files, copied_bytes), (FILE_COUNT, bundle_bytes));
 
             let delete_started = Instant::now();
             fs::remove_dir_all(destination).expect("baseline destination removed");
@@ -286,17 +300,6 @@ mod linux {
 
     fn operations_per_second(samples: &[u128]) -> u128 {
         samples.len() as u128 * 1_000_000_000 / samples.iter().sum::<u128>().max(1)
-    }
-
-    fn memory_report(before: u64, peak: u64, after: u64, boundary: &str) -> Value {
-        json!({
-            "after_bytes": after,
-            "before_bytes": before,
-            "boundary": boundary,
-            "peak_bytes": peak,
-            "peak_growth_bytes": peak.saturating_sub(before),
-            "retained_growth_bytes": after.saturating_sub(before),
-        })
     }
 
     struct TempBaselineDir(PathBuf);

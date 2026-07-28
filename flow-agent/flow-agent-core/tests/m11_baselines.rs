@@ -4,7 +4,7 @@ mod m11_baseline_support;
 #[path = "../../tests/support.rs"]
 mod test_support;
 
-use m11_baseline_support::BaselineReport;
+use m11_baseline_support::{BaselineReport, memory_report};
 #[cfg(target_os = "linux")]
 use m11_baseline_support::{filesystem_baseline, process_baseline};
 
@@ -21,6 +21,17 @@ fn baseline_report_is_machine_readable_and_complete() {
     assert!(value["metrics"].is_object());
     assert!(value["memory"].is_object());
     assert!(value["environment"].is_object());
+}
+
+#[test]
+fn memory_report_peak_includes_the_final_rss_sample() {
+    let memory = memory_report(100, 110, 120, "test_rss");
+
+    assert_eq!(memory["before_bytes"], 100);
+    assert_eq!(memory["after_bytes"], 120);
+    assert_eq!(memory["peak_bytes"], 120);
+    assert_eq!(memory["peak_growth_bytes"], 20);
+    assert_eq!(memory["retained_growth_bytes"], 20);
 }
 
 #[cfg(target_os = "linux")]
