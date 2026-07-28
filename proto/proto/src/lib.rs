@@ -16,6 +16,15 @@ use unicode_normalization::UnicodeNormalization;
 /// Protocol version string emitted by all v0 event envelopes.
 pub const PROTOCOL_VERSION_V0: &str = "0";
 
+/// Exclusive v0 recursion limit for nested JSON arrays and objects.
+///
+/// A value may contain at most 127 nested containers. Entering the 128th
+/// container is rejected, matching the default `serde_json` wire boundary.
+pub const JSON_NESTING_LIMIT_V0: usize = 128;
+
+const JSON_NESTING_REQUIREMENT_V0: &str =
+    "must stay below the protocol v0 JSON nesting limit of 128";
+
 /// Canonical runtime event envelope shared by Flow Agent, Meta-Harness and Liquid.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(try_from = "UncheckedEventEnvelope")]
@@ -206,6 +215,11 @@ impl EventEnvelope {
         source: impl Into<String>,
         payload: Value,
     ) -> Self {
+        let payload = if json_nesting_reaches_limit(&payload, 1) {
+            payload
+        } else {
+            nfc_json_string_values(payload)
+        };
         Self {
             additional_fields: BTreeMap::new(),
             correlation_id: None,
@@ -213,7 +227,7 @@ impl EventEnvelope {
             event_type,
             flow_id: None,
             parent_flow_id: None,
-            payload: nfc_json_string_values(payload),
+            payload,
             protocol_version: PROTOCOL_VERSION_V0.to_owned(),
             sequence,
             session_id: nfc_string(session_id.into()),
@@ -310,6 +324,20 @@ impl EventEnvelope {
                 format!("additional field {field:?}"),
                 "collides with an envelope field",
             ));
+        }
+        if json_nesting_reaches_limit(&self.payload, 1) {
+            return Err(EventValidationError::new(
+                "payload",
+                JSON_NESTING_REQUIREMENT_V0,
+            ));
+        }
+        for (field, value) in &self.additional_fields {
+            if json_nesting_reaches_limit(value, 1) {
+                return Err(EventValidationError::new(
+                    field.clone(),
+                    JSON_NESTING_REQUIREMENT_V0,
+                ));
+            }
         }
         if let Some(field) = null_location(&self.payload, "payload") {
             return Err(EventValidationError::new(
@@ -597,6 +625,29 @@ fn nfc_json_string_values(value: Value) -> Value {
     }
 }
 
+fn json_nesting_reaches_limit(value: &Value, enclosing_depth: usize) -> bool {
+    let mut pending = vec![(value, enclosing_depth)];
+    while let Some((value, enclosing_depth)) = pending.pop() {
+        let depth = enclosing_depth + 1;
+        match value {
+            Value::Array(values) => {
+                if depth >= JSON_NESTING_LIMIT_V0 {
+                    return true;
+                }
+                pending.extend(values.iter().map(|value| (value, depth)));
+            }
+            Value::Object(values) => {
+                if depth >= JSON_NESTING_LIMIT_V0 {
+                    return true;
+                }
+                pending.extend(values.values().map(|value| (value, depth)));
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => continue,
+        }
+    }
+    false
+}
+
 fn is_reserved_envelope_field(field: &str) -> bool {
     matches!(
         field,
@@ -791,6 +842,8 @@ pub enum CanonicalJsonError {
         /// Version string found in the envelope.
         protocol_version: String,
     },
+    /// A JSON value reached the exclusive v0 container-nesting limit.
+    JsonNestingLimitExceeded,
     /// Object keys collided after Unicode NFC normalization.
     DuplicateNormalizedObjectKey {
         /// Normalized duplicate key.
@@ -807,6 +860,10 @@ impl fmt::Display for CanonicalJsonError {
             Self::UnsupportedProtocolVersion { protocol_version } => write!(
                 f,
                 "unsupported protocol_version {protocol_version:?}; expected {PROTOCOL_VERSION_V0:?}"
+            ),
+            Self::JsonNestingLimitExceeded => write!(
+                f,
+                "value must stay below the protocol v0 JSON nesting limit of {JSON_NESTING_LIMIT_V0}"
             ),
             Self::DuplicateNormalizedObjectKey { key } => {
                 write!(f, "normalized object key collision: {key}")
@@ -914,6 +971,13 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 /// Serializes a JSON value with deterministic key ordering and NFC normalization.
 pub fn canonical_json(value: &Value) -> Result<String, CanonicalJsonError> {
+    if json_nesting_reaches_limit(value, 0) {
+        return Err(CanonicalJsonError::JsonNestingLimitExceeded);
+    }
+    canonical_json_bounded(value)
+}
+
+fn canonical_json_bounded(value: &Value) -> Result<String, CanonicalJsonError> {
     match value {
         Value::Null => Ok("null".to_owned()),
         Value::Bool(value) => Ok(value.to_string()),
@@ -925,7 +989,7 @@ pub fn canonical_json(value: &Value) -> Result<String, CanonicalJsonError> {
         Value::Array(values) => {
             let body = values
                 .iter()
-                .map(canonical_json)
+                .map(canonical_json_bounded)
                 .collect::<Result<Vec<_>, _>>()?
                 .join(",");
             Ok(format!("[{body}]"))
@@ -948,7 +1012,7 @@ pub fn canonical_json(value: &Value) -> Result<String, CanonicalJsonError> {
                 fields.push(format!(
                     "{}:{}",
                     serde_json::to_string(&key).expect("object key serialization cannot fail"),
-                    canonical_json(value)?
+                    canonical_json_bounded(value)?
                 ));
             }
             Ok(format!("{{{}}}", fields.join(",")))

@@ -55,7 +55,7 @@ Command/request messages are not runtime event types. The future RPC/control sur
 
 ## Required v0 event-envelope fields
 
-The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the session's ordered event segments store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads.
+The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the session's ordered event segments store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads. Protocol v0 has an exclusive JSON container-recursion limit of 128 across the complete event object: the envelope root counts, a path containing at most 127 arrays or objects is accepted, and entering the 128th is rejected before recursive processing. Constructed payloads, additive fields, ordinary and canonical event serialization, and the public canonical-JSON helper enforce the same boundary; for the helper, the supplied value is the root.
 
 | Field | Type / rule |
 | --- | --- |
