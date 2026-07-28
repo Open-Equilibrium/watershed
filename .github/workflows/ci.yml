@@ -123,5 +123,9 @@ jobs:
       - name: Check documentation links
         shell: pwsh
         run: |
-          $docs = @(node scripts/list-tracked-files.mjs '*.md' '*.html' | ConvertFrom-Json)
+          $docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $docs = @($docsJson | ConvertFrom-Json)
           lychee --no-progress --include-fragments -- @docs

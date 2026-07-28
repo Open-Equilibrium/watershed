@@ -94,7 +94,7 @@ fn closed_pipe_stdout() -> Stdio {
 }
 
 fn run_chat(workspace: &Path, input: &[u8]) -> Output {
-    let mut child = flow_command()
+    let child = flow_command()
         .current_dir(workspace)
         .arg("chat")
         .stdin(Stdio::piped())
@@ -102,13 +102,17 @@ fn run_chat(workspace: &Path, input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("flow binary should spawn");
+    wait_with_input_and_output_before(child, input, Duration::from_secs(10))
+}
+
+fn wait_with_input_and_output_before(mut child: Child, input: &[u8], timeout: Duration) -> Output {
     child
         .stdin
         .take()
         .expect("stdin is piped")
         .write_all(input)
         .expect("stdin write");
-    child.wait_with_output().expect("flow binary should exit")
+    wait_with_output_before(child, timeout)
 }
 
 fn wait_with_output_before(mut child: Child, timeout: Duration) -> Output {
@@ -177,6 +181,33 @@ fn wait_with_output_drains_large_captured_streams() {
     assert!(output.status.success());
     assert!(output.stdout.len() >= 512 * 1024);
     assert!(output.stderr.len() >= 512 * 1024);
+}
+
+#[test]
+fn hanging_input_child() {
+    if std::env::var_os("WATERSHED_FLOW_CLI_HANGING_INPUT_CHILD").is_some() {
+        std::thread::sleep(Duration::from_secs(30));
+    }
+}
+
+#[test]
+fn input_child_is_stopped_at_the_watchdog_deadline() {
+    let child = Command::new(std::env::current_exe().expect("test executable should resolve"))
+        .args(["--exact", "hanging_input_child", "--nocapture"])
+        .env("WATERSHED_FLOW_CLI_HANGING_INPUT_CHILD", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("hanging input child should spawn");
+    let started = Instant::now();
+
+    let result = std::panic::catch_unwind(|| {
+        wait_with_input_and_output_before(child, b"input\n", Duration::from_millis(100));
+    });
+
+    assert!(result.is_err(), "the watchdog must fail a hanging child");
+    assert!(started.elapsed() < Duration::from_secs(2));
 }
 
 fn replace_seeded_session_with_prefix(workspace: &Path, session_id: &str, prefix: &str) {

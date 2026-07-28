@@ -4,7 +4,11 @@ use core_script::{
 };
 use flow_agent_core::{EmitMode, run_flow};
 use proto::{EventEnvelope, EventType};
-use std::{collections::HashSet, fs, path::Path};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[path = "../../tests/support.rs"]
 mod test_support;
@@ -45,6 +49,31 @@ fn every_expected_stream_is_protocol_valid() {
     for stream_path in expected_streams() {
         load_stream_from_path(&stream_path);
     }
+}
+
+fn runtime_compared_streams() -> Vec<PathBuf> {
+    let root = fixture_root();
+    let mut streams = vec![
+        root.join("smoke-flow/expected/smoke-flow.jsonl"),
+        root.join("hello-flow/expected/hello-flow.jsonl"),
+    ];
+    let sandbox_expected = root.join("sandbox-negative/expected");
+    streams.extend(
+        expected_streams()
+            .into_iter()
+            .filter(|path| path.parent() == Some(sandbox_expected.as_path())),
+    );
+    streams
+}
+
+#[test]
+fn every_expected_stream_has_a_runtime_comparison() {
+    assert_eq!(
+        expected_streams().into_iter().collect::<HashSet<_>>(),
+        runtime_compared_streams()
+            .into_iter()
+            .collect::<HashSet<_>>(),
+    );
 }
 
 #[test]

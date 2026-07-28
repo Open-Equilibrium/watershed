@@ -1,6 +1,7 @@
 //! Flow Agent M1 deterministic runtime.
 
 #![deny(missing_docs)]
+#![cfg_attr(not(test), deny(clippy::wildcard_imports))]
 
 mod runtime;
 

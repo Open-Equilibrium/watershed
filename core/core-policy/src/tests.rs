@@ -987,6 +987,19 @@ fn policy_artifact_rejects_parameter_constraint_mismatches() {
 }
 
 #[test]
+fn policy_artifact_deserialization_rejects_unknown_parameter_fields() {
+    let artifact =
+        policy_artifact_with_parameter(valid_parameter("--count", ParameterValueType::Integer));
+    let mut value = serde_json::to_value(artifact).expect("policy artifact serializes");
+    value["commands"][0]["allowed_parameters"][0]["maxx"] = serde_json::json!(10);
+
+    let error = serde_json::from_value::<PolicyArtifact>(value)
+        .expect_err("unknown parameter fields must fail closed");
+
+    assert!(error.to_string().contains("unknown field `maxx`"));
+}
+
+#[test]
 fn policy_artifact_canonical_json_sorts_schema_arrays() {
     let artifact = PolicyArtifact {
         commands: vec![

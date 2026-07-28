@@ -54,6 +54,15 @@ REQUIRED_AGENT_FILES = {
     "docs_scout.toml": "docs_scout",
     "repo_mapper.toml": "repo_mapper",
 }
+EXPECTED_AGENT_SANDBOXES = {
+    "autoreview_lite": "workspace-write",
+    "autoreview_pro": "workspace-write",
+    "clawpatch_lite": "workspace-write",
+    "clawpatch_pro": "workspace-write",
+    "doc_sync": "read-only",
+    "docs_scout": "read-only",
+    "repo_mapper": "read-only",
+}
 AGENT_KEYS = {
     "description",
     "developer_instructions",
@@ -252,6 +261,9 @@ def validate_agents(root: Path) -> list[str]:
         expected_name = REQUIRED_AGENT_FILES.get(path.name, path.stem.replace("-", "_"))
         if agent.get("name") != expected_name:
             errors.append(f"{rel}: name must be {expected_name!r}")
+        expected_sandbox = EXPECTED_AGENT_SANDBOXES.get(expected_name)
+        if expected_sandbox is not None and agent.get("sandbox_mode") != expected_sandbox:
+            errors.append(f"{rel}: sandbox_mode must be {expected_sandbox!r}")
         nicknames = agent.get("nickname_candidates")
         if nicknames is not None and (
             not isinstance(nicknames, list)
@@ -260,8 +272,10 @@ def validate_agents(root: Path) -> list[str]:
         ):
             errors.append(f"{rel}: nickname_candidates must be a non-empty string list")
         instructions = agent.get("developer_instructions")
-        if not isinstance(instructions, str) or "AGENTS.md" not in instructions:
-            errors.append(f"{rel}: developer_instructions must reference AGENTS.md")
+        if not isinstance(instructions, str) or not instructions.startswith("Obey AGENTS.md."):
+            errors.append(
+                f"{rel}: developer_instructions must begin with 'Obey AGENTS.md.'"
+            )
         elif agent.get("name") == "docs_scout" and "docs/adr/ADR-LOG.md" not in instructions:
             errors.append(f"{rel}: docs_scout must reference docs/adr/ADR-LOG.md")
         elif agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
@@ -334,9 +348,9 @@ def read_toml(path: Path, rel: str, errors: list[str]) -> dict[str, Any] | None:
 
 
 def parse_skill_front_matter(text: str) -> dict[str, str] | None:
-    if not text.startswith("---\n"):
-        return None
     lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return None
     metadata: dict[str, str] = {}
     for line in lines[1:]:
         if line == "---":
@@ -346,13 +360,58 @@ def parse_skill_front_matter(text: str) -> dict[str, str] | None:
         key, sep, value = line.partition(":")
         if not sep or not key.strip():
             return None
-        metadata[key.strip()] = value.strip().strip('"')
+        key = key.strip()
+        if key in metadata:
+            return None
+        scalar = parse_front_matter_scalar(value)
+        if scalar is None:
+            return None
+        metadata[key] = scalar
+    return None
+
+
+def parse_front_matter_scalar(source: str) -> str | None:
+    source = source.strip()
+    if not source or source.startswith("#"):
+        return None
+    if source[0] not in "'\"":
+        value = source.split(" #", 1)[0].rstrip()
+        return value or None
+
+    quote = source[0]
+    escaped = False
+    for index, character in enumerate(source[1:], start=1):
+        if quote == '"' and character == "\\" and not escaped:
+            escaped = True
+            continue
+        if character == quote and not escaped:
+            tail = source[index + 1 :].strip()
+            if tail and not tail.startswith("#"):
+                return None
+            value = source[1:index]
+            if quote == '"':
+                try:
+                    value = json.loads(source[: index + 1])
+                except json.JSONDecodeError:
+                    return None
+            return value or None
+        escaped = False
     return None
 
 
 def references_canonical_rules(text: str) -> bool:
-    return "AGENTS.md" in text or all(
-        token in text for token in ("TESTING.md", "PERFORMANCE.md", "git skill")
+    visible = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
+    affirmative = (
+        re.compile(
+            r"^\s*(?:(?:[-*]|\d+\.)\s+)?(?:obey|follow)\s+`?AGENTS\.md`?(?:[.:]|$)",
+            re.IGNORECASE,
+        ),
+        re.compile(r"\bunder\s+(?:the\s+)?`?AGENTS\.md`?\b", re.IGNORECASE),
+        re.compile(r"\bcanonical\s+in\s+`?AGENTS\.md`?\b", re.IGNORECASE),
+    )
+    return any(
+        any(pattern.search(line) for pattern in affirmative)
+        for line in visible.splitlines()
     )
 
 

@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 #![forbid(unsafe_code)]
+#![cfg_attr(not(test), deny(clippy::wildcard_imports))]
 
 mod script;
 

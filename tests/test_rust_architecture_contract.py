@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WILDCARD_IMPORT_LINT = "#![cfg_attr(not(test), deny(clippy::wildcard_imports))]"
 
 
 class RustArchitectureContractTest(unittest.TestCase):
@@ -11,6 +12,8 @@ class RustArchitectureContractTest(unittest.TestCase):
             ROOT / "flow-agent" / "flow-agent-core" / "src" / "runtime"
         )
         production_sources = list(source_root.rglob("*.rs"))
+        crate_root = (source_root.parent / "lib.rs").read_text(encoding="utf-8")
+        self.assertIn(WILDCARD_IMPORT_LINT, crate_root)
 
         for path in production_sources:
             source = path.read_text(encoding="utf-8")
@@ -69,6 +72,8 @@ class RustArchitectureContractTest(unittest.TestCase):
             for path in source_root.rglob("*.rs")
             if path.name != "tests.rs"
         ]
+        crate_root = (source_root / "lib.rs").read_text(encoding="utf-8")
+        self.assertIn(WILDCARD_IMPORT_LINT, crate_root)
 
         for path in production_sources:
             source = path.read_text(encoding="utf-8")
@@ -93,6 +98,7 @@ class RustArchitectureContractTest(unittest.TestCase):
     def test_flow_agent_cli_uses_responsibility_modules(self) -> None:
         source_root = ROOT / "flow-agent" / "flow-agent-cli" / "src"
         main = (source_root / "main.rs").read_text(encoding="utf-8")
+        self.assertIn(WILDCARD_IMPORT_LINT, main)
 
         for module in ["dispatch", "parsing", "streaming", "tail"]:
             self.assertIn(f"mod {module};", main)

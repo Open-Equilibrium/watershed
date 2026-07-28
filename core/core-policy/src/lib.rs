@@ -525,6 +525,7 @@ impl CommandPolicy {
 
 /// Parameter-level policy.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AllowedParameterPolicy {
     /// Exact parameter name.
     pub name: String,

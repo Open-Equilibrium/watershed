@@ -1,7 +1,10 @@
 import { spawnSync as defaultSpawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const WINDOWS_LAUNCHER_PROBE_ARGS = ["-3", "-c", "import sys"];
+const PYTHON_THREE_PROBE_ARGS = [
+  "-c",
+  "import sys; raise SystemExit(sys.version_info.major != 3)",
+];
 
 function writeError(stderr, message) {
   stderr.write(`${message}\n`);
@@ -13,15 +16,15 @@ function pythonCandidates(platform, args) {
         {
           executable: "py",
           args: ["-3", ...args],
-          probeArgs: WINDOWS_LAUNCHER_PROBE_ARGS,
+          probeArgs: ["-3", ...PYTHON_THREE_PROBE_ARGS],
           missingName: "py -3",
         },
-        { executable: "python3", args },
-        { executable: "python", args },
+        { executable: "python3", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
+        { executable: "python", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
       ]
     : [
-        { executable: "python3", args },
-        { executable: "python", args },
+        { executable: "python3", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
+        { executable: "python", args, probeArgs: PYTHON_THREE_PROBE_ARGS },
       ];
 }
 
@@ -39,7 +42,7 @@ export function runPython(
     if (candidate.probeArgs) {
       const probe = spawnSync(candidate.executable, candidate.probeArgs, { stdio: "ignore" });
       if (probe.error?.code === "ENOENT") {
-        missing.push(candidate.missingName);
+        missing.push(candidate.missingName ?? candidate.executable);
         continue;
       }
       if (probe.error) {
@@ -51,7 +54,7 @@ export function runPython(
         return 1;
       }
       if ((probe.status ?? 1) !== 0) {
-        missing.push(candidate.missingName);
+        missing.push(candidate.missingName ?? candidate.executable);
         continue;
       }
     }
@@ -72,7 +75,7 @@ export function runPython(
     return result.status ?? 1;
   }
 
-  writeError(stderr, `missing Python interpreter: tried ${missing.join(", ")}`);
+  writeError(stderr, `missing Python 3 interpreter: tried ${missing.join(", ")}`);
   return 127;
 }
 

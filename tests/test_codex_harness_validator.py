@@ -190,18 +190,18 @@ process.stderr.write = (message) => {
               }},
             }});
             assert.equal(fallbackStatus, 0);
-            assert.deepEqual(fallbackCalls, ["python3", "python"]);
+            assert.deepEqual(fallbackCalls, ["python3", "python", "python"]);
 
             const failureCalls = [];
             const failureStatus = runPython(["script.py"], {{
               platform: "darwin",
-              spawnSync(executable) {{
+              spawnSync(executable, args) {{
                 failureCalls.push(executable);
-                return {{ status: 7 }};
+                return args[0] === "-c" ? {{ status: 0 }} : {{ status: 7 }};
               }},
             }});
             assert.equal(failureStatus, 7);
-            assert.deepEqual(failureCalls, ["python3"]);
+            assert.deepEqual(failureCalls, ["python3", "python3"]);
 
             const exhaustionCalls = [];
             const stderr = {{ text: "", write(chunk) {{ this.text += chunk; }} }};
@@ -215,7 +215,51 @@ process.stderr.write = (message) => {
             }});
             assert.equal(exhaustionStatus, 127);
             assert.deepEqual(exhaustionCalls, ["python3", "python"]);
-            assert.equal(stderr.text, "missing Python interpreter: tried python3, python\\n");
+            assert.equal(stderr.text, "missing Python 3 interpreter: tried python3, python\\n");
+            """
+        )
+
+        self.assertEqual("", result.stdout)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+
+    def test_python_launcher_requires_python_three_for_fallbacks(self) -> None:
+        result = run_node_module_test(
+            f"""
+            import assert from "node:assert/strict";
+            import {{ runPython }} from {json.dumps((ROOT / "scripts" / "run-python.mjs").as_uri())};
+
+            const missing = () => ({{
+              error: Object.assign(new Error("missing"), {{ code: "ENOENT" }}),
+            }});
+            const rejectedCalls = [];
+            const stderr = {{ text: "", write(chunk) {{ this.text += chunk; }} }};
+            const rejected = runPython(["script.py"], {{
+              platform: "linux",
+              stderr,
+              spawnSync(executable, args) {{
+                rejectedCalls.push({{ executable, args }});
+                if (executable === "python3") return missing();
+                if (executable === "python" && args[0] === "-c") return {{ status: 1 }};
+                throw new Error("incompatible interpreter executed target arguments");
+              }},
+            }});
+            assert.equal(rejected, 127);
+            assert.deepEqual(rejectedCalls.map((call) => call.executable), ["python3", "python"]);
+            assert.match(stderr.text, /missing Python 3 interpreter/);
+
+            const compatibleCalls = [];
+            const compatible = runPython(["script.py"], {{
+              platform: "darwin",
+              spawnSync(executable, args) {{
+                compatibleCalls.push({{ executable, args }});
+                return args[0] === "-c" ? {{ status: 0 }} : {{ status: 7 }};
+              }},
+            }});
+            assert.equal(compatible, 7);
+            assert.equal(compatibleCalls.length, 2);
+            assert.equal(compatibleCalls[0].args[0], "-c");
+            assert.deepEqual(compatibleCalls[1].args, ["script.py"]);
             """
         )
 
@@ -247,7 +291,7 @@ process.stderr.write = (message) => {
 
             assert.equal(status, 0);
             assert.equal(stderr.text, "");
-            assert.deepEqual(calls.map((call) => call.executable), ["py", "python3", "python"]);
+            assert.deepEqual(calls.map((call) => call.executable), ["py", "python3", "python", "python"]);
             assert.deepEqual(calls[0].args.slice(0, 2), ["-3", "-c"]);
             """
         )
@@ -374,13 +418,84 @@ process.stderr.write = (message) => {
                 ".codex/agents/docs_scout.toml",
                 "AGENTS.md",
                 "RULES.md",
-                ".codex/agents/docs_scout.toml: developer_instructions must reference AGENTS.md",
+                ".codex/agents/docs_scout.toml: developer_instructions must begin with 'Obey AGENTS.md.'",
             ),
         ]
 
         for name, path, old, new, expected in cases:
             with self.subTest(name=name):
                 self.assertIn(expected, validate_text_replacement(path, old, new))
+
+    def test_rejects_agent_sandbox_policy_drift(self) -> None:
+        for agent, old, new in [
+            ("repo_mapper", 'sandbox_mode = "read-only"', 'sandbox_mode = "workspace-write"'),
+            ("docs_scout", 'sandbox_mode = "read-only"', 'sandbox_mode = 7'),
+            ("doc_sync", 'sandbox_mode = "read-only"', 'sandbox_mode = "danger-full-access"'),
+            (
+                "autoreview_lite",
+                'sandbox_mode = "workspace-write"',
+                'sandbox_mode = "read-only"',
+            ),
+            (
+                "clawpatch_pro",
+                'sandbox_mode = "workspace-write"',
+                'sandbox_mode = "danger-full-access"',
+            ),
+        ]:
+            with self.subTest(agent=agent):
+                self.assertIn(
+                    f".codex/agents/{agent}.toml: sandbox_mode must be ",
+                    "\n".join(
+                        validate_text_replacement(
+                            f".codex/agents/{agent}.toml", old, new
+                        )
+                    ),
+                )
+
+    def test_rejects_non_directive_canonical_rule_mentions(self) -> None:
+        errors = validate_text_replacement(
+            ".codex/agents/docs_scout.toml",
+            "Obey AGENTS.md.",
+            "Do not obey AGENTS.md.",
+        )
+        self.assertIn(
+            ".codex/agents/docs_scout.toml: developer_instructions must begin with 'Obey AGENTS.md.'",
+            errors,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            skill = root / ".agents" / "skills" / "git" / "SKILL.md"
+            skill.write_text(
+                "---\nname: git\ndescription: Git mechanics.\n---\n\n"
+                "<!-- AGENTS.md TESTING.md PERFORMANCE.md git skill -->\n",
+                encoding="utf-8",
+            )
+
+            self.assertIn(
+                ".agents/skills/git/SKILL.md: must reference AGENTS.md or canonical repo rules",
+                validator.validate_repo(root),
+            )
+
+        invalid_skill_bodies = [
+            "You are not required to obey AGENTS.md.\n",
+            "This document mentions AGENTS.md for context.\n",
+            "TESTING.md PERFORMANCE.md git skill\n",
+        ]
+        for body in invalid_skill_bodies:
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                write_valid_harness(root)
+                skill = root / ".agents" / "skills" / "git" / "SKILL.md"
+                skill.write_text(
+                    "---\nname: git\ndescription: Git mechanics.\n---\n\n" + body,
+                    encoding="utf-8",
+                )
+
+                self.assertIn(
+                    ".agents/skills/git/SKILL.md: must reference AGENTS.md or canonical repo rules",
+                    validator.validate_repo(root),
+                )
 
     def test_reports_invalid_agent_instructions_without_crashing(self) -> None:
         for agent in ["docs_scout", "doc_sync"]:
@@ -398,7 +513,7 @@ process.stderr.write = (message) => {
                         )
 
                         self.assertIn(
-                            f".codex/agents/{agent}.toml: developer_instructions must reference AGENTS.md",
+                            f".codex/agents/{agent}.toml: developer_instructions must begin with 'Obey AGENTS.md.'",
                             validator.validate_repo(root),
                         )
 
@@ -467,6 +582,21 @@ process.stderr.write = (message) => {
                 ".agents/skills/git/SKILL.md: missing or invalid front matter",
                 validator.validate_repo(root),
             )
+
+    def test_skill_front_matter_uses_bounded_scalar_syntax(self) -> None:
+        self.assertEqual(
+            {"name": "git", "description": "Git mechanics."},
+            validator.parse_skill_front_matter(
+                "---\r\nname: 'git'\r\ndescription: \"Git mechanics.\" # detail\r\n---\r\n"
+            ),
+        )
+        for source in [
+            "---\nname: git\ndescription: # missing\n---\n",
+            "---\nname: git\nname: clawpatch\ndescription: duplicate\n---\n",
+            "---\nname: git\ndescription: 'unterminated\n---\n",
+        ]:
+            with self.subTest(source=source):
+                self.assertIsNone(validator.parse_skill_front_matter(source))
 
     def test_rejects_hook_drift(self) -> None:
         cases = [

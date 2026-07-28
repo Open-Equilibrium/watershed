@@ -1,3 +1,5 @@
+import os
+import stat
 import subprocess
 import tempfile
 import tomllib
@@ -73,6 +75,12 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
         path = repo / relative_path
         if is_protected_validation_path(relative_path) or path.is_symlink():
             continue
+        try:
+            metadata = path.lstat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            continue
         resolved = path.resolve()
         if resolved.is_relative_to(root) and resolved.is_file():
             paths.append(path)
@@ -116,6 +124,26 @@ class M1ValidationContractTest(unittest.TestCase):
             paths = tracked_validation_paths(ROOT)
 
         self.assertEqual(paths, [ROOT / "README.md"])
+
+    def test_validation_scan_excludes_external_hardlinks(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as repo_directory,
+            tempfile.TemporaryDirectory() as external_directory,
+        ):
+            repo = Path(repo_directory)
+            subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+            tracked = repo / "tracked.txt"
+            tracked.write_text("staged placeholder", encoding="utf-8")
+            subprocess.run(["git", "add", "--", tracked.name], cwd=repo, check=True)
+            tracked.unlink()
+            external = Path(external_directory) / "credential.txt"
+            external.write_text("external credential", encoding="utf-8")
+            try:
+                os.link(external, tracked)
+            except OSError as error:
+                self.skipTest(f"hard-link creation unavailable: {error}")
+
+            self.assertEqual(tracked_validation_paths(repo), [])
 
     def test_flow_agent_identity_has_no_stale_product_references(self) -> None:
         expected_paths = [
@@ -165,6 +193,9 @@ class M1ValidationContractTest(unittest.TestCase):
         )
         step = lines[start:end]
         self.assertFalse(any(line.startswith("        if:") for line in step))
+        self.assertFalse(
+            any(line.startswith("        continue-on-error:") for line in step)
+        )
         self.assertEqual(
             [line for line in step if line.startswith("        shell:")],
             ["        shell: pwsh"],
@@ -173,12 +204,13 @@ class M1ValidationContractTest(unittest.TestCase):
         script = "\n".join(line[10:] for line in step[run + 1 :])
         commands = script.splitlines()
         escaped_version = version.replace(".", r"\.")
-        self.assertIn(f"rustup override set {version}", commands)
-        self.assertIn(
-            "if ((rustc --version) -notmatch "
-            f"'^rustc {escaped_version} ') {{",
-            commands,
+        self.assertEqual(commands[0], f"rustup override set {version}")
+        self.assertEqual(
+            commands[1],
+            "if ((rustc --version) -notmatch " f"'^rustc {escaped_version} ') {{",
         )
+        self.assertTrue(commands[2].strip().startswith('throw "'))
+        self.assertEqual(commands[3:], ["}"])
 
     def test_ci_uses_the_pinned_rust_toolchain(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -206,8 +238,24 @@ class M1ValidationContractTest(unittest.TestCase):
         )
         wrong_shell = active.replace("        shell: pwsh", "        shell: bash")
         missing_shell = active.replace("        shell: pwsh\n", "")
+        continue_on_error = active.replace(
+            "      - name: Select pinned Rust\n        shell: pwsh",
+            "      - name: Select pinned Rust\n"
+            "        continue-on-error: true\n"
+            "        shell: pwsh",
+        )
+        early_success = active.replace(
+            "          rustup override", "          exit 0\n          rustup override"
+        )
 
-        for workflow in (commented, disabled, wrong_shell, missing_shell):
+        for workflow in (
+            commented,
+            disabled,
+            wrong_shell,
+            missing_shell,
+            continue_on_error,
+            early_success,
+        ):
             with self.subTest(workflow=workflow), self.assertRaises(
                 (AssertionError, ValueError)
             ):

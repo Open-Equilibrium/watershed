@@ -14,9 +14,81 @@ use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
 
 #[test]
 fn incomplete_near_limit_stream_fails_completion_check() {
-    let result = std::panic::catch_unwind(|| assert_near_limit_events(&[]));
+    let events = near_limit_completion_contract_events();
 
-    assert!(result.is_err(), "an incomplete workload must fail the gate");
+    for (label, event_type, flow_definition_id) in [
+        ("child flow", EventType::FlowCompleted, "near-limit-child"),
+        ("root flow", EventType::FlowCompleted, "smoke-flow"),
+        ("session", EventType::SessionCompleted, ""),
+    ] {
+        let mut incomplete = events.clone();
+        let index = incomplete
+            .iter()
+            .position(|event| {
+                event.event_type == event_type
+                    && (flow_definition_id.is_empty()
+                        || event
+                            .payload
+                            .get("flow_definition_id")
+                            .and_then(|id| id.as_str())
+                            == Some(flow_definition_id))
+            })
+            .unwrap_or_else(|| panic!("valid workload must contain {label} completion"));
+        incomplete.remove(index);
+
+        let result = std::panic::catch_unwind(|| assert_near_limit_events(&incomplete));
+        assert!(
+            result.is_err(),
+            "missing {label} completion must fail the gate"
+        );
+    }
+}
+
+fn near_limit_completion_contract_events() -> Vec<EventEnvelope> {
+    let mut sequence = 1;
+    let mut event = |event_type, payload| {
+        let current = sequence;
+        sequence += 1;
+        EventEnvelope::new(
+            format!("completion-contract-{current}"),
+            event_type,
+            "completion-contract",
+            current,
+            "2026-01-01T00:00:00Z",
+            "flow-agent",
+            payload,
+        )
+    };
+    let mut events = Vec::new();
+    let mut root_started = event(
+        EventType::FlowStarted,
+        serde_json::json!({"flow_definition_id": "smoke-flow"}),
+    );
+    root_started.flow_id = Some("root-flow".to_owned());
+    events.push(root_started);
+    for index in 0..16 {
+        let mut phase_entered = event(
+            EventType::PhaseEntered,
+            serde_json::json!({"phase_id": format!("near-limit-phase-{index:02}")}),
+        );
+        phase_entered.flow_id = Some("root-flow".to_owned());
+        events.push(phase_entered);
+    }
+    let mut child_completed = event(
+        EventType::FlowCompleted,
+        serde_json::json!({"flow_definition_id": "near-limit-child"}),
+    );
+    child_completed.flow_id = Some("child-flow".to_owned());
+    child_completed.parent_flow_id = Some("root-flow".to_owned());
+    events.push(child_completed);
+    let mut root_completed = event(
+        EventType::FlowCompleted,
+        serde_json::json!({"flow_definition_id": "smoke-flow"}),
+    );
+    root_completed.flow_id = Some("root-flow".to_owned());
+    events.push(root_completed);
+    events.push(event(EventType::SessionCompleted, serde_json::json!({})));
+    events
 }
 
 #[test]

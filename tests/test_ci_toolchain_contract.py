@@ -71,6 +71,35 @@ def cargo_dependency_tables(
     return tables
 
 
+def ci_push_branches(workflow: str) -> tuple[str, ...]:
+    lines = workflow.splitlines()
+    try:
+        push_start = lines.index("  push:")
+    except ValueError:
+        raise AssertionError("CI push.branches must use the canonical block form")
+    push_end = next(
+        (
+            index
+            for index in range(push_start + 1, len(lines))
+            if lines[index] and not lines[index].startswith("    ")
+        ),
+        len(lines),
+    )
+    try:
+        branches_start = lines.index("    branches:", push_start + 1, push_end)
+    except ValueError:
+        raise AssertionError("CI push.branches must use the canonical block form")
+    branches = []
+    for line in lines[branches_start + 1 :]:
+        if line and not line.startswith("      "):
+            break
+        item = line.strip()
+        if not item.startswith("- "):
+            continue
+        branches.append(item[2:].strip().strip('"'))
+    return tuple(branches)
+
+
 class CiToolchainContractTest(unittest.TestCase):
     def test_tracked_file_listing_preserves_unusual_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -124,7 +153,9 @@ class CiToolchainContractTest(unittest.TestCase):
 
     def test_tracked_file_listing_forwards_complete_git_failure(self) -> None:
         diagnostic = "git failure: " + ("x" * 1_000_000)
-        with tempfile.TemporaryDirectory() as temporary_directory:
+        with tempfile.TemporaryDirectory(
+            prefix="watershed path with spaces "
+        ) as temporary_directory:
             temporary_path = Path(temporary_directory)
             emitter = temporary_path / "emit_error.py"
             preload = temporary_path / "async_stderr.cjs"
@@ -170,7 +201,7 @@ class CiToolchainContractTest(unittest.TestCase):
                 + os.pathsep
                 + environment.get("PATH", "")
             )
-            environment["NODE_OPTIONS"] = f"--require={preload}"
+            environment["NODE_OPTIONS"] = "--require=./async_stderr.cjs"
             environment["WATERSHED_TEST_ASYNC_STDERR"] = "1"
 
             result = subprocess.run(
@@ -209,10 +240,11 @@ class CiToolchainContractTest(unittest.TestCase):
         self.assert_active_pinned_node_steps(workflow)
         self.assertIn("run: cargo fmt --all --check", workflow)
         self.assertIn(
-            "$docs = @(node scripts/list-tracked-files.mjs "
-            "'*.md' '*.html' | ConvertFrom-Json)",
+            "$docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'",
             workflow,
         )
+        self.assertIn("if ($LASTEXITCODE -ne 0) {", workflow)
+        self.assertIn("$docs = @($docsJson | ConvertFrom-Json)", workflow)
         self.assertIn(
             "lychee --no-progress --include-fragments -- @docs", workflow
         )
@@ -241,15 +273,15 @@ class CiToolchainContractTest(unittest.TestCase):
         corepack_step_index, corepack_commands = self.active_pwsh_step_commands(
             workflow, "Enable Corepack"
         )
-        self.assertIn(
-            "if ((node --version) -ne 'v24.18.0') {",
-            node_commands,
+        self.assertEqual(node_commands[0], "if ((node --version) -ne 'v24.18.0') {")
+        self.assertTrue(node_commands[1].startswith('throw "'))
+        self.assertEqual(node_commands[2:], ["}"])
+        self.assertEqual(corepack_commands[0], "corepack enable")
+        self.assertEqual(
+            corepack_commands[1], "if ((pnpm --version) -ne '11.15.1') {"
         )
-        self.assertIn("corepack enable", corepack_commands)
-        self.assertIn(
-            "if ((pnpm --version) -ne '11.15.1') {",
-            corepack_commands,
-        )
+        self.assertTrue(corepack_commands[2].startswith('throw "'))
+        self.assertEqual(corepack_commands[3:], ["}"])
         self.assertLess(setup_index, node_step_index)
         self.assertLess(node_step_index, corepack_step_index)
 
@@ -271,6 +303,9 @@ class CiToolchainContractTest(unittest.TestCase):
 
         self.assertFalse(
             any(line.startswith("        if:") for line in step_lines)
+        )
+        self.assertFalse(
+            any(line.startswith("        continue-on-error:") for line in step_lines)
         )
         self.assertEqual(
             [line for line in step_lines if line.startswith("        shell:")],
@@ -330,6 +365,15 @@ class CiToolchainContractTest(unittest.TestCase):
             "      - name: Enable Corepack\n        shell: pwsh\n",
             "      - name: Enable Corepack\n",
         )
+        continue_on_error = active.replace(
+            "      - name: Enable Corepack\n        shell: pwsh",
+            "      - name: Enable Corepack\n"
+            "        continue-on-error: true\n"
+            "        shell: pwsh",
+        )
+        early_success = active.replace(
+            "          corepack enable", "          exit 0\n          corepack enable"
+        )
 
         for workflow in (
             commented,
@@ -337,6 +381,8 @@ class CiToolchainContractTest(unittest.TestCase):
             disabled,
             wrong_shell,
             missing_shell,
+            continue_on_error,
+            early_success,
         ):
             with self.subTest(workflow=workflow), self.assertRaises(
                 (AssertionError, ValueError)
@@ -347,11 +393,22 @@ class CiToolchainContractTest(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
-        push_section = workflow.split("  push:\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(
+            ci_push_branches(workflow),
+            ("main", *(f"{branch_type}/**" for branch_type in TOPIC_BRANCH_TYPES)),
+        )
 
-        for branch_type in TOPIC_BRANCH_TYPES:
-            with self.subTest(branch_type=branch_type):
-                self.assertIn(f'"{branch_type}/**"', push_section)
+    def test_ci_branch_parser_ignores_comments_and_other_trigger_keys(self) -> None:
+        workflow = """on:
+  push:
+    paths:
+      - \"feat/**\"
+    branches:
+      # \"fix/**\"
+      - main
+"""
+
+        self.assertEqual(ci_push_branches(workflow), ("main",))
 
     def test_rust_product_manifests_have_no_node_runtime_dependency(self) -> None:
         violations: list[str] = []
