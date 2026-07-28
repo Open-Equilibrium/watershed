@@ -1,6 +1,0 @@
-loop:
-  id: sandbox-negative-symlink
-  name: SandboxNegativeSymlink
-  phase_refs: [negative-symlink]
-  subloop_refs: []
-  connection_refs: []

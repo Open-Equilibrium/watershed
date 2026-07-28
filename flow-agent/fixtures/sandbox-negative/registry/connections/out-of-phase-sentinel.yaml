@@ -1,0 +1,6 @@
+connection:
+  id: out-of-phase-sentinel
+  name: OutOfPhaseSentinel
+  connection_kind: data
+  from_ref: sandbox-negative-tool-out-of-phase
+  to_ref: negative-tool

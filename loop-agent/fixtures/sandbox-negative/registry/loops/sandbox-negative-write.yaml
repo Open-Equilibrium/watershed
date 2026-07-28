@@ -1,6 +1,0 @@
-loop:
-  id: sandbox-negative-write
-  name: SandboxNegativeWrite
-  phase_refs: [negative]
-  subloop_refs: []
-  connection_refs: []

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>V-Spec — Meta-Harness</title>
 <style>
-:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.loop{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.loop{grid-template-columns:1fr}}
+:root{--bg:#0f1115;--panel:#171a21;--panel2:#1e222b;--text:#e6e8ee;--muted:#9aa3b2;--line:#2a2f3a;--accent:#4ea1ff;--good:#7ee0a8;--warn:#ffcf6b;--bad:#ff9b9b;--r:12px;--font:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0f1115,#11141a 40rem,#0f1115);color:var(--text);font:16px/1.58 var(--font)}a{color:var(--accent)}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.layout{display:grid;grid-template-columns:250px minmax(0,1fr);gap:24px;max-width:1320px;margin:0 auto;padding:24px}.toc{position:sticky;top:16px;align-self:start;background:rgba(23,26,33,.9);border:1px solid var(--line);border-radius:var(--r);padding:16px}.toc h2{font-size:13px;text-transform:uppercase;color:var(--muted);letter-spacing:.12em}.toc a{display:block;color:var(--muted);text-decoration:none;padding:7px 8px;border-radius:8px}.toc a:hover{background:var(--panel2);color:var(--text)}.hero,.section{border:1px solid var(--line);border-radius:var(--r);background:rgba(23,26,33,.92);margin-bottom:14px}.hero{padding:28px}.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:8px 0}.eyebrow{color:var(--good);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.muted{color:var(--muted)}.section h2{margin:0;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:20px}.body{padding:18px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:14px}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:3px 8px;margin:2px;color:var(--muted);font-size:12px}.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}pre{overflow:auto;background:#0b0d12;border:1px solid var(--line);border-radius:var(--r);padding:14px}.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}.node{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}.arrow{color:var(--muted);display:flex;align-items:center;justify-content:center}@media(max-width:900px){.layout{display:block}.toc{position:relative;margin-bottom:16px}.grid,.flow{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -14,16 +14,16 @@
     <h2>Contents</h2>
     <a href="#purpose">1. Purpose & scope</a>
     <a href="#boundary">2. Product boundary</a>
-    <a href="#loop-agent">3. Relationship to Loop Agent</a>
+    <a href="#flow-agent">3. Relationship to Flow Agent</a>
     <a href="#liquid">4. Relationship to Liquid</a>
     <a href="#deployment">5. Deployment modes</a>
     <a href="#surfaces">6. Public surfaces</a>
     <a href="#architecture">7. Architecture</a>
     <a href="#config">8. Central config</a>
     <a href="#agentpulse">9. AgentPulse</a>
-    <a href="#automations">10. Scheduling & automations</a>
+    <a href="#automations">10. Agent scheduling &amp; orchestration</a>
     <a href="#byoa">11. BYOA / external control</a>
-    <a href="#m2">12. M2 implementation packet</a>
+    <a href="#m2">12. M2 implementation reference</a>
     <a href="#open">13. Open decisions</a>
   </aside>
   <main>
@@ -34,13 +34,13 @@
     </header>
 
     <section id="purpose" class="section"><h2>1. Purpose & scope</h2><div class="body">
-      <p><strong>Meta-Harness is a self-contained headless control plane.</strong> It can be used directly through CLI/API/service mode, and Liquid is the primary rich UI that consumes it. It centralizes configuration, starts and monitors sessions across many agents, normalizes their events, runs schedules and automations, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code, Pi Agent) plug in here as <strong>adapters</strong> — Codex is an adapter/target, not a Loop Agent base or fork (<a href="../adr/ADR-LOG.md">ADR-0028</a>).</p>
-      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its team/control/governance wedge (see <a href="../../PLAN.md">PLAN.md</a> wedge sequencing and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>control, observe, measure, and govern many agents.</em> It is a <strong>vendor-neutral, self-hostable headless control plane for heterogeneous AI agents</strong> — not a dashboard for Loop Agent only — and addresses multi-agent sprawl as an open, self-hostable, AGPL-aligned control problem.</p>
+      <p><strong>Meta-Harness is a self-contained, host-scoped headless control plane.</strong> It centralizes configuration, starts and monitors CLI agents on its own host, normalizes their events, runs agent schedules and triggers, and computes AgentPulse metrics. External coding agents (Codex CLI, Claude Code, Pi Agent) plug in through adapters — Codex is an adapter/target, not a Flow Agent base or fork (<a href="../adr/ADR-LOG.md">ADR-0028</a>).</p>
+      <p>Meta-Harness is the Watershed platform's <strong>control layer</strong> and its team/control/governance wedge (see <a href="../../PLAN.md">PLAN.md</a> and <a href="../adr/ADR-LOG.md">ADR-0018</a>). Standalone job: <em>control, observe, measure, and govern many agents.</em> It is a vendor-neutral, self-hostable control plane for heterogeneous host-local CLI agents, not limited to Flow Agent.</p>
       <p>The clean product model across the three Watershed tools:</p>
-      <pre><code>Loop Agent    = standalone agent runtime
+      <pre><code>Flow Agent    = standalone agent runtime
 Meta-Harness  = standalone headless many-agent control plane
 Liquid        = standalone native workspace / app-building product</code></pre>
-      <p><strong>Meta-Harness can run without Liquid.</strong> It is reachable through CLI, an API/protocol surface and a local/remote service, so CI, servers, power users and external (BYOA) agents can drive it headlessly. Liquid is the primary rich UI on top of those surfaces, not a prerequisite. Meta-Harness should <em>not</em> ship a competing full standalone GUI in the MVP; a minimal admin/status UI may be possible later but must not duplicate Liquid (packaging is <a href="../decisions/open-decisions.html#d-021">D-021</a>).</p>
+      <p><strong>Meta-Harness can run without Liquid.</strong> Its CLI/API/service may be reached locally or, with authenticated transport, from another device. Remote API reachability never grants ownership of a CLI process on another host. Liquid is the primary rich UI, not a prerequisite; Meta-Harness does not ship a competing rich GUI in the MVP (packaging: <a href="../decisions/open-decisions.html#d-021">D-021</a>).</p>
     </div></section>
 
     <section id="boundary" class="section"><h2>2. Product boundary</h2><div class="body">
@@ -50,76 +50,73 @@ Liquid        = standalone native workspace / app-building product</code></pre>
           <li>agent adapter model;</li>
           <li>central configuration resolution;</li>
           <li>schedules;</li>
-          <li>event-driven automations;</li>
+          <li>event-driven agent triggers and orchestration;</li>
           <li>event/transcript ingestion from agents;</li>
           <li>artifact/log/handoff indexing;</li>
           <li>AgentPulse metric computation;</li>
           <li>policy-gated configuration writes;</li>
           <li>approval/audit flow for sensitive changes;</li>
           <li>BYOA/API access for external agents and tools;</li>
-          <li>local and (later) remote execution/control surfaces.</li>
+          <li>host-local execution plus local-or-remote client surfaces.</li>
         </ul></div>
         <div class="card"><h3 class="bad">Meta-Harness does not own</h3><ul>
-          <li>Liquid dashboards;</li>
-          <li>component rendering;</li>
+          <li>Liquid Pages, Blocks or rendering;</li>
           <li>mobile/desktop app UX;</li>
           <li>PowerBar UX;</li>
           <li>the visual workspace model;</li>
-          <li>Loop Agent runtime internals;</li>
-          <li>Loop Agent local execution;</li>
+          <li>Flow Agent runtime internals;</li>
+          <li>agent execution on another host;</li>
           <li>a project VCS/history engine;</li>
           <li>a full separate rich GUI in the MVP.</li>
         </ul></div>
       </div>
     </div></section>
 
-    <section id="loop-agent" class="section"><h2>3. Relationship to Loop Agent</h2><div class="body">
-      <p><strong>Meta-Harness consumes Loop Agent; it does not own it.</strong> Loop Agent is a <a href="V-Spec_LoopAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
-      <pre><code>Loop Agent
+    <section id="flow-agent" class="section"><h2>3. Relationship to Flow Agent</h2><div class="body">
+      <p><strong>Meta-Harness consumes Flow Agent; it does not own it.</strong> Flow Agent is a <a href="V-Spec_FlowAgent.html">standalone CLI product</a> usable without Meta-Harness or Liquid.</p>
+      <pre><code>Flow Agent
   owns one local agent runtime
-  owns deterministic loop execution
+  owns deterministic flow execution
   owns local transcript/session persistence
-  owns JSONL/tail/export runtime surfaces and future RPC/SDK seams
+  owns run/replay/tail/resume and JSONL runtime surfaces
 
 Meta-Harness
-  consumes Loop Agent's public runtime surfaces
-  manages many agents and sessions
+  launches Flow Agent on the same host
+  consumes its public runtime surfaces
+  manages host-local agents and sessions
   normalizes events across providers
   resolves shared config to target CLIs
   computes cross-agent metrics</code></pre>
-      <p>Meta-Harness integrates through Loop Agent's <strong>public runtime surfaces</strong>: the JSONL event stream, RPC mode when implemented, explicit tail/export commands over the event stream, and a future embedded/API surface if available. It never reads Loop Agent's <code>.loop/sessions</code> store directly. It does not replace Loop Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence, and <strong>must not reach into Loop Agent internals</strong>. No Watershed project-history/VCS engine is required in the MVP.</p>
+      <p>Meta-Harness integrates through Flow Agent's <strong>public runtime surfaces</strong>: run/replay/tail/resume and JSONL now; RPC/control and export when implemented; embedding only if D-020 selects it. The executor and CLI process share a host, but Meta-Harness never reads <code>.flow/sessions</code> directly or reaches into Flow Agent internals. It does not replace Flow Agent's runtime kernel, deterministic FSM, sandbox or transcript persistence. Cross-host process control is outside the architecture.</p>
     </div></section>
 
     <section id="liquid" class="section"><h2>4. Relationship to Liquid</h2><div class="body">
       <pre><code>Meta-Harness
   headless control plane
   CLI / API / service
-  session / config / metric / automation backend
+  session / config / metric / agent-schedule backend
 
 Liquid
   native UI / workspace
-  dashboards, views, components, PowerBar
+  Pages, Blocks, Views, PowerBar
   visual session / config / metric / approval surfaces</code></pre>
-      <p>Liquid <strong>consumes</strong> Meta-Harness for: the live session dashboard; live transcripts; the artifact/diff/log inbox; approval requests; central-config editor data; AgentPulse dashboards; schedules and automations; PowerBar commands that start/steer sessions; and mobile/desktop monitoring and control.</p>
-      <p>Liquid <strong>must not duplicate</strong> Meta-Harness's session registry, adapter logic, config resolution, AgentPulse engine or scheduling engine. The integration boundary is <a href="../decisions/open-decisions.html#d-025">D-025</a>. See the <a href="V-Spec_Liquid.html">Liquid V-Spec</a>.</p>
-      <p><strong>Liquid is a standalone workspace/app-building product, not merely Meta-Harness's UI.</strong> Liquid is useful with no Meta-Harness present; when Meta-Harness <em>is</em> present, Liquid renders it. Conversely, when Meta-Harness or the agents it orchestrates need to read or edit Liquid workspace data, they go through Liquid's <strong>workspace CLI/API/mutation pipeline</strong> (recorded in Liquid's action history) and <strong>do not mutate Liquid storage internals</strong>. See the <a href="V-Spec_Liquid.html">Liquid V-Spec</a> (§7–8).</p>
+      <p>Projections from one or more Meta-Harness instances may be combined visually, but every record retains instance identity, freshness and authority; every live command routes back to the owning instance.</p>
+      <p>Liquid <strong>must not duplicate</strong> a Meta-Harness session registry, adapter logic, config resolution, AgentPulse engine or scheduling engine, and it must not invent global cross-instance authority.</p>
+      <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
     </div></section>
 
     <section id="deployment" class="section"><h2>5. Deployment modes</h2><div class="body">
-      <div class="card"><h3>Mode A — local embedded sidecar (default single-user)</h3>
+      <div class="card"><h3>Mode A — local sidecar (default single-user)</h3>
         <pre><code>Liquid Desktop
   starts local Meta-Harness sidecar
-    starts/monitors Loop Agent, Codex CLI, Claude Code, Pi Agent, ...
+    starts/monitors Flow Agent, Codex CLI, Claude Code, Pi Agent, ...
     stores local sessions/config/metrics</code></pre>
-        <p class="muted">The user installs Liquid; Liquid starts Meta-Harness locally; the user usually does not think about it as a separate process. PowerBar starts loops/sessions; dashboards show sessions, transcripts, metrics and approvals.</p>
+        <p class="muted">Liquid starts Meta-Harness locally. PowerBar commands go to the sidecar, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals.</p>
       </div>
-      <div class="card"><h3>Mode B — remote Meta-Harness server (team/server)</h3>
-        <pre><code>Liquid Desktop/Mobile
-  connects to remote Meta-Harness
-    manages many agents/runners
-    stores team sessions/config/metrics
-    exposes shared dashboards and approvals</code></pre>
-        <p class="muted">Team orchestration, remote runners, shared config, central AgentPulse, long-running scheduled automations and mobile monitoring/control.</p>
+      <div class="card"><h3>Mode B — server-host Meta-Harness</h3>
+        <pre><code>Liquid Desktop/Mobile → authenticated Meta-Harness API
+                             → CLI agents on server host</code></pre>
+        <p class="muted">The API client is remote; execution is not. The server instance owns only its host-local agents, sessions, config, metrics and scheduled work.</p>
       </div>
       <div class="card"><h3>Mode C — headless Meta-Harness only (no Liquid)</h3>
         <pre><code>meta start
@@ -129,7 +126,7 @@ meta schedule ...
 meta metrics ...</code></pre>
         <p class="muted">CI, server automation, power users, external tools, BYOA agents, and early development before Liquid exists.</p>
       </div>
-      <p>Which modes are in MVP scope is <a href="../decisions/open-decisions.html#d-022">D-022</a> (recommended: local daemon/sidecar + headless CLI in M2; remote server as a later extension).</p>
+      <p>The host-scoped ownership invariant applies to every mode. M2 implements the local sidecar/daemon and preserves authenticated remote API reachability as a protocol seam; execution ownership never crosses hosts.</p>
     </div></section>
 
     <section id="surfaces" class="section"><h2>6. Public surfaces</h2><div class="body">
@@ -150,18 +147,18 @@ meta approvals</code></pre></div>
           <li>transcript stream;</li>
           <li>artifact/log/handoff queries;</li>
           <li>config read/write proposals;</li>
-          <li>schedule and automation control;</li>
+          <li>agent schedule and trigger control;</li>
           <li>AgentPulse metric queries;</li>
           <li>BYOA command surface;</li>
           <li>approval/rejection/revert actions.</li>
         </ul></div>
       </div>
       <h3>Service / daemon surface</h3>
-      <p>Meta-Harness should run as a local sidecar service for Liquid, a standalone local daemon, and (later) a remote service/server. The concrete service/API transport is <a href="../decisions/open-decisions.html#d-023">D-023</a>; state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Loop Agent's designed control transport baseline is ADR-0029.</p>
+      <p>The same service can run as a Liquid sidecar, standalone daemon or server-host service. This changes client reachability, not executor ownership. Concrete service/API transport is <a href="../decisions/open-decisions.html#d-023">D-023</a>; state storage is <a href="../decisions/open-decisions.html#d-024">D-024</a>. Flow Agent's designed local control transport baseline is ADR-0029.</p>
     </div></section>
 
     <section id="architecture" class="section"><h2>7. Architecture</h2><div class="body">
-      <div class="loop" aria-label="Meta-Harness control-plane pipeline">
+      <div class="flow" aria-label="Meta-Harness control-plane pipeline">
         <div class="node">CLI / API / BYOA / Liquid command</div><div class="arrow">→</div><div class="node">Control plane + policy gate</div><div class="arrow">→</div><div class="node">Config resolver</div>
         <div class="node">Executor</div><div class="arrow">→</div><div class="node">Agent adapter</div><div class="arrow">→</div><div class="node">Artifact index</div>
         <div class="node">AgentPulse</div><div class="arrow">→</div><div class="node">Metrics / events</div><div class="arrow">→</div><div class="node">API / service</div>
@@ -169,15 +166,15 @@ meta approvals</code></pre></div>
       <p>Recommended structure (crate names remain provisional until M2 implementation planning):</p>
       <pre><code>meta-harness-core
   session registry, control plane, config resolver,
-  schedule/automation engine, policy gate,
+  agent schedule/trigger engine, policy gate,
   AgentPulse engine, artifact index
 
 meta-harness-adapters
-  Loop Agent adapter, Codex CLI adapter,
+  Flow Agent adapter, Codex CLI adapter,
   Claude Code adapter, Pi Agent adapter, future adapters
 
 meta-harness-service
-  local daemon / remote server, API/protocol transport,
+  local daemon / server-host service, API/protocol transport,
   event subscriptions, authentication/permissions hooks
 
 meta-harness-cli
@@ -186,9 +183,9 @@ meta-harness-cli
 liquid integration
   consumes the Meta-Harness API; does not duplicate backend logic</code></pre>
       <ul>
-        <li><strong>Control plane:</strong> session registry, task state, attention state, schedules and routing.</li>
+        <li><strong>Control plane:</strong> session registry, task state, attention state and schedules for this instance/host.</li>
         <li><strong>Config resolver:</strong> maps Watershed building blocks to agent-specific CLI config and launch commands.</li>
-        <li><strong>Executors:</strong> local executor first; remote execution is an extension point.</li>
+        <li><strong>Executor:</strong> host-local only. It validates that every launched/controlled CLI process belongs to this instance's host; cross-host execution is outside the architecture.</li>
         <li><strong>Adapters:</strong> normalize native events into <a href="../../PROTOCOL.md">PROTOCOL.md</a> families.</li>
         <li><strong>Artifact index:</strong> logs, summaries, checkpoints, handoff packs and host-provided diffs.</li>
         <li><strong>Policy gate:</strong> config writes and sensitive commands follow the review/audit rules in <a href="../../SECURITY.md">SECURITY.md</a>.</li>
@@ -196,12 +193,12 @@ liquid integration
     </div></section>
 
     <section id="config" class="section"><h2>8. Central config</h2><div class="body">
-      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Loop Agent, Codex CLI, Claude Code, Pi Agent and future adapters. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
+      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Flow Agent, Codex CLI, Claude Code, Pi Agent and future adapters. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
       <pre><code>shared block: "review-rust-change"
   instructions: ["review safety", "review tests"]
   tools: ["read", "search", "run-tests"]
   targets:
-    loop-agent:  loop script + building blocks
+    flow-agent:  flow script + building blocks
     codex-cli:   instruction pack + command args
     claude-code: instruction pack + command args
     pi-agent:    instruction pack + command args</code></pre>
@@ -209,16 +206,16 @@ liquid integration
     </div></section>
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">
-      <p><strong>AgentPulse belongs to Meta-Harness, not Liquid.</strong> Meta-Harness computes and stores AgentPulse metrics from normalized events/artifacts received from Loop Agent and other adapters; Liquid only renders the dashboards and views. Metrics are queryable through the CLI/API.</p>
-      <ul><li>rework ratio;</li><li>first-attempt success;</li><li>cost-per-productive-outcome;</li><li>loop comparison across agents/configs.</li></ul>
+      <p><strong>AgentPulse belongs to Meta-Harness, not Liquid.</strong> Each instance computes and stores metrics from normalized events/artifacts produced on its host. Liquid may render them through Blocks/Views and visually compare instances, but never rewrites their ownership. Metrics are queryable through the CLI/API.</p>
+      <ul><li>rework ratio;</li><li>first-attempt success;</li><li>cost-per-productive-outcome;</li><li>flow comparison across agents/configs.</li></ul>
       <p>The formulas are open in <a href="../decisions/open-decisions.html#d-010">D-010</a>. No M2 implementation should guess them.</p>
     </div></section>
 
-    <section id="automations" class="section"><h2>10. Scheduling & automations</h2><div class="body">
-      <p>Meta-Harness owns scheduling and event-driven automations. Liquid renders and configures them visually but does not own the automation engine. Examples:</p>
+    <section id="automations" class="section"><h2>10. Agent scheduling &amp; orchestration</h2><div class="body">
+      <p>Meta-Harness owns schedules, triggers and orchestration for agent sessions on its host. Liquid may render and configure them through the public API. These are distinct from Liquid Workspace Automations, which connect Liquid events, conditions and actions and may call an authorized Meta-Harness action. Examples owned by Meta-Harness:</p>
       <ul>
         <li>recurring tasks;</li>
-        <li>event-driven automations;</li>
+        <li>event-driven agent starts;</li>
         <li>session follow-ups;</li>
         <li>memory-building / "dreaming" jobs;</li>
         <li>central-config research;</li>
@@ -239,27 +236,12 @@ liquid integration
       <p>All sensitive commands go through the permission/policy gates in <a href="../../SECURITY.md">SECURITY.md</a>.</p>
     </div></section>
 
-    <section id="m2" class="section"><h2>12. M2 implementation packet</h2><div class="body">
-      <p>M2 defines Meta-Harness as a self-contained headless control plane (see <a href="../../PLAN.md">PLAN.md</a> M2). It should define or implement:</p>
-      <ul>
-        <li>Meta-Harness CLI;</li>
-        <li>local service/daemon shape;</li>
-        <li>API/protocol surface for Liquid/BYOA;</li>
-        <li>session registry;</li>
-        <li>Loop Agent adapter + at least one external CLI adapter;</li>
-        <li>central config resolver;</li>
-        <li>event/transcript ingestion;</li>
-        <li>artifact/log/handoff indexing;</li>
-        <li>AgentPulse v0 (after formulas are decided);</li>
-        <li>schedule/automation skeleton;</li>
-        <li>approval/audit model for config writes;</li>
-        <li><strong>no rich standalone GUI.</strong></li>
-      </ul>
-      <p><strong>M2 pass/fail</strong> includes: Meta-Harness runs without Liquid; Liquid integration is possible through the public API/protocol; Loop Agent integration uses Loop Agent public runtime surfaces; at least two agents are represented through one normalized session/event model; config resolution needs no duplicate per-agent config directories for the same capability; AgentPulse metrics are computed by Meta-Harness and queryable through CLI/API; sensitive config writes create review/audit records.</p>
+    <section id="m2" class="section"><h2>12. M2 implementation reference</h2><div class="body">
+      <p>See the canonical M2 scope and Definition of Done in <a href="../../PLAN.md">PLAN.md</a>; <a href="../decisions/open-decisions.html#d-023">D-023</a> selects the service/API bindings. This V-Spec defines the product and runtime shape without moving agent-process ownership across hosts.</p>
     </div></section>
 
     <section id="open" class="section"><h2>13. Open decisions</h2><div class="body">
-      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), deployment modes (<a href="../decisions/open-decisions.html#d-022">D-022</a>), service/API transport (<a href="../decisions/open-decisions.html#d-023">D-023</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>), Liquid integration boundary (<a href="../decisions/open-decisions.html#d-025">D-025</a>), AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). M2 is blocked by AgentPulse formulas and any unresolved adapter/config-resolution choices.</p>
+      <p>See <a href="../decisions/open-decisions.html">open-decisions.html</a>: product packaging (<a href="../decisions/open-decisions.html#d-021">D-021</a>), service/API transport (<a href="../decisions/open-decisions.html#d-023">D-023</a>), state storage (<a href="../decisions/open-decisions.html#d-024">D-024</a>) and AgentPulse formulas (<a href="../decisions/open-decisions.html#d-010">D-010</a>). Host-scoped execution and multi-instance projection ownership are decided, not open.</p>
     </div></section>
   </main>
 </div>

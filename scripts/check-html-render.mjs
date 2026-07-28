@@ -3,7 +3,6 @@ import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { inflateSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -44,9 +43,13 @@ function ensurePlaywrightChromium() {
     );
   }
 
+  const executablePath = chromium.executablePath();
+  if (existsSync(executablePath)) {
+    return;
+  }
+
   runPlaywrightCli(["exec", "playwright", "install", "chromium"], "Playwright browser install");
 
-  const executablePath = chromium.executablePath();
   if (!existsSync(executablePath)) {
     throw new Error(`Playwright browser install did not create ${executablePath}`);
   }
@@ -56,16 +59,41 @@ function normalizeText(value) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function stripTags(value) {
-  return value.replace(/<[^>]*>/g, "");
-}
+async function expectedHeading(page, html, relativePath) {
+  const text = await page.evaluate((source) => {
+    const parsed = new DOMParser().parseFromString(source, "text/html");
+    const heading = parsed.querySelector("h1");
+    if (!heading) {
+      return null;
+    }
 
-function expectedHeading(html, relativePath) {
-  const match = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
-  if (!match) {
+    const host = document.createElement("div");
+    host.style.position = "fixed";
+    host.style.left = "-10000px";
+    host.append(document.importNode(heading, true));
+    document.body.append(host);
+    const rendered = host.querySelector("h1").innerText;
+    host.remove();
+    return rendered;
+  }, html);
+  if (text === null) {
     throw new Error(`${relativePath}: missing h1 for render assertion`);
   }
-  return normalizeText(stripTags(match[1]));
+  return normalizeText(text);
+}
+
+async function assertHeadingExtraction(page) {
+  for (const [html, expected] of [
+    ["<h1>Plain heading</h1>", "Plain heading"],
+    ["<h1>R&amp;D</h1>", "R&D"],
+    ["<h1>Flow <span>Agent</span></h1>", "Flow Agent"],
+    ["<h1>Flow<br>Agent</h1>", "Flow Agent"],
+  ]) {
+    const actual = await expectedHeading(page, html, "heading extraction assertion");
+    if (actual !== expected) {
+      throw new Error(`heading extraction assertion: expected ${expected}, received ${actual}`);
+    }
+  }
 }
 
 async function docsToCheck() {
@@ -85,139 +113,56 @@ async function docsToCheck() {
       const html = await readFile(absolutePath, "utf8");
       return {
         absolutePath,
+        html,
         relativePath,
-        expectedText: expectedHeading(html, relativePath),
       };
     }),
   );
 }
 
-function parsePng(buffer) {
-  const signature = "89504e470d0a1a0a";
-  if (buffer.subarray(0, 8).toString("hex") !== signature) {
-    throw new Error("screenshot is not a PNG");
-  }
-
-  let offset = 8;
-  let width;
-  let height;
-  let bitDepth;
-  let colorType;
-  const idat = [];
-
-  while (offset < buffer.length) {
-    const length = buffer.readUInt32BE(offset);
-    const type = buffer.subarray(offset + 4, offset + 8).toString("ascii");
-    const data = buffer.subarray(offset + 8, offset + 8 + length);
-
-    if (type === "IHDR") {
-      width = data.readUInt32BE(0);
-      height = data.readUInt32BE(4);
-      bitDepth = data[8];
-      colorType = data[9];
-    } else if (type === "IDAT") {
-      idat.push(data);
-    } else if (type === "IEND") {
-      break;
+async function assertVisibleLayout(page, expectedText, viewport, label) {
+  const layout = await page.evaluate(({ expectedText, viewport }) => {
+    const body = document.body;
+    const heading = document.querySelector("h1");
+    if (!body || !heading) {
+      return null;
     }
 
-    offset += length + 12;
+    const visibleInViewport = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const cssVisible =
+        typeof element.checkVisibility === "function"
+          ? element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+          : style.display !== "none" && style.visibility === "visible" && Number(style.opacity) > 0;
+      return (
+        cssVisible &&
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < viewport.width &&
+        rect.top < viewport.height
+      );
+    };
+
+    return {
+      bodyVisible: visibleInViewport(body),
+      headingText: heading.innerText.replace(/\s+/g, " ").trim(),
+      headingVisible: visibleInViewport(heading),
+      expectedText,
+    };
+  }, { expectedText, viewport });
+
+  if (!layout) {
+    throw new Error(`${label}: missing body or h1`);
   }
-
-  if (!width || !height || bitDepth !== 8) {
-    throw new Error("unsupported PNG screenshot format");
+  if (!layout.bodyVisible || !layout.headingVisible) {
+    throw new Error(`${label}: body or h1 is not visibly laid out in the viewport`);
   }
-
-  const bytesPerPixelByColorType = new Map([
-    [0, 1],
-    [2, 3],
-    [4, 2],
-    [6, 4],
-  ]);
-  const bytesPerPixel = bytesPerPixelByColorType.get(colorType);
-  if (!bytesPerPixel) {
-    throw new Error(`unsupported PNG color type ${colorType}`);
+  if (layout.headingText !== layout.expectedText) {
+    throw new Error(`${label}: rendered h1 does not match "${layout.expectedText}"`);
   }
-
-  return {
-    bytesPerPixel,
-    data: inflateSync(Buffer.concat(idat)),
-    height,
-    width,
-  };
-}
-
-function unfilterPng({ bytesPerPixel, data, height, width }) {
-  const stride = width * bytesPerPixel;
-  const rows = Buffer.alloc(stride * height);
-  let sourceOffset = 0;
-
-  for (let y = 0; y < height; y += 1) {
-    const filter = data[sourceOffset];
-    sourceOffset += 1;
-    const rowOffset = y * stride;
-    const previousRowOffset = rowOffset - stride;
-
-    for (let x = 0; x < stride; x += 1) {
-      const raw = data[sourceOffset + x];
-      const left = x >= bytesPerPixel ? rows[rowOffset + x - bytesPerPixel] : 0;
-      const up = y > 0 ? rows[previousRowOffset + x] : 0;
-      const upLeft = y > 0 && x >= bytesPerPixel ? rows[previousRowOffset + x - bytesPerPixel] : 0;
-
-      if (filter === 0) {
-        rows[rowOffset + x] = raw;
-      } else if (filter === 1) {
-        rows[rowOffset + x] = (raw + left) & 0xff;
-      } else if (filter === 2) {
-        rows[rowOffset + x] = (raw + up) & 0xff;
-      } else if (filter === 3) {
-        rows[rowOffset + x] = (raw + Math.floor((left + up) / 2)) & 0xff;
-      } else if (filter === 4) {
-        const predictor = paethPredictor(left, up, upLeft);
-        rows[rowOffset + x] = (raw + predictor) & 0xff;
-      } else {
-        throw new Error(`unsupported PNG filter ${filter}`);
-      }
-    }
-
-    sourceOffset += stride;
-  }
-
-  return rows;
-}
-
-function paethPredictor(left, up, upLeft) {
-  const estimate = left + up - upLeft;
-  const leftDistance = Math.abs(estimate - left);
-  const upDistance = Math.abs(estimate - up);
-  const upLeftDistance = Math.abs(estimate - upLeft);
-
-  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) {
-    return left;
-  }
-  if (upDistance <= upLeftDistance) {
-    return up;
-  }
-  return upLeft;
-}
-
-function assertScreenshotNotBlank(screenshot, label) {
-  const png = parsePng(screenshot);
-  const pixels = unfilterPng(png);
-  const stride = png.width * png.bytesPerPixel;
-  const firstPixel = pixels.subarray(0, png.bytesPerPixel);
-  const sampleStep = Math.max(1, Math.floor((png.width * png.height) / 2000));
-
-  for (let index = 1; index < png.width * png.height; index += sampleStep) {
-    const offset = Math.floor(index / png.width) * stride + (index % png.width) * png.bytesPerPixel;
-    for (let channel = 0; channel < Math.min(3, png.bytesPerPixel); channel += 1) {
-      if (Math.abs(pixels[offset + channel] - firstPixel[channel]) > 2) {
-        return;
-      }
-    }
-  }
-
-  throw new Error(`${label}: screenshot appears blank`);
 }
 
 async function checkDocument(browser, doc, viewport) {
@@ -239,13 +184,13 @@ async function checkDocument(browser, doc, viewport) {
   try {
     await page.goto(pathToFileURL(doc.absolutePath).href, { waitUntil: "load" });
 
+    const expectedText = await expectedHeading(page, doc.html, doc.relativePath);
     const renderedText = normalizeText(await page.locator("body").innerText());
-    if (!renderedText.includes(doc.expectedText)) {
-      throw new Error(`${label}: missing expected text "${doc.expectedText}"`);
+    if (!renderedText.includes(expectedText)) {
+      throw new Error(`${label}: missing expected text "${expectedText}"`);
     }
 
-    const screenshot = await page.screenshot({ fullPage: false, type: "png" });
-    assertScreenshotNotBlank(screenshot, label);
+    await assertVisibleLayout(page, expectedText, viewport, label);
 
     if (consoleErrors.length > 0) {
       throw new Error(`${label}: console errors: ${consoleErrors.join("; ")}`);
@@ -265,6 +210,10 @@ async function main() {
   const browser = await chromium.launch();
 
   try {
+    const assertionPage = await browser.newPage();
+    await assertHeadingExtraction(assertionPage);
+    await assertionPage.close();
+
     for (const doc of docs) {
       for (const viewport of viewports) {
         await checkDocument(browser, doc, viewport);

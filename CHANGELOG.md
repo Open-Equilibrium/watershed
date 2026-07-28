@@ -3,30 +3,25 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [SemVer](https://semver.org/) once releases exist.
 
 ## [Unreleased]
+
 ### Added
-- Governance and spec set: README, VISION, PLAN, PROTOCOL, SECURITY, TESTING, PERFORMANCE, GLOSSARY, AGENTS, V-Spec concept files, open-decisions dashboard, ADR log (ADR-0001…ADR-0051).
-- OSS hygiene: Code of Conduct, issue/PR templates, security reporting policy.
-- Local project harness and closeout helpers, with canonical behavior in `AGENTS.md`, `package.json` and ADR-0023…ADR-0027.
-- M0 validation gates made mandatory; see `TESTING.md`, `SECURITY.md` and ADR-0021.
-- Test-coverage gate: ≥95% line coverage via `cargo llvm-cov`, enforced from M1 (ADR-0022).
-- Git branching model (ADR-0025/ADR-0046/ADR-0047/ADR-0048): protected `main` with topic branches off `main`; PR work uses `gh`; topic branches must not track `origin/main`; commit metadata amendments are limited to unpublished commits.
-- ADR-0028: Loop Agent build strategy & external-agent reuse — orchestration built in-house, non-differentiating plumbing reused via general-purpose crates, Codex CLI integrated as a Meta-Harness adapter (with Claude Code/Pi Agent), not as a Loop Agent base/fork; recorded as D-042.
-- `PROTOCOL.md` no-co-location contract rule (keeps the local-only MVP transport from foreclosing later remote topologies).
-- ADR-0038…ADR-0040: deployment topology, Loop Agent cloud/session durability and Liquid generative-UI scope decisions; D-034 enriched with the script-runtime trade-off triangle.
-- M0 protocol, fixture, policy-artifact and Rust workspace scaffold; canonical contracts live in `PROTOCOL.md`, `TESTING.md`, `SECURITY.md` and ADR-0029…ADR-0051.
+
+- Product, protocol, security, testing and contributor documentation with OSS governance templates.
+- Rust workspace and Flow Agent M1: standalone CLI, canonical events, script registry, deterministic fixtures, local session logs and policy artifacts.
+- M1.1 practical execution and M1.2 OS isolation stages with explicit deliverables and definitions of done.
+- Contributor harness and mandatory cross-platform CI gates; canonical commands and policy live in `TESTING.md` and `.github/workflows/ci.yml`.
 
 ### Changed
-- Local harness topology and closeout flow aligned with `AGENTS.md` and ADR-0023…ADR-0027.
-- Dependency hygiene, formatting, linting, test and docs gates aligned with `TESTING.md`, `SECURITY.md` and ADR-0021.
-- License identifier pinned to SPDX `AGPL-3.0-only`; contributions are DCO-only (no CLA, ADR-0015).
-- Liquid performance targets rewritten as tiered, falsifiable budgets (ADR-0014).
-- CLI binary names fixed: `loop`, `meta`, `liq` (ADR-0013).
-- Platform framing, wedge order, layer positioning and license posture recorded as ADR-0016…ADR-0019; D-036…D-041 closed.
-- Naming confirmed and recorded as ADR-0020 (repo `Open-Equilibrium/watershed`, crates.io/pub.dev free); D-003 closed.
-- Loop Agent determinism framing sharpened (VISION + Loop Agent V-Spec): deterministic orchestration over a non-deterministic generator — bounded, reproducible, measurable, governable; determinism of process, not output.
-- Liquid positioning clarified (absorb the long tail of personal/internal apps in a sovereign, reversible workspace; not "most apps obsolete"); audience-convergence note added to PLAN.
-- Drift fixes: Liquid V-Spec performance numbers realigned to the ADR-0014 tiered budgets; ADR range in this changelog corrected to ADR-0001…ADR-0051.
-- M0 documentation packet updated after ADR-0029…ADR-0037: initial M0 blockers cleared, `PROTOCOL.md` reconciled to the v0 event names/envelope, `SECURITY.md` aligned to the D-013 sandbox depth, and `TESTING.md` made canonical for the D-015 suite.
-- Global Flow Agent/Flow terminology renamed to Loop Agent/Loop across docs, paths, CLI examples and runtime field names (ADR-0044).
-- D-012 canonical serialization clarified as deterministic UTF-8 JSON of the schema-validated, registry-resolved building-block model.
-- Decision docs cleaned up: `open-decisions.html` now lists live milestone-relevant decisions only, and `ADR-LOG.md` is a compact accepted-decision index with a 100-entry hygiene limit.
+
+- Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback (ADR-0077).
+- Dev/CI uses exact Node 24.18.0 LTS and pnpm 11.15.1 pins without adding a product Node runtime (ADR-0080).
+- Protocol v0 applies one exclusive JSON container-recursion limit of 128 across wire, constructed-event and canonical-JSON boundaries (ADR-0089).
+- Agent and skill harness files use one exact authoritative `AGENTS.md` directive instead of natural-language interpretation (ADR-0090).
+- The M1 runtime satisfies the architecture-hardening entry criteria in `PLAN.md`; M1.1 provider and general subprocess work must preserve those boundaries (ADR-0079).
+- M1 provider context fixed as deterministic, cache-stable `flow-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved (ADR-0058).
+- M1 local events use serial authoritative append before a capacity-one, caller-owned, non-blocking high-watermark notification; receivers replay by sequence and the core owns no arbitrary output transport (ADR-0059, ADR-0062).
+- M1 is the Flow Agent deterministic runtime foundation: fixture-bounded execution and in-process policy emulation are explicit; real providers and tools belong to M1.1, and OS isolation belongs to M1.2 (ADR-0075, ADR-0076).
+- The complete unreleased execution domain uses Flow Agent, Flow, Subflow, `flow.*`, `flow_id`, `flow-context-v0`, `flow-agent*`, `flow-agent-cli`, `flow` and `.flow`, without legacy aliases or migration (ADR-0074).
+- Canonical registry serialization is deterministic UTF-8 JSON of the validated, resolved building-block model.
+- CI actions are pinned, Windows is included, and timing-sensitive performance tests run optimized outside coverage.
+- Licensing is `AGPL-3.0-only`; contributions use DCO without a CLA.

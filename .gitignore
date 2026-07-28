@@ -1,12 +1,10 @@
 # Build artifacts (Rust / Cargo workspace). Cargo.lock is intentionally tracked.
-/target/
 **/target/
 
-# Loop Agent runtime state & logs (see docs/concept/V-Spec_LoopAgent.html, SECURITY.md)
-.loop/sessions/
-.loop/logs/
-.flow/
-
+# Flow Agent runtime state & logs (see docs/concept/V-Spec_FlowAgent.html, SECURITY.md)
+**/.flow/sessions/
+**/.flow/logs/
+flow-agent/fixtures/**/out/
 # Node is dev tooling only (clawpatch via package.json); the product has no Node runtime (ADR-0001)
 node_modules/
 .pnpm-store/
@@ -20,7 +18,10 @@ node_modules/
 # Python bytecode (e.g. .codex/hooks/ scripts)
 __pycache__/
 *.pyc
+pytest-cache-files-*/
 .codex-logs/
+.tmp/
+.tmp-git-objects/
 
 # OS cruft
 .DS_Store
@@ -30,3 +31,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Generated local assets
+output/

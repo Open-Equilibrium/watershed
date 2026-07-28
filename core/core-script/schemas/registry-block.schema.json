@@ -2,18 +2,18 @@
   "$id": "https://open-equilibrium.org/watershed/schemas/script/v0/registry-block.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "M0 contract schema for one Watershed registry block file. M1 implements strict YAML 1.2 parsing before validating this model.",
+  "description": "M0 contract schema for one Watershed registry block file. M1 parses strict YAML 1.2 and validates an equivalent typed model; this schema documents the intended shape.",
   "oneOf": [
     { "required": ["tool"] },
     { "required": ["instruction"] },
     { "required": ["phase"] },
     { "required": ["connection"] },
-    { "required": ["loop"] }
+    { "required": ["flow"] }
   ],
   "properties": {
     "connection": { "$ref": "#/$defs/connection" },
     "instruction": { "$ref": "#/$defs/instruction" },
-    "loop": { "$ref": "#/$defs/loop" },
+    "flow": { "$ref": "#/$defs/flow" },
     "phase": { "$ref": "#/$defs/phase" },
     "tool": { "$ref": "#/$defs/tool" }
   },
@@ -26,7 +26,16 @@
             "properties": { "value_type": { "const": "string" } },
             "required": ["value_type"]
           },
-          "then": { "required": ["value_pattern", "max_length"] }
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            },
+            "required": ["value_pattern", "max_length"]
+          }
         },
         {
           "if": {
@@ -37,10 +46,65 @@
             "properties": {
               "allowed_values": { "items": { "type": "string" }, "minItems": 1, "type": "array" }
             },
+            "not": {
+              "anyOf": [
+                { "required": ["value_pattern"] },
+                { "required": ["max_length"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            },
             "required": ["allowed_values"]
           },
           "else": {
             "not": { "required": ["allowed_values"] }
+          }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "integer" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["value_pattern"] },
+                { "required": ["max_length"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "none" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["value_pattern"] },
+                { "required": ["max_length"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "value_type": { "const": "workspace-relative-path" } },
+            "required": ["value_type"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["allowed_values"] },
+                { "required": ["min"] },
+                { "required": ["max"] }
+              ]
+            }
           }
         }
       ],
@@ -57,8 +121,12 @@
       "required": ["name", "value_type", "required"],
       "type": "object"
     },
-    "block_id": { "pattern": "^[a-z0-9_-]{1,128}$", "type": "string" },
-    "block_name": { "minLength": 1, "type": "string" },
+    "block_id": {
+      "not": { "pattern": "^(con|prn|aux|nul|com[1-9]|lpt[1-9])$" },
+      "pattern": "^[a-z0-9_-]{1,128}$",
+      "type": "string"
+    },
+    "block_name": { "maxLength": 256, "minLength": 1, "type": "string" },
     "cidr_allow": {
       "additionalProperties": false,
       "properties": {
@@ -93,7 +161,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
-        "prompt": { "minLength": 1, "type": "string" }
+        "prompt": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "minLength": 1, "type": "string" }
       },
       "required": ["id", "name", "prompt"],
       "type": "object"
@@ -106,14 +174,14 @@
       "pattern": "^((([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,7}:)|(([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2})|(([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3})|(([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4})|(([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5})|([0-9A-Fa-f]{1,4}:)((:[0-9A-Fa-f]{1,4}){1,6})|(:((:[0-9A-Fa-f]{1,4}){1,7}|:)))/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$",
       "type": "string"
     },
-    "loop": {
+    "flow": {
       "additionalProperties": false,
       "properties": {
         "connection_refs": { "items": { "type": "string" }, "type": "array" },
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
         "phase_refs": { "items": { "type": "string" }, "minItems": 1, "type": "array" },
-        "subloop_refs": { "items": { "type": "string" }, "type": "array" }
+        "subflow_refs": { "items": { "type": "string" }, "type": "array" }
       },
       "required": ["id", "name", "phase_refs"],
       "type": "object"
@@ -190,7 +258,7 @@
           "then": {
             "properties": {
               "command": { "$ref": "#/$defs/own_script_command" },
-              "script_body": { "minLength": 1, "type": "string" },
+              "script_body": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "minLength": 1, "type": "string" },
               "script_runtime": { "const": "posix-sh" }
             },
             "required": ["script_runtime", "script_body"]
@@ -210,7 +278,7 @@
         "network": { "$ref": "#/$defs/network" },
         "protected_path_grants": { "items": { "type": "string" }, "type": "array" },
         "read_scope": { "items": { "type": "string" }, "type": "array" },
-        "script_body": { "type": "string" },
+        "script_body": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "type": "string" },
         "script_runtime": { "const": "posix-sh" },
         "tool_kind": { "enum": ["predefined-command", "own-script"] },
         "write_scope": { "items": { "type": "string" }, "type": "array" }

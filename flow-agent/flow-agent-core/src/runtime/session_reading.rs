@@ -1,0 +1,439 @@
+use crate::runtime::{
+    config_io::path_io_error,
+    event_construction::RuntimeStreamSignatureBuilder,
+    fs_guards::{
+        AnchoredFile, AnchoredWorkspace, ensure_anchored_real_file, open_anchored_file_for_read,
+        open_anchored_runtime_dir, open_runtime_dir, read_anchored_file_with_limit,
+        read_segmented_jsonl, retry_event_segment_discovery, segmented_jsonl_files,
+        segmented_jsonl_path,
+    },
+    planning::EVENT_PLAN_DOMAIN,
+    session_authority::SessionOwnershipObserver,
+    session_bundle::{SessionBundlePaths, session_ids},
+    types::{
+        EVENT_STREAM_LIMITS, EmitMode, LOCAL_SESSION_DIR, MAX_SESSION_EVENT_BYTES,
+        MAX_SESSION_SEGMENT_BYTES, RunOutput, RuntimeError, human_session_status,
+    },
+    validate::{SessionAppendValidationState, stream_is_failed, validate_session_log_text},
+};
+use proto::EventEnvelope;
+use std::{
+    fs,
+    io::{self, Read, Seek, SeekFrom},
+    path::Path,
+};
+
+/// Lists valid persisted session ids in canonical order.
+pub fn list_sessions(workspace: impl AsRef<Path>) -> Result<Vec<String>, RuntimeError> {
+    let workspace = workspace.as_ref();
+    let Some(dir) = open_runtime_dir(workspace, "sessions")? else {
+        return Ok(Vec::new());
+    };
+    session_ids(&dir)
+}
+
+/// Resumes a non-terminal persisted session after validating registry drift.
+pub fn read_existing_session(
+    workspace: &Path,
+    session_id: &str,
+    emit: EmitMode,
+) -> Result<RunOutput, RuntimeError> {
+    if !proto::is_valid_session_id(session_id) {
+        return Err(RuntimeError::Usage(format!(
+            "invalid session_id {session_id:?}"
+        )));
+    }
+    let sessions = open_runtime_dir(workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+        path: workspace.join(LOCAL_SESSION_DIR),
+        source: io::Error::from(io::ErrorKind::NotFound),
+    })?;
+    let file = SessionBundlePaths::events_in(&sessions, session_id);
+    let path = file.diagnostic_path().to_owned();
+    let stream =
+        retry_event_segment_discovery(|| read_segmented_jsonl(&file, EVENT_STREAM_LIMITS))?;
+    let events = validate_session_log_text(&path, session_id, &stream)?;
+    Ok(RunOutput {
+        event_count: events.len(),
+        failed: stream_is_failed(&events),
+        session_id: session_id.to_owned(),
+        session_path: path,
+        stdout: match emit {
+            EmitMode::Jsonl => stream,
+            EmitMode::Human => human_session_status(session_id, "replayed", &events),
+        },
+    })
+}
+
+/// Validated, append-only reader for one authoritative session log.
+///
+/// Each read is bounded by the per-segment and per-session event-data limits. The reader
+/// tolerates an incomplete final JSONL line while session ownership is active, rejects
+/// mutation of an already observed event, and leaves cursor advancement to the caller.
+pub struct SessionEventReader {
+    pub(crate) observed_current_segment_bytes: u64,
+    pub(crate) observed_segment_count: usize,
+    pub(crate) observed_signature: RuntimeStreamSignatureBuilder,
+    pub(crate) ownership: SessionOwnershipObserver,
+    pub(crate) path: AnchoredFile,
+    pub(crate) validation: SessionAppendValidationState,
+}
+
+impl SessionEventReader {
+    /// Opens a session's validated log boundary without reading event payloads yet.
+    pub fn open(workspace: impl AsRef<Path>, session_id: &str) -> Result<Self, RuntimeError> {
+        let workspace = workspace.as_ref();
+        if !proto::is_valid_session_id(session_id) {
+            return Err(RuntimeError::Usage(format!(
+                "invalid session_id {session_id:?}"
+            )));
+        }
+        let workspace_path =
+            fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
+        let workspace = AnchoredWorkspace::open(&workspace_path)?;
+        let ownership = SessionOwnershipObserver::open_anchored(&workspace, session_id)?;
+        let sessions =
+            open_anchored_runtime_dir(&workspace, "sessions")?.ok_or_else(|| RuntimeError::Io {
+                path: workspace_path.join(LOCAL_SESSION_DIR),
+                source: io::Error::from(io::ErrorKind::NotFound),
+            })?;
+        let path = SessionBundlePaths::events_in(&sessions, session_id);
+        ensure_anchored_real_file(&path)?;
+        Ok(Self {
+            observed_current_segment_bytes: 0,
+            observed_segment_count: 0,
+            observed_signature: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
+            ownership,
+            path,
+            validation: SessionAppendValidationState::empty(session_id),
+        })
+    }
+
+    /// Reads every complete committed event whose sequence is greater than `cursor`.
+    ///
+    /// The caller must advance `cursor` only after successfully processing each returned
+    /// event. Repeating this call is safe after a processing failure.
+    pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
+        let mut retried_inactive_partial = false;
+        loop {
+            let segments = retry_event_segment_discovery(|| {
+                segmented_jsonl_files(&self.path, EVENT_STREAM_LIMITS)
+            })?;
+            let mut bytes = Vec::new();
+            let mut final_complete_bytes = 0u64;
+            for (index, segment) in segments.iter().enumerate() {
+                let segment_bytes =
+                    read_anchored_file_with_limit(segment, MAX_SESSION_SEGMENT_BYTES)?;
+                if index + 1 != segments.len()
+                    && (segment_bytes.is_empty()
+                        || complete_jsonl_prefix_len(&segment_bytes) != segment_bytes.len())
+                {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} non-final segment must end with LF",
+                        segment.diagnostic_path().display()
+                    )));
+                }
+                if index + 1 == segments.len() {
+                    final_complete_bytes = u64::try_from(complete_jsonl_prefix_len(&segment_bytes))
+                        .unwrap_or(u64::MAX);
+                }
+                if u64::try_from(bytes.len().saturating_add(segment_bytes.len()))
+                    .unwrap_or(u64::MAX)
+                    > MAX_SESSION_EVENT_BYTES
+                {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} session event data exceeds max {MAX_SESSION_EVENT_BYTES}",
+                        self.path.diagnostic_path().display()
+                    )));
+                }
+                bytes.extend_from_slice(&segment_bytes);
+            }
+            let complete_len = complete_jsonl_prefix_len(&bytes);
+            let has_partial_line = complete_len != bytes.len();
+            let ownership_inactive =
+                (has_partial_line || bytes.is_empty()) && !self.session_ownership_active()?;
+            let inactive_partial = has_partial_line && ownership_inactive;
+            let inactive_empty = bytes.is_empty() && ownership_inactive;
+            if (inactive_partial || inactive_empty) && !retried_inactive_partial {
+                retried_inactive_partial = true;
+                continue;
+            }
+            let complete = &bytes[..complete_len];
+            let prefix_len =
+                jsonl_record_prefix_len(complete, self.observed_signature.record_count);
+            if prefix_len.is_none_or(|prefix_len| {
+                stream_signature(&complete[..prefix_len]).signature()
+                    != self.observed_signature.signature()
+            }) {
+                return Err(self.changed_outside_append_only());
+            }
+            let complete_text = std::str::from_utf8(complete).map_err(|source| {
+                RuntimeError::Protocol(format!(
+                    "{} is not valid UTF-8: {source}",
+                    self.path.diagnostic_path().display()
+                ))
+            })?;
+            let session_id = self
+                .validation
+                .expected_session_id
+                .as_deref()
+                .expect("session readers always validate one session");
+            let mut validation = SessionAppendValidationState::empty(session_id);
+            let events =
+                validation.validate_appended(self.path.diagnostic_path(), complete_text)?;
+            if has_partial_line && validation.terminal_line.is_some() {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} contains a partial line after a terminal event",
+                    self.path.diagnostic_path().display()
+                )));
+            }
+            if inactive_partial {
+                return Err(self.inactive_partial());
+            }
+            if inactive_empty {
+                return Err(self.inactive_empty());
+            }
+            self.ensure_cursor(cursor, validation.previous_sequence)?;
+            self.observed_current_segment_bytes = final_complete_bytes;
+            self.observed_segment_count = segments.len();
+            self.observed_signature = stream_signature(complete);
+            self.validation = validation;
+            return Ok(events_after(events, cursor));
+        }
+    }
+
+    /// Reads only the newly appended complete suffix after an initial verified read.
+    ///
+    /// This is the efficient path for a receiver attached to the same live operation. Call
+    /// [`Self::read_after`] once after the producer closes to verify the complete authoritative
+    /// log before treating delivery as final.
+    pub fn read_incremental_after(
+        &mut self,
+        cursor: u64,
+    ) -> Result<Vec<EventEnvelope>, RuntimeError> {
+        self.read_incremental_after_with(cursor, &mut || {})
+    }
+
+    pub(crate) fn read_incremental_after_with(
+        &mut self,
+        cursor: u64,
+        after_read: &mut impl FnMut(),
+    ) -> Result<Vec<EventEnvelope>, RuntimeError> {
+        if self.validation.line_count == 0 || cursor < self.validation.previous_sequence {
+            return self.read_after(cursor);
+        }
+        let observed_event_bytes =
+            u64::try_from(self.observed_signature.byte_count).unwrap_or(u64::MAX);
+        let mut retried_inactive_partial = false;
+        loop {
+            let segments = self.incremental_segments()?;
+            if segments.len() < self.observed_segment_count || self.observed_segment_count == 0 {
+                return Err(self.changed_outside_append_only());
+            }
+            let mut suffix = Vec::new();
+            let mut final_complete_bytes = 0u64;
+            let prior_final_index = self.observed_segment_count - 1;
+            for (index, segment) in segments.iter().enumerate().skip(prior_final_index) {
+                let (mut file, metadata) = open_anchored_file_for_read(segment)?;
+                let offset = if index == prior_final_index {
+                    self.observed_current_segment_bytes
+                } else {
+                    0
+                };
+                if metadata.len() < offset {
+                    return Err(self.changed_outside_append_only());
+                }
+                file.seek(SeekFrom::Start(offset))
+                    .map_err(|source| path_io_error(segment.diagnostic_path(), source))?;
+                let remaining_limit = MAX_SESSION_SEGMENT_BYTES.saturating_sub(offset);
+                let start = suffix.len();
+                let remaining_event_bytes = MAX_SESSION_EVENT_BYTES
+                    .saturating_sub(observed_event_bytes)
+                    .saturating_sub(u64::try_from(start).unwrap_or(u64::MAX));
+                file.take(remaining_limit.min(remaining_event_bytes).saturating_add(1))
+                    .read_to_end(&mut suffix)
+                    .map_err(|source| path_io_error(segment.diagnostic_path(), source))?;
+                let segment_suffix = &suffix[start..];
+                let segment_complete_len = complete_jsonl_prefix_len(segment_suffix);
+                if u64::try_from(segment_suffix.len()).unwrap_or(u64::MAX) > remaining_limit {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} read size exceeds max {MAX_SESSION_SEGMENT_BYTES}",
+                        segment.diagnostic_path().display()
+                    )));
+                }
+                if observed_event_bytes
+                    .saturating_add(u64::try_from(suffix.len()).unwrap_or(u64::MAX))
+                    > MAX_SESSION_EVENT_BYTES
+                {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} session event data exceeds max {MAX_SESSION_EVENT_BYTES}",
+                        self.path.diagnostic_path().display()
+                    )));
+                }
+                if index + 1 != segments.len()
+                    && (metadata.len() == 0 || segment_complete_len != segment_suffix.len())
+                {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} non-final segment must end with LF",
+                        segment.diagnostic_path().display()
+                    )));
+                }
+                if index + 1 == segments.len() {
+                    final_complete_bytes = offset
+                        .saturating_add(u64::try_from(segment_complete_len).unwrap_or(u64::MAX));
+                }
+            }
+            after_read();
+            let complete_len = complete_jsonl_prefix_len(&suffix);
+            let has_partial_line = complete_len != suffix.len();
+            let inactive_partial = has_partial_line && !self.session_ownership_active()?;
+            if inactive_partial && !retried_inactive_partial {
+                retried_inactive_partial = true;
+                continue;
+            }
+            let appended_bytes = &suffix[..complete_len];
+            let appended_text = std::str::from_utf8(appended_bytes).map_err(|source| {
+                RuntimeError::Protocol(format!(
+                    "{} is not valid UTF-8: {source}",
+                    self.path.diagnostic_path().display()
+                ))
+            })?;
+            let appended = match self
+                .validation
+                .validate_appended(self.path.diagnostic_path(), appended_text)
+            {
+                Ok(appended) => appended,
+                Err(error) => {
+                    self.reset_validation();
+                    return Err(error);
+                }
+            };
+            if has_partial_line && self.validation.terminal_line.is_some() {
+                self.reset_validation();
+                return Err(RuntimeError::Protocol(format!(
+                    "{} contains a partial line after a terminal event",
+                    self.path.diagnostic_path().display()
+                )));
+            }
+            if inactive_partial {
+                self.reset_validation();
+                return Err(self.inactive_partial());
+            }
+            if let Err(error) = self.ensure_cursor(cursor, self.validation.previous_sequence) {
+                self.reset_validation();
+                return Err(error);
+            }
+            for record in appended_bytes.split_inclusive(|byte| *byte == b'\n') {
+                self.observed_signature.push(record);
+            }
+            self.observed_current_segment_bytes = final_complete_bytes;
+            self.observed_segment_count = segments.len();
+            return Ok(events_after(appended, cursor));
+        }
+    }
+
+    pub(crate) fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
+        let observed = u64::try_from(self.observed_segment_count).unwrap_or(u64::MAX);
+        let mut segments = Vec::new();
+        for ordinal in 1..=observed {
+            let segment = segmented_jsonl_path(&self.path, ordinal)?;
+            ensure_anchored_real_file(&segment)?;
+            segments.push(segment);
+        }
+        for ordinal in observed.saturating_add(1)..=EVENT_STREAM_LIMITS.max_segments {
+            let segment = segmented_jsonl_path(&self.path, ordinal)?;
+            match segment.metadata() {
+                Ok(_) => ensure_anchored_real_file(&segment)?,
+                Err(RuntimeError::Io { source, .. })
+                    if source.kind() == io::ErrorKind::NotFound =>
+                {
+                    break;
+                }
+                Err(error) => return Err(error),
+            }
+            segments.push(segment);
+        }
+        Ok(segments)
+    }
+
+    pub(crate) fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
+        self.ownership.is_active()
+    }
+
+    pub(crate) fn inactive_partial(&self) -> RuntimeError {
+        RuntimeError::Protocol(format!(
+            "{} contains an incomplete final JSONL line without active session ownership",
+            self.path.diagnostic_path().display()
+        ))
+    }
+
+    pub(crate) fn inactive_empty(&self) -> RuntimeError {
+        RuntimeError::Protocol(format!(
+            "{} is empty without active session ownership",
+            self.path.diagnostic_path().display()
+        ))
+    }
+
+    pub(crate) fn reset_validation(&mut self) {
+        let session_id = self
+            .validation
+            .expected_session_id
+            .as_deref()
+            .expect("session readers always validate one session")
+            .to_owned();
+        self.validation = SessionAppendValidationState::empty(&session_id);
+    }
+
+    pub(crate) fn ensure_cursor(
+        &self,
+        cursor: u64,
+        latest_sequence: u64,
+    ) -> Result<(), RuntimeError> {
+        if cursor <= latest_sequence {
+            return Ok(());
+        }
+        Err(RuntimeError::Protocol(format!(
+            "{} no longer contains processed sequence {cursor}",
+            self.path.diagnostic_path().display()
+        )))
+    }
+
+    pub(crate) fn changed_outside_append_only(&self) -> RuntimeError {
+        RuntimeError::Protocol(format!(
+            "{} changed outside append-only session semantics",
+            self.path.diagnostic_path().display()
+        ))
+    }
+}
+
+pub fn stream_signature(bytes: &[u8]) -> RuntimeStreamSignatureBuilder {
+    let mut signature = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
+    for record in bytes.split_inclusive(|byte| *byte == b'\n') {
+        signature.push(record);
+    }
+    signature
+}
+
+pub fn jsonl_record_prefix_len(bytes: &[u8], record_count: usize) -> Option<usize> {
+    if record_count == 0 {
+        return Some(0);
+    }
+    bytes
+        .iter()
+        .enumerate()
+        .filter(|(_, byte)| **byte == b'\n')
+        .nth(record_count - 1)
+        .map(|(index, _)| index + 1)
+}
+
+pub fn events_after(mut events: Vec<EventEnvelope>, cursor: u64) -> Vec<EventEnvelope> {
+    let first = events.partition_point(|event| event.sequence <= cursor);
+    events.drain(..first);
+    events
+}
+
+pub fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |newline_index| newline_index + 1)
+}

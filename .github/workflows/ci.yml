@@ -1,59 +1,104 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "docs/**"
+      - "test/**"
+      - "ci/**"
+      - "chore/**"
+      - "refactor/**"
 
 permissions:
   contents: read
 
 jobs:
-  m0:
-    name: M0 gates (${{ matrix.os }})
+  m1:
+    name: M1 gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .node-version
+
+      - name: Check Node version
+        shell: pwsh
+        run: |
+          if ((node --version) -ne 'v24.18.0') {
+            throw "Node 24.18.0 must be active for CI gates"
+          }
 
       - name: Validate Codex harness
-        run: python -m unittest discover -s tests -p "test_*.py"
+        run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
 
       - name: Install Rust
         run: >-
-          rustup toolchain install 1.81.0
+          rustup toolchain install 1.97.1
           --profile minimal
           --component clippy
           --component rustfmt
           --component llvm-tools-preview
 
-      - name: Install Rust gate tools
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest,cargo-llvm-cov,cargo-audit,cargo-deny
+      - name: Select pinned Rust
+        shell: pwsh
+        run: |
+          rustup override set 1.97.1
+          if ((rustc --version) -notmatch '^rustc 1\.97\.1 ') {
+            throw "Rust 1.97.1 must be active for CI gates"
+          }
 
-      - name: Install lychee
-        uses: taiki-e/install-action@v2
+      - name: Install gate tools
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
         with:
-          tool: lychee
+          tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        shell: pwsh
+        run: cargo fmt --all --check
 
       - name: Check lints
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo nextest run --locked --workspace --all-targets
+        run: >-
+          cargo nextest run
+          --locked
+          --workspace
+          --all-targets
 
-      - name: Run coverage harness
-        run: cargo llvm-cov nextest --locked --workspace --no-report
+      - name: Run optimized performance tests
+        if: matrix.os == 'ubuntu-24.04'
+        run: >-
+          cargo nextest run
+          --locked
+          -p flow-agent-core
+          --release
+          --run-ignored ignored-only
+          -j 1
+
+      - name: Check line coverage
+        run: >-
+          cargo llvm-cov nextest
+          --locked
+          --workspace
+          --fail-under-lines 90
+          --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)'
+          --show-missing-lines
 
       - name: Check RustSec advisories
         run: cargo audit
@@ -62,35 +107,25 @@ jobs:
         run: cargo deny check
 
       - name: Enable Corepack
-        run: corepack enable
+        shell: pwsh
+        run: |
+          corepack enable
+          if ((pnpm --version) -ne '11.15.1') {
+            throw "pnpm 11.15.1 must be active for CI gates"
+          }
 
       - name: Install Node dev tools
         run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Chromium dependencies
-        if: runner.os == 'Linux'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Install Playwright Chromium
-        if: runner.os != 'Linux'
-        run: pnpm exec playwright install chromium
 
       - name: Render HTML docs
         run: pnpm run docs:render-check
 
       - name: Check documentation links
-        run: >-
-          lychee
-          --no-progress
-          --include-fragments
-          README.md
-          PLAN.md
-          VISION.md
-          PROTOCOL.md
-          SECURITY.md
-          TESTING.md
-          PERFORMANCE.md
-          GLOSSARY.md
-          CONTRIBUTING.md
-          CHANGELOG.md
-          docs/**/*.html
+        shell: pwsh
+        run: |
+          $docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+          $docs = @($docsJson | ConvertFrom-Json)
+          lychee --no-progress --include-fragments -- @docs

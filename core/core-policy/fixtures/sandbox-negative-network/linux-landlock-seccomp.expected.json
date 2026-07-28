@@ -1,1 +1,0 @@
-{"attempt":{"destination":"example.com","kind":"network","port":443,"tool_id":"negative-tool","transport":"tcp"},"expected":"deny","fixture_name":"sandbox-negative-network","reason_code":"network_denied","side_effects_allowed":false,"target":"linux-landlock-seccomp"}

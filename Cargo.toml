@@ -2,25 +2,31 @@
 members = [
     "core/core-policy",
     "core/core-script",
-    "loop-agent/loop-agent-cli",
-    "loop-agent/loop-agent-core",
+    "flow-agent/flow-agent-cli",
+    "flow-agent/flow-agent-core",
     "proto/proto",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 version = "0.0.0"
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.97"
 license = "AGPL-3.0-only"
 repository = "https://github.com/Open-Equilibrium/watershed"
 publish = false
 
 [workspace.dependencies]
+cap-fs-ext = { version = "=4.0.2", default-features = false, features = ["std"] }
+cap-std = { version = "=4.0.2", default-features = false }
 core-policy = { path = "core/core-policy", version = "0.0.0" }
 core-script = { path = "core/core-script", version = "0.0.0" }
-loop-agent-core = { path = "loop-agent/loop-agent-core", version = "0.0.0" }
+flow-agent-core = { path = "flow-agent/flow-agent-core", version = "0.0.0" }
+noyalib = { version = "=0.0.15", default-features = false, features = ["std"] }
 proto = { path = "proto/proto", version = "0.0.0" }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-unicode-normalization = "0.1.24"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_ignored = "0.1"
+serde_json = "1.0.150"
+sha2 = { version = "0.11.0", default-features = false }
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
+unicode-normalization = "0.1.25"

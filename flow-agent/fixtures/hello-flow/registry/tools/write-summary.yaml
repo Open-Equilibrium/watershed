@@ -1,0 +1,13 @@
+tool:
+  id: write-summary
+  name: WriteSummary
+  tool_kind: own-script
+  command: script:write-summary
+  script_runtime: posix-sh
+  script_body: |
+    printf '%s\n' "$SUMMARY" > out/summary.txt
+  allowed_parameters: []
+  read_scope: ["workspace"]
+  write_scope: ["workspace/out"]
+  protected_path_grants: []
+  network: deny

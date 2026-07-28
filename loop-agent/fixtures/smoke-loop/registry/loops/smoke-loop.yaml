@@ -1,6 +1,0 @@
-loop:
-  id: smoke-loop
-  name: SmokeLoop
-  phase_refs: [smoke]
-  subloop_refs: []
-  connection_refs: []

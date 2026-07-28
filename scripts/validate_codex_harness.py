@@ -24,6 +24,7 @@ CONFIG_ROOT_KEYS = {
     "tool_output_token_limit",
     "web_search",
 }
+CANONICAL_RULES_DIRECTIVE = "Obey AGENTS.md."
 CONFIG_TABLE_KEYS = {
     "agents": {"max_depth", "max_threads"},
     "features": {
@@ -46,12 +47,22 @@ EXPECTED_CONFIG_VALUES = {
 }
 
 REQUIRED_AGENT_FILES = {
-    "autoreview.toml": "autoreview_runner",
-    "clawpatch.toml": "clawpatch_runner",
-    "doc-sync.toml": "doc_sync",
-    "docs-scout.toml": "docs_scout",
-    "pr-validator.toml": "pr_validator",
-    "repo-mapper.toml": "repo_mapper",
+    "autoreview_lite.toml": "autoreview_lite",
+    "autoreview_pro.toml": "autoreview_pro",
+    "clawpatch_lite.toml": "clawpatch_lite",
+    "clawpatch_pro.toml": "clawpatch_pro",
+    "doc_sync.toml": "doc_sync",
+    "docs_scout.toml": "docs_scout",
+    "repo_mapper.toml": "repo_mapper",
+}
+EXPECTED_AGENT_SANDBOXES = {
+    "autoreview_lite": "workspace-write",
+    "autoreview_pro": "workspace-write",
+    "clawpatch_lite": "workspace-write",
+    "clawpatch_pro": "workspace-write",
+    "doc_sync": "read-only",
+    "docs_scout": "read-only",
+    "repo_mapper": "read-only",
 }
 AGENT_KEYS = {
     "description",
@@ -63,9 +74,21 @@ AGENT_KEYS = {
     "sandbox_mode",
 }
 
-REQUIRED_SKILLS = {"autoreview", "clawpatch", "git", "tdd"}
+REQUIRED_SKILLS = {"autoreview", "clawpatch", "git"}
+RETIRED_SKILLS = {"tdd"}
 SKILL_FRONT_MATTER_KEYS = {"description", "name"}
-PYTHON_HOOK_RE = re.compile(r"""["']?(\.codex[/\\]hooks[/\\][^"'\s]+\.py)["']?""")
+HOOK_SCRIPT_PATH_PATTERN = (
+    r"\.codex/hooks/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.py"
+)
+HOOK_COMMAND_RE = re.compile(
+    rf'^node (?:"scripts/run-python\.mjs"|scripts/run-python\.mjs) '
+    rf'(?:"(?P<quoted_script>{HOOK_SCRIPT_PATH_PATTERN})"|'
+    rf'(?P<script>{HOOK_SCRIPT_PATH_PATTERN}))$'
+)
+HOOK_SCRIPT_BY_EVENT = {
+    "PreToolUse": ".codex/hooks/pre_tool_use_guard.py",
+    "Stop": ".codex/hooks/stop_closeout_check.py",
+}
 
 
 def validate_repo(root: Path) -> list[str]:
@@ -97,9 +120,17 @@ def validate_config(root: Path) -> list[str]:
     for key, expected in EXPECTED_CONFIG_VALUES.items():
         if config.get(key) != expected:
             errors.append(f"{rel}: {key} must be {expected!r}")
-    if config.get("sandbox_workspace_write", {}).get("network_access") is not False:
-        errors.append(f"{rel}: sandbox_workspace_write.network_access must be false")
-    features = config.get("features", {})
+    sandbox_workspace_write = config.get("sandbox_workspace_write")
+    network_access = (
+        sandbox_workspace_write.get("network_access")
+        if isinstance(sandbox_workspace_write, dict)
+        else None
+    )
+    if network_access is not True:
+        errors.append(f"{rel}: sandbox_workspace_write.network_access must be true")
+    features = config.get("features")
+    if not isinstance(features, dict):
+        features = {}
     if features.get("hooks") is not True:
         errors.append(f"{rel}: features.hooks must be true")
     if features.get("multi_agent") is not True:
@@ -113,12 +144,16 @@ def validate_hooks(root: Path) -> list[str]:
     path = root / ".codex" / "hooks.json"
     rel = ".codex/hooks.json"
     errors: list[str] = []
+    text = read_utf8(path, rel, errors)
+    if text is None:
+        return errors
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return [f"{rel}: missing file"]
+        data = json.loads(text)
     except json.JSONDecodeError as err:
         return [f"{rel}: invalid JSON: {err.msg}"]
+
+    if not isinstance(data, dict):
+        return [f"{rel}: root must be an object"]
 
     errors.extend(unknown_keys(rel, data, {"hooks"}, "root key"))
     hooks = data.get("hooks")
@@ -178,17 +213,31 @@ def validate_hook_command(
     command = hook.get("command")
     if not isinstance(command, str) or not command:
         return errors + [f"{prefix}.command must be a non-empty string"]
+    if re.search(r"(?:^|\s)(?:bash|sh)\s+-c(?:\s|$)", command):
+        errors.append(f"{rel}: hook command must not require a POSIX shell")
     timeout = hook.get("timeout")
-    if not isinstance(timeout, int) or timeout <= 0:
+    if type(timeout) is not int or timeout <= 0:
         errors.append(f"{prefix}.timeout must be a positive integer")
 
-    match = PYTHON_HOOK_RE.search(command)
+    match = HOOK_COMMAND_RE.fullmatch(command)
     if match is None:
-        errors.append(f"{rel}: hook command must reference a .codex/hooks/*.py script")
+        errors.append(f"{rel}: hook command must use the approved Node launcher form")
         return errors
 
-    script = match.group(1).replace("\\", "/")
-    if not (root / script).is_file():
+    script = match.group("quoted_script") or match.group("script")
+    expected_script = HOOK_SCRIPT_BY_EVENT[event]
+    if script != expected_script:
+        errors.append(f"{prefix}.command must run {expected_script}")
+    resolved_root = root.resolve()
+    script_path = (root / script).resolve()
+    hooks_dir = (root / ".codex" / "hooks").resolve()
+    if not hooks_dir.is_relative_to(resolved_root) or not script_path.is_relative_to(
+        resolved_root
+    ):
+        errors.append(f"{rel}: hook command script must stay within repository")
+    elif not script_path.is_relative_to(hooks_dir):
+        errors.append(f"{rel}: hook command script must be below .codex/hooks")
+    elif not script_path.is_file():
         errors.append(f"{rel}: hook command references missing script {script}")
     return errors
 
@@ -213,28 +262,28 @@ def validate_agents(root: Path) -> list[str]:
         expected_name = REQUIRED_AGENT_FILES.get(path.name, path.stem.replace("-", "_"))
         if agent.get("name") != expected_name:
             errors.append(f"{rel}: name must be {expected_name!r}")
+        expected_sandbox = EXPECTED_AGENT_SANDBOXES.get(expected_name)
+        if expected_sandbox is not None and agent.get("sandbox_mode") != expected_sandbox:
+            errors.append(f"{rel}: sandbox_mode must be {expected_sandbox!r}")
         nicknames = agent.get("nickname_candidates")
-        if not isinstance(nicknames, list) or not nicknames:
-            errors.append(f"{rel}: nickname_candidates must be non-empty")
+        if nicknames is not None and (
+            not isinstance(nicknames, list)
+            or not nicknames
+            or not all(isinstance(nickname, str) and nickname for nickname in nicknames)
+        ):
+            errors.append(f"{rel}: nickname_candidates must be a non-empty string list")
         instructions = agent.get("developer_instructions")
-        if not isinstance(instructions, str) or "AGENTS.md" not in instructions:
-            errors.append(f"{rel}: developer_instructions must reference AGENTS.md")
-        if agent.get("name") == "docs_scout" and "docs/adr/ADR-LOG.md" not in instructions:
+        if not isinstance(instructions, str) or not begins_with_rules_directive(
+            instructions
+        ):
+            errors.append(
+                f"{rel}: developer_instructions must begin with the standalone line "
+                f"'{CANONICAL_RULES_DIRECTIVE}'"
+            )
+        elif agent.get("name") == "docs_scout" and "docs/adr/ADR-LOG.md" not in instructions:
             errors.append(f"{rel}: docs_scout must reference docs/adr/ADR-LOG.md")
-        if agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
+        elif agent.get("name") == "doc_sync" and "docs/decisions/open-decisions.html" not in instructions:
             errors.append(f"{rel}: doc_sync must reference docs/decisions/open-decisions.html")
-        if agent.get("name") == "pr_validator":
-            for token in (
-                "cargo fmt",
-                "cargo clippy",
-                "cargo nextest",
-                "cargo llvm-cov",
-                "cargo audit",
-                "cargo deny",
-                "lychee",
-            ):
-                if token not in instructions:
-                    errors.append(f"{rel}: pr_validator must include {token}")
     return errors
 
 
@@ -244,16 +293,21 @@ def validate_skills(root: Path) -> list[str]:
     if not skill_dir.is_dir():
         return [".agents/skills: missing directory"]
 
-    found_skills = {path.name for path in skill_dir.iterdir() if path.is_dir()}
+    found_skill_dirs = {path.name for path in skill_dir.iterdir() if path.is_dir()}
+    found_skills = {path.parent.name for path in skill_dir.glob("*/SKILL.md")}
     for name in sorted(REQUIRED_SKILLS - found_skills):
         errors.append(f".agents/skills/{name}/SKILL.md: missing required skill")
+    for name in sorted(RETIRED_SKILLS & found_skill_dirs):
+        errors.append(f".agents/skills/{name}/SKILL.md: retired skill must be absent")
 
     for path in sorted(skill_dir.glob("*/SKILL.md")):
         rel = f".agents/skills/{path.parent.name}/SKILL.md"
-        text = path.read_text(encoding="utf-8")
+        text = read_utf8(path, rel, errors)
+        if text is None:
+            continue
         metadata = parse_skill_front_matter(text)
         if metadata is None:
-            errors.append(f"{rel}: missing front matter")
+            errors.append(f"{rel}: missing or invalid front matter")
             continue
         errors.extend(unknown_keys(rel, metadata, SKILL_FRONT_MATTER_KEYS, "front matter key"))
         expected_name = path.parent.name
@@ -261,9 +315,24 @@ def validate_skills(root: Path) -> list[str]:
             errors.append(f"{rel}: name must be {expected_name!r}")
         if not metadata.get("description"):
             errors.append(f"{rel}: description is required")
-        if not references_canonical_rules(text):
-            errors.append(f"{rel}: must reference AGENTS.md or canonical repo rules")
+        if not skill_body_begins_with_rules_directive(text):
+            errors.append(
+                f"{rel}: body must begin with the standalone line "
+                f"'{CANONICAL_RULES_DIRECTIVE}'"
+            )
     return errors
+
+
+def read_utf8(path: Path, rel: str, errors: list[str]) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        errors.append(f"{rel}: missing file")
+    except UnicodeError:
+        errors.append(f"{rel}: file must be valid UTF-8")
+    except OSError:
+        errors.append(f"{rel}: file could not be read")
+    return None
 
 
 def read_toml(path: Path, rel: str, errors: list[str]) -> dict[str, Any] | None:
@@ -273,31 +342,85 @@ def read_toml(path: Path, rel: str, errors: list[str]) -> dict[str, Any] | None:
     except FileNotFoundError:
         errors.append(f"{rel}: missing file")
         return None
+    except UnicodeError:
+        errors.append(f"{rel}: file must be valid UTF-8")
+        return None
     except tomllib.TOMLDecodeError as err:
         errors.append(f"{rel}: invalid TOML: {err}")
+        return None
+    except OSError:
+        errors.append(f"{rel}: file could not be read")
         return None
     return data
 
 
 def parse_skill_front_matter(text: str) -> dict[str, str] | None:
-    if not text.startswith("---\n"):
-        return None
     lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return None
     metadata: dict[str, str] = {}
     for line in lines[1:]:
         if line == "---":
             return metadata
-        key, sep, value = line.partition(":")
-        if not sep:
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
-        metadata[key.strip()] = value.strip().strip('"')
+        key, sep, value = line.partition(":")
+        if not sep or not key.strip():
+            return None
+        key = key.strip()
+        if key in metadata:
+            return None
+        scalar = parse_front_matter_scalar(value)
+        if scalar is None:
+            return None
+        metadata[key] = scalar
     return None
 
 
-def references_canonical_rules(text: str) -> bool:
-    return "AGENTS.md" in text or all(
-        token in text for token in ("TESTING.md", "PERFORMANCE.md", "git skill")
-    )
+def parse_front_matter_scalar(source: str) -> str | None:
+    source = source.strip()
+    if not source or source.startswith("#"):
+        return None
+    if source[0] not in "'\"":
+        value = source.split(" #", 1)[0].rstrip()
+        return value or None
+
+    quote = source[0]
+    escaped = False
+    for index, character in enumerate(source[1:], start=1):
+        if quote == '"' and character == "\\" and not escaped:
+            escaped = True
+            continue
+        if character == quote and not escaped:
+            tail = source[index + 1 :].strip()
+            if tail and not tail.startswith("#"):
+                return None
+            value = source[1:index]
+            if quote == '"':
+                try:
+                    value = json.loads(source[: index + 1])
+                except json.JSONDecodeError:
+                    return None
+            return value or None
+        escaped = False
+    return None
+
+
+def begins_with_rules_directive(text: str) -> bool:
+    lines = text.splitlines()
+    return bool(lines) and lines[0] == CANONICAL_RULES_DIRECTIVE
+
+
+def skill_body_begins_with_rules_directive(text: str) -> bool:
+    lines = text.splitlines()
+    try:
+        front_matter_end = lines.index("---", 1)
+    except ValueError:
+        return False
+    return lines[front_matter_end + 1 : front_matter_end + 3] == [
+        "",
+        CANONICAL_RULES_DIRECTIVE,
+    ]
 
 
 def unknown_keys(

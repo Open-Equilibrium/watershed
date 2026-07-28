@@ -3,10 +3,10 @@
 commands; WARN on risky ones.
 
 Defense-in-depth ONLY. Codex PreToolUse currently intercepts just simple Bash
-calls and fails open (the model can bypass by writing a script and running it),
-This is a guardrail, NOT a security boundary — the real boundary is
-SECURITY.md's compiled OS sandbox. Aligns with SECURITY.md
-protected paths (.git, .loop, legacy .flow, secrets) and .gitignore. See ADR-0024.
+calls and fails open (the model can bypass by writing a script and running it).
+This is a guardrail, NOT a security boundary. M1's modeled policy enforcement
+and the post-M1 OS sandbox plan are defined in SECURITY.md. Aligns with its
+protected paths (.git, .flow, secrets) and .gitignore. See ADR-0024.
 """
 import json
 import re
@@ -16,8 +16,8 @@ import sys
 DENY = [
     (re.compile(r"\brm\s+(?:-\S+\s+)*(?:/|~|\*|\.)\s*$"),
      "Refusing rm targeting root / home / '*' / '.'."),
-    (re.compile(r"\brm\b[^|;&]*\.(?:git|loop|flow|clawpatch)\b"),
-     "Refusing to delete a protected path (.git / .loop / legacy .flow / .clawpatch)."),
+    (re.compile(r"\brm\b[^|;&]*\.(?:git|flow|clawpatch)\b"),
+     "Refusing to delete a protected path (.git / .flow / .clawpatch)."),
     (re.compile(r"(?:^|[\s;&|])>>?\s*\S*\.(?:git|env)\b"),
      "Refusing to redirect/overwrite into a protected path (.git / .env)."),
     (re.compile(r"\b(?:rm|mv|cp|truncate)\b[^|;&]*(?:\.env\b|\.local\b|secret|credential|\.pem\b|\.key\b)"),
@@ -42,8 +42,14 @@ def main() -> int:
     except Exception:
         return 0  # cannot parse -> fail open (guard is advisory only)
 
+    if not isinstance(data, dict):
+        return 0
     tool_input = data.get("tool_input") or {}
+    if not isinstance(tool_input, dict):
+        return 0
     cmd = tool_input.get("command") or tool_input.get("cmd") or ""
+    if not isinstance(cmd, str):
+        return 0
 
     for rx, reason in DENY:
         if rx.search(cmd):

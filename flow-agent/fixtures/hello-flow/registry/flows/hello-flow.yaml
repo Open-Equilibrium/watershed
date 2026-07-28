@@ -1,0 +1,6 @@
+flow:
+  id: hello-flow
+  name: HelloFlow
+  phase_refs: [inspect, summarize]
+  subflow_refs: [hello-subflow, hello-subflow]
+  connection_refs: [inspect-data, inspect-trigger, summary-refresh]

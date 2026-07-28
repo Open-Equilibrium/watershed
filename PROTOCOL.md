@@ -2,23 +2,36 @@
 
 The protocol is the **integration seam** between the tools (editor + LSP model). Tools are protocol clients, not compiled-in modules. This file is the canonical contract; build tools against it, not against each other's internals. ADR-0029 selects local JSON-RPC over stdio for designed control/RPC surfaces, but M1's implemented runtime stream is bare JSONL events. The envelope is transport-agnostic and all cross-tool state is addressed by IDs.
 
-Loop Agent is a **standalone product**, and its event stream is a public runtime contract in its own right (CLI JSONL mode, future RPC mode and local session log all carry these events — see [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html)). Meta-Harness and Liquid consume that contract; they are not required to run Loop Agent.
+Flow Agent is a **standalone host-local product**, and its event stream is a public runtime contract in its own right (CLI JSONL mode, future RPC mode and local session log all carry these events — see [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html)). A Meta-Harness on the same host consumes that contract; neither Meta-Harness nor Liquid is required to run Flow Agent.
 
 ## Participants
 
-- **Loop Agent** — emits execution events; accepts local loop commands. Standalone; its event stream is public.
-- **Meta-Harness** — self-contained headless control plane: consumes events from N agents through adapters; issues control/config commands; emits metrics. Exposes its own CLI/API/service surface for Liquid and BYOA (transport: D-023; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)).
-- **Liquid** — standalone workspace product; consumes events/metrics for rendering and issues user-originated commands. Liquid also exposes its **own** workspace CLI/API surface so external agents/tools read and edit workspace data; those mutations go through Liquid's permissioned pipeline and are recorded in its action history (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Loop Agent and Meta-Harness must use that surface; they do not mutate Liquid storage internals.
+- **Flow Agent** — standalone CLI that emits execution events and accepts commands on its current host; its event stream is public.
+- **Meta-Harness** — self-contained, host-scoped headless control plane: consumes events from CLI agents on its own host through adapters; issues control/config commands; emits metrics; and exposes a local-or-remote CLI/API/service surface for Liquid and BYOA (transport: D-023; see [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html)). It never controls another host's processes.
+- **Liquid** — standalone local-first workspace product. Each interactive or headless instance reads and mutates a local replica, exchanges committed Workspace changes through the central Sync Server, and may present projections from one or more Meta-Harness instances. Every projection retains its instance identity, freshness and authority. Liquid exposes its **own** Workspace CLI/API so external agents and integrations use typed actions through its Role, permission and History pipeline (see [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html), D-027). Flow Agent and Meta-Harness do not mutate Liquid storage internals.
+- **Sync Server** — central star-topology service for resumable Workspace change exchange. It neither runs Liquid Apps nor routes Meta-Harness commands.
 - **Adapters** — translate external agents (Codex CLI, Claude Code, Pi Agent, etc.) into the same contract.
+
+## Topology and ownership invariants
+
+- Agent-process ownership is host-local: a Meta-Harness may start, stop and observe only CLI processes on its own host.
+- API reachability is independent of execution locality: Liquid or BYOA may call a Meta-Harness from another device when authenticated transport exists.
+- Liquid routes every live command to the Meta-Harness instance that owns the addressed session or configuration. A merged projection never creates cross-instance authority.
+- Liquid replicas connect to the Sync Server, never directly to one another. The normal replication unit is an authorized Workspace, not a hand-selected set of Blocks.
+- User devices normally sync each authorized Workspace in full. A headless Liquid replica requires explicit workspace-level opt-in before it receives that Workspace.
+- The Sync Server and headless Liquid replica are separate logical participants even when one deployment co-locates them.
+- Workspace sync and live agent control are separate planes. Sync exchanges Liquid Actions/state; it does not tunnel Meta-Harness commands or imply that cached agent state is controllable offline.
+- Loss of sync connectivity does not change a Liquid replica's working store: local reads and mutations continue, while resumable exchange waits for connectivity.
+- Agents use Liquid through the Workspace CLI/API and effective Roles. No visibility, View placement, Connection or Meta-Harness reachability grants implicit Workspace authority.
 
 ## MVP boundary
 
-Protocol v0 is designed for the Loop Agent CLI MVP and later Meta-Harness integration. It does **not** require a Watershed project-history/VCS engine. Host Git/project events may appear as artifacts when the host tool provides them, but protocol correctness must not depend on Watershed owning version control.
+Protocol v0 is designed for the Flow Agent CLI MVP and later Meta-Harness integration. It does **not** require a Watershed project-history/VCS engine. Host Git/project events may appear as artifacts when the host tool provides them, but protocol correctness must not depend on Watershed owning version control.
 
 ## Runtime event families (v0 scope)
 
 - **Session lifecycle:** `session.started | session.paused | session.resumed | session.completed | session.failed`.
-- **Loop/activity:** `loop.started | loop.completed | loop.failed | phase.entered | step.started | step.completed`.
+- **Flow/activity:** `flow.started | flow.completed | flow.failed | phase.entered | step.started | step.completed`.
 - **Transcript:** `message.delta | message.completed` (near-real-time transcript sync; deltas are first-class).
 - **Tool/runtime:** `tool.started | tool.progress | tool.completed | tool.failed | tool.timed_out`.
 - **Artifacts:** `artifact.logged` (logs, summaries, handoff packs, checkpoints, host-provided diffs).
@@ -26,13 +39,23 @@ Protocol v0 is designed for the Loop Agent CLI MVP and later Meta-Harness integr
 - **Metrics:** `metric.sample` (AgentPulse).
 - **Errors:** `error` (generic runtime/protocol error event).
 
-Runtime events use the v0 Loop Agent short-form name set decided in ADR-0036. `message.delta` and `tool.progress` stay first-class for near-real-time consumers. Do not maintain a second event naming convention.
+Runtime events use the v0 Flow Agent short-form name set decided in ADR-0036. `message.delta` and `tool.progress` stay first-class for near-real-time consumers. Do not maintain a second event naming convention.
 
-Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029), but method names, parameters and error mapping remain D-019. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
+M1 Flow Agent emits the families exercised by the explicit fixture profile and runtime error paths. `session.paused`, `tool.timed_out`, `artifact.logged`, `attention.requested` and `metric.sample` are v0-designed names for later emitters and are not emitted by the M1 runtime.
+
+### v0 lifecycle ordering
+
+- `session.started` is the first event. `session.completed` or `session.failed` is last and requires every started flow, step, tool and message to be terminal.
+- A flow-scoped event follows its unique `flow.started` and precedes that flow's `flow.completed` or `flow.failed`. A subflow's `parent_flow_id` identifies its unchanged, active parent.
+- `phase.entered` requires no active step and selects that flow's current phase. Each `step.started` belongs to the current phase; a flow has at most one active step, closed by the matching `step.completed`.
+- `tool.started` belongs to the active step. Its progress and terminal event use the same flow, phase, step and tool identity. A pre-phase `tool.failed` may omit `tool.started` to record a failure during preflight; after `phase.entered`, it may not.
+- `message.delta` belongs to the active step and starts a message identity; further deltas and the matching `message.completed` retain its role. Completed lifecycle identities cannot be reused.
+
+Command/request messages are not runtime event types. The future RPC/control surface uses JSON-RPC over stdio for local transport (ADR-0029); ADR-0055 selects the initial method set as `flow.start`, `flow.status`, `flow.cancel`, `flow.tail` and `flow.export`. Resulting runtime events may use `correlation_id` to link back to a request, and must still address state by IDs.
 
 ## Required v0 event-envelope fields
 
-The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/sessions/<session_id>.jsonl` store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads.
+The v0 wire format is one UTF-8 JSON object per event. JSONL mode and the session's ordered event segments store one event object per line; future RPC event delivery carries the same object in JSON-RPC payloads. Protocol v0 has an exclusive JSON container-recursion limit of 128 across the complete event object: the envelope root counts, a path containing at most 127 arrays or objects is accepted, and entering the 128th is rejected before recursive processing. Constructed payloads, additive fields, ordinary and canonical event serialization, and the public canonical-JSON helper enforce the same boundary; for the helper, the supplied value is the root.
 
 | Field | Type / rule |
 | --- | --- |
@@ -40,28 +63,63 @@ The v0 wire format is one UTF-8 JSON object per event. JSONL mode and `.loop/ses
 | `event_id` | non-empty opaque string, unique within the session |
 | `event_type` | one of the v0 runtime event names above |
 | `session_id` | path-safe v0 token; opaque to consumers |
-| `loop_id` | optional runtime loop invocation id when loop-scoped; unique within the session |
-| `parent_loop_id` | optional parent runtime loop invocation id for subloop events |
-| `sequence` | unsigned integer, starts at 1 and strictly increases per `session_id` |
-| `timestamp` | RFC 3339 UTC timestamp string |
-| `source` | non-empty opaque string identifying the emitter, e.g. `loop-agent-cli` |
+| `flow_id` | optional runtime flow invocation id when flow-scoped; unique within the session |
+| `parent_flow_id` | optional parent runtime flow invocation id for subflow events |
+| `sequence` | unsigned integer, starts at 1 and increases by exactly 1 per `session_id` |
+| `timestamp` | canonical RFC 3339 UTC form ending in literal `Z`; numeric zero offsets are not accepted |
+| `source` | non-empty opaque string identifying the emitter, e.g. `flow-agent-cli` |
 | `payload` | JSON object; event-specific fields below |
 | `correlation_id` | optional non-empty opaque string linking request/result events |
 
-## v0 ID safety and loop identity
+Consumers retain unknown top-level fields so additive v0 extensions survive replay and forwarding unchanged.
 
-- `session_id` is a token, not a path. V0 session IDs match `^[a-z0-9_-]{1,128}$`; lowercase-only IDs avoid filename aliasing on case-insensitive targets. Producers reject externally supplied values outside that grammar before reading or writing `.loop/sessions/<session_id>.jsonl`. Reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..` and empty strings before filesystem access. If a future protocol accepts broader external session IDs, it must specify a canonical filename encoding instead of joining raw IDs into paths.
-- `loop_id` is a runtime invocation id, not the registry/definition id. The root loop and every subloop invocation get distinct `loop_id` values within the session. Reusing one subloop definition twice therefore emits two different `loop_id` values, each with `parent_loop_id` equal to the containing runtime loop invocation id.
-- Loop definition identity travels in payload fields, not in `loop_id`. `loop.*` events carry `loop_definition_id`; `loop_name` is optional display metadata.
+M1 Flow Agent derives timestamps from its event clock: `timestamp = base + (sequence - 1) seconds`. Fixture workspaces use a fixed base for byte-stable golden streams; non-fixture workspaces use a wall-clock base captured once at session start rather than sampling wall time per event.
+
+## v0 ID safety and flow identity
+
+- `session_id` is a token, not a path. V0 session IDs match `^[a-z0-9_-]{1,128}$` except Windows DOS device basenames (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`); lowercase-only IDs avoid filename aliasing on case-insensitive targets. Producers reject externally supplied values outside that grammar before reading or writing a session bundle. Reject path separators (`/`, `\`), drive prefixes, absolute paths, percent-encoded separators, `.`, `..` and empty strings before filesystem access. If a future protocol accepts broader external session IDs, it must specify a canonical filename encoding instead of joining raw IDs into paths.
+- `flow_id` is a runtime invocation id, not the registry/definition id. The root flow and every subflow invocation get distinct `flow_id` values within the session. Reusing one subflow definition twice therefore emits two different `flow_id` values, each with `parent_flow_id` equal to the containing runtime flow invocation id.
+- Flow definition identity travels in payload fields, not in `flow_id`. `flow.*` events carry `flow_definition_id`; `flow_name` is optional display metadata.
+
+## M1 local session storage
+
+The ordered append-only event segments are authoritative for replay and catch-up. The first is `.flow/sessions/<session_id>.jsonl`; later segments are `<session_id>.<six-digit-ordinal>.jsonl`, beginning at `000002`. Rotation occurs before an event would exceed the canonical uncompressed-byte per-segment limit; one event is never split, sequence and all [session safety limits](PERFORMANCE.md#adr-0068-safety-envelope) continue unchanged, and prior segments become immutable. Context manifests use `.flow/logs/<session_id>.contexts.jsonl` and the same rotation and ordinal rules; one manifest record is never split. Both directories use the Workspace access model and provide no cross-account confidentiality or tamper boundary; the separate ownership coordinator remains private.
+
+Context manifests reference the exact canonical source bytes through `session-object:sha256:<digest>`. Flow Agent stores those session-owned immutable objects once per digest, accounts existing objects again on resume and verifies availability and content before use. Complete inventory enforces the object-count limit in `PERFORMANCE.md` before opening or retaining an excess matching entry. Larger future artifacts must be chunked; no reference needed to validate or reconstruct recorded canonical history and provider context may point only to mutable or externally owned storage. Export and deletion operate on the complete bundle. The bundle preserves canonical history but cannot reproduce an external provider, tool, compatible registry for continuation, mutable environment or undeclared side effect. Local paths, locks, recovery and replay/resume behavior are defined in the [Flow Agent V-Spec](docs/concept/V-Spec_FlowAgent.html#surfaces); other tools consume public surfaces, never this store directly.
+
+Run, replay, tail, resume, listing and quota checks share canonical session paths and namespace rules. Resume and complete quota/bundle validation use the full session-bundle inventory; listing validates only its listing contract and does not prove that a session is completely resumable. Public export, delete, prune, retention and storage/quota-status operations are M1.1 work and must consume the complete inventory rather than infer ownership from one filename.
+
+Each active M1 session holds one exclusive operating-system file lease in a private deterministic coordinator beside the canonical workspace, under its canonical parent and keyed by the canonical workspace path plus `session_id`. Stable native path bytes make this location independent of `TEMP`, `TMP` and `TMPDIR`; the canonical parent is the coordinator trust/access boundary, and inability to open the same coordinator fails before `.flow` creation. On Windows, coordinator directories use a protected current-user-only DACL and fail closed when creation or opened-handle verification cannot prove it. The persistent coordinator slot is the sole local ownership authority and is never deleted; closing or terminating the owner process releases the lease. `.flow/sessions/<session_id>.lock` is a persistent observable session marker, not authority: creating, deleting or replacing it cannot grant or revoke ownership. Run and Resume acquire the lease before session side effects, Tail uses it when deciding whether an incomplete final line can still be in flight, and controlled returns release it while preserving the marker. This finite invariant includes direct local mutation of the workspace. Direct mutation of the canonical workspace parent, tampering with the coordinator by the same OS identity and cross-host/durable ownership remain outside M1.
+
+Controlled rollback removes only an empty, unactivated reservation whose identity-bound deletion remains proven. It never follows a separate identity comparison with a path unlink: if that proof is unavailable, cleanup fails visibly and retains the empty artifacts as inventory-visible reservation orphans. Operation and cleanup failures remain visible together, and retries are bounded.
+
+## M1 local append and live delivery (ADR-0059, ADR-0062)
+
+Runtime execution constructs each typed event, assigns its stable `event_id` and next per-session `sequence`, and canonically serializes it once. One asynchronous serial writer then owns each session's append order. For every event or ordered micro-batch it:
+
+1. validates the constructed event against the active protocol version and expected session order;
+2. appends the canonical bytes to the session's append-only log and confirms the process-level write;
+3. updates the session's highest committed sequence and attempts a non-blocking live notification.
+
+Notification never overtakes persistence. A failed write notifies any complete event prefix only after removing an incomplete suffix, then stops the writer before later events can pass it. Failed cleanup reports no new readable prefix. If the failure prevents a terminal error event from being appended, the command returns the runtime/I/O failure status; successful cleanup leaves the prior log as a valid prefix.
+
+Each caller-owned subscription has one pending wake-up slot retaining its earliest committed `sequence` and shared state containing the highest committed `sequence`; notifications carry no event payload. The producer updates that high-watermark after append and uses a non-blocking send. A full slot coalesces the wake-up, and a closed receiver is ignored, so a slow or disconnected consumer cannot block a run or another session. The core owns no caller transport, output task or arbitrary blocking writer. The CLI owns stdout; future adapters own their socket or IPC transport.
+
+A receiver owns its last fully processed sequence cursor. It subscribes before replay, reads validated events where `sequence > cursor` from the authoritative log, advances the cursor only after processing each event, then drains/rechecks notifications until its cursor reaches the observed high-watermark before waiting again. The earliest pending sequence lets an operation-scoped projection exclude commits made before that operation without bypassing validation of the log. This closes the replay/live race: dropped and coalesced wake-ups lose no committed event. Session-log reads and notification state remain explicitly bounded. Network transports still must not claim exactly-once delivery.
+
+Consecutive `message.delta` and `tool.progress` events share a bounded ordered micro-batch for at most 25 ms; the complete batch is appended before its per-event notifications. A semantic or terminal event closes any pending batch immediately. Append and notification are event-driven; only replay/tail clients poll the authoritative store when no live subscription is available.
+
+Append-before-notification is distinct from machine/power-loss durability. A successful append means the ordered bytes have crossed Flow Agent's userspace buffering boundary into the local log; it does not mean one `fsync` per event. The writer flushes and synchronizes at `message.completed`, `tool.completed`, `tool.failed`, `tool.timed_out`, `session.paused`, `session.completed` and `session.failed`, and at least once per second while an active stream has unsynchronized events. High-frequency deltas may share these boundaries. Remote replication cadence, crash recovery on a new host and the durable ownership lease remain post-M1 under ADR-0039.
 
 Minimum v0 payload fields:
 
 All listed payload fields are strings unless noted otherwise; string arrays are JSON arrays of strings. `role` is `system | user | assistant | tool`, `value` is a JSON number, `exit_code` is an integer and `data` is a JSON object.
 
 - `session.*`: `reason` optional except failure events, where it is required.
-- `loop.*`: `loop_definition_id` required; `loop_name` optional; `error` required for `loop.failed`.
+- `flow.*`: `flow_definition_id` required; `flow_name` optional; `error` required for `flow.failed`.
 - `phase.entered`: `phase_id`, `phase_name`, `instruction_ids` and `tool_ids` (string arrays; empty when none).
 - `step.started | step.completed`: `step_id`, `step_name`, optional `phase_id`, optional `instruction_id`, optional `connection_ids` and `connection_kinds` (string arrays; `connection_kinds` values are `data | trigger | refresh`). If either connection array is present, both are present with the same length; index `i` in `connection_ids` pairs with index `i` in `connection_kinds`, in the owning Step block's `connection_refs` order after registry resolution. With no connections, omit both arrays or emit both as empty arrays.
+- `step.completed` closes the step lifecycle on success or failure; derive outcome from the tool, error, flow and session events.
 - `message.delta`: `message_id`, `role`, `content_delta`.
 - `message.completed`: `message_id`, `role`.
 - `tool.started`: `tool_id`, `tool_name`, `tool_kind` (`predefined-command | own-script`), `read_scope` and `write_scope` (string arrays), `allowed_parameters` (string array of allowed parameter names), `network_access` (`deny | declared`).
@@ -71,11 +129,17 @@ All listed payload fields are strings unless noted otherwise; string arrays are 
 - `artifact.logged`: `artifact_id`, `artifact_type`, `uri`.
 - `attention.requested`: `request_id`, `reason`.
 - `metric.sample`: `metric_name`, `value`.
-- `error`: `code`, `message`, optional `data`.
+- `error`: `code`, `message`, optional `data`. M1 uses `execution_backend_unavailable` when a non-fixture workspace requests productive provider/Tool execution that M1 does not implement; the failure occurs before those side effects and cannot be followed by successful Flow/session completion.
+
+## CLI exit status
+
+- `0`: command completed successfully.
+- `64`: command-line usage or input validation error.
+- `65`: runtime, registry, policy, protocol, session-state or I/O failure.
 
 ## Canonical event JSONL serialization (v0)
 
-D-015 golden streams and `.loop/sessions/<session_id>.jsonl` logs use the same canonical event JSONL bytes:
+ADR-0034 golden streams and `.flow/sessions/<session_id>.jsonl` logs use the same canonical event JSONL bytes:
 
 - UTF-8; one event object per line; LF line endings; final LF required.
 - No insignificant whitespace outside or inside JSON objects.
@@ -92,12 +156,12 @@ Byte-stable golden diffs compare these canonical bytes. Consumers may still pars
 - **Versioned & additive.** Breaking changes bump the protocol version; clients negotiate.
 - **Normalized events.** Adapters must map native agent events into the families above; do not leak native shapes.
 - **Artifact contract over runtime parity.** Agents differ in runtime semantics; they must agree only on this message contract.
-- **Deterministic ordering within a session.** A participant must emit monotonically increasing `sequence` values per session.
+- **Deterministic ordering within a session.** A participant must follow the event envelope's `sequence` rule per session.
 - **No exfiltration via protocol.** Events and future commands carrying writes are subject to the security policy in `SECURITY.md`.
-- **No co-location assumption.** A participant must not assume it shares a host, filesystem or process tree with another. All cross-tool state is addressed by `session_id`/`workspace_id` over the protocol; a tool never reads another tool's local store directly (e.g. Loop Agent's `.loop/sessions` is consumed via the event stream or tail/export surfaces, and RPC when implemented, never from disk by Meta-Harness or Liquid). This keeps the local-only M0 transport (D-002) from foreclosing later remote topologies (D-043/ADR-0038).
+- **No private-store or implicit co-location coupling.** A protocol client must not infer shared filesystem/process access from API reachability. All cross-tool state is addressed by IDs and public surfaces; a tool never reads another tool's local store directly. The only deliberate process co-location is a Meta-Harness executor owning CLI agents on the same host. Remote Liquid/Meta-Harness clients remain possible without remote agent-process ownership (ADR-0038).
 
-## M0 implementation packet required before coding
+## Implementation constraints
 
-The M0/M1 transport, runtime event-envelope fields and runtime event names are decided (ADR-0029, ADR-0036). The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Do not add `cmd.*` event names to close the still-open D-019 command/request shape.
+The `proto` v0 implementation must serialize these JSON event envelopes for JSONL output, local logs and future JSON-RPC event delivery without adding co-location assumptions. Control methods stay separate from runtime events; do not add `cmd.*` event names.
 
-D-044/ADR-0039 constrains later cloud/remote execution: durability is replication plus durable storage, with live Meta-Harness ingestion where attached and a persistent `.loop` append-only JSONL volume otherwise. Before that ships, define the flush/fsync cadence, resume-from-log on a new container, crash replay to the last good `sequence` and the session-ownership lease. M0 local session storage remains ADR-0037.
+Later server-host durability requires replication plus durable storage, with live ingestion by the Meta-Harness on that host and a persistent `.flow` append-only JSONL volume otherwise. Replication cadence, crash replay and any transfer of session ownership to a new host must be defined before such migration ships; a Meta-Harness must never silently control a CLI process on another host.

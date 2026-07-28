@@ -1,0 +1,6 @@
+flow:
+  id: sandbox-negative-environment
+  name: SandboxNegativeEnvironment
+  phase_refs: [negative-environment]
+  subflow_refs: []
+  connection_refs: []

@@ -1,28 +1,10 @@
 # Watershed
 
-Watershed is an **AGPL/free-software AI-native work platform** for reusable, measurable, and reversible agent workflows. It is one platform with **three independently usable layers**, implemented as a monorepo over a shared core and a single versioned protocol — not three unrelated products and not a monolith.
-
-| Platform layer   | Product surface | Standalone job                                                            | Integrated value                                                                  |
-| ---------------- | --------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Execution        | Loop Agent      | Run repeatable, auditable AI-agent workflows from the CLI.                | Emits structured loop events and transcripts for Meta-Harness/Liquid.             |
-| Control          | Meta-Harness    | Control, observe, measure, and govern many agents.                        | Normalizes sessions/config/metrics across Loop Agent and external agents.         |
-| Workspace/action | Liquid          | Let humans and agents safely co-edit a workspace with reversible history. | Gives users a visual workspace where agent actions are reviewable and revertible. |
+Watershed is an **AGPL/free-software AI-native work platform** for reusable, measurable, and reversible agent workflows. Its independently usable Flow Agent, Meta-Harness, and Liquid layers share one core and protocol; their canonical boundaries and integration model are in [VISION.md](VISION.md).
 
 ## Project status
 
-**M0 scaffold stage.** This repository contains the governance/spec packet plus the M0 Rust workspace scaffold, contract crates, deterministic fixture streams, policy artifact fixtures and CI gate wiring. Loop Agent runtime execution starts with M1; M0 is the implementation packet described in [PLAN.md](PLAN.md).
-
-Each layer has independent value; the combined platform is stronger than any single layer. The defensible idea is the **combination** of structured loops, agent control, measurable outcomes, and reversible agent-edited workspace state — built as transparent, self-hostable, AGPL-licensed infrastructure rather than a proprietary/open-core product.
-
-## Adoption wedges
-
-Watershed is built and adopted through its layers in order of risk, as one platform:
-
-- **Loop Agent — developer/open-source execution wedge.** Prove deterministic, reusable, evented agent loops and earn developer trust with a concrete artifact that can be run, inspected, forked, and shared.
-- **Meta-Harness — team/control/governance wedge.** Turn Loop Agent and external agents into an observable, measurable, governable system through open, self-hostable control.
-- **Liquid — long-term workspace/action wedge.** Prove safe human/agent workspace co-editing with attributed, reviewable, reversible action history.
-
-The layers integrate through public surfaces, but each remains independently usable. See [PLAN.md](PLAN.md) for the wedge sequencing and [VISION.md](VISION.md) for the integration model.
+**M1 — Flow Agent deterministic runtime foundation.** Implementation is complete on this branch, pending maintainer review and merge. M1 provides deterministic registry, planning, event, context, session and in-process policy-emulation contracts; practical provider/process execution and OS isolation are separate M1.1 and M1.2 stages in [PLAN.md](PLAN.md).
 
 ## Repo layout
 
@@ -30,39 +12,50 @@ The layers integrate through public surfaces, but each remains independently usa
 core/         core-script (building-block model/parser) and core-policy
               (capability model + policy→sandbox compiler)
 proto/        proto: event schema and serialization (the integration seam)
-loop-agent/   loop-agent-core (engine/runtime/session) and loop-agent-cli
+flow-agent/   flow-agent-core (engine/runtime/session) and flow-agent-cli
               (human CLI, machine-readable run mode, tail/replay/resume)
-meta-harness/ control + analytics service
-liquid/       the UI surface that composes everything
+meta-harness/ host-scoped headless control plane for local CLI agents
+liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions
 ```
 
-## Loop Agent is a standalone product
+## Build and run Flow Agent
 
-Loop Agent is a **standalone CLI agent product first**, with Pi-style runtime integration surfaces: a human CLI, a headless JSONL event stream, designed-for remote-control/embeddable seams, and its own local session/transcript store. Meta-Harness and Liquid integrate with Loop Agent through its public runtime surfaces; **they are not required to run Loop Agent.** See [`docs/concept/V-Spec_LoopAgent.html`](docs/concept/V-Spec_LoopAgent.html) for the surfaces and [`PROTOCOL.md`](PROTOCOL.md) for the event contract.
+From the repo root:
 
-## Meta-Harness is a self-contained control plane
+```console
+cargo build --locked --workspace
+cargo nextest run --locked --workspace --all-targets
+```
 
-Meta-Harness is a **self-contained headless control plane** for many agents. It can be used directly through CLI/API/service mode — CI, servers, power users and external (BYOA) agents drive it headlessly — and **can run without Liquid**. Liquid is the _primary rich UI_ that consumes it, not a prerequisite; Meta-Harness does not ship a competing full GUI in the MVP. It owns the session registry, adapter model, central config resolution, scheduling/automations, artifact indexing and the AgentPulse engine; Liquid renders these. See [`docs/concept/V-Spec_MetaHarness.html`](docs/concept/V-Spec_MetaHarness.html).
+Run the checked-in smoke fixture from its workspace directory. Its explicit fixture profile selects deterministic stubs; this does not call a provider or execute a general external process:
 
-## Liquid is a standalone workspace product
+```console
+cd flow-agent/fixtures/smoke-flow
+cargo run -p flow-agent-cli -- run smoke-flow --emit jsonl
+cargo run -p flow-agent-cli -- replay smoke-flow --emit jsonl
+cargo run -p flow-agent-cli -- tail smoke-flow --emit jsonl --no-follow
+cargo run -p flow-agent-cli -- sessions
+```
 
-Liquid is a **standalone native workspace and app-building product**. Users compose dashboards, views, components, scripts, data sources and automations into custom workflows across desktop and mobile, with local workspace storage, an internal **workspace action history / VCS** and a **workspace CLI/API** that lets external agents and tools read and edit workspace data through a permissioned, fully-recorded mutation pipeline. **Liquid remains useful with neither Loop Agent nor Meta-Harness installed;** they integrate as _optional_ runtime/control-plane providers. Liquid's workspace action history is a workspace VCS over Liquid's own data — **not** a project-code VCS. See [`docs/concept/V-Spec_Liquid.html`](docs/concept/V-Spec_Liquid.html).
+Workspace layout and registry fields are defined in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html); checked-in examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/).
 
-## MVP scope
+M1 cannot productively call an LLM/provider, run arbitrary external Tools or scripts, guarantee OS isolation, allow network destinations, or export/delete/prune sessions. A normal workspace fails closed instead of reporting fixture execution as success.
 
-Loop Agent's MVP runs as a CLI inside normal Git projects. Watershed does **not** include a dedicated **project-code** VCS/history engine in the MVP, and Loop Agent does not own VCS behavior. Loop Agent's local session/transcript store is runtime state, not a project VCS/history engine. Those questions are deferred until after the Loop Agent and Meta-Harness MVPs prove the core workflow. (This is separate from Liquid's internal workspace action history, which is part of Liquid's product scope.)
+## Product boundaries
+
+Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN.md). Surface details live in the [Flow Agent](docs/concept/V-Spec_FlowAgent.html), [Meta-Harness](docs/concept/V-Spec_MetaHarness.html), and [Liquid](docs/concept/V-Spec_Liquid.html) V-Specs; events are defined in [PROTOCOL.md](PROTOCOL.md).
 
 ## Start here
 
 - **Why & how it fits together:** [VISION.md](VISION.md)
 - **Build plan & milestones:** [PLAN.md](PLAN.md)
 - **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
-- **Open decisions (human dashboard):** `docs/decisions/open-decisions.html`
+- **Open decisions (human decision page):** `docs/decisions/open-decisions.html`
 - **Terminology:** [GLOSSARY.md](GLOSSARY.md)
 
 ## License
 
-Watershed is free software, licensed under the GNU Affero General Public License, version 3 (SPDX-License-Identifier: `AGPL-3.0-only`). The full license text is in [LICENSE](LICENSE). The project's posture is transparency, self-hostability and user freedom; there are no proprietary tiers or open-core commercialization claims in these docs.
+Watershed-authored files are free software, licensed under the GNU Affero General Public License, version 3 (SPDX-License-Identifier: `AGPL-3.0-only`) unless otherwise stated. The full license text is in [LICENSE](LICENSE). Vendored third-party material retains its own license and is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The project's posture is transparency, self-hostability and user freedom; there are no proprietary tiers or open-core commercialization claims in these docs.
 
 Copyright (C) 2026 Open-Equilibrium. Project owner: **Open-Equilibrium**. Contributions are accepted under the **Developer Certificate of Origin** (DCO); no CLA is required. See [CONTRIBUTING.md](CONTRIBUTING.md).

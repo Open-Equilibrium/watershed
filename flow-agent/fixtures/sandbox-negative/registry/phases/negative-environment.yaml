@@ -1,0 +1,8 @@
+phase:
+  id: negative-environment
+  name: NegativeEnvironment
+  instruction_refs: [deny-attempt]
+  tool_refs: [environment-tool]
+  steps:
+    - id: attempt
+      name: Attempt

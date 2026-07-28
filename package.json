@@ -1,16 +1,20 @@
 {
   "name": "watershed-dev-tools",
   "private": true,
-  "packageManager": "pnpm@11.7.0",
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "11.15.1"
+  },
   "description": "Dev-only tooling manifest. Not part of the product: Watershed ships no Node runtime (ADR-0001). clawpatch is the PR-readiness review gate (see .agents/skills/clawpatch).",
   "license": "AGPL-3.0-only",
   "scripts": {
-    "codex-harness:test": "python -m unittest discover -s tests -p \"test_*.py\"",
-    "codex-harness:validate": "python scripts/validate_codex_harness.py",
+    "codex-harness:test": "node scripts/run-python.mjs -m unittest discover -s tests -p \"test_*.py\"",
+    "codex-harness:validate": "node scripts/run-python.mjs scripts/validate_codex_harness.py",
     "docs:render-check": "node scripts/check-html-render.mjs"
   },
   "devDependencies": {
-    "clawpatch": "0.1.0",
-    "playwright": "1.61.0"
+    "clawpatch": "0.7.0",
+    "playwright": "1.61.1"
   }
 }

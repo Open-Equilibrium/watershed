@@ -7,6 +7,7 @@ import copy
 import json
 import os
 import queue
+import stat
 import subprocess
 import sys
 import tempfile
@@ -86,6 +87,8 @@ def run(args: list[str], cwd: Path, *, input_text: str | None = None, check: boo
         cwd=cwd,
         input=input_text,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -122,6 +125,8 @@ def run_with_heartbeat(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     first_communicate = True
     while True:
@@ -154,6 +159,8 @@ def run_with_stream(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     events: queue.Queue[tuple[str, str | None]] = queue.Queue()
@@ -226,6 +233,8 @@ def repo_root() -> Path:
     result = subprocess.run(
         [git_bin, "rev-parse", "--show-toplevel"],
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -357,6 +366,52 @@ def read_text(path: Path, limit: int = 40_000) -> str:
     return bounded(text, limit)
 
 
+def read_untracked_text(repo: Path, path: Path, limit: int = 40_000) -> str:
+    try:
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or (
+            getattr(before, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        ):
+            return "[non-regular file omitted]"
+        if before.st_nlink != 1:
+            return "[hard-linked file omitted]"
+        if not is_within(path.resolve(strict=True), repo.resolve(strict=True)):
+            return "[outside repository omitted]"
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        return f"[unreadable: {exc}]"
+    try:
+        after = os.fstat(descriptor)
+        identity = lambda value: (
+            value.st_dev,
+            value.st_ino,
+            stat.S_IFMT(value.st_mode),
+            value.st_size,
+            value.st_mtime_ns,
+        )
+        if after.st_nlink != 1:
+            return "[hard-linked file omitted]"
+        if not stat.S_ISREG(after.st_mode) or identity(before) != identity(after):
+            return "[file changed during read; omitted]"
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            data = stream.read()
+            final = os.fstat(stream.fileno())
+            if final.st_nlink != 1:
+                return "[hard-linked file omitted]"
+            if identity(after) != identity(final):
+                return "[file changed during read; omitted]"
+    except OSError as exc:
+        return f"[unreadable: {exc}]"
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if b"\0" in data:
+        return "[binary file omitted]"
+    return bounded(data.decode("utf-8", errors="replace"), limit)
+
+
 def local_bundle(repo: Path) -> str:
     parts = [
         "# Git Status",
@@ -373,7 +428,7 @@ def local_bundle(repo: Path) -> str:
         parts.append("# Untracked Files")
         for rel in untracked:
             path = repo / rel
-            parts.append(f"## {rel}\n{read_text(path)}")
+            parts.append(f"## {rel}\n{read_untracked_text(repo, path)}")
     return "\n\n".join(parts)
 
 
@@ -425,7 +480,7 @@ def load_extra_prompt(args: argparse.Namespace) -> str:
     for value in args.prompt or []:
         chunks.append(value)
     for path in args.prompt_file or []:
-        chunks.append(Path(path).read_text())
+        chunks.append(Path(path).read_text(encoding="utf-8"))
     return "\n\n".join(chunks)
 
 
@@ -519,7 +574,7 @@ def run_codex(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         stream_display=CodexStreamDisplay() if args.stream_engine_output else None,
     )
     try:
-        output = output_path.read_text()
+        output = output_path.read_text(encoding="utf-8")
     finally:
         schema_path.unlink(missing_ok=True)
         output_path.unlink(missing_ok=True)
@@ -565,7 +620,7 @@ def run_droid(args: argparse.Namespace, repo: Path, prompt: str) -> str:
     if args.thinking:
         raise SystemExit("--thinking is not supported by the droid engine")
     prompt_path = Path(tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False).name)
-    prompt_path.write_text(prompt)
+    prompt_path.write_text(prompt, encoding="utf-8")
     cmd = [
         resolve_command(args.droid_bin, repo),
         "exec",
@@ -594,7 +649,7 @@ def run_copilot(args: argparse.Namespace, repo: Path, prompt: str) -> str:
         raise SystemExit("--no-tools is not supported by the copilot engine; copilot requires a read-only file view tool to load the review bundle without exposing it in argv")
     with tempfile.TemporaryDirectory(prefix="autoreview-copilot.") as tempdir:
         prompt_path = Path(tempdir) / "prompt.txt"
-        prompt_path.write_text(prompt)
+        prompt_path.write_text(prompt, encoding="utf-8")
         os.chmod(prompt_path, 0o600)
         cmd = [
             resolve_command(args.copilot_bin, repo),

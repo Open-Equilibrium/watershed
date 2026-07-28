@@ -4,14 +4,11 @@
 
 ## Validation
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
-- [ ] `cargo nextest run --locked --workspace --all-targets`
-- [ ] `cargo llvm-cov nextest --locked --workspace --no-report`
-- [ ] `cargo audit`
-- [ ] `cargo deny check`
-- [ ] `pnpm run docs:render-check`
-- [ ] `lychee` documentation link check
+- [ ] Exact-head CI passes the complete `.github/workflows/ci.yml` matrix required by `TESTING.md`.
+- [ ] Focused local checks are recorded below with exact commands and results.
+
+- Exact-head CI: <!-- head SHA, run URL, result -->
+- Focused checks: <!-- exact command + result, or N/A with reason -->
 
 ## Checklist
 

@@ -1,0 +1,6 @@
+flow:
+  id: sandbox-negative-interpreter
+  name: SandboxNegativeInterpreter
+  phase_refs: [negative-interpreter]
+  subflow_refs: []
+  connection_refs: []

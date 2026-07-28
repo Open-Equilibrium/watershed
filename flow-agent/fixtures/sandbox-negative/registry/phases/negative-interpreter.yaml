@@ -1,0 +1,8 @@
+phase:
+  id: negative-interpreter
+  name: NegativeInterpreter
+  instruction_refs: [deny-attempt]
+  tool_refs: [interpreter-tool]
+  steps:
+    - id: attempt
+      name: Attempt
