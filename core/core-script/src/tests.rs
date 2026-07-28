@@ -491,7 +491,7 @@ fn registry_file_reader_rejects_fifo_replacement_without_blocking() {
     let mut child = Command::new(std::env::current_exe().expect("test binary path"))
         .args([
             "--exact",
-            "tests::registry_file_reader_rejects_fifo_replacement_without_blocking",
+            "script::tests::registry_file_reader_rejects_fifo_replacement_without_blocking",
             "--nocapture",
         ])
         .env(CHILD_MARKER, &marker)
