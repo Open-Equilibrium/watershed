@@ -93,4 +93,4 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
   - `clawpatch_pro` (edit) — final PR-ready clawpatch.
   - `doc_sync` (read-only) — post-creation PR audit of doc + commit/PR standards.
 
-Every subagent must obey this file explicitly; role files may add scope but cannot weaken it (ADR-0023/ADR-0026/ADR-0027).
+Every agent `developer_instructions` value and every skill body starts with the exact standalone line `Obey AGENTS.md.` (the first instructions line and the first body line after front matter, respectively). The directive is authoritative; subsequent content may add scope but cannot weaken it (ADR-0023/ADR-0026/ADR-0027/ADR-0090).

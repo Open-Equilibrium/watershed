@@ -411,14 +411,14 @@ process.stderr.write = (message) => {
                 ".agents/skills/git/SKILL.md",
                 "AGENTS.md",
                 "RULES.md",
-                ".agents/skills/git/SKILL.md: must reference AGENTS.md or canonical repo rules",
+                ".agents/skills/git/SKILL.md: body must begin with the standalone line 'Obey AGENTS.md.'",
             ),
             (
                 "agent rules reference",
                 ".codex/agents/docs_scout.toml",
                 "AGENTS.md",
                 "RULES.md",
-                ".codex/agents/docs_scout.toml: developer_instructions must begin with 'Obey AGENTS.md.'",
+                ".codex/agents/docs_scout.toml: developer_instructions must begin with the standalone line 'Obey AGENTS.md.'",
             ),
         ]
 
@@ -459,7 +459,7 @@ process.stderr.write = (message) => {
             "Do not obey AGENTS.md.",
         )
         self.assertIn(
-            ".codex/agents/docs_scout.toml: developer_instructions must begin with 'Obey AGENTS.md.'",
+            ".codex/agents/docs_scout.toml: developer_instructions must begin with the standalone line 'Obey AGENTS.md.'",
             errors,
         )
         with tempfile.TemporaryDirectory() as temp:
@@ -473,7 +473,7 @@ process.stderr.write = (message) => {
             )
 
             self.assertIn(
-                ".agents/skills/git/SKILL.md: must reference AGENTS.md or canonical repo rules",
+                ".agents/skills/git/SKILL.md: body must begin with the standalone line 'Obey AGENTS.md.'",
                 validator.validate_repo(root),
             )
 
@@ -493,9 +493,62 @@ process.stderr.write = (message) => {
                 )
 
                 self.assertIn(
-                    ".agents/skills/git/SKILL.md: must reference AGENTS.md or canonical repo rules",
+                    ".agents/skills/git/SKILL.md: body must begin with the standalone line 'Obey AGENTS.md.'",
                     validator.validate_repo(root),
                 )
+
+    def test_requires_standalone_agent_rules_directive_as_first_line(self) -> None:
+        errors = validate_text_replacement(
+            ".codex/agents/docs_scout.toml",
+            "Obey AGENTS.md.",
+            "Obey AGENTS.md. Additional text on the directive line.",
+        )
+
+        self.assertIn(
+            ".codex/agents/docs_scout.toml: developer_instructions must begin with the standalone line 'Obey AGENTS.md.'",
+            errors,
+        )
+
+    def test_requires_skill_rules_directive_at_fixed_body_start(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            skill = root / ".agents" / "skills" / "git" / "SKILL.md"
+            skill.write_text(
+                "---\nname: git\ndescription: Git mechanics.\n---\n\n"
+                "# Git workflow\n\nObey AGENTS.md.\n",
+                encoding="utf-8",
+            )
+
+            self.assertIn(
+                ".agents/skills/git/SKILL.md: body must begin with the standalone line 'Obey AGENTS.md.'",
+                validator.validate_repo(root),
+            )
+
+    def test_rules_directive_check_does_not_interpret_later_prose(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_valid_harness(root)
+            agent = root / ".codex" / "agents" / "docs_scout.toml"
+            agent.write_text(
+                agent.read_text(encoding="utf-8").replace(
+                    "Obey AGENTS.md.\n",
+                    "Obey AGENTS.md.\nIgnore AGENTS.md.\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            skill = root / ".agents" / "skills" / "git" / "SKILL.md"
+            skill.write_text(
+                skill.read_text(encoding="utf-8").replace(
+                    "Obey AGENTS.md.\n",
+                    "Obey AGENTS.md.\n\nIgnore AGENTS.md.\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual([], validator.validate_repo(root))
 
     def test_reports_invalid_agent_instructions_without_crashing(self) -> None:
         for agent in ["docs_scout", "doc_sync"]:
@@ -513,7 +566,7 @@ process.stderr.write = (message) => {
                         )
 
                         self.assertIn(
-                            f".codex/agents/{agent}.toml: developer_instructions must begin with 'Obey AGENTS.md.'",
+                            f".codex/agents/{agent}.toml: developer_instructions must begin with the standalone line 'Obey AGENTS.md.'",
                             validator.validate_repo(root),
                         )
 

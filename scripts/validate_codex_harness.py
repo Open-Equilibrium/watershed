@@ -24,6 +24,7 @@ CONFIG_ROOT_KEYS = {
     "tool_output_token_limit",
     "web_search",
 }
+CANONICAL_RULES_DIRECTIVE = "Obey AGENTS.md."
 CONFIG_TABLE_KEYS = {
     "agents": {"max_depth", "max_threads"},
     "features": {
@@ -272,9 +273,12 @@ def validate_agents(root: Path) -> list[str]:
         ):
             errors.append(f"{rel}: nickname_candidates must be a non-empty string list")
         instructions = agent.get("developer_instructions")
-        if not isinstance(instructions, str) or not instructions.startswith("Obey AGENTS.md."):
+        if not isinstance(instructions, str) or not begins_with_rules_directive(
+            instructions
+        ):
             errors.append(
-                f"{rel}: developer_instructions must begin with 'Obey AGENTS.md.'"
+                f"{rel}: developer_instructions must begin with the standalone line "
+                f"'{CANONICAL_RULES_DIRECTIVE}'"
             )
         elif agent.get("name") == "docs_scout" and "docs/adr/ADR-LOG.md" not in instructions:
             errors.append(f"{rel}: docs_scout must reference docs/adr/ADR-LOG.md")
@@ -311,8 +315,11 @@ def validate_skills(root: Path) -> list[str]:
             errors.append(f"{rel}: name must be {expected_name!r}")
         if not metadata.get("description"):
             errors.append(f"{rel}: description is required")
-        if not references_canonical_rules(text):
-            errors.append(f"{rel}: must reference AGENTS.md or canonical repo rules")
+        if not skill_body_begins_with_rules_directive(text):
+            errors.append(
+                f"{rel}: body must begin with the standalone line "
+                f"'{CANONICAL_RULES_DIRECTIVE}'"
+            )
     return errors
 
 
@@ -399,20 +406,21 @@ def parse_front_matter_scalar(source: str) -> str | None:
     return None
 
 
-def references_canonical_rules(text: str) -> bool:
-    visible = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-    affirmative = (
-        re.compile(
-            r"^\s*(?:(?:[-*]|\d+\.)\s+)?(?:obey|follow)\s+`?AGENTS\.md`?(?:[.:]|$)",
-            re.IGNORECASE,
-        ),
-        re.compile(r"\bunder\s+(?:the\s+)?`?AGENTS\.md`?\b", re.IGNORECASE),
-        re.compile(r"\bcanonical\s+in\s+`?AGENTS\.md`?\b", re.IGNORECASE),
-    )
-    return any(
-        any(pattern.search(line) for pattern in affirmative)
-        for line in visible.splitlines()
-    )
+def begins_with_rules_directive(text: str) -> bool:
+    lines = text.splitlines()
+    return bool(lines) and lines[0] == CANONICAL_RULES_DIRECTIVE
+
+
+def skill_body_begins_with_rules_directive(text: str) -> bool:
+    lines = text.splitlines()
+    try:
+        front_matter_end = lines.index("---", 1)
+    except ValueError:
+        return False
+    return lines[front_matter_end + 1 : front_matter_end + 3] == [
+        "",
+        CANONICAL_RULES_DIRECTIVE,
+    ]
 
 
 def unknown_keys(

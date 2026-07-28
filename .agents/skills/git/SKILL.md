@@ -3,6 +3,8 @@ name: git
 description: "Git mechanics for protected-main topic branches, stable commits, ordered closeout, and squash-ready PRs."
 ---
 
+Obey AGENTS.md.
+
 # Git workflow
 
 This skill is the procedural home for branch, commit, push and PR mechanics. The ordered quality/review closeout is canonical in `AGENTS.md`.

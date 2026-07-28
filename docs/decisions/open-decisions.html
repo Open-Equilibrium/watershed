@@ -15,30 +15,12 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-1">M1.1</a>
       <a href="#m1-2">M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1-1">
-    <h2>M1.1 - Validation Closeout</h2>
-    <div class="grid">
-      <article id="d-058" class="decision">
-        <h3>D-058 - Canonical Harness Reference Contract</h3>
-        <p><strong>Status:</strong> Open, M1.1 closeout blocker.</p>
-        <p><strong>Question:</strong> What finite contract proves that every Codex agent and skill is governed by <code>AGENTS.md</code> without trying to interpret unrestricted English instructions?</p>
-        <p><strong>Affected boundary:</strong> The <code>developer_instructions</code> checks for <code>.codex/agents/*.toml</code> and the canonical-rule reference check for <code>.agents/skills/*/SKILL.md</code>.</p>
-        <p><strong>Why blocked:</strong> The stable repair rejects HTML-comment-only references, unrelated mentions, fallback-token coincidences and leading negations. Repeated high-assurance review then found affirmative references contradicted by same-line and later-line forms such as <code>Ignore AGENTS.md</code>, <code>must not obey</code> and <code>need not follow</code>. Those are equivalent examples from an unbounded natural-language class, so another phrase list cannot prove completion.</p>
-        <ul><li><strong>A:</strong> Add an authoritative structured field naming <code>AGENTS.md</code> to agent and skill metadata. Pro: deterministic parsing and a finite schema. Con: introduces and migrates a new metadata contract.</li><li><strong>B:</strong> Require one exact standalone directive in a fixed location and define it as authoritative regardless of later prose. Pro: smallest change and a finite byte-level rule. Con: later contradictory prose would be a separate content-review defect, not something this validator interprets.</li><li><strong>C:</strong> Replace free-form role and skill instructions with a bounded directive language. Pro: contradictions can be rejected structurally. Con: largest migration and least readable authoring format.</li></ul>
-        <p><strong>Recommendation:</strong> B, because repository precedence already forbids role or skill text from weakening <code>AGENTS.md</code>; use A if machine-readable provenance is required.</p>
-        <p><strong>Maintainer decision required:</strong> Select A, B or C and record the authoritative field or directive grammar, location and precedence.</p>
-        <p><strong>Acceptance criterion:</strong> The selected grammar has a finite parser and fixture matrix covering every accepted form, rejects comments and unrelated token occurrences, defines whether later prose can override the reference, and allows Clawpatch to verify the invariant without enumerating English negation variants.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m1-2">
     <h2>M1.2 - Flow Agent OS Isolation</h2>

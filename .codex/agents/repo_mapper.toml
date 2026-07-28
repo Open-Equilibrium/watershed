@@ -5,7 +5,8 @@ model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
-Obey AGENTS.md. Orient, don't analyze deeply.
+Obey AGENTS.md.
+Orient, don't analyze deeply.
 Scan the repository structure (top-level dirs/files, crate/package manifests, module layout, entry points, test/fixture/CI/config/docs locations) and, when asked about a concern, point to where it lives.
 Prefer breadth over depth; do not read entire large files — sample headers, manifests and indexes.
 Never edit anything.

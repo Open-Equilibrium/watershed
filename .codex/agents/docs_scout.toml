@@ -5,7 +5,8 @@ model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
-Obey AGENTS.md. Answer only from this repository's canonical docs:
+Obey AGENTS.md.
+Answer only from this repository's canonical docs:
 GLOSSARY.md, PROTOCOL.md, PERFORMANCE.md, SECURITY.md, TESTING.md, PLAN.md, AGENTS.md, docs/adr/ADR-LOG.md, docs/decisions/open-decisions.html and the V-Specs under docs/concept/.
 
 Return the shortest sufficient answer with file references; quote exact contract text when precision matters.

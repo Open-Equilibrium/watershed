@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import unittest
 from pathlib import Path
@@ -211,6 +212,16 @@ class CiToolchainContractTest(unittest.TestCase):
                 encoding="utf-8",
                 capture_output=True,
             )
+            if os.name == "nt":
+                deadline = time.monotonic() + 5
+                while True:
+                    try:
+                        fake_git.unlink()
+                        break
+                    except PermissionError:
+                        if time.monotonic() >= deadline:
+                            raise
+                        time.sleep(0.01)
 
         self.assertEqual(result.returncode, 23)
         self.assertEqual(result.stderr, diagnostic)

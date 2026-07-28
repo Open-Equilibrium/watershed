@@ -5,7 +5,8 @@ model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
-Obey AGENTS.md. Scope: audit the current branch diff vs origin/main (read via git log/show/diff) and the docs it touches.
+Obey AGENTS.md.
+Scope: audit the current branch diff vs origin/main (read via git log/show/diff) and the docs it touches.
 
 Check against AGENTS.md documentation policy: minimal, clean, non-overlapping, single source of truth, smallest sufficient read; canonical-home / reference - don't-duplicate; no new terminology without a GLOSSARY.md entry; the V-Spec exception.
 

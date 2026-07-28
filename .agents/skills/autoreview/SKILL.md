@@ -3,6 +3,8 @@ name: autoreview
 description: "Run a structured code review after a green gate and before clawpatch/PR."
 ---
 
+Obey AGENTS.md.
+
 # Autoreview
 
 This skill is the procedural home for the autoreview sequence only.

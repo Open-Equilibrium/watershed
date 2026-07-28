@@ -3,6 +3,8 @@ name: clawpatch
 description: "Final runtime package review gate after autoreview and before PR."
 ---
 
+Obey AGENTS.md.
+
 # Clawpatch Gate
 
 This skill is the procedural home for the clawpatch sequence only.
