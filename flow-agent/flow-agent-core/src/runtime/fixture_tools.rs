@@ -1,5 +1,6 @@
+#[cfg(windows)]
+use crate::runtime::config_io::path_io_error;
 use crate::runtime::{
-    config_io::path_io_error,
     context::sha256_hex,
     event_construction::{FlowInvocation, RuntimeEventBuilder},
     failures::{runtime_denied, runtime_protocol_or_denied},
@@ -9,7 +10,9 @@ use crate::runtime::{
     },
     types::RuntimeError,
 };
-use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt as _, OpenOptionsFollowExt};
+#[cfg(windows)]
+use cap_fs_ext::{DirExt, MetadataExt as _};
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use core_policy::{ProtectedPathMatchMode, protected_path_pattern_matches};
 use proto::EventType;
 #[cfg(test)]
