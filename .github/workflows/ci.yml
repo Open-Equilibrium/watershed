@@ -89,6 +89,7 @@ jobs:
           -p flow-agent-core
           --release
           --run-ignored ignored-only
+          --success-output immediate
           -j 1
 
       - name: Check line coverage
