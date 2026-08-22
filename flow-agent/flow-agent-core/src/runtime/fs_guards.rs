@@ -573,7 +573,10 @@ fn harden_created_private_directory(dir: &Dir) -> io::Result<()> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        rustix::fs::fchmod(dir, rustix::fs::Mode::from_bits_retain(0o700))
+        Ok(rustix::fs::fchmod(
+            dir,
+            rustix::fs::Mode::from_bits_retain(0o700),
+        )?)
     }
 }
 
