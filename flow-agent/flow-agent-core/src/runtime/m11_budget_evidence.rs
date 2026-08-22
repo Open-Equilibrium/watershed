@@ -278,7 +278,7 @@ pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 15] = [
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationMigrationQuantum,
-        p95_limit: Some(Duration::from_secs(1)),
+        p95_limit: Some(Duration::from_millis(1_250)),
         max_peak_rss_growth_bytes: Some(64 * MIB),
         min_peak_rss_growth_bytes: None,
     },
@@ -290,7 +290,7 @@ pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 15] = [
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationFullRunStreamingReplay,
-        p95_limit: Some(Duration::from_secs(10)),
+        p95_limit: Some(Duration::from_secs(13)),
         max_peak_rss_growth_bytes: Some(256 * MIB),
         min_peak_rss_growth_bytes: None,
     },

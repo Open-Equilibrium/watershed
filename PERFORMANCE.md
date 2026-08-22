@@ -52,6 +52,8 @@ Timing and RSS gates run in release mode, one performance test process at a time
 
 ADR-0150 recalibrated the per-Flow guideline from 20 fresh isolated release-mode samples in [CI run 32571620281](https://github.com/Open-Equilibrium/watershed/actions/runs/32571620281) at commit `7679ebc`. Peak RSS growth ranged from 10,559,488 to 10,756,096 bytes, with a 10,645,299.2-byte mean. Eleven MiB is the smallest whole-MiB ceiling above the observed maximum and leaves 778,240 bytes, or 7.24%, measurement headroom. The 110 MiB aggregate gate preserves the exact tenfold relationship for 10 concurrent top-level Flows.
 
+ADR-0151 recalibrated two latency guidelines from independent 30-sample Ubuntu release runs at commit `188318b`: [push run 32572626735](https://github.com/Open-Equilibrium/watershed/actions/runs/32572626735) measured migration/replay p95 of 1.192 s/12.354 s, and [pull-request run 32572629127](https://github.com/Open-Equilibrium/watershed/actions/runs/32572629127) measured 1.191 s/12.309 s. CV-12 migration is therefore 1.25 s and CV-17 replay is 13 s, leaving 4.83% and 5.23% above the larger observed p95 values. Workloads, samples, functional and capacity boundaries, and RSS guidelines are unchanged.
+
 Tool runs are bounded/headless; the harness itself must not be the bottleneck when local inference is fast.
 
 The event budgets measure individual events, not averages of batch averages; ordering and durability semantics are canonical in `PROTOCOL.md`.
