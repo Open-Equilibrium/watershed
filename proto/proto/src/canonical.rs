@@ -105,22 +105,30 @@ pub(crate) fn is_nfc(value: &str) -> bool {
 }
 
 pub(crate) fn nfc_string(value: String) -> String {
-    value.nfc().collect()
+    if is_nfc(&value) {
+        value
+    } else {
+        value.nfc().collect()
+    }
 }
 
-pub(crate) fn nfc_json_string_values(value: Value) -> Value {
+pub(crate) fn nfc_json_string_values(mut value: Value) -> Value {
+    nfc_json_string_values_in_place(&mut value);
+    value
+}
+
+fn nfc_json_string_values_in_place(value: &mut Value) {
     match value {
-        Value::String(value) => Value::String(nfc_string(value)),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(nfc_json_string_values).collect())
+        Value::String(value) => {
+            if !is_nfc(value) {
+                *value = value.nfc().collect();
+            }
         }
-        Value::Object(values) => Value::Object(
-            values
-                .into_iter()
-                .map(|(key, value)| (key, nfc_json_string_values(value)))
-                .collect(),
-        ),
-        Value::Null | Value::Bool(_) | Value::Number(_) => value,
+        Value::Array(values) => values.iter_mut().for_each(nfc_json_string_values_in_place),
+        Value::Object(values) => values
+            .values_mut()
+            .for_each(nfc_json_string_values_in_place),
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 
