@@ -294,12 +294,10 @@ impl AnchoredDir {
             if _created {
                 child
                     .dir
-                    .try_clone()
-                    .and_then(|dir| {
-                        use std::os::unix::fs::PermissionsExt as _;
+                    .set_permissions(Path::new("."), {
+                        use cap_std::fs::PermissionsExt as _;
 
-                        dir.into_std_file()
-                            .set_permissions(fs::Permissions::from_mode(0o700))
+                        cap_std::fs::Permissions::from_mode(0o700)
                     })
                     .map_err(|source| path_io_error(&path, source))?;
             }
