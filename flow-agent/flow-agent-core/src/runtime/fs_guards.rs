@@ -290,6 +290,19 @@ impl AnchoredDir {
         #[cfg(not(unix))]
         let child = self.open_existing_child_with_publication(leaf, error_mode, publishable)?;
         if private {
+            #[cfg(unix)]
+            if _created {
+                child
+                    .dir
+                    .try_clone()
+                    .and_then(|dir| {
+                        use std::os::unix::fs::PermissionsExt as _;
+
+                        dir.into_std_file()
+                            .set_permissions(fs::Permissions::from_mode(0o700))
+                    })
+                    .map_err(|source| path_io_error(&path, source))?;
+            }
             #[cfg(target_os = "macos")]
             if _created {
                 clear_macos_acl_entries(child.dir.as_ref())
