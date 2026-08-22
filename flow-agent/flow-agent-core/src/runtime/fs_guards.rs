@@ -1,39 +1,109 @@
-#[cfg(unix)]
-use crate::runtime::fixture_tools::hard_link_count;
-#[cfg(windows)]
-use crate::runtime::fixture_tools::{hard_link_count_for_open_file, windows_open_file_information};
-use crate::runtime::{
-    config_io::{
-        decode_utf8, for_each_anchored_file_line_with_limit, path_io_error,
-        read_opened_file_with_limit,
-    },
-    failures::runtime_denied,
-    types::{MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
-};
-use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt as _, OpenOptionsFollowExt};
+use crate::runtime::types::{MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits};
+use cap_fs_ext::{DirExt, MetadataExt as _};
 use cap_std::{ambient_authority, fs::Dir};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::cell::RefCell;
 use std::{
-    fs, io,
+    ffi::OsStr,
+    fs,
+    io::{self, Read},
     path::{Path, PathBuf},
+};
+
+#[cfg(target_os = "macos")]
+mod macos_acl;
+#[cfg(target_os = "macos")]
+pub(crate) use macos_acl::{
+    clear_entries as clear_macos_acl_entries, has_entries as has_macos_acl_entries,
+};
+
+mod bounded_read;
+#[cfg(test)]
+pub use bounded_read::for_each_reader_line_with_limit;
+pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
+
+mod anchored_file;
+pub(crate) use anchored_file::open_files_share_identity;
+pub use anchored_file::{
+    AnchoredFile, AnchoredFileIdentity, anchored_file_identity, create_anchored_file,
+    create_anchored_file_for_update, ensure_anchored_new_leaf_available,
+    ensure_anchored_non_hardlinked_file, ensure_anchored_real_file,
+    ensure_not_hardlinked_open_file, for_each_anchored_file_line_with_limit,
+    open_anchored_file_for_read, open_anchored_file_for_update, open_anchored_real_file_for_read,
+    open_anchored_session_log_append_file, read_anchored_file_with_limit,
+    read_anchored_to_string_with_limit, remove_owned_anchored_file,
+    validate_open_session_log_append_file, validate_real_file, verify_owned_anchored_file,
+    verify_owned_anchored_marker, with_anchored_replacement_temp,
+};
+#[cfg(test)]
+pub use anchored_file::{replacement_temp_path, set_owned_file_remove_observer};
+pub(crate) use anchored_file::{reserve_new_anchored_file, with_anchored_replacement_temp_checked};
+
+mod durability;
+#[cfg(all(test, windows))]
+pub(crate) use durability::{
+    WindowsDirectorySyncBoundary, set_windows_directory_sync_observer_for_test,
+};
+#[cfg(test)]
+pub(crate) use durability::{
+    set_directory_sync_error_for_path_for_test, set_directory_sync_error_for_test,
+    start_directory_sync_trace_for_test, take_directory_sync_trace_for_test,
+};
+pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
+
+mod runtime_dirs;
+#[cfg(test)]
+pub use runtime_dirs::ensure_runtime_dirs;
+pub use runtime_dirs::{RuntimeDirs, open_runtime_dir};
+pub(crate) use runtime_dirs::{
+    ensure_anchored_runtime_dirs, open_anchored_runtime_dir, open_anchored_runtime_dir_read_only,
+};
+
+#[cfg(test)]
+pub(crate) fn test_path_key(path: &Path) -> PathBuf {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        missing.push(
+            existing
+                .file_name()
+                .expect("an absent test path has a leaf")
+                .to_owned(),
+        );
+        existing = existing
+            .parent()
+            .expect("a test path has an existing ancestor");
+    }
+    let mut canonical = fs::canonicalize(existing).expect("test path ancestor canonicalizes");
+    for component in missing.iter().rev() {
+        canonical.push(component);
+    }
+    canonical
+}
+
+mod segmented_jsonl;
+#[cfg(test)]
+pub use segmented_jsonl::with_segmented_jsonl_discovery_metrics_for_test;
+pub use segmented_jsonl::{
+    SegmentedJsonlLeaf, canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
+    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, parse_segmented_jsonl_leaf,
+    retry_event_segment_discovery, segmented_jsonl_files, segmented_jsonl_leaf,
+    segmented_jsonl_leaf_stem, segmented_jsonl_path, segmented_jsonl_segment_count,
 };
 
 #[derive(Clone, Debug)]
 pub struct AnchoredDir {
     pub(crate) dir: std::sync::Arc<Dir>,
     pub(crate) path: PathBuf,
-}
-
-#[derive(Clone, Debug)]
-pub struct AnchoredFile {
-    pub(crate) parent: AnchoredDir,
-    pub(crate) leaf: PathBuf,
-    pub(crate) path: PathBuf,
+    #[cfg(windows)]
+    read_only: bool,
+    #[cfg(windows)]
+    sync_file: Option<std::sync::Arc<fs::File>>,
 }
 
 #[derive(Debug)]
 pub struct AnchoredWorkspace {
+    canonical_path: PathBuf,
     identity: AnchoredDirectoryIdentity,
     root: AnchoredDir,
 }
@@ -44,6 +114,50 @@ pub(crate) struct AnchoredDirectoryIdentity {
     pub(crate) inode: u64,
 }
 
+#[cfg(windows)]
+fn open_windows_read_only_directory(path: &Path) -> Result<Dir, RuntimeError> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let mut options = fs::OpenOptions::new();
+    options
+        .access_mode(FILE_GENERIC_READ)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let file = options
+        .open(path)
+        .map_err(|source| path_io_error(path, source))?;
+    let handle_metadata = file
+        .metadata()
+        .map_err(|source| path_io_error(path, source))?;
+    if has_windows_reparse_point(&handle_metadata) {
+        return Err(unsafe_anchored_directory(
+            path.to_owned(),
+            io::Error::other("reparse point"),
+            DirectoryErrorMode::Protocol,
+        ));
+    }
+    let dir = Dir::from_std_file(file);
+    let metadata = dir
+        .dir_metadata()
+        .map_err(|source| path_io_error(path, source))?;
+    validate_anchored_directory(path, &metadata, DirectoryErrorMode::Protocol)?;
+    Ok(dir)
+}
+
+#[cfg(windows)]
+fn open_anchored_windows_read_only_directory(parent: &Dir, leaf: &str) -> io::Result<Dir> {
+    crate::runtime::windows_anchored_dir::open_anchored_read_only(parent, leaf)
+}
+
+#[cfg(windows)]
+fn open_anchored_windows_publishable_directory(parent: &Dir, leaf: &str) -> io::Result<Dir> {
+    crate::runtime::windows_anchored_dir::open_anchored_for_publication(parent, leaf)
+}
+
 impl AnchoredDir {
     pub(crate) fn workspace(path: &Path) -> Result<Self, RuntimeError> {
         let dir = Dir::open_ambient_dir(path, ambient_authority())
@@ -51,55 +165,110 @@ impl AnchoredDir {
         Ok(Self {
             dir: std::sync::Arc::new(dir),
             path: path.to_owned(),
+            #[cfg(windows)]
+            read_only: false,
+            #[cfg(windows)]
+            sync_file: None,
+        })
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn read_only_workspace(path: &Path) -> Result<Self, RuntimeError> {
+        let dir = open_windows_read_only_directory(path)?;
+        Ok(Self {
+            dir: std::sync::Arc::new(dir),
+            path: path.to_owned(),
+            read_only: true,
+            sync_file: None,
         })
     }
 
     pub(crate) fn child(
         &self,
-        leaf: &str,
+        leaf: impl AsRef<OsStr>,
         create: bool,
         error_mode: DirectoryErrorMode,
     ) -> Result<Option<Self>, RuntimeError> {
-        self.child_with_privacy(leaf, create, error_mode, false)
+        self.child_with_options(leaf.as_ref(), create, error_mode, false, false)
+    }
+
+    pub(crate) fn publishable_child(
+        &self,
+        leaf: impl AsRef<OsStr>,
+        error_mode: DirectoryErrorMode,
+    ) -> Result<Option<Self>, RuntimeError> {
+        self.child_with_options(leaf.as_ref(), false, error_mode, false, true)
     }
 
     pub(crate) fn private_child(
         &self,
-        leaf: &str,
+        leaf: impl AsRef<OsStr>,
         create: bool,
         error_mode: DirectoryErrorMode,
     ) -> Result<Option<Self>, RuntimeError> {
-        self.child_with_privacy(leaf, create, error_mode, true)
+        self.child_with_options(leaf.as_ref(), create, error_mode, true, false)
     }
 
-    fn child_with_privacy(
+    pub(crate) fn private_publishable_child(
         &self,
-        leaf: &str,
+        leaf: impl AsRef<OsStr>,
+        create: bool,
+        error_mode: DirectoryErrorMode,
+    ) -> Result<Option<Self>, RuntimeError> {
+        self.child_with_options(leaf.as_ref(), create, error_mode, true, true)
+    }
+
+    fn child_with_options(
+        &self,
+        leaf: &OsStr,
         create: bool,
         error_mode: DirectoryErrorMode,
         private: bool,
+        publishable: bool,
     ) -> Result<Option<Self>, RuntimeError> {
         let path = self.path.join(leaf);
-        match self.dir.symlink_metadata(leaf) {
-            Ok(_) => {}
+        let leaf_path = Path::new(leaf);
+        #[cfg(unix)]
+        let mut created_private_dir = None;
+        #[cfg(windows)]
+        let windows_leaf = leaf.to_str().ok_or_else(|| {
+            path_io_error(
+                &path,
+                io::Error::new(io::ErrorKind::InvalidInput, "directory leaf is not Unicode"),
+            )
+        })?;
+        #[cfg(windows)]
+        crate::runtime::windows_anchored_dir::validate_anchored_leaf(windows_leaf)
+            .map_err(|source| path_io_error(&path, source))?;
+        let _created = match self.dir.symlink_metadata(leaf_path) {
+            Ok(_) => false,
             Err(err) if err.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
                 let result = if private {
-                    create_private_anchored_directory(&self.dir, &path, leaf)
+                    #[cfg(unix)]
+                    {
+                        create_private_anchored_directory(&self.dir, leaf).map(|dir| {
+                            created_private_dir = Some(dir);
+                        })
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        create_private_anchored_directory(&self.dir, leaf)
+                    }
                 } else {
-                    self.dir.create_dir(leaf)
+                    self.dir.create_dir(leaf_path)
                 };
                 match result {
-                    Ok(()) => {}
-                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+                    Ok(()) => true,
+                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => false,
                     Err(source) => return Err(path_io_error(&path, source)),
                 }
             }
             Err(source) => return Err(path_io_error(&path, source)),
-        }
+        };
         let metadata = self
             .dir
-            .symlink_metadata(leaf)
+            .symlink_metadata(leaf_path)
             .map_err(|source| path_io_error(&path, source))?;
         validate_anchored_directory(&path, &metadata, error_mode)?;
         if private {
@@ -107,23 +276,126 @@ impl AnchoredDir {
         }
         #[cfg(all(test, unix))]
         observe_private_directory_open();
-        let dir = self
-            .dir
-            .open_dir_nofollow(leaf)
-            .map_err(|source| unsafe_anchored_directory(path.clone(), source, error_mode))?;
+        #[cfg(unix)]
+        let child = created_private_dir.map_or_else(
+            || self.open_existing_child_with_publication(leaf, error_mode, publishable),
+            |dir| {
+                Ok(Self {
+                    dir: std::sync::Arc::new(dir),
+                    path: path.clone(),
+                })
+            },
+        )?;
+        #[cfg(not(unix))]
+        let child = self.open_existing_child_with_publication(leaf, error_mode, publishable)?;
+        if private {
+            #[cfg(target_os = "macos")]
+            if _created {
+                clear_macos_acl_entries(child.dir.as_ref())
+                    .map_err(|source| path_io_error(&path, source))?;
+            }
+            let metadata = child
+                .dir
+                .dir_metadata()
+                .map_err(|source| path_io_error(&path, source))?;
+            validate_private_anchored_directory(&path, &metadata)?;
+            validate_opened_private_directory(&path, &child.dir)?;
+        }
+        Ok(Some(child))
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn open_existing_child(
+        &self,
+        leaf: &str,
+        error_mode: DirectoryErrorMode,
+    ) -> Result<Self, RuntimeError> {
+        self.open_existing_child_with_publication(leaf.as_ref(), error_mode, false)
+    }
+
+    fn open_existing_child_with_publication(
+        &self,
+        leaf: &OsStr,
+        error_mode: DirectoryErrorMode,
+        publishable: bool,
+    ) -> Result<Self, RuntimeError> {
+        let path = self.path.join(leaf);
+        let leaf_path = Path::new(leaf);
+        #[cfg(windows)]
+        let windows_leaf = leaf.to_str().ok_or_else(|| {
+            path_io_error(
+                &path,
+                io::Error::new(io::ErrorKind::InvalidInput, "directory leaf is not Unicode"),
+            )
+        })?;
+        #[cfg(windows)]
+        crate::runtime::windows_anchored_dir::validate_anchored_leaf(windows_leaf)
+            .map_err(|source| path_io_error(&path, source))?;
+        #[cfg(windows)]
+        let dir = if self.read_only {
+            open_anchored_windows_read_only_directory(&self.dir, windows_leaf).map_err(
+                |source| {
+                    classify_anchored_directory_open_error(
+                        &self.dir, leaf_path, &path, source, error_mode,
+                    )
+                },
+            )?
+        } else if publishable {
+            open_anchored_windows_publishable_directory(&self.dir, windows_leaf).map_err(
+                |source| {
+                    classify_anchored_directory_open_error(
+                        &self.dir, leaf_path, &path, source, error_mode,
+                    )
+                },
+            )?
+        } else {
+            self.dir.open_dir_nofollow(leaf_path).map_err(|source| {
+                classify_anchored_directory_open_error(
+                    &self.dir, leaf_path, &path, source, error_mode,
+                )
+            })?
+        };
+        #[cfg(not(windows))]
+        let _ = publishable;
+        #[cfg(not(windows))]
+        let dir = self.dir.open_dir_nofollow(leaf_path).map_err(|source| {
+            classify_anchored_directory_open_error(&self.dir, leaf_path, &path, source, error_mode)
+        })?;
         let metadata = dir
             .dir_metadata()
             .map_err(|source| path_io_error(&path, source))?;
         validate_anchored_directory(&path, &metadata, error_mode)?;
-        if private {
-            validate_private_anchored_directory(&path, &metadata)?;
-            #[cfg(windows)]
-            validate_opened_windows_private_directory(&path, &dir)?;
-        }
-        Ok(Some(Self {
+        #[cfg(windows)]
+        // A cloned publishable handle preserves anchored synchronization without a conflicting
+        // path reopen; the original carries DELETE access for publication.
+        let sync_file = if publishable {
+            Some(std::sync::Arc::new(
+                dir.try_clone()
+                    .map(cap_std::fs::Dir::into_std_file)
+                    .map_err(|source| path_io_error(&path, source))?,
+            ))
+        } else {
+            self.sync_file
+                .as_deref()
+                .map(|parent| {
+                    durability::open_anchored_windows_directory_for_sync(
+                        parent,
+                        &path,
+                        windows_leaf,
+                        anchored_directory_identity(&path, &dir)?,
+                    )
+                    .map(std::sync::Arc::new)
+                })
+                .transpose()?
+        };
+        Ok(Self {
             dir: std::sync::Arc::new(dir),
             path,
-        }))
+            #[cfg(windows)]
+            read_only: self.read_only,
+            #[cfg(windows)]
+            sync_file,
+        })
     }
 
     pub(crate) fn file(&self, leaf: impl Into<PathBuf>) -> AnchoredFile {
@@ -134,13 +406,80 @@ impl AnchoredDir {
             leaf,
         }
     }
+
+    pub(crate) fn identity(&self) -> Result<AnchoredDirectoryIdentity, RuntimeError> {
+        anchored_directory_identity(&self.path, &self.dir)
+    }
+
+    #[cfg(any(unix, windows))]
+    pub(crate) fn validate_private(&self) -> Result<(), RuntimeError> {
+        let metadata = self
+            .dir
+            .dir_metadata()
+            .map_err(|source| path_io_error(&self.path, source))?;
+        validate_private_anchored_directory(&self.path, &metadata)?;
+        validate_opened_private_directory(&self.path, &self.dir)?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn validate_not_group_or_other_writable(&self) -> Result<(), RuntimeError> {
+        use cap_std::fs::PermissionsExt as _;
+
+        let metadata = self
+            .dir
+            .dir_metadata()
+            .map_err(|source| path_io_error(&self.path, source))?;
+        if metadata.permissions().mode() & 0o022 != 0 {
+            return Err(RuntimeError::Protocol(format!(
+                "{} must not grant group or other write access",
+                self.path.display()
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl AnchoredWorkspace {
     pub(crate) fn open(path: &Path) -> Result<Self, RuntimeError> {
+        let canonical_path =
+            fs::canonicalize(path).map_err(|source| path_io_error(path, source))?;
         let root = AnchoredDir::workspace(path)?;
         let identity = anchored_directory_identity(path, &root.dir)?;
-        Ok(Self { identity, root })
+        verify_canonical_workspace_identity(&canonical_path, identity)?;
+        #[cfg(windows)]
+        let root = {
+            let mut root = root;
+            root.sync_file = Some(std::sync::Arc::new(
+                durability::open_windows_directory_for_sync(path, identity)?,
+            ));
+            root
+        };
+        Ok(Self {
+            canonical_path,
+            identity,
+            root,
+        })
+    }
+
+    pub(crate) fn open_read_only(path: &Path) -> Result<Self, RuntimeError> {
+        let canonical_path =
+            fs::canonicalize(path).map_err(|source| path_io_error(path, source))?;
+        #[cfg(windows)]
+        let root = AnchoredDir::read_only_workspace(path)?;
+        #[cfg(not(windows))]
+        let root = AnchoredDir::workspace(path)?;
+        let identity = anchored_directory_identity(path, &root.dir)?;
+        verify_canonical_workspace_identity(&canonical_path, identity)?;
+        Ok(Self {
+            canonical_path,
+            identity,
+            root,
+        })
+    }
+
+    pub(crate) fn canonical_path(&self) -> &Path {
+        &self.canonical_path
     }
 
     pub(crate) fn root(&self) -> &AnchoredDir {
@@ -177,6 +516,20 @@ impl AnchoredWorkspace {
     }
 }
 
+fn verify_canonical_workspace_identity(
+    canonical_path: &Path,
+    identity: AnchoredDirectoryIdentity,
+) -> Result<(), RuntimeError> {
+    let canonical = AnchoredDir::workspace(canonical_path)?;
+    if anchored_directory_identity(canonical_path, &canonical.dir)? != identity {
+        return Err(RuntimeError::Protocol(format!(
+            "{} workspace root identity changed while opening",
+            canonical_path.display()
+        )));
+    }
+    Ok(())
+}
+
 fn anchored_directory_identity(
     path: &Path,
     dir: &Dir,
@@ -190,26 +543,33 @@ fn anchored_directory_identity(
     })
 }
 
-fn create_private_anchored_directory(parent: &Dir, path: &Path, leaf: &str) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use cap_std::fs::DirBuilderExt as _;
+#[cfg(unix)]
+fn create_private_anchored_directory(parent: &Dir, leaf: &OsStr) -> io::Result<Dir> {
+    use cap_std::fs::DirBuilderExt as _;
 
-        let _ = path;
-        let mut builder = cap_std::fs::DirBuilder::new();
-        builder.mode(0o700);
-        parent.create_dir_with(leaf, &builder)
-    }
-    #[cfg(windows)]
-    {
-        let _ = (parent, leaf);
-        super::windows_private_dir::create(path)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = path;
-        parent.create_dir(leaf)
-    }
+    let mut builder = cap_std::fs::DirBuilder::new();
+    builder.mode(0o700);
+    let leaf = Path::new(leaf);
+    // Do not chmod by name after creation: the leaf can be replaced before it is opened.
+    parent.create_dir_with(leaf, &builder)?;
+    #[cfg(test)]
+    observe_private_directory_create();
+    parent.open_dir_nofollow(leaf)
+}
+
+#[cfg(windows)]
+fn create_private_anchored_directory(parent: &Dir, leaf: &OsStr) -> io::Result<()> {
+    super::windows_private_dir::create_anchored(
+        parent,
+        leaf.to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "directory leaf is not Unicode")
+        })?,
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_private_anchored_directory(parent: &Dir, leaf: &OsStr) -> io::Result<()> {
+    parent.create_dir(Path::new(leaf))
 }
 
 fn validate_private_anchored_directory(
@@ -218,20 +578,57 @@ fn validate_private_anchored_directory(
 ) -> Result<(), RuntimeError> {
     #[cfg(unix)]
     {
-        use cap_std::fs::PermissionsExt as _;
+        use cap_std::fs::{MetadataExt as _, PermissionsExt as _};
 
-        let mode = metadata.permissions().mode();
-        if mode & 0o077 != 0 {
-            return Err(RuntimeError::Protocol(format!(
-                "{} must not grant group or other access",
-                path.display()
-            )));
-        }
+        validate_unix_private_directory_metadata(
+            path,
+            metadata.uid(),
+            metadata.permissions().mode(),
+            rustix::process::geteuid().as_raw(),
+        )
     }
-    #[cfg(not(any(unix, windows)))]
-    let _ = (path, metadata);
+    #[cfg(not(unix))]
+    {
+        let _ = (path, metadata);
+        Ok(())
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn validate_opened_private_directory(path: &Path, dir: &Dir) -> Result<(), RuntimeError> {
+    #[cfg(target_os = "macos")]
+    if has_macos_acl_entries(dir).map_err(|source| path_io_error(path, source))? {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not grant access through extended ACL entries",
+            path.display()
+        )));
+    }
     #[cfg(windows)]
-    let _ = (path, metadata);
+    validate_opened_windows_private_directory(path, dir)?;
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let _ = (path, dir);
+    Ok(())
+}
+
+#[cfg(any(unix, test))]
+pub(crate) fn validate_unix_private_directory_metadata(
+    path: &Path,
+    owner_uid: u32,
+    mode: u32,
+    effective_uid: u32,
+) -> Result<(), RuntimeError> {
+    if owner_uid != effective_uid {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be owned by the current user",
+            path.display()
+        )));
+    }
+    if mode & 0o077 != 0 {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must not grant group or other access",
+            path.display()
+        )));
+    }
     Ok(())
 }
 
@@ -264,311 +661,18 @@ pub(crate) fn windows_file_is_current_user_only_for_test(path: &Path) -> io::Res
     super::windows_private_dir::file_is_current_user_only(path)
 }
 
-impl AnchoredFile {
-    pub(crate) fn diagnostic_path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(crate) fn metadata(&self) -> Result<cap_std::fs::Metadata, RuntimeError> {
-        self.parent
-            .dir
-            .symlink_metadata(&self.leaf)
-            .map_err(|source| path_io_error(&self.path, source))
-    }
-
-    pub(crate) fn open(
-        &self,
-        options: &cap_std::fs::OpenOptions,
-    ) -> Result<fs::File, RuntimeError> {
-        self.parent
-            .dir
-            .open_with(&self.leaf, options)
-            .map(cap_std::fs::File::into_std)
-            .map_err(|source| path_io_error(&self.path, source))
-    }
-
-    pub(crate) fn remove(&self) -> Result<(), RuntimeError> {
-        self.parent
-            .dir
-            .remove_file(&self.leaf)
-            .map_err(|source| path_io_error(&self.path, source))
-    }
-
-    pub(crate) fn rename_to(&self, target: &Self) -> Result<(), RuntimeError> {
-        self.parent
-            .dir
-            .rename(&self.leaf, &target.parent.dir, &target.leaf)
-            .map_err(|source| path_io_error(&target.path, source))
-    }
-
-    pub(crate) fn hard_link_to(&self, target: &Self) -> Result<(), RuntimeError> {
-        self.parent
-            .dir
-            .hard_link(&self.leaf, &target.parent.dir, &target.leaf)
-            .map_err(|source| path_io_error(&target.path, source))
-    }
+#[cfg(all(test, windows))]
+pub(crate) fn windows_file_has_current_user_only_access_for_test(path: &Path) -> io::Result<bool> {
+    super::windows_private_dir::file_has_current_user_only_access(path)
 }
 
-pub fn ensure_anchored_new_leaf_available(file: &AnchoredFile) -> Result<(), RuntimeError> {
-    match file.metadata() {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink or reparse point",
-            file.path.display()
-        ))),
-        Ok(_) => Err(path_io_error(
-            &file.path,
-            io::Error::new(io::ErrorKind::AlreadyExists, "file already exists"),
-        )),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-pub fn ensure_anchored_real_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
-    let metadata = file.metadata()?;
-    if metadata.file_type().is_symlink() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink or reparse point",
-            file.path.display()
-        )));
-    }
-    if !metadata.is_file() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must be a file",
-            file.path.display()
-        )));
-    }
-    Ok(())
-}
-
-pub fn open_anchored_real_file_for_read(
-    file: &AnchoredFile,
-) -> Result<(fs::File, fs::Metadata), RuntimeError> {
-    ensure_anchored_real_file(file)?;
-    let mut options = cap_std::fs::OpenOptions::new();
-    options.read(true).follow(FollowSymlinks::No);
-    let opened = file.open(&options)?;
-    let metadata = opened
-        .metadata()
-        .map_err(|source| path_io_error(&file.path, source))?;
-    validate_real_file(&file.path, &metadata)?;
-    Ok((opened, metadata))
-}
-
-pub fn open_anchored_file_for_read(
-    file: &AnchoredFile,
-) -> Result<(fs::File, fs::Metadata), RuntimeError> {
-    let (opened, metadata) = open_anchored_real_file_for_read(file)?;
-    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)?;
-    Ok((opened, metadata))
-}
-
-pub fn read_anchored_file_with_limit(
-    file: &AnchoredFile,
-    max_bytes: u64,
-) -> Result<Vec<u8>, RuntimeError> {
-    let (opened, metadata) = open_anchored_file_for_read(file)?;
-    read_opened_file_with_limit(opened, metadata.len(), &file.path, max_bytes)
-}
-
-pub fn read_anchored_to_string_with_limit(
-    file: &AnchoredFile,
-    max_bytes: u64,
-) -> Result<String, RuntimeError> {
-    decode_utf8(&file.path, read_anchored_file_with_limit(file, max_bytes)?)
-}
-
-pub fn segmented_jsonl_path(
-    base: &AnchoredFile,
-    ordinal: u64,
-) -> Result<AnchoredFile, RuntimeError> {
-    if ordinal == 1 {
-        return Ok(base.clone());
-    }
-    let leaf = segmented_jsonl_stem(base)?;
-    Ok(base.parent.file(format!("{leaf}.{ordinal:06}.jsonl")))
-}
-
-pub fn segmented_jsonl_stem(base: &AnchoredFile) -> Result<&str, RuntimeError> {
-    base.leaf
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .and_then(|leaf| leaf.strip_suffix(".jsonl"))
-        .ok_or_else(|| {
-            RuntimeError::Protocol(format!(
-                "{} segmented JSONL path must end in .jsonl",
-                base.diagnostic_path().display()
-            ))
-        })
-}
-
-pub enum SegmentedJsonlMember {
-    Canonical(u64, AnchoredFile),
-    Alias(AnchoredFile),
-}
-
-pub fn for_each_segmented_jsonl_member(
-    base: &AnchoredFile,
-    mut visit: impl FnMut(SegmentedJsonlMember) -> Result<(), RuntimeError>,
-) -> Result<(), RuntimeError> {
-    let leaf = segmented_jsonl_stem(base)?;
-    let base_name = format!("{leaf}.jsonl");
-    let prefix = format!("{leaf}.");
-    for entry in base
-        .parent
-        .dir
-        .entries()
-        .map_err(|source| path_io_error(&base.parent.path, source))?
-    {
-        let entry = entry.map_err(|source| path_io_error(&base.parent.path, source))?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let candidate = name.to_ascii_lowercase();
-        if candidate == base_name {
-            if name != base_name {
-                visit(SegmentedJsonlMember::Alias(base.parent.file(name)))?;
-            }
-            continue;
-        }
-        let Some(ordinal) = candidate
-            .strip_prefix(&prefix)
-            .and_then(|suffix| suffix.strip_suffix(".jsonl"))
-            .filter(|ordinal| {
-                ordinal.len() == 6 && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-            })
-            .and_then(|ordinal| ordinal.parse::<u64>().ok())
-        else {
-            continue;
-        };
-        let file = base.parent.file(name);
-        visit(if candidate == name {
-            SegmentedJsonlMember::Canonical(ordinal, file)
-        } else {
-            SegmentedJsonlMember::Alias(file)
-        })?;
-    }
-    Ok(())
-}
-
-pub fn canonical_segmented_jsonl_sibling(
-    base: &AnchoredFile,
-    member: SegmentedJsonlMember,
-) -> Result<(u64, AnchoredFile), RuntimeError> {
-    match member {
-        SegmentedJsonlMember::Canonical(ordinal, file) => Ok((ordinal, file)),
-        SegmentedJsonlMember::Alias(file) => Err(RuntimeError::Protocol(format!(
-            "{} contains non-canonical segmented JSONL name {}",
-            base.parent.path.display(),
-            file.leaf.display()
-        ))),
-    }
-}
-
-pub fn retry_event_segment_discovery<T>(
-    mut discover: impl FnMut() -> Result<T, RuntimeError>,
-) -> Result<T, RuntimeError> {
-    match discover() {
-        Err(RuntimeError::Protocol(_)) => discover(),
-        result => result,
-    }
-}
-
-pub fn segmented_jsonl_files(
-    base: &AnchoredFile,
-    limits: SessionStreamLimits,
-) -> Result<Vec<AnchoredFile>, RuntimeError> {
-    ensure_anchored_real_file(base)?;
-    let mut files = vec![base.clone()];
-    let mut siblings = Vec::new();
-    let mut invalid_ordinal = None;
-    let mut exceeds_limit = false;
-    for_each_segmented_jsonl_member(base, |member| {
-        let (ordinal, candidate) = canonical_segmented_jsonl_sibling(base, member)?;
-        if ordinal < 2 {
-            invalid_ordinal = Some(invalid_ordinal.map_or(ordinal, |old: u64| old.min(ordinal)));
-        } else if ordinal > limits.max_segments {
-            exceeds_limit = true;
-        } else {
-            siblings.push((ordinal, candidate));
-        }
-        Ok(())
-    })?;
-    if let Some(ordinal) = invalid_ordinal {
-        return Err(RuntimeError::Protocol(format!(
-            "{} has invalid segmented JSONL ordinal {ordinal:06}",
-            base.diagnostic_path().display()
-        )));
-    }
-    if exceeds_limit {
-        return Err(RuntimeError::Protocol(format!(
-            "{} segment count exceeds max {}",
-            base.diagnostic_path().display(),
-            limits.max_segments
-        )));
-    }
-    siblings.sort_unstable_by_key(|(ordinal, _)| *ordinal);
-    for (expected, (ordinal, candidate)) in (2..).zip(siblings) {
-        if ordinal != expected {
-            return Err(RuntimeError::Protocol(format!(
-                "{} has non-contiguous segmented JSONL ordinals",
-                base.diagnostic_path().display()
-            )));
-        }
-        ensure_anchored_real_file(&candidate)?;
-        files.push(candidate);
-    }
-    Ok(files)
-}
-
-pub fn read_segmented_jsonl(
-    base: &AnchoredFile,
-    limits: SessionStreamLimits,
-) -> Result<String, RuntimeError> {
-    let mut bytes = Vec::new();
-    let files = segmented_jsonl_files(base, limits)?;
-    for (index, file) in files.iter().enumerate() {
-        let segment = read_anchored_file_with_limit(file, MAX_SESSION_SEGMENT_BYTES)?;
-        if index + 1 != files.len() && !segment.ends_with(b"\n") {
-            return Err(RuntimeError::Protocol(format!(
-                "{} non-final segment must end with LF",
-                file.diagnostic_path().display()
-            )));
-        }
-        let total = u64::try_from(bytes.len().saturating_add(segment.len())).unwrap_or(u64::MAX);
-        if total > limits.max_total_bytes {
-            return Err(RuntimeError::Protocol(format!(
-                "{} segmented JSONL size {total} bytes exceeds max {}",
-                base.diagnostic_path().display(),
-                limits.max_total_bytes
-            )));
-        }
-        bytes.extend_from_slice(&segment);
-    }
-    decode_utf8(base.diagnostic_path(), bytes)
-}
-
-pub fn for_each_segmented_jsonl_line(
-    base: &AnchoredFile,
-    limits: SessionStreamLimits,
-    mut visit: impl FnMut(&str) -> Result<(), RuntimeError>,
-) -> Result<u64, RuntimeError> {
-    let mut total = 0u64;
-    let files = segmented_jsonl_files(base, limits)?;
-    let segment_count = files.len();
-    for (index, file) in files.into_iter().enumerate() {
-        let remaining = limits.max_total_bytes.saturating_sub(total);
-        let non_final = index + 1 != segment_count;
-        let segment_bytes = for_each_anchored_file_line_with_limit(
-            &file,
-            MAX_SESSION_SEGMENT_BYTES.min(remaining),
-            non_final,
-            &mut visit,
-        )?;
-        total = total.saturating_add(segment_bytes);
-    }
-    Ok(total)
+#[cfg(all(test, windows))]
+pub(crate) fn windows_directory_is_current_user_only_for_test(
+    path: &Path,
+) -> Result<bool, RuntimeError> {
+    let directory = AnchoredDir::workspace(path)?;
+    super::windows_private_dir::opened_is_current_user_only(&directory.dir)
+        .map_err(|source| path_io_error(path, source))
 }
 
 #[cfg(all(test, unix))]
@@ -576,8 +680,23 @@ type PrivateDirectoryOpenObserver = Box<dyn FnOnce()>;
 
 #[cfg(all(test, unix))]
 std::thread_local! {
+    static PRIVATE_DIRECTORY_CREATE_OBSERVER: RefCell<Option<PrivateDirectoryOpenObserver>> =
+        RefCell::new(None);
     static PRIVATE_DIRECTORY_OPEN_OBSERVER: RefCell<Option<PrivateDirectoryOpenObserver>> =
         RefCell::new(None);
+}
+
+#[cfg(all(test, unix))]
+pub fn set_private_directory_create_observer(observer: impl FnOnce() + 'static) {
+    PRIVATE_DIRECTORY_CREATE_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(all(test, unix))]
+fn observe_private_directory_create() {
+    let observer = PRIVATE_DIRECTORY_CREATE_OBSERVER.with_borrow_mut(Option::take);
+    if let Some(observer) = observer {
+        observer();
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -591,256 +710,6 @@ fn observe_private_directory_open() {
     if let Some(observer) = observer {
         observer();
     }
-}
-
-#[cfg(test)]
-type OwnedFileRemoveObserver = Box<dyn FnOnce(&AnchoredFile)>;
-
-#[cfg(test)]
-std::thread_local! {
-    static OWNED_FILE_REMOVE_OBSERVER: RefCell<Option<OwnedFileRemoveObserver>> =
-        RefCell::new(None);
-}
-
-#[cfg(test)]
-pub fn set_owned_file_remove_observer(observer: impl FnOnce(&AnchoredFile) + 'static) {
-    OWNED_FILE_REMOVE_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
-}
-
-#[cfg(test)]
-fn observe_owned_file_remove(path: &AnchoredFile) {
-    let observer = OWNED_FILE_REMOVE_OBSERVER.with_borrow_mut(Option::take);
-    if let Some(observer) = observer {
-        observer(path);
-    }
-}
-
-pub fn remove_owned_anchored_file(
-    path: &AnchoredFile,
-    _acquired: AnchoredFileIdentity,
-) -> Result<(), RuntimeError> {
-    #[cfg(test)]
-    observe_owned_file_remove(path);
-    Err(RuntimeError::Protocol(format!(
-        "cannot safely remove reserved file {}; retained as an inventory-visible orphan",
-        path.diagnostic_path().display(),
-    )))
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AnchoredFileIdentity {
-    #[cfg(unix)]
-    device: u64,
-    #[cfg(unix)]
-    inode: u64,
-    #[cfg(windows)]
-    file_index: u64,
-    #[cfg(windows)]
-    volume_serial_number: u64,
-}
-
-pub fn anchored_file_identity(
-    path: &Path,
-    file: &fs::File,
-) -> Result<AnchoredFileIdentity, RuntimeError> {
-    let metadata = file
-        .metadata()
-        .map_err(|source| path_io_error(path, source))?;
-    validate_real_file(path, &metadata)?;
-    ensure_not_hardlinked_open_file(path, file, &metadata)?;
-
-    #[cfg(unix)]
-    {
-        Ok(AnchoredFileIdentity {
-            device: std::os::unix::fs::MetadataExt::dev(&metadata),
-            inode: std::os::unix::fs::MetadataExt::ino(&metadata),
-        })
-    }
-    #[cfg(windows)]
-    {
-        let identity = windows_open_file_information(path, file)?;
-        Ok(AnchoredFileIdentity {
-            file_index: identity.file_index,
-            volume_serial_number: identity.volume_serial_number,
-        })
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(RuntimeError::Protocol(format!(
-            "{} file identity verification is unsupported on this platform",
-            path.display(),
-        )))
-    }
-}
-
-pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    ensure_anchored_new_leaf_available(file)?;
-    let mut options = cap_std::fs::OpenOptions::new();
-    options
-        .write(true)
-        .create_new(true)
-        .follow(FollowSymlinks::No);
-    file.open(&options)
-}
-
-pub fn verify_owned_anchored_marker(
-    path: &AnchoredFile,
-    acquired: &fs::File,
-) -> Result<(), RuntimeError> {
-    verify_owned_anchored_file(path, acquired, "session marker")
-}
-
-pub fn verify_owned_anchored_file(
-    path: &AnchoredFile,
-    acquired: &fs::File,
-    kind: &str,
-) -> Result<(), RuntimeError> {
-    let (current, current_metadata) = open_anchored_real_file_for_read(path)?;
-    ensure_not_hardlinked_open_file(path.diagnostic_path(), &current, &current_metadata)?;
-    let acquired_metadata = acquired
-        .metadata()
-        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
-    validate_real_file(path.diagnostic_path(), &acquired_metadata)?;
-    ensure_not_hardlinked_open_file(path.diagnostic_path(), acquired, &acquired_metadata)?;
-    if !open_files_share_identity(path.diagnostic_path(), acquired, &current)? {
-        return Err(RuntimeError::Protocol(format!(
-            "{} {kind} identity changed while ownership was active",
-            path.diagnostic_path().display(),
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-pub fn open_files_share_identity(
-    _path: &Path,
-    left: &fs::File,
-    right: &fs::File,
-) -> Result<bool, RuntimeError> {
-    let left = left
-        .metadata()
-        .map_err(|source| path_io_error(_path, source))?;
-    let right = right
-        .metadata()
-        .map_err(|source| path_io_error(_path, source))?;
-    Ok(
-        std::os::unix::fs::MetadataExt::dev(&left) == std::os::unix::fs::MetadataExt::dev(&right)
-            && std::os::unix::fs::MetadataExt::ino(&left)
-                == std::os::unix::fs::MetadataExt::ino(&right),
-    )
-}
-
-#[cfg(windows)]
-pub fn open_files_share_identity(
-    path: &Path,
-    left: &fs::File,
-    right: &fs::File,
-) -> Result<bool, RuntimeError> {
-    let left = windows_open_file_information(path, left)?;
-    let right = windows_open_file_information(path, right)?;
-    Ok(left.volume_serial_number == right.volume_serial_number
-        && left.file_index == right.file_index)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn open_files_share_identity(
-    _path: &Path,
-    _left: &fs::File,
-    _right: &fs::File,
-) -> Result<bool, RuntimeError> {
-    Ok(false)
-}
-
-pub fn ensure_anchored_non_hardlinked_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
-    open_anchored_file_for_read(file).map(|_| ())
-}
-
-#[cfg(any(unix, windows))]
-pub fn ensure_not_hardlinked_open_file(
-    path: &Path,
-    file: &fs::File,
-    _metadata: &fs::Metadata,
-) -> Result<(), RuntimeError> {
-    #[cfg(unix)]
-    let _ = file;
-    #[cfg(unix)]
-    let links = hard_link_count(path, _metadata)?;
-    #[cfg(windows)]
-    let links = hard_link_count_for_open_file(path, file)?;
-    if links == 0 {
-        return Err(RuntimeError::Protocol(format!(
-            "{} was unlinked while open",
-            path.display()
-        )));
-    }
-    if links > 1 {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be hard-linked",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn ensure_not_hardlinked_open_file(
-    _path: &Path,
-    _file: &fs::File,
-    _metadata: &fs::Metadata,
-) -> Result<(), RuntimeError> {
-    Ok(())
-}
-
-pub struct RuntimeDirs {
-    pub(crate) logs: AnchoredDir,
-    pub(crate) sessions: AnchoredDir,
-}
-
-#[cfg(test)]
-pub fn ensure_runtime_dirs(workspace: &Path) -> Result<RuntimeDirs, RuntimeError> {
-    let workspace = AnchoredDir::workspace(workspace)?;
-    ensure_runtime_dirs_from(&workspace)
-}
-
-pub(crate) fn ensure_anchored_runtime_dirs(
-    workspace: &AnchoredWorkspace,
-) -> Result<RuntimeDirs, RuntimeError> {
-    ensure_runtime_dirs_from(workspace.root())
-}
-
-fn ensure_runtime_dirs_from(workspace: &AnchoredDir) -> Result<RuntimeDirs, RuntimeError> {
-    let flow_dir = workspace
-        .child(".flow", true, DirectoryErrorMode::Protocol)?
-        .expect("created runtime directory is present");
-    let sessions = flow_dir
-        .child("sessions", true, DirectoryErrorMode::Protocol)?
-        .expect("created session directory is present");
-    let logs = flow_dir
-        .child("logs", true, DirectoryErrorMode::Protocol)?
-        .expect("created log directory is present");
-    Ok(RuntimeDirs { logs, sessions })
-}
-
-pub fn open_runtime_dir(workspace: &Path, leaf: &str) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let workspace = AnchoredDir::workspace(workspace)?;
-    open_runtime_dir_from(&workspace, leaf)
-}
-
-pub(crate) fn open_anchored_runtime_dir(
-    workspace: &AnchoredWorkspace,
-    leaf: &str,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
-    open_runtime_dir_from(workspace.root(), leaf)
-}
-
-fn open_runtime_dir_from(
-    workspace: &AnchoredDir,
-    leaf: &str,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let Some(flow_dir) = workspace.child(".flow", false, DirectoryErrorMode::Protocol)? else {
-        return Ok(None);
-    };
-    flow_dir.child(leaf, false, DirectoryErrorMode::Protocol)
 }
 
 pub fn validate_anchored_directory(
@@ -858,6 +727,23 @@ pub fn validate_anchored_directory(
     Ok(())
 }
 
+fn classify_anchored_directory_open_error(
+    parent: &Dir,
+    leaf: &Path,
+    path: &Path,
+    source: io::Error,
+    error_mode: DirectoryErrorMode,
+) -> RuntimeError {
+    let unsafe_entry = parent
+        .symlink_metadata(leaf)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink() || !metadata.is_dir());
+    if unsafe_entry {
+        unsafe_anchored_directory(path.to_owned(), source, error_mode)
+    } else {
+        path_io_error(path, source)
+    }
+}
+
 pub fn unsafe_anchored_directory(
     path: PathBuf,
     source: io::Error,
@@ -870,7 +756,7 @@ pub fn unsafe_anchored_directory(
     match error_mode {
         DirectoryErrorMode::Protocol => RuntimeError::Protocol(message),
         DirectoryErrorMode::ScriptWrite => {
-            runtime_denied(core_policy::DenyReasonCode::SymlinkEscapeDenied, message)
+            RuntimeError::denied(core_policy::DenyReasonCode::SymlinkEscapeDenied, message)
         }
     }
 }
@@ -892,49 +778,4 @@ pub fn has_windows_reparse_point(metadata: &fs::Metadata) -> bool {
 #[cfg(not(windows))]
 pub fn has_windows_reparse_point(_metadata: &fs::Metadata) -> bool {
     false
-}
-
-pub fn open_anchored_session_log_append_file(
-    path: &AnchoredFile,
-) -> Result<fs::File, RuntimeError> {
-    let mut options = cap_std::fs::OpenOptions::new();
-    #[cfg(not(windows))]
-    options.append(true);
-    #[cfg(windows)]
-    {
-        use cap_std::fs::OpenOptionsExt as _;
-
-        const FILE_SHARE_READ: u32 = 0x0000_0001;
-        options.read(true).write(true).share_mode(FILE_SHARE_READ);
-    }
-    options.follow(FollowSymlinks::No);
-    let file = path.open(&options)?;
-    validate_open_session_log_append_file(&path.path, &file)?;
-    Ok(file)
-}
-pub fn validate_open_session_log_append_file(
-    path: &Path,
-    file: &fs::File,
-) -> Result<(), RuntimeError> {
-    let metadata = file
-        .metadata()
-        .map_err(|source| path_io_error(path, source))?;
-    validate_real_file(path, &metadata)?;
-    ensure_not_hardlinked_open_file(path, file, &metadata)
-}
-
-pub fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must not be a symlink or reparse point",
-            path.display()
-        )));
-    }
-    if !metadata.is_file() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must be a file",
-            path.display()
-        )));
-    }
-    Ok(())
 }

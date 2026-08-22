@@ -1,8 +1,12 @@
 use crate::script::canonical::parse_error;
-use crate::script::model::{MAX_REGISTRY_FILE_BYTES, RegistryBlock};
-use crate::script::naming::RegistryError;
+use crate::script::error::RegistryError;
+use crate::script::model::{MAX_REGISTRY_FILE_BYTES, RegistryBlock, RegistryBlockKind};
 use noyalib::policy::{DenyAnchors, MaxScalarLength, Policy, PolicyEvent};
 use noyalib::{DuplicateKeyPolicy, MergeKeyPolicy, ParserConfig, RequireIndent, YamlVersion};
+
+mod registry_fields;
+
+use registry_fields::reject_unknown_fields;
 
 pub(super) const MAX_YAML_BYTES: usize = MAX_REGISTRY_FILE_BYTES as usize;
 pub(super) const MAX_YAML_DEPTH: usize = 64;
@@ -60,17 +64,22 @@ pub(super) fn deserialize_registry_block(
             )
         })?;
     let (kind, payload) = mapping.iter().next().expect("one mapping entry");
-    reject_unknown_fields(source_name, kind, payload)?;
-    match kind.as_str() {
-        "tool" => deserialize_value(source_name, payload).map(RegistryBlock::Tool),
-        "instruction" => deserialize_value(source_name, payload).map(RegistryBlock::Instruction),
-        "phase" => deserialize_value(source_name, payload).map(RegistryBlock::Phase),
-        "connection" => deserialize_value(source_name, payload).map(RegistryBlock::Connection),
-        "flow" => deserialize_value(source_name, payload).map(RegistryBlock::Flow),
-        _ => Err(parse_error(
+    let Some(kind) = RegistryBlockKind::parse(kind.as_str()) else {
+        return Err(parse_error(
             source_name,
             format!("unsupported registry block kind `{kind}`"),
-        )),
+        ));
+    };
+    reject_unknown_fields(source_name, kind, payload)?;
+    match kind {
+        RegistryBlockKind::Tool => deserialize_value(source_name, payload).map(RegistryBlock::Tool),
+        RegistryBlockKind::Instruction => {
+            deserialize_value(source_name, payload).map(RegistryBlock::Instruction)
+        }
+        RegistryBlockKind::Phase => {
+            deserialize_value(source_name, payload).map(RegistryBlock::Phase)
+        }
+        RegistryBlockKind::Flow => deserialize_value(source_name, payload).map(RegistryBlock::Flow),
     }
 }
 
@@ -116,98 +125,6 @@ where
     }
 
     Ok(parsed)
-}
-
-fn reject_unknown_fields(
-    source_name: &str,
-    kind: &str,
-    value: &noyalib::Value,
-) -> Result<(), RegistryError> {
-    match kind {
-        "tool" => {
-            reject_mapping_fields(
-                source_name,
-                value,
-                &[
-                    "id",
-                    "name",
-                    "tool_kind",
-                    "command",
-                    "script_runtime",
-                    "script_body",
-                    "allowed_parameters",
-                    "read_scope",
-                    "write_scope",
-                    "protected_path_grants",
-                    "network",
-                ],
-            )?;
-            let Some(tool) = value.as_mapping() else {
-                return Ok(());
-            };
-            if let Some(command) = tool.get("command") {
-                reject_mapping_fields(source_name, command, &["command_id", "argv"])?;
-            }
-            if let Some(network) = tool.get("network") {
-                reject_mapping_fields(source_name, network, &["default", "allow"])?;
-                if let Some(entries) = network
-                    .as_mapping()
-                    .and_then(|network| network.get("allow"))
-                    .and_then(|allow| allow.as_sequence())
-                {
-                    for entry in entries {
-                        reject_mapping_fields(
-                            source_name,
-                            entry,
-                            &["kind", "transport", "cidr", "port"],
-                        )?;
-                    }
-                }
-            }
-        }
-        "instruction" => reject_mapping_fields(source_name, value, &["id", "name", "prompt"])?,
-        "phase" => reject_mapping_fields(
-            source_name,
-            value,
-            &["id", "name", "instruction_refs", "tool_refs", "steps"],
-        )?,
-        "connection" => reject_mapping_fields(
-            source_name,
-            value,
-            &["id", "name", "connection_kind", "from_ref", "to_ref"],
-        )?,
-        "flow" => reject_mapping_fields(
-            source_name,
-            value,
-            &[
-                "id",
-                "name",
-                "phase_refs",
-                "subflow_refs",
-                "connection_refs",
-            ],
-        )?,
-        _ => {}
-    }
-    Ok(())
-}
-
-fn reject_mapping_fields(
-    source_name: &str,
-    value: &noyalib::Value,
-    fields: &[&str],
-) -> Result<(), RegistryError> {
-    if let Some(field) = value.as_mapping().and_then(|mapping| {
-        mapping
-            .keys()
-            .find(|field| !fields.contains(&field.as_str()))
-    }) {
-        return Err(parse_error(
-            source_name,
-            format!("unknown field at `{field}`"),
-        ));
-    }
-    Ok(())
 }
 
 fn contains_null(value: &noyalib::Value) -> bool {

@@ -1,5 +1,24 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+/// Root of the logical workspace scope namespace.
+pub const WORKSPACE_SCOPE_ROOT: &str = "workspace";
+
+/// Builds a logical workspace scope from a root-relative path.
+pub fn workspace_scope_path(relative: &str) -> String {
+    if relative.is_empty() {
+        WORKSPACE_SCOPE_ROOT.to_owned()
+    } else {
+        format!("{WORKSPACE_SCOPE_ROOT}/{relative}")
+    }
+}
+
+/// Strips the logical workspace scope from a nested path.
+pub fn strip_workspace_scope(path: &str) -> Option<&str> {
+    path.strip_prefix(WORKSPACE_SCOPE_ROOT)?
+        .strip_prefix('/')
+        .filter(|relative| !relative.is_empty())
+}
+
 /// Returns whether `value` is a valid v0 block id.
 pub fn is_valid_block_id(value: &str) -> bool {
     proto::is_valid_session_id(value)
@@ -89,6 +108,7 @@ pub fn normalize_protected_path_pattern(value: &str) -> Option<String> {
                 || segment == ".."
                 || segment.contains("**") && segment != "**"
                 || path_component_has_windows_alias(segment)
+                || path_pattern_component_has_windows_invalid_character(segment)
         })
     {
         return None;
@@ -104,10 +124,12 @@ pub fn normalize_protected_path_pattern(value: &str) -> Option<String> {
 
 /// Returns whether `path` is equal to or contained under `scope`.
 pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
-    path == scope
-        || path
-            .strip_prefix(scope)
-            .is_some_and(|suffix| suffix.starts_with('/'))
+    normalize_safe_relative_path(path).as_deref() == Some(path)
+        && normalize_safe_relative_path(scope).as_deref() == Some(scope)
+        && (path == scope
+            || path
+                .strip_prefix(scope)
+                .is_some_and(|suffix| suffix.starts_with('/')))
 }
 
 /// Returns whether any path component would alias a Windows device or trimmed name.
@@ -130,22 +152,30 @@ fn path_component_has_windows_alias(component: &str) -> bool {
         .split_once('.')
         .map_or(component, |(basename, _)| basename);
     let uppercase = basename.to_ascii_uppercase();
-    matches!(uppercase.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || uppercase
-            .strip_prefix("COM")
-            .or_else(|| uppercase.strip_prefix("LPT"))
-            .is_some_and(|digit| {
-                matches!(
-                    digit,
-                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
-                )
-            })
+    matches!(
+        uppercase.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || uppercase
+        .strip_prefix("COM")
+        .or_else(|| uppercase.strip_prefix("LPT"))
+        .is_some_and(|digit| {
+            matches!(
+                digit,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
 }
 
 fn path_component_has_windows_invalid_character(component: &str) -> bool {
     component
         .bytes()
         .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|' | b'?' | b'*'))
+}
+
+fn path_pattern_component_has_windows_invalid_character(component: &str) -> bool {
+    component
+        .bytes()
+        .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|'))
 }
 
 fn matches_lower_token(value: &str, min_len: usize, max_len: usize) -> bool {

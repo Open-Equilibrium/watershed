@@ -16,6 +16,8 @@ pub enum LiveEventNotifyStatus {
 /// A best-effort wake-up for events already committed to one session log.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveEventNotification {
+    /// Conversation owning a nested run; absent for a flat session.
+    pub conversation_id: Option<String>,
     /// Session whose committed log should be read.
     pub session_id: String,
     /// Earliest committed sequence represented by this pending wake-up.
@@ -53,23 +55,50 @@ pub struct LiveEventState {
 /// This handle owns no task or thread. Pass it to one run or resume operation. Each
 /// successful append advances a shared high-watermark and attempts a capacity-one wake-up.
 pub struct LiveEventNotifier {
-    pub(crate) sender: std::sync::mpsc::SyncSender<(String, u64)>,
+    pub(crate) sender: std::sync::mpsc::SyncSender<(Option<String>, String, u64)>,
     pub(crate) state: std::sync::Arc<LiveEventState>,
 }
 
 impl LiveEventNotifier {
+    pub(crate) fn duplicate_for_same_operation(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+            state: self.state.clone(),
+        }
+    }
+
     /// Advances the committed high-watermark and attempts a wake-up without waiting.
     ///
     /// Call this only after `committed_sequence` is readable from the authoritative session
     /// log. A full or closed channel never blocks and never changes persistence semantics.
     pub fn try_notify(&self, session_id: &str, committed_sequence: u64) -> LiveEventNotifyStatus {
+        self.try_notify_run(None, session_id, committed_sequence)
+    }
+
+    /// Advances the committed high-watermark for one conversation-owned run.
+    pub fn try_notify_conversation_run(
+        &self,
+        conversation_id: &str,
+        run_session_id: &str,
+        committed_sequence: u64,
+    ) -> LiveEventNotifyStatus {
+        self.try_notify_run(Some(conversation_id), run_session_id, committed_sequence)
+    }
+
+    fn try_notify_run(
+        &self,
+        conversation_id: Option<&str>,
+        session_id: &str,
+        committed_sequence: u64,
+    ) -> LiveEventNotifyStatus {
         self.state
             .highest_committed_sequence
             .fetch_max(committed_sequence, std::sync::atomic::Ordering::Release);
-        match self
-            .sender
-            .try_send((session_id.to_owned(), committed_sequence))
-        {
+        match self.sender.try_send((
+            conversation_id.map(str::to_owned),
+            session_id.to_owned(),
+            committed_sequence,
+        )) {
             Ok(()) => LiveEventNotifyStatus::Queued,
             Err(std::sync::mpsc::TrySendError::Full(_)) => LiveEventNotifyStatus::Coalesced,
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => LiveEventNotifyStatus::Closed,
@@ -86,7 +115,7 @@ impl LiveEventNotifier {
 /// the replay/live race because a commit either advances the observed high-watermark or leaves
 /// another wake-up queued.
 pub struct LiveEventReceiver {
-    pub(crate) receiver: std::sync::mpsc::Receiver<(String, u64)>,
+    pub(crate) receiver: std::sync::mpsc::Receiver<(Option<String>, String, u64)>,
     pub(crate) state: std::sync::Arc<LiveEventState>,
 }
 
@@ -105,16 +134,15 @@ impl LiveEventReceiver {
         &self,
         timeout: Duration,
     ) -> Result<LiveEventNotification, LiveEventReceiveError> {
-        let (session_id, first_committed_sequence) =
-            self.receiver
-                .recv_timeout(timeout)
-                .map_err(|err| match err {
-                    std::sync::mpsc::RecvTimeoutError::Timeout => LiveEventReceiveError::Timeout,
-                    std::sync::mpsc::RecvTimeoutError::Disconnected => {
-                        LiveEventReceiveError::Closed
-                    }
-                })?;
+        let (conversation_id, session_id, first_committed_sequence) = self
+            .receiver
+            .recv_timeout(timeout)
+            .map_err(|err| match err {
+                std::sync::mpsc::RecvTimeoutError::Timeout => LiveEventReceiveError::Timeout,
+                std::sync::mpsc::RecvTimeoutError::Disconnected => LiveEventReceiveError::Closed,
+            })?;
         Ok(LiveEventNotification {
+            conversation_id,
             session_id,
             first_committed_sequence,
             highest_committed_sequence: self.highest_committed_sequence(),

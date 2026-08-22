@@ -6,6 +6,8 @@ Rationale for the Rust core: low per-agent memory footprint, true multi-core par
 
 ## Flow Agent
 
+Flow Agent budgets govern work while Flow Agent is executing. Dormant on-disk conversation histories and run bundles have no count, age or byte quota and never trigger retention or deletion. Complete-history validation uses the per-command temporary index selected by [CV-03, CV-04, CV-09 and CV-13–CV-14](flow-agent/benchmarks/M1_1_BUDGETS.md#conversations-and-run-logs): it has bounded scan, memory and scratch, uses checked arithmetic and performs at most O(n log n) work. Other command reads likewise keep scan, projection, memory, output and latency streaming or bounded by an approved budget.
+
 Product target:
 - **10 parallel top-level flows** on a laptop-class device with at least 4 logical cores, 16 GiB RAM and SSD storage. Their roots and subflows share the process-wide limit of 32 live invocations. Model/provider processes, tool processes, network latency and caller-owned output buffers are excluded.
 
@@ -15,16 +17,14 @@ These hard limits always apply and are not multiplied into one promised workload
 
 - Flow tree depth: 16 levels, root = level 1.
 - Direct fan-out: 32 subflow references per Flow definition.
-- Cumulative invocations: 512 per session, root-inclusive. Every start counts, including repeated definitions, retries and failed starts.
+- Cumulative invocations: 512 per Run, root-inclusive. Every start counts, including repeated definitions, loop iterations and failed starts.
 - Live invocations: 32 process-wide across all sessions. A started non-terminal root or subflow counts while running or waiting for model, tool or child work; queued, terminal and fully paused work does not.
-- Canonical events: 155,750 per session across all segments, resumes, errors and future event families.
-- Canonical storage: 320 KiB per event including LF, 16 MiB per event segment or context-manifest segment, 48 MiB total event data, 48 MiB total context-manifest data, 16 MiB per immutable object, at most 131,072 immutable objects per session and 5.5 GiB for the complete logical session bundle. Object data may use at most 5,520 MiB, reserving the other 112 MiB for the two JSONL streams and metadata. The former 10 MiB event-stream limit is removed.
+- Canonical events: 155,750 per Run across all segments, resumes, errors and future event families.
+- Canonical storage: 320 KiB per event including LF, 16 MiB per event segment or context-manifest segment, 352 MiB total event data, 48 MiB total context-manifest data, 16 MiB per immutable object, at most 131,072 immutable objects per Run and 5.5 GiB for the complete Run bundle. Object data may use at most 5,216 MiB, reserving the other 416 MiB for the two JSONL streams and metadata. The former 10 MiB event-stream limit is removed.
 
-The 155,750-event sizing model is `2 session + 1,024 Flow lifecycle + 1,024 phase + 102,400 model-cycle + 100 non-model step-lifecycle + 51,200 tool lifecycle`. It assumes 25,600 model cycles and 25,600 tool calls. Four model-cycle events mean one enclosing `step.started`/`step.completed` pair plus `message.delta`/`message.completed`; the 100 non-model step-lifecycle events represent 50 turns. These are capacity assumptions, not independent product limits.
+The 155,750-event sizing model is `2 session + 1,024 Flow lifecycle + 1,024 Phase lifecycle + 102,400 provider-message lifecycle + 51,200 Tool lifecycle + 100 terminal/error reserve`. It represents 51,200 message pairs and 25,600 Tool lifecycle pairs. The 100-event term is sizing slack for terminal orchestration, not an independently addressable product limit. These are capacity assumptions, not independent product limits.
 
-M1 plans the complete deterministic stream before side effects. A future dynamic planner must keep 20 event slots free until clean termination: one active tool/message terminal event, one `step.completed`, up to 16 `flow.failed` events, one `error` and one `session.failed`.
-
-Sixteen MiB is a per-segment rotation boundary, not a session or RAM limit. Rotation occurs before a record would cross it and never splits a record. At the 48 MiB event-data ceiling this normally yields three event segments and at most four when unsplittable event boundaries leave slack; arbitrary unsplit manifest records need at most five. This keeps sequential reads and recovery bounded without the extra file/flush overhead of materially smaller segments or the larger per-read burst of 32/64 MiB segments.
+Sixteen MiB is a per-segment rotation boundary, not a session or RAM limit. Rotation occurs before a record would cross it and never splits a record. An event stream uses at most 22 segments; record-boundary slack can make that count bind before the 352 MiB byte ceiling. Arbitrary unsplit manifest records use at most five segments. This keeps sequential reads and recovery bounded without the extra file/flush overhead of materially smaller segments or the larger per-read burst of 32/64 MiB segments.
 
 The representative payload distribution is 90% of events at 768 B, the next 9% at 12 KiB, the next 0.9% at 96 KiB and the final 0.1% at 320 KiB. This is a distribution of complete canonical event sizes, not `max payload / 2`. Exactly 16,000 events occupy 48,152,576 B (45.92 MiB).
 
@@ -42,7 +42,7 @@ M1 implementation budgets (ADR-0049):
 - Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
 - `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
 - Concurrency smoke: 10 fixture top-level flows complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 100 MiB aggregate RSS budget.
-- Initial full-session replay <= 10 s at the ADR-0068 event cap; full-session inspection with a retained maximum object inventory <= 15 s. Each allows <= 256 MiB RSS growth.
+- Callback-streaming full-Run replay uses the workload, latency and peak-RSS evidence in [CV-17/CV-18](flow-agent/benchmarks/M1_1_BUDGETS.md#conversations-and-run-logs). Full-Run inspection with a retained maximum object inventory completes <= 15 s with <= 256 MiB RSS growth.
 - Incremental tail read p95 <= 100 ms for one newly committed event up to 320 KiB, with <= 64 MiB retained-reader RSS growth.
 - The representative ten-session and ten-full-cap event-storage/replay gates each complete <= 120 s; they are not end-to-end runtime gates.
 
@@ -52,7 +52,7 @@ Tool runs are bounded/headless; the harness itself must not be the bottleneck wh
 
 The event budgets measure individual events, not averages of batch averages; ordering and durability semantics are canonical in `PROTOCOL.md`.
 
-M1.1 implementation budgets must be decided before implementation for: provider-adapter overhead; bounded subprocess startup and dispatch; timeout/cancel termination; stdout/stderr cap memory; per-tool Run Log append; typed input/parameter validation; exactly-once plan/apply bookkeeping; and complete-bundle export, delete, prune, retention, quota and storage-status operations. No budget is implied by this category list.
+ADR-0107 selects the E3 evidence scope, balanced bundle A and finite evidence matrix; ADR-0123 adds the bounded status-summary contract and reuses its fixed status-page workload. The [M1.1 budget matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) is the single source for every selected numeric cap, deadline and optimized gate, its exact counting rule, functional boundary proof, named performance workload, measurement-validation fixture and justified exclusion. Its evidence must pass before M1.1 product behavior begins. Under ADR-0106, every optimized workload sample and warmup runs in a fresh child process. Linux peak RSS growth is `post-workload VmHWM - pre-workload VmRSS`, which includes rather than subtracts recorded lifetime-high-water slack; retained growth is `post-workload VmRSS - pre-workload VmRSS`. Reports remain unadjusted. Because `flow-tool-result-v0` stores each non-inline stdout/stderr stream as one immutable object, the per-stream collector caps in [TR-01/TR-02](flow-agent/benchmarks/M1_1_BUDGETS.md#tool-runner) remain below the existing per-object limit.
 
 ## Meta-Harness
 

@@ -3,4 +3,3 @@ flow:
   name: SandboxNegativeProtectedPath
   phase_refs: [negative-protected-path]
   subflow_refs: []
-  connection_refs: []

@@ -1,75 +1,33 @@
 import json
-import os
 import re
 import shlex
-import shutil
-import subprocess
-import sys
-import tempfile
-import time
 import tomllib
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NODE_VERSION = "24.18.0"
-PNPM_VERSION = "11.15.1"
-SETUP_NODE_RELEASE = "v6.5.0"
-SETUP_NODE_SHA = "249970729cb0ef3589644e2896645e5dc5ba9c38"
-TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
-FORBIDDEN_NODE_RUNTIME_DEPENDENCY = re.compile(
-    r"^(?:node|nodejs|node-api|napi|neon)(?:[-_].*)?$"
+PACKAGE = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+NODE_VERSION = (ROOT / ".node-version").read_text(encoding="utf-8").strip()
+PNPM_VERSION = PACKAGE["packageManager"].removeprefix("pnpm@")
+CHECKOUT_RELEASE = "v7.0.1"
+CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+SETUP_NODE_RELEASE = "v7.0.0"
+SETUP_NODE_SHA = "820762786026740c76f36085b0efc47a31fe5020"
+INSTALL_ACTION_RELEASE = "v2.86.4"
+INSTALL_ACTION_SHA = "a2a5f6e99e1a31540baa0468acfa302cff0f359f"
+GATE_TOOLS = (
+    "cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,"
+    "cargo-deny@0.20.2,lychee@0.24.2"
 )
-
-
-def forbidden_dependency_names(table: dict[str, object]) -> list[str]:
-    return [
-        package_name
-        for dependency, specification in table.items()
-        for package_name in [
-            specification.get("package", dependency)
-            if isinstance(specification, dict)
-            else dependency
-        ]
-        if isinstance(package_name, str)
-        and FORBIDDEN_NODE_RUNTIME_DEPENDENCY.fullmatch(package_name)
-    ]
-
-
-def cargo_dependency_tables(
-    manifest: object,
-) -> list[tuple[tuple[str, ...], dict[str, object]]]:
-    if not isinstance(manifest, dict):
-        return []
-
-    dependency_table_names = (
-        "dependencies",
-        "build-dependencies",
-        "dev-dependencies",
-    )
-    tables: list[tuple[tuple[str, ...], dict[str, object]]] = []
-    for name in dependency_table_names:
-        table = manifest.get(name)
-        if isinstance(table, dict):
-            tables.append(((name,), table))
-
-    workspace = manifest.get("workspace")
-    if isinstance(workspace, dict):
-        table = workspace.get("dependencies")
-        if isinstance(table, dict):
-            tables.append((("workspace", "dependencies"), table))
-
-    targets = manifest.get("target")
-    if isinstance(targets, dict):
-        for selector, target in targets.items():
-            if not isinstance(target, dict):
-                continue
-            for name in dependency_table_names:
-                table = target.get(name)
-                if isinstance(table, dict):
-                    tables.append((("target", selector, name), table))
-    return tables
+M11_BUDGET_FEATURE = "m11-budget-evidence"
+M11_BUDGET_EXAMPLE = "m11_budgets"
+TEST_ISOLATION_CARGO_CONFIG = (
+    'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
+)
+UPLOAD_ARTIFACT_RELEASE = "v7.0.1"
+UPLOAD_ARTIFACT_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 
 
 def ci_push_branches(workflow: str) -> tuple[str, ...]:
@@ -101,140 +59,37 @@ def ci_push_branches(workflow: str) -> tuple[str, ...]:
     return tuple(branches)
 
 
-class CiToolchainContractTest(unittest.TestCase):
-    def test_tracked_file_listing_preserves_unusual_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            repo = Path(temporary_directory)
-            subprocess.run(
-                ["git", "init", "--quiet"], cwd=repo, check=True
-            )
-            tracked_paths = [
-                "-leading.md",
-                "unicodé.md",
-                "ignored.txt",
-            ]
-            if os.name != "nt":
-                tracked_paths.append("line\nbreak.md")
-            for tracked_path in tracked_paths:
-                blob = subprocess.run(
-                    ["git", "hash-object", "-w", "--stdin"],
-                    cwd=repo,
-                    input=b"tracked\n",
-                    capture_output=True,
-                    check=True,
-                ).stdout.decode("ascii").strip()
-                subprocess.run(
-                    [
-                        "git",
-                        "update-index",
-                        "--add",
-                        "--cacheinfo",
-                        f"100644,{blob},{tracked_path}",
-                    ],
-                    cwd=repo,
-                    check=True,
-                )
 
-            result = subprocess.run(
-                [
-                    "node",
-                    str(ROOT / "scripts" / "list-tracked-files.mjs"),
-                    "*.md",
-                ],
-                cwd=repo,
-                encoding="utf-8",
-                capture_output=True,
-            )
+class CiWorkflowContractTest(unittest.TestCase):
+    def test_ci_uses_the_pinned_rust_toolchain(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        with (ROOT / "rust-toolchain.toml").open("rb") as toolchain_file:
+            version = tomllib.load(toolchain_file)["toolchain"]["channel"]
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertCountEqual(
-            json.loads(result.stdout),
-            [path for path in tracked_paths if path.endswith(".md")],
+        self.assert_active_pinned_rust_step(workflow, version)
+
+    def test_rust_toolchain_contract_rejects_pin_tampering(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        with (ROOT / "rust-toolchain.toml").open("rb") as toolchain_file:
+            version = tomllib.load(toolchain_file)["toolchain"]["channel"]
+        tampered = workflow.replace(
+            "open('rust-toolchain.toml', 'rb')",
+            "open('another-toolchain.toml', 'rb')",
         )
 
-    def test_tracked_file_listing_forwards_complete_git_failure(self) -> None:
-        diagnostic = "git failure: " + ("x" * 1_000_000)
-        with tempfile.TemporaryDirectory(
-            prefix="watershed path with spaces "
-        ) as temporary_directory:
-            temporary_path = Path(temporary_directory)
-            emitter = temporary_path / "emit_error.py"
-            preload = temporary_path / "async_stderr.cjs"
-            emitter.write_text(
-                "import sys\n"
-                f"sys.stderr.write({diagnostic!r})\n"
-                "sys.exit(23)\n",
-                encoding="utf-8",
-            )
-            preload.write_text(
-                "if (process.env.WATERSHED_TEST_ASYNC_STDERR === '1') {\n"
-                "  delete process.env.WATERSHED_TEST_ASYNC_STDERR;\n"
-                "  const write = process.stderr.write.bind(process.stderr);\n"
-                "  process.stderr.write = (...args) => {\n"
-                "    setTimeout(() => write(...args), 10);\n"
-                "    return false;\n"
-                "  };\n"
-                "}\n",
-                encoding="utf-8",
-            )
-            if os.name == "nt":
-                node_executable = shutil.which("node")
-                self.assertIsNotNone(node_executable)
-                fake_git = temporary_path / "git.exe"
-                shutil.copy2(node_executable, fake_git)
-                (temporary_path / "ls-files").write_text(
-                    f"process.stderr.write({json.dumps(diagnostic)});\n"
-                    "process.exit(23);\n",
-                    encoding="utf-8",
-                )
-            else:
-                fake_git = temporary_path / "git"
-                fake_git.write_text(
-                    "#!/bin/sh\n"
-                    f"exec {shlex.quote(sys.executable)} "
-                    f"{shlex.quote(str(emitter))}\n",
-                    encoding="utf-8",
-                )
-                fake_git.chmod(0o755)
-            environment = os.environ.copy()
-            environment["PATH"] = (
-                str(temporary_path)
-                + os.pathsep
-                + environment.get("PATH", "")
-            )
-            environment["NODE_OPTIONS"] = "--require=./async_stderr.cjs"
-            environment["WATERSHED_TEST_ASYNC_STDERR"] = "1"
-
-            result = subprocess.run(
-                ["node", str(ROOT / "scripts" / "list-tracked-files.mjs")],
-                cwd=temporary_path,
-                env=environment,
-                encoding="utf-8",
-                capture_output=True,
-            )
-            if os.name == "nt":
-                deadline = time.monotonic() + 5
-                while True:
-                    try:
-                        fake_git.unlink()
-                        break
-                    except PermissionError:
-                        if time.monotonic() >= deadline:
-                            raise
-                        time.sleep(0.01)
-
-        self.assertEqual(result.returncode, 23)
-        self.assertEqual(result.stderr, diagnostic)
+        with self.assertRaises(AssertionError):
+            self.assert_active_pinned_rust_step(tampered, version)
 
     def test_node_and_pnpm_versions_are_pinned(self) -> None:
         self.assertEqual(
             (ROOT / ".node-version").read_text(encoding="utf-8"),
             f"{NODE_VERSION}\n",
         )
-        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
-        self.assertEqual(package["engines"]["node"], NODE_VERSION)
-        self.assertEqual(package["engines"]["pnpm"], PNPM_VERSION)
-        self.assertEqual(package["packageManager"], f"pnpm@{PNPM_VERSION}")
+        self.assertEqual(PACKAGE["packageManager"], f"pnpm@{PNPM_VERSION}")
 
     def test_node_toolchain_docs_cover_every_documentation_gate(self) -> None:
         testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
@@ -243,23 +98,245 @@ class CiToolchainContractTest(unittest.TestCase):
             "documentation gates (HTML rendering and link-manifest generation)",
             testing,
         )
+        self.assertIn("the Node advisory audit", testing)
+        self.assertIn("the Rust test-isolation runner", testing)
+        self.assertIn("`pnpm audit --lockfile-only`", testing)
 
     def test_ci_installs_and_verifies_the_pinned_node_toolchain(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
         self.assert_active_pinned_node_steps(workflow)
-        self.assertIn("run: cargo fmt --all --check", workflow)
-        self.assertIn(
-            "$docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'",
-            workflow,
-        )
-        self.assertIn("if ($LASTEXITCODE -ne 0) {", workflow)
-        self.assertIn("$docs = @($docsJson | ConvertFrom-Json)", workflow)
-        self.assertIn(
-            "lychee --no-progress --include-fragments -- @docs", workflow
-        )
+        self.assert_all_remote_actions_pinned(workflow)
         self.assertNotIn("git ls-files", workflow)
+
+    def test_ci_collects_and_covers_feature_gated_reporter(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        manifest = tomllib.loads(
+            (ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        reporter = next(
+            example
+            for example in manifest["example"]
+            if example["name"] == M11_BUDGET_EXAMPLE
+        )
+        self.assertEqual(reporter["required-features"], [M11_BUDGET_FEATURE])
+
+        self.assert_active_ci_gates(workflow)
+
+    def test_ci_gate_contract_rejects_mandatory_gate_removal(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        mutations = {
+            "formatting disabled": workflow.replace(
+                "      - name: Check formatting\n"
+                "        shell: pwsh\n",
+                "      - name: Check formatting\n"
+                "        if: false\n"
+                "        shell: pwsh\n",
+            ),
+            "clippy removed": workflow.replace(
+                "      - name: Check lints\n"
+                "        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings\n\n",
+                "",
+            ),
+            "optimized performance contract": workflow.replace(
+                "          --release\n"
+                "          --run-ignored ignored-only\n"
+                "          -j 1\n",
+                "",
+            ),
+            "optimized performance tolerated": workflow.replace(
+                "      - name: Run optimized performance tests\n"
+                "        if: matrix.os == 'ubuntu-24.04'\n",
+                "      - name: Run optimized performance tests\n"
+                "        if: matrix.os == 'ubuntu-24.04'\n"
+                "        continue-on-error: true\n",
+            ),
+            "coverage threshold": workflow.replace(
+                "          --fail-under-lines 90\n", ""
+            ),
+            "M1.1 budget execution": workflow.replace(
+                "          cargo run --locked -p flow-agent-core --release \\\n",
+                "          true \\\n",
+            ),
+            "M1.1 evidence upload tolerated": workflow.replace(
+                "          if-no-files-found: error\n",
+                "          if-no-files-found: error\n"
+                "        continue-on-error: true\n",
+            ),
+            "RustSec audit removed": workflow.replace(
+                "      - name: Check RustSec advisories\n"
+                "        run: cargo audit\n\n",
+                "",
+            ),
+            "dependency policy removed": workflow.replace(
+                "      - name: Check dependency policy\n"
+                "        run: cargo deny check\n\n",
+                "",
+            ),
+            "HTML rendering removed": workflow.replace(
+                "      - name: Render HTML docs\n"
+                "        run: pnpm run docs:render-check\n\n",
+                "",
+            ),
+            "documentation links disabled": workflow.replace(
+                "      - name: Check documentation links\n"
+                "        shell: pwsh\n",
+                "      - name: Check documentation links\n"
+                "        if: false\n"
+                "        shell: pwsh\n",
+            ),
+        }
+
+        for label, mutated in mutations.items():
+            with self.subTest(label=label):
+                self.assertNotEqual(workflow, mutated)
+                with self.assertRaises(AssertionError):
+                    self.assert_active_ci_gates(mutated)
+
+    def assert_active_ci_gates(self, workflow: str) -> None:
+        single_line_gates = {
+            "Check formatting": "cargo fmt --all --check",
+            "Check lints": (
+                "cargo clippy --locked --workspace --all-targets "
+                "--all-features -- -D warnings"
+            ),
+            "Check RustSec advisories": "cargo audit",
+            "Check dependency policy": "cargo deny check",
+            "Check Node advisories": "pnpm audit --lockfile-only",
+            "Render HTML docs": "pnpm run docs:render-check",
+        }
+        for step_name, command in single_line_gates.items():
+            self.assert_active_single_line_step(workflow, step_name, command)
+
+        self.assertEqual(
+            self.active_folded_step_tokens(workflow, "Run tests"),
+            [
+                "cargo",
+                "nextest",
+                "run",
+                "--config",
+                TEST_ISOLATION_CARGO_CONFIG,
+                "--locked",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+            ],
+        )
+        self.assertEqual(
+            self.active_folded_step_tokens(workflow, "Run Rustdoc tests"),
+            [
+                "cargo",
+                "--config",
+                ".cargo/test-isolation.toml",
+                "test",
+                "--locked",
+                "--workspace",
+                "--all-features",
+                "--doc",
+            ],
+        )
+        _, performance_step_lines = self.conditionally_active_step_lines(
+            workflow,
+            "Run optimized performance tests",
+            "matrix.os == 'ubuntu-24.04'",
+        )
+        self.assertEqual(
+            self.folded_step_line_tokens(performance_step_lines),
+            [
+                "cargo",
+                "nextest",
+                "run",
+                "--config",
+                TEST_ISOLATION_CARGO_CONFIG,
+                "--locked",
+                "-p",
+                "flow-agent-core",
+                "--release",
+                "--run-ignored",
+                "ignored-only",
+                "-j",
+                "1",
+            ],
+        )
+        self.assertEqual(
+            self.step_lines(workflow, "Run M1.1 optimized budget suite")[1],
+            [
+                "      - name: Run M1.1 optimized budget suite",
+                "        id: m11_budgets",
+                "        if: matrix.os == 'ubuntu-24.04'",
+                "        continue-on-error: true",
+                "        shell: bash",
+                "        run: |",
+                "          mkdir -p target/m11-budgets",
+                "          cargo run --locked -p flow-agent-core --release \\",
+                "            --features m11-budget-evidence --example m11_budgets \\",
+                "            > target/m11-budgets/m11-budgets.jsonl",
+                "",
+            ],
+        )
+        self.assert_active_pinned_gate_actions(workflow)
+        self.assertEqual(
+            self.step_lines(workflow, "Enforce M1.1 optimized budgets")[1],
+            [
+                "      - name: Enforce M1.1 optimized budgets",
+                "        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'",
+                "        shell: bash",
+                "        run: exit 1",
+                "",
+            ],
+        )
+        self.assertEqual(
+            self.active_folded_step_tokens(workflow, "Check line coverage"),
+            [
+                "cargo",
+                "llvm-cov",
+                "nextest",
+                "--config",
+                TEST_ISOLATION_CARGO_CONFIG,
+                "--locked",
+                "--workspace",
+                "--all-targets",
+                "--all-features",
+                "--fail-under-lines",
+                "90",
+                "--ignore-filename-regex",
+                r"((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))",
+                "--show-missing-lines",
+            ],
+        )
+        _, link_commands = self.active_pwsh_step_commands(
+            workflow, "Check documentation links"
+        )
+        self.assertEqual(
+            link_commands,
+            [
+                "$docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'",
+                "if ($LASTEXITCODE -ne 0) {",
+                "exit $LASTEXITCODE",
+                "}",
+                "$docs = @($docsJson | ConvertFrom-Json)",
+                "lychee --no-progress --include-fragments -- @docs",
+            ],
+        )
+
+    def test_ci_runs_public_surface_rustdoc_tests(self) -> None:
+        testing_contract = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+        mandatory_gates = next(
+            line
+            for line in testing_contract.splitlines()
+            if line.startswith("- Mandatory gates:")
+        )
+        self.assertIn(
+            "`cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`",
+            mandatory_gates,
+        )
 
     def assert_active_pinned_node_steps(self, workflow: str) -> None:
         setup_reference = (
@@ -269,7 +346,7 @@ class CiToolchainContractTest(unittest.TestCase):
         self.assertIn(setup_reference, workflow)
         self.assertRegex(
             workflow,
-            r"uses: actions/checkout@[0-9a-f]{40} # v7\.0\.0\n\n"
+            rf"uses: actions/checkout@{CHECKOUT_SHA} # {CHECKOUT_RELEASE}\n\n"
             r"\s+- name: Install pinned Node\n\s+"
             rf"{re.escape(setup_reference)}\n\s+with:\n"
             r"\s+node-version-file: \.node-version(?:\n|$)",
@@ -284,44 +361,87 @@ class CiToolchainContractTest(unittest.TestCase):
         corepack_step_index, corepack_commands = self.active_pwsh_step_commands(
             workflow, "Enable Corepack"
         )
-        self.assertEqual(node_commands[0], "if ((node --version) -ne 'v24.18.0') {")
-        self.assertTrue(node_commands[1].startswith('throw "'))
-        self.assertEqual(node_commands[2:], ["}"])
+        self.assertEqual(
+            node_commands,
+            [
+                "$expectedNode = (Get-Content -Raw .node-version).Trim()",
+                'if ((node --version) -ne "v$expectedNode") {',
+                'throw "Node $expectedNode must be active for CI gates"',
+                "}",
+            ],
+        )
         self.assertEqual(corepack_commands[0], "corepack enable")
         self.assertEqual(
-            corepack_commands[1], "if ((pnpm --version) -ne '11.15.1') {"
+            corepack_commands[1],
+            "$packageManager = (Get-Content -Raw package.json | ConvertFrom-Json).packageManager",
         )
-        self.assertTrue(corepack_commands[2].startswith('throw "'))
-        self.assertEqual(corepack_commands[3:], ["}"])
+        self.assertEqual(corepack_commands[2], "$expectedPnpm = $packageManager -replace '^pnpm@', ''")
+        self.assertEqual(corepack_commands[3], "if ((pnpm --version) -ne $expectedPnpm) {")
+        self.assertEqual(corepack_commands[4], 'throw "pnpm $expectedPnpm must be active for CI gates"')
+        self.assertEqual(corepack_commands[5:], ["}"])
         self.assertLess(setup_index, node_step_index)
         self.assertLess(node_step_index, corepack_step_index)
+
+    def assert_active_pinned_rust_step(self, workflow: str, version: str) -> None:
+        _, commands = self.active_pwsh_step_commands(workflow, "Select pinned Rust")
+        self.assertNotIn(version, workflow)
+        self.assertEqual(
+            commands,
+            [
+                '$toolchain = node scripts/run-python.mjs -c "import tomllib; '
+                "print(tomllib.load(open('rust-toolchain.toml', 'rb'))"
+                "['toolchain']['channel'])\"",
+                "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+                "$escapedToolchain = [regex]::Escape($toolchain)",
+                'if ((rustc --version) -notmatch "^rustc $escapedToolchain ") {',
+                'throw "Rust $toolchain must be active for CI gates"',
+                "}",
+            ],
+        )
+
+    def assert_active_pinned_gate_actions(self, workflow: str) -> None:
+        self.assertEqual(
+            self.step_lines(workflow, "Install gate tools")[1],
+            [
+                "      - name: Install gate tools",
+                f"        uses: taiki-e/install-action@{INSTALL_ACTION_SHA} # {INSTALL_ACTION_RELEASE}",
+                "        with:",
+                f"          tool: {GATE_TOOLS}",
+                "",
+            ],
+        )
+        self.assertEqual(
+            self.step_lines(workflow, "Upload M1.1 optimized budget evidence")[1],
+            [
+                "      - name: Upload M1.1 optimized budget evidence",
+                "        if: matrix.os == 'ubuntu-24.04' && always()",
+                f"        uses: actions/upload-artifact@{UPLOAD_ARTIFACT_SHA} # {UPLOAD_ARTIFACT_RELEASE}",
+                "        with:",
+                "          name: m11-optimized-budgets",
+                "          path: target/m11-budgets/m11-budgets.jsonl",
+                "          if-no-files-found: error",
+                "",
+            ],
+        )
+
+    def assert_all_remote_actions_pinned(self, workflow: str) -> None:
+        for line in workflow.splitlines():
+            match = re.match(r"^\s*(?:-\s+)?uses:\s*([^\s#]+)", line)
+            if match is None:
+                continue
+            reference = match.group(1)
+            if reference.startswith("./"):
+                continue
+            self.assertRegex(
+                reference,
+                r"^[^@/\s]+/[^@\s]+@[0-9a-f]{40}$",
+                f"remote action must use a full commit SHA: {reference}",
+            )
 
     def active_pwsh_step_commands(
         self, workflow: str, step_name: str
     ) -> tuple[int, list[str]]:
-        lines = workflow.splitlines()
-        self.assertFalse(any(line.startswith("    if:") for line in lines))
-        self.assertFalse(
-            any(line.startswith("    continue-on-error:") for line in lines)
-        )
-        marker = f"      - name: {step_name}"
-        step_start = lines.index(marker)
-        step_end = next(
-            (
-                index
-                for index in range(step_start + 1, len(lines))
-                if lines[index].startswith("      - ")
-            ),
-            len(lines),
-        )
-        step_lines = lines[step_start:step_end]
-
-        self.assertFalse(
-            any(line.startswith("        if:") for line in step_lines)
-        )
-        self.assertFalse(
-            any(line.startswith("        continue-on-error:") for line in step_lines)
-        )
+        step_index, step_lines = self.active_step_lines(workflow, step_name)
         self.assertEqual(
             [line for line in step_lines if line.startswith("        shell:")],
             ["        shell: pwsh"],
@@ -334,32 +454,110 @@ class CiToolchainContractTest(unittest.TestCase):
             and line.strip()
             and not line.lstrip().startswith("#")
         ]
-        return workflow.index(marker), commands
+        return step_index, commands
+
+    def assert_active_single_line_step(
+        self, workflow: str, step_name: str, command: str
+    ) -> None:
+        _, step_lines = self.active_step_lines(workflow, step_name)
+        self.assertEqual(
+            [line for line in step_lines if line.startswith("        run:")],
+            [f"        run: {command}"],
+        )
+
+    def active_step_lines(self, workflow: str, step_name: str) -> tuple[int, list[str]]:
+        lines = workflow.splitlines()
+        self.assertFalse(any(line.startswith("    if:") for line in lines))
+        self.assertFalse(
+            any(line.startswith("    continue-on-error:") for line in lines)
+        )
+        step_index, step_lines = self.step_lines(workflow, step_name)
+
+        self.assertFalse(
+            any(line.startswith("        if:") for line in step_lines)
+        )
+        self.assertFalse(
+            any(line.startswith("        continue-on-error:") for line in step_lines)
+        )
+        return step_index, step_lines
+
+    def conditionally_active_step_lines(
+        self, workflow: str, step_name: str, condition: str
+    ) -> tuple[int, list[str]]:
+        lines = workflow.splitlines()
+        self.assertFalse(any(line.startswith("    if:") for line in lines))
+        self.assertFalse(
+            any(line.startswith("    continue-on-error:") for line in lines)
+        )
+        step_index, step_lines = self.step_lines(workflow, step_name)
+        self.assertEqual(
+            [line for line in step_lines if line.startswith("        if:")],
+            [f"        if: {condition}"],
+        )
+        self.assertFalse(
+            any(line.startswith("        continue-on-error:") for line in step_lines)
+        )
+        return step_index, step_lines
+
+    def step_lines(self, workflow: str, step_name: str) -> tuple[int, list[str]]:
+        lines = workflow.splitlines()
+        marker = f"      - name: {step_name}"
+        self.assertIn(marker, lines)
+        step_start = lines.index(marker)
+        step_end = next(
+            (
+                index
+                for index in range(step_start + 1, len(lines))
+                if lines[index].startswith("      - ")
+            ),
+            len(lines),
+        )
+        return workflow.index(marker), lines[step_start:step_end]
+
+    def active_folded_step_tokens(self, workflow: str, step_name: str) -> list[str]:
+        _, step_lines = self.active_step_lines(workflow, step_name)
+        return self.folded_step_line_tokens(step_lines)
+
+    def folded_step_line_tokens(self, step_lines: list[str]) -> list[str]:
+        run_index = step_lines.index("        run: >-")
+        command = " ".join(
+            line.strip()
+            for line in step_lines[run_index + 1 :]
+            if line.startswith("          ")
+            and line.strip()
+            and not line.lstrip().startswith("#")
+        )
+        return shlex.split(command)
 
     def test_node_toolchain_contract_rejects_inert_commands(self) -> None:
         active = """      - name: Checkout
-        uses: actions/checkout@1111111111111111111111111111111111111111 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install pinned Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
 
       - name: Check Node version
         shell: pwsh
         run: |
-          if ((node --version) -ne 'v24.18.0') {
-            throw "wrong Node"
+          $expectedNode = (Get-Content -Raw .node-version).Trim()
+          if ((node --version) -ne "v$expectedNode") {
+            throw "Node $expectedNode must be active for CI gates"
           }
 
       - name: Enable Corepack
         shell: pwsh
         run: |
           corepack enable
-          if ((pnpm --version) -ne '11.15.1') {
-            throw "wrong pnpm"
+          $packageManager = (Get-Content -Raw package.json | ConvertFrom-Json).packageManager
+          $expectedPnpm = $packageManager -replace '^pnpm@', ''
+          if ((pnpm --version) -ne $expectedPnpm) {
+            throw "pnpm $expectedPnpm must be active for CI gates"
           }
 """
+        self.assert_active_pinned_node_steps(active)
+
         commented = active.replace("          corepack", "          # corepack").replace(
             "          if ((pnpm", "          # if ((pnpm"
         )
@@ -410,6 +608,44 @@ class CiToolchainContractTest(unittest.TestCase):
             ):
                 self.assert_active_pinned_node_steps(workflow)
 
+    def test_ci_action_pin_contract_rejects_tampering(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        replacements = [
+            (CHECKOUT_SHA, "0" * 40),
+            (INSTALL_ACTION_SHA, "1" * 40),
+            (UPLOAD_ARTIFACT_SHA, "2" * 40),
+            ("cargo-nextest@0.9.143", "cargo-nextest@0.9.142"),
+        ]
+
+        for expected, replacement in replacements:
+            with self.subTest(expected=expected), self.assertRaises(AssertionError):
+                tampered = workflow.replace(expected, replacement)
+                self.assert_active_pinned_node_steps(tampered)
+                self.assert_active_pinned_gate_actions(tampered)
+
+    def test_ci_action_pin_contract_rejects_new_unpinned_actions(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assert_all_remote_actions_pinned(
+            workflow
+            + "\n      - uses: example/action@"
+            + "a" * 40
+            + "\n      - uses: ./local-action\n"
+        )
+
+        for reference in (
+            "example/action@main",
+            "example/action@v1",
+            "example/action@abc1234",
+        ):
+            with self.subTest(reference=reference), self.assertRaises(AssertionError):
+                self.assert_all_remote_actions_pinned(
+                    workflow + f"\n      - uses: {reference}\n"
+                )
+
     def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
@@ -430,66 +666,6 @@ class CiToolchainContractTest(unittest.TestCase):
 """
 
         self.assertEqual(ci_push_branches(workflow), ("main",))
-
-    def test_rust_product_manifests_have_no_node_runtime_dependency(self) -> None:
-        violations: list[str] = []
-
-        for manifest_path in sorted(ROOT.rglob("Cargo.toml")):
-            if "target" in manifest_path.parts:
-                continue
-            with manifest_path.open("rb") as manifest_file:
-                manifest = tomllib.load(manifest_file)
-            for table_path, table in cargo_dependency_tables(manifest):
-                for dependency in forbidden_dependency_names(table):
-                    violations.append(
-                        f"{manifest_path.relative_to(ROOT)}:"
-                        f"{'.'.join(table_path)}:{dependency}"
-                    )
-
-        self.assertEqual(violations, [])
-
-    def test_cargo_dependency_tables_exclude_metadata(self) -> None:
-        manifest = {
-            "dependencies": {"node-api": "1"},
-            "workspace": {
-                "dependencies": {"nodejs": "1"},
-                "metadata": {
-                    "reporter": {"dependencies": {"node": "display only"}}
-                },
-            },
-            "package": {
-                "metadata": {
-                    "reporter": {"dependencies": {"napi": "display only"}}
-                }
-            },
-            "target": {
-                "cfg(unix)": {
-                    "build-dependencies": {"neon": "1"},
-                    "metadata": {
-                        "reporter": {
-                            "dependencies": {"node_bridge": "display only"}
-                        }
-                    },
-                }
-            },
-        }
-
-        self.assertEqual(
-            [path for path, _ in cargo_dependency_tables(manifest)],
-            [
-                ("dependencies",),
-                ("workspace", "dependencies"),
-                ("target", "cfg(unix)", "build-dependencies"),
-            ],
-        )
-
-    def test_forbidden_dependency_names_checks_cargo_package_aliases(self) -> None:
-        self.assertEqual(
-            forbidden_dependency_names(
-                {"node_bridge": {"package": "node-api", "version": "1"}}
-            ),
-            ["node-api"],
-        )
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
 
-The current M1 Flow Agent milestone is the deterministic, fixture-bounded runtime foundation. Practical provider/process execution is M1.1 and OS-enforced isolation is M1.2; scope and evidence are canonical in `PLAN.md` and `SECURITY.md`.
+The current M1.1 Flow Agent milestone extends the completed deterministic, fixture-bounded M1 foundation with practical provider/process execution. M1.2 adds the Flow-owned Executor and OS-isolation boundary described in the [executor architecture concept](docs/concept/flow-agent-executor-architecture.md); scope and evidence are canonical in `PLAN.md` and `SECURITY.md`.
 
 Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model (ADR-0019).
 
@@ -40,17 +40,31 @@ Watershed is a monorepo, **not** a monolith. The products share `core` libraries
 
 Liquid is the only Watershed UI that controls agents. It projects one or more Meta-Harness instances into one experience while retaining each record's execution location, owner, freshness and command destination. A friendly location and session name hide infrastructure detail without inventing one global controller.
 
-```text
-Laptop Liquid replica ──┐
-Phone Liquid replica ───┼── central Sync Server
-Headless Liquid replica ┘
-        │
-        └── same-host Meta-Harness ── same-host CLI agents
+### Workspace sync plane
+
+```mermaid
+flowchart LR
+  LR["Laptop, phone and headless Liquid replicas"] <--> SS["Central Sync Server"]
 ```
 
-The Sync Server and headless Liquid replica are separate logical roles, though one hosted deployment may co-locate them. User devices normally sync each authorized Workspace in full. A headless replica receives a Workspace only after workspace-level opt-in because it adds a server execution boundary.
+### Live agent-control plane
 
-Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded.
+```mermaid
+flowchart TD
+  UI["Liquid or BYOA control client"] <--> MH["Owning Meta-Harness instance"]
+  MH --> OA["Other CLI agent processes on the same host"]
+  DIRECT["Humans, scripts and CI"] --> FA
+  MH --> FA
+  subgraph FLOW["Flow Agent-owned execution boundary"]
+    FA["Flow Agent process on the same host"] <--> PROVIDER["Provider or local model endpoint"]
+    FA --> EXECUTOR["Configured Executor"]
+    EXECUTOR --> TOOL["Sandboxed Tool process"]
+  end
+```
+
+The Sync Server and headless Liquid replica are separate logical roles, though one hosted deployment may co-locate them. In the M3 MVP, user devices sync each authorized Workspace in full. Resource-scoped Roles govern Liquid surfaces but do not hide replicated bytes from the authorized device owner. Stable resource identity and versioned sync keep selective replication possible in a later protocol. A headless replica receives a Workspace only after workspace-level opt-in because it adds a server execution boundary.
+
+Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded. Meta-Harness may start or observe Flow Agent but does not select or manage its Executor or Tool Sandbox.
 
 ## Liquid integration boundary
 

@@ -3,6 +3,5 @@ phase:
   name: NegativeWrite
   instruction_refs: [deny-attempt]
   tool_refs: [negative-tool]
-  steps:
-    - id: attempt
-      name: Attempt
+  output:
+    type: string

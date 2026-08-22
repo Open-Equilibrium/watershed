@@ -1,9 +1,10 @@
-use flow_agent_core::{EmitMode, RunOutput, run_flow};
+use flow_agent_core::{EmitMode, RunOutput, run_flow, validate_protocol_jsonl_text};
 use proto::{EventEnvelope, EventType};
 use std::{
     collections::HashSet,
     fs,
-    sync::{Arc, Barrier, mpsc},
+    path::Path,
+    sync::{Arc, Barrier, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -11,6 +12,8 @@ use std::{
 #[path = "../../tests/support.rs"]
 mod test_support;
 use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
+
+static PERFORMANCE_GATE: Mutex<()> = Mutex::new(());
 
 #[test]
 fn incomplete_near_limit_stream_fails_completion_check() {
@@ -36,12 +39,61 @@ fn incomplete_near_limit_stream_fails_completion_check() {
             .unwrap_or_else(|| panic!("valid workload must contain {label} completion"));
         incomplete.remove(index);
 
-        let result = std::panic::catch_unwind(|| assert_near_limit_events(&incomplete));
+        let result =
+            std::panic::catch_unwind(|| assert_near_limit_completion_contract(&incomplete));
         assert!(
             result.is_err(),
             "missing {label} completion must fail the gate"
         );
     }
+}
+
+#[test]
+fn near_limit_workload_oracle_rejects_incomplete_lifecycle() {
+    let result = std::panic::catch_unwind(|| {
+        assert_near_limit_events(&near_limit_completion_contract_events());
+    });
+
+    assert!(
+        result.is_err(),
+        "the oracle must reject a stream that skips phase/tool work and child startup"
+    );
+}
+
+#[test]
+fn near_limit_completion_oracle_requires_tool_and_child_phase_work() {
+    let events = near_limit_completion_contract_events();
+
+    let mut missing_tool = events.clone();
+    let tool_index = missing_tool
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::ToolStarted
+                && event.flow_id.as_deref() == Some("root-flow")
+        })
+        .expect("valid workload contains root tool work");
+    missing_tool.remove(tool_index);
+    assert!(
+        std::panic::catch_unwind(|| assert_near_limit_completion_contract(&missing_tool)).is_err(),
+        "missing root tool work must fail the gate"
+    );
+
+    let mut missing_child_phase = events;
+    let child_phase_index = missing_child_phase
+        .iter()
+        .position(|event| {
+            event.event_type == EventType::PhaseEntered
+                && event.flow_id.as_deref() == Some("child-flow")
+        })
+        .expect("valid workload contains child phase work");
+    missing_child_phase.remove(child_phase_index);
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_near_limit_completion_contract(&missing_child_phase);
+        })
+        .is_err(),
+        "missing child phase work must fail the gate"
+    );
 }
 
 fn near_limit_completion_contract_events() -> Vec<EventEnvelope> {
@@ -73,7 +125,40 @@ fn near_limit_completion_contract_events() -> Vec<EventEnvelope> {
         );
         phase_entered.flow_id = Some("root-flow".to_owned());
         events.push(phase_entered);
+        let mut tool_started = event(
+            EventType::ToolStarted,
+            serde_json::json!({"tool_id":"echo"}),
+        );
+        tool_started.flow_id = Some("root-flow".to_owned());
+        events.push(tool_started);
+        let mut tool_completed = event(
+            EventType::ToolCompleted,
+            serde_json::json!({"tool_id":"echo"}),
+        );
+        tool_completed.flow_id = Some("root-flow".to_owned());
+        events.push(tool_completed);
     }
+    let mut child_phase_entered = event(
+        EventType::PhaseEntered,
+        serde_json::json!({"phase_id":"near-limit-phase-00"}),
+    );
+    child_phase_entered.flow_id = Some("child-flow".to_owned());
+    child_phase_entered.parent_flow_id = Some("root-flow".to_owned());
+    events.push(child_phase_entered);
+    let mut child_tool_started = event(
+        EventType::ToolStarted,
+        serde_json::json!({"tool_id":"echo"}),
+    );
+    child_tool_started.flow_id = Some("child-flow".to_owned());
+    child_tool_started.parent_flow_id = Some("root-flow".to_owned());
+    events.push(child_tool_started);
+    let mut child_tool_completed = event(
+        EventType::ToolCompleted,
+        serde_json::json!({"tool_id":"echo"}),
+    );
+    child_tool_completed.flow_id = Some("child-flow".to_owned());
+    child_tool_completed.parent_flow_id = Some("root-flow".to_owned());
+    events.push(child_tool_completed);
     let mut child_completed = event(
         EventType::FlowCompleted,
         serde_json::json!({"flow_definition_id": "near-limit-child"}),
@@ -94,6 +179,13 @@ fn near_limit_completion_contract_events() -> Vec<EventEnvelope> {
 #[test]
 #[ignore = "performance gate"]
 fn one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget() {
+    let _gate = PERFORMANCE_GATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if test_support::run_current_ignored_test_isolated_session_home() {
+        return;
+    }
+
     let (workspace, active_bytes) = near_limit_registry_workspace();
     assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
     assert!(active_bytes >= core_script::MAX_ACTIVE_REGISTRY_BYTES * 9 / 10);
@@ -118,6 +210,13 @@ fn one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget() {
 #[test]
 #[ignore = "performance gate"]
 fn ten_near_limit_orchestrating_flows_complete_under_m1_runtime_contract() {
+    let _gate = PERFORMANCE_GATE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if test_support::run_current_ignored_test_isolated_session_home() {
+        return;
+    }
+
     let (workspace, active_bytes) = near_limit_registry_workspace();
     assert!(active_bytes <= core_script::MAX_ACTIVE_REGISTRY_BYTES);
     assert!(active_bytes >= core_script::MAX_ACTIVE_REGISTRY_BYTES * 9 / 10);
@@ -195,6 +294,21 @@ fn assert_near_limit_output(output: &RunOutput) {
 }
 
 fn assert_near_limit_events(events: &[EventEnvelope]) {
+    let stream = events
+        .iter()
+        .map(|event| {
+            event
+                .canonical_jsonl()
+                .expect("near-limit event canonicalizes")
+        })
+        .collect::<String>();
+    validate_protocol_jsonl_text(Path::new("near-limit-workload.jsonl"), &stream)
+        .expect("near-limit workload must satisfy the canonical lifecycle");
+
+    assert_near_limit_completion_contract(events);
+}
+
+fn assert_near_limit_completion_contract(events: &[EventEnvelope]) {
     let root_flow_id = events
         .iter()
         .find(|event| {
@@ -220,16 +334,23 @@ fn assert_near_limit_events(events: &[EventEnvelope]) {
                 .and_then(|phase_id| phase_id.as_str())
                 .map(str::to_owned)
         })
-        .collect::<HashSet<_>>();
+        .collect::<Vec<_>>();
     let expected_root_phases = (0..16)
         .map(|index| format!("near-limit-phase-{index:02}"))
         .collect::<HashSet<_>>();
     assert_eq!(
-        entered_root_phases, expected_root_phases,
+        entered_root_phases.len(),
+        expected_root_phases.len(),
+        "near-limit workload must enter every root phase exactly once"
+    );
+    assert_eq!(
+        entered_root_phases.into_iter().collect::<HashSet<_>>(),
+        expected_root_phases,
         "near-limit workload must enter every root phase"
     );
-    assert!(
-        events.iter().any(|event| {
+    let child_flow_id = events
+        .iter()
+        .find(|event| {
             event.event_type == EventType::FlowCompleted
                 && event.parent_flow_id.as_deref() == Some(root_flow_id)
                 && event
@@ -237,9 +358,53 @@ fn assert_near_limit_events(events: &[EventEnvelope]) {
                     .get("flow_definition_id")
                     .and_then(|id| id.as_str())
                     == Some("near-limit-child")
-        }),
-        "near-limit workload must complete its child flow"
+        })
+        .and_then(|event| event.flow_id.as_deref())
+        .expect("near-limit workload must complete its child flow");
+    let child_phases = events
+        .iter()
+        .filter(|event| {
+            event.event_type == EventType::PhaseEntered
+                && event.flow_id.as_deref() == Some(child_flow_id)
+                && event.parent_flow_id.as_deref() == Some(root_flow_id)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        child_phases.len(),
+        1,
+        "near-limit workload must enter its child phase exactly once"
     );
+    assert_eq!(
+        child_phases[0]
+            .payload
+            .get("phase_id")
+            .and_then(|phase_id| phase_id.as_str()),
+        Some("near-limit-phase-00"),
+        "near-limit workload must execute the declared child phase"
+    );
+    let assert_echo_lifecycle = |flow_id: &str, expected: usize| {
+        for event_type in [EventType::ToolStarted, EventType::ToolCompleted] {
+            let tool_events = events
+                .iter()
+                .filter(|event| {
+                    event.event_type == event_type && event.flow_id.as_deref() == Some(flow_id)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                tool_events.len(),
+                expected,
+                "near-limit workload must execute every declared echo Tool lifecycle"
+            );
+            assert!(
+                tool_events.iter().all(|event| {
+                    event.payload.get("tool_id").and_then(|id| id.as_str()) == Some("echo")
+                }),
+                "near-limit workload must execute only its declared echo Tool"
+            );
+        }
+    };
+    assert_echo_lifecycle(root_flow_id, 16);
+    assert_echo_lifecycle(child_flow_id, 1);
     assert!(
         events.iter().any(|event| {
             event.event_type == EventType::FlowCompleted
@@ -282,7 +447,7 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
         fs::write(
             workspace.join("registry").join(&phase_path),
             format!(
-                "phase:\n  id: {phase_id}\n  name: NearLimitPhase{index:02}\n  instruction_refs: [{id}]\n  tool_refs: [echo]\n  steps:\n    - id: say\n      name: Say\n"
+                "phase:\n  id: {phase_id}\n  name: NearLimitPhase{index:02}\n  instruction_refs: [{id}]\n  tool_refs: [echo]\n  output:\n    type: string\n"
             ),
         )
         .expect("near-limit phase written");
@@ -291,14 +456,14 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
     let child_path = "flows/near-limit-child.yaml";
     fs::write(
         workspace.join("registry").join(child_path),
-        "flow:\n  id: near-limit-child\n  name: NearLimitChild\n  phase_refs: [near-limit-phase-00]\n  subflow_refs: []\n  connection_refs: []\n",
+        "flow:\n  id: near-limit-child\n  name: NearLimitChild\n  phase_refs: [near-limit-phase-00]\n  subflow_refs: []\n",
     )
     .expect("near-limit child flow written");
     active_paths.push(child_path.to_owned());
     fs::write(
         workspace.join("registry/flows/smoke-flow.yaml"),
         format!(
-            "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [{}]\n  subflow_refs: [near-limit-child]\n  connection_refs: []\n",
+            "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [{}]\n  subflow_refs: [near-limit-child]\n",
             phase_refs.join(", ")
         ),
     )

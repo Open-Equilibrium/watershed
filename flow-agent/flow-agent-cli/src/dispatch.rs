@@ -1,166 +1,168 @@
 use crate::{
+    authoring::{create_command, init_command, validate_command},
+    interrupt::InterruptCoordinator,
     output::write_stdout,
-    parsing::{emit_mode, positional, reject_extra_args, tail_args, usage},
-    streaming::stream_live_operation,
+    parsing::{
+        ResumeCommand, auth_args, paired_emit_args, paired_tail_args, positional,
+        reconcile_tool_args, reject_extra_args, resume_args, run_args, sessions_args, usage,
+    },
+    streaming::stream_conversation_replay,
     tail::tail_command,
 };
-use flow_agent_core::{EmitMode, RunOutput, RuntimeError, SessionEventReader};
-use std::{
-    env,
-    io::{self, BufRead},
-    path::{Path, PathBuf},
-    process::ExitCode,
-};
+use flow_agent_core::{EmitMode, RuntimeError};
+use std::{path::Path, process::ExitCode};
 
-pub(crate) fn dispatch(args: &[String]) -> Result<ExitCode, RuntimeError> {
-    dispatch_with_workspace(args, || {
-        env::current_dir().map_err(|source| RuntimeError::Io {
-            path: PathBuf::from("."),
-            source,
-        })
-    })
+mod auth;
+mod chat;
+mod execution;
+mod resume;
+mod run;
+mod sessions;
+
+use auth::authentication_command;
+use chat::chat;
+use execution::command_exit_code;
+use resume::{continue_command, resume_command};
+use run::{read_root_input, read_tool_reconciliation, run_command};
+use sessions::sessions_command;
+
+pub(crate) fn dispatch(
+    args: &[String],
+    interrupts: &InterruptCoordinator,
+) -> Result<ExitCode, RuntimeError> {
+    dispatch_in_workspace(args, interrupts, Path::new("."))
 }
 
-fn dispatch_with_workspace(
+fn dispatch_in_workspace(
     args: &[String],
-    workspace: impl FnOnce() -> Result<PathBuf, RuntimeError>,
+    interrupts: &InterruptCoordinator,
+    workspace: &Path,
 ) -> Result<ExitCode, RuntimeError> {
     let Some(command) = args.first().map(String::as_str) else {
         return Err(RuntimeError::Usage(usage()));
     };
 
     match command {
+        "init" => {
+            init_command(workspace, &args[1..])?;
+            Ok(ExitCode::SUCCESS)
+        }
+        "validate" => {
+            validate_command(workspace, &args[1..])?;
+            Ok(ExitCode::SUCCESS)
+        }
+        "create" => {
+            create_command(workspace, &args[1..])?;
+            Ok(ExitCode::SUCCESS)
+        }
+        "auth" => {
+            authentication_command(auth_args(args)?)?;
+            Ok(ExitCode::SUCCESS)
+        }
         "run" => {
             let flow_ref = positional(args, 1, "flow name")?;
-            let emit = emit_mode(args)?;
-            let workspace = workspace()?;
-            let output = run_command(&workspace, flow_ref, emit)?;
+            if flow_ref.starts_with('-') {
+                return Err(RuntimeError::Usage(format!(
+                    "unknown argument {flow_ref:?}"
+                )));
+            }
+            let options = run_args(args)?;
+            let root_input = options
+                .inputs
+                .as_deref()
+                .map(|source| read_root_input(workspace, source))
+                .transpose()?;
+            let output = run_command(workspace, flow_ref, options.emit, root_input, interrupts)?;
             Ok(command_exit_code(output.failed))
         }
         "replay" => {
-            let session_id = positional(args, 1, "session_id")?;
-            let emit = emit_mode(args)?;
-            let workspace = workspace()?;
-            let output = flow_agent_core::replay_session(workspace, session_id, emit)?;
-            write_stdout(&output.stdout)?;
+            let (conversation_id, run_session_id, emit) = paired_emit_args(args)?;
+            let output = match emit {
+                EmitMode::Jsonl => {
+                    stream_conversation_replay(workspace, conversation_id, run_session_id)?
+                }
+                EmitMode::Human => {
+                    let output = flow_agent_core::replay_conversation_run(
+                        workspace,
+                        conversation_id,
+                        run_session_id,
+                        emit,
+                    )?;
+                    write_stdout(&output.stdout)?;
+                    output
+                }
+            };
             Ok(command_exit_code(output.failed))
         }
         "tail" => {
-            let session_id = positional(args, 1, "session_id")?;
-            let (emit, tail_options) = tail_args(args)?;
-            let workspace = workspace()?;
+            let (conversation_id, run_session_id, emit, tail_options) = paired_tail_args(args)?;
             Ok(command_exit_code(tail_command(
-                &workspace,
-                session_id,
+                workspace,
+                conversation_id,
+                run_session_id,
                 emit,
                 tail_options,
             )?))
         }
-        "resume" => {
-            let session_id = positional(args, 1, "session_id")?;
-            let emit = emit_mode(args)?;
-            let workspace = workspace()?;
-            let output = resume_command(&workspace, session_id, emit)?;
-            Ok(command_exit_code(output.failed))
+        "reconcile-tool" => {
+            let command = reconcile_tool_args(args)?;
+            let source = read_tool_reconciliation(workspace, &command.result)?;
+            flow_agent_core::reconcile_tool_attempt(
+                workspace,
+                &command.conversation_id,
+                &command.run_session_id,
+                &source,
+            )?;
+            Ok(ExitCode::SUCCESS)
         }
-        "sessions" => {
-            reject_extra_args(args, 1)?;
-            let workspace = workspace()?;
-            let mut output = String::new();
-            for session_id in flow_agent_core::list_sessions(workspace)? {
-                output.push_str(&session_id);
-                output.push('\n');
+        "resume" => match resume_args(args)? {
+            ResumeCommand::Interrupted {
+                conversation_id,
+                emit,
+                run_session_id,
+            } => {
+                let output = resume_command(
+                    workspace,
+                    &conversation_id,
+                    &run_session_id,
+                    emit,
+                    interrupts,
+                )?;
+                Ok(command_exit_code(output.failed))
             }
-            write_stdout(&output)?;
+            ResumeCommand::Continue {
+                conversation_id,
+                emit,
+                from_entry,
+                inputs,
+            } => {
+                let root_input = inputs
+                    .as_deref()
+                    .map(|source| read_root_input(workspace, source))
+                    .transpose()?;
+                let output = continue_command(
+                    workspace,
+                    &conversation_id,
+                    from_entry.as_deref(),
+                    emit,
+                    root_input,
+                    interrupts,
+                )?;
+                Ok(command_exit_code(output.failed))
+            }
+        },
+        "sessions" => {
+            let command = sessions_args(args)?;
+            sessions_command(workspace, command)?;
             Ok(ExitCode::SUCCESS)
         }
         "chat" => {
             reject_extra_args(args, 1)?;
-            let workspace = workspace()?;
-            chat(workspace)
+            chat(workspace.to_path_buf(), interrupts)
         }
         _ => Err(RuntimeError::Usage(usage())),
     }
 }
 
-fn chat(workspace: PathBuf) -> Result<ExitCode, RuntimeError> {
-    let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|source| RuntimeError::Io {
-            path: PathBuf::from("<stdin>"),
-            source,
-        })?;
-        match line.trim() {
-            "/hello-flow" | "hello" => {
-                let output = run_command(&workspace, "hello-flow", EmitMode::Jsonl)?;
-                return Ok(command_exit_code(output.failed));
-            }
-            "" => {}
-            other => {
-                return Err(RuntimeError::Usage(format!(
-                    "unsupported chat command {other:?}"
-                )));
-            }
-        }
-    }
-    Ok(ExitCode::SUCCESS)
-}
-
-fn command_exit_code(failed: bool) -> ExitCode {
-    ExitCode::from(if failed { 65 } else { 0 })
-}
-
-fn run_command(
-    workspace: &Path,
-    flow_ref: &str,
-    emit: EmitMode,
-) -> Result<RunOutput, RuntimeError> {
-    if emit == EmitMode::Human {
-        let output = flow_agent_core::run_flow(workspace, flow_ref, emit)?;
-        write_stdout(&output.stdout)?;
-        return Ok(output);
-    }
-    let workspace = workspace.to_owned();
-    let operation_workspace = workspace.clone();
-    let flow_ref = flow_ref.to_owned();
-    stream_live_operation(workspace, None, move |notifier| {
-        flow_agent_core::run_flow_with_live_events(operation_workspace, &flow_ref, notifier)
-    })
-}
-
-fn resume_command(
-    workspace: &Path,
-    session_id: &str,
-    emit: EmitMode,
-) -> Result<RunOutput, RuntimeError> {
-    if emit == EmitMode::Human {
-        let output = flow_agent_core::resume_session(workspace, session_id, emit)?;
-        write_stdout(&output.stdout)?;
-        return Ok(output);
-    }
-    let reader = SessionEventReader::open(workspace, session_id)?;
-    let workspace = workspace.to_owned();
-    let operation_workspace = workspace.clone();
-    let session_id = session_id.to_owned();
-    stream_live_operation(workspace, Some(reader), move |notifier| {
-        flow_agent_core::resume_session_with_live_events(operation_workspace, &session_id, notifier)
-    })
-}
-
 #[cfg(test)]
-mod tests {
-    use crate::dispatch::dispatch_with_workspace;
-    use flow_agent_core::RuntimeError;
-
-    #[test]
-    fn usage_errors_do_not_resolve_the_workspace() {
-        for args in [Vec::<String>::new(), vec!["unknown".to_owned()]] {
-            let error = dispatch_with_workspace(&args, || {
-                panic!("usage validation must not resolve the workspace")
-            })
-            .expect_err("missing and unknown commands are usage errors");
-
-            assert!(matches!(error, RuntimeError::Usage(_)));
-        }
-    }
-}
+mod tests;

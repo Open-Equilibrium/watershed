@@ -1,269 +1,91 @@
-use super::*;
+mod root_binding;
+
+#[cfg(windows)]
+use super::helpers::create_windows_junction;
+use super::{
+    helpers::{
+        assert_no_session_artifacts, create_directory_alias, empty_workspace,
+        fixture_runtime_policy, replace_registry_text,
+    },
+    support::assert_denied,
+    test_support::workspace_copy,
+};
+use crate::runtime::{
+    apply::{FlowApplication, apply_flow_with_sink},
+    context::ContextManifestCheckpoint,
+    event_writer::RuntimeEventSink,
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_protected_path_match_mode},
+    fixture_tools::{plan_own_script, preflight_own_script_outputs, write_script_output},
+    fs_guards::{AnchoredDir, replacement_temp_path},
+    planning::plan_flow,
+    session::run_flow,
+    types::{EmitMode, EventClock, RuntimeError, terminal_failure_reason},
+    validate::validate_session_log_text,
+};
+use proto::{EventEnvelope, EventType};
+use std::{
+    fs,
+    path::Path,
+    sync::{Arc, Barrier},
+    thread,
+    time::Instant,
+};
 
 #[test]
-fn workspace_config_helpers_reject_unsafe_registry_roots() {
-    let workspace = empty_workspace("workspace-config-helpers");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
-    fs::create_dir(workspace.join("registry")).expect("registry dir");
-    fs::write(workspace.join("registry-file"), "not a dir").expect("registry file");
+fn shared_workspace_tool_write_parents_are_concurrent_safe() {
+    let workspace = workspace_copy("hello-flow");
+    fs::remove_dir_all(workspace.join("out")).expect("fixture output dir removed");
 
-    for (label, source, expected) in [
-        (
-            "unknown field",
-            "registry_root: registry\nother: ignored\n",
-            "unknown field",
-        ),
-        (
-            "duplicate field",
-            "registry_root: registry\nregistry_root: other\n",
-            "duplicate",
-        ),
-        (
-            "explicit tag",
-            "registry_root: !!str registry\n",
-            "explicit YAML tag",
-        ),
-        (
-            "multiple documents",
-            "registry_root: registry\n---\nregistry_root: other\n",
-            "document",
-        ),
-    ] {
-        fs::write(workspace.join(".flow/config.yaml"), source).expect("invalid config written");
-        match load_workspace_config(&workspace).expect_err("invalid config must be rejected") {
-            RuntimeError::Usage(message) => {
-                assert!(message.contains(expected), "{label}: {message}")
-            }
-            error => panic!("{label}: {error}"),
-        }
-    }
-
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "stub_model: deterministic\n",
-    )
-    .expect("config without registry root");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("missing")
-    ));
-
-    for registry_root in ["registry", "nested/registry", "répertoire/注册表"] {
+    for index in 0..10 {
         fs::write(
-            workspace.join(".flow/config.yaml"),
-            format!("registry_root: {registry_root}\n"),
-        )
-        .expect("valid config");
-        let config = load_workspace_config(&workspace).expect("config loads");
-        let expected = registry_root
-            .split('/')
-            .fold(PathBuf::new(), |mut path, component| {
-                path.push(component);
-                path
-            });
-        assert_ne!(config.event_clock, EventClock::fixed_fixture());
-        assert_eq!(config.registry_root, expected, "{registry_root}");
-    }
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "registry_root: registry # fixture registry\n",
-    )
-    .expect("commented config");
-    let config = load_workspace_config(&workspace).expect("commented config loads");
-    assert_eq!(config.registry_root, PathBuf::from("registry"));
-
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n",
-    )
-    .expect("fixture config");
-    let config = load_workspace_config(&workspace).expect("fixture config loads");
-    assert_eq!(config.event_clock, EventClock::fixed_fixture());
-
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "fixture_profile: stub-model\nregistry_root: registry\n",
-    )
-    .expect("fixture config without stub model");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("requires stub_model")
-    ));
-
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "registry_root: registry\nstub_model: deterministic\n",
-    )
-    .expect("stub model without fixture profile");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("requires fixture_profile")
-    ));
-
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "fixture_profile: live\nregistry_root: registry\nstub_model: deterministic\n",
-    )
-    .expect("unsupported fixture profile");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("unsupported .flow/config.yaml fixture_profile")
-    ));
-
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "fixture_profile: stub-model\nregistry_root: registry\nstub_model: live\n",
-    )
-    .expect("unsupported stub model");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("unsupported .flow/config.yaml stub_model")
-    ));
-
-    for registry_root in [
-        ".",
-        "../registry",
-        "registry/./nested",
-        "registry/../nested",
-        r"registry\nested",
-        "C:/registry",
-        "NUL/registry",
-        "bad:name",
-    ] {
-        fs::write(
-            workspace.join(".flow/config.yaml"),
-            format!("registry_root: {registry_root}\n"),
-        )
-        .expect("unsafe config");
-        assert!(
-            matches!(
-                load_workspace_config(&workspace),
-                Err(RuntimeError::Usage(message)) if message.contains("within the workspace")
+            workspace.join(format!("registry/tools/write-summary-{index}.yaml")),
+            format!(
+                "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace/out\"]\n  protected_path_grants: []\n  network: deny\n"
             ),
-            "{registry_root}"
+        )
+        .expect("tool fixture written");
+        fs::write(
+            workspace.join(format!("registry/phases/summarize-{index}.yaml")),
+            format!(
+                "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
+            ),
+        )
+        .expect("phase fixture written");
+        fs::write(
+            workspace.join(format!("registry/flows/hello-flow-{index}.yaml")),
+            format!(
+                "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n  subflow_refs: []\n"
+            ),
+        )
+        .expect("flow fixture written");
+    }
+
+    let barrier = Arc::new(Barrier::new(10));
+    let handles = (0..10)
+        .map(|index| {
+            let workspace = workspace.clone();
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                run_flow(
+                    workspace.as_ref(),
+                    &format!("hello-flow-{index}"),
+                    EmitMode::Jsonl,
+                )
+                .expect("shared workspace flow runs")
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for (index, handle) in handles.into_iter().enumerate() {
+        let output = handle.join().expect("thread joins");
+        assert!(!output.failed);
+        assert_eq!(
+            fs::read_to_string(workspace.join(format!("out/summary-{index}.txt")))
+                .expect("summary output readable"),
+            format!("hello {index}\n")
         );
     }
-    assert!(matches!(
-        read_workspace_config_to_string(&workspace.join("missing-workspace")),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
-    ));
-
-    let oversized_len = usize::try_from(MAX_WORKSPACE_CONFIG_BYTES).expect("limit fits usize") + 1;
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        format!("registry_root: registry\n{}", "x".repeat(oversized_len)),
-    )
-    .expect("oversized config written");
-    assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
-    ));
-}
-
-#[test]
-fn non_fixture_workspace_fails_closed_before_runtime_side_effects() {
-    let workspace = workspace_copy("hello-flow");
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "registry_root: registry\n",
-    )
-    .expect("normal workspace config written");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("M1 has no productive provider or tool backend");
-
-    assert_eq!(
-        err.to_string(),
-        "execution_backend_unavailable: M1 requires the explicit stub-model fixture profile"
-    );
-    assert_eq!(err.exit_code(), 65);
-    assert!(!workspace.join("out/summary.txt").exists());
-    assert!(
-        !workspace.join(LOCAL_SESSION_DIR).exists(),
-        "backend rejection must precede session persistence"
-    );
-}
-
-#[test]
-fn workspace_config_reports_non_regular_config_leaf() {
-    let workspace = workspace_copy("hello-flow");
-    let config_path = workspace.join(".flow/config.yaml");
-    fs::remove_file(&config_path).expect("fixture config removed");
-    fs::create_dir(&config_path).expect("config path replaced with directory");
-
-    let err = load_workspace_config(&workspace).expect_err("config directory must fail");
-
-    assert!(
-        matches!(&err, RuntimeError::Protocol(message)
-            if message.contains("regular file") && !message.contains("symlink")),
-        "unexpected error: {err:?}"
-    );
-}
-
-#[test]
-fn workspace_config_preserves_unrelated_open_errors() {
-    let workspace = workspace_copy("hello-flow");
-    let flow_path = workspace.join(".flow");
-    let config_path = flow_path.join("config.yaml");
-    let workspace_dir =
-        cap_std::fs::Dir::open_ambient_dir(&workspace, cap_std::ambient_authority())
-            .expect("workspace opens");
-    let flow_dir = workspace_dir
-        .open_dir(".flow")
-        .expect("flow directory opens");
-
-    let err = classify_workspace_config_open_error(
-        &flow_dir,
-        "config.yaml",
-        config_path.clone(),
-        io::Error::new(io::ErrorKind::PermissionDenied, "injected access failure"),
-        "file",
-    );
-
-    assert!(matches!(
-        err,
-        RuntimeError::Io { path, source }
-            if path == config_path && source.kind() == io::ErrorKind::PermissionDenied
-    ));
-}
-
-#[cfg(unix)]
-#[test]
-fn workspace_config_rejects_symlinked_config_file() {
-    use std::os::unix::fs::symlink;
-
-    let workspace = empty_workspace("workspace-config-symlink");
-    let outside = empty_workspace("outside-workspace-config");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
-    let outside_config = outside.join("config.yaml");
-    fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
-    symlink(&outside_config, workspace.join(".flow/config.yaml")).expect("config symlink");
-
-    let err = load_workspace_config(&workspace).expect_err("config symlink must fail");
-
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn workspace_config_rejects_linked_parent_directory() {
-    let workspace = empty_workspace("workspace-config-linked-parent");
-    let outside = empty_workspace("outside-workspace-config-parent");
-    fs::write(outside.join("config.yaml"), "registry_root: registry\n")
-        .expect("outside config written");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&outside, workspace.join(".flow"))
-        .expect("config parent symlink created");
-    #[cfg(windows)]
-    create_windows_junction(&workspace.join(".flow"), &outside);
-
-    let err = load_workspace_config(&workspace).expect_err("linked config parent must fail");
-
-    assert!(
-        matches!(&err, RuntimeError::Protocol(message)
-            if message.contains("symlink") || message.contains("reparse")),
-        "unexpected error: {err:?}"
-    );
 }
 
 #[cfg(unix)]
@@ -273,8 +95,12 @@ fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
 
     let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-log");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow dir");
-    symlink(&outside, workspace.join(LOCAL_LOG_DIR)).expect("log dir symlink");
+    crate::tests::helpers::ensure_workspace_session_dir(&workspace);
+    symlink(
+        &outside,
+        crate::tests::helpers::workspace_log_dir(&workspace),
+    )
+    .expect("log dir symlink");
 
     let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect_err("symlinked log dir must fail");
@@ -282,8 +108,7 @@ fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside.join("smoke-flow.log").exists());
     assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
+        !crate::tests::helpers::workspace_session_dir(&workspace)
             .join("smoke-flow.jsonl")
             .exists()
     );
@@ -296,8 +121,7 @@ fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
 
     let workspace = workspace_copy("smoke-flow");
     let outside = empty_workspace("outside-session");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
+    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
     let outside_target = outside.join("victim.jsonl");
     symlink(&outside_target, session_dir.join("smoke-flow.jsonl")).expect("session leaf symlink");
 
@@ -307,8 +131,7 @@ fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
     assert!(!outside_target.exists());
     assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
+        !crate::tests::helpers::workspace_log_dir(&workspace)
             .join("smoke-flow.log")
             .exists()
     );
@@ -459,8 +282,7 @@ fn run_flow_commits_failure_stream_when_apply_side_effects_fail() {
         output.stdout
     );
     assert!(
-        workspace
-            .join(LOCAL_LOG_DIR)
+        crate::tests::helpers::workspace_log_dir(&workspace)
             .join("hello-flow.log")
             .exists()
     );
@@ -471,10 +293,6 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
     struct RejectWriteStart;
 
     impl RuntimeEventSink for RejectWriteStart {
-        fn measurement_started_at(&self) -> Option<Instant> {
-            None
-        }
-
         fn commit(
             &mut self,
             event: &EventEnvelope,
@@ -536,329 +354,6 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
     assert!(!workspace.join("out/summary.txt").exists());
 }
 
-#[test]
-fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
-    struct RebindWorkspace<'a> {
-        moved: PathBuf,
-        outside: &'a Path,
-        rebound: bool,
-        rebind_blocked: bool,
-        trigger: EventType,
-        workspace: &'a Path,
-    }
-
-    impl RuntimeEventSink for RebindWorkspace<'_> {
-        fn measurement_started_at(&self) -> Option<Instant> {
-            None
-        }
-
-        fn commit(
-            &mut self,
-            event: &EventEnvelope,
-            _canonical_jsonl: &str,
-            _context_manifest: Option<ContextManifestCheckpoint>,
-            _measurement_started_at: Option<Instant>,
-        ) -> Result<(), RuntimeError> {
-            if !self.rebound
-                && !self.rebind_blocked
-                && event.event_type == self.trigger
-                && (self.trigger != EventType::ToolStarted
-                    || event
-                        .payload
-                        .get("tool_id")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("write-summary"))
-            {
-                if let Err(source) = fs::rename(self.workspace, &self.moved) {
-                    if cfg!(windows) && source.raw_os_error() == Some(32) {
-                        self.rebind_blocked = true;
-                        return Ok(());
-                    }
-                    panic!("workspace root must move or be retained open: {source}");
-                }
-                fs::rename(self.outside, self.workspace).expect("workspace root is rebound");
-                self.rebound = true;
-            }
-            Ok(())
-        }
-    }
-
-    for (label, trigger) in [
-        ("run", EventType::SessionStarted),
-        ("tool", EventType::ToolStarted),
-    ] {
-        let workspace = workspace_copy("hello-flow");
-        let outside = empty_workspace(&format!("outside-{label}-rebound-workspace"));
-        let moved = workspace.with_extension(format!("{label}-original"));
-        let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-        let flow_block = registry
-            .flow_block("hello-flow")
-            .expect("hello flow exists");
-        let mut sink = RebindWorkspace {
-            moved: moved.clone(),
-            outside: &outside,
-            rebound: false,
-            rebind_blocked: false,
-            trigger,
-            workspace: &workspace,
-        };
-
-        let plan = plan_flow(
-            &workspace,
-            &registry,
-            &policy,
-            flow_block,
-            &format!("rebound{label}001"),
-            FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-        )
-        .expect("flow planning succeeds");
-        let result = apply_flow_with_sink(
-            FlowApplication {
-                workspace: &workspace,
-                session_id: &format!("rebound{label}001"),
-                options: FlowExecutionOptions::new(
-                    EventClock::fixed_fixture(),
-                    ToolSideEffectMode::Apply,
-                ),
-                plan: &plan,
-            },
-            Some(&mut sink),
-        );
-
-        if sink.rebind_blocked {
-            assert!(
-                result.is_ok(),
-                "an OS-retained workspace root must remain dispatchable"
-            );
-            assert!(
-                !outside.join("out/summary.txt").exists(),
-                "outside workspace must remain untouched"
-            );
-            continue;
-        }
-        assert!(
-            sink.rebound,
-            "{label} fixture must rebind the workspace root"
-        );
-        fs::rename(&*workspace, &*outside).expect("outside workspace restores");
-        fs::rename(&moved, &*workspace).expect("original workspace root restores");
-        let execution = result.expect("workspace rebind is recorded as a terminal execution");
-        assert!(execution.failed, "{label} workspace rebind must fail");
-        let err = execution
-            .terminal_error
-            .expect("workspace rebind preserves its terminal error");
-        assert!(
-            err.to_string().contains("workspace root identity changed"),
-            "{err}"
-        );
-        assert!(
-            !outside.join("out/summary.txt").exists(),
-            "rebound outside workspace must remain untouched"
-        );
-    }
-}
-
-#[test]
-fn apply_rejects_a_workspace_root_rebound_after_planning() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = workspace_copy("hello-flow");
-    let moved = workspace.with_extension("planned-original");
-    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let flow_block = registry
-        .flow_block("hello-flow")
-        .expect("hello flow exists");
-    let plan = plan_flow(
-        &workspace,
-        &registry,
-        &policy,
-        flow_block,
-        "reboundplan001",
-        FlowExecutionOptions::new(EventClock::fixed_fixture(), ToolSideEffectMode::Plan),
-    )
-    .expect("flow plans against the original workspace");
-
-    fs::rename(&*workspace, &moved).expect("planned workspace root moves");
-    fs::rename(&*outside, &*workspace).expect("workspace root is rebound before apply");
-    let result = apply_flow_with_sink(
-        FlowApplication {
-            workspace: &workspace,
-            session_id: "reboundplan001",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Apply,
-            ),
-            plan: &plan,
-        },
-        None,
-    );
-    fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
-    fs::rename(&moved, &*workspace).expect("planned workspace restores");
-
-    let err = result.expect_err("apply must retain the planned workspace identity");
-    assert!(
-        err.to_string().contains("workspace root identity changed"),
-        "{err}"
-    );
-    assert!(
-        !outside.join("out/summary.txt").exists(),
-        "rebound outside workspace must remain untouched"
-    );
-}
-
-#[test]
-fn run_rejects_a_workspace_root_rebound_after_config_load() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = workspace_copy("hello-flow");
-    let moved = workspace.with_extension("configured-original");
-    let workspace_for_observer = workspace.to_path_buf();
-    let outside_for_observer = outside.to_path_buf();
-    let moved_for_observer = moved.clone();
-    let rebind_blocked = std::rc::Rc::new(std::cell::Cell::new(false));
-    let observer_rebind_blocked = rebind_blocked.clone();
-    set_run_post_config_observer(move || {
-        if let Err(source) = fs::rename(&workspace_for_observer, &moved_for_observer) {
-            if cfg!(windows) && source.raw_os_error() == Some(32) {
-                observer_rebind_blocked.set(true);
-                return;
-            }
-            panic!("configured workspace root must move or be retained open: {source}");
-        }
-        fs::rename(&outside_for_observer, &workspace_for_observer)
-            .expect("workspace root is rebound after config load");
-    });
-
-    let result = run_flow(&workspace, "hello-flow", EmitMode::Jsonl);
-    if rebind_blocked.get() {
-        assert!(result.is_ok(), "OS-retained workspace remains runnable");
-        assert!(!outside.join("out/summary.txt").exists());
-        return;
-    }
-    fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
-    fs::rename(&moved, &*workspace).expect("configured workspace restores");
-
-    let err = result.expect_err("configured workspace identity must remain authoritative");
-    assert!(
-        err.to_string().contains("workspace root identity changed"),
-        "{err}"
-    );
-    assert!(
-        !outside.join("out/summary.txt").exists(),
-        "rebound outside workspace must remain untouched"
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn run_uses_the_retained_workspace_when_a_root_junction_is_transiently_rebound() {
-    let original = workspace_copy("hello-flow");
-    let rebound = workspace_copy("hello-flow");
-    replace_registry_text(
-        &rebound,
-        "tools/write-summary.yaml",
-        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "printf 'rebound\\n' > out/summary.txt",
-    );
-    let workspace = empty_workspace("transient-root-junction");
-    fs::remove_dir(&*workspace).expect("junction path starts absent");
-    create_windows_junction(&workspace, &original);
-
-    let workspace_for_rebind = workspace.to_path_buf();
-    let rebound_for_observer = rebound.to_path_buf();
-    set_run_post_config_observer(move || {
-        fs::remove_dir(&workspace_for_rebind).expect("original workspace junction removed");
-        create_windows_junction(&workspace_for_rebind, &rebound_for_observer);
-    });
-    let workspace_for_restore = workspace.to_path_buf();
-    let original_for_observer = original.to_path_buf();
-    set_run_pre_plan_observer(move || {
-        fs::remove_dir(&workspace_for_restore).expect("rebound workspace junction removed");
-        create_windows_junction(&workspace_for_restore, &original_for_observer);
-    });
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("transient root rebind cannot replace capability-loaded definitions");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(original.join("out/summary.txt")).expect("original output is readable"),
-        "hello\n"
-    );
-    assert!(!rebound.join("out/summary.txt").exists());
-    fs::remove_dir(&*workspace).expect("test junction removed");
-}
-
-#[cfg(unix)]
-#[test]
-fn run_uses_the_retained_workspace_when_the_root_is_transiently_rebound() {
-    let workspace = workspace_copy("hello-flow");
-    let rebound = workspace_copy("hello-flow");
-    replace_registry_text(
-        &rebound,
-        "tools/write-summary.yaml",
-        "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "printf 'rebound\\n' > out/summary.txt",
-    );
-    let moved = workspace.with_extension("transient-original");
-    let workspace_for_rebind = workspace.to_path_buf();
-    let rebound_for_observer = rebound.to_path_buf();
-    let moved_for_rebind = moved.clone();
-    set_run_post_config_observer(move || {
-        fs::rename(&workspace_for_rebind, &moved_for_rebind).expect("original workspace moves");
-        fs::rename(&rebound_for_observer, &workspace_for_rebind)
-            .expect("workspace root is rebound for registry loading");
-    });
-    let workspace_for_restore = workspace.to_path_buf();
-    let rebound_for_restore = rebound.to_path_buf();
-    let moved_for_restore = moved.clone();
-    set_run_pre_plan_observer(move || {
-        fs::rename(&workspace_for_restore, &rebound_for_restore)
-            .expect("rebound workspace moves back");
-        fs::rename(&moved_for_restore, &workspace_for_restore)
-            .expect("original workspace root is restored");
-    });
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("transient root rebind cannot replace capability-loaded definitions");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("original output is readable"),
-        "hello\n"
-    );
-    assert!(!rebound.join("out/summary.txt").exists());
-}
-
-#[cfg(unix)]
-#[test]
-fn run_retains_one_workspace_root_across_reservation_planning_and_apply() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = workspace_copy("hello-flow");
-    let moved = workspace.with_extension("run-original");
-    let workspace_for_observer = workspace.to_path_buf();
-    let outside_for_observer = outside.to_path_buf();
-    let moved_for_observer = moved.clone();
-    set_run_pre_plan_observer(move || {
-        fs::rename(&workspace_for_observer, &moved_for_observer)
-            .expect("reserved workspace root moves before planning");
-        fs::rename(&outside_for_observer, &workspace_for_observer)
-            .expect("workspace root is rebound before planning");
-    });
-
-    let result = run_flow(&workspace, "hello-flow", EmitMode::Jsonl);
-    fs::rename(&*workspace, &*outside).expect("rebound workspace restores");
-    fs::rename(&moved, &*workspace).expect("reserved workspace restores");
-
-    let err = result.expect_err("the run-bound workspace identity must remain authoritative");
-    assert!(
-        err.to_string().contains("workspace root identity changed"),
-        "{err}"
-    );
-    assert!(
-        !outside.join("out/summary.txt").exists(),
-        "rebound outside workspace must remain untouched"
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
@@ -907,11 +402,7 @@ fn own_script_internal_directory_alias_cannot_escape_write_scope() {
     let workspace = workspace_copy("hello-flow");
     fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
     fs::create_dir(workspace.join("private")).expect("ungranted directory created");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(workspace.join("private"), workspace.join("out"))
-        .expect("internal summary ancestor symlink");
-    #[cfg(windows)]
-    create_windows_junction(&workspace.join("out"), &workspace.join("private"));
+    create_directory_alias(&workspace.join("out"), &workspace.join("private"));
 
     let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
     let tool = registry

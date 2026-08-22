@@ -13,6 +13,7 @@ Run the bundled structured review helper as a closeout check. This is code revie
 
 ## Contract
 
+- Exclude repository agent setup (`AGENTS.md`, `.codex/**` and `.agents/**`) from review bundles, findings and rerun triggers. A change limited to that setup makes Autoreview not applicable.
 - Re-derive findings from the selected diff and touched paths. Treat prior and current review input as advisory until verified against real code paths, adjacent tests, cross-references and downstream effects; refute speculative findings with evidence.
 - Read dependency docs/source/types when the finding depends on external behavior.
 - Reject unrealistic edge cases, speculative risks, and broad rewrites. Prefer small fixes at the right ownership boundary; no refactor unless it clearly improves the bug class.
@@ -143,13 +144,13 @@ Run multiple reviewers against one frozen bundle:
 Set reviewer models and thinking/effort explicitly:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex --model codex=gpt-5.1 --thinking codex=high
+"$AUTOREVIEW" --reviewers codex --model codex=gpt-5.6-sol --thinking codex=high
 ```
 
 Inline syntax is also supported:
 
 ```bash
-"$AUTOREVIEW" --reviewers codex:gpt-5.1:high
+"$AUTOREVIEW" --reviewers codex:gpt-5.6-sol:high
 ```
 
 Codex maps thinking to `model_reasoning_effort` and accepts `low`, `medium`,
@@ -177,13 +178,13 @@ The smoke harness has thin shell wrappers over a shared Python implementation:
 On native Windows, invoke the extensionless Python helper through Python:
 
 ```powershell
-python skills\autoreview\scripts\autoreview --help
+python .agents\skills\autoreview\scripts\autoreview --help
 ```
 
 and the smoke harness:
 
 ```powershell
-skills\autoreview\scripts\test-review-harness.ps1 -Fixture benign -Engine codex
+.agents\skills\autoreview\scripts\test-review-harness.ps1 -Fixture benign -Engine codex
 ```
 
 The helper:
@@ -201,6 +202,7 @@ The helper:
 - supports `--stream-engine-output` or `AUTOREVIEW_STREAM_ENGINE_OUTPUT=1` for live engine text while preserving structured validation; Codex hides tool/file event details, emit compact activity summaries, and report usage at turn completion
 - supports opt-in review panels with `--panel` / `--reviewers`, plus per-engine `--model` and `--thinking`
 - allows read-only tools and web search by default where the selected CLI supports them; forbids nested review in the prompt; Codex is run through `codex exec` with read-only sandbox and structured output
+- requires `--no-tools` for standalone Droid reviews; panels disable Droid tools independently because its tool-enabled mode has no enforced read-only sandbox
 - prints `review still running: <engine> elapsed=<seconds>s pid=<pid>` to stderr at long-running intervals while waiting for the selected review engine, unless streamed output or compact Codex activity has been visible recently
 - prints `autoreview clean: no accepted/actionable findings reported` when the selected review command exits 0
 - exits nonzero when accepted/actionable findings are present

@@ -1,18 +1,14 @@
 use core_script::{
     AllowedParameter, FlowBlock, ParameterValueType, PhaseBlock, RegistryBlock, ScriptRuntime,
-    StepBlock, ToolBlock, ToolCommand, ToolKind, parse_registry_block,
+    ToolBlock, ToolCommand, ToolKind, ValueContract, parse_registry_block,
 };
 use flow_agent_core::{EmitMode, run_flow};
 use proto::{EventEnvelope, EventType};
-use std::{
-    collections::HashSet,
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{collections::HashSet, fs, path::Path};
 
 #[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::workspace_copy;
+use test_support::{workspace_copy, workspace_session_dir};
 
 #[test]
 fn every_fixture_workspace_has_config_and_expected_stream() {
@@ -51,41 +47,8 @@ fn every_expected_stream_is_protocol_valid() {
     }
 }
 
-fn runtime_compared_streams() -> Vec<PathBuf> {
-    let root = fixture_root();
-    let mut streams = vec![
-        root.join("smoke-flow/expected/smoke-flow.jsonl"),
-        root.join("hello-flow/expected/hello-flow.jsonl"),
-    ];
-    let sandbox_expected = root.join("sandbox-negative/expected");
-    streams.extend(
-        expected_streams()
-            .into_iter()
-            .filter(|path| path.parent() == Some(sandbox_expected.as_path())),
-    );
-    streams
-}
-
-#[test]
-fn every_expected_stream_has_a_runtime_comparison() {
-    assert_eq!(
-        expected_streams().into_iter().collect::<HashSet<_>>(),
-        runtime_compared_streams()
-            .into_iter()
-            .collect::<HashSet<_>>(),
-    );
-}
-
 #[test]
 fn smoke_flow_stream_matches_m0_order_contract() {
-    let workspace = workspace_copy("smoke-flow");
-    let output =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("smoke-flow fixture executes");
-    assert!(!output.failed);
-    let expected = fs::read_to_string(fixture_root().join("smoke-flow/expected/smoke-flow.jsonl"))
-        .expect("smoke-flow golden stream reads");
-    assert_eq!(output.stdout, expected);
-
     let stream = load_stream("smoke-flow", "smoke-flow.jsonl");
     let event_types = event_types(&stream);
 
@@ -95,12 +58,13 @@ fn smoke_flow_stream_matches_m0_order_contract() {
             EventType::SessionStarted,
             EventType::FlowStarted,
             EventType::PhaseEntered,
-            EventType::StepStarted,
             EventType::MessageDelta,
             EventType::MessageCompleted,
             EventType::ToolStarted,
             EventType::ToolCompleted,
-            EventType::StepCompleted,
+            EventType::MessageDelta,
+            EventType::MessageCompleted,
+            EventType::PhaseCompleted,
             EventType::FlowCompleted,
             EventType::SessionCompleted,
         ]
@@ -109,39 +73,45 @@ fn smoke_flow_stream_matches_m0_order_contract() {
 }
 
 #[test]
-fn sandbox_negative_runtime_matches_golden_streams() {
-    let expected_dir = fixture_root().join("sandbox-negative/expected");
-    for stream_path in expected_streams()
-        .into_iter()
-        .filter(|path| path.parent() == Some(expected_dir.as_path()))
-    {
+fn every_golden_stream_matches_runtime_output() {
+    if test_support::run_current_test_isolated_session_home() {
+        return;
+    }
+
+    for stream_path in expected_streams() {
+        let fixture_name = stream_path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .expect("fixture name is UTF-8");
         let flow_ref = stream_path
             .file_stem()
             .and_then(|name| name.to_str())
-            .expect("sandbox-negative stream name is UTF-8");
-        let workspace = workspace_copy("sandbox-negative");
+            .expect("golden stream name is UTF-8");
+        let workspace = workspace_copy(fixture_name);
         let output = run_flow(&workspace, flow_ref, EmitMode::Jsonl)
             .unwrap_or_else(|err| panic!("{flow_ref} fixture executes: {err}"));
-        assert!(output.failed, "{flow_ref} must fail");
         let expected = fs::read_to_string(&stream_path)
             .unwrap_or_else(|err| panic!("{}: {err}", stream_path.display()));
+        let expected_failed = expected.contains("\"event_type\":\"session.failed\"");
 
+        assert_eq!(output.failed, expected_failed, "{}", stream_path.display());
         assert_eq!(output.stdout, expected, "{}", stream_path.display());
+        assert_eq!(
+            fs::read_to_string(
+                workspace_session_dir(&workspace).join(format!("{}.jsonl", output.session_id))
+            )
+            .expect("authoritative session log readable"),
+            expected,
+            "{fixture_name}/{flow_ref} session log"
+        );
     }
 }
 
 #[test]
 fn hello_flow_stream_covers_m0_contract_dimensions() {
-    let workspace = workspace_copy("hello-flow");
-    let output =
-        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("hello-flow fixture executes");
-    assert!(!output.failed);
-    let expected_path = fixture_root().join("hello-flow/expected/hello-flow.jsonl");
-    let expected = fs::read_to_string(&expected_path).expect("hello-flow golden stream reads");
-    assert_eq!(output.stdout, expected);
-    let stream = flow_agent_core::validate_protocol_jsonl_text(&expected_path, &output.stdout)
-        .expect("hello-flow runtime stream is protocol-valid");
-
+    let stream = load_stream("hello-flow", "hello-flow.jsonl");
     assert_hello_flow_payload_dimensions(&stream);
 }
 
@@ -155,28 +125,18 @@ fn hello_flow_source_tools_cover_m0_contract() {
     let write_summary = load_tool_block(&fixture.join("registry/tools/write-summary.yaml"));
 
     assert_eq!(flow_block.phase_refs, vec!["inspect", "summarize"]);
-    assert_eq!(
-        flow_block.connection_refs,
-        vec!["inspect-data", "inspect-trigger", "summary-refresh"]
-    );
     assert_eq!(inspect_phase.tool_refs, vec!["read-file"]);
     assert_eq!(
-        inspect_phase.steps,
-        vec![StepBlock {
-            id: "gather".to_owned(),
-            name: "Gather".to_owned(),
-            connection_refs: vec!["inspect-data".to_owned()],
-        }]
+        inspect_phase.output,
+        ValueContract::String { max_length: None }
     );
+    assert!(inspect_phase.phase_refs.is_empty());
     assert_eq!(summarize_phase.tool_refs, vec!["write-summary"]);
     assert_eq!(
-        summarize_phase.steps,
-        vec![StepBlock {
-            id: "write".to_owned(),
-            name: "Write".to_owned(),
-            connection_refs: vec!["inspect-trigger".to_owned(), "summary-refresh".to_owned()],
-        }]
+        summarize_phase.output,
+        ValueContract::String { max_length: None }
     );
+    assert!(summarize_phase.phase_refs.is_empty());
 
     assert_eq!(read_file.tool_kind, ToolKind::PredefinedCommand);
     assert_eq!(
@@ -247,6 +207,11 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             "{} must contain session.failed",
             stream_path.display()
         );
+        assert!(
+            event_types.contains(&EventType::PhaseFailed),
+            "{} must contain phase.failed",
+            stream_path.display()
+        );
         assert_eq!(
             event_types
                 .iter()
@@ -286,6 +251,11 @@ fn sandbox_negative_streams_fail_without_completion_events() {
             stream_path.display()
         );
         assert!(
+            !event_types.contains(&EventType::PhaseCompleted),
+            "{} must not contain phase.completed",
+            stream_path.display()
+        );
+        assert!(
             !event_types.contains(&EventType::FlowCompleted),
             "{} must not contain flow.completed",
             stream_path.display()
@@ -299,9 +269,22 @@ fn sandbox_negative_streams_fail_without_completion_events() {
 }
 
 fn sandbox_negative_attempts_tool_launch(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name != "sandbox-negative-tool-out-of-phase.jsonl")
+    match path.file_stem().and_then(|name| name.to_str()) {
+        Some(
+            "sandbox-negative-environment"
+            | "sandbox-negative-interpreter"
+            | "sandbox-negative-network"
+            | "sandbox-negative-protected-path"
+            | "sandbox-negative-symlink"
+            | "sandbox-negative-write",
+        ) => true,
+        Some("sandbox-negative-tool-out-of-phase") => false,
+        Some(name) => panic!("{name}: sandbox-negative launch stage must be registered"),
+        None => panic!(
+            "{}: sandbox-negative stream name is not UTF-8",
+            path.display()
+        ),
+    }
 }
 
 fn fixture_root() -> std::path::PathBuf {
@@ -409,7 +392,15 @@ fn assert_smoke_flow_payload_dimensions(stream: &[EventEnvelope]) {
 }
 
 fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
-    assert_step_connection_payloads(stream);
+    let event_types = event_types(stream);
+    assert_eq!(event_types.first(), Some(&EventType::SessionStarted));
+    assert_eq!(event_types.get(1), Some(&EventType::FlowStarted));
+    assert_eq!(
+        event_types.get(event_types.len().saturating_sub(2)),
+        Some(&EventType::FlowCompleted)
+    );
+    assert_eq!(event_types.last(), Some(&EventType::SessionCompleted));
+
     assert!(
         stream
             .iter()
@@ -428,13 +419,15 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         .as_deref()
         .expect("hello-flow root flow.started must include flow_id");
 
-    let phase_count = stream
-        .iter()
-        .filter(|event| event.event_type == EventType::PhaseEntered)
-        .count();
+    let entered_phase_ids = phase_execution_ids(stream, EventType::PhaseEntered);
     assert!(
-        phase_count >= 2,
+        entered_phase_ids.len() >= 2,
         "hello-flow must include at least two phase.entered events"
+    );
+    assert_eq!(
+        entered_phase_ids,
+        phase_execution_ids(stream, EventType::PhaseCompleted),
+        "hello-flow must complete every entered phase"
     );
     find_payload_event(
         stream,
@@ -489,26 +482,6 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
         serde_json::json!(["workspace/out"]),
     );
 
-    let step_started_pairs = stream
-        .iter()
-        .filter(|event| event.event_type == EventType::StepStarted)
-        .filter_map(connection_pairs_for_event)
-        .collect::<Vec<_>>();
-    assert!(
-        step_started_pairs
-            .iter()
-            .any(|pairs| pairs == &[("inspect-data".to_owned(), "data".to_owned())]),
-        "hello-flow must include inspect-data/data connection pair"
-    );
-    assert!(
-        step_started_pairs.iter().any(|pairs| pairs
-            == &[
-                ("inspect-trigger".to_owned(), "trigger".to_owned()),
-                ("summary-refresh".to_owned(), "refresh".to_owned()),
-            ]),
-        "hello-flow must include trigger and refresh connection pairs in order"
-    );
-
     let subflow_started = stream
         .iter()
         .filter(|event| {
@@ -544,78 +517,20 @@ fn assert_hello_flow_payload_dimensions(stream: &[EventEnvelope]) {
     }
 }
 
-fn assert_step_connection_payloads(stream: &[EventEnvelope]) {
-    for event in stream.iter().filter(|event| {
-        matches!(
-            event.event_type,
-            EventType::StepStarted | EventType::StepCompleted
-        )
-    }) {
-        connection_pairs_for_event(event);
-    }
-}
-
-fn connection_pairs_for_event(event: &EventEnvelope) -> Option<Vec<(String, String)>> {
-    match (
-        event.payload.get("connection_ids"),
-        event.payload.get("connection_kinds"),
-    ) {
-        (None, None) => None,
-        (Some(_), None) | (None, Some(_)) => panic!(
-            "{} sequence {} must include connection_ids and connection_kinds together",
-            event.event_type.as_str(),
-            event.sequence
-        ),
-        (Some(_), Some(_)) => {
-            let ids = payload_string_array(event, "connection_ids");
-            let kinds = payload_string_array(event, "connection_kinds");
-            assert_eq!(
-                ids.len(),
-                kinds.len(),
-                "{} sequence {} connection arrays must have equal length",
-                event.event_type.as_str(),
-                event.sequence
-            );
-            for kind in &kinds {
-                assert!(
-                    matches!(kind.as_str(), "data" | "trigger" | "refresh"),
-                    "{} sequence {} uses unsupported connection_kind {kind}",
-                    event.event_type.as_str(),
-                    event.sequence
-                );
-            }
-            Some(ids.into_iter().zip(kinds).collect())
-        }
-    }
-}
-
-fn payload_string_array(event: &EventEnvelope, field: &str) -> Vec<String> {
-    let values = event
-        .payload
-        .get(field)
-        .unwrap_or_else(|| panic!("{} must include payload.{field}", event.event_type.as_str()))
-        .as_array()
-        .unwrap_or_else(|| {
-            panic!(
-                "{} payload.{field} must be an array",
-                event.event_type.as_str()
-            )
-        });
-
-    values
+fn phase_execution_ids(stream: &[EventEnvelope], event_type: EventType) -> Vec<&str> {
+    let mut ids = stream
         .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{} payload.{field} must contain strings",
-                        event.event_type.as_str()
-                    )
-                })
-                .to_owned()
+        .filter(|event| event.event_type == event_type)
+        .map(|event| {
+            event
+                .payload
+                .get("phase_execution_id")
+                .and_then(serde_json::Value::as_str)
+                .expect("phase lifecycle events must include a string phase_execution_id")
         })
-        .collect()
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids
 }
 
 fn find_event<'a>(

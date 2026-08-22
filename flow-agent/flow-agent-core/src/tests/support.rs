@@ -1,6 +1,89 @@
-use super::*;
+use crate::runtime::{
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
+    fs_guards::{open_anchored_session_log_append_file, path_io_error},
+    session_lock::SessionReservation,
+    types::{EventClock, RuntimeError},
+    validate::{SessionAppendValidationState, validate_session_log_text},
+};
+use proto::{EventEnvelope, EventType};
+use std::{fs, io::Write, path::Path};
 
-pub(super) static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+#[test]
+fn replay_segment_cleanup_preserves_unrelated_entries() {
+    let workspace = super::test_support::TempWorkspace::fresh("replay-replacement");
+    let run = workspace.join("run");
+    fs::create_dir_all(&run).expect("replay run directory is created");
+    fs::write(run.join("events.jsonl"), b"first").expect("first segment is written");
+    fs::write(run.join("events.000005.jsonl"), b"stale").expect("stale segment is written");
+    fs::write(run.join("unrelated"), b"keep").expect("unrelated fixture is written");
+
+    super::test_support::remove_replay_segments(&run);
+
+    assert!(!run.join("events.jsonl").exists());
+    assert!(!run.join("events.000005.jsonl").exists());
+    assert_eq!(
+        fs::read(run.join("unrelated")).expect("unrelated fixture remains readable"),
+        b"keep"
+    );
+}
+
+#[test]
+fn session_home_setup_preserves_the_environment_and_live_home() {
+    use std::sync::Barrier;
+
+    if super::test_support::run_current_test_isolated_session_home() {
+        return;
+    }
+
+    let parent_home = std::env::var_os("FLOW_AGENT_HOME");
+    let first = super::test_support::TempWorkspace::fresh("watershed-session-home-owner");
+    let session_home = super::test_support::session_home_path();
+    fs::create_dir_all(&session_home).expect("test session home is created");
+    let marker = session_home.join("live-home-marker");
+    fs::write(&marker, b"live").expect("live home marker is written");
+    drop(first);
+
+    let barrier = std::sync::Arc::new(Barrier::new(3));
+    let workers = (0..2)
+        .map(|index| {
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                super::test_support::TempWorkspace::fresh(&format!(
+                    "watershed-session-home-handoff-{index}"
+                ))
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    let replacements = workers
+        .into_iter()
+        .map(|worker| worker.join().expect("home handoff worker joins"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        std::env::var_os("FLOW_AGENT_HOME"),
+        parent_home,
+        "session-home setup must not mutate the parent test environment"
+    );
+    assert!(marker.is_file(), "a live session home cannot be deleted");
+    drop(replacements);
+}
+
+pub(super) fn run_isolated_test(child_env: &str) -> bool {
+    if std::env::var_os(child_env).is_some() || std::env::var_os("NEXTEST").is_some() {
+        return false;
+    }
+    let test_name = super::test_support::current_test_name();
+    let status =
+        std::process::Command::new(std::env::current_exe().expect("core test executable resolves"))
+            .args(["--exact", &test_name, "--nocapture"])
+            .env(child_env, "1")
+            .status()
+            .expect("isolated core test starts");
+    assert!(status.success(), "isolated core test failed");
+    true
+}
 
 impl FlowExecutionOptions {
     pub(super) fn new(clock: EventClock, side_effect_mode: ToolSideEffectMode) -> Self {
@@ -18,7 +101,7 @@ pub(super) fn write_initial_session_log_with_clock(
         EventType::SessionStarted,
         session_id.to_owned(),
         1,
-        clock.timestamp(1),
+        clock.timestamp(1).expect("fixture timestamp is valid"),
         "flow-agent-cli",
         serde_json::json!({"reason":"fixture-start"}),
     )
@@ -58,7 +141,33 @@ pub(super) fn append_session_log_line(path: &Path, line: &str) -> Result<(), Run
 }
 
 pub(super) fn event_timestamp(sequence: u64) -> String {
-    EventClock::fixed_fixture().timestamp(sequence)
+    EventClock::fixed_fixture()
+        .timestamp(sequence)
+        .expect("fixture timestamp is valid")
+}
+
+pub(super) fn write_registry_definition(workspace: &Path, kind: &str, id: &str, source: &str) {
+    fs::write(
+        workspace
+            .join("registry")
+            .join(kind)
+            .join(format!("{id}.yaml")),
+        source,
+    )
+    .unwrap_or_else(|error| panic!("write {kind}/{id}: {error}"));
+}
+
+pub(super) fn completed_phase_result<'a>(
+    events: &'a [EventEnvelope],
+    phase_id: &str,
+) -> &'a serde_json::Value {
+    &events
+        .iter()
+        .find(|event| {
+            event.event_type == EventType::PhaseCompleted && event.payload["phase_id"] == phase_id
+        })
+        .unwrap_or_else(|| panic!("Phase {phase_id} completes"))
+        .payload["result"]
 }
 
 pub(super) fn assert_denied(
@@ -82,6 +191,7 @@ pub(super) fn assert_denied(
 }
 
 pub(super) fn assert_active_session(err: RuntimeError, session_id: &str, lock_name: &str) {
+    let message = err.to_string();
     match err {
         RuntimeError::ActiveSession {
             session_id: actual,
@@ -93,7 +203,6 @@ pub(super) fn assert_active_session(err: RuntimeError, session_id: &str, lock_na
                 "{} did not end with {lock_name}",
                 lock_path.display()
             );
-            let message = active_session_lock_message(&lock_path, &actual);
             assert!(message.contains("already active"));
             assert!(message.contains("host-local ownership lease"));
         }

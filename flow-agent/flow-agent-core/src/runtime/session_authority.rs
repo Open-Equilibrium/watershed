@@ -1,14 +1,12 @@
 use crate::runtime::{
-    config_io::path_io_error,
-    context::sha256_hex,
+    digest::sha256_hex,
     fs_guards::{
-        AnchoredDir, AnchoredFile, AnchoredWorkspace, DirectoryErrorMode,
-        ensure_anchored_new_leaf_available, ensure_anchored_real_file,
-        ensure_not_hardlinked_open_file, validate_real_file,
+        AnchoredDir, AnchoredFile, AnchoredWorkspace, create_anchored_file_for_update,
+        open_anchored_file_for_update, path_io_error,
     },
+    session_store::WorkspaceStore,
     types::RuntimeError,
 };
-use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use std::{
     cell::Cell,
     fs, io,
@@ -16,11 +14,26 @@ use std::{
 };
 
 const SESSION_OWNERSHIP_AUTHORITY_DIR: &str = "session-ownership-v1";
-const SESSION_OWNERSHIP_AUTHORITY_ROOT: &str = ".watershed-flow-agent";
-const SESSION_OWNERSHIP_AUTHORITY_ROOT_ALTERNATE: &str = ".watershed-flow-agent-coordinator";
-const SESSION_OWNERSHIP_DOMAIN: &[u8] = b"watershed-session-ownership-v2\0";
-const SESSION_OWNERSHIP_WORKSPACE_DIR: &str = "workspace-v2";
-const SESSION_OWNERSHIP_WORKSPACE_DOMAIN: &[u8] = b"watershed-session-ownership-workspace-v2\0";
+const SESSION_OWNERSHIP_DOMAIN: &[u8] = b"watershed-session-ownership-v3\0";
+const LEASES_DIR: &str = "leases";
+const SCRATCH_DIR: &str = "scratch";
+const CONVERSATION_HISTORY_VALIDATION_DIR: &str = "conversation-history-validation-v1";
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_SESSION_OWNERSHIP_RELEASE: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) use crate::runtime::session_store::stable_native_path_bytes;
+
+pub(crate) fn conversation_ownership_key(conversation_id: &str) -> String {
+    format!("conversation:{conversation_id}")
+}
+
+pub(crate) fn run_ownership_key(conversation_id: &str, run_session_id: &str) -> String {
+    format!("run:{conversation_id}:{run_session_id}")
+}
 
 #[derive(Debug)]
 pub struct SessionOwnershipLease {
@@ -83,11 +96,21 @@ pub(crate) fn session_ownership_is_active(
     SessionOwnershipObserver::open(workspace, session_id)?.is_active()
 }
 
+#[cfg(test)]
+pub(crate) fn set_session_ownership_release_failure_for_test(fail: bool) {
+    FAIL_NEXT_SESSION_OWNERSHIP_RELEASE.with(|slot| slot.set(fail));
+}
+
 impl SessionOwnershipLease {
-    pub(crate) fn ensure_coordinator_available(workspace: &Path) -> Result<(), RuntimeError> {
+    pub(crate) fn ensure_store_available(workspace: &Path) -> Result<(), RuntimeError> {
         let workspace = open_session_ownership_workspace(workspace)?;
-        let workspace_key = session_ownership_workspace_key(&workspace);
-        session_ownership_authority_dir(&workspace.root().path, &workspace_key, true).map(|_| ())
+        Self::ensure_store_available_anchored(&workspace)
+    }
+
+    pub(crate) fn ensure_store_available_anchored(
+        workspace: &AnchoredWorkspace,
+    ) -> Result<(), RuntimeError> {
+        session_ownership_authority_dir(workspace, true).map(|_| ())
     }
 
     pub(crate) fn acquire(
@@ -96,8 +119,24 @@ impl SessionOwnershipLease {
         marker_path: &Path,
     ) -> Result<Self, RuntimeError> {
         let workspace = open_session_ownership_workspace(workspace)?;
-        let path = session_ownership_authority_path(&workspace, session_id, true)?
+        Self::acquire_anchored(&workspace, session_id, marker_path)
+    }
+
+    pub(crate) fn acquire_anchored(
+        workspace: &AnchoredWorkspace,
+        session_id: &str,
+        marker_path: &Path,
+    ) -> Result<Self, RuntimeError> {
+        let path = session_ownership_authority_path(workspace, session_id, true)?
             .expect("created session ownership authority path");
+        Self::acquire_path(path, session_id, marker_path)
+    }
+
+    fn acquire_path(
+        path: AnchoredFile,
+        session_id: &str,
+        marker_path: &Path,
+    ) -> Result<Self, RuntimeError> {
         let file = open_or_create_authority_file(&path)?;
         match file.try_lock() {
             Ok(()) => Ok(Self {
@@ -118,6 +157,13 @@ impl SessionOwnershipLease {
     pub(crate) fn release(&self) -> Result<(), RuntimeError> {
         if self.released.get() {
             return Ok(());
+        }
+        #[cfg(test)]
+        if FAIL_NEXT_SESSION_OWNERSHIP_RELEASE.with(|slot| slot.replace(false)) {
+            return Err(path_io_error(
+                &self.path,
+                io::Error::other("injected session ownership release failure"),
+            ));
         }
         self.file
             .unlock()
@@ -140,61 +186,43 @@ fn session_ownership_authority_path(
     session_id: &str,
     create: bool,
 ) -> Result<Option<AnchoredFile>, RuntimeError> {
-    let workspace_key = session_ownership_workspace_key(workspace);
-    let mut key =
-        Vec::with_capacity(SESSION_OWNERSHIP_DOMAIN.len() + workspace_key.len() + session_id.len());
+    let mut key = Vec::with_capacity(SESSION_OWNERSHIP_DOMAIN.len() + session_id.len() + 8);
     key.extend_from_slice(SESSION_OWNERSHIP_DOMAIN);
-    append_length_prefixed(&mut key, &workspace_key);
     append_length_prefixed(&mut key, session_id.as_bytes());
     let leaf = format!("{}.lease", sha256_hex(&key));
 
-    let Some(authority) =
-        session_ownership_authority_dir(&workspace.root().path, &workspace_key, create)?
-    else {
+    let Some(authority) = session_ownership_authority_dir(workspace, create)? else {
         return Ok(None);
     };
     Ok(Some(authority.file(leaf)))
 }
 
 fn session_ownership_authority_dir(
-    workspace: &Path,
-    workspace_key: &[u8],
+    workspace: &AnchoredWorkspace,
     create: bool,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let parent = workspace.parent().ok_or_else(|| {
-        RuntimeError::Protocol(format!(
-            "{} cannot use a workspace-adjacent session coordinator",
-            workspace.display()
-        ))
-    })?;
-    let parent = AnchoredDir::workspace(parent)?;
-    let root_name = if workspace
-        .file_name()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|name| name.eq_ignore_ascii_case(SESSION_OWNERSHIP_AUTHORITY_ROOT))
-    {
-        SESSION_OWNERSHIP_AUTHORITY_ROOT_ALTERNATE
-    } else {
-        SESSION_OWNERSHIP_AUTHORITY_ROOT
-    };
-    let Some(root) = parent.private_child(root_name, create, DirectoryErrorMode::Protocol)? else {
+    let store = WorkspaceStore::open(workspace, create)?;
+    let Some(store) = store else {
         return Ok(None);
     };
-    let workspace_leaf = format!(
-        "{}-{}",
-        SESSION_OWNERSHIP_WORKSPACE_DIR,
-        sha256_hex(workspace_key)
-    );
-    let Some(workspace_root) =
-        root.private_child(&workspace_leaf, create, DirectoryErrorMode::Protocol)?
-    else {
+    let Some(leases) = store.child(LEASES_DIR, create)? else {
         return Ok(None);
     };
-    workspace_root.private_child(
-        SESSION_OWNERSHIP_AUTHORITY_DIR,
-        create,
-        DirectoryErrorMode::Protocol,
-    )
+    store.child_in(&leases, SESSION_OWNERSHIP_AUTHORITY_DIR, create)
+}
+
+pub(crate) fn conversation_history_validation_dir(
+    workspace: &Path,
+    create: bool,
+) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let workspace = open_session_ownership_workspace(workspace)?;
+    let Some(store) = WorkspaceStore::open(&workspace, create)? else {
+        return Ok(None);
+    };
+    let Some(scratch) = store.child(SCRATCH_DIR, create)? else {
+        return Ok(None);
+    };
+    store.child_in(&scratch, CONVERSATION_HISTORY_VALIDATION_DIR, create)
 }
 
 fn open_session_ownership_workspace(workspace: &Path) -> Result<AnchoredWorkspace, RuntimeError> {
@@ -203,37 +231,9 @@ fn open_session_ownership_workspace(workspace: &Path) -> Result<AnchoredWorkspac
     AnchoredWorkspace::open(&workspace)
 }
 
-fn session_ownership_workspace_key(workspace: &AnchoredWorkspace) -> Vec<u8> {
-    let path = stable_native_path_bytes(&workspace.root().path);
-    let identity = workspace.identity();
-    let mut key = Vec::with_capacity(SESSION_OWNERSHIP_WORKSPACE_DOMAIN.len() + path.len() + 24);
-    key.extend_from_slice(SESSION_OWNERSHIP_WORKSPACE_DOMAIN);
-    append_length_prefixed(&mut key, &path);
-    key.extend_from_slice(&identity.device.to_le_bytes());
-    key.extend_from_slice(&identity.inode.to_le_bytes());
-    key
-}
-
 fn append_length_prefixed(target: &mut Vec<u8>, value: &[u8]) {
     target.extend_from_slice(&(value.len() as u64).to_le_bytes());
     target.extend_from_slice(value);
-}
-
-#[cfg(unix)]
-pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::unix::ffi::OsStrExt as _;
-
-    path.as_os_str().as_bytes().to_vec()
-}
-
-#[cfg(windows)]
-pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt as _;
-
-    path.as_os_str()
-        .encode_wide()
-        .flat_map(u16::to_le_bytes)
-        .collect()
 }
 
 fn open_or_create_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
@@ -247,30 +247,9 @@ fn open_or_create_authority_file(path: &AnchoredFile) -> Result<fs::File, Runtim
 }
 
 fn create_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    ensure_anchored_new_leaf_available(path)?;
-    let mut options = cap_std::fs::OpenOptions::new();
-    options
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .follow(FollowSymlinks::No);
-    let file = path.open(&options)?;
-    validate_authority_file(path, file)
+    create_anchored_file_for_update(path)
 }
 
 fn open_existing_authority_file(path: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    ensure_anchored_real_file(path)?;
-    let mut options = cap_std::fs::OpenOptions::new();
-    options.read(true).write(true).follow(FollowSymlinks::No);
-    let file = path.open(&options)?;
-    validate_authority_file(path, file)
-}
-
-fn validate_authority_file(path: &AnchoredFile, file: fs::File) -> Result<fs::File, RuntimeError> {
-    let metadata = file
-        .metadata()
-        .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
-    validate_real_file(path.diagnostic_path(), &metadata)?;
-    ensure_not_hardlinked_open_file(path.diagnostic_path(), &file, &metadata)?;
-    Ok(file)
+    open_anchored_file_for_update(path).map(|(file, _)| file)
 }

@@ -28,6 +28,7 @@ Apply the canonical [closeout open search-space stop](../../../AGENTS.md#closeou
 
 ## Hard Rules
 
+- Repository agent setup (`AGENTS.md`, `.codex/**` and `.agents/**`) is outside Clawpatch scope. Do not map, review, triage or revalidate it; a change limited to that setup makes Clawpatch not applicable.
 - Never edit `.clawpatch/` by hand!
 - Never weaken tests!
 - If a finding implies an undecided architectural/product question, stop and record it per `AGENTS.md` instead of fixing by guesswork.

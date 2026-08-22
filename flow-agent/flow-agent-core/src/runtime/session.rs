@@ -1,36 +1,60 @@
 use crate::runtime::{
-    apply::{FlowApplication, apply_flow_with_anchored_workspace, preflight_flow_execution_plan},
-    config_io::{load_workspace_config_from, require_fixture_execution_backend},
-    event_writer::{EventWriterTimings, SerialSessionWriter},
-    fs_guards::{AnchoredFile, AnchoredWorkspace},
-    live_events::LiveEventNotifier,
-    planning::{
-        FlowExecutionOptions, ToolSideEffectMode, plan_flow_with_workspace, runtime_policy_target,
-    },
-    resume::session_definition_metadata,
-    session_reservation::{
-        materialize_session_candidate, reserve_unique_session_candidate_with_anchored_workspace,
-        write_reserved_session_metadata,
-    },
-    types::{EmitMode, RunOutput, RuntimeError},
+    cancellation::{ProductiveTerminalClaim, claim_productive_terminal},
+    config_io::WorkspaceConfig,
+    context::ContextModelProfile,
+    execution_plan::runtime_policy_target,
+    fs_guards::AnchoredWorkspace,
+    session_definition::{SessionLogMetadata, verify_resume_definition_metadata_values},
+    types::RuntimeError,
 };
 #[cfg(test)]
 use std::cell::RefCell;
-use std::path::Path;
+use std::{io, path::Path};
 
-#[cfg(test)]
-type PostWriterFinishObserver = Box<dyn FnOnce(&AnchoredFile)>;
+fn verify_productive_model_profile(
+    run_session_id: &str,
+    recorded: &SessionLogMetadata,
+    model: &str,
+    profile: crate::runtime::context::ContextModelProfile,
+) -> Result<(), RuntimeError> {
+    if recorded.legacy_definition {
+        return Ok(());
+    }
+    if recorded.model.as_deref() == Some(model)
+        && recorded.model_profile_id.as_deref() == Some(profile.id)
+        && recorded.model_context_limit == Some(profile.context_limit)
+        && recorded.output_reserve == Some(profile.output_reserve)
+        && recorded.safety_margin == Some(profile.safety_margin)
+    {
+        return Ok(());
+    }
+    Err(RuntimeError::Protocol(format!(
+        "productive run {run_session_id} model profile does not match the recorded Run"
+    )))
+}
 
 #[cfg(test)]
 std::thread_local! {
-    static POST_WRITER_FINISH_OBSERVER: RefCell<Option<PostWriterFinishObserver>> = RefCell::new(None);
+    static PRODUCTIVE_PRE_RUN_CREATE_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
+    static PRODUCTIVE_PRE_RUN_PUBLISH_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
+    static PRODUCTIVE_RUN_COMMIT_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
     static RUN_POST_CONFIG_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
     static RUN_PRE_PLAN_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
 }
 
 #[cfg(test)]
-pub(crate) fn set_post_writer_finish_observer(observer: impl FnOnce(&AnchoredFile) + 'static) {
-    POST_WRITER_FINISH_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+pub(crate) fn set_productive_pre_run_create_observer(observer: impl FnOnce() + 'static) {
+    PRODUCTIVE_PRE_RUN_CREATE_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(test)]
+pub(crate) fn set_productive_pre_run_publish_observer(observer: impl FnOnce() + 'static) {
+    PRODUCTIVE_PRE_RUN_PUBLISH_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(test)]
+pub(crate) fn set_productive_run_commit_observer(observer: impl FnOnce() + 'static) {
+    PRODUCTIVE_RUN_COMMIT_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -51,228 +75,174 @@ fn run_pre_plan_observer() {
 }
 
 #[cfg(test)]
-pub(crate) fn post_writer_finish_observer(path: &AnchoredFile) {
-    if let Some(observer) = POST_WRITER_FINISH_OBSERVER.with_borrow_mut(Option::take) {
-        observer(path);
-    }
-}
-
-#[cfg(test)]
 fn run_post_config_observer() {
     if let Some(observer) = RUN_POST_CONFIG_OBSERVER.with_borrow_mut(Option::take) {
         observer();
     }
 }
 
-pub(crate) fn reconcile_controlled_stages<T>(
-    operation: Result<T, RuntimeError>,
-    finalization: Result<(), RuntimeError>,
-    cleanup: Result<(), RuntimeError>,
-) -> Result<T, RuntimeError> {
-    match (operation, finalization, cleanup) {
-        (Ok(value), Ok(()), Ok(())) => Ok(value),
-        (Err(error), Ok(()), Ok(()))
-        | (Ok(_), Err(error), Ok(()))
-        | (Ok(_), Ok(()), Err(error)) => Err(error),
-        (operation, finalization, cleanup) => Err(RuntimeError::ControlledStageFailures {
-            operation: operation.err().map(Box::new),
-            finalization: finalization.err().map(Box::new),
-            cleanup: cleanup.err().map(Box::new),
-        }),
+#[cfg(test)]
+fn productive_pre_run_create_observer() {
+    if let Some(observer) = PRODUCTIVE_PRE_RUN_CREATE_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
     }
 }
 
-/// Runs a flow from a workspace registry and captures its output.
-pub fn run_flow(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    emit: EmitMode,
-) -> Result<RunOutput, RuntimeError> {
-    run_flow_internal(workspace, flow_ref, None, None, emit == EmitMode::Jsonl)
-}
-
-/// Runs a flow with bounded, non-blocking committed-event notifications.
-///
-/// The caller owns the receiver and any blocking transport. Notifications carry only a
-/// high-watermark wake-up; read event payloads from [`crate::SessionEventReader`] by sequence.
-pub fn run_flow_with_live_events(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    notifier: LiveEventNotifier,
-) -> Result<RunOutput, RuntimeError> {
-    let mut output = run_flow_internal(workspace, flow_ref, Some(notifier), None, false)?;
-    output.stdout.clear();
-    Ok(output)
-}
-
-pub fn run_flow_internal(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    notifier: Option<LiveEventNotifier>,
-    timings: Option<&mut EventWriterTimings>,
-    capture_jsonl: bool,
-) -> Result<RunOutput, RuntimeError> {
-    run_flow_internal_with_cleanup_observer_impl(
-        workspace,
-        flow_ref,
-        notifier,
-        timings,
-        capture_jsonl,
-        (|result| result, |result| result),
-        |_| {},
-    )
+#[cfg(test)]
+fn productive_pre_run_publish_observer() {
+    if let Some(observer) = PRODUCTIVE_PRE_RUN_PUBLISH_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
+    }
 }
 
 #[cfg(test)]
-pub(crate) fn run_flow_internal_with_cleanup_observer(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    capture_jsonl: bool,
-    before_cleanup: impl FnOnce(&AnchoredFile),
-) -> Result<RunOutput, RuntimeError> {
-    run_flow_internal_with_cleanup_observer_impl(
-        workspace,
-        flow_ref,
-        None,
-        None,
-        capture_jsonl,
-        (|result| result, |result| result),
-        before_cleanup,
-    )
+fn productive_run_commit_observer() {
+    if let Some(observer) = PRODUCTIVE_RUN_COMMIT_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
+    }
 }
 
-#[cfg(test)]
-pub(crate) fn run_flow_internal_with_stage_observers(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    capture_jsonl: bool,
-    after_operation: impl FnOnce(Result<RunOutput, RuntimeError>) -> Result<RunOutput, RuntimeError>,
-    after_finalization: impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
-    before_cleanup: impl FnOnce(&AnchoredFile),
-) -> Result<RunOutput, RuntimeError> {
-    run_flow_internal_with_cleanup_observer_impl(
-        workspace,
-        flow_ref,
-        None,
-        None,
-        capture_jsonl,
-        (after_operation, after_finalization),
-        before_cleanup,
-    )
+fn reconcile_productive_preflight<T, E>(result: Result<T, E>) -> Result<T, RuntimeError>
+where
+    E: Into<RuntimeError>,
+{
+    match result.map_err(Into::into) {
+        Err(_) if claim_productive_terminal() == ProductiveTerminalClaim::Cancellation => {
+            Err(RuntimeError::Cancelled)
+        }
+        result => result,
+    }
 }
 
-fn run_flow_internal_with_cleanup_observer_impl(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    notifier: Option<LiveEventNotifier>,
-    timings: Option<&mut EventWriterTimings>,
-    capture_jsonl: bool,
-    stage_observers: (
-        impl FnOnce(Result<RunOutput, RuntimeError>) -> Result<RunOutput, RuntimeError>,
-        impl FnOnce(Result<(), RuntimeError>) -> Result<(), RuntimeError>,
-    ),
-    before_cleanup: impl FnOnce(&AnchoredFile),
-) -> Result<RunOutput, RuntimeError> {
-    let (after_operation, after_finalization) = stage_observers;
-    let workspace = workspace.as_ref();
-    let execution_workspace = AnchoredWorkspace::open(workspace)?;
-    let config = load_workspace_config_from(execution_workspace.root())?;
-    #[cfg(test)]
-    run_post_config_observer();
-    require_fixture_execution_backend(&config)?;
-    let registry = core_script::load_flow_registry_from_workspace_dir(
-        &execution_workspace.root().dir,
-        workspace,
-        &config.registry_root,
-        flow_ref,
+struct RecordedProductivePreflight {
+    registry: core_script::ResolvedRegistry,
+    flow_ref: String,
+    policy: core_policy::PolicyArtifact,
+    credential: crate::runtime::oauth_credential::CredentialRecord,
+    repository_instructions: String,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_recorded_productive_preflight<C>(
+    workspace: &Path,
+    execution_workspace: &AnchoredWorkspace,
+    config: &WorkspaceConfig,
+    run_session_id: &str,
+    recorded: &SessionLogMetadata,
+    missing_flow_id_message: &'static str,
+    model: &str,
+    model_profile: ContextModelProfile,
+    resolve_credential: C,
+) -> Result<RecordedProductivePreflight, RuntimeError>
+where
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
+    let flow_ref = reconcile_productive_preflight(
+        recorded
+            .flow_definition_id
+            .as_deref()
+            .ok_or_else(|| RuntimeError::Protocol(missing_flow_id_message.to_owned())),
     )?;
-    let flow_block = registry
-        .flow_block(flow_ref)
-        .ok_or_else(|| RuntimeError::Usage(format!("unknown flow {flow_ref}")))?;
-    let definition_metadata = session_definition_metadata(&registry, flow_block)?;
-    let policy =
-        core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())?;
-    let base_session_id = &flow_block.identity.id;
-    let candidate = reserve_unique_session_candidate_with_anchored_workspace(
-        &execution_workspace,
-        base_session_id,
+    reconcile_productive_preflight(verify_productive_model_profile(
+        run_session_id,
+        recorded,
+        model,
+        model_profile,
+    ))?;
+    let registry =
+        reconcile_productive_preflight(core_script::load_flow_registry_from_workspace_dir(
+            &execution_workspace.root().dir,
+            workspace,
+            &config.registry_root,
+            flow_ref,
+        ))?;
+    let flow_block = reconcile_productive_preflight(
+        registry
+            .flow_block(flow_ref)
+            .ok_or_else(|| RuntimeError::Usage(format!("unknown flow {flow_ref}"))),
     )?;
-    let expected_session_id = candidate.session_id.clone();
-    #[cfg(test)]
-    run_pre_plan_observer();
-    let plan = plan_flow_with_workspace(
-        &execution_workspace,
+    reconcile_productive_preflight(verify_resume_definition_metadata_values(
+        run_session_id,
+        recorded,
         &registry,
-        &policy,
         flow_block,
-        &expected_session_id,
-        FlowExecutionOptions::with_stub_model_fixture_profile(
-            config.event_clock,
-            ToolSideEffectMode::Plan,
-            config.stub_model_fixture_profile,
-        ),
-    )?;
-    preflight_flow_execution_plan(&plan, &execution_workspace, ToolSideEffectMode::Apply)?;
-    let reservation = materialize_session_candidate(&execution_workspace, candidate)?;
-    let mut finalization_result = Ok(());
-    let operation_result = (|| {
-        write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-        let mut serial_writer = SerialSessionWriter::start(&reservation, notifier, timings)?;
-        if capture_jsonl {
-            serial_writer.enable_jsonl_capture();
+    ))?;
+    let policy = reconcile_productive_preflight(core_policy::compile_policy_artifact(
+        &registry,
+        flow_ref,
+        runtime_policy_target(),
+    ))?;
+    let credential = reconcile_productive_preflight(resolve_credential())?;
+    let repository_instructions =
+        reconcile_productive_preflight(read_repository_instructions(execution_workspace))?;
+    Ok(RecordedProductivePreflight {
+        registry,
+        flow_ref: flow_ref.to_owned(),
+        policy,
+        credential,
+        repository_instructions,
+    })
+}
+
+mod continuation;
+#[cfg(test)]
+pub(crate) use continuation::continue_conversation_with_provider;
+pub use continuation::{
+    continue_conversation, continue_conversation_with_execution_activation,
+    continue_conversation_with_live_events,
+};
+
+mod new_run;
+pub use new_run::{
+    run_flow, run_flow_with_execution_activation, run_flow_with_live_events,
+    run_flow_with_root_input, run_flow_with_root_input_and_live_events,
+};
+#[cfg(test)]
+pub(crate) use new_run::{
+    run_flow_internal, run_flow_internal_with_cleanup_observer,
+    run_flow_internal_with_stage_observers,
+};
+
+mod productive_run;
+#[cfg(test)]
+pub(crate) use productive_run::{
+    execute_reserved_productive_recovery, run_productive_session_with_provider,
+};
+
+mod resume_run;
+pub use resume_run::{
+    resume_conversation_run, resume_conversation_run_with_execution_activation,
+    resume_conversation_run_with_live_events,
+};
+#[cfg(test)]
+pub(crate) use resume_run::{
+    resume_conversation_run_with_provider, resume_conversation_run_with_provider_and_live_events,
+    resume_conversation_run_with_provider_and_preflight,
+};
+
+pub(crate) fn read_repository_instructions(
+    workspace: &AnchoredWorkspace,
+) -> Result<String, RuntimeError> {
+    const MAX_REPOSITORY_INSTRUCTION_BYTES: u64 = 1024 * 1024;
+    let root = workspace.root();
+    let metadata = match root.dir.symlink_metadata("AGENTS.md") {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(source) => {
+            return Err(RuntimeError::Io {
+                path: root.path.join("AGENTS.md"),
+                source,
+            });
         }
-        let runtime_result = apply_flow_with_anchored_workspace(
-            FlowApplication {
-                #[cfg(test)]
-                workspace,
-                session_id: &expected_session_id,
-                options: FlowExecutionOptions::with_stub_model_fixture_profile(
-                    config.event_clock,
-                    ToolSideEffectMode::Apply,
-                    config.stub_model_fixture_profile,
-                ),
-                plan: &plan,
-            },
-            &execution_workspace,
-            Some(&mut serial_writer),
-        );
-        finalization_result = serial_writer.finish();
-        #[cfg(test)]
-        post_writer_finish_observer(&reservation.session_path);
-        let captured_jsonl = serial_writer.take_captured_jsonl();
-        let runtime = runtime_result?;
-        let runtime_failed = runtime.failed;
-        let event_count = runtime.events.record_count;
-        let outcome = runtime.failure_status.unwrap_or_else(|| {
-            if runtime_failed {
-                "failed"
-            } else {
-                "completed"
-            }
-            .to_owned()
-        });
-        if let Some(err) = runtime.terminal_error {
-            return Err(RuntimeError::session_failed(&expected_session_id, err));
-        }
-        let stdout = if capture_jsonl {
-            captured_jsonl.expect("JSONL capture enabled before runtime application")
-        } else {
-            format!(
-                "flow {} (session {expected_session_id}) {outcome}\n",
-                flow_block.identity.id
-            )
-        };
-        Ok(RunOutput {
-            event_count,
-            failed: runtime_failed,
-            session_id: expected_session_id,
-            session_path: reservation.session_path.diagnostic_path().to_owned(),
-            stdout,
-        })
-    })();
-    let operation_result = after_operation(operation_result);
-    finalization_result = after_finalization(finalization_result);
-    before_cleanup(&reservation.lock_path);
-    let cleanup_result = reservation.cleanup();
-    reconcile_controlled_stages(operation_result, finalization_result, cleanup_result)
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(RuntimeError::Protocol(format!(
+            "{} must be a real file",
+            root.path.join("AGENTS.md").display()
+        )));
+    }
+    crate::runtime::fs_guards::read_anchored_to_string_with_limit(
+        &root.file("AGENTS.md"),
+        MAX_REPOSITORY_INSTRUCTION_BYTES,
+    )
 }

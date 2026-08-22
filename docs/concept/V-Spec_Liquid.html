@@ -131,6 +131,7 @@ Liquid        = local-first workspace and App platform</code></pre>
       <ul>
         <li>Anything not allowed is denied by default. Explicit deny/blacklist rules are deferred until real policy conflicts require them.</li>
         <li>Capabilities distinguish discovery/read, propose, execute/apply, approve and manage where the resource supports them.</li>
+        <li>In the M3 MVP, resource-scoped discovery/read permissions govern Liquid surfaces but do not hide bytes in a complete plaintext replica from its authorized device owner or same-identity local processes.</li>
         <li>Agents may receive narrower per-session authority than their reusable agent profile.</li>
         <li>Every Workspace write uses the same mutation pipeline and records actor, origin, permission result and reversible change in History.</li>
         <li>Visibility, View placement, Connection existence and sync access never imply execution authority.</li>
@@ -143,9 +144,10 @@ Liquid        = local-first workspace and App platform</code></pre>
 Phone replica ───┼── Sync Server
 Headless replica ┘</code></pre>
       <ul>
-        <li>Every client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
+        <li>Every authorized M3 MVP client reads and writes a complete local Workspace replica; network loss never switches Liquid into a remote-only mode.</li>
         <li>Replicas connect to the central Sync Server, not directly to one another. The server persists and exchanges committed changes resumably.</li>
-        <li>Authorized user devices normally sync the full Workspace. Per-Block replication is not part of the initial model.</li>
+        <li>Authorized user devices sync the full plaintext Workspace. The Workspace is therefore the local confidentiality boundary, while Liquid still enforces resource-scoped action and API checks.</li>
+        <li>Workspace admission and resource authorization remain separate. Resources keep stable identities, committed changes remain resource-addressed and sync is versioned so a later protocol can add a finite authorized-resource closure. Selective replication is not part of the MVP.</li>
         <li>A headless Liquid replica is an optional normal replica without UI. It requires workspace-level opt-in because it introduces a server execution boundary.</li>
         <li>Same-host agents use the headless replica's normal CLI/API, Roles and mutation pipeline even while user devices are offline.</li>
         <li>The Sync Server does not execute Apps or agents. It and headless Liquid may be co-located in one hosted deployment while remaining separate logical services.</li>

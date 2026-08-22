@@ -3,7 +3,5 @@ phase:
   name: Summarize
   instruction_refs: [write-output]
   tool_refs: [write-summary]
-  steps:
-    - id: write
-      name: Write
-      connection_refs: [inspect-trigger, summary-refresh]
+  output:
+    type: string

@@ -1,51 +1,52 @@
-use core_policy::ProtectedPathMatchMode;
-use proto::{EventEnvelope, EventType};
-use std::{
-    collections::BTreeSet,
-    fs,
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
-    sync::{
-        Arc, Barrier, Condvar, Mutex,
-        atomic::{AtomicUsize, Ordering},
-        mpsc,
-    },
-    thread,
-    time::{Duration, Instant},
-};
-
 #[path = "../../tests/support.rs"]
 mod test_support;
-use crate::runtime::{
-    apply::*, config_io::*, context::*, context_persistence::*, event_construction::*,
-    event_writer::*, failures::*, fixture_effects::*, fixture_tools::*, fs_guards::*,
-    live_events::*, planning::*, resume::*, session::*, session_authority::*, session_bundle::*,
-    session_lock::*, session_reading::*, session_reservation::*, tail::*, types::*, validate::*,
-};
-use test_support::{
-    PeakRssSampler, TempWorkspace, copy_dir, current_resident_set_size, expected_stream,
-    fixture_dir, workspace_copy,
-};
 
 mod support;
-use support::*;
 
 mod helpers;
-use helpers::*;
 
+mod auth;
+mod authoring;
 mod context;
+mod conversations;
+mod credential_store;
+mod deadlines;
 mod event_writer;
+mod fixture_tools;
 mod fs_guards;
+mod live_events;
+mod m11_budget_evidence;
+mod m11_runtime;
+mod oauth_credential;
+mod openai_codex;
 mod performance;
+mod planning;
+mod productive;
+mod productive_recovery_support;
 mod protocol_lifecycle;
 mod protocol_payload;
 mod registry_runtime;
+mod responses;
+mod resume;
+mod run_attempts;
+mod run_input;
+mod runtime_capacity;
+mod runtime_execution;
 mod sandbox;
+mod segmented_appender;
+mod serial_event_writer;
+mod session;
+mod session_authority;
 mod session_bundle;
+mod session_cleanup;
 mod session_corruption;
-mod session_listing;
+mod session_definition;
+mod session_lifecycle;
+mod session_lock;
 mod session_reservation;
 mod session_resume;
+mod session_store;
 mod surface_contracts;
-mod tail;
+mod tool_runner;
+mod workspace_config_security;
 mod workspace_security;
