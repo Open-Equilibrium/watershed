@@ -42,6 +42,7 @@ Open milestone-relevant question → add it to `docs/decisions/open-decisions.ht
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior without duplicating code, tests, docs or abstractions.
 - **Maintainability and modularity:** the human maintainer is the bottleneck. Keep modules cohesive, boundaries narrow and responsibilities explicit; reuse only when it reduces duplication and maintenance cost, and avoid abstractions that add indirection without making change simpler. Treat unusually large files as mandatory audit signals; split them when they contain independent reasons to change, not to satisfy an arbitrary line target.
 - **Meaningful tests:** follow the test-economy rules in `TESTING.md`.
+- **Performance budgets:** apply the evidence-based review rule in `PERFORMANCE.md`; do not treat a selected number as immutable or bypass a red gate.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
 - **Work partitioning:** one Goal/PR addresses one clear risk boundary; keep mechanical renames separate from behavior changes; split M1.1 into small issues and PRs.
 - **Agent economy:** use the least-cost capable tier for small mapping and documentation tasks.

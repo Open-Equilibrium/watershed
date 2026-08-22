@@ -1,6 +1,8 @@
 # Performance Targets (NFR)
 
-Non-functional targets. These are **falsifiable budgets**: every target must have a test or benchmark (see `TESTING.md`). Targets are split into product-level goals and implementation budgets so the MVP can fail fast on the actual bottleneck.
+Non-functional targets. These are **evidence-based, falsifiable guidelines**: every target must have a test or benchmark (see `TESTING.md`). Targets are split into product-level goals and implementation budgets so the MVP can fail fast on the actual bottleneck.
+
+A performance-gate exceedance blocks release until it is dispositioned; the selected number is not immutable. The maintainer classifies the exceedance as small or large. A small exceedance requires re-evaluating the numeric target and its evidence. A large exceedance requires re-evaluating the workload, architecture and limit structure. Optimize only when a small, clear and maintainable fix is feasible; otherwise add an open design decision before changing the implementation or target. This policy does not relax functional, safety or capacity boundaries explicitly defined as hard limits or exact `F`-row contracts.
 
 Rationale for the Rust core: low per-agent memory footprint, true multi-core parallelism, and a post-M1 Wasmtime plugin isolation path — properties a Node runtime cannot meet at the required scale.
 
