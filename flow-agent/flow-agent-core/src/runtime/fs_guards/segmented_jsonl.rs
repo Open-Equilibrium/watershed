@@ -269,6 +269,19 @@ pub fn segmented_jsonl_segment_count(
     limits: SessionStreamLimits,
 ) -> Result<usize, RuntimeError> {
     ensure_anchored_real_file(base)?;
+    segmented_jsonl_inventory(base, limits, |candidate| {
+        ensure_anchored_real_file(candidate)?;
+        #[cfg(test)]
+        record_retained_paths(1);
+        Ok(())
+    })
+}
+
+fn segmented_jsonl_inventory(
+    base: &AnchoredFile,
+    limits: SessionStreamLimits,
+    mut inspect_candidate: impl FnMut(&AnchoredFile) -> Result<(), RuntimeError>,
+) -> Result<usize, RuntimeError> {
     let mut segment_count = 1usize;
     let mut max_ordinal = 1u64;
     let mut invalid_ordinal = None;
@@ -280,11 +293,9 @@ pub fn segmented_jsonl_segment_count(
         } else if ordinal > limits.max_segments {
             exceeds_limit = true;
         } else {
-            ensure_anchored_real_file(&candidate)?;
+            inspect_candidate(&candidate)?;
             segment_count = segment_count.saturating_add(1);
             max_ordinal = max_ordinal.max(ordinal);
-            #[cfg(test)]
-            record_retained_paths(1);
         }
         Ok(())
     })?;
@@ -308,6 +319,21 @@ pub fn segmented_jsonl_segment_count(
         )));
     }
     Ok(segment_count)
+}
+
+pub(crate) fn verify_segmented_jsonl_inventory(
+    base: &AnchoredFile,
+    limits: SessionStreamLimits,
+    expected_segment_count: usize,
+) -> Result<(), RuntimeError> {
+    let segment_count = segmented_jsonl_inventory(base, limits, |_| Ok(()))?;
+    if segment_count != expected_segment_count {
+        return Err(RuntimeError::Protocol(format!(
+            "{} segment inventory changed outside append semantics: expected {expected_segment_count} segments, found {segment_count}",
+            base.diagnostic_path().display()
+        )));
+    }
+    Ok(())
 }
 
 pub fn for_each_segmented_jsonl_line(

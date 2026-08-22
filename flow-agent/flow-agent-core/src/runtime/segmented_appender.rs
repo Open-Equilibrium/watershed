@@ -6,6 +6,7 @@ use crate::runtime::{
         open_anchored_file_for_read, open_anchored_session_log_append_file, path_io_error,
         reserve_new_anchored_file, segmented_jsonl_files, segmented_jsonl_path,
         sync_anchored_directory, validate_open_session_log_append_file, verify_owned_anchored_file,
+        verify_segmented_jsonl_inventory,
     },
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
 };
@@ -300,14 +301,8 @@ impl SessionLogAppender {
     }
 
     fn verify_current_segment(&self) -> Result<AnchoredFile, RuntimeError> {
-        let segment_count = segmented_jsonl_files(&self.base_path, self.limits)?.len();
         let expected_segment_count = usize::try_from(self.current_ordinal).unwrap_or(usize::MAX);
-        if segment_count != expected_segment_count {
-            return Err(RuntimeError::Protocol(format!(
-                "{} segment inventory changed outside append semantics: expected {expected_segment_count} segments, found {segment_count}",
-                self.base_path.diagnostic_path().display()
-            )));
-        }
+        verify_segmented_jsonl_inventory(&self.base_path, self.limits, expected_segment_count)?;
         for segment in &self.sealed_segments {
             verify_owned_anchored_file(&segment.path, &segment.file, "session log segment")?;
             let actual = segment.file.metadata().map_err(|source| RuntimeError::Io {
@@ -342,10 +337,6 @@ impl SessionLogAppender {
         Ok(current)
     }
 
-    pub(crate) fn rotate_before(&mut self, appended_bytes: usize) -> Result<(), RuntimeError> {
-        self.rotate_before_with_checkpoint(appended_bytes, |_| {})
-    }
-
     #[cfg(test)]
     pub(crate) fn rotate_before_after_reservation_for_test<F>(
         &mut self,
@@ -356,13 +347,14 @@ impl SessionLogAppender {
         F: FnOnce(&AnchoredFile),
     {
         self.rotate_before_with_checkpoint(appended_bytes, checkpoint)
+            .map(|_| ())
     }
 
     fn rotate_before_with_checkpoint<F>(
         &mut self,
         appended_bytes: usize,
         checkpoint: F,
-    ) -> Result<(), RuntimeError>
+    ) -> Result<AnchoredFile, RuntimeError>
     where
         F: FnOnce(&AnchoredFile),
     {
@@ -375,7 +367,7 @@ impl SessionLogAppender {
             self.total_bytes,
             appended_bytes,
         )? {
-            return Ok(());
+            return Ok(current_path);
         }
         self.file.sync_all().map_err(|source| RuntimeError::Io {
             path: current_path.diagnostic_path().to_owned(),
@@ -402,9 +394,10 @@ impl SessionLogAppender {
         });
         self.current_ordinal = next_ordinal;
         self.current_bytes = 0;
-        Ok(())
+        self.verify_current_segment()
     }
 
+    #[cfg(test)]
     pub(crate) fn append_native_batch_with<F, C>(
         &mut self,
         _path: &Path,
@@ -419,10 +412,24 @@ impl SessionLogAppender {
         let current_path = self
             .verify_current_segment()
             .map_err(BatchAppendFailure::none_committed)?;
+        self.append_native_batch_to_current_with(&current_path, events, write, cleanup)
+    }
+
+    fn append_native_batch_to_current_with<F, C>(
+        &mut self,
+        current_path: &AnchoredFile,
+        events: &[&[u8]],
+        write: F,
+        cleanup: C,
+    ) -> Result<(), BatchAppendFailure>
+    where
+        F: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+        C: FnOnce(&mut fs::File, u64) -> io::Result<()>,
+    {
         let path = current_path.diagnostic_path();
         #[cfg(windows)]
         let cleanup = |append_file: &mut fs::File, retained_len| {
-            let (mut cleanup_file, _) = open_anchored_file_for_update(&current_path)
+            let (mut cleanup_file, _) = open_anchored_file_for_update(current_path)
                 .map_err(|error| io::Error::other(error.to_string()))?;
             if !open_files_share_identity(path, append_file, &cleanup_file)
                 .map_err(|error| io::Error::other(error.to_string()))?
@@ -513,10 +520,11 @@ impl EventLogAppender for SessionLogAppender {
             .map_err(|failure| failure.error)
     }
 
-    fn append_batch(&mut self, path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
+    fn append_batch(&mut self, _path: &Path, events: &[&[u8]]) -> Result<(), BatchAppendFailure> {
         let mut committed_events = 0;
         while committed_events < events.len() {
-            self.rotate_before(events[committed_events].len())
+            let current_path = self
+                .rotate_before_with_checkpoint(events[committed_events].len(), |_| {})
                 .map_err(|error| BatchAppendFailure {
                     committed_events: Some(committed_events),
                     error,
@@ -540,8 +548,8 @@ impl EventLogAppender for SessionLogAppender {
 
             debug_assert!(batch_end > committed_events);
             let batch = &events[committed_events..batch_end];
-            if let Err(failure) = self.append_native_batch_with(
-                path,
+            if let Err(failure) = self.append_native_batch_to_current_with(
+                &current_path,
                 batch,
                 |file, bytes| file.write_all(bytes),
                 cleanup_incomplete_suffix,

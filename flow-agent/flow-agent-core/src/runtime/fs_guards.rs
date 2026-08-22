@@ -83,6 +83,7 @@ pub(crate) fn test_path_key(path: &Path) -> PathBuf {
 }
 
 mod segmented_jsonl;
+pub(crate) use segmented_jsonl::verify_segmented_jsonl_inventory;
 #[cfg(test)]
 pub use segmented_jsonl::with_segmented_jsonl_discovery_metrics_for_test;
 pub use segmented_jsonl::{
