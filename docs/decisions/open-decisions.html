@@ -15,30 +15,12 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-1">M1.1</a>
       <a href="#m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1-1">
-    <h2>M1.1 - Flow Agent Performance Budget</h2>
-    <div class="grid">
-      <article id="d-057" class="decision">
-        <h3>D-057 - Per-Flow Memory Budget Disposition</h3>
-        <p><strong>Status:</strong> Open, blocks M1.1 closeout.</p>
-        <p><strong>Affected boundary:</strong> The near-limit orchestration fixture has a 10 MiB peak RSS-growth guideline per active top-level Flow on <code>ubuntu-24.04</code>. Two independent runs at commit <code>6312576</code> each measured 10,690,560 bytes against 10,485,760 bytes: 204,800 bytes, or about 1.95%, over the guideline.</p>
-        <p><strong>Known work:</strong> Segment inventory scans are bounded, the performance oracle no longer rematerializes emitted events, and canonical JSON normalization reuses already-owned storage. Those maintainable changes preserved behavior and passed focused tests, but the exact Linux RSS gate remains over budget. The original 10 MiB number has no recorded measurement rationale, so more tuning has no finite proportional completion criterion.</p>
-        <p><strong>Question:</strong> How should the maintainer dispose of this small, repeatable exceedance without silently weakening the benchmark?</p>
-        <ul><li><strong>A:</strong> Retain 10 MiB and authorize a broader, profiled memory-reduction change. Pro: preserves the existing number. Con: delays M1.1 and may add disproportionate complexity to recover about 2% from a limit without recorded provenance.</li><li><strong>B:</strong> Recalibrate the guideline from 20 isolated release-mode samples on the documented Ubuntu runner, using the smallest whole-MiB ceiling above the observed maximum and recording the corresponding aggregate-budget relationship. Pro: produces an evidence-based, reproducible number. Con: accepts a higher ceiling and the sample cannot cover every future runner change.</li><li><strong>C:</strong> Replace process RSS growth with a designed per-Flow accounting boundary before setting a new number. Pro: attributes memory to the Flow more directly and addresses the measurement structurally. Con: requires broader instrumentation and delays M1.1.</li></ul>
-        <p><strong>Recommendation:</strong> B because the exceedance is small and the current number lacks provenance; choose A only if 10 MiB is an external constraint, or C if process RSS is not the intended long-term measure.</p>
-        <p><strong>Maintainer decision required:</strong> Select A, B or C and identify any external constraint that makes 10 MiB non-negotiable.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected target and measurement rule in the ADR log and <a href="../../PERFORMANCE.md">PERFORMANCE.md</a>; complete the selected option's bounded evidence; then pass the unchanged near-limit fixture in two fresh Ubuntu CI runs plus the existing ten-Flow aggregate gate. Do not skip the test or change its workload to obtain a pass.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>

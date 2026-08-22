@@ -39,16 +39,18 @@ Synthetic event-storage/replay workload:
 M1 implementation budgets (ADR-0049):
 - FSM transition overhead p95 <= 1 ms per event, excluding model and tool work.
 - Local no-op tool dispatch overhead p95 <= 50 ms per run, excluding the tool's own runtime.
-- Memory overhead <= 10 MiB per active top-level flow before LLM/tool payloads, including one unique resolved registry closure shared by that Flow and its subflows (ADR-0067).
+- Memory overhead <= 11 MiB per active top-level flow before LLM/tool payloads, including one unique resolved registry closure shared by that Flow and its subflows (ADR-0067, ADR-0150).
 - Log/event append latency p95 <= 5 ms per event for the `hello-flow` canonical serialization and local append path.
 - Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
 - `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
-- Concurrency smoke: 10 fixture top-level flows complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 100 MiB aggregate RSS budget.
+- Concurrency smoke: 10 fixture top-level flows complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 110 MiB aggregate RSS budget.
 - Callback-streaming full-Run replay uses the workload, latency and peak-RSS evidence in [CV-17/CV-18](flow-agent/benchmarks/M1_1_BUDGETS.md#conversations-and-run-logs). Full-Run inspection with a retained maximum object inventory completes <= 15 s with <= 256 MiB RSS growth.
 - Incremental tail read p95 <= 100 ms for one newly committed event up to 320 KiB, with <= 64 MiB retained-reader RSS growth.
 - The representative ten-session and ten-full-cap event-storage/replay gates each complete <= 120 s; they are not end-to-end runtime gates.
 
 Timing and RSS gates run in release mode, one performance test process at a time, on the fixed `ubuntu-24.04` x64 CI image. Other operating systems run functional boundary tests; performance claims require the reference hardware class above.
+
+ADR-0150 recalibrated the per-Flow guideline from 20 fresh isolated release-mode samples in [CI run 32571620281](https://github.com/Open-Equilibrium/watershed/actions/runs/32571620281) at commit `7679ebc`. Peak RSS growth ranged from 10,559,488 to 10,756,096 bytes, with a 10,645,299.2-byte mean. Eleven MiB is the smallest whole-MiB ceiling above the observed maximum and leaves 778,240 bytes, or 7.24%, measurement headroom. The 110 MiB aggregate gate preserves the exact tenfold relationship for 10 concurrent top-level Flows.
 
 Tool runs are bounded/headless; the harness itself must not be the bottleneck when local inference is fast.
 

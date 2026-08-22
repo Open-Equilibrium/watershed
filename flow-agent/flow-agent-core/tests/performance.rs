@@ -14,6 +14,7 @@ mod test_support;
 use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
 
 static PERFORMANCE_GATE: Mutex<()> = Mutex::new(());
+const PER_FLOW_MEMORY_BUDGET_BYTES: u64 = 11 * 1024 * 1024;
 
 #[test]
 fn incomplete_near_limit_stream_fails_completion_check() {
@@ -200,10 +201,9 @@ fn one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget() {
         let baseline = sampler.baseline();
         let peak_growth = sampler.finish().saturating_sub(baseline);
         println!("M1_PER_FLOW_RSS_SAMPLE_BYTES={peak_growth}");
-        let budget = 10 * 1024 * 1024;
         assert!(
-            peak_growth <= budget,
-            "near-limit fixture peak RSS growth must stay <= {budget} bytes for one active top-level flow: {peak_growth} bytes"
+            peak_growth <= PER_FLOW_MEMORY_BUDGET_BYTES,
+            "near-limit fixture peak RSS growth must stay <= {PER_FLOW_MEMORY_BUDGET_BYTES} bytes for one active top-level flow: {peak_growth} bytes"
         );
     }
 }
@@ -268,7 +268,7 @@ fn ten_near_limit_orchestrating_flows_complete_under_m1_runtime_contract() {
     if let Some(mut sampler) = peak_rss_sampler {
         let baseline = sampler.baseline();
         let peak_growth = sampler.finish().saturating_sub(baseline);
-        let per_flow_budget = 10 * 1024 * 1024;
+        let per_flow_budget = PER_FLOW_MEMORY_BUDGET_BYTES;
         let budget = per_flow_budget * concurrency as u64;
         assert!(
             peak_growth <= budget,
