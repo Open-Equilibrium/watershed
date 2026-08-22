@@ -86,6 +86,48 @@ jobs:
           --all-features
           --doc
 
+      - name: Collect per-flow RSS calibration samples
+        if: matrix.os == 'ubuntu-24.04' && github.event_name == 'push'
+        shell: bash
+        run: |
+          mkdir -p target/per-flow-rss-calibration
+          evidence=target/per-flow-rss-calibration/samples.jsonl
+          : > "$evidence"
+          for sample in $(seq 1 20); do
+            sample_log=$(mktemp)
+            set +e
+            cargo nextest run \
+              --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
+              --locked \
+              -p flow-agent-core \
+              --release \
+              --run-ignored ignored-only \
+              -j 1 \
+              -E 'test(one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget)' \
+              --success-output immediate \
+              --failure-output immediate \
+              > "$sample_log" 2>&1
+            status=$?
+            set -e
+            cat "$sample_log"
+            value=$(grep -o 'M1_PER_FLOW_RSS_SAMPLE_BYTES=[0-9]*' "$sample_log" | tail -n 1 | cut -d= -f2)
+            rm "$sample_log"
+            if [ -z "$value" ]; then
+              echo "sample $sample produced no RSS evidence" >&2
+              exit 1
+            fi
+            printf '{"sample":%d,"peak_rss_growth_bytes":%s,"test_exit_code":%d}\n' \
+              "$sample" "$value" "$status" >> "$evidence"
+          done
+
+      - name: Upload per-flow RSS calibration evidence
+        if: matrix.os == 'ubuntu-24.04' && github.event_name == 'push' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: per-flow-rss-calibration
+          path: target/per-flow-rss-calibration/samples.jsonl
+          if-no-files-found: error
+
       - name: Run optimized performance tests
         if: matrix.os == 'ubuntu-24.04'
         run: >-

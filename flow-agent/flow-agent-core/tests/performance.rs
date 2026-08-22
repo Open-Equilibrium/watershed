@@ -199,6 +199,7 @@ fn one_near_limit_orchestrating_flow_stays_within_per_flow_memory_budget() {
     if let Some(mut sampler) = peak_rss_sampler {
         let baseline = sampler.baseline();
         let peak_growth = sampler.finish().saturating_sub(baseline);
+        println!("M1_PER_FLOW_RSS_SAMPLE_BYTES={peak_growth}");
         let budget = 10 * 1024 * 1024;
         assert!(
             peak_growth <= budget,
