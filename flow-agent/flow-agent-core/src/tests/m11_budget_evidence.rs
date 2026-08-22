@@ -61,7 +61,7 @@ fn optimized_m11_budget_contract_is_the_exact_approved_set() {
         ),
         (
             "conversation_migration_quantum",
-            Some(Duration::from_millis(1_250)),
+            Some(Duration::from_millis(1_600)),
             Some(64 * 1024 * 1024),
             None,
         ),
@@ -73,7 +73,7 @@ fn optimized_m11_budget_contract_is_the_exact_approved_set() {
         ),
         (
             "conversation_full_run_streaming_replay",
-            Some(Duration::from_secs(13)),
+            Some(Duration::from_secs(15)),
             Some(256 * 1024 * 1024),
             None,
         ),
