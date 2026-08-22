@@ -1,3 +1,7 @@
+#[cfg(target_os = "linux")]
+use crate::runtime::fs_guards::{
+    SegmentedJsonlLeaf, parse_segmented_jsonl_leaf, segmented_jsonl_leaf_stem,
+};
 #[cfg(windows)]
 use crate::runtime::fs_guards::{open_anchored_file_for_update, open_files_share_identity};
 use crate::runtime::{
@@ -10,6 +14,11 @@ use crate::runtime::{
     },
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits},
 };
+#[cfg(target_os = "linux")]
+use rustix::{
+    fd::OwnedFd,
+    fs::inotify::{self, CreateFlags, ReadFlags, WatchFlags},
+};
 #[cfg(test)]
 use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 use std::{
@@ -17,6 +26,8 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
+#[cfg(target_os = "linux")]
+use std::{mem::MaybeUninit, os::fd::AsRawFd as _};
 
 #[cfg(test)]
 static SESSION_STREAM_PARENT_SYNC_ERRORS: Mutex<BTreeMap<PathBuf, io::ErrorKind>> =
@@ -73,11 +84,138 @@ fn sync_session_stream_parent(parent: &AnchoredDir) -> Result<(), RuntimeError> 
     }
     sync_anchored_directory(parent)
 }
+
+struct SegmentInventoryWatch {
+    #[cfg(target_os = "linux")]
+    inner: Option<LinuxSegmentInventoryWatch>,
+}
+
+#[cfg(target_os = "linux")]
+struct LinuxSegmentInventoryWatch {
+    fd: OwnedFd,
+    folded_stem: String,
+}
+
+impl SegmentInventoryWatch {
+    fn open(base: &AnchoredFile) -> Self {
+        #[cfg(target_os = "linux")]
+        {
+            Self {
+                inner: Self::open_linux(base),
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = base;
+            Self {}
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn open_linux(base: &AnchoredFile) -> Option<LinuxSegmentInventoryWatch> {
+        let stem = base
+            .leaf
+            .file_name()?
+            .to_str()
+            .and_then(segmented_jsonl_leaf_stem)?;
+        if !stem.is_ascii() {
+            return None;
+        }
+        let fd = inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK).ok()?;
+        let parent_path = format!("/proc/self/fd/{}", base.parent.dir.as_raw_fd());
+        inotify::add_watch(
+            &fd,
+            parent_path,
+            WatchFlags::CREATE
+                | WatchFlags::DELETE
+                | WatchFlags::DELETE_SELF
+                | WatchFlags::MOVED_FROM
+                | WatchFlags::MOVED_TO
+                | WatchFlags::MOVE_SELF
+                | WatchFlags::ONLYDIR,
+        )
+        .ok()?;
+        Some(LinuxSegmentInventoryWatch {
+            fd,
+            folded_stem: stem.to_ascii_lowercase(),
+        })
+    }
+
+    fn is_active(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.inner.is_some()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    }
+
+    fn changed(&self, base: &AnchoredFile) -> Result<bool, RuntimeError> {
+        #[cfg(target_os = "linux")]
+        {
+            let Some(watch) = &self.inner else {
+                return Ok(false);
+            };
+            let mut buffer = [MaybeUninit::uninit(); 4096];
+            let mut reader = inotify::Reader::new(&watch.fd, &mut buffer);
+            let mut changed = false;
+            loop {
+                match reader.next() {
+                    Ok(event)
+                        if event
+                            .events()
+                            .intersects(ReadFlags::IGNORED | ReadFlags::UNMOUNT) =>
+                    {
+                        return Err(RuntimeError::Protocol(format!(
+                            "{} segment inventory watch was invalidated",
+                            base.diagnostic_path().display()
+                        )));
+                    }
+                    Ok(event) => changed |= watch.is_relevant(&event),
+                    Err(rustix::io::Errno::AGAIN) => return Ok(changed),
+                    Err(rustix::io::Errno::INTR) => {}
+                    Err(source) => {
+                        return Err(path_io_error(
+                            &base.parent.path,
+                            io::Error::from_raw_os_error(source.raw_os_error()),
+                        ));
+                    }
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = base;
+            Ok(false)
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxSegmentInventoryWatch {
+    fn is_relevant(&self, event: &inotify::Event<'_>) -> bool {
+        let Some(name) = event.file_name() else {
+            return true;
+        };
+        let Ok(name) = name.to_str() else {
+            return false;
+        };
+        let folded_name = name.to_ascii_lowercase();
+        !matches!(
+            parse_segmented_jsonl_leaf(&folded_name, &self.folded_stem),
+            SegmentedJsonlLeaf::Unrelated
+        )
+    }
+}
+
 pub(crate) struct SessionStreamInventory {
     pub(crate) current_bytes: u64,
     current_identity: AnchoredFileIdentity,
     pub(crate) current_ordinal: u64,
     current_path: AnchoredFile,
+    inventory_watch: SegmentInventoryWatch,
     sealed_segments: Vec<SealedSessionStreamSegment>,
     pub(crate) total_bytes: u64,
 }
@@ -96,6 +234,7 @@ fn session_stream_inventory_with_checkpoint<F>(
 where
     F: FnOnce(&AnchoredFile),
 {
+    let inventory_watch = SegmentInventoryWatch::open(path);
     let segments = segmented_jsonl_files(path, limits)?;
     let mut total_bytes = 0u64;
     let mut opened_segments = Vec::with_capacity(segments.len());
@@ -155,6 +294,7 @@ where
         current_identity,
         current_ordinal,
         current_path,
+        inventory_watch,
         sealed_segments: opened_segments,
         total_bytes,
     })
@@ -233,6 +373,7 @@ pub struct SessionLogAppender {
     pub(crate) current_bytes: u64,
     pub(crate) current_ordinal: u64,
     pub(crate) file: fs::File,
+    inventory_watch: SegmentInventoryWatch,
     pub(crate) limits: SessionStreamLimits,
     sealed_segments: Vec<SealedSessionStreamSegment>,
     pub(crate) total_bytes: u64,
@@ -270,6 +411,7 @@ impl SessionLogAppender {
             current_bytes: inventory.current_bytes,
             current_ordinal: inventory.current_ordinal,
             file,
+            inventory_watch: inventory.inventory_watch,
             limits,
             sealed_segments: inventory.sealed_segments,
             total_bytes: inventory.total_bytes,
@@ -302,39 +444,59 @@ impl SessionLogAppender {
 
     fn verify_current_segment(&self) -> Result<AnchoredFile, RuntimeError> {
         let expected_segment_count = usize::try_from(self.current_ordinal).unwrap_or(usize::MAX);
-        verify_segmented_jsonl_inventory(&self.base_path, self.limits, expected_segment_count)?;
-        for segment in &self.sealed_segments {
-            verify_owned_anchored_file(&segment.path, &segment.file, "session log segment")?;
-            let actual = segment.file.metadata().map_err(|source| RuntimeError::Io {
-                path: segment.path.diagnostic_path().to_owned(),
+        let watch_active = self.inventory_watch.is_active();
+        let mut scan_inventory = !watch_active || self.inventory_watch.changed(&self.base_path)?;
+        loop {
+            if scan_inventory {
+                verify_segmented_jsonl_inventory(
+                    &self.base_path,
+                    self.limits,
+                    expected_segment_count,
+                )?;
+            }
+            for segment in &self.sealed_segments {
+                verify_owned_anchored_file(&segment.path, &segment.file, "session log segment")?;
+                let actual = segment.file.metadata().map_err(|source| RuntimeError::Io {
+                    path: segment.path.diagnostic_path().to_owned(),
+                    source,
+                })?;
+                if actual.len() != segment.bytes {
+                    return Err(RuntimeError::Protocol(format!(
+                        "{} changed outside append semantics: expected {} bytes, found {}",
+                        segment.path.diagnostic_path().display(),
+                        segment.bytes,
+                        actual.len()
+                    )));
+                }
+            }
+            let current = self.current_path()?;
+            let path = current.diagnostic_path();
+            validate_open_session_log_append_file(path, &self.file)?;
+            verify_owned_anchored_file(&current, &self.file, "session log segment")?;
+            let actual = self.file.metadata().map_err(|source| RuntimeError::Io {
+                path: path.to_owned(),
                 source,
             })?;
-            if actual.len() != segment.bytes {
+            if actual.len() != self.current_bytes {
                 return Err(RuntimeError::Protocol(format!(
                     "{} changed outside append semantics: expected {} bytes, found {}",
-                    segment.path.diagnostic_path().display(),
-                    segment.bytes,
+                    path.display(),
+                    self.current_bytes,
                     actual.len()
                 )));
             }
-        }
-        let current = self.current_path()?;
-        let path = current.diagnostic_path();
-        validate_open_session_log_append_file(path, &self.file)?;
-        verify_owned_anchored_file(&current, &self.file, "session log segment")?;
-        let actual = self.file.metadata().map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
-        if actual.len() != self.current_bytes {
+            if !watch_active || !self.inventory_watch.changed(&self.base_path)? {
+                return Ok(current);
+            }
+            if !scan_inventory {
+                scan_inventory = true;
+                continue;
+            }
             return Err(RuntimeError::Protocol(format!(
-                "{} changed outside append semantics: expected {} bytes, found {}",
-                path.display(),
-                self.current_bytes,
-                actual.len()
+                "{} segment inventory changed during verification",
+                self.base_path.diagnostic_path().display()
             )));
         }
-        Ok(current)
     }
 
     #[cfg(test)]
