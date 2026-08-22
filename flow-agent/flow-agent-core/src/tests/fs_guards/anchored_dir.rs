@@ -195,7 +195,8 @@ fn private_child_still_denies_a_symlink_open_race() {
     );
 }
 
-#[cfg(unix)]
+// macOS rejects non-UTF-8 directory entries before this race can be constructed.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn private_child_denies_a_non_unicode_symlink_open_race() {
     use std::{
