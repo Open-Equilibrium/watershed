@@ -292,13 +292,7 @@ impl AnchoredDir {
         if private {
             #[cfg(unix)]
             if _created {
-                child
-                    .dir
-                    .set_permissions(Path::new("."), {
-                        use cap_std::fs::PermissionsExt as _;
-
-                        cap_std::fs::Permissions::from_mode(0o700)
-                    })
+                harden_created_private_directory(&child.dir)
                     .map_err(|source| path_io_error(&path, source))?;
             }
             #[cfg(target_os = "macos")]
@@ -567,6 +561,20 @@ fn create_private_anchored_directory(parent: &Dir, leaf: &OsStr) -> io::Result<D
     #[cfg(test)]
     observe_private_directory_create();
     parent.open_dir_nofollow(leaf)
+}
+
+#[cfg(unix)]
+fn harden_created_private_directory(dir: &Dir) -> io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use cap_std::fs::PermissionsExt as _;
+
+        dir.set_permissions(Path::new("."), cap_std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        rustix::fs::fchmod(dir, rustix::fs::Mode::from_bits_retain(0o700))
+    }
 }
 
 #[cfg(windows)]
