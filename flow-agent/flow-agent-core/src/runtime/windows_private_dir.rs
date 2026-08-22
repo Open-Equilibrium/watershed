@@ -293,12 +293,6 @@ pub(super) fn file_is_current_user_only(path: &Path) -> io::Result<bool> {
     opened_handle_is_current_user_only(file.as_raw_handle() as HANDLE, 0)
 }
 
-#[cfg(test)]
-pub(super) fn file_has_current_user_only_access(path: &Path) -> io::Result<bool> {
-    let file = fs::File::open(path)?;
-    opened_handle_has_current_user_only_access(file.as_raw_handle() as HANDLE, 0, false)
-}
-
 pub(super) fn opened_file_is_current_user_only(file: &fs::File) -> io::Result<bool> {
     opened_handle_is_current_user_only(file.as_raw_handle() as HANDLE, 0)
 }

@@ -2,6 +2,8 @@ use super::helpers::{
     canonical_context_manifest_line, empty_workspace, fill_event_segments_to_final_byte,
     reserve_session_log,
 };
+#[cfg(windows)]
+use crate::runtime::fs_guards::windows_file_is_current_user_only_for_test;
 use crate::runtime::{
     context_persistence::ContextManifestWriter,
     fs_guards::{segmented_jsonl_files, segmented_jsonl_path, set_directory_sync_error_for_test},
@@ -294,6 +296,15 @@ fn event_appender_rotates_before_crossing_the_segment_limit() {
             .len(),
         2
     );
+    #[cfg(windows)]
+    for segment in [&reservation.session_path, &second] {
+        assert!(
+            windows_file_is_current_user_only_for_test(segment.diagnostic_path())
+                .expect("segment DACL reads"),
+            "{} must grant access to the current Windows user only",
+            segment.diagnostic_path().display()
+        );
+    }
     drop(appender);
     reservation.rollback().expect("reservation rolls back");
 }

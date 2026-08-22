@@ -685,11 +685,6 @@ pub(crate) fn windows_file_is_current_user_only_for_test(path: &Path) -> io::Res
 }
 
 #[cfg(all(test, windows))]
-pub(crate) fn windows_file_has_current_user_only_access_for_test(path: &Path) -> io::Result<bool> {
-    super::windows_private_dir::file_has_current_user_only_access(path)
-}
-
-#[cfg(all(test, windows))]
 pub(crate) fn windows_directory_is_current_user_only_for_test(
     path: &Path,
 ) -> Result<bool, RuntimeError> {

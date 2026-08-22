@@ -23,7 +23,7 @@ use crate::{
     runtime::{
         fs_guards::{
             windows_directory_is_current_user_only_for_test,
-            windows_file_has_current_user_only_access_for_test,
+            windows_file_is_current_user_only_for_test,
         },
         live_events::live_event_channel,
         session::{
@@ -62,7 +62,7 @@ fn persisted_session_store_is_current_user_only_on_windows() {
         );
     }
     assert!(
-        windows_file_has_current_user_only_access_for_test(&output.session_path)
+        windows_file_is_current_user_only_for_test(&output.session_path)
             .expect("persisted session DACL reads"),
         "{} must grant access to the current Windows user only",
         output.session_path.display()

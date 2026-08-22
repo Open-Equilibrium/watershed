@@ -434,6 +434,40 @@ pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeErro
     file.open(&options)
 }
 
+fn create_private_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
+    ensure_anchored_new_leaf_available(file)?;
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
+    #[cfg(windows)]
+    {
+        use cap_std::fs::OpenOptionsExt as _;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_WRITE, WRITE_DAC, WRITE_OWNER};
+
+        options.access_mode(FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER);
+    }
+    let opened = file.open(&options)?;
+    #[cfg(windows)]
+    {
+        crate::runtime::windows_private_dir::set_opened_file_current_user_only(&opened)
+            .map_err(|source| path_io_error(&file.path, source))?;
+        if !crate::runtime::windows_private_dir::opened_file_is_current_user_only(&opened)
+            .map_err(|source| path_io_error(&file.path, source))?
+        {
+            return Err(path_io_error(
+                &file.path,
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "private file is not current-user-only",
+                ),
+            ));
+        }
+    }
+    Ok(opened)
+}
+
 pub fn create_anchored_file_for_update(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
     ensure_anchored_new_leaf_available(file)?;
     let mut options = cap_std::fs::OpenOptions::new();
@@ -454,7 +488,7 @@ pub fn create_anchored_file_for_update(file: &AnchoredFile) -> Result<fs::File, 
 pub(crate) fn reserve_new_anchored_file(
     path: &AnchoredFile,
 ) -> Result<AnchoredFileIdentity, RuntimeError> {
-    let file = create_anchored_file(path)?;
+    let file = create_private_anchored_file(path)?;
     anchored_file_identity(path.diagnostic_path(), &file)
 }
 
