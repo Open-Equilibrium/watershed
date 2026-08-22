@@ -1,6 +1,9 @@
 use crate::{
     runtime::{session::resume_conversation_run_with_provider_and_preflight, types::RuntimeError},
-    tests::{productive::support::FakeProvider, test_support::workspace_copy},
+    tests::{
+        helpers::write_productive_workspace_config, productive::support::FakeProvider,
+        test_support::workspace_copy,
+    },
 };
 
 #[test]
@@ -14,6 +17,7 @@ fn resume_activates_controlled_cancellation_before_platform_preflight() {
     }
 
     let workspace = workspace_copy("smoke-flow");
+    write_productive_workspace_config(&workspace);
     let mut provider = FakeProvider::default();
     let error = resume_conversation_run_with_provider_and_preflight(
         &workspace,
@@ -37,7 +41,8 @@ fn resume_reconciles_cancellation_with_workspace_preflight_failure() {
         Ok(())
     }
 
-    let workspace = workspace_copy("smoke-flow").join("missing");
+    let workspace = workspace_copy("smoke-flow");
+    write_productive_workspace_config(&workspace);
     let mut provider = FakeProvider::default();
     let error = resume_conversation_run_with_provider_and_preflight(
         &workspace,
