@@ -15,12 +15,32 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1-1-closeout">M1.1 Closeout</a>
       <a href="#m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1-1-closeout">
+    <h2>M1.1 Closeout</h2>
+    <div class="grid">
+      <article id="d-058" class="decision">
+        <h3>D-058 - Conversation Latency Budget Structure</h3>
+        <p><strong>Status:</strong> Open M1.1 closeout blocker; the selected limits remain enforced until this decision is recorded.</p>
+        <p><strong>Evidence:</strong> Two independent 30-sample Ubuntu release runs at commit <code>188318b</code> reproduced the same large timing misses. The 16 MiB migration quantum measured p95 1.192 s and 1.191 s against 1.000 s. The 352 MiB validated streaming replay measured p95 12.354 s and 12.309 s against 10.000 s. See <a href="https://github.com/Open-Equilibrium/watershed/actions/runs/32572626735">push evidence</a> and <a href="https://github.com/Open-Equilibrium/watershed/actions/runs/32572629127">pull-request evidence</a>. All RSS checks and the other 13 optimized workloads passed.</p>
+        <p><strong>Question:</strong> What contract should replace or satisfy the unsupported CV-12 migration and CV-17 replay deadlines?</p>
+        <ul>
+          <li><strong>A - Preserve 1 s and 10 s:</strong> Redesign and optimize the two runtime paths independently. Pro: preserves the selected latency goals. Con: migration durability and full canonical event validation are different boundaries; no small shared optimization is known, and changing either requires new security and recovery proof.</li>
+          <li><strong>B - Recalibrate the fixed workloads:</strong> Set the reference-runner p95 guidelines to 1.25 s and 13 s, about 5% above the larger observed p95 in each pair. Pro: smallest evidence-backed closeout change while retaining the exact fixtures. Con: records current implementation performance rather than a demonstrated product need.</li>
+          <li><strong>C - Use scaling contracts:</strong> Replace the two absolute deadlines with finite throughput and fixed-overhead checks at maintainer-selected input sizes. Pro: tests how performance scales and separates fixed work from bytes processed. Con: needs a new bounded matrix and calibration before M1.1 can close.</li>
+        </ul>
+        <p><strong>Recommendation:</strong> B for M1.1 unless a concrete product requirement justifies A; choose C only if throughput scaling is the intended long-term promise.</p>
+        <p><strong>Acceptance criterion:</strong> Record A, B or C in the ADR log. A must pass both current deadlines in two independent 30-sample Ubuntu runs without weakening validation or durability. B must update the two canonical matrix rows and pass all 15 workloads in two independent runs. C must first record a finite workload-size and formula matrix, then pass it twice. Every option keeps the existing functional, capacity and RSS boundaries unchanged.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>
