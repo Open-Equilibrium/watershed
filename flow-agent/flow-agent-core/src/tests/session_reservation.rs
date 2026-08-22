@@ -6,6 +6,8 @@ use super::{
     support::assert_active_session,
     test_support::workspace_copy,
 };
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+use crate::runtime::session_bundle::{SessionBundleInventory, SessionBundlePaths};
 use crate::runtime::{
     fs_guards::{
         AnchoredWorkspace, ensure_runtime_dirs, set_directory_sync_error_for_path_for_test,
@@ -15,7 +17,6 @@ use crate::runtime::{
     resume::resume_session,
     session::run_flow,
     session_authority::{SessionOwnershipLease, session_ownership_is_active},
-    session_bundle::{SessionBundleInventory, SessionBundlePaths},
     session_candidates::suffixed_session_id,
     session_definition::SessionDefinitionMetadata,
     session_reservation::{

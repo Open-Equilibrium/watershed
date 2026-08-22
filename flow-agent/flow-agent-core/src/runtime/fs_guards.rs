@@ -23,6 +23,7 @@ pub use bounded_read::for_each_reader_line_with_limit;
 pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
 
 mod anchored_file;
+#[cfg(windows)]
 pub(crate) use anchored_file::open_files_share_identity;
 pub use anchored_file::{
     AnchoredFile, AnchoredFileIdentity, anchored_file_identity, create_anchored_file,

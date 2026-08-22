@@ -1,4 +1,4 @@
-use super::super::super::helpers::empty_workspace;
+use super::super::super::helpers::{empty_workspace, write_productive_workspace_config};
 use super::super::{REQUEST_HASH, append_uncertain_provider_intent, create_review_run};
 use crate::runtime::{
     context::ContextObject,
@@ -13,6 +13,7 @@ use crate::runtime::{
     session::resume_conversation_run,
     types::EmitMode,
 };
+use crate::tests::test_support::workspace_copy;
 use std::fs::{self};
 
 fn tool_intent(attempt_id: &str) -> RunAttemptIntent {
@@ -291,7 +292,8 @@ fn tool_reconciliation_rejects_a_run_object_whose_bytes_do_not_match_its_digest_
 
 #[test]
 fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
-    let workspace = empty_workspace("conversation-uncertain-resume");
+    let workspace = workspace_copy("smoke-flow");
+    write_productive_workspace_config(&workspace);
     create_review_run(&workspace);
     append_uncertain_provider_intent(&workspace);
     let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
@@ -302,7 +304,10 @@ fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
         .expect_err("Resume must not automatically repeat an uncertain attempt");
     assert_eq!(error.exit_code(), 65);
     #[cfg(windows)]
-    assert!(error.to_string().contains("execution_backend_unavailable"));
+    assert!(
+        error.to_string().contains("execution_backend_unavailable"),
+        "unexpected Resume error: {error}"
+    );
     #[cfg(not(windows))]
     assert!(error.to_string().contains("uncertain"));
     assert_eq!(
