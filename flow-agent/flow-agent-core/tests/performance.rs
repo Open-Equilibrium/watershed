@@ -277,20 +277,15 @@ fn ten_near_limit_orchestrating_flows_complete_under_m1_runtime_contract() {
 }
 
 fn assert_near_limit_output(output: &RunOutput) {
-    let events = output
-        .stdout
-        .lines()
-        .map(|line| {
-            serde_json::from_str::<EventEnvelope>(line)
-                .expect("near-limit output must contain valid events")
-        })
-        .collect::<Vec<_>>();
+    let events =
+        validate_protocol_jsonl_text(Path::new("near-limit-workload.jsonl"), &output.stdout)
+            .expect("near-limit workload must satisfy the canonical lifecycle");
     assert_eq!(
         events.len(),
         output.event_count,
         "near-limit output must contain every reported event"
     );
-    assert_near_limit_events(&events);
+    assert_near_limit_completion_contract(&events);
 }
 
 fn assert_near_limit_events(events: &[EventEnvelope]) {
