@@ -2,9 +2,12 @@
 
 #![cfg_attr(not(test), deny(clippy::wildcard_imports))]
 
+mod authoring;
 mod dispatch;
+mod interrupt;
 mod output;
 mod parsing;
+mod stdin;
 mod streaming;
 mod tail;
 
@@ -14,9 +17,11 @@ mod test_support;
 
 use crate::{
     dispatch::dispatch,
+    interrupt::InterruptCoordinator,
     output::{print_error, write_stdout},
     parsing::{informational_output, parse_args},
 };
+use flow_agent_core::RuntimeError;
 use std::{env, process::ExitCode};
 
 fn main() -> ExitCode {
@@ -24,7 +29,7 @@ fn main() -> ExitCode {
         Ok(args) => args,
         Err(err) => {
             print_error(&err);
-            return ExitCode::from(64);
+            return ExitCode::from(RuntimeError::Usage(err.to_owned()).exit_code() as u8);
         }
     };
 
@@ -38,7 +43,15 @@ fn main() -> ExitCode {
         };
     }
 
-    match dispatch(&args) {
+    let interrupts = match InterruptCoordinator::install() {
+        Ok(interrupts) => interrupts,
+        Err(err) => {
+            print_error(&err);
+            return ExitCode::from(err.exit_code() as u8);
+        }
+    };
+
+    match dispatch(&args, &interrupts) {
         Ok(code) => code,
         Err(err) => {
             print_error(&err);

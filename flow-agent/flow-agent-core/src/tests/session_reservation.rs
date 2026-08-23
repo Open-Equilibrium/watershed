@@ -1,10 +1,91 @@
-use super::*;
+use super::{
+    helpers::{
+        create_directory_alias, empty_workspace, remove_directory_alias, reserve_session_log,
+        reserve_session_log_with_publish_observer,
+    },
+    support::assert_active_session,
+    test_support::workspace_copy,
+};
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+use crate::runtime::session_bundle::{SessionBundleInventory, SessionBundlePaths};
+use crate::runtime::{
+    fs_guards::{
+        AnchoredWorkspace, ensure_runtime_dirs, set_directory_sync_error_for_path_for_test,
+        set_owned_file_remove_observer, start_directory_sync_trace_for_test,
+        take_directory_sync_trace_for_test,
+    },
+    resume::resume_session,
+    session::run_flow,
+    session_authority::{SessionOwnershipLease, session_ownership_is_active},
+    session_candidates::suffixed_session_id,
+    session_definition::SessionDefinitionMetadata,
+    session_reservation::{
+        materialize_session_candidate, reserve_anchored_session_lock_file,
+        reserve_unique_session_candidate_with_anchored_workspace, session_log_metadata_text,
+        set_metadata_pre_activation_observer_for_test, write_reserved_session_metadata,
+    },
+    session_store::workspace_store_leaf,
+    types::{EmitMode, RuntimeError},
+};
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+use std::ffi::OsString;
+use std::{fs, io};
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn non_unicode_object_leaf(session_id: &str) -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut bytes = format!("{session_id}.object.sha256-").into_bytes();
+    bytes.push(0xff);
+    OsString::from_vec(bytes)
+}
+
+#[cfg(windows)]
+fn non_unicode_object_leaf(session_id: &str) -> OsString {
+    use std::os::windows::ffi::OsStringExt;
+
+    let mut units = format!("{session_id}.object.sha256-")
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    units.push(0xd800);
+    OsString::from_wide(&units)
+}
+
+fn session_definition_metadata(
+    registry_hash: &str,
+    flow_definition_hash: &str,
+) -> SessionDefinitionMetadata {
+    SessionDefinitionMetadata {
+        flow_definition_id: "smoke-flow".to_owned(),
+        registry_hash: registry_hash.to_owned(),
+        flow_definition_hash: flow_definition_hash.to_owned(),
+    }
+}
+
+fn assert_unsafe_namespace_collision(error: RuntimeError, expected_session_id: &str) {
+    match error {
+        RuntimeError::ControlledStageFailures {
+            operation: Some(operation),
+            finalization: None,
+            cleanup: Some(cleanup),
+        } => {
+            assert!(matches!(
+                *operation,
+                RuntimeError::SessionLogExists(session_id) if session_id == expected_session_id
+            ));
+            assert!(
+                cleanup.to_string().contains("cannot safely remove"),
+                "{cleanup}"
+            );
+        }
+        other => panic!("unexpected reservation failure: {other}"),
+    }
+}
 
 #[test]
 fn run_flow_allocates_next_session_id_when_base_log_is_corrupt() {
     let workspace = workspace_copy("smoke-flow");
-    let session_dir = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&session_dir).expect("session dir");
+    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
     let corrupt_path = session_dir.join("smoke-flow.jsonl");
     fs::write(&corrupt_path, "{\"not\":\"an event\"}\n").expect("corrupt base log written");
     let before = fs::read_to_string(&corrupt_path).expect("corrupt base log readable");
@@ -24,11 +105,15 @@ fn run_flow_allocates_next_session_id_when_base_log_is_corrupt() {
 #[test]
 fn reservation_collision_preserves_existing_session_log() {
     let workspace = empty_workspace("reservation-existing-session");
+    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&anchored, "existing001")
+            .expect("candidate reserves before collision");
     let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
     let session_path = dirs.sessions.path.join("existing001.jsonl");
     fs::write(&session_path, b"existing session").expect("existing session written");
 
-    let err = reserve_session_log(&workspace, "existing001")
+    let err = materialize_session_candidate(&anchored, candidate)
         .expect_err("existing session must reject reservation");
 
     assert!(matches!(
@@ -40,6 +125,95 @@ fn reservation_collision_preserves_existing_session_log() {
         b"existing session"
     );
     assert!(!dirs.sessions.path.join("existing001.lock").exists());
+}
+
+#[test]
+fn reserved_candidate_rejects_materialization_in_another_workspace() {
+    let reserved_workspace = empty_workspace("reservation-bound-workspace-a");
+    let materialized_workspace = empty_workspace("reservation-bound-workspace-b");
+    let reserved = AnchoredWorkspace::open(&reserved_workspace).expect("workspace A opens");
+    let materialized = AnchoredWorkspace::open(&materialized_workspace).expect("workspace B opens");
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&reserved, "boundworkspace001")
+            .expect("candidate reserves in workspace A");
+
+    let error = materialize_session_candidate(&materialized, candidate)
+        .expect_err("workspace A reservation cannot materialize in workspace B");
+
+    assert!(matches!(error, RuntimeError::Protocol(_)), "{error}");
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&materialized_workspace).exists(),
+        "rejection occurs before creating workspace B session storage"
+    );
+    assert!(
+        !session_ownership_is_active(&reserved_workspace, "boundworkspace001")
+            .expect("workspace A authority reads"),
+        "the rejected candidate releases workspace A ownership"
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn reserved_candidate_rejects_a_rebound_workspace_path() {
+    let workspace = empty_workspace("reservation-rebound-original");
+    let replacement = empty_workspace("reservation-rebound-replacement");
+    let alias_parent = empty_workspace("reservation-rebound-alias-parent");
+    let alias = alias_parent.join("workspace");
+    create_directory_alias(&alias, &workspace);
+    let anchored = AnchoredWorkspace::open(&alias).expect("workspace alias opens");
+    let store_leaf = workspace_store_leaf(&anchored).expect("workspace store leaf derives");
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&anchored, "reboundworkspace001")
+            .expect("candidate reserves before workspace rebind");
+    remove_directory_alias(&alias);
+    create_directory_alias(&alias, &replacement);
+    assert_eq!(
+        workspace_store_leaf(&anchored).expect("workspace store leaf remains available"),
+        store_leaf,
+        "one anchored workspace must select one immutable private store"
+    );
+
+    let result = materialize_session_candidate(&anchored, candidate);
+
+    remove_directory_alias(&alias);
+    create_directory_alias(&alias, &workspace);
+    let error = result.expect_err("a rebound workspace path must reject materialization");
+    assert!(matches!(error, RuntimeError::Protocol(_)), "{error}");
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&replacement).exists(),
+        "rebound workspace remains untouched"
+    );
+    assert!(
+        !session_ownership_is_active(&alias, "reboundworkspace001")
+            .expect("reserved workspace authority reads"),
+        "rejection releases the reserved workspace authority"
+    );
+}
+
+#[test]
+fn reservation_rejects_an_orphan_segment_namespace() {
+    let workspace = empty_workspace("reservation-orphan-segment-namespace");
+    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&anchored, "orphansegment001")
+            .expect("candidate reserves before collision");
+    let sessions = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
+    let segment = sessions.join("orphansegment001.000002.jsonl");
+    fs::write(&segment, b"foreign segment").expect("orphan segment writes");
+
+    let error = materialize_session_candidate(&anchored, candidate)
+        .expect_err("an orphan segment occupies the complete session namespace");
+
+    assert!(matches!(
+        error,
+        RuntimeError::SessionLogExists(session_id) if session_id == "orphansegment001"
+    ));
+    assert_eq!(
+        fs::read(segment).expect("orphan segment remains readable"),
+        b"foreign segment"
+    );
+    assert!(!sessions.join("orphansegment001.jsonl").exists());
+    assert!(!sessions.join("orphansegment001.lock").exists());
 }
 
 #[test]
@@ -56,31 +230,15 @@ fn partial_reservation_rollback_preserves_context_collision() {
     })
     .expect_err("context collision must reject reservation");
 
-    match err {
-        RuntimeError::ControlledStageFailures {
-            operation: Some(operation),
-            finalization: None,
-            cleanup: Some(cleanup),
-        } => {
-            assert!(matches!(
-                *operation,
-                RuntimeError::SessionLogExists(session_id) if session_id == "context001"
-            ));
-            assert!(
-                cleanup.to_string().contains("cannot safely remove"),
-                "{cleanup}"
-            );
-        }
-        other => panic!("unexpected reservation failure: {other}"),
-    }
+    assert_unsafe_namespace_collision(err, "context001");
     assert_eq!(
         fs::read(&context_path).expect("racing context remains"),
         b"existing context"
     );
     assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert_eq!(
-        fs::read(metadata_path).expect("metadata orphan remains"),
-        b""
+    assert!(
+        !metadata_path.exists(),
+        "the final namespace check runs before metadata reservation"
     );
     assert!(!lock_path.exists());
 }
@@ -101,23 +259,7 @@ fn partial_reservation_rollback_preserves_concurrent_event_segment() {
     })
     .expect_err("context collision must reject reservation");
 
-    match err {
-        RuntimeError::ControlledStageFailures {
-            operation: Some(operation),
-            finalization: None,
-            cleanup: Some(cleanup),
-        } => {
-            assert!(matches!(
-                *operation,
-                RuntimeError::SessionLogExists(session_id) if session_id == "segment001"
-            ));
-            assert!(
-                cleanup.to_string().contains("cannot safely remove"),
-                "{cleanup}"
-            );
-        }
-        other => panic!("unexpected reservation failure: {other}"),
-    }
+    assert_unsafe_namespace_collision(err, "segment001");
     assert_eq!(
         fs::read(&segment_path).expect("racing event segment remains"),
         b"foreign event segment"
@@ -127,11 +269,93 @@ fn partial_reservation_rollback_preserves_concurrent_event_segment() {
         b"existing context"
     );
     assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
-    assert_eq!(
-        fs::read(metadata_path).expect("metadata orphan remains"),
-        b""
+    assert!(
+        !metadata_path.exists(),
+        "the segment collision occurs before metadata reservation"
     );
     assert!(!lock_path.exists());
+}
+
+#[test]
+fn reservation_rejects_event_segment_published_after_base_reservation() {
+    let workspace = empty_workspace("reservation-segment-only-race");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("segment003.jsonl");
+    let segment_path = dirs.sessions.path.join("segment003.000002.jsonl");
+    let lock_path = dirs.sessions.path.join("segment003.lock");
+    let metadata_path = dirs.logs.path.join("segment003.log");
+    let context_path = dirs.logs.path.join("segment003.contexts.jsonl");
+
+    let err = reserve_session_log_with_publish_observer(&workspace, "segment003", || {
+        fs::write(&segment_path, b"foreign event segment").expect("racing event segment written");
+    })
+    .expect_err("event segment collision must reject reservation");
+
+    assert_unsafe_namespace_collision(err, "segment003");
+    assert_eq!(
+        fs::read(&segment_path).expect("racing event segment remains"),
+        b"foreign event segment"
+    );
+    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
+    assert!(!metadata_path.exists());
+    assert!(!context_path.exists());
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn reservation_rejects_context_segment_published_after_base_reservation() {
+    let workspace = empty_workspace("reservation-context-segment-only-race");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("segment004.jsonl");
+    let lock_path = dirs.sessions.path.join("segment004.lock");
+    let metadata_path = dirs.logs.path.join("segment004.log");
+    let context_path = dirs.logs.path.join("segment004.contexts.jsonl");
+    let context_segment_path = dirs.logs.path.join("segment004.contexts.000002.jsonl");
+
+    let err = reserve_session_log_with_publish_observer(&workspace, "segment004", || {
+        fs::write(&context_segment_path, b"foreign context segment")
+            .expect("racing context segment written");
+    })
+    .expect_err("context segment collision must reject reservation");
+
+    assert_unsafe_namespace_collision(err, "segment004");
+    assert_eq!(
+        fs::read(&context_segment_path).expect("racing context segment remains"),
+        b"foreign context segment"
+    );
+    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
+    assert!(!lock_path.exists());
+    assert!(!metadata_path.exists());
+    assert!(!context_path.exists());
+}
+
+#[test]
+fn reservation_rejects_object_published_after_base_reservation() {
+    let workspace = empty_workspace("reservation-object-race");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let session_path = dirs.sessions.path.join("objectrace001.jsonl");
+    let lock_path = dirs.sessions.path.join("objectrace001.lock");
+    let metadata_path = dirs.logs.path.join("objectrace001.log");
+    let context_path = dirs.logs.path.join("objectrace001.contexts.jsonl");
+    let object_path = dirs
+        .sessions
+        .path
+        .join("objectrace001.object.sha256-invalid");
+
+    let err = reserve_session_log_with_publish_observer(&workspace, "objectrace001", || {
+        fs::write(&object_path, b"foreign object member").expect("racing object member written");
+    })
+    .expect_err("object namespace collision must reject reservation");
+
+    assert_unsafe_namespace_collision(err, "objectrace001");
+    assert_eq!(
+        fs::read(&object_path).expect("racing object member remains"),
+        b"foreign object member"
+    );
+    assert_eq!(fs::read(session_path).expect("session orphan remains"), b"");
+    assert!(!lock_path.exists());
+    assert!(!metadata_path.exists());
+    assert!(!context_path.exists());
 }
 
 #[test]
@@ -208,95 +432,144 @@ fn reservation_rollback_never_unlinks_a_replacement_after_identity_check() {
         reservation.context_path.diagnostic_path().exists(),
         "owned context orphan remains inventory-visible"
     );
-    let next = reserve_unique_session_log(&workspace, "replacement001")
+    let next = reserve_session_log(&workspace, "replacement001")
         .expect("orphan inventory advances the unique reservation suffix");
     assert_eq!(next.session_id, "replacement001-2");
     next.simulate_abrupt_termination();
 }
 
 #[test]
-fn unique_reservation_inventories_orphan_namespaces_before_probing() {
+fn unique_reservation_skips_orphan_namespaces() {
     let workspace = empty_workspace("reservation-orphan-inventory");
+    let sessions = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
+    let logs = crate::tests::helpers::ensure_workspace_log_dir(&workspace);
     let sentinels = [
-        (LOCAL_SESSION_DIR, "bundle001.000002.jsonl"),
-        (LOCAL_SESSION_DIR, "bundle001-2.000007.jsonl"),
-        (LOCAL_LOG_DIR, "bundle001-3.contexts.jsonl"),
-        (LOCAL_LOG_DIR, "bundle001-4.contexts.000002.jsonl"),
-        (LOCAL_LOG_DIR, "bundle001-5.contexts.000007.jsonl"),
-        (LOCAL_LOG_DIR, "bundle001-6.log"),
-        (LOCAL_LOG_DIR, "BUNDLE001-7.LOG"),
-        (LOCAL_SESSION_DIR, "BUNDLE001-8.LOCK"),
-        (LOCAL_SESSION_DIR, "bundle001-9.object.sha256-invalid"),
-        (LOCAL_SESSION_DIR, "BUNDLE001-10.JSONL"),
-        (LOCAL_SESSION_DIR, "BUNDLE001-11.000002.JSONL"),
-        (LOCAL_LOG_DIR, "BUNDLE001-12.CONTEXTS.JSONL"),
-        (LOCAL_LOG_DIR, "BUNDLE001-13.CONTEXTS.000002.JSONL"),
+        (&sessions, "bundle001.000002.jsonl"),
+        (&sessions, "bundle001-2.000007.jsonl"),
+        (&logs, "bundle001-3.contexts.jsonl"),
+        (&logs, "bundle001-4.contexts.000002.jsonl"),
+        (&logs, "bundle001-5.contexts.000007.jsonl"),
+        (&logs, "bundle001-6.log"),
+        (&logs, "BUNDLE001-7.LOG"),
+        (&sessions, "BUNDLE001-8.LOCK"),
+        (&sessions, "bundle001-9.object.sha256-invalid"),
+        (&sessions, "BUNDLE001-10.JSONL"),
+        (&sessions, "BUNDLE001-11.000002.JSONL"),
+        (&logs, "BUNDLE001-12.CONTEXTS.JSONL"),
+        (&logs, "BUNDLE001-13.CONTEXTS.000002.JSONL"),
     ];
-    for (directory, leaf) in sentinels {
-        let path = workspace.join(directory).join(leaf);
-        fs::create_dir_all(path.parent().expect("sentinel parent")).expect("runtime dir");
+    for (directory, leaf) in &sentinels {
+        let path = directory.join(leaf);
         fs::write(path, "").expect("orphan sentinel written");
     }
-    let mut probed = Vec::new();
-
     let reservation =
-        reserve_unique_session_log_with_probe_observer(&workspace, "bundle001", |session_id| {
-            probed.push(session_id.to_owned())
-        })
-        .expect("inventory skips orphan namespaces");
+        reserve_session_log(&workspace, "bundle001").expect("inventory skips orphan namespaces");
 
     assert_eq!(reservation.session_id, "bundle001-14");
-    assert_eq!(probed, ["bundle001-14"]);
     reservation.rollback().expect("reservation rolls back");
     assert!(
         sentinels
             .iter()
-            .all(|(directory, leaf)| workspace.join(directory).join(leaf).is_file())
+            .all(|(directory, leaf)| directory.join(leaf).is_file())
+    );
+}
+
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[test]
+fn unique_reservation_skips_a_non_unicode_object_namespace() {
+    let workspace = empty_workspace("reservation-non-unicode-object-inventory");
+    let object_path = crate::tests::helpers::ensure_workspace_session_dir(&workspace)
+        .join(non_unicode_object_leaf("nonunicode001"));
+    fs::write(&object_path, b"foreign object member").expect("object sentinel written");
+
+    let reservation = reserve_session_log(&workspace, "nonunicode001")
+        .expect("non-Unicode object namespace advances the candidate");
+
+    assert_eq!(reservation.session_id, "nonunicode001-2");
+    reservation.rollback().expect("reservation rolls back");
+    assert_eq!(
+        fs::read(object_path).expect("object sentinel remains readable"),
+        b"foreign object member"
+    );
+}
+
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[test]
+fn reservation_rejects_a_non_unicode_object_published_after_candidate_selection() {
+    let workspace = empty_workspace("reservation-non-unicode-object-race");
+    let dirs = ensure_runtime_dirs(&workspace).expect("runtime dirs");
+    let object_path = dirs
+        .sessions
+        .path
+        .join(non_unicode_object_leaf("nonunicode002"));
+
+    let error = reserve_session_log_with_publish_observer(&workspace, "nonunicode002", || {
+        fs::write(&object_path, b"foreign object member").expect("object sentinel written");
+    })
+    .expect_err("non-Unicode object namespace collision must reject reservation");
+
+    assert!(error.to_string().contains("already exists"), "{error}");
+    assert_eq!(
+        fs::read(object_path).expect("object sentinel remains readable"),
+        b"foreign object member"
+    );
+}
+
+#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[test]
+fn bundle_inspection_rejects_a_non_unicode_object_in_its_namespace() {
+    let workspace = empty_workspace("bundle-non-unicode-object-inventory");
+    let reservation =
+        reserve_session_log(&workspace, "nonunicode003").expect("Run bundle reserved");
+    let paths = SessionBundlePaths::from_reservation(&reservation);
+    reservation.activate().expect("reservation activates");
+    drop(reservation);
+    fs::write(paths.events.diagnostic_path(), b"event\n").expect("event segment written");
+    fs::write(paths.contexts.diagnostic_path(), b"context\n").expect("context segment written");
+    fs::write(paths.metadata.diagnostic_path(), b"metadata").expect("metadata written");
+    fs::write(
+        paths
+            .sessions
+            .path
+            .join(non_unicode_object_leaf("nonunicode003")),
+        b"foreign object member",
+    )
+    .expect("non-Unicode object written");
+
+    let error = SessionBundleInventory::inspect(paths)
+        .expect_err("non-Unicode object name in the session namespace must be rejected");
+
+    assert!(
+        matches!(
+            &error,
+            RuntimeError::Protocol(message)
+                if message.contains("non-canonical session object name")
+        ),
+        "unexpected bundle inspection error: {error}"
     );
 }
 
 #[test]
-fn unique_reservation_marks_every_ordinal_for_a_truncated_candidate_alias() {
+fn unique_reservation_skips_a_truncated_candidate_alias() {
     let workspace = empty_workspace("reservation-truncated-candidate");
     let base = format!("{}-2", "a".repeat(126));
-    let sentinel = workspace
-        .join(LOCAL_SESSION_DIR)
+    let sentinel = crate::tests::helpers::ensure_workspace_session_dir(&workspace)
         .join(format!("{base}.000002.jsonl"));
-    fs::create_dir_all(sentinel.parent().expect("sentinel parent")).expect("runtime dir");
     fs::write(sentinel, "").expect("orphan segment written");
-    let mut probed = Vec::new();
-
-    let reservation = reserve_unique_session_log_with_probe_observer(&workspace, &base, |id| {
-        probed.push(id.to_owned())
-    })
-    .expect("duplicate generated candidate is skipped once");
+    let reservation = reserve_session_log(&workspace, &base)
+        .expect("duplicate generated candidate is skipped once");
 
     assert_eq!(reservation.session_id, suffixed_session_id(&base, 3));
-    assert_eq!(probed, [suffixed_session_id(&base, 3)]);
     reservation.rollback().expect("reservation rolls back");
-}
-
-#[test]
-fn unique_reservation_validates_the_base_before_inventory() {
-    let workspace = empty_workspace("reservation-invalid-base");
-    let sentinel = workspace.join(LOCAL_SESSION_DIR).join("con.000002.jsonl");
-    fs::create_dir_all(sentinel.parent().expect("sentinel parent")).expect("runtime dir");
-    fs::write(sentinel, "").expect("orphan segment written");
-
-    assert!(matches!(
-        reserve_unique_session_log(&workspace, "con"),
-        Err(RuntimeError::Usage(message)) if message.contains("invalid session_id")
-    ));
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn unique_reservation_inventories_case_alias_symlink_locks_before_probing() {
+fn unique_reservation_skips_case_alias_symlink_locks() {
     use std::os::unix::fs::symlink;
 
     let workspace = empty_workspace("reservation-lock-alias-inventory");
-    let sessions = workspace.join(LOCAL_SESSION_DIR);
-    fs::create_dir_all(&sessions).expect("session dir");
+    let sessions = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
     for ordinal in 1..=4 {
         let id = if ordinal == 1 {
             "bundle001".to_owned()
@@ -309,31 +582,26 @@ fn unique_reservation_inventories_case_alias_symlink_locks_before_probing() {
         )
         .expect("case-alias lock symlink");
     }
-    let mut probed = Vec::new();
-
-    let reservation =
-        reserve_unique_session_log_with_probe_observer(&workspace, "bundle001", |id| {
-            probed.push(id.to_owned())
-        })
+    let reservation = reserve_session_log(&workspace, "bundle001")
         .expect("case aliases are inventoried on a case-sensitive host");
 
     assert_eq!(reservation.session_id, "bundle001-5");
-    assert_eq!(probed, ["bundle001-5"]);
     reservation.rollback().expect("reservation rolls back");
 }
 
 #[test]
-fn session_log_reservation_is_atomic_for_duplicate_session_ids() {
+fn unique_session_reservation_suffixes_an_active_session_id() {
     let workspace = empty_workspace("reservation");
     let first = reserve_session_log(&workspace, "reserve001").expect("first reservation succeeds");
 
-    let err = reserve_session_log(&workspace, "reserve001")
-        .expect_err("second reservation must fail atomically");
+    let second = reserve_session_log(&workspace, "reserve001")
+        .expect("second reservation selects the next candidate");
 
-    assert_active_session(err, "reserve001", "reserve001.lock");
+    assert_eq!(second.session_id, "reserve001-2");
     assert!(first.session_path.diagnostic_path().exists());
     assert!(first.log_path.diagnostic_path().exists());
     assert!(!first.lock_path.diagnostic_path().exists());
+    second.rollback().expect("second reservation rolls back");
     first.rollback().expect("reservation rolls back");
 }
 
@@ -368,11 +636,7 @@ fn dropped_active_reservation_preserves_artifacts_and_releases_lock() {
     let (session_path, log_path, context_path, lock_path) = {
         let reservation =
             reserve_session_log(&workspace, "active001").expect("reservation succeeds");
-        let metadata = SessionDefinitionMetadata {
-            flow_definition_id: "smoke-flow".to_owned(),
-            registry_hash: "sha256:registry".to_owned(),
-            flow_definition_hash: "sha256:flow".to_owned(),
-        };
+        let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
         write_reserved_session_metadata(&reservation, Some(&metadata))
             .expect("valid metadata activates the reservation");
         (
@@ -387,6 +651,383 @@ fn dropped_active_reservation_preserves_artifacts_and_releases_lock() {
     assert!(log_path.diagnostic_path().exists());
     assert!(context_path.diagnostic_path().exists());
     assert!(lock_path.diagnostic_path().exists());
+}
+
+#[test]
+fn released_reservation_cannot_rewrite_metadata_or_reactivate() {
+    let workspace = empty_workspace("reservation-released-terminal");
+    let reservation = reserve_session_log(&workspace, "released001").expect("reservation succeeds");
+    let original_metadata =
+        session_definition_metadata("sha256:original-registry", "sha256:original-flow");
+    write_reserved_session_metadata(&reservation, Some(&original_metadata))
+        .expect("metadata activates reservation");
+    reservation.cleanup().expect("reservation releases");
+    let replacement_ownership = SessionOwnershipLease::acquire(
+        &workspace,
+        "released001",
+        reservation.lock_path.diagnostic_path(),
+    )
+    .expect("another owner acquires the released session");
+    let metadata_path = reservation.log_path.diagnostic_path().to_owned();
+    let before = fs::read(&metadata_path).expect("released metadata remains readable");
+    let replacement_metadata =
+        session_definition_metadata("sha256:replacement-registry", "sha256:replacement-flow");
+
+    let write_error = write_reserved_session_metadata(&reservation, Some(&replacement_metadata))
+        .expect_err("released reservation must not rewrite metadata");
+    let activation_error = reservation
+        .activate()
+        .expect_err("released reservation must not reactivate");
+
+    assert!(
+        write_error.to_string().contains("released"),
+        "{write_error}"
+    );
+    assert!(
+        activation_error.to_string().contains("released"),
+        "{activation_error}"
+    );
+    assert_eq!(
+        fs::read(metadata_path).expect("metadata remains readable"),
+        before
+    );
+    replacement_ownership
+        .release()
+        .expect("replacement owner releases");
+}
+
+#[test]
+fn partial_cleanup_release_makes_the_reservation_terminal() {
+    let workspace = empty_workspace("reservation-partial-release-terminal");
+    let reservation =
+        reserve_session_log(&workspace, "partialrelease001").expect("reservation succeeds");
+    reservation.activate().expect("reservation activates");
+    let marker_path = reservation.lock_path.diagnostic_path().to_owned();
+    reservation
+        .lock_path
+        .remove()
+        .expect("owned marker removes");
+    fs::write(&marker_path, b"foreign marker").expect("foreign marker replaces ownership leaf");
+
+    reservation
+        .cleanup()
+        .expect_err("marker replacement remains visible during cleanup");
+    assert!(
+        !session_ownership_is_active(&workspace, "partialrelease001")
+            .expect("released authority reads")
+    );
+    let replacement_ownership = SessionOwnershipLease::acquire(
+        &workspace,
+        "partialrelease001",
+        reservation.lock_path.diagnostic_path(),
+    )
+    .expect("another actor acquires the released authority");
+    let metadata =
+        session_definition_metadata("sha256:replacement-registry", "sha256:replacement-flow");
+
+    let write_error = write_reserved_session_metadata(&reservation, Some(&metadata))
+        .expect_err("partially released reservation cannot write metadata");
+    let activation_error = reservation
+        .activate()
+        .expect_err("partially released reservation cannot reactivate");
+
+    assert!(
+        write_error.to_string().contains("released"),
+        "{write_error}"
+    );
+    assert!(
+        activation_error.to_string().contains("released"),
+        "{activation_error}"
+    );
+    assert_eq!(
+        fs::read(marker_path).expect("foreign marker remains readable"),
+        b"foreign marker"
+    );
+    replacement_ownership
+        .release()
+        .expect("replacement owner releases");
+}
+
+#[test]
+fn metadata_publication_rejects_a_replacement_of_the_reserved_log() {
+    let workspace = empty_workspace("reservation-metadata-replacement");
+    let reservation =
+        reserve_session_log(&workspace, "metadatareplace001").expect("reservation succeeds");
+    let moved_reserved_log = reservation
+        .log_path
+        .diagnostic_path()
+        .with_extension("reserved.log");
+    fs::rename(reservation.log_path.diagnostic_path(), &moved_reserved_log)
+        .expect("reserved log moved aside");
+    fs::write(
+        reservation.log_path.diagnostic_path(),
+        b"foreign replacement",
+    )
+    .expect("replacement log written");
+    let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
+
+    let error = write_reserved_session_metadata(&reservation, Some(&metadata))
+        .expect_err("replacement must invalidate the reservation");
+
+    assert!(error.to_string().contains("identity changed"), "{error}");
+    assert_eq!(
+        fs::read(reservation.log_path.diagnostic_path()).expect("replacement remains readable"),
+        b"foreign replacement"
+    );
+    assert_eq!(
+        fs::read(moved_reserved_log).expect("reserved file remains readable"),
+        b""
+    );
+    assert!(!reservation.lock_path.diagnostic_path().exists());
+}
+
+#[test]
+fn metadata_activation_rejects_a_replacement_after_parent_sync() {
+    let workspace = empty_workspace("reservation-metadata-activation-replacement");
+    let reservation = reserve_session_log(&workspace, "metadataactivate001")
+        .expect("session reservation succeeds");
+    let metadata_path = reservation.log_path.diagnostic_path().to_owned();
+    let moved_reserved_log = metadata_path.with_extension("reserved.log");
+    let moved_for_observer = moved_reserved_log.clone();
+    let metadata_for_observer = metadata_path.clone();
+    set_metadata_pre_activation_observer_for_test(move || {
+        fs::rename(&metadata_for_observer, &moved_for_observer)
+            .expect("reserved metadata moves after parent synchronization");
+        fs::write(&metadata_for_observer, b"foreign replacement")
+            .expect("replacement metadata writes before activation");
+    });
+    let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
+    let expected = session_log_metadata_text(Some(&metadata));
+
+    let error = write_reserved_session_metadata(&reservation, Some(&metadata))
+        .expect_err("replacement before activation must invalidate the reservation");
+
+    assert!(error.to_string().contains("identity changed"), "{error}");
+    assert_eq!(
+        fs::read(&metadata_path).expect("foreign replacement remains readable"),
+        b"foreign replacement"
+    );
+    assert_eq!(
+        fs::read_to_string(moved_reserved_log).expect("reserved metadata remains readable"),
+        expected
+    );
+}
+
+#[test]
+fn metadata_activation_rejects_a_lock_published_after_materialization() {
+    let workspace = empty_workspace("reservation-late-lock-collision");
+    let reservation =
+        reserve_session_log(&workspace, "latelock001").expect("session reservation succeeds");
+    let lock_path = reservation.lock_path.diagnostic_path().to_owned();
+    fs::write(&lock_path, b"foreign marker").expect("foreign marker wins activation race");
+    let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
+
+    let error = write_reserved_session_metadata(&reservation, Some(&metadata))
+        .expect_err("late marker collision must reject activation");
+
+    assert!(
+        matches!(
+            error,
+            RuntimeError::ActiveSession {
+                ref session_id,
+                ref lock_path,
+            } if session_id == "latelock001" && lock_path == reservation.lock_path.diagnostic_path()
+        ),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(lock_path).expect("foreign marker remains readable"),
+        b"foreign marker"
+    );
+}
+
+#[test]
+fn metadata_activation_revalidates_every_reserved_bundle_member() {
+    #[derive(Clone, Copy, Debug)]
+    enum Collision {
+        SessionReplacement,
+        ContextReplacement,
+        EventSegment,
+        ContextSegment,
+        ObjectMember,
+    }
+
+    for collision in [
+        Collision::SessionReplacement,
+        Collision::ContextReplacement,
+        Collision::EventSegment,
+        Collision::ContextSegment,
+        Collision::ObjectMember,
+    ] {
+        let workspace = empty_workspace(&format!("reservation-activation-{collision:?}"));
+        let reservation = reserve_session_log(&workspace, "bundlecommit001")
+            .expect("session reservation succeeds");
+        let (foreign_path, moved_owned_path) = match collision {
+            Collision::SessionReplacement => {
+                let path = reservation.session_path.diagnostic_path().to_owned();
+                let moved = path.with_extension("reserved.jsonl");
+                fs::rename(&path, &moved).expect("reserved session moves aside");
+                fs::write(&path, b"foreign session").expect("foreign session writes");
+                (path, Some(moved))
+            }
+            Collision::ContextReplacement => {
+                let path = reservation.context_path.diagnostic_path().to_owned();
+                let moved = path.with_extension("reserved.jsonl");
+                fs::rename(&path, &moved).expect("reserved context moves aside");
+                fs::write(&path, b"foreign context").expect("foreign context writes");
+                (path, Some(moved))
+            }
+            Collision::EventSegment => {
+                let path = reservation
+                    .session_path
+                    .diagnostic_path()
+                    .with_file_name("bundlecommit001.000002.jsonl");
+                fs::write(&path, b"foreign event segment").expect("event segment writes");
+                (path, None)
+            }
+            Collision::ContextSegment => {
+                let path = reservation
+                    .context_path
+                    .diagnostic_path()
+                    .with_file_name("bundlecommit001.contexts.000002.jsonl");
+                fs::write(&path, b"foreign context segment").expect("context segment writes");
+                (path, None)
+            }
+            Collision::ObjectMember => {
+                let path = reservation
+                    .session_path
+                    .diagnostic_path()
+                    .with_file_name("bundlecommit001.object.sha256-invalid");
+                fs::write(&path, b"foreign object member").expect("object member writes");
+                (path, None)
+            }
+        };
+        let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
+
+        let error = write_reserved_session_metadata(&reservation, Some(&metadata))
+            .expect_err("changed bundle must reject activation");
+
+        assert!(
+            matches!(
+                error,
+                RuntimeError::Protocol(_) | RuntimeError::SessionLogExists(_)
+            ),
+            "{collision:?}: {error}"
+        );
+        assert!(foreign_path.exists(), "{collision:?} must remain visible");
+        if let Some(moved_owned_path) = moved_owned_path {
+            assert_eq!(
+                fs::read(moved_owned_path).expect("reserved orphan remains readable"),
+                b"",
+                "{collision:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn metadata_parent_sync_failure_is_retryable_before_reservation_activation() {
+    let workspace = empty_workspace("reservation-metadata-parent-sync-retry");
+    let reservation =
+        reserve_session_log(&workspace, "metadatasync001").expect("reservation succeeds");
+    let logs = crate::tests::helpers::workspace_log_dir(&workspace);
+    let metadata = session_definition_metadata("sha256:registry", "sha256:flow");
+    let expected = session_log_metadata_text(Some(&metadata));
+    set_directory_sync_error_for_path_for_test(&logs, io::ErrorKind::Other);
+
+    let error = write_reserved_session_metadata(&reservation, Some(&metadata))
+        .expect_err("metadata publication must synchronize its parent before activation");
+
+    assert!(
+        error
+            .to_string()
+            .contains("injected directory synchronization failure"),
+        "{error}"
+    );
+    assert!(
+        !reservation.lock_path.diagnostic_path().exists(),
+        "failed metadata finalization must not activate the reservation"
+    );
+    assert_eq!(
+        fs::read_to_string(reservation.log_path.diagnostic_path())
+            .expect("published metadata remains readable"),
+        expected
+    );
+
+    start_directory_sync_trace_for_test();
+    write_reserved_session_metadata(&reservation, Some(&metadata))
+        .expect("retry re-synchronizes metadata and activates the reservation");
+    assert_eq!(
+        take_directory_sync_trace_for_test(),
+        [crate::tests::helpers::canonical_test_path(&logs)]
+    );
+    assert_eq!(
+        fs::read_to_string(reservation.log_path.diagnostic_path())
+            .expect("retried metadata remains readable"),
+        expected
+    );
+    assert!(reservation.lock_path.diagnostic_path().exists());
+}
+
+#[test]
+fn failed_activation_retains_empty_reservation_and_releases_authority() {
+    let workspace = empty_workspace("reservation-activation-rollback");
+    let reservation =
+        reserve_session_log(&workspace, "activation001").expect("reservation succeeds");
+    let paths = [
+        reservation.session_path.diagnostic_path().to_owned(),
+        reservation.log_path.diagnostic_path().to_owned(),
+        reservation.context_path.diagnostic_path().to_owned(),
+    ];
+    let lock_path = reservation.lock_path.diagnostic_path().to_owned();
+    fs::create_dir(&lock_path).expect("directory blocks marker creation");
+
+    reservation
+        .activate()
+        .expect_err("marker failure must reject activation");
+
+    fs::remove_dir(&lock_path).expect("marker blocker removed");
+    reservation
+        .cleanup()
+        .expect_err("empty reservation cleanup retains identity-bound artifacts");
+    assert!(paths.iter().all(|path| path.exists()));
+    reservation
+        .release_lock()
+        .expect("failed activation releases its authority");
+}
+
+#[test]
+fn empty_reservation_cleanup_retries_without_deleting_owned_artifacts() {
+    let workspace = empty_workspace("reservation-removal-retry");
+    let reservation =
+        reserve_session_log(&workspace, "removalretry001").expect("reservation succeeds");
+    let session_path = reservation.session_path.diagnostic_path().to_owned();
+    let log_path = reservation.log_path.diagnostic_path().to_owned();
+    let context_path = reservation.context_path.diagnostic_path().to_owned();
+    let moved_path = session_path.with_extension("owned");
+    let moved_for_observer = moved_path.clone();
+    set_owned_file_remove_observer(move |path| {
+        fs::rename(path.diagnostic_path(), &moved_for_observer)
+            .expect("owned file moves after identity check");
+        fs::write(path.diagnostic_path(), b"temporary replacement")
+            .expect("replacement blocks guarded removal");
+    });
+
+    reservation
+        .cleanup()
+        .expect_err("unsafe first removal attempt must remain visible");
+    fs::remove_file(&session_path).expect("temporary replacement removed");
+    fs::rename(moved_path, &session_path).expect("owned file restored");
+
+    reservation
+        .cleanup()
+        .expect_err("retry retains identity-bound artifacts");
+    assert!(session_path.exists());
+    assert!(log_path.exists());
+    assert!(context_path.exists());
+    reservation
+        .release_lock()
+        .expect("fixture teardown releases its authority");
 }
 
 #[test]
@@ -437,344 +1078,9 @@ fn explicit_reservation_rollback_never_accepts_a_foreign_replacement_lock() {
 }
 
 #[test]
-fn controlled_stage_failure_combinations_preserve_every_cause() {
-    for (operation_failed, finalization_failed, cleanup_failed) in [
-        (true, false, false),
-        (false, true, false),
-        (false, false, true),
-        (true, true, false),
-        (true, false, true),
-        (false, true, true),
-        (true, true, true),
-    ] {
-        let operation = if operation_failed {
-            Err(RuntimeError::Protocol("operation failed".to_owned()))
-        } else {
-            Ok(())
-        };
-        let finalization = if finalization_failed {
-            Err(RuntimeError::Protocol("finalization failed".to_owned()))
-        } else {
-            Ok(())
-        };
-        let cleanup = if cleanup_failed {
-            Err(RuntimeError::Protocol("cleanup failed".to_owned()))
-        } else {
-            Ok(())
-        };
-
-        let err = reconcile_controlled_stages(operation, finalization, cleanup)
-            .expect_err("the injected stage failure must be returned");
-        let text = err.to_string();
-
-        assert_eq!(
-            text.contains("operation failed"),
-            operation_failed,
-            "{text}"
-        );
-        assert_eq!(
-            text.contains("finalization failed"),
-            finalization_failed,
-            "{text}"
-        );
-        assert_eq!(text.contains("cleanup failed"), cleanup_failed, "{text}");
-        let expected_source = if operation_failed {
-            "operation failed"
-        } else if finalization_failed {
-            "finalization failed"
-        } else {
-            "cleanup failed"
-        };
-        assert_eq!(
-            std::error::Error::source(&err).map(ToString::to_string),
-            if operation_failed as u8 + finalization_failed as u8 + cleanup_failed as u8 > 1 {
-                Some(expected_source.to_owned())
-            } else {
-                None
-            },
-            "{text}"
-        );
-    }
-}
-
-#[test]
-fn runtime_and_writer_finalization_failures_remain_visible() {
-    let workspace = workspace_copy("sandbox-negative");
-    let lock_path = workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("sandbox-negative-write.lock");
-
-    let err = run_flow_internal_with_stage_observers(
-        &workspace,
-        "sandbox-negative-write",
-        false,
-        |result| {
-            result?;
-            Err(RuntimeError::Protocol(
-                "injected runtime operation failure".to_owned(),
-            ))
-        },
-        |_| {
-            Err(RuntimeError::Protocol(
-                "injected writer finalization failure".to_owned(),
-            ))
-        },
-        |_| {},
-    )
-    .expect_err("runtime and finalization failures must be retained");
-
-    assert!(matches!(
-        &err,
-        RuntimeError::ControlledStageFailures {
-            operation: Some(operation),
-            finalization: Some(finalization),
-            cleanup: None,
-        } if operation.to_string().contains("injected runtime operation failure")
-            && finalization.to_string().contains("injected writer finalization failure")
-    ));
-    assert!(lock_path.exists());
-}
-
-#[test]
-fn runtime_finalization_and_real_cleanup_failures_remain_visible() {
-    let workspace = workspace_copy("sandbox-negative");
-    let lock_path = workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("sandbox-negative-write.lock");
-
-    let err = run_flow_internal_with_stage_observers(
-        &workspace,
-        "sandbox-negative-write",
-        false,
-        |result| {
-            result?;
-            Err(RuntimeError::Protocol(
-                "injected runtime operation failure".to_owned(),
-            ))
-        },
-        |_| {
-            Err(RuntimeError::Protocol(
-                "injected writer finalization failure".to_owned(),
-            ))
-        },
-        |lock| {
-            lock.remove().expect("lock file removed");
-            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
-        },
-    )
-    .expect_err("all three failures must be retained");
-
-    assert!(matches!(
-        &err,
-        RuntimeError::ControlledStageFailures {
-            operation: Some(operation),
-            finalization: Some(finalization),
-            cleanup: Some(cleanup),
-        } if operation.to_string().contains("injected runtime operation failure")
-            && finalization.to_string().contains("injected writer finalization failure")
-            && cleanup.to_string().contains("sandbox-negative-write.lock")
-    ));
-    assert!(
-        err.to_string()
-            .contains("injected writer finalization failure"),
-        "{err}"
-    );
-    assert!(
-        err.to_string().contains("sandbox-negative-write.lock"),
-        "{err}"
-    );
-    assert!(
-        std::error::Error::source(&err).is_some_and(|source| source
-            .to_string()
-            .contains("injected runtime operation failure")),
-        "{err}"
-    );
-
-    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
-}
-
-#[test]
-fn controlled_cleanup_retains_empty_orphans_and_preserves_active_reservations() {
-    let workspace = empty_workspace("controlled-reservation-state");
-    let empty =
-        reserve_session_log(&workspace, "emptycontrolled001").expect("empty reservation succeeds");
-    let empty_paths = [
-        empty.session_path.diagnostic_path().to_owned(),
-        empty.log_path.diagnostic_path().to_owned(),
-        empty.context_path.diagnostic_path().to_owned(),
-        empty.lock_path.diagnostic_path().to_owned(),
-    ];
-
-    let empty_err = reconcile_controlled_stages::<()>(
-        Err(RuntimeError::Protocol("controlled failure".to_owned())),
-        Ok(()),
-        empty.cleanup(),
-    )
-    .expect_err("operation failure remains visible");
-
-    match empty_err {
-        RuntimeError::ControlledStageFailures {
-            operation: Some(operation),
-            finalization: None,
-            cleanup: Some(cleanup),
-        } => {
-            assert!(matches!(
-                *operation,
-                RuntimeError::Protocol(message) if message == "controlled failure"
-            ));
-            assert!(
-                cleanup.to_string().contains("cannot safely remove"),
-                "{cleanup}"
-            );
-        }
-        other => panic!("unexpected controlled failure: {other}"),
-    }
-    for orphan in &empty_paths[..3] {
-        assert_eq!(
-            fs::read(orphan).expect("owned orphan remains readable"),
-            b""
-        );
-    }
-    assert!(!empty_paths[3].exists());
-
-    let active = reserve_session_log(&workspace, "activecontrolled001")
-        .expect("active reservation succeeds");
-    write_reserved_session_metadata(&active, None).expect("metadata activates reservation");
-    let active_paths = [
-        active.session_path.diagnostic_path().to_owned(),
-        active.log_path.diagnostic_path().to_owned(),
-        active.context_path.diagnostic_path().to_owned(),
-    ];
-    let active_lock = active.lock_path.diagnostic_path().to_owned();
-
-    let active_err = reconcile_controlled_stages::<()>(
-        Err(RuntimeError::Protocol("controlled failure".to_owned())),
-        Ok(()),
-        active.cleanup(),
-    )
-    .expect_err("operation failure remains visible");
-
-    assert!(
-        matches!(active_err, RuntimeError::Protocol(message) if message == "controlled failure")
-    );
-    assert!(active_paths.iter().all(|path| path.is_file()));
-    assert!(active_lock.exists());
-}
-
-#[test]
-fn controlled_run_cleanup_failure_is_returned_and_keeps_valid_artifacts() {
-    let workspace = workspace_copy("smoke-flow");
-    let lock_path = workspace.join(LOCAL_SESSION_DIR).join("smoke-flow.lock");
-
-    let err = run_flow_internal_with_cleanup_observer(&workspace, "smoke-flow", true, |lock| {
-        lock.remove().expect("lock file removed");
-        fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
-    })
-    .expect_err("cleanup failure must replace a successful return");
-
-    assert!(
-        matches!(
-            err,
-            RuntimeError::Io { ref path, .. } if path == &lock_path
-        ) || err.to_string().contains("must be a file"),
-        "{err}"
-    );
-    assert!(
-        workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("smoke-flow.jsonl")
-            .is_file()
-    );
-    assert!(lock_path.is_dir());
-    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
-}
-
-#[test]
-fn controlled_run_operation_and_cleanup_failures_are_both_returned() {
-    let workspace = workspace_copy("sandbox-negative");
-    let lock_path = workspace
-        .join(LOCAL_SESSION_DIR)
-        .join("sandbox-negative-write.lock");
-
-    let err = run_flow_internal_with_stage_observers(
-        &workspace,
-        "sandbox-negative-write",
-        false,
-        |result| {
-            result?;
-            Err(RuntimeError::Protocol(
-                "injected runtime operation failure".to_owned(),
-            ))
-        },
-        |result| result,
-        |lock| {
-            lock.remove().expect("lock file removed");
-            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
-        },
-    )
-    .expect_err("operation and cleanup failures must both be returned");
-
-    assert!(matches!(
-        &err,
-        RuntimeError::ControlledStageFailures {
-            operation: Some(operation),
-            finalization: None,
-            cleanup: Some(cleanup),
-        } if operation.to_string().contains("injected runtime operation failure")
-            && cleanup.to_string().contains("sandbox-negative-write.lock")
-    ));
-    assert!(
-        workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("sandbox-negative-write.jsonl")
-            .is_file()
-    );
-    assert!(lock_path.is_dir());
-    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
-}
-
-#[test]
-fn resume_validation_and_cleanup_failures_are_both_returned() {
-    let workspace = workspace_copy("smoke-flow");
-    let completed =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
-    fs::write(&completed.session_path, "{not-json}\n").expect("session log corrupted");
-    let lock_path = workspace
-        .join(LOCAL_SESSION_DIR)
-        .join(format!("{}.lock", completed.session_id));
-
-    let err = resume_session_internal_with_cleanup_observer(
-        &workspace,
-        &completed.session_id,
-        true,
-        |lock| {
-            lock.remove().expect("lock file removed");
-            fs::create_dir(lock.diagnostic_path()).expect("lock path replaced with a directory");
-        },
-    )
-    .expect_err("validation and cleanup failures must both be returned");
-
-    assert!(matches!(
-        &err,
-        RuntimeError::ControlledStageFailures {
-            operation: Some(_),
-            finalization: None,
-            cleanup: Some(cleanup),
-        } if cleanup.to_string().contains(".lock")
-    ));
-    assert!(
-        err.to_string().contains("ownership cleanup failed"),
-        "{err}"
-    );
-    assert!(lock_path.is_dir());
-    fs::remove_dir(&lock_path).expect("blocking lock directory removed");
-}
-
-#[test]
 fn simulated_abrupt_termination_releases_authority_without_removing_the_marker() {
     let workspace = empty_workspace("abrupt-session-termination");
-    let reservation =
-        reserve_session_log(&workspace, "abrupt001").expect("session bundle reserved");
+    let reservation = reserve_session_log(&workspace, "abrupt001").expect("Run bundle reserved");
     let lock = reservation.lock_path.diagnostic_path().to_owned();
     reservation.activate().expect("reservation activates");
 
@@ -788,45 +1094,7 @@ fn simulated_abrupt_termination_releases_authority_without_removing_the_marker()
 }
 
 #[test]
-fn ownership_observer_ignores_an_active_replacement_workspace() {
-    let parent = empty_workspace("ownership-observer-root-replacement");
-    let workspace = parent.join("workspace");
-    let moved_workspace = parent.join("workspace-moved");
-    let replacement = parent.join("replacement");
-    fs::create_dir(&workspace).expect("source workspace created");
-    fs::create_dir(&replacement).expect("replacement workspace created");
-    let session_id = "ownershipobserverreplace001";
-    let source_marker = workspace.join("source.lock");
-    let source_ownership = SessionOwnershipLease::acquire(&workspace, session_id, &source_marker)
-        .expect("source ownership authority seeded");
-    source_ownership
-        .release()
-        .expect("source ownership becomes inactive");
-    let observer =
-        SessionOwnershipObserver::open(&workspace, session_id).expect("source observer opens");
-
-    fs::rename(&workspace, &moved_workspace).expect("source workspace moved aside");
-    fs::rename(&replacement, &workspace).expect("replacement installed at original path");
-    let replacement_marker = workspace.join("replacement.lock");
-    let replacement_ownership =
-        SessionOwnershipLease::acquire(&workspace, session_id, &replacement_marker)
-            .expect("replacement ownership acquired");
-
-    let source_active = observer.is_active();
-    replacement_ownership
-        .release()
-        .expect("replacement ownership releases");
-    fs::rename(&workspace, &replacement).expect("replacement moved aside");
-    fs::rename(&moved_workspace, &workspace).expect("source workspace restored");
-
-    assert!(
-        !source_active.expect("source ownership reads"),
-        "replacement ownership must not authorize the source workspace"
-    );
-}
-
-#[test]
-fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
+fn reservation_rejects_a_missing_lock_and_non_file_session_leaf() {
     let workspace = empty_workspace("reservation-helper-edges");
     let missing_lock = reserve_session_log(&workspace, "missing001").expect("reservation succeeds");
     missing_lock.activate().expect("reservation activates");
@@ -844,28 +1112,18 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
         .cleanup()
         .expect_err("missing lock rollback reports an IO error");
 
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let missing_guard =
-        acquire_anchored_session_lock(&sessions, "missing-resume").expect("resume lock reserved");
-    missing_guard.path.remove().expect("resume lock removed");
-    let err = missing_guard
-        .release()
-        .expect_err("missing resume lock release reports an IO error");
-    assert!(matches!(
-        err,
-        RuntimeError::Io { path, .. } if path.ends_with("missing-resume.lock")
-    ));
-
     let session_dir = ensure_runtime_dirs(&workspace)
         .expect("runtime dirs created")
         .sessions
         .path;
     let directory_leaf = session_dir.join("dirleaf001.jsonl");
+    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
+    let candidate =
+        reserve_unique_session_candidate_with_anchored_workspace(&anchored, "dirleaf001")
+            .expect("candidate reserves before collision");
     fs::create_dir(&directory_leaf).expect("directory session leaf created");
 
-    let err = reserve_session_log(&workspace, "dirleaf001")
+    let err = materialize_session_candidate(&anchored, candidate)
         .expect_err("directory session leaf must be rejected");
 
     assert!(matches!(
@@ -875,425 +1133,113 @@ fn reservation_helpers_reject_missing_locks_and_non_file_leaves() {
 }
 
 #[test]
-fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
-    let workspace = empty_workspace("sequential-lock-owners");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let first =
-        acquire_anchored_session_lock(&sessions, "sequential001").expect("first owner acquires");
-    first.path.remove().expect("first lock unlinked externally");
-    let second = match acquire_anchored_session_lock(&sessions, "sequential001") {
-        Ok(_) => panic!("workspace marker deletion cannot grant ownership"),
-        Err(error) => error,
-    };
-    assert_active_session(second, "sequential001", "sequential001.lock");
-
-    first
-        .release()
-        .expect_err("marker deletion remains visible when authority releases");
-    let second =
-        acquire_anchored_session_lock(&sessions, "sequential001").expect("second owner acquires");
-    assert!(second.path.diagnostic_path().is_file());
-    assert!(
-        session_ownership_is_active(&workspace, "sequential001")
-            .expect("second owner's authority reads")
-    );
-    drop(first);
-    assert!(
-        session_ownership_is_active(&workspace, "sequential001")
-            .expect("second owner's authority survives earlier guard drop")
-    );
-    second
-        .release()
-        .expect("second owner releases its own lock");
-    assert!(second.path.diagnostic_path().exists());
-}
-
-const OWNERSHIP_CHILD_WORKSPACE: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_WORKSPACE";
-const OWNERSHIP_CHILD_SESSION_ID: &str = "WATERSHED_TEST_OWNERSHIP_CHILD_SESSION_ID";
-
-#[test]
-fn session_ownership_child_process() {
-    let Some(workspace) = std::env::var_os(OWNERSHIP_CHILD_WORKSPACE) else {
-        return;
-    };
-    let session_id =
-        std::env::var(OWNERSHIP_CHILD_SESSION_ID).expect("child session id is configured");
-    let workspace = PathBuf::from(workspace);
-    let reservation =
-        reserve_session_log(&workspace, &session_id).expect("child reserves session ownership");
-    write_reserved_session_metadata(&reservation, None).expect("child activates session ownership");
-    fs::write(workspace.join("ownership-child-ready"), b"ready")
-        .expect("child readiness marker written");
-    while !workspace.join("ownership-child-release").exists() {
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
-#[test]
-fn host_local_owner_survives_deleted_workspace_marker_across_processes() {
-    let workspace = empty_workspace("cross-process-marker-deletion");
-    let session_id = "crossprocess001";
-    let mut child = spawn_session_ownership_child(&workspace, session_id);
-    wait_for_ownership_child(&workspace, &mut child);
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    fs::remove_file(sessions.path.join(format!("{session_id}.lock")))
-        .expect("workspace marker removed directly");
-
-    let second = acquire_anchored_session_lock(&sessions, session_id);
-    release_ownership_child(&workspace, &mut child);
-    let violated_exclusivity = match second {
-        Ok(guard) => {
-            drop(guard);
-            true
-        }
-        Err(error) => {
-            assert_active_session(error, session_id, &format!("{session_id}.lock"));
-            false
-        }
-    };
-
-    assert!(
-        !violated_exclusivity,
-        "deleting the workspace marker must not grant a second process ownership"
-    );
-}
-
-#[test]
-fn crashed_owner_releases_host_local_authority_without_marker_cleanup() {
-    let workspace = empty_workspace("cross-process-crash-recovery");
-    let session_id = "crossprocess002";
-    let mut child = spawn_session_ownership_child(&workspace, session_id);
-    wait_for_ownership_child(&workspace, &mut child);
-    child.kill().expect("ownership child terminates abruptly");
-    child.wait().expect("terminated ownership child reaped");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    assert!(
-        sessions.path.join(format!("{session_id}.lock")).is_file(),
-        "abrupt termination leaves the workspace marker"
-    );
-
-    let recovered = acquire_anchored_session_lock(&sessions, session_id)
-        .expect("kernel-released authority permits crash recovery");
-
-    recovered
-        .release()
-        .expect("recovered owner releases its authority");
-}
-
-#[test]
-fn host_local_authority_is_independent_of_process_temp_environment() {
-    let workspace = empty_workspace("cross-process-temp-environment");
-    let alternate_temp = workspace.join("alternate-process-temp");
-    fs::create_dir(&alternate_temp).expect("alternate process temp directory created");
-    let session_id = "crossprocess003";
-    let mut child =
-        spawn_session_ownership_child_with_temp(&workspace, session_id, &alternate_temp);
-    wait_for_ownership_child(&workspace, &mut child);
-
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let second = acquire_anchored_session_lock(&sessions, session_id);
-    release_ownership_child(&workspace, &mut child);
-    let violated_exclusivity = match second {
-        Ok(guard) => {
-            drop(guard);
-            true
-        }
-        Err(error) => {
-            assert_active_session(error, session_id, &format!("{session_id}.lock"));
-            false
-        }
-    };
-
-    assert!(
-        !violated_exclusivity,
-        "process temp configuration must not select a different ownership authority"
-    );
-}
-
-#[test]
-fn authority_root_case_alias_uses_the_alternate_adjacent_coordinator() {
-    let parent = empty_workspace("case-aliased-adjacent-coordinator");
-    let workspace = parent.join(".Watershed-Flow-Agent");
-    fs::create_dir(&workspace).expect("case-aliased workspace created");
-
-    let reservation = reserve_unique_session_log(&workspace, "coordinatoralias001")
-        .expect("case alias selects the alternate adjacent coordinator");
-
-    assert!(
-        parent.join(".watershed-flow-agent-coordinator").is_dir(),
-        "the ownership coordinator must remain outside the workspace"
-    );
-    reservation.rollback().expect("reservation rolls back");
-}
-
-#[test]
-fn unavailable_workspace_adjacent_coordinator_fails_before_workspace_side_effects() {
-    let parent = empty_workspace("unavailable-adjacent-coordinator");
-    let workspace = parent.join("workspace");
-    fs::create_dir(&workspace).expect("nested workspace created");
+fn reserve_session_log_cleans_partial_files_on_late_reservation_errors() {
+    let log_conflict = empty_workspace("reserve-log-conflict");
+    let anchored = AnchoredWorkspace::open(&log_conflict).expect("workspace opens");
+    let candidate = reserve_unique_session_candidate_with_anchored_workspace(&anchored, "clean001")
+        .expect("candidate reserves before collision");
+    crate::tests::helpers::ensure_workspace_session_dir(&log_conflict);
+    crate::tests::helpers::ensure_workspace_log_dir(&log_conflict);
     fs::write(
-        parent.join(".watershed-flow-agent"),
-        b"coordinator path obstruction",
+        crate::tests::helpers::workspace_log_dir(&log_conflict).join("clean001.log"),
+        "",
     )
-    .expect("coordinator obstruction written");
+    .expect("conflicting log file");
 
-    let result = reserve_unique_session_log(&workspace, "coordinator001");
-    if let Ok(reservation) = result {
-        reservation
-            .rollback()
-            .expect("unexpected reservation rolls back");
-        panic!("unavailable coordinator must reject the reservation");
-    }
+    materialize_session_candidate(&anchored, candidate)
+        .expect_err("log conflict must fail reservation");
 
     assert!(
-        !workspace.join(".flow").exists(),
-        "coordinator access must fail before runtime directories are created"
+        !crate::tests::helpers::workspace_session_dir(&log_conflict)
+            .join("clean001.jsonl")
+            .exists()
     );
-}
 
-#[cfg(unix)]
-#[test]
-fn unsafe_workspace_adjacent_coordinator_mode_fails_closed() {
-    use std::os::unix::fs::PermissionsExt;
+    let lock_conflict = empty_workspace("reserve-lock-conflict");
+    let anchored = AnchoredWorkspace::open(&lock_conflict).expect("workspace opens");
+    let candidate = reserve_unique_session_candidate_with_anchored_workspace(&anchored, "clean002")
+        .expect("candidate reserves before collision");
+    crate::tests::helpers::ensure_workspace_session_dir(&lock_conflict);
+    fs::write(
+        crate::tests::helpers::workspace_session_dir(&lock_conflict).join("clean002.lock"),
+        "",
+    )
+    .expect("conflicting lock file");
 
-    let parent = empty_workspace("unsafe-adjacent-coordinator-mode");
-    let workspace = parent.join("workspace");
-    fs::create_dir(&workspace).expect("nested workspace created");
-    let coordinator = parent.join(".watershed-flow-agent");
-    fs::create_dir(&coordinator).expect("coordinator directory created");
-    fs::set_permissions(&coordinator, fs::Permissions::from_mode(0o777))
-        .expect("unsafe coordinator mode installed");
-
-    let result = reserve_unique_session_log(&workspace, "coordinator002");
-    if let Ok(reservation) = result {
-        reservation
-            .rollback()
-            .expect("unexpected reservation rolls back");
-        panic!("unsafe coordinator mode must reject the reservation");
-    }
+    materialize_session_candidate(&anchored, candidate)
+        .expect_err("lock conflict must fail reservation");
 
     assert!(
-        !workspace.join(".flow").exists(),
-        "unsafe coordinator mode must fail before runtime directories are created"
+        !crate::tests::helpers::workspace_session_dir(&lock_conflict)
+            .join("clean002.jsonl")
+            .exists()
     );
+    assert!(
+        !crate::tests::helpers::workspace_log_dir(&lock_conflict)
+            .join("clean002.log")
+            .exists()
+    );
+}
+
+#[test]
+fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
+    let workspace = workspace_copy("hello-flow");
+    let sessions = ensure_runtime_dirs(&workspace)
+        .expect("runtime dirs")
+        .sessions;
+    let session_dir = sessions.path.clone();
+    let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {
+        let err = resume_session(&workspace, "publish001", EmitMode::Jsonl)
+            .expect_err("published session must already be locked");
+        assert_active_session(err, "publish001", "publish001.lock");
+    })
+    .expect("session published under lock");
+    published.rollback().expect("reservation rolls back");
+
+    let held_lock = sessions.file("smoke001.lock");
+    let held_lock_file =
+        reserve_anchored_session_lock_file(&held_lock, "smoke001").expect("candidate lock held");
+
+    let second = reserve_session_log(&workspace, "smoke001")
+        .expect("locked unpublished candidate must allocate the next suffix");
+
+    assert!(!session_dir.join("smoke001.jsonl").exists());
+    assert!(held_lock.diagnostic_path().exists());
+    assert_eq!(second.session_id, "smoke001-2");
+    assert!(second.session_path.diagnostic_path().exists());
+    second.rollback().expect("reservation rolls back");
+    held_lock.remove().expect("held lock removed");
+    drop(held_lock_file);
 }
 
 #[cfg(unix)]
 #[test]
-fn session_authority_keys_preserve_native_unix_path_bytes() {
-    use std::os::unix::ffi::OsStringExt;
-
-    let path = PathBuf::from(std::ffi::OsString::from_vec(vec![b'a', 0xff, b'z']));
-
-    assert_eq!(stable_native_path_bytes(&path), [b'a', 0xff, b'z']);
-}
-
-#[cfg(windows)]
-#[test]
-fn session_authority_keys_use_stable_little_endian_utf16() {
-    use std::os::windows::ffi::OsStringExt;
-
-    let path = PathBuf::from(std::ffi::OsString::from_wide(&[0x0061, 0xd800, 0x20ac]));
-
-    assert_eq!(
-        stable_native_path_bytes(&path),
-        [0x61, 0x00, 0x00, 0xd8, 0xac, 0x20]
-    );
-}
-
-fn spawn_session_ownership_child(workspace: &Path, session_id: &str) -> std::process::Child {
-    session_ownership_child_command(workspace, session_id)
-        .spawn()
-        .expect("ownership child starts")
-}
-
-fn spawn_session_ownership_child_with_temp(
-    workspace: &Path,
-    session_id: &str,
-    temp: &Path,
-) -> std::process::Child {
-    session_ownership_child_command(workspace, session_id)
-        .env("TMPDIR", temp)
-        .env("TMP", temp)
-        .env("TEMP", temp)
-        .spawn()
-        .expect("ownership child starts")
-}
-
-fn session_ownership_child_command(workspace: &Path, session_id: &str) -> std::process::Command {
-    let mut command =
-        std::process::Command::new(std::env::current_exe().expect("current test executable"));
-    command
-        .args([
-            "--exact",
-            "tests::session_reservation::session_ownership_child_process",
-            "--nocapture",
-        ])
-        .env(OWNERSHIP_CHILD_WORKSPACE, workspace)
-        .env(OWNERSHIP_CHILD_SESSION_ID, session_id);
-    command
-}
-
-fn wait_for_ownership_child(workspace: &Path, child: &mut std::process::Child) {
-    let ready = workspace.join("ownership-child-ready");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        if ready.is_file() {
-            return;
-        }
-        if let Some(status) = child.try_wait().expect("ownership child status reads") {
-            panic!("ownership child exited before readiness: {status}");
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    child.kill().expect("timed-out ownership child terminates");
-    child.wait().expect("timed-out ownership child reaped");
-    panic!("ownership child did not become ready");
-}
-
-fn release_ownership_child(workspace: &Path, child: &mut std::process::Child) {
-    fs::write(workspace.join("ownership-child-release"), b"release")
-        .expect("ownership child release marker written");
-    let status = child.wait().expect("ownership child exits");
-    assert!(status.success(), "ownership child failed: {status}");
-}
-
-#[cfg(windows)]
-#[test]
-fn lock_release_rejects_junction_replacement_without_touching_its_target() {
-    let workspace = empty_workspace("junction-lock-owner");
-    let outside = empty_workspace("junction-lock-owner-outside");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let guard =
-        acquire_anchored_session_lock(&sessions, "junctionlock001").expect("lock owner acquires");
-    let lock_path = guard.path.diagnostic_path().to_owned();
-    let outside_marker = outside.join("foreign-owner");
-    fs::write(&outside_marker, b"foreign owner").expect("foreign marker written");
-    guard.path.remove().expect("lock file removed");
-    create_windows_junction(&lock_path, &outside);
-
-    guard
-        .release()
-        .expect_err("junction replacement must not be released as the original lock");
-
-    assert_eq!(
-        fs::read(&outside_marker).expect("foreign marker remains readable"),
-        b"foreign owner"
-    );
-    fs::remove_dir(&lock_path).expect("junction removed");
-}
-
-#[test]
-fn released_lock_guard_drop_does_not_touch_a_later_owner() {
-    let workspace = empty_workspace("released-lock-owner");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let guard =
-        acquire_anchored_session_lock(&sessions, "released001").expect("lock owner acquires");
-    let lock_path = guard.path.diagnostic_path().to_owned();
-    guard.release().expect("owner releases its lock");
-    fs::write(&lock_path, b"later owner").expect("later owner installs its lock");
-
-    drop(guard);
-
-    assert_eq!(
-        fs::read(&lock_path).expect("later owner's lock remains readable"),
-        b"later owner"
-    );
-    fs::remove_file(lock_path).expect("later owner releases its lock");
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn lock_release_rejects_hardlinked_ownership_without_removing_either_name() {
-    let workspace = empty_workspace("hardlinked-lock-owner");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let guard =
-        acquire_anchored_session_lock(&sessions, "hardlock001").expect("lock owner acquires");
-    let alias = workspace.join("lock-alias");
-    fs::hard_link(guard.path.diagnostic_path(), &alias).expect("lock hard link created");
-
-    let err = guard
-        .release()
-        .expect_err("hard-linked ownership must fail closed");
-
-    assert!(err.to_string().contains("hard-linked"), "{err}");
-    assert!(guard.path.diagnostic_path().is_file());
-    assert!(alias.is_file());
-    fs::remove_file(&alias).expect("hard-link alias removed");
-    guard.release().expect("owner releases after alias removal");
-}
-
-#[cfg(unix)]
-#[test]
-fn lock_release_rejects_symlink_replacement_without_touching_its_target() {
+fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
     use std::os::unix::fs::symlink;
 
-    let workspace = empty_workspace("symlink-lock-owner");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let guard =
-        acquire_anchored_session_lock(&sessions, "symlinklock001").expect("lock owner acquires");
-    let target = workspace.join("foreign-lock-target");
-    fs::write(&target, b"foreign").expect("foreign target written");
-    guard.path.remove().expect("owned lock unlinked externally");
-    symlink(&target, guard.path.diagnostic_path()).expect("foreign symlink installed");
+    let workspace = empty_workspace("reservation-directory-swap");
+    let outside = empty_workspace("reservation-directory-swap-outside");
+    let session_dir = crate::tests::helpers::workspace_session_dir(&workspace);
+    let moved_session_dir =
+        crate::tests::helpers::workspace_store_dir(&workspace).join("sessions-opened");
+    let outside_session = outside.join("swap001.jsonl");
+    fs::write(&outside_session, "outside").expect("outside session fixture written");
 
-    let err = guard
-        .release()
-        .expect_err("symlink replacement must fail closed");
+    let reservation = reserve_session_log_with_publish_observer(&workspace, "swap001", || {
+        fs::rename(&session_dir, &moved_session_dir).expect("session directory moved");
+        symlink(&outside, &session_dir).expect("replacement session symlink created");
+    })
+    .expect("reservation survives directory rename");
+    reservation.rollback().expect("reservation rolls back");
 
-    assert!(
-        err.to_string()
-            .contains("must not be a symlink or reparse point")
-            || err.to_string().contains("unlinked while open"),
-        "{err}"
+    assert_eq!(
+        fs::read_to_string(outside_session).expect("outside session remains readable"),
+        "outside"
     );
     assert_eq!(
-        fs::read(&target).expect("foreign target remains readable"),
-        b"foreign"
+        fs::read(moved_session_dir.join("swap001.jsonl"))
+            .expect("owned session orphan remains readable"),
+        b""
     );
-    assert!(
-        fs::symlink_metadata(guard.path.diagnostic_path())
-            .expect("foreign symlink remains")
-            .file_type()
-            .is_symlink()
-    );
-    fs::remove_file(guard.path.diagnostic_path()).expect("foreign symlink removed");
-}
-
-#[cfg(any(unix, windows))]
-#[test]
-fn append_rejects_hardlinked_leaf_without_changing_target() {
-    let workspace = empty_workspace("session-hardlink");
-    let outside = empty_workspace("outside-session-hardlink");
-    let session_dir = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let outside_target = outside.join("victim.jsonl");
-    fs::write(&outside_target, "outside\n").expect("outside target written");
-    let session_path = session_dir.file("race001.jsonl");
-    fs::hard_link(&outside_target, session_path.diagnostic_path()).expect("session hard link");
-
-    let err = open_anchored_session_log_append_file(&session_path)
-        .expect_err("hard-linked session leaf must reject before append");
-    assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("hard-linked")));
-    assert_eq!(
-        fs::read_to_string(&outside_target).expect("outside target readable"),
-        "outside\n"
-    );
+    assert!(!moved_session_dir.join("swap001.lock").exists());
 }

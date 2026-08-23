@@ -1,11 +1,16 @@
+use crate::script::error::SemanticValidationError;
 use crate::script::model::{
-    FlowBlock, MAX_BLOCK_NAME_CHARS, MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy,
-    ParameterValueType, RegistryBlock, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
+    BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_PHASE_LOOP_ITERATIONS,
+    MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy, ParameterValueType, PhaseBlock, RegistryBlock,
+    RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
 };
-use crate::script::naming::SemanticValidationError;
 use crate::script::paths::{
     is_valid_allowed_parameter_name, is_valid_block_id, is_valid_canonical_cidr,
     is_valid_command_id, normalize_protected_path_pattern, normalize_safe_relative_path,
+};
+use crate::script::values::{
+    parameter_pattern_matches, validate_predicate_against_contract, validate_predicate_definition,
+    validate_value_contract_definition,
 };
 use std::collections::BTreeSet;
 
@@ -14,32 +19,15 @@ pub(super) fn validate_registry_block_semantics(
 ) -> Result<(), SemanticValidationError> {
     match block {
         RegistryBlock::Tool(tool) => validate_tool_semantics(tool),
+        RegistryBlock::Instruction(instruction) => validate_instruction_semantics(instruction),
+        RegistryBlock::Phase(phase) => validate_phase_semantics(phase),
         RegistryBlock::Flow(flow_block) => validate_flow_semantics(flow_block),
-        RegistryBlock::Instruction(_) | RegistryBlock::Phase(_) | RegistryBlock::Connection(_) => {
-            Ok(())
-        }
     }
 }
 
 pub(super) fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(), String> {
-    let (kind, identity) = match block {
-        RegistryBlock::Tool(block) => ("tool", &block.identity),
-        RegistryBlock::Instruction(block) => ("instruction", &block.identity),
-        RegistryBlock::Phase(block) => ("phase", &block.identity),
-        RegistryBlock::Connection(block) => ("connection", &block.identity),
-        RegistryBlock::Flow(block) => ("flow", &block.identity),
-    };
-    if !is_valid_block_id(&identity.id) {
-        return Err(format!("{kind}.id must be a valid block id"));
-    }
-    if identity.name.is_empty() {
-        return Err(format!("{kind}.name must be non-empty"));
-    }
-    if identity.name.chars().count() > MAX_BLOCK_NAME_CHARS {
-        return Err(format!(
-            "{kind}.name must contain at most {MAX_BLOCK_NAME_CHARS} characters"
-        ));
-    }
+    let (kind, identity) = block.kind_and_identity();
+    validate_block_identity(kind, identity)?;
 
     match block {
         RegistryBlock::Instruction(block) if block.prompt.is_empty() => {
@@ -60,33 +48,147 @@ pub(super) fn validate_registry_block_shape(block: &RegistryBlock) -> Result<(),
                 "tool.script_body exceeds the maximum of {MAX_REGISTRY_DEFINITION_BYTES} bytes"
             ))
         }
-        RegistryBlock::Phase(block) if block.steps.is_empty() => {
-            Err("phase.steps must contain at least one item".to_owned())
-        }
-        RegistryBlock::Phase(block) => {
-            for step in &block.steps {
-                if !is_valid_block_id(&step.id) {
-                    return Err("phase.steps.id must be a valid block id".to_owned());
-                }
-                if step.name.is_empty() {
-                    return Err("phase.steps.name must be non-empty".to_owned());
-                }
-                if step.name.chars().count() > MAX_BLOCK_NAME_CHARS {
-                    return Err(format!(
-                        "phase.steps.name must contain at most {MAX_BLOCK_NAME_CHARS} characters"
-                    ));
-                }
-            }
-            Ok(())
-        }
-        RegistryBlock::Connection(block) if block.from_ref.is_empty() => {
-            Err("connection.from_ref must be non-empty".to_owned())
-        }
-        RegistryBlock::Connection(block) if block.to_ref.is_empty() => {
-            Err("connection.to_ref must be non-empty".to_owned())
-        }
         _ => Ok(()),
     }
+}
+
+/// Validates the canonical identifier and name shape shared by registry blocks.
+pub fn validate_block_identity(
+    kind: RegistryBlockKind,
+    identity: &BlockIdentity,
+) -> Result<(), String> {
+    let kind = kind.as_str();
+    if !is_valid_block_id(&identity.id) {
+        return Err(format!("{kind}.id must be a valid block id"));
+    }
+    if identity.name.is_empty() {
+        return Err(format!("{kind}.name must be non-empty"));
+    }
+    if identity.name.chars().count() > MAX_BLOCK_NAME_CHARS {
+        return Err(format!(
+            "{kind}.name must contain at most {MAX_BLOCK_NAME_CHARS} characters"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_instruction_semantics(
+    instruction: &InstructionBlock,
+) -> Result<(), SemanticValidationError> {
+    let mut names = BTreeSet::new();
+    for parameter in &instruction.parameters {
+        if !is_valid_command_id(&parameter.name) {
+            return Err(invalid_instruction(
+                instruction,
+                "parameters.name must be a valid parameter name",
+            ));
+        }
+        if !names.insert(parameter.name.as_str()) {
+            return Err(invalid_instruction(
+                instruction,
+                &format!("parameter {} is declared more than once", parameter.name),
+            ));
+        }
+        validate_value_contract_definition(&parameter.value_contract)
+            .map_err(|message| invalid_instruction(instruction, &message.to_string()))?;
+        let placeholder = format!("{{{{{}}}}}", parameter.name);
+        if !instruction.prompt.contains(&placeholder) {
+            return Err(invalid_instruction(
+                instruction,
+                &format!("parameter {} has no matching placeholder", parameter.name),
+            ));
+        }
+    }
+
+    for placeholder in instruction_placeholders(&instruction.prompt)
+        .map_err(|message| invalid_instruction(instruction, &message))?
+    {
+        if !names.contains(placeholder) {
+            return Err(invalid_instruction(
+                instruction,
+                &format!("placeholder {placeholder} has no declared parameter"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn instruction_placeholders(prompt: &str) -> Result<Vec<&str>, String> {
+    let mut rest = prompt;
+    let mut placeholders = Vec::new();
+    while let Some(start) = rest.find("{{") {
+        if rest[..start].contains("}}") {
+            return Err("prompt has an unmatched placeholder terminator".to_owned());
+        }
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("}}") else {
+            return Err("prompt has an unclosed placeholder".to_owned());
+        };
+        let name = &after_start[..end];
+        if !is_valid_command_id(name) {
+            return Err(format!(
+                "placeholder {name:?} is not a valid parameter name"
+            ));
+        }
+        placeholders.push(name);
+        rest = &after_start[end + 2..];
+    }
+    if rest.contains("}}") {
+        return Err("prompt has an unmatched placeholder terminator".to_owned());
+    }
+    Ok(placeholders)
+}
+
+fn validate_phase_semantics(phase: &PhaseBlock) -> Result<(), SemanticValidationError> {
+    validate_value_contract_definition(&phase.output)
+        .map_err(|message| invalid_phase(phase, &message.to_string()))?;
+    let PhaseBlock { loop_config, .. } = phase;
+    if let Some(loop_config) = loop_config {
+        if !(1..=MAX_PHASE_LOOP_ITERATIONS).contains(&loop_config.max_iterations) {
+            return Err(invalid_phase(
+                phase,
+                &format!("loop.max_iterations must be between 1 and {MAX_PHASE_LOOP_ITERATIONS}"),
+            ));
+        }
+        validate_predicate_against_contract(&loop_config.until, &phase.output)
+            .map_err(|message| invalid_phase(phase, &format!("loop.until {message}")))?;
+    }
+
+    if phase.phase_refs.is_empty() {
+        if phase.result_from.is_some() {
+            return Err(invalid_phase(phase, "leaf Phase must omit result_from"));
+        }
+        if !phase.transitions.is_empty() {
+            return Err(invalid_phase(
+                phase,
+                "leaf Phase cannot declare child Transitions",
+            ));
+        }
+    } else {
+        if !phase.instruction_refs.is_empty() || !phase.tool_refs.is_empty() {
+            return Err(invalid_phase(
+                phase,
+                "composite Phase must not declare Instructions or Tools",
+            ));
+        }
+        if phase.result_from.as_deref().is_none_or(str::is_empty) {
+            return Err(invalid_phase(
+                phase,
+                "composite Phase must name result_from",
+            ));
+        }
+    }
+    for transition in &phase.transitions {
+        if transition.from_phase_ref.is_empty() || transition.to_phase_ref.is_empty() {
+            return Err(invalid_phase(
+                phase,
+                "Transition Phase references must be non-empty",
+            ));
+        }
+        validate_predicate_definition(&transition.when)
+            .map_err(|message| invalid_phase(phase, &format!("transition.when {message}")))?;
+    }
+    Ok(())
 }
 
 fn validate_flow_semantics(flow_block: &FlowBlock) -> Result<(), SemanticValidationError> {
@@ -96,13 +198,41 @@ fn validate_flow_semantics(flow_block: &FlowBlock) -> Result<(), SemanticValidat
             message: "flow.phase_refs must contain at least one item".to_owned(),
         });
     }
+    for transition in &flow_block.transitions {
+        if transition.from_phase_ref.is_empty() || transition.to_phase_ref.is_empty() {
+            return Err(SemanticValidationError::InvalidFlowDefinition {
+                flow_id: flow_block.identity.id.clone(),
+                message: "Transition Phase references must be non-empty".to_owned(),
+            });
+        }
+        validate_predicate_definition(&transition.when).map_err(|message| {
+            SemanticValidationError::InvalidFlowDefinition {
+                flow_id: flow_block.identity.id.clone(),
+                message: format!("transition.when {message}"),
+            }
+        })?;
+    }
     Ok(())
+}
+
+fn invalid_instruction(instruction: &InstructionBlock, message: &str) -> SemanticValidationError {
+    SemanticValidationError::InvalidInstructionDefinition {
+        instruction_id: instruction.identity.id.clone(),
+        message: message.to_owned(),
+    }
+}
+
+fn invalid_phase(phase: &PhaseBlock, message: &str) -> SemanticValidationError {
+    SemanticValidationError::InvalidPhaseDefinition {
+        phase_id: phase.identity.id.clone(),
+        message: message.to_owned(),
+    }
 }
 
 pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
     match (&tool.tool_kind, &tool.command) {
         (ToolKind::OwnScript, ToolCommand::OwnScript(command)) => {
-            let expected = format!("script:{}", tool.identity.id);
+            let expected = crate::script::model::own_script_command_id(&tool.identity.id);
             if command != &expected {
                 return Err(SemanticValidationError::OwnScriptCommandIdMismatch {
                     command: command.clone(),
@@ -112,7 +242,10 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
             if tool.script_runtime.as_ref() != Some(&ScriptRuntime::PosixSh) {
                 return Err(SemanticValidationError::InvalidToolDefinition {
                     tool_id: tool.identity.id.clone(),
-                    message: "own-script tools must set script_runtime: posix-sh".to_owned(),
+                    message: format!(
+                        "own-script tools must set script_runtime: {}",
+                        ScriptRuntime::PosixSh.as_str()
+                    ),
                 });
             }
             if tool.script_body.is_none() {
@@ -131,10 +264,20 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
                     message: "own-script tools must set a non-empty script_body".to_owned(),
                 });
             }
+            if tool
+                .script_body
+                .as_deref()
+                .is_some_and(|body| body.contains('\0'))
+            {
+                return Err(invalid_tool(tool, "script_body must not contain NUL"));
+            }
         }
-        (ToolKind::PredefinedCommand, ToolCommand::Predefined { command_id, .. }) => {
+        (ToolKind::PredefinedCommand, ToolCommand::Predefined { command_id, argv }) => {
             if !is_valid_command_id(command_id) {
                 return Err(invalid_tool(tool, "command_id must be a valid command id"));
+            }
+            if argv.iter().any(|argument| argument.contains('\0')) {
+                return Err(invalid_tool(tool, "command.argv must not contain NUL"));
             }
             if tool.script_runtime.is_some() || tool.script_body.is_some() {
                 return Err(SemanticValidationError::InvalidToolDefinition {
@@ -157,7 +300,7 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
         if !is_valid_allowed_parameter_name(&parameter.name) {
             return Err(invalid_tool(
                 tool,
-                "allowed_parameters.name must start with -- and contain only letters, digits, _ or -",
+                "allowed_parameters.name must be a valid allowed-parameter name",
             ));
         }
         if !parameter_names.insert(parameter.name.as_str()) {
@@ -172,13 +315,7 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
         let has_values = !parameter.allowed_values.is_empty();
         let has_string_bounds = parameter.value_pattern.is_some() || parameter.max_length.is_some();
         let has_integer_bounds = parameter.min.is_some() || parameter.max.is_some();
-        let value_type = match parameter.value_type {
-            ParameterValueType::Enum => "enum",
-            ParameterValueType::Integer => "integer",
-            ParameterValueType::None => "none",
-            ParameterValueType::String => "string",
-            ParameterValueType::WorkspaceRelativePath => "workspace-relative-path",
-        };
+        let value_type = parameter.value_type.as_str();
         let valid_shape = match parameter.value_type {
             ParameterValueType::String => {
                 !has_values
@@ -197,6 +334,30 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
                 &format!(
                     "allowed parameter {} has fields incompatible with value_type {value_type}",
                     parameter.name,
+                ),
+            ));
+        }
+        if parameter
+            .allowed_values
+            .iter()
+            .any(|value| value.contains('\0'))
+        {
+            return Err(invalid_tool(
+                tool,
+                &format!(
+                    "allowed parameter {} allowed_values must not contain NUL",
+                    parameter.name
+                ),
+            ));
+        }
+        if let Some(pattern) = &parameter.value_pattern
+            && let Err(error) = parameter_pattern_matches(pattern, "")
+        {
+            return Err(invalid_tool(
+                tool,
+                &format!(
+                    "allowed parameter {} value_pattern is invalid: {error}",
+                    parameter.name
                 ),
             ));
         }

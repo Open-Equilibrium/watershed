@@ -1,6 +1,0 @@
-connection:
-  id: inspect-data
-  name: InspectData
-  connection_kind: data
-  from_ref: read-file
-  to_ref: inspect.gather

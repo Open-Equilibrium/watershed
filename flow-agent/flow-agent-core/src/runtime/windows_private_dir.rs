@@ -1,20 +1,26 @@
+use crate::runtime::windows_anchored_dir::{
+    NativeDirectoryOpenError, open_native_anchored_directory,
+};
 use cap_std::fs::Dir;
-#[cfg(test)]
-use std::fs;
 use std::{
     ffi::{OsStr, c_void},
-    io, mem,
+    fs, io, mem,
     os::windows::{ffi::OsStrExt as _, io::AsRawHandle as _},
     path::Path,
     ptr, slice,
 };
-#[cfg(test)]
+use windows_sys::Wdk::Storage::FileSystem::{
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_SYNCHRONOUS_IO_NONALERT,
+};
 use windows_sys::Win32::Security::{
-    Authorization::SetNamedSecurityInfoW, GetSecurityDescriptorDacl,
-    PROTECTED_DACL_SECURITY_INFORMATION,
+    Authorization::{SetNamedSecurityInfoW, SetSecurityInfo},
+    GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, LocalFree},
+    Foundation::{
+        CloseHandle, ERROR_ALREADY_EXISTS, ERROR_INSUFFICIENT_BUFFER, HANDLE, LocalFree,
+        STATUS_OBJECT_NAME_COLLISION,
+    },
     Security::{
         ACCESS_ALLOWED_ACE, ACL_SIZE_INFORMATION, AclSizeInformation,
         Authorization::{
@@ -22,7 +28,7 @@ use windows_sys::Win32::{
             GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
         },
         CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
-        GetSecurityDescriptorControl, GetTokenInformation, OBJECT_INHERIT_ACE,
+        GetSecurityDescriptorControl, GetTokenInformation, INHERITED_ACE, OBJECT_INHERIT_ACE,
         OWNER_SECURITY_INFORMATION, PSID, SE_DACL_PRESENT, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES,
         TOKEN_QUERY, TOKEN_USER, TokenUser,
     },
@@ -149,10 +155,14 @@ fn security_descriptor(sddl: &str) -> io::Result<LocalAllocation> {
     Ok(LocalAllocation(descriptor))
 }
 
-pub(super) fn create(path: &Path) -> io::Result<()> {
+fn private_directory_security_descriptor() -> io::Result<LocalAllocation> {
     let current_user = CurrentUserSid::get()?;
     let sid = current_user.as_sddl()?;
-    let descriptor = security_descriptor(&format!("O:{sid}D:P(A;OICI;FA;;;{sid})"))?;
+    security_descriptor(&format!("O:{sid}D:P(A;OICI;FA;;;{sid})"))
+}
+
+pub(super) fn create(path: &Path) -> io::Result<()> {
+    let descriptor = private_directory_security_descriptor()?;
     let attributes = SECURITY_ATTRIBUTES {
         nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor.0,
@@ -166,6 +176,24 @@ pub(super) fn create(path: &Path) -> io::Result<()> {
     }
 }
 
+pub(super) fn create_anchored(parent: &Dir, leaf: &str) -> io::Result<()> {
+    let descriptor = private_directory_security_descriptor()?;
+    open_native_anchored_directory(
+        parent,
+        leaf,
+        descriptor.0.cast(),
+        FILE_CREATE,
+        FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT,
+    )
+    .map(drop)
+    .map_err(|error| match error {
+        NativeDirectoryOpenError::NtStatus(STATUS_OBJECT_NAME_COLLISION) => {
+            io::Error::from_raw_os_error(ERROR_ALREADY_EXISTS as i32)
+        }
+        error => error.into_io_error(),
+    })
+}
+
 pub(super) fn opened_is_current_user_only(dir: &Dir) -> io::Result<bool> {
     opened_handle_is_current_user_only(
         dir.as_raw_handle() as HANDLE,
@@ -174,6 +202,14 @@ pub(super) fn opened_is_current_user_only(dir: &Dir) -> io::Result<bool> {
 }
 
 fn opened_handle_is_current_user_only(handle: HANDLE, expected_ace_flags: u8) -> io::Result<bool> {
+    opened_handle_has_current_user_only_access(handle, expected_ace_flags, true)
+}
+
+fn opened_handle_has_current_user_only_access(
+    handle: HANDLE,
+    expected_ace_flags: u8,
+    require_protected_dacl: bool,
+) -> io::Result<bool> {
     let mut owner = ptr::null_mut();
     let mut dacl = ptr::null_mut();
     let mut descriptor = ptr::null_mut();
@@ -199,7 +235,8 @@ fn opened_handle_is_current_user_only(handle: HANDLE, expected_ace_flags: u8) ->
     if unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) } == 0 {
         return Err(io::Error::last_os_error());
     }
-    if control & (SE_DACL_PRESENT | SE_DACL_PROTECTED) != SE_DACL_PRESENT | SE_DACL_PROTECTED
+    if control & SE_DACL_PRESENT == 0
+        || (require_protected_dacl && control & SE_DACL_PROTECTED == 0)
         || owner.is_null()
         || dacl.is_null()
     {
@@ -236,8 +273,13 @@ fn opened_handle_is_current_user_only(handle: HANDLE, expected_ace_flags: u8) ->
         return Err(io::Error::last_os_error());
     }
     let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
+    let flags_match = if require_protected_dacl {
+        ace.Header.AceFlags == expected_ace_flags
+    } else {
+        ace.Header.AceFlags == 0 || u32::from(ace.Header.AceFlags) == INHERITED_ACE
+    };
     if ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE as u8
-        || ace.Header.AceFlags != expected_ace_flags
+        || !flags_match
         || ace.Mask != FILE_ALL_ACCESS
     {
         return Ok(false);
@@ -246,13 +288,52 @@ fn opened_handle_is_current_user_only(handle: HANDLE, expected_ace_flags: u8) ->
     Ok(unsafe { EqualSid(ace_sid, current_user.as_ptr()) } != 0)
 }
 
-#[cfg(test)]
 pub(super) fn file_is_current_user_only(path: &Path) -> io::Result<bool> {
     let file = fs::File::open(path)?;
     opened_handle_is_current_user_only(file.as_raw_handle() as HANDLE, 0)
 }
 
-#[cfg(test)]
+pub(super) fn opened_file_is_current_user_only(file: &fs::File) -> io::Result<bool> {
+    opened_handle_is_current_user_only(file.as_raw_handle() as HANDLE, 0)
+}
+
+pub(super) fn set_opened_file_current_user_only(file: &fs::File) -> io::Result<()> {
+    let current_user = CurrentUserSid::get()?;
+    let sid = current_user.as_sddl()?;
+    let descriptor = security_descriptor(&format!("D:P(A;;FA;;;{sid})"))?;
+    let mut present = 0;
+    let mut defaulted = 0;
+    let mut dacl = ptr::null_mut();
+    if unsafe { GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted) }
+        == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    if present == 0 || dacl.is_null() {
+        return Err(invalid_security_data(
+            "private file security descriptor has no DACL",
+        ));
+    }
+    let status = unsafe {
+        SetSecurityInfo(
+            file.as_raw_handle() as HANDLE,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            current_user.as_ptr(),
+            ptr::null_mut(),
+            dacl,
+            ptr::null_mut(),
+        )
+    };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::from_raw_os_error(status as i32))
+    }
+}
+
 pub(super) fn set_file_current_user_only(path: &Path) -> io::Result<()> {
     let current_user = CurrentUserSid::get()?;
     let sid = current_user.as_sddl()?;
@@ -264,7 +345,6 @@ pub(super) fn set_world_access(path: &Path) -> io::Result<()> {
     set_named_dacl(path, "D:P(A;OICI;FA;;;WD)", ptr::null_mut())
 }
 
-#[cfg(test)]
 fn set_named_dacl(path: &Path, sddl: &str, owner: PSID) -> io::Result<()> {
     let descriptor = security_descriptor(sddl)?;
     let mut present = 0;

@@ -3,4 +3,3 @@ flow:
   name: HelloSubflow
   phase_refs: [inspect]
   subflow_refs: []
-  connection_refs: [inspect-data]

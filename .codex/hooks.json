@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"scripts/run-python.mjs\" \".codex/hooks/pre_tool_use_guard.py\"",
+            "command": "repo_root=\"$(git rev-parse --show-toplevel)\" && node \"$repo_root/scripts/run-python.mjs\" \"$repo_root/.codex/hooks/pre_tool_use_guard.py\"",
+            "commandWindows": "$repoRoot = git rev-parse --show-toplevel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; node \"$repoRoot/scripts/run-python.mjs\" \"$repoRoot/.codex/hooks/pre_tool_use_guard.py\"",
             "statusMessage": "Checking command against protected-path policy",
             "timeout": 20
           }
@@ -18,7 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"scripts/run-python.mjs\" \".codex/hooks/stop_closeout_check.py\"",
+            "command": "repo_root=\"$(git rev-parse --show-toplevel)\" && node \"$repo_root/scripts/run-python.mjs\" \"$repo_root/.codex/hooks/stop_closeout_check.py\"",
+            "commandWindows": "$repoRoot = git rev-parse --show-toplevel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; node \"$repoRoot/scripts/run-python.mjs\" \"$repoRoot/.codex/hooks/stop_closeout_check.py\"",
             "timeout": 30
           }
         ]

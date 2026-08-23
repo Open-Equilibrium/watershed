@@ -1,7 +1,7 @@
 use crate::runtime::{
+    execution_plan::{PlannedFixtureAction, PlannedFixtureEffect},
     fixture_tools::{plan_own_script, preflight_own_script_outputs, write_script_output},
     fs_guards::AnchoredDir,
-    planning::{PlannedFixtureAction, PlannedFixtureEffect},
     types::RuntimeError,
 };
 use core_policy::ProtectedPathMatchMode;
@@ -120,7 +120,11 @@ pub fn execute_predefined_command(
     argv: &[String],
 ) -> Result<Option<&'static str>, RuntimeError> {
     let progress = trusted_predefined_command_progress(command_id)?;
-    let executable = format!("registry:{command_id}");
+    let executable = core_policy::TrustedPredefinedCommand::parse(command_id)
+        .ok_or_else(|| {
+            RuntimeError::Protocol(format!("unsupported predefined command {command_id:?}"))
+        })?
+        .executable();
     if policy.executable != executable {
         return Err(RuntimeError::Protocol(format!(
             "runtime policy executable does not match trusted command {command_id:?}"
@@ -137,10 +141,8 @@ pub fn execute_predefined_command(
 pub fn trusted_predefined_command_progress(
     command_id: &str,
 ) -> Result<Option<&'static str>, RuntimeError> {
-    if !core_policy::is_trusted_predefined_command_id(command_id) {
-        return Err(RuntimeError::Protocol(format!(
-            "unsupported predefined command {command_id:?}"
-        )));
-    }
-    Ok((command_id == "agent-read").then_some("stub read completed"))
+    let command = core_policy::TrustedPredefinedCommand::parse(command_id).ok_or_else(|| {
+        RuntimeError::Protocol(format!("unsupported predefined command {command_id:?}"))
+    })?;
+    Ok((command == core_policy::TrustedPredefinedCommand::Read).then_some("stub read completed"))
 }

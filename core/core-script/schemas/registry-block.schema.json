@@ -2,16 +2,14 @@
   "$id": "https://open-equilibrium.org/watershed/schemas/script/v0/registry-block.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "M0 contract schema for one Watershed registry block file. M1 parses strict YAML 1.2 and validates an equivalent typed model; this schema documents the intended shape.",
+  "description": "M1.1 contract schema for one Watershed registry block file. The parser also enforces semantic reference, recursion, value, and byte limits.",
   "oneOf": [
     { "required": ["tool"] },
     { "required": ["instruction"] },
     { "required": ["phase"] },
-    { "required": ["connection"] },
     { "required": ["flow"] }
   ],
   "properties": {
-    "connection": { "$ref": "#/$defs/connection" },
     "instruction": { "$ref": "#/$defs/instruction" },
     "flow": { "$ref": "#/$defs/flow" },
     "phase": { "$ref": "#/$defs/phase" },
@@ -110,9 +108,9 @@
       ],
       "properties": {
         "allowed_values": { "items": { "type": "string" }, "type": "array" },
-        "max": { "type": "integer" },
+        "max": { "maximum": 9223372036854775807, "minimum": -9223372036854775808, "type": "integer" },
         "max_length": { "maximum": 65535, "minimum": 0, "type": "integer" },
-        "min": { "type": "integer" },
+        "min": { "maximum": 9223372036854775807, "minimum": -9223372036854775808, "type": "integer" },
         "name": { "pattern": "^--[A-Za-z0-9][A-Za-z0-9_-]*$", "type": "string" },
         "required": { "type": "boolean" },
         "value_pattern": { "type": "string" },
@@ -144,23 +142,12 @@
         { "$ref": "#/$defs/ipv6_cidr" }
       ]
     },
-    "connection": {
-      "additionalProperties": false,
-      "properties": {
-        "connection_kind": { "enum": ["data", "trigger", "refresh"] },
-        "from_ref": { "minLength": 1, "type": "string" },
-        "id": { "$ref": "#/$defs/block_id" },
-        "name": { "$ref": "#/$defs/block_name" },
-        "to_ref": { "minLength": 1, "type": "string" }
-      },
-      "required": ["id", "name", "connection_kind", "from_ref", "to_ref"],
-      "type": "object"
-    },
     "instruction": {
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
+        "parameters": { "items": { "$ref": "#/$defs/instruction_parameter" }, "type": "array" },
         "prompt": { "description": "Maximum 65,536 UTF-8 bytes enforced when loaded.", "minLength": 1, "type": "string" }
       },
       "required": ["id", "name", "prompt"],
@@ -177,11 +164,11 @@
     "flow": {
       "additionalProperties": false,
       "properties": {
-        "connection_refs": { "items": { "type": "string" }, "type": "array" },
         "id": { "$ref": "#/$defs/block_id" },
         "name": { "$ref": "#/$defs/block_name" },
         "phase_refs": { "items": { "type": "string" }, "minItems": 1, "type": "array" },
-        "subflow_refs": { "items": { "type": "string" }, "type": "array" }
+        "subflow_refs": { "items": { "type": "string" }, "type": "array" },
+        "transitions": { "items": { "$ref": "#/$defs/transition" }, "type": "array" }
       },
       "required": ["id", "name", "phase_refs"],
       "type": "object"
@@ -206,11 +193,15 @@
       "properties": {
         "id": { "$ref": "#/$defs/block_id" },
         "instruction_refs": { "items": { "type": "string" }, "type": "array" },
+        "loop": { "$ref": "#/$defs/phase_loop" },
         "name": { "$ref": "#/$defs/block_name" },
-        "steps": { "items": { "$ref": "#/$defs/step" }, "minItems": 1, "type": "array" },
-        "tool_refs": { "items": { "type": "string" }, "type": "array" }
+        "output": { "$ref": "#/$defs/value_contract" },
+        "phase_refs": { "items": { "type": "string" }, "type": "array" },
+        "result_from": { "minLength": 1, "type": "string" },
+        "tool_refs": { "items": { "type": "string" }, "type": "array" },
+        "transitions": { "items": { "$ref": "#/$defs/transition" }, "type": "array" }
       },
-      "required": ["id", "name", "instruction_refs", "tool_refs", "steps"],
+      "required": ["id", "name", "instruction_refs", "tool_refs", "output"],
       "type": "object"
     },
     "predefined_command": {
@@ -222,14 +213,196 @@
       "required": ["command_id", "argv"],
       "type": "object"
     },
-    "step": {
+    "flow_value": {
+      "oneOf": [
+        { "$ref": "#/$defs/flow_value_boolean" },
+        { "$ref": "#/$defs/flow_value_integer" },
+        { "$ref": "#/$defs/flow_value_string" },
+        { "$ref": "#/$defs/flow_value_list" },
+        { "$ref": "#/$defs/flow_value_map" },
+        { "$ref": "#/$defs/flow_value_session_object" }
+      ]
+    },
+    "flow_value_boolean": {
       "additionalProperties": false,
       "properties": {
-        "connection_refs": { "items": { "type": "string" }, "type": "array" },
-        "id": { "$ref": "#/$defs/block_id" },
-        "name": { "$ref": "#/$defs/block_name" }
+        "type": { "const": "boolean" },
+        "value": { "type": "boolean" }
       },
-      "required": ["id", "name"],
+      "required": ["type", "value"],
+      "type": "object"
+    },
+    "flow_value_integer": {
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "integer" },
+        "value": { "pattern": "^(0|-?[1-9][0-9]*)$", "type": "string" }
+      },
+      "required": ["type", "value"],
+      "type": "object"
+    },
+    "flow_value_list": {
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "list" },
+        "value": { "items": { "$ref": "#/$defs/flow_value" }, "maxItems": 1024, "type": "array" }
+      },
+      "required": ["type", "value"],
+      "type": "object"
+    },
+    "flow_value_map": {
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "map" },
+        "value": {
+          "additionalProperties": { "$ref": "#/$defs/flow_value" },
+          "maxProperties": 1024,
+          "propertyNames": { "maxLength": 256, "minLength": 1 },
+          "type": "object"
+        }
+      },
+      "required": ["type", "value"],
+      "type": "object"
+    },
+    "flow_value_session_object": {
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "session-object" },
+        "value": { "pattern": "^session-object:sha256:[0-9a-f]{64}$", "type": "string" }
+      },
+      "required": ["type", "value"],
+      "type": "object"
+    },
+    "flow_value_string": {
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "string" },
+        "value": { "type": "string" }
+      },
+      "required": ["type", "value"],
+      "type": "object"
+    },
+    "instruction_parameter": {
+      "additionalProperties": false,
+      "properties": {
+        "name": { "pattern": "^[a-z][a-z0-9_-]{0,63}$", "type": "string" },
+        "value_contract": { "$ref": "#/$defs/value_contract" }
+      },
+      "required": ["name", "value_contract"],
+      "type": "object"
+    },
+    "phase_loop": {
+      "additionalProperties": false,
+      "properties": {
+        "max_iterations": { "maximum": 32, "minimum": 1, "type": "integer" },
+        "until": { "$ref": "#/$defs/value_predicate" }
+      },
+      "required": ["max_iterations", "until"],
+      "type": "object"
+    },
+    "transition": {
+      "additionalProperties": false,
+      "properties": {
+        "from_phase_ref": { "minLength": 1, "type": "string" },
+        "to_phase_ref": { "minLength": 1, "type": "string" },
+        "when": { "$ref": "#/$defs/value_predicate" }
+      },
+      "required": ["from_phase_ref", "to_phase_ref", "when"],
+      "type": "object"
+    },
+    "value_contract": {
+      "oneOf": [
+        { "$ref": "#/$defs/value_contract_boolean" },
+        { "$ref": "#/$defs/value_contract_integer" },
+        { "$ref": "#/$defs/value_contract_string" },
+        { "$ref": "#/$defs/value_contract_list" },
+        { "$ref": "#/$defs/value_contract_map" },
+        { "$ref": "#/$defs/value_contract_session_object" }
+      ]
+    },
+    "value_contract_boolean": {
+      "additionalProperties": false,
+      "properties": { "type": { "const": "boolean" } },
+      "required": ["type"],
+      "type": "object"
+    },
+    "value_contract_integer": {
+      "additionalProperties": false,
+      "properties": {
+        "max": { "maximum": 9223372036854775807, "minimum": -9223372036854775808, "type": "integer" },
+        "min": { "maximum": 9223372036854775807, "minimum": -9223372036854775808, "type": "integer" },
+        "type": { "const": "integer" }
+      },
+      "required": ["type"],
+      "type": "object"
+    },
+    "value_contract_list": {
+      "additionalProperties": false,
+      "properties": {
+        "items": { "$ref": "#/$defs/value_contract" },
+        "max_items": { "maximum": 1024, "minimum": 0, "type": "integer" },
+        "type": { "const": "list" }
+      },
+      "required": ["type", "items"],
+      "type": "object"
+    },
+    "value_contract_map": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": { "items": { "$ref": "#/$defs/value_field_contract" }, "maxItems": 1024, "type": "array" },
+        "type": { "const": "map" }
+      },
+      "required": ["type", "fields"],
+      "type": "object"
+    },
+    "value_contract_session_object": {
+      "additionalProperties": false,
+      "properties": { "type": { "const": "session-object" } },
+      "required": ["type"],
+      "type": "object"
+    },
+    "value_contract_string": {
+      "additionalProperties": false,
+      "properties": {
+        "max_length": { "maximum": 65535, "minimum": 0, "type": "integer" },
+        "type": { "const": "string" }
+      },
+      "required": ["type"],
+      "type": "object"
+    },
+    "value_field_contract": {
+      "additionalProperties": false,
+      "properties": {
+        "name": { "maxLength": 256, "minLength": 1, "type": "string" },
+        "required": { "type": "boolean" },
+        "value_contract": { "$ref": "#/$defs/value_contract" }
+      },
+      "required": ["name", "required", "value_contract"],
+      "type": "object"
+    },
+    "value_path_segment": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": { "field": { "maxLength": 256, "minLength": 1, "type": "string" } },
+          "required": ["field"],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": { "index": { "maximum": 65535, "minimum": 0, "type": "integer" } },
+          "required": ["index"],
+          "type": "object"
+        }
+      ]
+    },
+    "value_predicate": {
+      "additionalProperties": false,
+      "properties": {
+        "equals": { "$ref": "#/$defs/flow_value" },
+        "path": { "items": { "$ref": "#/$defs/value_path_segment" }, "type": "array" }
+      },
+      "required": ["path", "equals"],
       "type": "object"
     },
     "tool": {

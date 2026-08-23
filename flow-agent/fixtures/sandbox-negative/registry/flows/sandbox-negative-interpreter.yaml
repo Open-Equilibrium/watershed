@@ -3,4 +3,3 @@ flow:
   name: SandboxNegativeInterpreter
   phase_refs: [negative-interpreter]
   subflow_refs: []
-  connection_refs: []

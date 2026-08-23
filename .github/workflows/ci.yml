@@ -20,52 +20,47 @@ permissions:
 
 jobs:
   m1:
-    name: M1 gates (${{ matrix.os }}) [${{ github.event_name }}]
+    name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-26, windows-latest]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install pinned Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
 
       - name: Check Node version
         shell: pwsh
         run: |
-          if ((node --version) -ne 'v24.18.0') {
-            throw "Node 24.18.0 must be active for CI gates"
+          $expectedNode = (Get-Content -Raw .node-version).Trim()
+          if ((node --version) -ne "v$expectedNode") {
+            throw "Node $expectedNode must be active for CI gates"
           }
 
-      - name: Validate Codex harness
+      - name: Run repository tooling tests
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
-
-      - name: Install Rust
-        run: >-
-          rustup toolchain install 1.97.1
-          --profile minimal
-          --component clippy
-          --component rustfmt
-          --component llvm-tools-preview
 
       - name: Select pinned Rust
         shell: pwsh
         run: |
-          rustup override set 1.97.1
-          if ((rustc --version) -notmatch '^rustc 1\.97\.1 ') {
-            throw "Rust 1.97.1 must be active for CI gates"
+          $toolchain = node scripts/run-python.mjs -c "import tomllib; print(tomllib.load(open('rust-toolchain.toml', 'rb'))['toolchain']['channel'])"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $escapedToolchain = [regex]::Escape($toolchain)
+          if ((rustc --version) -notmatch "^rustc $escapedToolchain ") {
+            throw "Rust $toolchain must be active for CI gates"
           }
 
       - name: Install gate tools
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
         with:
-          tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
+          tool: cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
       - name: Check formatting
         shell: pwsh
@@ -77,27 +72,65 @@ jobs:
       - name: Run tests
         run: >-
           cargo nextest run
+          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
           --workspace
           --all-targets
+          --all-features
+
+      - name: Run Rustdoc tests
+        run: >-
+          cargo --config .cargo/test-isolation.toml test
+          --locked
+          --workspace
+          --all-features
+          --doc
 
       - name: Run optimized performance tests
         if: matrix.os == 'ubuntu-24.04'
         run: >-
           cargo nextest run
+          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
           -p flow-agent-core
           --release
           --run-ignored ignored-only
           -j 1
 
+      - name: Run M1.1 optimized budget suite
+        id: m11_budgets
+        if: matrix.os == 'ubuntu-24.04'
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p target/m11-budgets
+          cargo run --locked -p flow-agent-core --release \
+            --features m11-budget-evidence --example m11_budgets \
+            > target/m11-budgets/m11-budgets.jsonl
+
+      - name: Upload M1.1 optimized budget evidence
+        if: matrix.os == 'ubuntu-24.04' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m11-optimized-budgets
+          path: target/m11-budgets/m11-budgets.jsonl
+          if-no-files-found: error
+
+      - name: Enforce M1.1 optimized budgets
+        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'
+        shell: bash
+        run: exit 1
+
       - name: Check line coverage
         run: >-
           cargo llvm-cov nextest
+          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
           --workspace
+          --all-targets
+          --all-features
           --fail-under-lines 90
-          --ignore-filename-regex '(^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)'
+          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))'
           --show-missing-lines
 
       - name: Check RustSec advisories
@@ -110,12 +143,17 @@ jobs:
         shell: pwsh
         run: |
           corepack enable
-          if ((pnpm --version) -ne '11.15.1') {
-            throw "pnpm 11.15.1 must be active for CI gates"
+          $packageManager = (Get-Content -Raw package.json | ConvertFrom-Json).packageManager
+          $expectedPnpm = $packageManager -replace '^pnpm@', ''
+          if ((pnpm --version) -ne $expectedPnpm) {
+            throw "pnpm $expectedPnpm must be active for CI gates"
           }
 
       - name: Install Node dev tools
         run: pnpm install --frozen-lockfile
+
+      - name: Check Node advisories
+        run: pnpm audit --lockfile-only
 
       - name: Render HTML docs
         run: pnpm run docs:render-check

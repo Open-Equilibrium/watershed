@@ -159,8 +159,18 @@ def run_reviews(repo: Path, script_dir: Path, fixture: str, engines: list[str]) 
             "--prompt",
             MALICIOUS_PROMPT if fixture == "malicious" else BENIGN_PROMPT,
         ]
+        if engine == "droid":
+            command.append("--no-tools")
         if fixture == "malicious":
-            command.extend(["--require-finding", "command", "--expect-findings"])
+            command.extend(
+                [
+                    "--require-finding-path",
+                    "app.js",
+                    "--require-finding-category",
+                    "security",
+                    "--expect-findings",
+                ]
+            )
         run(command, repo)
 
 

@@ -1,11 +1,8 @@
 # Build artifacts (Rust / Cargo workspace). Cargo.lock is intentionally tracked.
 **/target/
 
-# Flow Agent runtime state & logs (see docs/concept/V-Spec_FlowAgent.html, SECURITY.md)
-**/.flow/sessions/
-**/.flow/logs/
 flow-agent/fixtures/**/out/
-# Node is dev tooling only (clawpatch via package.json); the product has no Node runtime (ADR-0001)
+# Node artifacts; Watershed has no Node product-runtime dependency (ADR-0001).
 node_modules/
 .pnpm-store/
 .clawpatch/
@@ -15,7 +12,7 @@ node_modules/
 .env.*
 *.local
 
-# Python bytecode (e.g. .codex/hooks/ scripts)
+# Python bytecode
 __pycache__/
 *.pyc
 pytest-cache-files-*/

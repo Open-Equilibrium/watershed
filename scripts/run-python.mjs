@@ -39,24 +39,22 @@ export function runPython(
 
   const missing = [];
   for (const candidate of pythonCandidates(platform, args)) {
-    if (candidate.probeArgs) {
-      const probe = spawnSync(candidate.executable, candidate.probeArgs, { stdio: "ignore" });
-      if (probe.error?.code === "ENOENT") {
-        missing.push(candidate.missingName ?? candidate.executable);
-        continue;
-      }
-      if (probe.error) {
-        writeError(stderr, `${candidate.executable}: ${probe.error.message}`);
-        return 1;
-      }
-      if (probe.signal) {
-        writeError(stderr, `${candidate.executable}: stopped by signal ${probe.signal}`);
-        return 1;
-      }
-      if ((probe.status ?? 1) !== 0) {
-        missing.push(candidate.missingName ?? candidate.executable);
-        continue;
-      }
+    const probe = spawnSync(candidate.executable, candidate.probeArgs, { stdio: "ignore" });
+    if (probe.error?.code === "ENOENT") {
+      missing.push(candidate.missingName ?? candidate.executable);
+      continue;
+    }
+    if (probe.error) {
+      writeError(stderr, `${candidate.executable}: ${probe.error.message}`);
+      return 1;
+    }
+    if (probe.signal) {
+      writeError(stderr, `${candidate.executable}: stopped by signal ${probe.signal}`);
+      return 1;
+    }
+    if ((probe.status ?? 1) !== 0) {
+      missing.push(candidate.missingName ?? candidate.executable);
+      continue;
     }
 
     const result = spawnSync(candidate.executable, candidate.args, { stdio: "inherit" });

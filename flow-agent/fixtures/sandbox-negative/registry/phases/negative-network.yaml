@@ -3,6 +3,5 @@ phase:
   name: NegativeNetwork
   instruction_refs: [deny-attempt]
   tool_refs: [network-tool]
-  steps:
-    - id: attempt
-      name: Attempt
+  output:
+    type: string

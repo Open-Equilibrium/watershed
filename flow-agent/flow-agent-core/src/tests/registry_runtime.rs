@@ -1,4 +1,28 @@
-use super::*;
+mod own_script;
+
+#[cfg(windows)]
+use super::helpers::create_windows_junction;
+#[cfg(windows)]
+use super::support::assert_denied;
+use super::{
+    helpers::{
+        assert_invalid_stream, empty_workspace, fixture_runtime_policy, flow_id_for_definition,
+        replace_registry_text,
+    },
+    support::event_timestamp,
+    test_support::{copy_dir, expected_stream, fixture_dir, workspace_copy},
+};
+use crate::runtime::{
+    execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
+    failures::canonical_event_stream,
+    planning::plan_flow,
+    session::run_flow,
+    types::{EmitMode, EventClock, MAX_FLOW_INVOCATIONS, RuntimeError},
+    validate::validate_session_log_text,
+};
+use core_policy::ProtectedPathMatchMode;
+use proto::{EventEnvelope, EventType};
+use std::{fs, path::Path};
 
 #[test]
 fn registry_root_must_stay_inside_workspace() {
@@ -13,7 +37,7 @@ fn registry_root_must_stay_inside_workspace() {
         .expect_err("escaped registry root must fail");
 
     assert!(matches!(err, RuntimeError::Usage(message) if message.contains("registry_root")));
-    assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
 #[cfg(unix)]
@@ -42,7 +66,7 @@ fn registry_root_rejects_symlinked_path_components() {
         RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
             if message.contains("symlink")
     ));
-    assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
 #[cfg(windows)]
@@ -69,7 +93,7 @@ fn registry_root_rejects_junction_path_components() {
         RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
             if message.contains("reparse")
     ));
-    assert!(!workspace.join(LOCAL_SESSION_DIR).exists());
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
 #[cfg(target_os = "macos")]
@@ -119,7 +143,7 @@ fn runtime_executes_subflows_after_all_parent_phases() {
     let summarize_completed = events
         .iter()
         .position(|event| {
-            event.event_type == EventType::StepCompleted
+            event.event_type == EventType::PhaseCompleted
                 && event.flow_id.as_deref() == Some(root_flow_id.as_str())
                 && event
                     .payload
@@ -147,7 +171,7 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     let workspace = workspace_copy("smoke-flow");
     fs::write(
         workspace.join("registry/phases/smoke.yaml"),
-        "phase:\n  id: smoke\n  name: Smoke\n  instruction_refs: []\n  tool_refs: []\n  steps:\n    - id: noop\n      name: Noop\n",
+        "phase:\n  id: smoke\n  name: Smoke\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
     )
     .expect("tool-free phase written");
     let flows = workspace.join("registry/flows");
@@ -155,7 +179,7 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
         fs::write(
             flows.join(format!("{id}.yaml")),
             format!(
-                "flow:\n  id: {id}\n  name: {id}\n  phase_refs: [smoke]\n  subflow_refs: [{}]\n  connection_refs: []\n",
+                "flow:\n  id: {id}\n  name: {id}\n  phase_refs: [smoke]\n  subflow_refs: [{}]\n",
                 refs.join(", ")
             ),
         )
@@ -229,18 +253,17 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
         &persisted,
         "flow invocation budget exceeded",
     );
-    let sessions = list_sessions(&workspace).expect("sessions list before rejection");
-
     root_refs.push("smoke-flow");
     write_flow("budget-root", &root_refs);
     assert!(matches!(
         run_flow(&workspace, "budget-root", EmitMode::Jsonl),
         Err(RuntimeError::Protocol(message)) if message.contains("flow invocation budget")
     ));
-    assert_eq!(
-        list_sessions(&workspace).expect("sessions list after rejection"),
-        sessions,
-        "preflight rejection must not create a session"
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("budget-root-2.jsonl")
+            .exists(),
+        "preflight rejection must not create a Run"
     );
 }
 
@@ -261,472 +284,15 @@ fn run_flow_rejects_unknown_predefined_command_without_side_effects() {
         matches!(err, RuntimeError::Policy(message) if message.to_string().contains("unknown trusted command"))
     );
     assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
+        !crate::tests::helpers::workspace_session_dir(&workspace)
             .join("smoke-flow.jsonl")
             .exists()
     );
     assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
+        !crate::tests::helpers::workspace_log_dir(&workspace)
             .join("smoke-flow.log")
             .exists()
     );
-}
-
-#[test]
-fn run_flow_executes_own_script_without_exact_fixture_body() {
-    let workspace = workspace_copy("hello-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/write-summary.yaml",
-        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "script_body: |\n    # Explain the reviewed deterministic write.\n\n    printf '%s\\n' \"$SUMMARY\" > out/custom-summary.txt",
-    );
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("own-script comments and body execute through M1 runner");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/custom-summary.txt"))
-            .expect("custom summary is written"),
-        "hello\n"
-    );
-}
-
-#[test]
-fn run_flow_keeps_quoted_redirection_markers_in_own_script_output() {
-    let workspace = workspace_copy("hello-flow");
-    replace_registry_text(
-        &workspace,
-        "tools/write-summary.yaml",
-        "script_body: |\n    printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
-        "script_body: |\n    printf '%s > done\\n' \"$SUMMARY\" > out/summary.txt",
-    );
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("quoted redirection marker stays in output");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(workspace.join("out/summary.txt")).expect("summary is written"),
-        "hello > done\n"
-    );
-}
-
-#[test]
-fn run_flow_rejects_existing_own_script_output_on_repeat_run() {
-    let workspace = workspace_copy("hello-flow");
-
-    let first = run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("first run succeeds");
-    assert!(!first.failed);
-    let summary_path = workspace.join("out/summary.txt");
-    assert_eq!(
-        fs::read_to_string(&summary_path).expect("summary is written"),
-        "hello\n"
-    );
-    fs::write(&summary_path, "stale\n").expect("stale summary written");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("repeat run must reject the existing output before runtime setup");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::WriteDenied,
-        "already exists",
-    );
-    assert_eq!(
-        fs::read_to_string(summary_path).expect("summary is replaced"),
-        "stale\n"
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_SESSION_DIR)
-            .join("hello-flow-2.jsonl")
-            .exists()
-    );
-    assert!(
-        !workspace
-            .join(LOCAL_LOG_DIR)
-            .join("hello-flow-2.log")
-            .exists()
-    );
-}
-
-#[test]
-fn own_script_atomic_replacement_rejects_protected_temp_path() {
-    let workspace = workspace_copy("hello-flow");
-    fs::create_dir(workspace.join(".git")).expect("protected target parent created");
-    let target = workspace.join(".git/allowed.txt");
-    let anchored_workspace = AnchoredDir::workspace(&workspace).expect("workspace anchors");
-    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let mut write_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists")
-        .clone();
-    write_policy.filesystem.write_roots = vec!["workspace".to_owned()];
-    write_policy.filesystem.protected_path_grants = vec!["workspace/.git/allowed.txt".to_owned()];
-    let temp_path = replacement_temp_path(Path::new(".git/allowed.txt"), 0)
-        .expect("replacement temp path is valid");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-    assert_eq!(
-        validate_script_write_target(match_mode, &write_policy, ".git/allowed.txt")
-            .expect("final protected target has an exact grant"),
-        ".git/allowed.txt"
-    );
-
-    let err = write_script_output(
-        &anchored_workspace,
-        ".git/allowed.txt",
-        b"new\n",
-        match_mode,
-        &write_policy,
-    )
-    .expect_err("protected replacement temp must reject before creation");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-    assert!(!workspace.join(temp_path).exists());
-    assert!(!target.exists());
-}
-
-#[test]
-fn own_script_helpers_reject_unsupported_m1_shell_shapes() {
-    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let command_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-
-    assert_eq!(
-        script_redirection("printf 'hello > world\\n' > \"out/quoted.txt\"")
-            .expect("quoted redirection parses"),
-        Some((
-            "printf 'hello > world\\n'".to_owned(),
-            "out/quoted.txt".to_owned()
-        ))
-    );
-    assert_eq!(
-        script_redirection("printf 'hello\\n' > \"out/quoted summary.txt\"")
-            .expect("quoted redirection target with spaces parses"),
-        Some((
-            "printf 'hello\\n'".to_owned(),
-            "out/quoted summary.txt".to_owned()
-        ))
-    );
-    assert_eq!(
-        script_redirection("echo no-redirection").expect("plain command parses"),
-        None
-    );
-    assert!(matches!(
-        script_redirection("printf 'x' >> out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("append redirection")
-    ));
-    assert!(matches!(
-        script_redirection("> out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("must include a command")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'x' > out/a > out/b"),
-        Err(RuntimeError::Protocol(message)) if message.contains("multiple redirections")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'unterminated > out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unterminated quote")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'x' > out/summary one.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
-    ));
-    assert!(matches!(
-        script_redirection("printf 'x' > \"out/summary.txt\"suffix"),
-        Err(RuntimeError::Protocol(message)) if message.contains("one literal path")
-    ));
-
-    for target in [
-        "",
-        "/abs",
-        "C:/abs",
-        r"out\summary.txt",
-        "out/$SUMMARY",
-        "out/*.txt",
-        "out/?.txt",
-    ] {
-        assert!(matches!(
-            normalize_script_write_target(target),
-            Err(RuntimeError::Protocol(message))
-                if message.contains("literal workspace-relative path")
-        ));
-    }
-    for target in [
-        "out//summary.txt",
-        "out/./summary.txt",
-        "out/../summary.txt",
-        "out/a|b",
-    ] {
-        assert!(matches!(
-            normalize_script_write_target(target),
-            Err(RuntimeError::Protocol(message)) if message.contains("inside the workspace")
-        ));
-    }
-    for target in [
-        ".ssh./id_rsa",
-        "NUL",
-        "out./summary.txt",
-        "out/COM1",
-        "out/lPt9.log",
-        "out/nul.txt",
-        "out/summary.txt.",
-    ] {
-        assert!(matches!(
-            normalize_script_write_target(target),
-            Err(RuntimeError::Protocol(message)) if message.contains("Windows path alias")
-        ));
-    }
-
-    assert_eq!(
-        evaluate_script_command("printf 'hi\\n'").expect("printf without args evaluates"),
-        b"hi\n"
-    );
-    assert_eq!(
-        evaluate_script_command("printf 'a\\\\b'").expect("printf backslash escape"),
-        b"a\\b"
-    );
-    assert_eq!(
-        evaluate_script_command("printf '%s\\n' $SUMMARY").expect("stub SUMMARY evaluates"),
-        b"hello\n"
-    );
-    assert_eq!(
-        evaluate_script_command("echo plain").expect("echo evaluates"),
-        b"plain\n"
-    );
-    assert!(matches!(
-        evaluate_script_command("printf \"bad\""),
-        Err(RuntimeError::Protocol(message)) if message.contains("single-quoted")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf 'bad"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unterminated")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf 'bad\\t'"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf 'bad\\'"),
-        Err(RuntimeError::Protocol(message)) if message.contains("dangling escape")
-    ));
-    assert!(matches!(
-        evaluate_script_command("printf '%s' OTHER"),
-        Err(RuntimeError::Protocol(message)) if message.contains("printf argument")
-    ));
-    assert!(matches!(
-        evaluate_script_command("echo $SUMMARY"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
-    ));
-    assert!(matches!(
-        evaluate_script_command("echo \"$SUMMARY\""),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script argument")
-    ));
-    assert!(matches!(
-        evaluate_script_command("cat out/summary.txt"),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported own-script command")
-    ));
-
-    assert!(
-        compile_own_script_operations(match_mode, command_policy, "\n# comment\n---\necho noop\n")
-            .expect("noop-like lines and echo compile")
-            .is_none()
-    );
-}
-
-#[test]
-fn own_script_printf_uses_bounded_posix_string_conversions() {
-    for (command, expected) in [
-        ("printf '%s:%s\\n' \"$SUMMARY\"", b"hello:\n".as_slice()),
-        ("printf '%%:%s\\n' $SUMMARY", b"%:hello\n".as_slice()),
-        ("printf '[%s]\\n'", b"[]\n".as_slice()),
-    ] {
-        assert_eq!(
-            evaluate_script_command(command).expect("supported printf evaluates"),
-            expected,
-            "{command}"
-        );
-    }
-    for command in [
-        "printf '%d' $SUMMARY",
-        "printf '%'",
-        "printf '%1$s' $SUMMARY",
-    ] {
-        assert!(
-            matches!(
-                evaluate_script_command(command),
-                Err(RuntimeError::Protocol(message))
-                    if message.contains("unsupported own-script printf conversion")
-            ),
-            "{command}"
-        );
-    }
-}
-
-#[test]
-fn script_scope_and_pattern_helpers_cover_grants_and_wildcards() {
-    let (_registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let command_policy = policy
-        .commands
-        .iter()
-        .find(|command| command.tool_id == "write-summary")
-        .expect("write-summary policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-    assert_eq!(
-        validate_script_write_target(match_mode, command_policy, "out/summary.txt")
-            .expect("declared write target accepted"),
-        "out/summary.txt"
-    );
-    let mut file_scoped_policy = command_policy.clone();
-    file_scoped_policy.filesystem.write_roots = vec!["workspace/out/summary.txt".to_owned()];
-    assert_denied(
-        validate_script_write_target(match_mode, &file_scoped_policy, "out/summary.txt")
-            .expect_err("file-scoped writes cannot reserve replacement temps"),
-        core_policy::DenyReasonCode::WriteDenied,
-        "replacement temp",
-    );
-    assert_denied(
-        validate_script_write_target(match_mode, command_policy, "other/summary.txt")
-            .expect_err("out-of-scope write must reject"),
-        core_policy::DenyReasonCode::WriteDenied,
-        "lacks write scope",
-    );
-
-    let mut broad_policy = command_policy.clone();
-    broad_policy.filesystem.write_roots = vec!["workspace".to_owned()];
-    assert_denied(
-        validate_script_write_target(match_mode, &broad_policy, ".ssh/id_rsa")
-            .expect_err("ungranted protected path must reject"),
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-    broad_policy.filesystem.protected_path_grants = vec!["workspace/.ssh/**".to_owned()];
-    assert_eq!(
-        validate_script_write_target(match_mode, &broad_policy, ".ssh/id_rsa")
-            .expect("explicit protected grant accepted"),
-        ".ssh/id_rsa"
-    );
-    broad_policy.filesystem.protected_paths = vec!["workspace/*.pem".to_owned()];
-    broad_policy.filesystem.protected_path_grants = vec!["workspace/??.pem".to_owned()];
-    assert_denied(
-        validate_script_write_target(match_mode, &broad_policy, "é.pem")
-            .expect_err("two-character grant must not authorize one Unicode scalar"),
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-}
-
-#[test]
-fn tool_dispatch_helpers_enforce_scope_and_trusted_commands() {
-    let (registry, policy) = fixture_runtime_policy("hello-flow", "hello-flow");
-    let write_tool = registry
-        .tool_block("write-summary")
-        .expect("write-summary tool exists");
-    let write_policy =
-        command_policy_for_phase(&policy, "summarize", write_tool).expect("policy scoped");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-    let mut unscoped = policy.clone();
-    unscoped.phase_scope.clear();
-    assert!(matches!(
-        command_policy_for_phase(&unscoped, "summarize", write_tool),
-        Err(RuntimeError::Protocol(message)) if message.contains("not available")
-    ));
-
-    let mut missing_command = policy.clone();
-    missing_command
-        .commands
-        .retain(|command| command.tool_id != "write-summary");
-    assert!(matches!(
-        command_policy_for_phase(&missing_command, "summarize", write_tool),
-        Err(RuntimeError::Protocol(message)) if message.contains("missing command")
-    ));
-
-    let read_tool = registry
-        .tool_block("read-file")
-        .expect("read-file tool exists");
-    let read_policy =
-        command_policy_for_phase(&policy, "inspect", read_tool).expect("read policy scoped");
-    assert_eq!(
-        execute_predefined_command(read_policy, "agent-read", &[])
-            .expect("trusted read command executes"),
-        Some("stub read completed")
-    );
-    assert!(matches!(
-        execute_predefined_command(read_policy, "agent-custom", &[]),
-        Err(RuntimeError::Protocol(message)) if message.contains("unsupported predefined")
-    ));
-    assert!(matches!(
-        execute_predefined_command(read_policy, "agent-read", &["extra".to_owned()]),
-        Err(RuntimeError::Protocol(message)) if message.contains("arguments")
-    ));
-    let mut wrong_executable = (*read_policy).clone();
-    wrong_executable.executable = "registry:agent-echo".to_owned();
-    assert!(matches!(
-        execute_predefined_command(&wrong_executable, "agent-read", &[]),
-        Err(RuntimeError::Protocol(message)) if message.contains("executable")
-    ));
-    let mut wrong_runtime = write_tool.clone();
-    wrong_runtime.script_runtime = None;
-    assert!(matches!(
-        plan_own_script(&wrong_runtime, match_mode, write_policy),
-        Err(RuntimeError::Protocol(message)) if message.contains("script_runtime")
-    ));
-
-    let mut missing_body = write_tool.clone();
-    missing_body.script_body = None;
-    assert!(matches!(
-        plan_own_script(&missing_body, match_mode, write_policy),
-        Err(RuntimeError::Protocol(message)) if message.contains("script_body")
-    ));
-
-    let mut mismatched_shape = write_tool.clone();
-    mismatched_shape.tool_kind = core_script::ToolKind::PredefinedCommand;
-    assert!(matches!(
-        compile_fixture_tool_effect(
-            &mismatched_shape,
-            match_mode,
-            write_policy,
-        ),
-        Err(RuntimeError::Protocol(message)) if message.contains("command shape")
-    ));
-}
-
-#[test]
-fn predefined_command_runtime_uses_policy_membership_and_local_progress() {
-    for (command_id, expected_progress) in [
-        ("agent-echo", None),
-        ("agent-negative", None),
-        ("agent-read", Some("stub read completed")),
-    ] {
-        assert!(core_policy::is_trusted_predefined_command_id(command_id));
-        assert_eq!(
-            trusted_predefined_command_progress(command_id)
-                .expect("policy-trusted command is accepted at runtime"),
-            expected_progress
-        );
-    }
-
-    for command_id in ["", "agent-custom", "agent-read-extra"] {
-        assert!(!core_policy::is_trusted_predefined_command_id(command_id));
-        assert!(matches!(
-            trusted_predefined_command_progress(command_id),
-            Err(RuntimeError::Protocol(message)) if message.contains("unsupported predefined")
-        ));
-    }
 }
 
 #[cfg(windows)]
@@ -757,7 +323,7 @@ fn run_flow_rejects_windows_short_alias_of_protected_directory() {
         "protected target must remain untouched"
     );
     assert!(
-        !workspace.join(LOCAL_SESSION_DIR).exists(),
+        !crate::tests::helpers::workspace_session_dir(&workspace).exists(),
         "protected alias must fail during preflight"
     );
 }
@@ -775,5 +341,30 @@ fn protected_path_modes_follow_policy_target() {
     assert_eq!(
         protected_path_match_mode_for_policy_target(&core_policy::PolicyTarget::MacosSeatbelt),
         ProtectedPathMatchMode::CaseInsensitive
+    );
+}
+
+#[test]
+fn run_flow_emits_resolved_ids_for_name_references() {
+    let workspace = workspace_copy("hello-flow");
+    let phase_path = workspace.join("registry/phases/inspect.yaml");
+    let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
+    fs::write(
+        &phase_path,
+        source
+            .replace(
+                "instruction_refs: [inspect-input]",
+                "instruction_refs: [InspectInput]",
+            )
+            .replace("tool_refs: [read-file]", "tool_refs: [ReadFile]"),
+    )
+    .expect("phase fixture rewritten");
+
+    let output =
+        run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("flow executes with name refs");
+
+    assert_eq!(
+        output.stdout,
+        expected_stream("hello-flow", "hello-flow.jsonl")
     );
 }

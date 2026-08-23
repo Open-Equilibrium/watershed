@@ -1,0 +1,2 @@
+[target.'cfg(all())']
+runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]

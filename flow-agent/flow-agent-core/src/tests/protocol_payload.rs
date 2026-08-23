@@ -1,4 +1,45 @@
-use super::*;
+use super::{
+    helpers::{
+        assert_invalid_event, assert_invalid_session_log, assert_invalid_stream, base_event,
+        event_line, event_line_with_parent, flow_started_line, load_test_registry,
+    },
+    support::event_timestamp,
+    test_support::workspace_copy,
+};
+use crate::runtime::{
+    RuntimeError,
+    event_construction::flow_completed_payload,
+    failures::canonical_event_stream,
+    types::EventClock,
+    validate::{
+        SessionAppendValidationState, validate_event_payload, validate_protocol_jsonl_text,
+    },
+};
+use proto::{EventEnvelope, EventType};
+use std::path::Path;
+
+#[test]
+fn resultless_flow_completion_omits_the_optional_result_field() {
+    let workspace = workspace_copy("smoke-flow");
+    let registry = load_test_registry(&workspace, "smoke-flow");
+    let flow = registry.flow_block("smoke-flow").expect("root Flow");
+    let payload = flow_completed_payload(flow, &None);
+    let mut event = EventEnvelope::new(
+        "evt-001",
+        EventType::FlowCompleted,
+        "resultless001",
+        1,
+        "2026-01-01T00:00:00Z",
+        "flow-agent-cli",
+        payload.clone(),
+    );
+    event.flow_id = Some("flow-001".to_owned());
+
+    event
+        .validate_v0()
+        .expect("result-less completion remains a valid v0 event");
+    assert!(payload.get("result").is_none());
+}
 
 #[test]
 fn protocol_validator_rejects_sequence_that_does_not_start_at_one() {
@@ -13,63 +54,6 @@ fn protocol_validator_rejects_sequence_that_does_not_start_at_one() {
     );
 
     assert_invalid_event("bad-sequence.jsonl", event, "first sequence");
-}
-
-#[test]
-fn protocol_validator_rejects_required_envelope_metadata() {
-    let mut empty_source = base_event();
-    empty_source.source.clear();
-    assert_invalid_event("empty-source.jsonl", empty_source, "source");
-
-    let mut invalid_timestamp = base_event();
-    invalid_timestamp.timestamp = "not-a-time".to_owned();
-    assert_invalid_event("invalid-timestamp.jsonl", invalid_timestamp, "timestamp");
-
-    let mut empty_correlation_id = base_event();
-    empty_correlation_id.correlation_id = Some(String::new());
-    assert_invalid_event(
-        "empty-correlation-id.jsonl",
-        empty_correlation_id,
-        "correlation_id",
-    );
-
-    let mut empty_flow_id = base_event();
-    empty_flow_id.flow_id = Some(String::new());
-    assert_invalid_event("empty-flow-id.jsonl", empty_flow_id, "flow_id");
-
-    let mut empty_parent_flow_id = base_event();
-    empty_parent_flow_id.parent_flow_id = Some(String::new());
-    assert_invalid_event(
-        "empty-parent-flow-id.jsonl",
-        empty_parent_flow_id,
-        "parent_flow_id",
-    );
-}
-
-#[test]
-fn protocol_validator_rejects_scalar_and_session_payload_edges() {
-    let mut scalar_payload = base_event();
-    scalar_payload.payload = serde_json::json!("bad");
-    let err = validate_event_payload(Path::new("scalar-payload.jsonl"), 1, &scalar_payload)
-        .expect_err("scalar payload must fail");
-    assert!(err.to_string().contains("payload must be a JSON object"));
-
-    let mut invalid_session_reason = base_event();
-    invalid_session_reason.payload = serde_json::json!({"reason": 42});
-    assert_invalid_event(
-        "invalid-session-started-reason.jsonl",
-        invalid_session_reason,
-        "payload.reason",
-    );
-
-    let mut missing_reason = base_event();
-    missing_reason.event_type = EventType::SessionFailed;
-    missing_reason.payload = serde_json::json!({});
-    assert_invalid_event(
-        "missing-session-failed-reason.jsonl",
-        missing_reason,
-        "payload.reason",
-    );
 }
 
 #[test]
@@ -201,227 +185,6 @@ fn proto_jsonl_and_constructed_event_paths_report_the_same_structure_error() {
     );
     assert_eq!(validation.line_count, 0);
     assert_eq!(validation.previous_sequence, 0);
-}
-
-#[test]
-fn protocol_validator_rejects_tool_started_required_payload_edges() {
-    let mut incomplete_tool = flow_scoped_event();
-    incomplete_tool.event_type = EventType::ToolStarted;
-    incomplete_tool.payload = serde_json::json!({
-        "allowed_parameters": [],
-        "network_access": "deny",
-        "tool_id": "read-file",
-        "tool_kind": "predefined-command",
-        "tool_name": "ReadFile",
-    });
-    assert_invalid_event(
-        "incomplete-tool-started.jsonl",
-        incomplete_tool,
-        "payload.read_scope",
-    );
-}
-
-#[test]
-fn protocol_validator_rejects_step_connection_payload_edges() {
-    let mut mismatched_connections = flow_scoped_event();
-    mismatched_connections.event_type = EventType::StepStarted;
-    mismatched_connections.payload = serde_json::json!({
-        "connection_ids": ["inspect-data"],
-        "step_id": "inspect",
-        "step_name": "Inspect",
-    });
-    assert_invalid_event(
-        "mismatched-step-connections.jsonl",
-        mismatched_connections,
-        "payload.connection_ids and payload.connection_kinds must be present together",
-    );
-
-    let mut unequal_connections = flow_scoped_event();
-    unequal_connections.event_type = EventType::StepStarted;
-    unequal_connections.payload = serde_json::json!({
-        "connection_ids": ["inspect-data", "inspect-trigger"],
-        "connection_kinds": ["data"],
-        "step_id": "inspect",
-        "step_name": "Inspect",
-    });
-    assert_invalid_event(
-        "unequal-step-connections.jsonl",
-        unequal_connections,
-        "same length",
-    );
-
-    let mut invalid_connection_kind = flow_scoped_event();
-    invalid_connection_kind.event_type = EventType::StepStarted;
-    invalid_connection_kind.payload = serde_json::json!({
-        "connection_ids": ["inspect-data"],
-        "connection_kinds": ["socket"],
-        "step_id": "inspect",
-        "step_name": "Inspect",
-    });
-    assert_invalid_event(
-        "invalid-step-connection-kind.jsonl",
-        invalid_connection_kind,
-        "connection_kinds values",
-    );
-}
-
-#[test]
-fn protocol_validator_rejects_message_payload_edges() {
-    let mut invalid_role = flow_scoped_event();
-    invalid_role.event_type = EventType::MessageDelta;
-    invalid_role.payload = serde_json::json!({
-        "content_delta": "hi",
-        "message_id": "msg-001",
-        "role": "critic",
-    });
-    assert_invalid_event("invalid-role.jsonl", invalid_role, "payload.role");
-}
-
-#[test]
-fn protocol_validator_rejects_tool_started_enum_and_scope_payload_edges() {
-    let mut invalid_tool_kind = flow_scoped_event();
-    invalid_tool_kind.event_type = EventType::ToolStarted;
-    invalid_tool_kind.payload = serde_json::json!({
-        "allowed_parameters": [],
-        "network_access": "deny",
-        "read_scope": ["workspace"],
-        "tool_id": "read-file",
-        "tool_kind": "shell",
-        "tool_name": "ReadFile",
-        "write_scope": [],
-    });
-    assert_invalid_event(
-        "invalid-tool-kind.jsonl",
-        invalid_tool_kind,
-        "payload.tool_kind",
-    );
-
-    let mut invalid_network = flow_scoped_event();
-    invalid_network.event_type = EventType::ToolStarted;
-    invalid_network.payload = serde_json::json!({
-        "allowed_parameters": [],
-        "network_access": "allow",
-        "read_scope": ["workspace"],
-        "tool_id": "read-file",
-        "tool_kind": "predefined-command",
-        "tool_name": "ReadFile",
-        "write_scope": [],
-    });
-    assert_invalid_event(
-        "invalid-tool-network.jsonl",
-        invalid_network,
-        "payload.network_access",
-    );
-
-    let mut non_array_read_scope = flow_scoped_event();
-    non_array_read_scope.event_type = EventType::ToolStarted;
-    non_array_read_scope.payload = serde_json::json!({
-        "allowed_parameters": [],
-        "network_access": "deny",
-        "read_scope": "workspace",
-        "tool_id": "read-file",
-        "tool_kind": "predefined-command",
-        "tool_name": "ReadFile",
-        "write_scope": [],
-    });
-    assert_invalid_event(
-        "non-array-read-scope.jsonl",
-        non_array_read_scope,
-        "payload.read_scope",
-    );
-
-    let mut non_string_allowed_parameter = flow_scoped_event();
-    non_string_allowed_parameter.event_type = EventType::ToolStarted;
-    non_string_allowed_parameter.payload = serde_json::json!({
-        "allowed_parameters": [1],
-        "network_access": "deny",
-        "read_scope": ["workspace"],
-        "tool_id": "read-file",
-        "tool_kind": "predefined-command",
-        "tool_name": "ReadFile",
-        "write_scope": [],
-    });
-    assert_invalid_event(
-        "non-string-allowed-parameter.jsonl",
-        non_string_allowed_parameter,
-        "contain only strings",
-    );
-}
-
-#[test]
-fn protocol_validator_rejects_tool_terminal_and_auxiliary_payload_edges() {
-    let mut non_integer_exit_code = flow_scoped_event();
-    non_integer_exit_code.event_type = EventType::ToolCompleted;
-    non_integer_exit_code.payload = serde_json::json!({"exit_code": 1.5, "tool_id": "read-file"});
-    assert_invalid_event(
-        "non-integer-exit-code.jsonl",
-        non_integer_exit_code,
-        "payload.exit_code",
-    );
-
-    let mut string_exit_code = flow_scoped_event();
-    string_exit_code.event_type = EventType::ToolCompleted;
-    string_exit_code.payload = serde_json::json!({"exit_code": "0", "tool_id": "read-file"});
-    assert_invalid_event(
-        "string-exit-code.jsonl",
-        string_exit_code,
-        "payload.exit_code",
-    );
-
-    let mut missing_artifact_type = base_event();
-    missing_artifact_type.event_type = EventType::ArtifactLogged;
-    missing_artifact_type.payload = serde_json::json!({
-        "artifact_id": "artifact-001",
-        "uri": "workspace/out/summary.txt",
-    });
-    assert_invalid_event(
-        "missing-artifact-type.jsonl",
-        missing_artifact_type,
-        "artifact_type",
-    );
-
-    let mut missing_attention_reason = base_event();
-    missing_attention_reason.event_type = EventType::AttentionRequested;
-    missing_attention_reason.payload = serde_json::json!({"request_id": "req-001"});
-    assert_invalid_event(
-        "missing-attention-reason.jsonl",
-        missing_attention_reason,
-        "payload.reason",
-    );
-
-    let mut invalid_error_data = base_event();
-    invalid_error_data.event_type = EventType::Error;
-    invalid_error_data.payload = serde_json::json!({
-        "code": "E_PROTOCOL",
-        "data": [],
-        "message": "bad",
-    });
-    assert_invalid_event(
-        "invalid-error-data.jsonl",
-        invalid_error_data,
-        "payload.data",
-    );
-
-    let mut non_numeric_metric = base_event();
-    non_numeric_metric.event_type = EventType::MetricSample;
-    non_numeric_metric.payload = serde_json::json!({
-        "metric_name": "fsm.p95",
-        "value": "1",
-    });
-    assert_invalid_event(
-        "non-numeric-metric.jsonl",
-        non_numeric_metric,
-        "payload.value",
-    );
-
-    let mut valid_metric = base_event();
-    valid_metric.event_type = EventType::MetricSample;
-    valid_metric.payload = serde_json::json!({
-        "metric_name": "fsm.p95",
-        "value": 1.25,
-    });
-    validate_event_payload(Path::new("valid-metric.jsonl"), 1, &valid_metric)
-        .expect("numeric metric payload is valid");
 }
 
 #[test]
@@ -620,6 +383,21 @@ fn protocol_validator_rejects_stream_identity_edges() {
             flow_started_line("evt-002", 2),
             parent_without_flow_id
         ),
-        "flow_id is required for flow-scoped events",
+        "parent_flow_id requires flow_id",
     );
+}
+
+#[test]
+fn event_clock_rejects_timestamps_outside_the_protocol_year_range() {
+    assert_eq!(event_timestamp(61), "2026-01-01T00:01:00Z");
+    let last = proto::parse_rfc3339_utc_timestamp("9999-12-31T23:59:59Z")
+        .expect("last protocol timestamp");
+    let error = EventClock {
+        base_unix_seconds: last,
+    }
+    .timestamp(2)
+    .expect_err("the next second is outside the protocol timestamp grammar");
+
+    assert!(matches!(error, RuntimeError::Protocol(_)));
+    assert!(error.to_string().contains("four-digit year range"));
 }

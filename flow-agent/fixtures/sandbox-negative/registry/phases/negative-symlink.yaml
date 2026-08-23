@@ -3,6 +3,5 @@ phase:
   name: NegativeSymlink
   instruction_refs: [deny-attempt]
   tool_refs: [symlink-tool]
-  steps:
-    - id: attempt
-      name: Attempt
+  output:
+    type: string

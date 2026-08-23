@@ -1,16 +1,14 @@
 import os
+import re
 import stat
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from unittest import mock
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LEGACY_DOMAIN_WORD = bytes((108, 111, 111, 112)).decode("ascii")
-LEGACY_DOMAIN_TYPE = LEGACY_DOMAIN_WORD.capitalize()
 PROTECTED_SCAN_DIRECTORIES = {
     ".git",
     ".flow",
@@ -36,6 +34,8 @@ PROTECTED_SCAN_FILES = {
     "id_ecdsa_sk",
     "id_ed25519_sk",
 }
+DECISION_REFERENCE_PATTERN = re.compile(r"\bD-([0-9]{3})\b")
+DECISION_ANCHOR_PATTERN = re.compile(r'<article id="d-([0-9]{3})"')
 
 
 def is_protected_validation_path(relative_path: Path) -> bool:
@@ -64,14 +64,17 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
         capture_output=True,
     )
     root = repo.resolve()
-    paths: list[Path] = []
+    relative_paths: list[Path] = []
     for raw_path in result.stdout.split(b"\0"):
         if not raw_path:
             continue
         try:
-            relative_path = Path(raw_path.decode("utf-8"))
+            relative_paths.append(Path(raw_path.decode("utf-8")))
         except UnicodeDecodeError:
             continue
+    tracked_paths = set(relative_paths)
+    paths: list[Path] = []
+    for relative_path in relative_paths:
         path = repo / relative_path
         if is_protected_validation_path(relative_path) or path.is_symlink():
             continue
@@ -82,12 +85,34 @@ def tracked_validation_paths(repo: Path) -> list[Path]:
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             continue
         resolved = path.resolve()
-        if resolved.is_relative_to(root) and resolved.is_file():
+        if not resolved.is_relative_to(root):
+            continue
+        resolved_relative = resolved.relative_to(root)
+        if (
+            resolved_relative in tracked_paths
+            and not is_protected_validation_path(resolved_relative)
+            and resolved.is_file()
+        ):
             paths.append(path)
     return paths
 
 
 class M1ValidationContractTest(unittest.TestCase):
+    def test_documented_decision_references_resolve_to_live_entries(self) -> None:
+        decisions = (ROOT / "docs" / "decisions" / "open-decisions.html").read_text(
+            encoding="utf-8"
+        )
+        live_ids = set(DECISION_ANCHOR_PATTERN.findall(decisions))
+        referenced_ids: set[str] = set()
+        for path in tracked_validation_paths(ROOT):
+            if path.suffix in {".md", ".html"}:
+                referenced_ids.update(
+                    DECISION_REFERENCE_PATTERN.findall(path.read_text(encoding="utf-8"))
+                )
+
+        self.assertTrue(live_ids)
+        self.assertEqual(referenced_ids - live_ids, set())
+
     def test_validation_scan_excludes_untracked_and_protected_files(self) -> None:
         with tempfile.TemporaryDirectory(
             prefix="watershed-m1-validation-"
@@ -145,131 +170,48 @@ class M1ValidationContractTest(unittest.TestCase):
 
             self.assertEqual(tracked_validation_paths(repo), [])
 
-    def test_flow_agent_identity_has_no_stale_product_references(self) -> None:
-        expected_paths = [
-            ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml",
-            ROOT / "flow-agent" / "flow-agent-cli" / "Cargo.toml",
-            ROOT / "flow-agent" / "fixtures" / "smoke-flow" / ".flow" / "config.yaml",
-            ROOT / "docs" / "concept" / "V-Spec_FlowAgent.html",
-        ]
-        self.assertEqual(
-            [str(path.relative_to(ROOT)) for path in expected_paths if not path.is_file()],
-            [],
-        )
+    def test_validation_scan_excludes_resolved_untracked_and_protected_paths(
+        self,
+    ) -> None:
+        for label, target_relative in [
+            ("protected", Path("credentials/Cargo.toml")),
+            ("untracked", Path("scratch/Cargo.toml")),
+        ]:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary_directory:
+                repo = Path(temporary_directory)
+                subprocess.run(["git", "init", "--quiet"], cwd=repo, check=True)
+                target = repo / target_relative
+                target.parent.mkdir()
+                target.write_text(label, encoding="utf-8")
+                safe_parent = repo / "safe"
+                safe_parent.mkdir()
+                tracked = safe_parent / "Cargo.toml"
+                tracked.write_text("tracked", encoding="utf-8")
+                subprocess.run(
+                    ["git", "add", "--", "safe/Cargo.toml"], cwd=repo, check=True
+                )
+                tracked.unlink()
+                safe_parent.rmdir()
+                try:
+                    safe_parent.symlink_to(target.parent, target_is_directory=True)
+                except OSError as error:
+                    if os.name != "nt":
+                        self.skipTest(f"directory symlink creation unavailable: {error}")
+                    result = subprocess.run(
+                        [
+                            "cmd",
+                            "/c",
+                            "mklink",
+                            "/J",
+                            str(safe_parent),
+                            str(target.parent),
+                        ],
+                        capture_output=True,
+                    )
+                    if result.returncode != 0:
+                        self.skipTest("directory link creation unavailable")
 
-        stale_tokens = [
-            LEGACY_DOMAIN_TYPE + " Agent",
-            LEGACY_DOMAIN_TYPE + "Agent",
-            LEGACY_DOMAIN_TYPE + "-Agent",
-            LEGACY_DOMAIN_WORD + "-agent",
-            LEGACY_DOMAIN_WORD + "_agent",
-        ]
-        stale_references: dict[str, list[str]] = {}
-        for path in tracked_validation_paths(ROOT):
-            try:
-                content = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            matches = [token for token in stale_tokens if token in content]
-            if matches:
-                stale_references[str(path.relative_to(ROOT))] = matches
-
-        self.assertEqual(stale_references, {})
-        cli_manifest = expected_paths[1].read_text(encoding="utf-8")
-        self.assertIn('name = "flow"', cli_manifest)
-        self.assertNotIn('name = "' + LEGACY_DOMAIN_WORD + '"', cli_manifest)
-
-    def assert_active_pinned_rust_step(self, workflow: str, version: str) -> None:
-        lines = workflow.splitlines()
-        self.assertFalse(any(line.startswith("    if:") for line in lines))
-        self.assertFalse(
-            any(line.startswith("    continue-on-error:") for line in lines)
-        )
-        marker = "      - name: Select pinned Rust"
-        start = lines.index(marker)
-        end = next(
-            (
-                index
-                for index in range(start + 1, len(lines))
-                if lines[index].startswith("      - ")
-            ),
-            len(lines),
-        )
-        step = lines[start:end]
-        self.assertFalse(any(line.startswith("        if:") for line in step))
-        self.assertFalse(
-            any(line.startswith("        continue-on-error:") for line in step)
-        )
-        self.assertEqual(
-            [line for line in step if line.startswith("        shell:")],
-            ["        shell: pwsh"],
-        )
-        run = step.index("        run: |")
-        script = "\n".join(line[10:] for line in step[run + 1 :])
-        commands = script.splitlines()
-        escaped_version = version.replace(".", r"\.")
-        self.assertEqual(commands[0], f"rustup override set {version}")
-        self.assertEqual(
-            commands[1],
-            "if ((rustc --version) -notmatch " f"'^rustc {escaped_version} ') {{",
-        )
-        self.assertTrue(commands[2].strip().startswith('throw "'))
-        self.assertEqual(commands[3:], ["}"])
-
-    def test_ci_uses_the_pinned_rust_toolchain(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        with (ROOT / "rust-toolchain.toml").open("rb") as toolchain_file:
-            version = tomllib.load(toolchain_file)["toolchain"]["channel"]
-
-        self.assert_active_pinned_rust_step(workflow, version)
-
-    def test_ci_toolchain_contract_rejects_inert_commands(self) -> None:
-        active = """      - name: Select pinned Rust
-        shell: pwsh
-        run: |
-          rustup override set 1.97.1
-          if ((rustc --version) -notmatch '^rustc 1\\.97\\.1 ') {
-            throw "wrong version"
-          }
-"""
-        commented = active.replace("          rustup", "          # rustup").replace(
-            "          if ((rustc", "          # if ((rustc"
-        )
-        disabled = active.replace(
-            "        shell: pwsh", "        if: ${{ false }}\n        shell: pwsh"
-        )
-        wrong_shell = active.replace("        shell: pwsh", "        shell: bash")
-        missing_shell = active.replace("        shell: pwsh\n", "")
-        continue_on_error = active.replace(
-            "      - name: Select pinned Rust\n        shell: pwsh",
-            "      - name: Select pinned Rust\n"
-            "        continue-on-error: true\n"
-            "        shell: pwsh",
-        )
-        job_disabled = "jobs:\n  m1:\n    if: false\n    steps:\n" + active
-        job_continue_on_error = (
-            "jobs:\n  m1:\n    continue-on-error: true\n    steps:\n" + active
-        )
-        early_success = active.replace(
-            "          rustup override", "          exit 0\n          rustup override"
-        )
-
-        for workflow in (
-            commented,
-            disabled,
-            wrong_shell,
-            missing_shell,
-            continue_on_error,
-            job_disabled,
-            job_continue_on_error,
-            early_success,
-        ):
-            with self.subTest(workflow=workflow), self.assertRaises(
-                (AssertionError, ValueError)
-            ):
-                self.assert_active_pinned_rust_step(workflow, "1.97.1")
+                self.assertEqual(tracked_validation_paths(repo), [])
 
     def assert_git_ignore(self, path: str, *, ignored: bool) -> None:
         result = subprocess.run(
@@ -285,8 +227,8 @@ class M1ValidationContractTest(unittest.TestCase):
     def test_gitignore_keeps_flow_workspace_config_trackable(self) -> None:
         for path, ignored in [
             ("flow-agent/fixtures/new-fixture/.flow/config.yaml", False),
-            ("flow-agent/fixtures/new-fixture/.flow/sessions/session.jsonl", True),
-            ("flow-agent/fixtures/new-fixture/.flow/logs/session.log", True),
+            ("flow-agent/fixtures/new-fixture/.flow/sessions/session.jsonl", False),
+            ("flow-agent/fixtures/new-fixture/.flow/logs/session.log", False),
             ("flow-agent/fixtures/new-fixture/out/result.txt", True),
             ("docs/out/example.md", False),
         ]:

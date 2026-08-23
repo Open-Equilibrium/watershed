@@ -1,18 +1,299 @@
-use crate::script::canonical::{parse_error, registry_source_error};
-use crate::script::model::{
-    BlockIdentity, MAX_ACTIVE_REGISTRY_BYTES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES,
-    RegistryBlock, ResolvedRegistry,
+mod catalog;
+mod storage;
+
+use self::catalog::{RegistryCatalog, enqueue_dependencies};
+#[cfg(test)]
+pub(super) use self::storage::RegistryFile;
+pub(super) use self::storage::{
+    RegistryRoot, RegistryTraversalLimits, RegistryTraversalState,
+    collect_registry_files_with_limits, open_registry_root, open_registry_root_from_workspace_dir,
+    read_registry_file_to_string,
 };
-use crate::script::naming::{RegistryError, insert_named_block, normalize_string};
+use crate::script::canonical::{parse_error, registry_source_error};
+use crate::script::error::RegistryError;
+use crate::script::model::{
+    MAX_ACTIVE_REGISTRY_BYTES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, RegistryBlock,
+    RegistryBlockKind, ResolvedRegistry,
+};
 use crate::script::parser::deserialize_registry_block;
 use crate::script::semantics::{validate_registry_block_semantics, validate_registry_block_shape};
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
-use cap_std::{ambient_authority, fs::Dir};
+use cap_std::fs::Dir;
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    io::{self, Read},
-    path::{Path, PathBuf},
+    collections::BTreeSet,
+    io::{self, Write},
+    path::Path,
 };
+
+#[derive(Default)]
+struct DefinitionByteCounter(u64);
+
+impl Write for DefinitionByteCounter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0 = self
+            .0
+            .saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Returns the canonical serialized definition size, including its trailing newline.
+pub fn registry_block_definition_bytes(block: &RegistryBlock) -> Result<u64, RegistryError> {
+    let mut bytes = DefinitionByteCounter::default();
+    serde_json::to_writer_pretty(&mut bytes, block).map_err(RegistryError::Serialize)?;
+    Ok(bytes.0.saturating_add(1))
+}
+
+impl ResolvedRegistry {
+    pub(super) fn validate_addition_from_workspace_dir_with_limits(
+        workspace_dir: &Dir,
+        workspace: &Path,
+        registry_root: &Path,
+        candidate: RegistryBlock,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+    ) -> Result<(), RegistryError> {
+        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        let limits = RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes);
+        let candidate_bytes = registry_block_definition_bytes(&candidate)?;
+        if candidate_bytes > limits.max_file_bytes {
+            return Err(RegistryError::ReadLimitExceeded {
+                path: root.path,
+                bytes: candidate_bytes,
+                max: limits.max_file_bytes,
+            });
+        }
+        let mut blocks = Self::read_all_blocks_with_initial_bytes(&root, limits, candidate_bytes)?;
+        if blocks.len() == limits.max_entries {
+            return Err(RegistryError::TraversalLimitExceeded {
+                path: root.path,
+                limit: "entry count",
+                observed: blocks.len().saturating_add(1),
+                max: limits.max_entries,
+            });
+        }
+        blocks.push(candidate);
+        Self::from_blocks(blocks).map(|_| ())
+    }
+
+    pub(super) fn load_all_with_limits(
+        workspace: &Path,
+        registry_root: &Path,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+    ) -> Result<Self, RegistryError> {
+        let root = open_registry_root(workspace, registry_root)?;
+        Self::load_all_from_root(
+            root,
+            RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes),
+        )
+    }
+
+    pub(super) fn load_all_from_workspace_dir_with_limits(
+        workspace_dir: &Dir,
+        workspace: &Path,
+        registry_root: &Path,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+    ) -> Result<Self, RegistryError> {
+        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        Self::load_all_from_root(
+            root,
+            RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes),
+        )
+    }
+
+    fn load_all_from_root(
+        root: RegistryRoot,
+        limits: RegistryTraversalLimits,
+    ) -> Result<Self, RegistryError> {
+        Self::from_blocks(Self::read_all_blocks(&root, limits)?)
+    }
+
+    fn read_all_blocks(
+        root: &RegistryRoot,
+        limits: RegistryTraversalLimits,
+    ) -> Result<Vec<RegistryBlock>, RegistryError> {
+        Self::read_all_blocks_with_initial_bytes(root, limits, 0)
+    }
+
+    fn read_all_blocks_with_initial_bytes(
+        root: &RegistryRoot,
+        limits: RegistryTraversalLimits,
+        initial_bytes: u64,
+    ) -> Result<Vec<RegistryBlock>, RegistryError> {
+        let mut paths = Vec::new();
+        let mut state = RegistryTraversalState::default();
+        collect_registry_files_with_limits(
+            root,
+            &root.dir,
+            Path::new(""),
+            &mut paths,
+            limits,
+            0,
+            &mut state,
+        )?;
+        paths.sort_by(|left, right| left.path.cmp(&right.path));
+
+        let mut total_bytes = initial_bytes;
+        if total_bytes > limits.max_total_bytes {
+            return Err(RegistryError::ReadLimitExceeded {
+                path: root.path.clone(),
+                bytes: total_bytes,
+                max: limits.max_total_bytes,
+            });
+        }
+        let mut blocks = Vec::with_capacity(paths.len());
+        for file in paths {
+            let source = read_registry_file_to_string(root, &file, limits.max_file_bytes)?;
+            total_bytes = total_bytes
+                .checked_add(u64::try_from(source.len()).unwrap_or(u64::MAX))
+                .ok_or_else(|| RegistryError::ReadLimitExceeded {
+                    path: root.path.clone(),
+                    bytes: u64::MAX,
+                    max: limits.max_total_bytes,
+                })?;
+            if total_bytes > limits.max_total_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: root.path.clone(),
+                    bytes: total_bytes,
+                    max: limits.max_total_bytes,
+                });
+            }
+            let source_name = file.path.to_string_lossy().replace('\\', "/");
+            blocks.push(parse_registry_block(&source_name, &source)?);
+        }
+        Ok(blocks)
+    }
+
+    pub(super) fn load_for_flow_with_limits(
+        workspace: &Path,
+        registry_root: &Path,
+        flow_reference: &str,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+        max_active_bytes: u64,
+    ) -> Result<Self, RegistryError> {
+        Self::load_for_flow_with_all_limits(
+            workspace,
+            registry_root,
+            flow_reference,
+            max_active_bytes,
+            RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes),
+        )
+    }
+
+    pub(super) fn load_for_flow_from_workspace_dir_with_limits(
+        workspace_dir: &Dir,
+        workspace: &Path,
+        registry_root: &Path,
+        flow_reference: &str,
+        max_file_bytes: u64,
+        max_total_bytes: u64,
+        max_active_bytes: u64,
+    ) -> Result<Self, RegistryError> {
+        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        Self::load_for_flow_from_root(
+            root,
+            flow_reference,
+            max_active_bytes,
+            RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes),
+        )
+    }
+
+    pub(super) fn load_for_flow_with_all_limits(
+        workspace: &Path,
+        registry_root: &Path,
+        flow_reference: &str,
+        max_active_bytes: u64,
+        limits: RegistryTraversalLimits,
+    ) -> Result<Self, RegistryError> {
+        let root = open_registry_root(workspace, registry_root)?;
+        Self::load_for_flow_from_root(root, flow_reference, max_active_bytes, limits)
+    }
+
+    fn load_for_flow_from_root(
+        root: RegistryRoot,
+        flow_reference: &str,
+        max_active_bytes: u64,
+        limits: RegistryTraversalLimits,
+    ) -> Result<Self, RegistryError> {
+        let mut paths = Vec::new();
+        let mut state = RegistryTraversalState::default();
+        collect_registry_files_with_limits(
+            &root,
+            &root.dir,
+            Path::new(""),
+            &mut paths,
+            limits,
+            0,
+            &mut state,
+        )?;
+        paths.sort_by(|left, right| left.path.cmp(&right.path));
+        let mut catalog = RegistryCatalog::default();
+        let mut total_bytes = 0u64;
+
+        for file in &paths {
+            let source = read_registry_file_to_string(&root, file, limits.max_file_bytes)?;
+            let bytes = u64::try_from(source.len()).unwrap_or(u64::MAX);
+            total_bytes = total_bytes.saturating_add(bytes);
+            if total_bytes > limits.max_total_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: root.path.clone(),
+                    bytes: total_bytes,
+                    max: limits.max_total_bytes,
+                });
+            }
+            let source_name = file.path.to_string_lossy().replace('\\', "/");
+            let block = parse_registry_block(&source_name, &source)?;
+            catalog.insert(&block, file.clone())?;
+        }
+
+        let root_flow =
+            catalog.require(RegistryBlockKind::Flow, flow_reference, "registry", "root")?;
+        let mut pending = vec![(RegistryBlockKind::Flow, root_flow.identity.id.clone())];
+        let mut loaded = BTreeSet::new();
+        let mut active_bytes = 0u64;
+        let mut blocks = Vec::new();
+
+        while let Some((kind, id)) = pending.pop() {
+            if !loaded.insert((kind, id.clone())) {
+                continue;
+            }
+            let entry = catalog
+                .resolve(kind, &id)
+                .expect("queued catalog entries remain available");
+            let source = read_registry_file_to_string(&root, &entry.file, limits.max_file_bytes)?;
+            active_bytes =
+                active_bytes.saturating_add(u64::try_from(source.len()).unwrap_or(u64::MAX));
+            if active_bytes > max_active_bytes {
+                return Err(RegistryError::ReadLimitExceeded {
+                    path: root.path.clone(),
+                    bytes: active_bytes,
+                    max: max_active_bytes,
+                });
+            }
+            let source_name = entry.file.path.to_string_lossy().replace('\\', "/");
+            let block = parse_registry_block(&source_name, &source)?;
+            let (actual_kind, actual_identity) = block.kind_and_identity();
+            if actual_kind != kind || actual_identity != &entry.identity {
+                return Err(parse_error(
+                    &source_name,
+                    "registry block identity changed while loading".to_owned(),
+                ));
+            }
+            enqueue_dependencies(&catalog, &block, &mut pending)?;
+            blocks.push(block);
+        }
+
+        drop(catalog);
+        drop(paths);
+        Self::from_blocks(blocks)
+    }
+}
 
 /// Loads the unique transitive registry closure for one top-level Flow.
 pub fn load_flow_registry_from_workspace(
@@ -48,6 +329,53 @@ pub fn load_flow_registry_from_workspace_dir(
     )
 }
 
+/// Validates every block and reference in a workspace registry.
+pub fn validate_registry_from_workspace(
+    workspace: impl AsRef<Path>,
+    registry_root: impl AsRef<Path>,
+) -> Result<(), RegistryError> {
+    ResolvedRegistry::load_all_with_limits(
+        workspace.as_ref(),
+        registry_root.as_ref(),
+        MAX_REGISTRY_FILE_BYTES,
+        MAX_REGISTRY_TOTAL_BYTES,
+    )
+    .map(|_| ())
+}
+
+/// Validates every block and reference from an already opened workspace capability.
+pub fn validate_registry_from_workspace_dir(
+    workspace_dir: &Dir,
+    workspace_path: impl AsRef<Path>,
+    registry_root: impl AsRef<Path>,
+) -> Result<(), RegistryError> {
+    ResolvedRegistry::load_all_from_workspace_dir_with_limits(
+        workspace_dir,
+        workspace_path.as_ref(),
+        registry_root.as_ref(),
+        MAX_REGISTRY_FILE_BYTES,
+        MAX_REGISTRY_TOTAL_BYTES,
+    )
+    .map(|_| ())
+}
+
+/// Validates a candidate block against every existing block without publishing it.
+pub fn validate_registry_addition_from_workspace_dir(
+    workspace_dir: &Dir,
+    workspace_path: impl AsRef<Path>,
+    registry_root: impl AsRef<Path>,
+    candidate: RegistryBlock,
+) -> Result<(), RegistryError> {
+    ResolvedRegistry::validate_addition_from_workspace_dir_with_limits(
+        workspace_dir,
+        workspace_path.as_ref(),
+        registry_root.as_ref(),
+        candidate,
+        MAX_REGISTRY_FILE_BYTES,
+        MAX_REGISTRY_TOTAL_BYTES,
+    )
+}
+
 /// Parses one registry block from a named YAML source.
 pub fn parse_registry_block(
     source_name: &str,
@@ -58,445 +386,4 @@ pub fn parse_registry_block(
     validate_registry_block_semantics(&block)
         .map_err(|error| registry_source_error(source_name, error.into()))?;
     Ok(block)
-}
-
-pub(super) struct RegistryRoot {
-    pub(super) dir: Dir,
-    pub(super) path: PathBuf,
-}
-
-#[derive(Clone)]
-pub(super) struct RegistryFile {
-    pub(super) path: PathBuf,
-}
-
-pub(super) struct RegistryCatalogEntry {
-    pub(super) identity: BlockIdentity,
-    pub(super) kind: &'static str,
-    pub(super) file: RegistryFile,
-    pub(super) step_ids: BTreeSet<String>,
-}
-
-#[derive(Default)]
-pub(super) struct RegistryCatalog {
-    entries: BTreeMap<&'static str, BTreeMap<String, RegistryCatalogEntry>>,
-    name_ids: BTreeMap<&'static str, BTreeMap<String, String>>,
-}
-
-impl RegistryCatalog {
-    pub(super) fn insert(
-        &mut self,
-        block: &RegistryBlock,
-        file: RegistryFile,
-    ) -> Result<(), RegistryError> {
-        let (kind, identity) = registry_block_identity(block);
-        let step_ids = match block {
-            RegistryBlock::Phase(phase) => phase.steps.iter().map(|step| step.id.clone()).collect(),
-            _ => BTreeSet::new(),
-        };
-        insert_named_block(
-            kind,
-            identity.clone(),
-            self.entries.entry(kind).or_default(),
-            &mut self.name_ids,
-            RegistryCatalogEntry {
-                identity: identity.clone(),
-                kind,
-                file,
-                step_ids,
-            },
-        )
-    }
-
-    pub(super) fn resolve(
-        &self,
-        kind: &'static str,
-        reference: &str,
-    ) -> Option<&RegistryCatalogEntry> {
-        let entries = self.entries.get(kind)?;
-        entries.get(reference).or_else(|| {
-            self.name_ids
-                .get(kind)
-                .and_then(|names| names.get(&normalize_string(reference)))
-                .and_then(|id| entries.get(id))
-        })
-    }
-
-    pub(super) fn require(
-        &self,
-        kind: &'static str,
-        reference: &str,
-        from_kind: &'static str,
-        from_id: &str,
-    ) -> Result<&RegistryCatalogEntry, RegistryError> {
-        self.resolve(kind, reference)
-            .ok_or_else(|| RegistryError::MissingReference {
-                from_kind,
-                from_id: from_id.to_owned(),
-                reference_kind: kind,
-                reference: reference.to_owned(),
-            })
-    }
-
-    fn endpoint(
-        &self,
-        reference: &str,
-        connection_id: &str,
-    ) -> Result<&RegistryCatalogEntry, RegistryError> {
-        let mut matches = ["tool", "instruction", "phase", "flow"]
-            .into_iter()
-            .filter_map(|kind| self.resolve(kind, reference))
-            .collect::<Vec<_>>();
-        let mut missing_step = false;
-        if let Some((phase_reference, step_id)) = reference.rsplit_once('.')
-            && let Some(phase) = self.resolve("phase", phase_reference)
-        {
-            if phase.step_ids.contains(step_id) {
-                matches.push(phase);
-            } else {
-                missing_step = true;
-            }
-        }
-        match matches.as_slice() {
-            [entry] => Ok(entry),
-            [] => Err(RegistryError::MissingReference {
-                from_kind: "connection",
-                from_id: connection_id.to_owned(),
-                reference_kind: if missing_step { "step" } else { "endpoint" },
-                reference: reference.to_owned(),
-            }),
-            _ => Err(RegistryError::AmbiguousReference {
-                kind: "endpoint",
-                reference: reference.to_owned(),
-            }),
-        }
-    }
-}
-
-pub(super) fn registry_block_identity(block: &RegistryBlock) -> (&'static str, &BlockIdentity) {
-    match block {
-        RegistryBlock::Tool(block) => ("tool", &block.identity),
-        RegistryBlock::Instruction(block) => ("instruction", &block.identity),
-        RegistryBlock::Phase(block) => ("phase", &block.identity),
-        RegistryBlock::Connection(block) => ("connection", &block.identity),
-        RegistryBlock::Flow(block) => ("flow", &block.identity),
-    }
-}
-
-pub(super) fn enqueue_dependencies(
-    catalog: &RegistryCatalog,
-    block: &RegistryBlock,
-    pending: &mut Vec<(&'static str, String)>,
-) -> Result<(), RegistryError> {
-    let mut push = |kind, reference: &str, from_kind, from_id: &str| {
-        let target = catalog.require(kind, reference, from_kind, from_id)?;
-        pending.push((target.kind, target.identity.id.clone()));
-        Ok::<_, RegistryError>(())
-    };
-
-    match block {
-        RegistryBlock::Tool(_) | RegistryBlock::Instruction(_) => {}
-        RegistryBlock::Phase(phase) => {
-            for reference in &phase.instruction_refs {
-                push("instruction", reference, "phase", &phase.identity.id)?;
-            }
-            for reference in &phase.tool_refs {
-                push("tool", reference, "phase", &phase.identity.id)?;
-            }
-            for step in &phase.steps {
-                for reference in &step.connection_refs {
-                    push("connection", reference, "step", &step.id)?;
-                }
-            }
-        }
-        RegistryBlock::Connection(connection) => {
-            for reference in [&connection.from_ref, &connection.to_ref] {
-                let target = catalog.endpoint(reference, &connection.identity.id)?;
-                pending.push((target.kind, target.identity.id.clone()));
-            }
-        }
-        RegistryBlock::Flow(flow_block) => {
-            for reference in &flow_block.phase_refs {
-                push("phase", reference, "flow", &flow_block.identity.id)?;
-            }
-            for reference in &flow_block.subflow_refs {
-                push("flow", reference, "flow", &flow_block.identity.id)?;
-            }
-            for reference in &flow_block.connection_refs {
-                push("connection", reference, "flow", &flow_block.identity.id)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct RegistryTraversalLimits {
-    pub(super) max_file_bytes: u64,
-    pub(super) max_total_bytes: u64,
-    pub(super) max_entries: usize,
-    pub(super) max_depth: usize,
-}
-
-#[derive(Default)]
-pub(super) struct RegistryTraversalState {
-    entries: usize,
-    bytes: u64,
-}
-
-pub(super) fn open_registry_root(
-    workspace: &Path,
-    registry_root: &Path,
-) -> Result<RegistryRoot, RegistryError> {
-    let workspace_dir =
-        Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
-            RegistryError::Io {
-                path: workspace.to_path_buf(),
-                source,
-            }
-        })?;
-    open_registry_root_from_workspace_dir(&workspace_dir, workspace, registry_root)
-}
-
-pub(super) fn open_registry_root_from_workspace_dir(
-    workspace_dir: &Dir,
-    workspace: &Path,
-    registry_root: &Path,
-) -> Result<RegistryRoot, RegistryError> {
-    if registry_root.components().any(|component| {
-        matches!(
-            component,
-            std::path::Component::ParentDir
-                | std::path::Component::Prefix(_)
-                | std::path::Component::RootDir
-        )
-    }) {
-        return Err(RegistryError::UnsafePath {
-            path: registry_root.to_path_buf(),
-            message: "registry root must stay within the workspace".to_owned(),
-        });
-    }
-
-    let mut dir = workspace_dir
-        .try_clone()
-        .map_err(|source| RegistryError::Io {
-            path: workspace.to_path_buf(),
-            source,
-        })?;
-    let mut path = workspace.to_path_buf();
-    for component in registry_root.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::Normal(segment) => {
-                path.push(segment);
-                dir = dir
-                    .open_dir_nofollow(segment)
-                    .map_err(|source| unsafe_directory(path.clone(), source))?;
-            }
-            std::path::Component::ParentDir
-            | std::path::Component::Prefix(_)
-            | std::path::Component::RootDir => unreachable!("checked above"),
-        }
-    }
-    Ok(RegistryRoot { dir, path })
-}
-
-fn unsafe_directory(path: PathBuf, source: io::Error) -> RegistryError {
-    if source.kind() == io::ErrorKind::NotFound {
-        return RegistryError::Io { path, source };
-    }
-    RegistryError::UnsafePath {
-        path,
-        message: format!(
-            "registry directories must not be symlinks or reparse points and must remain directories: {source}"
-        ),
-    }
-}
-
-fn unsafe_file(path: PathBuf, source: io::Error) -> RegistryError {
-    if source.kind() == io::ErrorKind::NotFound {
-        return RegistryError::Io { path, source };
-    }
-    RegistryError::UnsafePath {
-        path,
-        message: format!(
-            "registry files must not be symlinks or reparse points and must remain files: {source}"
-        ),
-    }
-}
-
-fn open_registry_regular_file(
-    dir: &Dir,
-    name: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<cap_std::fs::File, RegistryError> {
-    let mut options = cap_std::fs::OpenOptions::new();
-    options.read(true).follow(FollowSymlinks::No).nonblock(true);
-    let opened = dir
-        .open_with(name, &options)
-        .map_err(|source| unsafe_file(path.to_path_buf(), source))?;
-    let metadata = opened.metadata().map_err(|source| RegistryError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(RegistryError::UnsafePath {
-            path: path.to_path_buf(),
-            message: "registry files must not be symlinks or reparse points".to_owned(),
-        });
-    }
-    Ok(opened)
-}
-
-pub(super) fn read_registry_file_to_string(
-    root: &RegistryRoot,
-    file: &RegistryFile,
-    max_bytes: u64,
-) -> Result<String, RegistryError> {
-    let path = root.path.join(&file.path);
-    let mut opened_dir = None;
-    if let Some(parent) = file.path.parent() {
-        for component in parent.components() {
-            let std::path::Component::Normal(segment) = component else {
-                unreachable!("collected registry paths contain only entry names")
-            };
-            let dir = opened_dir.as_ref().unwrap_or(&root.dir);
-            let next = dir
-                .open_dir_nofollow(segment)
-                .map_err(|source| unsafe_directory(path.clone(), source))?;
-            opened_dir = Some(next);
-        }
-    }
-    let dir = opened_dir.as_ref().unwrap_or(&root.dir);
-
-    let opened = open_registry_regular_file(
-        dir,
-        file.path
-            .file_name()
-            .expect("collected registry files have names"),
-        &path,
-    )?;
-
-    let mut bytes = Vec::new();
-    opened
-        .take(max_bytes.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|source| RegistryError::Io {
-            path: path.clone(),
-            source,
-        })?;
-    let source_len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-    if source_len > max_bytes {
-        return Err(RegistryError::ReadLimitExceeded {
-            path,
-            bytes: source_len,
-            max: max_bytes,
-        });
-    }
-    String::from_utf8(bytes).map_err(|source| RegistryError::Io {
-        path,
-        source: io::Error::new(io::ErrorKind::InvalidData, source),
-    })
-}
-
-pub(super) fn collect_registry_files_with_limits(
-    root: &RegistryRoot,
-    dir: &Dir,
-    relative_dir: &Path,
-    out: &mut Vec<RegistryFile>,
-    limits: RegistryTraversalLimits,
-    depth: usize,
-    state: &mut RegistryTraversalState,
-) -> Result<(), RegistryError> {
-    for entry in dir.entries().map_err(|source| RegistryError::Io {
-        path: root.path.join(relative_dir),
-        source,
-    })? {
-        let entry = entry.map_err(|source| RegistryError::Io {
-            path: root.path.join(relative_dir),
-            source,
-        })?;
-        let name = entry.file_name();
-        let relative_path = relative_dir.join(&name);
-        let path = root.path.join(&relative_path);
-        state.entries = state.entries.saturating_add(1);
-        if state.entries > limits.max_entries {
-            return Err(RegistryError::TraversalLimitExceeded {
-                path,
-                limit: "entry count",
-                observed: state.entries,
-                max: limits.max_entries,
-            });
-        }
-        let file_type = entry.file_type().map_err(|source| RegistryError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        if file_type.is_symlink() {
-            return Err(RegistryError::UnsafePath {
-                path,
-                message: "registry paths must not be symlinks or reparse points".to_owned(),
-            });
-        }
-        if file_type.is_dir() {
-            let next_depth = depth.saturating_add(1);
-            if next_depth > limits.max_depth {
-                return Err(RegistryError::TraversalLimitExceeded {
-                    path,
-                    limit: "depth",
-                    observed: next_depth,
-                    max: limits.max_depth,
-                });
-            }
-            let child = dir
-                .open_dir_nofollow(&name)
-                .map_err(|source| unsafe_directory(path, source))?;
-            collect_registry_files_with_limits(
-                root,
-                &child,
-                &relative_path,
-                out,
-                limits,
-                next_depth,
-                state,
-            )?;
-        } else if file_type.is_file()
-            && relative_path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .is_some_and(|ext| matches!(ext, "yaml" | "yml"))
-        {
-            let opened = open_registry_regular_file(dir, &name, &path)?;
-            let metadata = opened.metadata().map_err(|source| RegistryError::Io {
-                path: path.clone(),
-                source,
-            })?;
-            if !metadata.is_file() || metadata.file_type().is_symlink() {
-                return Err(RegistryError::UnsafePath {
-                    path,
-                    message: "registry files must not be symlinks or reparse points".to_owned(),
-                });
-            }
-            let bytes = metadata.len();
-            if bytes > limits.max_file_bytes {
-                return Err(RegistryError::ReadLimitExceeded {
-                    path,
-                    bytes,
-                    max: limits.max_file_bytes,
-                });
-            }
-            state.bytes = state.bytes.saturating_add(bytes);
-            if state.bytes > limits.max_total_bytes {
-                return Err(RegistryError::ReadLimitExceeded {
-                    path: root.path.clone(),
-                    bytes: state.bytes,
-                    max: limits.max_total_bytes,
-                });
-            }
-            out.push(RegistryFile {
-                path: relative_path,
-            });
-        }
-    }
-    Ok(())
 }

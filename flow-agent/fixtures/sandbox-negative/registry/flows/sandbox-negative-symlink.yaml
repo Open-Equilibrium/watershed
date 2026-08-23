@@ -3,4 +3,3 @@ flow:
   name: SandboxNegativeSymlink
   phase_refs: [negative-symlink]
   subflow_refs: []
-  connection_refs: []

@@ -3,4 +3,3 @@ flow:
   name: SandboxNegativeWrite
   phase_refs: [negative-write]
   subflow_refs: []
-  connection_refs: []

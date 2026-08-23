@@ -35,7 +35,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 ### M1 — Flow Agent deterministic runtime foundation
 
-**Status:** Implementation complete on this branch; pending maintainer review and merge.
+**Status:** Complete.
 
 **Purpose:** establish the deterministic, auditable runtime contracts that later practical execution and OS isolation extend without presenting fixture behavior as productive provider or process execution.
 
@@ -55,16 +55,18 @@ M1 does not provide a real provider adapter, general external process execution,
 
 ### M1.1 — Flow Agent practical execution
 
+**Status:** The final M1.1 Maintainer decisions are implemented; repository closeout is in progress.
+
 #### M1.1 entry criteria — architecture hardening
 
 The M1 deterministic runtime foundation satisfies the following criteria. They remain mandatory boundaries before real provider integration or general subprocess execution begins (ADR-0079):
 
 1. **Protocol validation ownership:** `proto` alone owns Event-envelope and Event-payload structure validation; `flow-agent-core` delegates it. Runtime retains only stream, sequence, budget and lifecycle invariants, without parallel payload schemas or duplicated `EventType` matches.
-2. **Real `core-script` modules:** production uses no `include!` assembly. `model`, `registry`, `naming`, `semantics`, `load`, `parser`, `canonical` and `paths` are real Rust modules with explicit visibility/imports and a minimal public API.
+2. **Real `core-script` modules:** production uses real Rust modules with explicit visibility/imports, no `include!` assembly and a minimal public API.
 3. **Explicit Flow Agent runtime boundaries:** internal structure does not depend primarily on flat `pub use module::*` namespaces or systematic `use super::*`; imports, re-exports and security-critical interfaces are targeted.
-4. **Responsibility-based module split:** separate planning/apply; Event construction/persistence; Protocol lifecycle validation; Session reservation/locks; Session bundle inventory; Session reader/replay/tail; Resume orchestration; Context compilation; fixture Tool execution; capability-relative filesystem operations; CLI parsing/dispatch; CLI live streaming; and CLI tail. Do not split by line count alone.
+4. **Responsibility-based module split:** separate planning/apply; Event construction/persistence; Protocol lifecycle validation; Run reservation/locks; Run bundle inventory; Run reader/replay/tail; Resume orchestration; Context compilation; fixture Tool execution; capability-relative filesystem operations; CLI parsing/dispatch; CLI live streaming; and CLI tail. Do not split by line count alone.
 5. **Explicit finite execution-plan IR:** `FlowExecutionPlan` is a typed finite IR. Planning has no provider/Tool adapter and cannot constructively perform side effects; invocation IDs are planned; Apply consumes only the plan; Resume distinguishes pending from completed intents; a second full FSM pass is not a substitute for the IR.
-6. **Test architecture:** split large tests along the same responsibilities, including Protocol payload versus lifecycle and Session reservation versus bundle, corruption and Resume. Tests remain behavior-focused and the coverage threshold is unchanged.
+6. **Test architecture:** split large tests along the same responsibilities, including Protocol payload versus lifecycle and Run reservation versus bundle, corruption and Resume. Tests remain behavior-focused and the coverage threshold is unchanged.
 7. **CLI architecture:** `main.rs` is only the composition root; argument/usage parsing, dispatch, streaming and tail are separate internal modules, without requiring a product-framework decision.
 8. **Completion state:** the criteria are complete in M1; provider/subprocess work must preserve them and remains separately scoped to M1.1.
 
@@ -73,52 +75,63 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 **Deliverables:**
 
 1. A provider abstraction with at least one real provider adapter.
-2. Typed user inputs.
-3. Typed Connection values.
-4. Typed Tool and Artifact outputs for `flow-context-v0` or an explicitly versioned successor.
-5. Invocation parameters validated against each Tool's `allowed_parameters`.
-6. A general bounded external subprocess runner.
-7. Predefined commands launched by direct exec without shell parsing, PATH lookup or ambient environment inheritance.
-8. Own-script execution through one fixed runner with a bounded runtime and no implicit interpreter selection.
-9. Timeouts and cancellation.
-10. Bounded stdout and stderr.
-11. Per-Tool run logs.
-12. Actual `tool.timed_out` and real Tool-failure event emission.
-13. The M1 pure-plan/exactly-once-apply boundary for real providers and Tools.
-14. Whole-bundle session export, delete, prune and storage/quota status with retention configuration.
-15. No Watershed-owned project-code VCS behavior.
+2. Explicit non-interactive `flow init`, `flow validate` and custom `flow create <kind>` authoring for the four registry kinds: Tool, Instruction, Phase and Flow. Creation has complete preflight, no overwrite and no implicit attachment or discovery.
+3. Typed selected-root-Flow input and closed typed runtime values.
+4. Parameterized Instructions whose declared `{{name}}` placeholders bind typed Phase input values; explicit output contracts for every Phase.
+5. Recursive Phases: a leaf runs the provider loop, while a composite runs only its ordered child Phases and selects its declared result child.
+6. Whole successful result handoff between selected sibling Phases by default, with ordered inline forward Transitions using exact typed equality.
+7. Declarative Phase loops bounded to 1–32 local iterations and 512 Phase iterations per top-level Flow.
+8. Phase-scoped Tool availability: the provider may request an available Tool zero or more times; a Tool reference never invokes it automatically.
+9. Provider-requested invocation parameters validated against each Tool's `allowed_parameters`, with canonical bounded Tool results for events and Run Logs.
+10. A general bounded external subprocess runner.
+11. Predefined commands launched by direct exec without shell parsing, PATH lookup or ambient environment inheritance.
+12. Own-script execution through one fixed runner with a bounded runtime and no implicit interpreter selection.
+13. Timeouts, cancellation and bounded stdout and stderr.
+14. Per-Tool Run Log projections plus actual `tool.timed_out` and Tool-failure events.
+15. Durable intent around every explicit provider or provider-requested Tool attempt; an uncertain attempt is never relaunched automatically, and `flow reconcile-tool <conversation-id> <run-session-id> --result <file|->` settles exactly one eligible Tool attempt from bounded external evidence.
+16. Versioned Conversation trees over linear Runs, including creation, continuation, branching, recovery and paged status, as defined in `PROTOCOL.md`.
+17. Explicit `openai-codex` project configuration, browser/device authentication and a protected Flow-owned credential record.
+18. Automatic root `AGENTS.md` loading. Manually referenced Instruction source filenames have no authority or naming semantics and may, for example, be named `SYSTEM.md`.
+19. No Watershed-owned project-code VCS behavior.
 
 **DoD:**
 
 - A non-fixture workspace runs a real Flow through a real provider adapter.
+- Init, Validate and Create for Tool, Instruction, Phase and Flow satisfy the exact long-flag and delimited-group grammar in `PROTOCOL.md` plus the identity-bound transaction contract (ADR-0104); valid output round-trips through registry validation, while failure preserves existing bytes and publishes no partial output.
+- Recursive composite/leaf execution, typed Instruction binding, output contracts, whole-result handoff, ordered forward Transitions and both loop bounds are enforced before or during deterministic orchestration.
 - At least one predefined command and one own-script Tool use the bounded runner.
-- Inputs, Connection values and invocation parameters are typed and validated.
-- Provider and Tool side effects occur exactly once per planned invocation.
+- Root input, Phase results, Instruction parameters and provider-requested Tool parameters are typed and validated. Tool declarations make capabilities available but cause no automatic execution.
+- Every explicit provider or provider-requested Tool attempt records durable intent; an intent without a committed terminal result is reported as uncertain. Tool reconciliation accepts one canonical bounded result, derives exactly one eligible attempt and never redispatches it.
 - Timeout, cancellation, output caps and Tool logs are tested.
-- Export, delete and prune operate on the complete session bundle.
+- Every Conversation branch remains navigable in one append-only history. Latest-entry continuation and explicit older-entry branching create new Runs from the selected terminal compact snapshot after registry-drift validation, never roll back filesystem or external effects, and retain descendants. Exact two-id recovery consumes the same bounded snapshot model without redispatching durable external results.
 - No capability depends on Meta-Harness or Liquid.
 - Current gates plus the M1.1 performance and security budgets decided before implementation pass.
 
+**Explicit post-M1.1 Flow Agent work:** later milestones may add typed projections or mappings between Flow, Phase, Instruction, subflow, Tool and addressable artifact inputs/outputs; backward edges or an expression language; general retry/fallback policies; and automatic Tool imports referenced by Instructions. Dynamic proposals to add a Phase, child Phase or Flow at run time—including one-run versus persisted approval and an operator opt-out—also remain deferred. A durable ordered Conversation-status inventory may replace the query-only CV-03 admission bound when larger inventories are required; it must define transaction, recovery, migration and consistency rules without replacing Conversation or migration authority. Any future routing or proposal surface requires a finite schema, permissions, complete allowed/rejected matrix, provenance, replay and approval decision before enablement. The M1.1 routing boundary is canonical in `PROTOCOL.md`.
+
 ### M1.2 — Flow Agent OS isolation
 
-**Purpose:** enforce the declared policy as an operating-system boundary around real provider and Tool processes.
+**Purpose:** replace M1.1's productive direct-Tool path with a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
 
 **Deliverables:**
 
-1. Linux Landlock filesystem restrictions plus seccomp or an equivalent process/syscall boundary, inherited by child processes.
-2. A macOS Seatbelt profile with semantic parity to canonical policy artifacts and child-process inheritance.
-3. A Windows enforcement strategy selected through [D-047](docs/decisions/open-decisions.html#d-047); no parity claim before that decision and its evidence.
-4. Deny-by-default egress enforcement; CIDR/port grants remain blocked until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven, including DNS, DoH, DoT and child-process escape tests.
-5. An escape matrix covering traversal, symlinks, hardlinks, rename/create races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, protected paths, process spawning, timeout and cancellation termination.
-6. Optional container or microVM hardening that does not replace the OS baseline unless a later accepted decision changes it.
+1. A versioned one-shot Executor protocol for exactly one Tool invocation: Flow Agent owns policy validation, Executor selection and lifecycle, bounded request/result validation, durable attempt state and fail-closed errors. The companion process receives one JSON request on stdin, returns one JSON result on stdout and is resolved only from an administrator-configured absolute path. No daemon, socket, pool or remote transport is in M1.2.
+2. One official Default Sandbox Executor installed by the standard Flow Agent installation path. `--no-default-executor` is an explicit administrator opt-out; it preserves authoring, validation and fixture execution but leaves productive execution fail-closed until a Custom Executor is configured. Flow Agent provides the protocol, implementer documentation, actionable diagnostics and an advisory compatibility probe, but makes no third-party compatibility or security guarantee.
+3. Ubuntu 24.04 x64 enforcement through Bubblewrap namespaces/mounts plus seccomp, with inherited descendant confinement and deny-all Tool networking. There is no Landlock-only or unsandboxed fallback.
+4. macOS 26 arm64 enforcement through a native Seatbelt profile with semantic parity to the canonical policy and deny-all Tool networking, inherited by descendants.
+5. The unchanged deterministic Fixture executor and fake-Executor conformance fixtures, so M1/M1.1 contracts remain testable before, during and after backend implementation.
+6. A hostile escape matrix covering traversal, symlinks, hardlinks, rename/create races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, protected paths, process/session escape, timeout, cancellation and teardown.
 
 **DoD:**
 
-- Real Tool processes cannot exceed declared read, write, network or process boundaries on every platform for which support is claimed.
-- Negative tests exercise the applied OS boundary, not M1 policy emulation.
-- The canonical policy artifact and applied policy are demonstrably equivalent.
-- Child processes inherit restrictions and fail-open behavior is prevented or remains a release blocker.
-- Platform differences and tested coverage are explicit; no security claim exceeds the evidence.
+- A standard supported-platform installation passes its readiness self-test and runs a productive Flow out of the box; both standard and opt-out installation paths have automated acceptance tests.
+- Real Tool processes cannot exceed declared read, write, deny-all network or process boundaries on every exact platform for which support is claimed. Provider traffic remains Flow Agent traffic outside the Tool Sandbox.
+- Protocol conformance tests cover success, unsupported versions and policy, malformed/oversized output, timeout, premature exit, missing evidence and unavailable configuration without spawning a Tool after failed preflight.
+- Negative tests exercise the official applied OS boundary, not M1 policy emulation, and demonstrate equivalence between canonical policy and applied restrictions.
+- Descendants inherit restrictions; backend, protocol or readiness failure never falls back to M1.1 direct execution; platform differences and tested coverage are explicit.
+- The architecture and plain-language comparison with Pi Coding Agent and Codex CLI remain visible in [`docs/concept/flow-agent-executor-architecture.md`](docs/concept/flow-agent-executor-architecture.md).
+
+**Explicit post-M1.2 work:** Windows productive execution remains disabled until [D-047](docs/decisions/open-decisions.html#d-047) selects and proves a boundary. Positive CIDR/port grants remain disabled until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven. OCI/Docker/Podman, Lima/Apple Container, Firecracker/Cloud Hypervisor, gVisor, Kata Containers and Gondolin are non-binding future integration candidates, not support promises. A later milestone may add an independently reviewed backend or Custom Executor without transferring Executor ownership to Meta-Harness or Liquid.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 
@@ -131,9 +144,9 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Meta-Harness CLI (headless user/admin: run/session/config/metrics commands).
 - Local service/daemon shape (sidecar for Liquid or standalone daemon) with the transport-neutral API and D-023 bindings.
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, AgentPulse queries, approval/reject/revert (transport: D-023).
-- Central configuration model that resolves shared Watershed building blocks to the correct agent CLI (Flow Agent, Codex CLI, Claude Code, Pi Agent, etc.).
+- Central configuration model that resolves shared Watershed building blocks to the correct agent CLI (Flow Agent, Codex CLI, Claude Code and future agents).
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
-- Host-local executor that rejects cross-host agent-process control.
+- Host-local Meta-Harness agent executor that rejects cross-host agent-process control and never manages a Flow Executor or Tool Sandbox (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
 - Event/transcript ingestion from agents; artifact/log/handoff indexing (logs, structured summaries, host-provided diffs, handoff packs, checkpoints).
 - AgentPulse v0 metrics: rework ratio, first-attempt success and cost-per-productive-outcome using formulas decided before M2 implementation; computed and stored by Meta-Harness and queryable through CLI/API.

@@ -12,4 +12,4 @@ labels: bug
 
 **Environment** (OS, Rust toolchain, commit)
 
-**Logs / event stream excerpt** (if applicable; `.flow/sessions/<id>.jsonl`)
+**Logs / event stream excerpt** (if applicable; see `PROTOCOL.md` for current storage)

@@ -4,7 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1 — Flow Agent deterministic runtime foundation.** Implementation is complete on this branch, pending maintainer review and merge. M1 provides deterministic registry, planning, event, context, session and in-process policy-emulation contracts; practical provider/process execution and OS isolation are separate M1.1 and M1.2 stages in [PLAN.md](PLAN.md).
+**M1.1 — Flow Agent practical execution.** Current milestone status is canonical in [PLAN.md](PLAN.md#m11--flow-agent-practical-execution). M1.1 extends the deterministic M1 foundation with productive provider, Tool, Conversation, authoring, authentication, cancellation and durability behavior; OS isolation remains the separate M1.2 stage.
 
 ## Repo layout
 
@@ -19,13 +19,15 @@ liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions
 ```
 
+Current crate dependencies and major Flow Agent responsibility paths are mapped in [`docs/architecture.md`](docs/architecture.md).
+
 ## Build and run Flow Agent
 
 From the repo root:
 
 ```console
 cargo build --locked --workspace
-cargo nextest run --locked --workspace --all-targets
+cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
 Run the checked-in smoke fixture from its workspace directory. Its explicit fixture profile selects deterministic stubs; this does not call a provider or execute a general external process:
@@ -33,14 +35,16 @@ Run the checked-in smoke fixture from its workspace directory. Its explicit fixt
 ```console
 cd flow-agent/fixtures/smoke-flow
 cargo run -p flow-agent-cli -- run smoke-flow --emit jsonl
-cargo run -p flow-agent-cli -- replay smoke-flow --emit jsonl
-cargo run -p flow-agent-cli -- tail smoke-flow --emit jsonl --no-follow
-cargo run -p flow-agent-cli -- sessions
+cargo run -p flow-agent-cli -- replay smoke-flow smoke-flow --emit jsonl
+cargo run -p flow-agent-cli -- tail smoke-flow smoke-flow --emit jsonl --no-follow
+cargo run -p flow-agent-cli -- sessions status
 ```
 
-Workspace layout and registry fields are defined in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html); checked-in examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/).
+Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/).
 
-M1 cannot productively call an LLM/provider, run arbitrary external Tools or scripts, guarantee OS isolation, allow network destinations, or export/delete/prune sessions. A normal workspace fails closed instead of reporting fixture execution as success.
+For productive execution, initialize a workspace with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Use productive execution only on the [enabled targets](SECURITY.md#enforcement-per-flow). Agentic Engineers define each Flow's available Tools and capability limits through its Building Blocks; other users may run those predefined Flows. Productive Tools share the operator's OS identity until M1.2.
+
+The M1 baseline cannot productively call an LLM/provider, run external Tools or scripts, guarantee OS isolation or allow network destinations. M1.1 adds declared provider and Tool execution; its complete command and storage boundary is in [`PROTOCOL.md`](PROTOCOL.md). OS isolation remains scheduled for M1.2.
 
 ## Product boundaries
 
@@ -50,8 +54,10 @@ Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN
 
 - **Why & how it fits together:** [VISION.md](VISION.md)
 - **Build plan & milestones:** [PLAN.md](PLAN.md)
+- **Current implementation architecture:** [docs/architecture.md](docs/architecture.md)
+- **M1.2 Executor and Sandbox target:** [docs/concept/flow-agent-executor-architecture.md](docs/concept/flow-agent-executor-architecture.md)
 - **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
-- **Open decisions (human decision page):** `docs/decisions/open-decisions.html`
+- **Open decisions (human decision page):** [docs/decisions/open-decisions.html](docs/decisions/open-decisions.html)
 - **Terminology:** [GLOSSARY.md](GLOSSARY.md)
 
 ## License

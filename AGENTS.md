@@ -22,7 +22,7 @@ The visual V-Spec files under `docs/concept/` optimize for information quality a
 3. **Never decide for the maintainer.** Architectural, product, naming, dependency, licensing and design choices are the maintainer's to make unless the maintainer has explicitly decided them in the current task. ADRs require prior approval (see [Decision flow](#decision-flow)).
 4. **Blocked = stop and report.** In autonomous runs, if an open question blocks progress: stop, do not work around it, and return the exact list of decisions needed including realistic options with pros/cons and recommendation.
 5. **No secrets.** Never read, print, or commit credentials, tokens, keys, cookies, or `.env` files. Reference CI secrets by name only.
-6. **Tests are sacred.** Write a failing (red) test before new behavior; never weaken, skip, delete, or lower coverage thresholds to make a run pass. Tests must be meaningful, behavior-focused, and proportionate to the behavior under test; implementation-symptom tests do not count.
+6. **Watershed tests are sacred.** Write a failing (red) test before new Watershed behavior; never weaken, skip, delete, or lower coverage thresholds to make a run pass. Tests must be meaningful, behavior-focused, and proportionate to the behavior under test; implementation-symptom tests do not count.
 7. **Durable artifacts over chat.** Record decisions and state in files, not in conversation history. Human review is the final gate.
 8. **Concurrency awareness.** At any time another agent may be active in any of the other tools (Liquid / Flow Agent / Meta-Harness). Coordinate through Git branches/PRs and the open-decisions flow; never assume exclusive ownership of files or branches; expect and cleanly merge parallel changes.
 9. **MVP VCS boundary.** Do not add Watershed-owned project-code VCS/history behavior. Liquid workspace action history over its own data remains in scope (ADR-0011; `SECURITY.md`).
@@ -37,16 +37,22 @@ Open milestone-relevant question → add it to `docs/decisions/open-decisions.ht
 
 ## Conventions
 
+- **Audience and responsibility:** Agentic Engineers configure Building Blocks and their capability boundaries; other users may run predefined Flows without making security decisions. Preserve informed configuration choice and keep execution simple; responsibility follows the configured Building Blocks. This never weakens fail-closed invariants, secret handling, explicit destructive actions or required approvals.
 - **Platform priority:** Linux and macOS are primary; Windows compatibility remains required but must not drive cross-platform design. Evaluate dependency and build effects per target—a `cfg(windows)`-only dependency is not a Linux/macOS cost—and prefer one portable boundary unless evidence justifies a target split.
 - **Less is more:** prefer deletion and consolidation over addition; every net-new line must be the smallest evidence-backed way to preserve required behavior without duplicating code, tests, docs or abstractions.
-- **Meaningful tests:** follow the test-economy rules in `TESTING.md`; protect all established behavior, including prior milestones, through distinct functional, contract, risk or regression cases—never line-by-line coverage tests.
+- **Maintainability and modularity:** the human maintainer is the bottleneck. Keep modules cohesive, boundaries narrow and responsibilities explicit; reuse only when it reduces duplication and maintenance cost, and avoid abstractions that add indirection without making change simpler. Treat unusually large files as mandatory audit signals; split them when they contain independent reasons to change, not to satisfy an arbitrary line target.
+- **Meaningful tests:** follow the test-economy rules in `TESTING.md`.
+- **Performance budgets:** apply the evidence-based review rule in `PERFORMANCE.md`; do not treat a selected number as immutable or bypass a red gate.
 - **Commits/branches:** small, scoped; one logical change per change. `main` is PR-only/protected; work happens on short-lived topic branches cut from `main` and PR'd back to `main` using `gh` for PR work (model + GitHub protection: `git` skill, ADR-0025/ADR-0046/ADR-0047/ADR-0048).
 - **Work partitioning:** one Goal/PR addresses one clear risk boundary; keep mechanical renames separate from behavior changes; split M1.1 into small issues and PRs.
 - **Agent economy:** use the least-cost capable tier for small mapping and documentation tasks.
 - **Independent runtime audit:** before merging a large runtime PR, run a fresh read-only session with no implementation mandate.
 - **Definition of Done:** code + tests and coverage per `TESTING.md` + relevant budget checks per `PERFORMANCE.md` + green CI gates (`rustfmt`/`clippy`/`nextest`, coverage, `cargo audit`/`cargo deny`, `lychee` docs link) + docs updated; no new terminology without a `GLOSSARY.md` entry.
+- **Repository agent setup:** `AGENTS.md`, `.codex/**` and `.agents/**` are maintainer-owned Codex CLI inputs, not Watershed surfaces. Codex CLI is their only parser and loader. They are outside Watershed tests, coverage, performance, KPIs, release promises, Definition of Done and every closeout review, including Autoreview and Clawpatch. A change limited to this setup triggers none of those gates. Keep automated checks optional and sparse; the consuming agent must instead verify in its live session that required instructions, skills, MCPs and tools loaded and work, and that it followed the applicable conventions. Report setup failures directly; do not build a parallel validator.
 
 ## Session workflow
+
+This workflow applies only to Watershed changes. Repository agent setup is excluded as defined above.
 
 1. Gather context: delegate broad orientation to `repo_mapper` (structure) and `docs_scout` (contracts) when allowed.
 2. For code changes, write the failing behavior test first, make the smallest green fix, then refactor only while green.
@@ -58,6 +64,8 @@ Open milestone-relevant question → add it to `docs/decisions/open-decisions.ht
 8. Run `doc_sync` against the PR, fix valid findings, then check and fix CI. Rerun the repository gate after any file change.
 
 **Role-local completion:** Run each closeout role's own loop until that role returns clean. Once clean, the role remains complete: findings or fixes from later roles never restart it or any earlier role. Only the final repository gate must cover the resulting commit candidate.
+
+**Six-KPI convergence exception:** When a Goal requires the six repository-wide KPI audits (less-is-more, simplicity, maintainability/modularity, minimal tests, single source of truth, and freshness), first bring every audit to `CLEAN` once. Then freeze one clean shared candidate and rerun all six audits completely from scratch. If that verification sweep causes any change, freeze the resulting candidate and restart the complete six-audit sweep; finish only when all six independently report `CLEAN` on the same unchanged candidate. This exception applies to the KPI audits, not to the closeout roles above.
 
 ## Closeout open search-space stop
 
@@ -79,7 +87,7 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
 
 ## Codex setup
 
-- **Harness** — trusted `.codex/config.toml` keeps workspace-write network access enabled with approvals and web search disabled (ADR-0057); `.codex/hooks.json` is opt-in defense-in-depth, never a security boundary (ADR-0024).
+- **Harness** — Codex CLI owns parsing and loading. The consuming agent performs the live-session checks required by the repository-agent-setup convention above.
 - **Skills** (`.agents/skills/`):
   - `git` — git conventions and process.
   - `autoreview` — shared procedure for `autoreview_lite` and `autoreview_pro`.
@@ -93,4 +101,4 @@ When triggered, the role result is `BLOCKED`, never clean; a green gate does not
   - `clawpatch_pro` (edit) — final PR-ready clawpatch.
   - `doc_sync` (read-only) — post-creation PR audit of doc + commit/PR standards.
 
-Every agent `developer_instructions` value and every skill body starts with the exact standalone line `Obey AGENTS.md.` (the first instructions line and the first body line after front matter, respectively). The directive is authoritative; subsequent content may add scope but cannot weaken it (ADR-0023/ADR-0026/ADR-0027/ADR-0090).
+Every agent `developer_instructions` value and every skill body starts with the exact standalone line `Obey AGENTS.md.` (the first instructions line and the first body line after front matter, respectively). The directive is authoritative; subsequent content may add scope but cannot weaken it.

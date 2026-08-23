@@ -1,211 +1,27 @@
 use crate::runtime::{
     event_construction::{
-        ConstructedRuntimeEvent, RuntimeEventAlternative, RuntimeStreamSignatureBuilder,
+        ConstructedRuntimeEvent, PlannedRuntimeEvent, RuntimeEventAlternative,
         construct_runtime_transition, fixture_failure_transition_events,
         live_invocation_failure_transition_events, validate_runtime_transition_capacity,
     },
     event_writer::RuntimeEventSink,
+    execution_plan::{
+        FlowExecutionAction, FlowExecutionOptions, FlowExecutionPlan, PlannedFixtureAction,
+        RuntimeExecution, ToolSideEffectMode,
+    },
     failures::{
         fixture_failure_capacity_candidates, runtime_failure_for_tool_error,
         runtime_failure_for_unhandled_error,
     },
     fixture_effects::{apply_planned_fixture_effect, preflight_planned_fixture_effect},
     fs_guards::AnchoredWorkspace,
-    planning::{
-        CONTEXT_PLAN_DOMAIN, EVENT_PLAN_DOMAIN, FlowExecutionAction, FlowExecutionOptions,
-        FlowExecutionPlan, PlannedFixtureAction, PlannedFlowFailureBoundary, RuntimeExecution,
-        ToolSideEffectMode,
-    },
-    types::{MAX_LIVE_FLOW_INVOCATIONS, RuntimeError, render_human_failure_status},
+    live_flow_invocations::LiveFlowInvocations,
+    stream_signature::{CONTEXT_PLAN_DOMAIN, EVENT_PLAN_DOMAIN, RuntimeStreamSignatureBuilder},
+    types::{RuntimeError, render_human_failure_status},
 };
-use proto::{EventEnvelope, EventType};
+use proto::EventType;
 #[cfg(test)]
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static LIVE_FLOW_INVOCATIONS: LiveInvocationCounter = LiveInvocationCounter::new();
-
-struct LiveInvocationCounter {
-    count: AtomicUsize,
-}
-
-impl LiveInvocationCounter {
-    const fn new() -> Self {
-        Self {
-            count: AtomicUsize::new(0),
-        }
-    }
-
-    fn acquire(&self) -> Result<LiveInvocationGuard<'_>, RuntimeError> {
-        let mut observed = self.count.load(Ordering::Acquire);
-        loop {
-            if observed >= MAX_LIVE_FLOW_INVOCATIONS {
-                return Err(RuntimeError::Protocol(format!(
-                    "global live flow invocation limit reached: max {MAX_LIVE_FLOW_INVOCATIONS}"
-                )));
-            }
-            match self.count.compare_exchange_weak(
-                observed,
-                observed + 1,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return Ok(LiveInvocationGuard { counter: self }),
-                Err(actual) => observed = actual,
-            }
-        }
-    }
-}
-
-struct LiveInvocationGuard<'a> {
-    counter: &'a LiveInvocationCounter,
-}
-
-impl Drop for LiveInvocationGuard<'_> {
-    fn drop(&mut self) {
-        self.counter.count.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-struct ActiveLiveInvocation {
-    boundary: PlannedFlowFailureBoundary,
-    _guard: Option<LiveInvocationGuard<'static>>,
-}
-
-struct LiveFlowInvocations {
-    acquire_slots: bool,
-    active: Vec<ActiveLiveInvocation>,
-    prefix_event_count: u64,
-    tracks_events: bool,
-}
-
-impl LiveFlowInvocations {
-    fn for_application(
-        plan: &FlowExecutionPlan,
-        side_effect_mode: ToolSideEffectMode,
-    ) -> Result<Self, RuntimeError> {
-        let Some((prefix_event_count, acquire_slots)) = (match side_effect_mode {
-            ToolSideEffectMode::Apply => Some((0, true)),
-            ToolSideEffectMode::Resume { prefix_event_count } => Some((prefix_event_count, true)),
-            ToolSideEffectMode::PreflightResume { prefix_event_count } => {
-                Some((prefix_event_count, false))
-            }
-            ToolSideEffectMode::Plan => None,
-        }) else {
-            return Ok(Self {
-                acquire_slots: false,
-                active: Vec::new(),
-                prefix_event_count: 0,
-                tracks_events: false,
-            });
-        };
-        let mut tracker = Self {
-            acquire_slots,
-            active: Vec::new(),
-            prefix_event_count,
-            tracks_events: true,
-        };
-        for action in &plan.actions {
-            let FlowExecutionAction::Event(action) = action else {
-                continue;
-            };
-            if action.event.sequence > prefix_event_count {
-                break;
-            }
-            tracker.reconstruct_prefix_event(&action.event)?;
-        }
-        if tracker.acquire_slots {
-            for active in &mut tracker.active {
-                active._guard = Some(LIVE_FLOW_INVOCATIONS.acquire()?);
-            }
-        }
-        Ok(tracker)
-    }
-
-    fn reconstruct_prefix_event(&mut self, event: &EventEnvelope) -> Result<(), RuntimeError> {
-        match event.event_type {
-            EventType::FlowStarted => self.active.push(ActiveLiveInvocation {
-                boundary: flow_boundary(event)?,
-                _guard: None,
-            }),
-            EventType::FlowCompleted | EventType::FlowFailed => self.finish(event),
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn before_event(&mut self, event: &EventEnvelope) -> Result<(), RuntimeError> {
-        if !self.should_process(event) {
-            return Ok(());
-        }
-        if event.event_type == EventType::FlowStarted {
-            self.active.push(ActiveLiveInvocation {
-                boundary: flow_boundary(event)?,
-                _guard: if self.acquire_slots {
-                    Some(LIVE_FLOW_INVOCATIONS.acquire()?)
-                } else {
-                    None
-                },
-            });
-        }
-        Ok(())
-    }
-
-    fn after_event(&mut self, event: &EventEnvelope) {
-        if self.should_process(event)
-            && matches!(
-                event.event_type,
-                EventType::FlowCompleted | EventType::FlowFailed
-            )
-        {
-            self.finish(event);
-        }
-    }
-
-    fn finish(&mut self, event: &EventEnvelope) {
-        let Some(flow_id) = event.flow_id.as_deref() else {
-            return;
-        };
-        if let Some(index) = self
-            .active
-            .iter()
-            .rposition(|active| active.boundary.flow_id == flow_id)
-        {
-            self.active.remove(index);
-        }
-    }
-
-    fn active_boundaries(&self) -> Vec<PlannedFlowFailureBoundary> {
-        self.active
-            .iter()
-            .map(|active| active.boundary.clone())
-            .collect()
-    }
-
-    fn should_process(&self, event: &EventEnvelope) -> bool {
-        self.tracks_events && event.sequence > self.prefix_event_count
-    }
-}
-
-fn flow_boundary(event: &EventEnvelope) -> Result<PlannedFlowFailureBoundary, RuntimeError> {
-    let flow_id = event.flow_id.clone().ok_or_else(|| {
-        RuntimeError::Protocol("flow.started action is missing flow_id".to_owned())
-    })?;
-    let flow_definition_id = event
-        .payload
-        .get("flow_definition_id")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            RuntimeError::Protocol(
-                "flow.started action is missing payload.flow_definition_id".to_owned(),
-            )
-        })?;
-    Ok(PlannedFlowFailureBoundary {
-        flow_definition_id: flow_definition_id.to_owned(),
-        flow_id,
-        parent_flow_id: event.parent_flow_id.clone(),
-    })
-}
 
 pub struct FlowApplication<'a> {
     #[cfg(test)]
@@ -220,12 +36,7 @@ pub fn apply_flow_with_sink(
     application: FlowApplication<'_>,
     sink: Option<&mut dyn RuntimeEventSink>,
 ) -> Result<RuntimeExecution, RuntimeError> {
-    if application.options.side_effect_mode == ToolSideEffectMode::Plan {
-        return Err(RuntimeError::Protocol(
-            "flow apply cannot use ToolSideEffectMode::Plan".to_owned(),
-        ));
-    }
-    application.plan.validate_integrity()?;
+    validate_flow_application(&application)?;
     let execution_workspace = AnchoredWorkspace::open(application.workspace)?;
     apply_flow_with_workspace(application, &execution_workspace, sink)
 }
@@ -235,13 +46,17 @@ pub(crate) fn apply_flow_with_anchored_workspace(
     execution_workspace: &AnchoredWorkspace,
     sink: Option<&mut dyn RuntimeEventSink>,
 ) -> Result<RuntimeExecution, RuntimeError> {
+    validate_flow_application(&application)?;
+    apply_flow_with_workspace(application, execution_workspace, sink)
+}
+
+fn validate_flow_application(application: &FlowApplication<'_>) -> Result<(), RuntimeError> {
     if application.options.side_effect_mode == ToolSideEffectMode::Plan {
         return Err(RuntimeError::Protocol(
             "flow apply cannot use ToolSideEffectMode::Plan".to_owned(),
         ));
     }
-    application.plan.validate_integrity()?;
-    apply_flow_with_workspace(application, execution_workspace, sink)
+    application.plan.validate_integrity()
 }
 
 pub(crate) fn preflight_flow_execution_plan(
@@ -251,7 +66,7 @@ pub(crate) fn preflight_flow_execution_plan(
 ) -> Result<(), RuntimeError> {
     plan.validate_integrity()?;
     execution_workspace.verify_identity(plan.workspace_identity())?;
-    for action in &plan.actions {
+    for action in plan.actions.iter() {
         if let FlowExecutionAction::Fixture(action) = action
             && (side_effect_mode.should_execute_tool(action.completion_sequence)
                 || side_effect_mode.should_preflight_tool(action.completion_sequence))
@@ -293,7 +108,7 @@ fn apply_flow_with_workspace(
     let mut sink = sink;
     let mut event_signature = RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN);
     let mut context_signature = RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN);
-    for action in &application.plan.actions {
+    for action in application.plan.actions.iter() {
         match action {
             FlowExecutionAction::Event(action) => {
                 if action.event.event_type == EventType::FlowStarted
@@ -316,12 +131,16 @@ fn apply_flow_with_workspace(
                         &mut live_invocations,
                     );
                 }
-                if let Some(sink) = sink.as_deref_mut() {
+                if live_invocations.should_process(&action.event)
+                    && let Some(sink) = sink.as_deref_mut()
+                {
+                    #[cfg(test)]
                     let measurement_started_at = sink.measurement_started_at();
                     sink.commit(
                         &action.event,
                         &action.canonical_jsonl,
                         action.context_checkpoint.clone(),
+                        #[cfg(test)]
                         measurement_started_at,
                     )?;
                 }
@@ -371,7 +190,7 @@ fn apply_flow_with_workspace(
             FlowExecutionAction::Fixture(_) => {}
         }
     }
-    debug_assert!(live_invocations.active.is_empty());
+    debug_assert!(live_invocations.is_empty());
     Ok(RuntimeExecution {
         actions: application.plan.actions.clone(),
         context_manifests: context_signature.signature(),
@@ -401,21 +220,12 @@ fn preflight_fixture_failure_transitions(
     }
     let mut alternatives = Vec::new();
     for failure in fixture_failure_capacity_candidates() {
-        let alternative = RuntimeEventAlternative {
-            events: construct_runtime_transition(
-                application.session_id,
-                application.options.clock,
-                u64::try_from(event_signature.record_count).unwrap_or(u64::MAX),
-                fixture_failure_transition_events(&action.failure_transition, &failure),
-            )?,
-            label: "runtime failure transition",
-        };
-        validate_runtime_transition_capacity(
-            event_signature.record_count,
-            event_signature.byte_count,
-            &alternative,
-        )?;
-        alternatives.push(alternative);
+        alternatives.push(construct_runtime_alternative(
+            application,
+            event_signature,
+            fixture_failure_transition_events(&action.failure_transition, &failure),
+            "runtime failure transition",
+        )?);
     }
     sink.preflight_alternatives(&alternatives)
 }
@@ -435,22 +245,11 @@ fn preflight_live_invocation_failure_transition(
     let failure = runtime_failure_for_unhandled_error(&RuntimeError::Protocol(
         "global live flow invocation limit reached".to_owned(),
     ));
-    let alternative = RuntimeEventAlternative {
-        events: construct_runtime_transition(
-            application.session_id,
-            application.options.clock,
-            u64::try_from(event_signature.record_count).unwrap_or(u64::MAX),
-            live_invocation_failure_transition_events(
-                &live_invocations.active_boundaries(),
-                &failure,
-            ),
-        )?,
-        label: "live invocation failure transition",
-    };
-    validate_runtime_transition_capacity(
-        event_signature.record_count,
-        event_signature.byte_count,
-        &alternative,
+    let alternative = construct_runtime_alternative(
+        application,
+        event_signature,
+        live_invocation_failure_transition_events(&live_invocations.active_boundaries(), &failure),
+        "live invocation failure transition",
     )?;
     sink.preflight_alternatives(&[alternative])
 }
@@ -468,19 +267,11 @@ fn terminalize_planned_fixture_error(
     let known_tool_failure = mapped_failure.is_some();
     let mut failure = mapped_failure.unwrap_or_else(|| runtime_failure_for_unhandled_error(&error));
     failure.tool_id = Some(action.failure_transition.tool_id.clone());
-    let alternative = RuntimeEventAlternative {
-        events: construct_runtime_transition(
-            application.session_id,
-            application.options.clock,
-            u64::try_from(event_signature.record_count).unwrap_or(u64::MAX),
-            fixture_failure_transition_events(&action.failure_transition, &failure),
-        )?,
-        label: "runtime failure transition",
-    };
-    validate_runtime_transition_capacity(
-        event_signature.record_count,
-        event_signature.byte_count,
-        &alternative,
+    let alternative = construct_runtime_alternative(
+        application,
+        &event_signature,
+        fixture_failure_transition_events(&action.failure_transition, &failure),
+        "runtime failure transition",
     )?;
     let mut transition_state = PlannedTransitionState {
         sink,
@@ -523,19 +314,11 @@ fn terminalize_live_invocation_error(
 ) -> Result<RuntimeExecution, RuntimeError> {
     let failure = runtime_failure_for_unhandled_error(&error);
     let active_boundaries = live_invocations.active_boundaries();
-    let alternative = RuntimeEventAlternative {
-        events: construct_runtime_transition(
-            application.session_id,
-            application.options.clock,
-            u64::try_from(event_signature.record_count).unwrap_or(u64::MAX),
-            live_invocation_failure_transition_events(&active_boundaries, &failure),
-        )?,
-        label: "live invocation failure transition",
-    };
-    validate_runtime_transition_capacity(
-        event_signature.record_count,
-        event_signature.byte_count,
-        &alternative,
+    let alternative = construct_runtime_alternative(
+        application,
+        &event_signature,
+        live_invocation_failure_transition_events(&active_boundaries, &failure),
+        "live invocation failure transition",
     )?;
     let mut transition_state = PlannedTransitionState {
         sink,
@@ -559,6 +342,29 @@ fn terminalize_live_invocation_error(
     })
 }
 
+fn construct_runtime_alternative(
+    application: &FlowApplication<'_>,
+    event_signature: &RuntimeStreamSignatureBuilder,
+    planned: Vec<PlannedRuntimeEvent>,
+    label: &'static str,
+) -> Result<RuntimeEventAlternative, RuntimeError> {
+    let alternative = RuntimeEventAlternative {
+        events: construct_runtime_transition(
+            application.session_id,
+            application.options.clock,
+            u64::try_from(event_signature.record_count).unwrap_or(u64::MAX),
+            planned,
+        )?,
+        label,
+    };
+    validate_runtime_transition_capacity(
+        event_signature.record_count,
+        event_signature.byte_count,
+        &alternative,
+    )?;
+    Ok(alternative)
+}
+
 struct PlannedTransitionState<'state, 'sink> {
     sink: &'state mut Option<&'sink mut dyn RuntimeEventSink>,
     event_signature: &'state mut RuntimeStreamSignatureBuilder,
@@ -572,11 +378,13 @@ fn commit_constructed_transition(
     for constructed in events {
         state.live_invocations.before_event(&constructed.event)?;
         if let Some(sink) = state.sink.as_deref_mut() {
+            #[cfg(test)]
             let measurement_started_at = sink.measurement_started_at();
             sink.commit(
                 &constructed.event,
                 &constructed.canonical_jsonl,
                 None,
+                #[cfg(test)]
                 measurement_started_at,
             )?;
         }

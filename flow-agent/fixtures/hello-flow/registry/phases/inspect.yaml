@@ -3,7 +3,5 @@ phase:
   name: Inspect
   instruction_refs: [inspect-input]
   tool_refs: [read-file]
-  steps:
-    - id: gather
-      name: Gather
-      connection_refs: [inspect-data]
+  output:
+    type: string

@@ -3,6 +3,5 @@ phase:
   name: Smoke
   instruction_refs: [say-smoke]
   tool_refs: [echo]
-  steps:
-    - id: say
-      name: Say
+  output:
+    type: string

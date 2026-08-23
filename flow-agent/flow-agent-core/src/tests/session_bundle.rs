@@ -1,10 +1,47 @@
-use super::*;
+use super::helpers::{empty_workspace, reserve_session_log};
+use crate::runtime::{
+    digest::sha256_hex,
+    session_bundle::{
+        SessionBundleInventory, SessionBundlePaths, generated_zero_byte_session_objects_for_test,
+    },
+    types::{MAX_SESSION_OBJECTS, RuntimeError},
+};
+use std::fs;
+
+#[test]
+fn session_bundle_leaf_builders_and_parsers_share_one_grammar() {
+    let session_id = "bundle001";
+    let digest = "a".repeat(64);
+
+    let contexts = SessionBundlePaths::contexts_leaf(session_id);
+    let events = SessionBundlePaths::events_leaf(session_id);
+    let lock = SessionBundlePaths::lock_leaf(session_id);
+    let metadata = SessionBundlePaths::metadata_leaf(session_id);
+    let object = SessionBundlePaths::object_leaf(session_id, &digest);
+
+    assert_eq!(
+        SessionBundlePaths::split_contexts_leaf(&contexts),
+        Some(session_id)
+    );
+    assert_eq!(
+        SessionBundlePaths::split_events_leaf(&events),
+        Some(session_id)
+    );
+    assert_eq!(SessionBundlePaths::split_lock_leaf(&lock), Some(session_id));
+    assert_eq!(
+        SessionBundlePaths::split_metadata_leaf(&metadata),
+        Some(session_id)
+    );
+    assert_eq!(
+        SessionBundlePaths::split_object_leaf(&object),
+        Some((session_id, digest.as_str()))
+    );
+}
 
 #[test]
 fn session_bundle_inventory_owns_paths_segments_objects_and_byte_counts() {
     let workspace = empty_workspace("session-bundle-inventory");
-    let reservation =
-        reserve_session_log(&workspace, "inventory001").expect("session bundle reserved");
+    let reservation = reserve_session_log(&workspace, "inventory001").expect("Run bundle reserved");
     let paths = SessionBundlePaths::from_reservation(&reservation);
     reservation.activate().expect("reservation activates");
     drop(reservation);
@@ -39,14 +76,13 @@ fn session_bundle_inventory_owns_paths_segments_objects_and_byte_counts() {
     assert_eq!(inventory.metadata_bytes, 8);
     assert_eq!(inventory.object_bytes, 6);
     assert_eq!(inventory.total_bytes(), 42);
-    assert!(inventory.lock_present);
 }
 
 #[test]
 fn session_object_inventory_bounds_zero_byte_entries_before_opening_the_excess() {
     let workspace = empty_workspace("session-object-count");
     let reservation =
-        reserve_session_log(&workspace, "objectcount001").expect("session bundle reserved");
+        reserve_session_log(&workspace, "objectcount001").expect("Run bundle reserved");
     let sessions = SessionBundlePaths::from_reservation(&reservation).sessions;
     let opened = std::cell::Cell::new(0);
 

@@ -1,24 +1,26 @@
+#[cfg(test)]
+use crate::runtime::session_lock::SessionReservation;
 use crate::runtime::{
-    config_io::path_io_error,
-    context::is_lowercase_sha256_hex,
-    context_persistence::ensure_session_object_total,
+    digest::is_lowercase_sha256_hex,
     fs_guards::{
-        AnchoredDir, AnchoredFile, RuntimeDirs, open_anchored_file_for_read, segmented_jsonl_files,
+        AnchoredDir, AnchoredFile, RuntimeDirs, open_anchored_file_for_read, path_io_error,
+        segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem,
     },
     types::{
         CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_SESSION_BUNDLE_BYTES,
         MAX_SESSION_CONTEXT_MANIFEST_BYTES, MAX_SESSION_EVENT_BYTES, MAX_SESSION_METADATA_BYTES,
-        MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECTS, MAX_SESSION_SEGMENT_BYTES, RuntimeError,
-        SessionStreamLimits,
+        MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECT_TOTAL_BYTES, MAX_SESSION_OBJECTS,
+        MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits,
     },
 };
 #[cfg(test)]
-use crate::runtime::{
-    fs_guards::ensure_anchored_non_hardlinked_file, session_lock::SessionReservation,
-};
-#[cfg(test)]
 use std::cell::Cell;
-use std::{collections::BTreeMap, io, path::Path};
+use std::{collections::BTreeMap, ffi::OsStr, io, path::Path};
+
+const CONTEXT_STREAM_STEM_SUFFIX: &str = ".contexts";
+const LOCK_SUFFIX: &str = ".lock";
+const METADATA_SUFFIX: &str = ".log";
+const OBJECT_DIGEST_SEPARATOR: &str = ".object.sha256-";
 
 #[derive(Clone, Debug)]
 pub struct SessionBundlePaths {
@@ -56,19 +58,88 @@ impl SessionBundlePaths {
     }
 
     pub(crate) fn contexts_in(logs: &AnchoredDir, session_id: &str) -> AnchoredFile {
-        logs.file(format!("{session_id}.contexts.jsonl"))
+        logs.file(Self::contexts_leaf(session_id))
     }
 
     pub(crate) fn events_in(sessions: &AnchoredDir, session_id: &str) -> AnchoredFile {
-        sessions.file(format!("{session_id}.jsonl"))
+        sessions.file(Self::events_leaf(session_id))
     }
 
     pub(crate) fn lock_in(sessions: &AnchoredDir, session_id: &str) -> AnchoredFile {
-        sessions.file(format!("{session_id}.lock"))
+        sessions.file(Self::lock_leaf(session_id))
     }
 
     pub(crate) fn metadata_in(logs: &AnchoredDir, session_id: &str) -> AnchoredFile {
-        logs.file(format!("{session_id}.log"))
+        logs.file(Self::metadata_leaf(session_id))
+    }
+
+    pub(crate) fn contexts_leaf(session_id: &str) -> String {
+        segmented_jsonl_leaf(&format!("{session_id}{CONTEXT_STREAM_STEM_SUFFIX}"), 1)
+            .expect("first context segment ordinal is valid")
+    }
+
+    pub(crate) fn events_leaf(session_id: &str) -> String {
+        segmented_jsonl_leaf(session_id, 1).expect("first event segment ordinal is valid")
+    }
+
+    pub(crate) fn lock_leaf(session_id: &str) -> String {
+        format!("{session_id}{LOCK_SUFFIX}")
+    }
+
+    pub(crate) fn metadata_leaf(session_id: &str) -> String {
+        format!("{session_id}{METADATA_SUFFIX}")
+    }
+
+    pub(crate) fn object_prefix(session_id: &str) -> String {
+        format!("{session_id}{OBJECT_DIGEST_SEPARATOR}")
+    }
+
+    pub(crate) fn object_leaf(session_id: &str, digest: &str) -> String {
+        format!("{}{digest}", Self::object_prefix(session_id))
+    }
+
+    pub(crate) fn object_namespace_owner(name: &OsStr) -> Option<String> {
+        let bytes = name.as_encoded_bytes();
+        let separator = OBJECT_DIGEST_SEPARATOR.as_bytes();
+        let boundary = bytes
+            .windows(separator.len())
+            .position(|window| window.eq_ignore_ascii_case(separator))?;
+        let owner = std::str::from_utf8(&bytes[..boundary])
+            .ok()?
+            .to_ascii_lowercase();
+        proto::is_valid_session_id(&owner).then_some(owner)
+    }
+
+    pub(crate) fn object_in(
+        sessions: &AnchoredDir,
+        session_id: &str,
+        digest: &str,
+    ) -> AnchoredFile {
+        sessions.file(Self::object_leaf(session_id, digest))
+    }
+
+    pub(crate) fn split_contexts_leaf(name: &str) -> Option<&str> {
+        Self::split_contexts_stem(segmented_jsonl_leaf_stem(name)?)
+    }
+
+    pub(crate) fn split_contexts_stem(name: &str) -> Option<&str> {
+        name.strip_suffix(CONTEXT_STREAM_STEM_SUFFIX)
+    }
+
+    pub(crate) fn split_events_leaf(name: &str) -> Option<&str> {
+        segmented_jsonl_leaf_stem(name)
+    }
+
+    pub(crate) fn split_lock_leaf(name: &str) -> Option<&str> {
+        name.strip_suffix(LOCK_SUFFIX)
+    }
+
+    pub(crate) fn split_metadata_leaf(name: &str) -> Option<&str> {
+        name.strip_suffix(METADATA_SUFFIX)
+    }
+
+    pub(crate) fn split_object_leaf(name: &str) -> Option<(&str, &str)> {
+        name.split_once(OBJECT_DIGEST_SEPARATOR)
     }
 }
 
@@ -78,8 +149,6 @@ pub struct SessionBundleInventory {
     pub(crate) context_segments: Vec<AnchoredFile>,
     pub(crate) event_bytes: u64,
     pub(crate) event_segments: Vec<AnchoredFile>,
-    #[cfg(test)]
-    pub(crate) lock_present: bool,
     pub(crate) metadata_bytes: u64,
     pub(crate) object_bytes: u64,
     pub(crate) objects: BTreeMap<String, AnchoredFile>,
@@ -99,15 +168,11 @@ impl SessionBundleInventory {
         let context_bytes = segment_bytes(&context_segments, MAX_SESSION_CONTEXT_MANIFEST_BYTES)?;
         let metadata_bytes = anchored_file_bytes(&paths.metadata, MAX_SESSION_METADATA_BYTES)?;
         let (objects, object_bytes) = session_objects(&paths.sessions, &paths.session_id)?;
-        #[cfg(test)]
-        let lock_present = anchored_leaf_present(&paths.lock)?;
         let inventory = Self {
             context_bytes,
             context_segments,
             event_bytes,
             event_segments,
-            #[cfg(test)]
-            lock_present,
             metadata_bytes,
             object_bytes,
             objects,
@@ -115,7 +180,7 @@ impl SessionBundleInventory {
         };
         if inventory.total_bytes() > MAX_SESSION_BUNDLE_BYTES {
             return Err(RuntimeError::Protocol(format!(
-                "session bundle size {} bytes exceeds max {MAX_SESSION_BUNDLE_BYTES}",
+                "Run bundle size {} bytes exceeds max {MAX_SESSION_BUNDLE_BYTES}",
                 inventory.total_bytes()
             )));
         }
@@ -143,7 +208,7 @@ impl SessionBundleInventory {
             )));
         }
         for (digest, path) in &self.objects {
-            let expected = format!("{}.object.sha256-{digest}", self.paths_session_id());
+            let expected = SessionBundlePaths::object_leaf(self.paths_session_id(), digest);
             if path.leaf != Path::new(&expected) {
                 return Err(RuntimeError::Protocol(format!(
                     "{} does not match its session object inventory key",
@@ -201,20 +266,6 @@ fn anchored_file_bytes(file: &AnchoredFile, maximum: u64) -> Result<u64, Runtime
     Ok(bytes)
 }
 
-#[cfg(test)]
-fn anchored_leaf_present(file: &AnchoredFile) -> Result<bool, RuntimeError> {
-    match file.metadata() {
-        Ok(_) => {
-            ensure_anchored_non_hardlinked_file(file)?;
-            Ok(true)
-        }
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-            Ok(false)
-        }
-        Err(error) => Err(error),
-    }
-}
-
 pub(crate) fn session_objects(
     sessions: &AnchoredDir,
     session_id: &str,
@@ -224,14 +275,20 @@ pub(crate) fn session_objects(
         .entries()
         .map_err(|source| path_io_error(&sessions.path, source))?
         .map(|entry| {
-            entry
-                .map(|entry| {
-                    entry
-                        .file_name()
-                        .to_str()
-                        .map(std::borrow::ToOwned::to_owned)
-                })
-                .map_err(|source| path_io_error(&sessions.path, source))
+            let entry = entry.map_err(|source| path_io_error(&sessions.path, source))?;
+            let name = entry.file_name();
+            match name.to_str() {
+                Some(name) => Ok(Some(name.to_owned())),
+                None if SessionBundlePaths::object_namespace_owner(&name).as_deref()
+                    == Some(session_id) =>
+                {
+                    Err(RuntimeError::Protocol(format!(
+                        "{} contains non-canonical session object name",
+                        sessions.path.display()
+                    )))
+                }
+                None => Ok(None),
+            }
         });
     collect_session_objects(sessions, session_id, names, |path| {
         anchored_file_bytes(path, MAX_SESSION_OBJECT_BYTES)
@@ -244,7 +301,6 @@ fn collect_session_objects(
     names: impl Iterator<Item = Result<Option<String>, RuntimeError>>,
     mut file_bytes: impl FnMut(&AnchoredFile) -> Result<u64, RuntimeError>,
 ) -> Result<(BTreeMap<String, AnchoredFile>, u64), RuntimeError> {
-    let prefix = format!("{session_id}.object.sha256-");
     let mut objects = BTreeMap::new();
     let mut total = 0u64;
     for name in names {
@@ -252,9 +308,14 @@ fn collect_session_objects(
             continue;
         };
         let candidate = name.to_ascii_lowercase();
-        let Some(digest) = candidate.strip_prefix(&prefix) else {
+        let Some((candidate_session_id, digest)) =
+            SessionBundlePaths::split_object_leaf(&candidate)
+        else {
             continue;
         };
+        if candidate_session_id != session_id {
+            continue;
+        }
         if candidate != name || !is_lowercase_sha256_hex(digest) {
             return Err(RuntimeError::Protocol(format!(
                 "{} contains non-canonical session object name {name}",
@@ -262,7 +323,7 @@ fn collect_session_objects(
             )));
         }
         ensure_session_object_count(sessions, objects.len().saturating_add(1))?;
-        let path = sessions.file(&name);
+        let path = SessionBundlePaths::object_in(sessions, session_id, digest);
         let bytes = file_bytes(&path)?;
         total = total.saturating_add(bytes);
         ensure_session_object_total(total)?;
@@ -284,6 +345,15 @@ pub(crate) fn ensure_session_object_count(
     Ok(())
 }
 
+pub(crate) fn ensure_session_object_total(bytes: u64) -> Result<(), RuntimeError> {
+    if bytes > MAX_SESSION_OBJECT_TOTAL_BYTES {
+        return Err(RuntimeError::Protocol(format!(
+            "Run bundle object data size {bytes} bytes exceeds max {MAX_SESSION_OBJECT_TOTAL_BYTES}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 pub(crate) fn generated_zero_byte_session_objects_for_test(
     sessions: &AnchoredDir,
@@ -291,172 +361,14 @@ pub(crate) fn generated_zero_byte_session_objects_for_test(
     count: usize,
     opened: &Cell<usize>,
 ) -> Result<(BTreeMap<String, AnchoredFile>, u64), RuntimeError> {
-    let names =
-        (0..count).map(|index| Ok(Some(format!("{session_id}.object.sha256-{index:064x}"))));
+    let names = (0..count).map(|index| {
+        Ok(Some(SessionBundlePaths::object_leaf(
+            session_id,
+            &format!("{index:064x}"),
+        )))
+    });
     collect_session_objects(sessions, session_id, names, |_| {
         opened.set(opened.get() + 1);
         Ok(0)
     })
-}
-
-pub(crate) fn session_ids(sessions: &AnchoredDir) -> Result<Vec<String>, RuntimeError> {
-    let mut ids = Vec::new();
-    for entry in sessions
-        .dir
-        .entries()
-        .map_err(|source| path_io_error(&sessions.path, source))?
-    {
-        let entry = entry.map_err(|source| path_io_error(&sessions.path, source))?;
-        let name = entry.file_name();
-        let path = Path::new(&name);
-        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("jsonl") {
-            continue;
-        }
-        let Some(id) = path.file_stem().and_then(std::ffi::OsStr::to_str) else {
-            continue;
-        };
-        if !proto::is_valid_session_id(id)
-            || open_anchored_file_for_read(&sessions.file(name.clone())).is_err()
-        {
-            continue;
-        }
-        ids.push(id.to_owned());
-    }
-    ids.sort();
-    Ok(ids)
-}
-
-pub const MAX_UNIQUE_SESSION_CANDIDATES: u32 = 10_000;
-
-#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-pub enum SessionCandidateHint {
-    Free,
-    Occupied,
-    Probe,
-}
-
-#[cfg(test)]
-pub fn session_candidate_hints(
-    dirs: &RuntimeDirs,
-    base_session_id: &str,
-) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
-    session_candidate_hints_from_dirs(Some(&dirs.sessions), Some(&dirs.logs), base_session_id)
-}
-
-pub(crate) fn session_candidate_hints_from_dirs(
-    sessions: Option<&AnchoredDir>,
-    logs: Option<&AnchoredDir>,
-    base_session_id: &str,
-) -> Result<Vec<SessionCandidateHint>, RuntimeError> {
-    let mut hints = vec![SessionCandidateHint::Free; MAX_UNIQUE_SESSION_CANDIDATES as usize];
-    for (dir, logs) in [(sessions, false), (logs, true)] {
-        let Some(dir) = dir else {
-            continue;
-        };
-        for entry in dir
-            .dir
-            .entries()
-            .map_err(|source| path_io_error(&dir.path, source))?
-        {
-            let entry = entry.map_err(|source| path_io_error(&dir.path, source))?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            let lower = name.to_ascii_lowercase();
-            let classified = if logs {
-                classify_log_candidate_leaf(&lower)
-            } else {
-                classify_session_candidate_leaf(dir, &lower, name == lower)
-            };
-            let Some((session_id, hint)) = classified else {
-                continue;
-            };
-            for index in [
-                (session_id == base_session_id).then_some(0),
-                generated_suffix_candidate_index(base_session_id, session_id),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                hints[index] = hints[index].max(hint);
-            }
-        }
-    }
-    Ok(hints)
-}
-
-fn classify_log_candidate_leaf(name: &str) -> Option<(&str, SessionCandidateHint)> {
-    if let Some(id) = name.strip_suffix(".log") {
-        return Some((id, SessionCandidateHint::Occupied));
-    }
-    segmented_candidate_id(name, true)
-        .or_else(|| name.strip_suffix(".contexts.jsonl"))
-        .map(|id| (id, SessionCandidateHint::Occupied))
-}
-
-fn classify_session_candidate_leaf<'a>(
-    dir: &AnchoredDir,
-    name: &'a str,
-    canonical: bool,
-) -> Option<(&'a str, SessionCandidateHint)> {
-    if let Some((id, _)) = name.split_once(".object.sha256-") {
-        return Some((id, SessionCandidateHint::Occupied));
-    }
-    if let Some(id) = name.strip_suffix(".lock") {
-        let hint = match dir.file(name).metadata() {
-            Ok(metadata) if !metadata.file_type().is_symlink() => SessionCandidateHint::Occupied,
-            Err(RuntimeError::Io { source, .. })
-                if !canonical && source.kind() == io::ErrorKind::NotFound =>
-            {
-                SessionCandidateHint::Occupied
-            }
-            _ => SessionCandidateHint::Probe,
-        };
-        return Some((id, hint));
-    }
-    if let Some(id) = segmented_candidate_id(name, false) {
-        return Some((id, SessionCandidateHint::Occupied));
-    }
-    name.strip_suffix(".jsonl").map(|id| {
-        let hint = if canonical {
-            SessionCandidateHint::Probe
-        } else {
-            SessionCandidateHint::Occupied
-        };
-        (id, hint)
-    })
-}
-
-fn segmented_candidate_id(name: &str, contexts: bool) -> Option<&str> {
-    let (stem, ordinal) = name.strip_suffix(".jsonl")?.rsplit_once('.')?;
-    if ordinal.len() != 6 || !ordinal.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    if contexts {
-        stem.strip_suffix(".contexts")
-    } else {
-        Some(stem)
-    }
-}
-
-fn generated_suffix_candidate_index(base_session_id: &str, session_id: &str) -> Option<usize> {
-    let ordinal = session_id.rsplit_once('-')?.1.parse::<u32>().ok()?;
-    if !(2..=MAX_UNIQUE_SESSION_CANDIDATES).contains(&ordinal) {
-        return None;
-    }
-    (suffixed_session_id(base_session_id, ordinal) == session_id).then_some(ordinal as usize - 1)
-}
-
-pub fn suffixed_session_id(base_session_id: &str, ordinal: u32) -> String {
-    let suffix = format!("-{ordinal}");
-    let prefix_len = 128usize.saturating_sub(suffix.len());
-    let prefix = if base_session_id.len() > prefix_len {
-        &base_session_id[..prefix_len]
-    } else {
-        base_session_id
-    };
-    let candidate = format!("{prefix}{suffix}");
-    debug_assert!(proto::is_valid_session_id(&candidate));
-    candidate
 }

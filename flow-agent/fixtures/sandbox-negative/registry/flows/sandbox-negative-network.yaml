@@ -3,4 +3,3 @@ flow:
   name: SandboxNegativeNetwork
   phase_refs: [negative-network]
   subflow_refs: []
-  connection_refs: []
