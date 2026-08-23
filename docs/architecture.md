@@ -54,3 +54,7 @@ flowchart TD
 ```
 
 See the [Flow Agent V-Spec](concept/V-Spec_FlowAgent.html#architecture) for responsibility boundaries. Current module declarations live in [`flow-agent-core/src/runtime/mod.rs`](../flow-agent/flow-agent-core/src/runtime/mod.rs); CLI composition lives in [`flow-agent-cli/src/dispatch.rs`](../flow-agent/flow-agent-cli/src/dispatch.rs).
+
+## Current configuration boundary
+
+Current M1.1 anchors the selected Workspace, reads `.flow/config.yaml`, resolves its Workspace-relative registry and loads provider/model fields from that file. It has no global Flow configuration loader. Credentials and runtime sessions are already user-global, but they are separate stores. This behavior does not yet implement ADR-0152's global-only target; [D-057](decisions/open-decisions.html#d-057) must define storage, authoring and migration before code changes.
