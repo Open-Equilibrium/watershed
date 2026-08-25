@@ -31,8 +31,10 @@ fn import_requires_one_explicit_legacy_workspace_and_publishes_globally() {
     .expect("legacy config is staged");
     copy_dir(&fixture.join("registry"), &source.join("registry"));
     let harness_workspace = empty_workspace();
+    let global_home = harness_workspace.join("import-home");
 
     let output = flow_command()
+        .env("FLOW_AGENT_HOME", &global_home)
         .current_dir(&harness_workspace)
         .args([
             "import",
@@ -47,7 +49,6 @@ fn import_requires_one_explicit_legacy_workspace_and_publishes_globally() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"imported\n");
-    let global_home = session_home_path();
     assert!(global_home.join("config.yaml").is_file());
     assert!(global_home.join("registry/flows/smoke-flow.yaml").is_file());
     assert!(!harness_workspace.join(".flow").exists());
