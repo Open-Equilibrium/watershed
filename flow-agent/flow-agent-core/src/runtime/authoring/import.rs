@@ -329,14 +329,14 @@ fn populate_stage(
 
 fn publish_stage(
     parent: &AnchoredDir,
-    stage: &AnchoredDir,
+    _stage: &AnchoredDir,
     _stage_leaf: &str,
     target_leaf: &str,
     target_path: &Path,
 ) -> Result<(), RuntimeError> {
     #[cfg(windows)]
     let result = crate::runtime::windows_anchored_dir::publish_anchored_directory(
-        &stage.dir,
+        &_stage.dir,
         &parent.dir,
         target_leaf,
     );
