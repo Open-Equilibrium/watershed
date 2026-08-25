@@ -1,5 +1,6 @@
 use super::super::helpers::empty_workspace;
-use super::support::{absent_global_home, authoring_workspace, padded_instruction};
+use super::super::test_support::absent_global_home;
+use super::support::{authoring_workspace, padded_instruction};
 use crate::runtime::authoring::set_create_post_validation_observer;
 use crate::runtime::m11_budget_evidence::maximum_tool;
 use crate::runtime::types::RuntimeError;

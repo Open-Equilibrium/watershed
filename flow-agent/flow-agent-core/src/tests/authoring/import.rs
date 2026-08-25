@@ -1,8 +1,7 @@
 use super::super::{
     helpers::empty_workspace,
-    test_support::{copy_dir, fixture_dir, session_home_path},
+    test_support::{absent_global_home, copy_dir, fixture_dir, session_home_path},
 };
-use super::support::absent_global_home;
 use crate::{import_global_config_from_workspace, initialize_global_config};
 use std::{fs, path::PathBuf, process::Command};
 

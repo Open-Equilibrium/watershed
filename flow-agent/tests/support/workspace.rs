@@ -70,6 +70,16 @@ pub(crate) fn session_home_path() -> PathBuf {
 }
 
 #[allow(dead_code)]
+pub(crate) fn absent_global_home() -> PathBuf {
+    let home = session_home_path();
+    if home.exists() {
+        fs::remove_dir(&home).expect("the isolated empty global home removes");
+    }
+    assert!(!home.exists());
+    home
+}
+
+#[allow(dead_code)]
 pub(crate) fn workspace_session_dir(workspace: &Path) -> PathBuf {
     workspace_store_dir(workspace).join("sessions")
 }

@@ -1,6 +1,6 @@
 use super::{
     helpers::{create_directory_alias, empty_workspace},
-    test_support::{session_home_path, workspace_copy},
+    test_support::{absent_global_home, session_home_path, workspace_copy},
 };
 use crate::runtime::{
     config_io::{
@@ -543,10 +543,11 @@ fn global_config_rejects_hardlinked_config_file() {
 #[cfg(any(unix, windows))]
 #[test]
 fn global_config_rejects_linked_home_directory() {
+    let global_home = absent_global_home();
     let outside = empty_workspace("outside-global-config-home");
     fs::write(outside.join("config.yaml"), "registry_root: registry\n")
         .expect("outside config written");
-    create_directory_alias(&session_home_path(), &outside);
+    create_directory_alias(&global_home, &outside);
 
     let err = load_global_config().expect_err("linked config parent must fail");
 

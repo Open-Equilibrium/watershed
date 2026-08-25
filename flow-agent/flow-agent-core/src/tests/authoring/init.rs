@@ -1,5 +1,4 @@
-use super::super::test_support::session_home_path;
-use super::support::absent_global_home;
+use super::super::test_support::{absent_global_home, session_home_path};
 use crate::runtime::authoring::{
     set_init_post_marker_removal_observer, set_init_serialization_observer,
 };
