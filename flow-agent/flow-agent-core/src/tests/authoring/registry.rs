@@ -1,5 +1,5 @@
 use super::super::helpers::empty_workspace;
-use super::support::{authoring_workspace, padded_instruction};
+use super::support::{absent_global_home, authoring_workspace, padded_instruction};
 use crate::runtime::authoring::set_create_post_validation_observer;
 use crate::runtime::m11_budget_evidence::maximum_tool;
 use crate::runtime::types::RuntimeError;
@@ -165,6 +165,7 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
 
 #[test]
 fn authoring_uninitialized_global_config_uses_runtime_exit_class() {
+    absent_global_home();
     let workspace = empty_workspace("authoring-uninitialized-global-config");
     let error = create_global_registry_block(maximum_tool())
         .expect_err("uninitialized global config is rejected");
