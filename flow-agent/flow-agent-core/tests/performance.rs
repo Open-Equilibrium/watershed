@@ -11,7 +11,7 @@ use std::{
 
 #[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::{PeakRssSampler, TempWorkspace, workspace_copy};
+use test_support::{PeakRssSampler, TempWorkspace, session_home_path, workspace_copy};
 
 static PERFORMANCE_GATE: Mutex<()> = Mutex::new(());
 const PER_FLOW_MEMORY_BUDGET_BYTES: u64 = 11 * 1024 * 1024;
@@ -422,6 +422,7 @@ fn assert_near_limit_completion_contract(events: &[EventEnvelope]) {
 
 fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
     let workspace = workspace_copy("smoke-flow");
+    let registry = session_home_path().join("registry");
     let mut phase_refs = Vec::new();
     let mut active_paths = vec![
         "flows/smoke-flow.yaml".to_owned(),
@@ -436,12 +437,12 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
             "x".repeat(60 * 1024)
         );
         let instruction_path = format!("instructions/{id}.yaml");
-        fs::write(workspace.join("registry").join(&instruction_path), source)
+        fs::write(registry.join(&instruction_path), source)
             .expect("near-limit instruction written");
         active_paths.push(instruction_path);
         let phase_path = format!("phases/{phase_id}.yaml");
         fs::write(
-            workspace.join("registry").join(&phase_path),
+            registry.join(&phase_path),
             format!(
                 "phase:\n  id: {phase_id}\n  name: NearLimitPhase{index:02}\n  instruction_refs: [{id}]\n  tool_refs: [echo]\n  output:\n    type: string\n"
             ),
@@ -451,13 +452,13 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
     }
     let child_path = "flows/near-limit-child.yaml";
     fs::write(
-        workspace.join("registry").join(child_path),
+        registry.join(child_path),
         "flow:\n  id: near-limit-child\n  name: NearLimitChild\n  phase_refs: [near-limit-phase-00]\n  subflow_refs: []\n",
     )
     .expect("near-limit child flow written");
     active_paths.push(child_path.to_owned());
     fs::write(
-        workspace.join("registry/flows/smoke-flow.yaml"),
+        registry.join("flows/smoke-flow.yaml"),
         format!(
             "flow:\n  id: smoke-flow\n  name: SmokeFlow\n  phase_refs: [{}]\n  subflow_refs: [near-limit-child]\n",
             phase_refs.join(", ")
@@ -472,7 +473,7 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
             "x".repeat(core_script::MAX_BLOCK_NAME_CHARS - name_prefix.len())
         );
         fs::write(
-            workspace.join(format!("registry/instructions/{id}.yaml")),
+            registry.join(format!("instructions/{id}.yaml")),
             format!("instruction:\n  id: {id}\n  name: {name}\n  prompt: Unused\n"),
         )
         .expect("unrelated catalog instruction written");
@@ -480,7 +481,7 @@ fn near_limit_registry_workspace() -> (TempWorkspace, u64) {
     let active_bytes = active_paths
         .into_iter()
         .map(|path| {
-            fs::metadata(workspace.join("registry").join(path))
+            fs::metadata(registry.join(path))
                 .expect("active definition metadata")
                 .len()
         })
