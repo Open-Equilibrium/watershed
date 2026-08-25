@@ -1,5 +1,5 @@
 use super::super::{
-    helpers::{create_windows_junction, empty_workspace},
+    helpers::{create_directory_alias, empty_workspace},
     test_support::{absent_global_home, copy_dir, fixture_dir, session_home_path},
 };
 use crate::runtime::{
@@ -156,7 +156,7 @@ fn import_cleanup_preserves_missing_replaced_and_linked_stage_paths() {
         .expect("linked stage is created");
     let linked_identity = linked_stage.identity().expect("linked identity reads");
     let outside = empty_workspace("import-cleanup-link-target");
-    create_windows_junction(&linked_stage.path.join("foreign-link"), &outside);
+    create_directory_alias(&linked_stage.path.join("foreign-link"), &outside);
     drop(linked_stage);
     let error = cleanup_import_stage(&parent, "linked-stage", linked_identity)
         .expect_err("cleanup refuses a linked entry");
@@ -168,7 +168,7 @@ fn import_cleanup_preserves_missing_replaced_and_linked_stage_paths() {
 fn import_snapshot_rejects_rebound_links_depth_and_file_size() {
     let linked_root = empty_workspace("import-snapshot-linked-root");
     let outside = empty_workspace("import-snapshot-linked-target");
-    create_windows_junction(&linked_root.join("linked"), &outside);
+    create_directory_alias(&linked_root.join("linked"), &outside);
     let linked = AnchoredDir::workspace(&linked_root).expect("linked root opens");
     let error = snapshot_registry_for_test(&linked).expect_err("linked entries are rejected");
     assert!(
