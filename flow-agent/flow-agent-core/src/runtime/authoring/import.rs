@@ -1,4 +1,6 @@
 use super::storage::{create_relative_directory, ensure_child_absent, write_new_file};
+#[cfg(test)]
+use crate::runtime::fs_guards::set_directory_sync_error_for_path_for_test;
 use crate::runtime::{
     config_io::{load_global_config_from, parse_global_config_from_text},
     fs_guards::{
@@ -15,6 +17,8 @@ use core_script::{
     MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES,
     MAX_REGISTRY_TRAVERSAL_DEPTH, validate_registry_from_root_dir,
 };
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -22,6 +26,13 @@ use std::{
 
 const LEGACY_CONFIG_DIR: &str = ".flow";
 static IMPORT_STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
+#[cfg(test)]
+static IMPORT_POST_PUBLICATION_SYNC_FAILURE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+pub(crate) fn set_import_post_publication_sync_failure() {
+    IMPORT_POST_PUBLICATION_SYNC_FAILURE.store(true, Ordering::Relaxed);
+}
 
 struct RegistryDefinition {
     bytes: Vec<u8>,
@@ -121,6 +132,10 @@ pub fn import_global_config_from_workspace(
             cleanup_import_stage(&global_parent, &stage_leaf, stage_identity),
         );
     }
+    #[cfg(test)]
+    if IMPORT_POST_PUBLICATION_SYNC_FAILURE.swap(false, Ordering::Relaxed) {
+        set_directory_sync_error_for_path_for_test(&global_parent.path, std::io::ErrorKind::Other);
+    }
     sync_anchored_directory(&global_parent).map_err(|source| {
         RuntimeError::PublishedOutputFinalizationFailure {
             output: global_path,
@@ -129,7 +144,7 @@ pub fn import_global_config_from_workspace(
     })
 }
 
-fn cleanup_import_stage(
+pub(crate) fn cleanup_import_stage(
     parent: &AnchoredDir,
     stage_leaf: &str,
     expected_identity: crate::runtime::fs_guards::AnchoredDirectoryIdentity,
@@ -291,6 +306,16 @@ fn snapshot_registry(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn snapshot_registry_for_test(directory: &AnchoredDir) -> Result<(), RuntimeError> {
+    snapshot_registry(
+        directory,
+        Path::new(""),
+        0,
+        &mut RegistrySnapshot::default(),
+    )
 }
 
 fn populate_stage(

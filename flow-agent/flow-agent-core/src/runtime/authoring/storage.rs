@@ -10,27 +10,36 @@ use crate::runtime::{
 };
 use core_script::MAX_REGISTRY_DEFINITION_BYTES;
 #[cfg(test)]
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::{io::Write, path::Path};
 
 #[cfg(test)]
 std::thread_local! {
-    static AUTHORING_POST_PUBLICATION_FAILURE: RefCell<bool> = const { RefCell::new(false) };
+    static AUTHORING_POST_PUBLICATION_FAILURE: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
 pub(crate) fn set_authoring_post_publication_failure() {
-    AUTHORING_POST_PUBLICATION_FAILURE.with(|failure| failure.replace(true));
+    set_authoring_post_publication_failure_after(1);
+}
+
+#[cfg(test)]
+pub(crate) fn set_authoring_post_publication_failure_after(publications: usize) {
+    AUTHORING_POST_PUBLICATION_FAILURE.with(|failure| failure.set(publications));
 }
 
 #[cfg(test)]
 fn observe_authoring_post_publication() -> Result<(), RuntimeError> {
-    AUTHORING_POST_PUBLICATION_FAILURE.with(|failure| {
-        if failure.replace(false) {
+    AUTHORING_POST_PUBLICATION_FAILURE.with(|failure| match failure.get() {
+        0 => Ok(()),
+        1 => {
+            failure.set(0);
             Err(RuntimeError::Protocol(
                 "injected authoring post-publication failure".to_owned(),
             ))
-        } else {
+        }
+        remaining => {
+            failure.set(remaining - 1);
             Ok(())
         }
     })
