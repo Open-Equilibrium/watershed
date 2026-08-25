@@ -33,7 +33,7 @@ pub(super) fn tier_zero(turn_value: &str) -> [ContextSource; 8] {
             "base-runtime-security",
             serde_json::json!({"policy":"deny"}),
         ),
-        context_source("repository-instructions", serde_json::json!([])),
+        context_source("agent-instructions", serde_json::json!([])),
         context_source("active-flow-instructions", serde_json::json!([])),
         context_source("active-phase-instructions", serde_json::json!(["phase"])),
         context_source("active-available-tools", serde_json::json!({"z":1,"a":2})),

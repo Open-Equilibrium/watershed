@@ -306,7 +306,7 @@ pub(crate) struct ProductiveExecution<'a> {
     pub(crate) policy: &'a core_policy::PolicyArtifact,
     pub(crate) prior_history: crate::runtime::context::ContextHistory,
     pub(crate) registry: &'a core_script::ResolvedRegistry,
-    pub(crate) repository_instructions: &'a str,
+    pub(crate) agent_instructions: &'a str,
     pub(crate) root_flow: &'a core_script::FlowBlock,
     pub(crate) root_input: Option<core_script::FlowValue>,
     pub(crate) session_id: &'a str,

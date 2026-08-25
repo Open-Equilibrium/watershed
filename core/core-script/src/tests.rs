@@ -1,7 +1,7 @@
 use super::error::RegistryError;
 use super::load::{
     RegistryFile, RegistryRoot, RegistryTraversalLimits, RegistryTraversalState,
-    collect_registry_files_with_limits, load_flow_registry_from_workspace, open_registry_root,
+    collect_registry_files_with_limits, load_flow_registry_from_root, open_registry_root,
 };
 use super::model::{
     BlockIdentity, FlowBlock, FlowValue, MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES,
@@ -23,7 +23,7 @@ fn registry_location(root: &Path) -> (&Path, &Path) {
 
 fn load_registry(root: impl AsRef<Path>) -> Result<ResolvedRegistry, RegistryError> {
     let (workspace, registry_root) = registry_location(root.as_ref());
-    load_flow_registry_from_workspace(workspace, registry_root, "root")
+    load_flow_registry_from_root(workspace, registry_root, "root")
 }
 
 fn collect_registry_files(root: &Path) -> Result<(RegistryRoot, Vec<RegistryFile>), RegistryError> {

@@ -1,5 +1,5 @@
 use super::productive_run::run_productive_session_with_provider;
-use super::{read_repository_instructions, reconcile_productive_preflight};
+use super::reconcile_productive_preflight;
 #[cfg(test)]
 use super::{run_post_config_observer, run_pre_plan_observer};
 #[cfg(test)]
@@ -9,10 +9,11 @@ use crate::runtime::event_writer::post_writer_finish_observer;
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_anchored_workspace, preflight_flow_execution_plan},
     auth::resolve_openai_codex_credential,
-    config_io::{ExecutionBackend, load_workspace_config_from, require_execution_backend},
+    config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     event_writer::SerialSessionWriter,
     execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target},
     fs_guards::{AnchoredFile, AnchoredWorkspace},
+    instructions::read_applicable_agent_instructions,
     live_events::LiveEventNotifier,
     planning::plan_flow_with_workspace,
     productive::{OpenAiCodexProvider, ensure_productive_execution_platform},
@@ -26,7 +27,7 @@ use crate::runtime::{
 };
 use std::path::Path;
 
-/// Runs a flow from a workspace registry and captures its output.
+/// Runs a globally registered Flow in one Workspace and captures its output.
 pub fn run_flow(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
@@ -244,18 +245,18 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     let (after_operation, after_finalization) = stage_observers;
     let workspace = workspace.as_ref();
     let execution_workspace = AnchoredWorkspace::open(workspace)?;
-    let config = load_workspace_config_from(execution_workspace.root())?;
+    let authority = load_global_config_authority()?;
+    let config = &authority.config;
     #[cfg(test)]
     run_post_config_observer();
-    let backend = require_execution_backend(&config)?;
+    let backend = require_execution_backend(config)?;
     let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
-    let registry =
-        reconcile_productive_preflight(core_script::load_flow_registry_from_workspace_dir(
-            &execution_workspace.root().dir,
-            workspace,
-            &config.registry_root,
-            flow_ref,
-        ))?;
+    let registry = reconcile_productive_preflight(core_script::load_flow_registry_from_root_dir(
+        &authority.home.dir,
+        &authority.home.path,
+        &config.registry_root,
+        flow_ref,
+    ))?;
     let flow_block = reconcile_productive_preflight(
         registry
             .flow_block(flow_ref)
@@ -275,13 +276,14 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     {
         reconcile_productive_preflight(ensure_productive_execution_platform())?;
         let credential = reconcile_productive_preflight(resolve_openai_codex_credential())?;
-        let repository_instructions =
-            reconcile_productive_preflight(read_repository_instructions(&execution_workspace))?;
+        let agent_instructions = reconcile_productive_preflight(
+            read_applicable_agent_instructions(&authority.home, &execution_workspace),
+        )?;
         let mut provider = OpenAiCodexProvider;
         return run_productive_session_with_provider(
             workspace,
             &execution_workspace,
-            &config,
+            config,
             &model,
             model_profile,
             &registry,
@@ -290,7 +292,7 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
             root_input,
             capture_jsonl,
             &credential,
-            &repository_instructions,
+            &agent_instructions,
             notifier,
             &mut provider,
         );

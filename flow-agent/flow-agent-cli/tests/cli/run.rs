@@ -100,7 +100,7 @@ fn run_rejects_stdin_input_above_the_byte_limit() {
 fn productive_run_reports_provider_failure_directly() {
     let workspace = workspace_copy("hello-flow");
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        super::test_support::session_home_path().join("config.yaml"),
         "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
     )
     .expect("productive config written");

@@ -43,7 +43,7 @@ pub(in crate::tests) fn load_test_registry(
     workspace: &Path,
     flow_ref: &str,
 ) -> core_script::ResolvedRegistry {
-    core_script::load_flow_registry_from_workspace(workspace, Path::new("registry"), flow_ref)
+    core_script::load_flow_registry_from_root(workspace, Path::new("registry"), flow_ref)
         .expect("fixture registry loads")
 }
 
@@ -117,8 +117,18 @@ pub(in crate::tests) fn replace_registry_text(
     before: &str,
     after: &str,
 ) {
-    let path = workspace.join("registry").join(path);
-    let text = fs::read_to_string(&path).expect("registry fixture reads");
+    let local = workspace.join("registry").join(path);
+    replace_registry_file_text(&local, before, after);
+    let global = crate::tests::test_support::session_home_path()
+        .join("registry")
+        .join(path);
+    if global.is_file() {
+        replace_registry_file_text(&global, before, after);
+    }
+}
+
+fn replace_registry_file_text(path: &Path, before: &str, after: &str) {
+    let text = fs::read_to_string(path).expect("registry fixture reads");
     assert_eq!(
         text.matches(before).count(),
         1,
@@ -137,11 +147,14 @@ pub(in crate::tests) fn disable_smoke_echo_tool(workspace: &Path) {
 }
 
 pub(in crate::tests) fn write_productive_workspace_config(workspace: &Path) {
+    let source = "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n";
+    fs::write(workspace.join(".flow/config.yaml"), source)
+        .expect("ambient workspace config writes");
     fs::write(
-        workspace.join(".flow/config.yaml"),
-        "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
+        crate::tests::test_support::session_home_path().join("config.yaml"),
+        source,
     )
-    .expect("productive config writes");
+    .expect("productive global config writes");
 }
 
 pub(in crate::tests) fn assert_no_session_artifacts(workspace: &Path, session_id: &str) {
@@ -167,10 +180,8 @@ pub(in crate::tests) fn assert_no_active_session_lock(workspace: &Path, session_
 }
 
 pub(in crate::tests) fn add_bad_write_tool_to_summarize(workspace: &Path, script_body: &str) {
-    fs::write(
-        workspace.join("registry/tools/bad-write.yaml"),
-        format!(
-            r#"tool:
+    let definition = format!(
+        r#"tool:
   id: bad-write
   name: BadWrite
   tool_kind: own-script
@@ -184,9 +195,14 @@ pub(in crate::tests) fn add_bad_write_tool_to_summarize(workspace: &Path, script
   protected_path_grants: []
   network: deny
 "#
-        ),
-    )
-    .expect("bad tool fixture written");
+    );
+    for root in [
+        workspace.to_path_buf(),
+        crate::tests::test_support::session_home_path(),
+    ] {
+        fs::write(root.join("registry/tools/bad-write.yaml"), &definition)
+            .expect("bad tool fixture written");
+    }
     replace_registry_text(
         workspace,
         "phases/summarize.yaml",

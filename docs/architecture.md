@@ -50,11 +50,13 @@ flowchart TD
   W --> J[Event and context JSONL]
   W --> L[Live-event watermarks]
   C --> Q[Run Log, recovery and status]
-  G[Workspace config and context] --> S
+  G[Global config and registry] --> S
+  A[Global and Workspace AGENTS.md] --> S
+  X[Execution Workspace] --> S
 ```
 
 See the [Flow Agent V-Spec](concept/V-Spec_FlowAgent.html#architecture) for responsibility boundaries. Current module declarations live in [`flow-agent-core/src/runtime/mod.rs`](../flow-agent/flow-agent-core/src/runtime/mod.rs); CLI composition lives in [`flow-agent-cli/src/dispatch.rs`](../flow-agent/flow-agent-cli/src/dispatch.rs).
 
 ## Current configuration boundary
 
-Current M1.1 anchors the selected Workspace, reads `.flow/config.yaml`, resolves its Workspace-relative registry and loads provider/model fields from that file. It has no global Flow configuration loader. Credentials and runtime sessions are already user-global, but they are separate stores. This behavior does not yet implement ADR-0152's global-only target; [D-057](decisions/open-decisions.html#d-057) must define storage, authoring and migration before code changes.
+Current M1.1 resolves technical configuration only from `FLOW_AGENT_HOME`, defaulting to `~/.flow` on Unix and `%USERPROFILE%\.flow` on Windows. Its `config.yaml` selects a registry only beneath that global home. Workspace `.flow` files and registries are never implicit inputs. Global-home and harness-start Workspace `AGENTS.md` files are loaded separately as ordered instructions and cannot alter technical authority. `flow import <legacy-workspace>` is the only migration path from the former Workspace layout; [`PROTOCOL.md`](../PROTOCOL.md#m11-authoring-cli-grammar-adr-0091-adr-0097-adr-0104-adr-0110) owns its contract.

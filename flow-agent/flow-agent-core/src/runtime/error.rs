@@ -52,8 +52,8 @@ pub enum RuntimeError {
     Protocol(String),
     /// Persisted workspace state prevents the requested operation.
     PersistedState(String),
-    /// Workspace initialization refused an existing owned output.
-    WorkspaceAlreadyInitialized {
+    /// Global Flow configuration initialization refused an existing owned output.
+    GlobalConfigAlreadyInitialized {
         /// Existing authoring path that prevents initialization.
         path: PathBuf,
     },
@@ -252,9 +252,9 @@ impl fmt::Display for RuntimeError {
             | Self::PersistedState(message)
             | Self::Usage(message)
             | Self::AuthenticationRequired(message) => f.write_str(message),
-            Self::WorkspaceAlreadyInitialized { path } => write!(
+            Self::GlobalConfigAlreadyInitialized { path } => write!(
                 f,
-                "workspace_already_initialized: path={}",
+                "global_config_already_initialized: path={}",
                 path.display()
             ),
             Self::DefinitionExists {
@@ -411,7 +411,7 @@ impl std::error::Error for RuntimeError {
             | Self::ProductiveExecutionUnavailable
             | Self::Provider(_)
             | Self::Cancelled
-            | Self::WorkspaceAlreadyInitialized { .. }
+            | Self::GlobalConfigAlreadyInitialized { .. }
             | Self::DefinitionExists { .. }
             | Self::ActiveSession { .. }
             | Self::SessionLogExists(_)

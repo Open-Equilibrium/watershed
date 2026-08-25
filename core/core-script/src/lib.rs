@@ -8,9 +8,9 @@ mod script;
 
 pub use script::error::{RegistryError, SemanticValidationError};
 pub use script::load::{
-    load_flow_registry_from_workspace, load_flow_registry_from_workspace_dir, parse_registry_block,
-    registry_block_definition_bytes, validate_registry_addition_from_workspace_dir,
-    validate_registry_from_workspace, validate_registry_from_workspace_dir,
+    load_flow_registry_from_root, load_flow_registry_from_root_dir, parse_registry_block,
+    registry_block_definition_bytes, validate_registry_addition_from_root_dir,
+    validate_registry_from_root, validate_registry_from_root_dir,
 };
 pub use script::model::{
     AllowedParameter, BlockIdentity, FlowBlock, FlowValue, InstructionBlock, InstructionParameter,

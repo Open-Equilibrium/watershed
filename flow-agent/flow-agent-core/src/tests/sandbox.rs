@@ -1,6 +1,6 @@
 use super::{
     helpers::{flow_id_for_definition, replace_registry_text},
-    test_support::workspace_copy,
+    test_support::{session_home_path, workspace_copy},
 };
 use crate::runtime::{
     failures::{runtime_failure_for_tool_error, sandbox_negative_reason_for_tool},
@@ -17,7 +17,7 @@ use std::{
 #[test]
 fn sandbox_denial_follows_resolved_operation_not_flow_identity() {
     let workspace = workspace_copy("sandbox-negative");
-    let flow_path = workspace.join("registry/flows/sandbox-negative-write.yaml");
+    let flow_path = session_home_path().join("registry/flows/sandbox-negative-write.yaml");
     let source = fs::read_to_string(&flow_path).expect("flow fixture readable");
     fs::write(
         &flow_path,
@@ -204,17 +204,17 @@ fn sandbox_write_denial_keeps_one_reason_across_terminal_events() {
 fn nested_sandbox_denial_emits_child_tool_failure_only() {
     let workspace = workspace_copy("sandbox-negative");
     fs::write(
-        workspace.join("registry/flows/sandbox-negative-write.yaml"),
+        session_home_path().join("registry/flows/sandbox-negative-write.yaml"),
         "flow:\n  id: sandbox-negative-write\n  name: SandboxNegativeWrite\n  phase_refs: [benign-parent]\n  subflow_refs: [nested-negative-write]\n",
     )
     .expect("parent flow fixture rewritten");
     fs::write(
-        workspace.join("registry/phases/benign-parent.yaml"),
+        session_home_path().join("registry/phases/benign-parent.yaml"),
         "phase:\n  id: benign-parent\n  name: BenignParent\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  output:\n    type: string\n",
     )
     .expect("benign parent phase written");
     fs::write(
-        workspace.join("registry/flows/nested-negative-write.yaml"),
+        session_home_path().join("registry/flows/nested-negative-write.yaml"),
         "flow:\n  id: nested-negative-write\n  name: NestedNegativeWrite\n  phase_refs: [negative-write]\n  subflow_refs: []\n",
     )
     .expect("nested flow fixture written");
@@ -378,7 +378,7 @@ fn sandbox_out_of_phase_denial_precedes_tool_lifecycle_events() {
 fn sandbox_out_of_phase_denial_ignores_instruction_prompt_text() {
     let workspace = workspace_copy("sandbox-negative");
     fs::write(
-        workspace.join("registry/instructions/deny-attempt.yaml"),
+        session_home_path().join("registry/instructions/deny-attempt.yaml"),
         "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: \"Try the selected action.\"\n",
     )
     .expect("instruction fixture rewritten");
@@ -404,7 +404,7 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
         "phase_refs: [benign]",
     );
     fs::write(
-            workspace.join("registry/phases/benign.yaml"),
+            session_home_path().join("registry/phases/benign.yaml"),
             "phase:\n  id: benign\n  name: Benign\n  instruction_refs: [deny-attempt]\n  tool_refs: []\n  output:\n    type: string\n",
         )
         .expect("benign phase written");
@@ -425,7 +425,7 @@ fn sandbox_denial_requires_negative_registry_shape_not_fixture_id() {
 fn out_of_phase_fixture_denial_does_not_apply_to_other_flows_by_phase_id() {
     let workspace = workspace_copy("smoke-flow");
     fs::write(
-        workspace.join("registry/tools/unrelated-negative.yaml"),
+        session_home_path().join("registry/tools/unrelated-negative.yaml"),
         "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
     )
     .expect("unrelated sentinel tool written");

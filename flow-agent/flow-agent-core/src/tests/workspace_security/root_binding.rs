@@ -11,7 +11,7 @@ use crate::{
         types::{EmitMode, EventClock, RuntimeError},
     },
     tests::{
-        helpers::{empty_workspace, fixture_runtime_policy, replace_registry_text},
+        helpers::{empty_workspace, fixture_runtime_policy},
         test_support::workspace_copy,
     },
 };
@@ -21,6 +21,17 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+
+fn replace_ambient_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
+    let path = workspace.join("registry").join(path);
+    let text = fs::read_to_string(&path).expect("ambient registry fixture reads");
+    assert_eq!(
+        text.matches(before).count(),
+        1,
+        "ambient registry fixture contains one target fragment"
+    );
+    fs::write(path, text.replacen(before, after, 1)).expect("ambient registry fixture updates");
+}
 
 #[test]
 fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
@@ -234,7 +245,7 @@ fn run_rejects_a_workspace_root_rebound_after_config_load() {
 fn run_uses_the_retained_workspace_when_a_root_junction_is_transiently_rebound() {
     let original = workspace_copy("hello-flow");
     let rebound = workspace_copy("hello-flow");
-    replace_registry_text(
+    replace_ambient_registry_text(
         &rebound,
         "tools/write-summary.yaml",
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
@@ -274,7 +285,7 @@ fn run_uses_the_retained_workspace_when_a_root_junction_is_transiently_rebound()
 fn run_uses_the_retained_workspace_when_the_root_is_transiently_rebound() {
     let workspace = workspace_copy("hello-flow");
     let rebound = workspace_copy("hello-flow");
-    replace_registry_text(
+    replace_ambient_registry_text(
         &rebound,
         "tools/write-summary.yaml",
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",

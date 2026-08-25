@@ -202,7 +202,7 @@ liquid integration
     flow-agent:  flow script + building blocks
     codex-cli:   instruction pack + command args
     claude-code: instruction pack + command args</code></pre>
-      <p>Meta-Harness config resolution is <strong>not</strong> a project VCS/history engine. Config changes must be auditable, reviewable and policy-gated. Meta-Harness may manage Flow Agent's global authority only through a public config surface; it never writes target-private storage directly. Meta-Harness storage remains <a href="../decisions/open-decisions.html#d-024">D-024</a>, while Flow Agent's exact global path, authoring and local-config migration remain <a href="../decisions/open-decisions.html#d-057">D-057</a>.</p>
+      <p>Meta-Harness config resolution is <strong>not</strong> a project VCS/history engine. Config changes must be auditable, reviewable and policy-gated. Meta-Harness may manage Flow Agent's <code>FLOW_AGENT_HOME</code> authority only through a public config surface; it never writes target-private storage directly. Meta-Harness storage remains <a href="../decisions/open-decisions.html#d-024">D-024</a>; Flow Agent's global path, authoring and explicit-import boundary are canonical in <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
     </div></section>
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">

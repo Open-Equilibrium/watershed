@@ -20,7 +20,7 @@ const DEFAULT_WARMUPS: usize = 5;
 const DEFAULT_SAMPLES: usize = 30;
 const MAX_SAMPLE_COUNT: usize = 1_000;
 const FLOW_AGENT_HOME_ENV: &str = "FLOW_AGENT_HOME";
-const FLOW_AGENT_HOME_LEAF: &str = ".flow-agent";
+const FLOW_AGENT_HOME_LEAF: &str = ".flow";
 type DynError = Box<dyn Error + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

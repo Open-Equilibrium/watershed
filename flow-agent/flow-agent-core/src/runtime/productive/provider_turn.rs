@@ -11,7 +11,7 @@ use super::{
     emit_and_commit, mark_recovery_failure, message_delta_chunks, provider_dispatch_reservation,
 };
 use crate::runtime::{
-    context::{CompiledContext, compile_provider_turn_context_with_repository_instructions},
+    context::{CompiledContext, compile_provider_turn_context_with_agent_instructions},
     event_construction::RuntimeEventBuilder,
     event_writer::RuntimeEventSink,
     openai_codex::{
@@ -278,7 +278,7 @@ where
     let mut seen_call_ids = BTreeSet::new();
     loop {
         crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
-        let compiled = compile_provider_turn_context_with_repository_instructions(
+        let compiled = compile_provider_turn_context_with_agent_instructions(
             &context.execution.model_profile,
             context.execution.registry,
             flow,
@@ -288,7 +288,7 @@ where
             invocation,
             context.execution.session_id,
             &builder.history,
-            context.execution.repository_instructions,
+            context.execution.agent_instructions,
         )?;
         let mut instructions =
             String::from_utf8(compiled.provider_bytes.clone()).map_err(|_| {

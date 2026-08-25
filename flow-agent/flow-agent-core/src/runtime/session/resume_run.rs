@@ -5,7 +5,7 @@ use super::{
 };
 use crate::runtime::{
     auth::resolve_openai_codex_credential,
-    config_io::{ExecutionBackend, load_workspace_config_from, require_execution_backend},
+    config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     conversations::{
         RUN_EVENTS_LEAF, existing_anchored_run, legacy_flat_compatibility_is_available,
         migrate_legacy_session, migrate_legacy_session_if_present,
@@ -196,9 +196,9 @@ where
     }
     let workspace = workspace.as_ref();
     let execution_workspace = reconcile_productive_preflight(AnchoredWorkspace::open(workspace))?;
-    let config =
-        reconcile_productive_preflight(load_workspace_config_from(execution_workspace.root()))?;
-    let backend = reconcile_productive_preflight(require_execution_backend(&config))?;
+    let authority = reconcile_productive_preflight(load_global_config_authority())?;
+    let config = &authority.config;
+    let backend = reconcile_productive_preflight(require_execution_backend(config))?;
     let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
     let legacy_notifier = notifier
         .as_ref()
@@ -237,11 +237,10 @@ where
             flow_ref,
             policy,
             credential,
-            repository_instructions,
+            agent_instructions,
         } = prepare_recorded_productive_preflight(
-            workspace,
             &execution_workspace,
-            &config,
+            &authority,
             run_session_id,
             recorded,
             "productive run recovery lacks a Flow id",
@@ -262,7 +261,7 @@ where
             &policy,
             capture_jsonl,
             &credential,
-            &repository_instructions,
+            &agent_instructions,
             provider,
             &reservation,
             notifier,

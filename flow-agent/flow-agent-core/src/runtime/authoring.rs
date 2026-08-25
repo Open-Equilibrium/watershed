@@ -1,5 +1,6 @@
-mod init;
-mod registry;
+mod import;
+pub(in crate::runtime) mod init;
+pub(in crate::runtime) mod registry;
 mod storage;
 
 use core_script::RegistryBlockKind;
@@ -13,10 +14,11 @@ pub(in crate::runtime) const fn registry_directory(kind: RegistryBlockKind) -> &
     }
 }
 
+pub use import::import_global_config_from_workspace;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(in crate::runtime) use init::DEFAULT_REGISTRY_ROOT;
-pub use init::initialize_workspace;
-pub use registry::{create_registry_block, validate_workspace_registry};
+pub use init::initialize_global_config;
+pub use registry::{create_global_registry_block, validate_global_registry};
 pub use storage::read_authoring_file;
 
 #[cfg(test)]

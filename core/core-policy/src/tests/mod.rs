@@ -35,6 +35,6 @@ fn fixture_registry(fixture: &str, flow_ref: &str) -> core_script::ResolvedRegis
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../flow-agent/fixtures")
         .join(fixture);
-    core_script::load_flow_registry_from_workspace(&workspace, Path::new("registry"), flow_ref)
+    core_script::load_flow_registry_from_root(&workspace, Path::new("registry"), flow_ref)
         .expect("fixture registry loads")
 }

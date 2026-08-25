@@ -119,21 +119,24 @@ fn repeated_phase_loop_gets_unique_executions() {
 #[test]
 fn composite_phase_exposes_tool_only_in_owning_leaf() {
     let workspace = workspace_copy("hello-flow");
-    fs::write(
-        workspace.join("registry/phases/summarize.yaml"),
+    write_registry_definition(
+        &workspace,
+        "phases",
+        "summarize",
         "phase:\n  id: summarize\n  name: Summarize\n  instruction_refs: []\n  tool_refs: []\n  phase_refs: [prepare-summary, write-summary-phase]\n  output:\n    type: string\n  result_from: write-summary-phase\n",
-    )
-    .expect("composite Phase written");
-    fs::write(
-        workspace.join("registry/phases/prepare-summary.yaml"),
+    );
+    write_registry_definition(
+        &workspace,
+        "phases",
+        "prepare-summary",
         "phase:\n  id: prepare-summary\n  name: PrepareSummary\n  instruction_refs: [write-output]\n  tool_refs: []\n  output:\n    type: string\n",
-    )
-    .expect("preparation leaf written");
-    fs::write(
-        workspace.join("registry/phases/write-summary-phase.yaml"),
+    );
+    write_registry_definition(
+        &workspace,
+        "phases",
+        "write-summary-phase",
         "phase:\n  id: write-summary-phase\n  name: WriteSummaryPhase\n  instruction_refs: [write-output]\n  tool_refs: [write-summary]\n  output:\n    type: string\n",
-    )
-    .expect("Tool-owning leaf written");
+    );
 
     let output =
         run_flow(&workspace, "hello-flow", EmitMode::Jsonl).expect("composite Phase executes");

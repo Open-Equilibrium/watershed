@@ -1,6 +1,6 @@
 use super::super::error::{RegistryError, SemanticValidationError};
 use super::super::load::{
-    parse_registry_block, validate_registry_from_workspace, validate_registry_from_workspace_dir,
+    parse_registry_block, validate_registry_from_root, validate_registry_from_root_dir,
 };
 use super::super::model::{
     AllowedParameter, BlockIdentity, FlowBlock, FlowValue, InstructionBlock, MAX_BLOCK_NAME_CHARS,
@@ -385,11 +385,11 @@ fn public_registry_validation_checks_path_and_capability_entry_points() {
     .expect("registry definition written");
     let (workspace, registry_root) = registry_location(&root);
 
-    validate_registry_from_workspace(workspace, registry_root)
+    validate_registry_from_root(workspace, registry_root)
         .expect("path-based registry validation succeeds");
     let workspace_dir = cap_std::fs::Dir::open_ambient_dir(workspace, cap_std::ambient_authority())
         .expect("workspace capability opens");
-    validate_registry_from_workspace_dir(&workspace_dir, workspace, registry_root)
+    validate_registry_from_root_dir(&workspace_dir, workspace, registry_root)
         .expect("capability-based registry validation succeeds");
 }
 

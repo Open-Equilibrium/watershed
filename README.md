@@ -30,9 +30,10 @@ cargo build --locked --workspace
 cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
-Run the checked-in smoke fixture from its workspace directory. Its explicit fixture profile selects deterministic stubs; this does not call a provider or execute a general external process:
+Set `FLOW_AGENT_HOME` to an unused absolute path, explicitly import the checked-in smoke fixture, then run it from its Workspace. Its fixture profile selects deterministic stubs; this does not call a provider or execute a general external process:
 
 ```console
+cargo run -p flow-agent-cli -- import flow-agent/fixtures/smoke-flow
 cd flow-agent/fixtures/smoke-flow
 cargo run -p flow-agent-cli -- run smoke-flow --emit jsonl
 cargo run -p flow-agent-cli -- replay smoke-flow smoke-flow --emit jsonl
@@ -42,9 +43,9 @@ cargo run -p flow-agent-cli -- sessions status
 
 Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/).
 
-For productive execution, initialize a workspace with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Use productive execution only on the [enabled targets](SECURITY.md#enforcement-per-flow). Agentic Engineers define each Flow's available Tools and capability limits through its Building Blocks; other users may run those predefined Flows. Productive Tools share the operator's OS identity until M1.2.
+For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Use productive execution only on the [enabled targets](SECURITY.md#enforcement-per-flow). Agentic Engineers define each Flow's available Tools and capability limits through its Building Blocks; other users may run those predefined Flows. Productive Tools share the operator's OS identity until M1.2.
 
-That workflow describes current M1.1 behavior. ADR-0152 accepts a future Global Flow configuration authority with project-specific behavior expressed only through explicit Flows; current `.flow/config.yaml`, Workspace registry and automatic root `AGENTS.md` loading are known implementation mismatches pending [D-057](docs/decisions/open-decisions.html#d-057).
+`FLOW_AGENT_HOME` defaults to `~/.flow` on Unix and `%USERPROFILE%\.flow` on Windows. Its `config.yaml` and registry are the sole implicit technical authority. Workspace `.flow` content is not discovered; optional global-home and harness-start Workspace `AGENTS.md` files provide instructions only.
 
 The M1 baseline cannot productively call an LLM/provider, run external Tools or scripts, guarantee OS isolation or allow network destinations. M1.1 adds declared provider and Tool execution; its complete command and storage boundary is in [`PROTOCOL.md`](PROTOCOL.md). OS isolation remains scheduled for M1.2.
 

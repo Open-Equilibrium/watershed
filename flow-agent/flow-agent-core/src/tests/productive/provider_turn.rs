@@ -348,7 +348,7 @@ fn productive_leaf_dispatches_once_and_commits_its_typed_result() {
                 }
                 history
             },
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "productive-fixture")
         },
         &mut provider,
@@ -442,7 +442,7 @@ fn productive_leaf_runs_only_provider_requested_phase_tools_and_returns_the_resu
     let mut tools = FakeToolExecutor::default();
     let execution = execute_productive_flow_with_tool_executor(
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "productive-tool-fixture")
         },
         &mut provider,
@@ -556,7 +556,7 @@ fn accumulated_provider_input_overflow_stops_before_another_dispatch() {
 
     let execution = execute_productive_flow_with_tool_executor(
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "provider-input-overflow-fixture")
         },
         &mut provider,
@@ -723,7 +723,7 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
 
     let execution = execute_productive_flow_with_tool_executor(
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "productive-failed-tool-fixture")
         },
         &mut provider,
@@ -777,7 +777,7 @@ fn definitive_provider_failure_is_terminal_and_persists_the_direct_message() {
 
     let execution = execute_productive_flow(
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "provider-error-fixture")
         },
         &mut provider,

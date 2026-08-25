@@ -1,15 +1,15 @@
 use crate::runtime::{
     cancellation::{ProductiveTerminalClaim, claim_productive_terminal},
-    config_io::WorkspaceConfig,
+    config_io::GlobalConfigAuthority,
     context::ContextModelProfile,
     execution_plan::runtime_policy_target,
     fs_guards::AnchoredWorkspace,
+    instructions::read_applicable_agent_instructions,
     session_definition::{SessionLogMetadata, verify_resume_definition_metadata_values},
     types::RuntimeError,
 };
 #[cfg(test)]
 use std::cell::RefCell;
-use std::{io, path::Path};
 
 fn verify_productive_model_profile(
     run_session_id: &str,
@@ -119,14 +119,13 @@ struct RecordedProductivePreflight {
     flow_ref: String,
     policy: core_policy::PolicyArtifact,
     credential: crate::runtime::oauth_credential::CredentialRecord,
-    repository_instructions: String,
+    agent_instructions: String,
 }
 
 #[allow(clippy::too_many_arguments)]
 fn prepare_recorded_productive_preflight<C>(
-    workspace: &Path,
     execution_workspace: &AnchoredWorkspace,
-    config: &WorkspaceConfig,
+    authority: &GlobalConfigAuthority,
     run_session_id: &str,
     recorded: &SessionLogMetadata,
     missing_flow_id_message: &'static str,
@@ -137,6 +136,7 @@ fn prepare_recorded_productive_preflight<C>(
 where
     C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
 {
+    let config = &authority.config;
     let flow_ref = reconcile_productive_preflight(
         recorded
             .flow_definition_id
@@ -149,13 +149,12 @@ where
         model,
         model_profile,
     ))?;
-    let registry =
-        reconcile_productive_preflight(core_script::load_flow_registry_from_workspace_dir(
-            &execution_workspace.root().dir,
-            workspace,
-            &config.registry_root,
-            flow_ref,
-        ))?;
+    let registry = reconcile_productive_preflight(core_script::load_flow_registry_from_root_dir(
+        &authority.home.dir,
+        &authority.home.path,
+        &config.registry_root,
+        flow_ref,
+    ))?;
     let flow_block = reconcile_productive_preflight(
         registry
             .flow_block(flow_ref)
@@ -173,14 +172,16 @@ where
         runtime_policy_target(),
     ))?;
     let credential = reconcile_productive_preflight(resolve_credential())?;
-    let repository_instructions =
-        reconcile_productive_preflight(read_repository_instructions(execution_workspace))?;
+    let agent_instructions = reconcile_productive_preflight(read_applicable_agent_instructions(
+        &authority.home,
+        execution_workspace,
+    ))?;
     Ok(RecordedProductivePreflight {
         registry,
         flow_ref: flow_ref.to_owned(),
         policy,
         credential,
-        repository_instructions,
+        agent_instructions,
     })
 }
 
@@ -219,30 +220,3 @@ pub(crate) use resume_run::{
     resume_conversation_run_with_provider, resume_conversation_run_with_provider_and_live_events,
     resume_conversation_run_with_provider_and_preflight,
 };
-
-pub(crate) fn read_repository_instructions(
-    workspace: &AnchoredWorkspace,
-) -> Result<String, RuntimeError> {
-    const MAX_REPOSITORY_INSTRUCTION_BYTES: u64 = 1024 * 1024;
-    let root = workspace.root();
-    let metadata = match root.dir.symlink_metadata("AGENTS.md") {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
-        Err(source) => {
-            return Err(RuntimeError::Io {
-                path: root.path.join("AGENTS.md"),
-                source,
-            });
-        }
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return Err(RuntimeError::Protocol(format!(
-            "{} must be a real file",
-            root.path.join("AGENTS.md").display()
-        )));
-    }
-    crate::runtime::fs_guards::read_anchored_to_string_with_limit(
-        &root.file("AGENTS.md"),
-        MAX_REPOSITORY_INSTRUCTION_BYTES,
-    )
-}

@@ -1,7 +1,7 @@
 use super::{
     flow_command,
     process::{wait_with_input_and_output_before, wait_with_output_before},
-    test_support::empty_workspace,
+    test_support::{copy_dir, empty_workspace, fixture_dir, session_home_path},
 };
 use core_script::{RegistryBlock, ToolCommand, parse_registry_block};
 use std::{fs, path::Path, process::Stdio, time::Duration};
@@ -20,15 +20,51 @@ fn initialize_default_workspace(workspace: &Path) {
 }
 
 #[test]
+fn import_requires_one_explicit_legacy_workspace_and_publishes_globally() {
+    let source = empty_workspace();
+    let fixture = fixture_dir("smoke-flow");
+    fs::create_dir(source.join(".flow")).expect("legacy config directory is staged");
+    fs::copy(
+        fixture.join(".flow/config.yaml"),
+        source.join(".flow/config.yaml"),
+    )
+    .expect("legacy config is staged");
+    copy_dir(&fixture.join("registry"), &source.join("registry"));
+    let harness_workspace = empty_workspace();
+
+    let output = flow_command()
+        .current_dir(&harness_workspace)
+        .args([
+            "import",
+            source.to_str().expect("fixture path is valid UTF-8"),
+        ])
+        .output()
+        .expect("explicit import should run");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"imported\n");
+    let global_home = session_home_path();
+    assert!(global_home.join("config.yaml").is_file());
+    assert!(global_home.join("registry/flows/smoke-flow.yaml").is_file());
+    assert!(!harness_workspace.join(".flow").exists());
+    assert!(source.join(".flow/config.yaml").is_file());
+}
+
+#[test]
 fn init_create_and_validate_custom_recursive_flow() {
     let workspace = empty_workspace();
     initialize_default_workspace(&workspace);
+    let global_home = session_home_path();
     assert_eq!(
-        fs::read_to_string(workspace.join(".flow/config.yaml")).expect("config is readable"),
+        fs::read_to_string(global_home.join("config.yaml")).expect("config is readable"),
         "registry_root: \"registry\"\n"
     );
     for kind in ["tools", "instructions", "phases", "flows"] {
-        assert!(workspace.join("registry").join(kind).is_dir());
+        assert!(global_home.join("registry").join(kind).is_dir());
     }
     let repeated_init = flow_command()
         .current_dir(&workspace)
@@ -321,7 +357,7 @@ fn init_create_and_validate_custom_recursive_flow() {
         .output()
         .expect("duplicate create should run");
     assert!(!duplicate.status.success());
-    let original = fs::read_to_string(workspace.join("registry/flows/custom-review.yaml"))
+    let original = fs::read_to_string(global_home.join("registry/flows/custom-review.yaml"))
         .expect("original flow remains readable");
     assert!(original.contains("CustomReview"));
     assert!(!original.contains("Replacement"));
@@ -345,7 +381,7 @@ fn init_create_and_validate_custom_recursive_flow() {
         .output()
         .expect("unresolved create should run");
     assert!(!unresolved.status.success());
-    assert!(!workspace.join("registry/phases/unresolved.yaml").exists());
+    assert!(!global_home.join("registry/phases/unresolved.yaml").exists());
 }
 
 #[test]
@@ -361,8 +397,9 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
         "{}",
         String::from_utf8_lossy(&init.stderr)
     );
+    let global_home = session_home_path();
     assert_eq!(
-        fs::read_to_string(workspace.join(".flow/config.yaml")).expect("config is readable"),
+        fs::read_to_string(global_home.join("config.yaml")).expect("config is readable"),
         "registry_root: \"custom-registry\"\n"
     );
 
@@ -475,7 +512,7 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
         String::from_utf8_lossy(&validate.stderr)
     );
     assert!(
-        workspace
+        session_home_path()
             .join("custom-registry/flows/stdin-flow.yaml")
             .is_file()
     );
@@ -664,7 +701,7 @@ fn tool_argv_preserves_literal_help_flags() {
             String::from_utf8_lossy(&create.stderr)
         );
 
-        let path = workspace.join(format!("registry/tools/{id}.yaml"));
+        let path = session_home_path().join(format!("registry/tools/{id}.yaml"));
         let source = fs::read_to_string(&path).expect("tool definition should be readable");
         let block = parse_registry_block(&path.to_string_lossy(), &source)
             .expect("tool definition should parse");
@@ -767,7 +804,12 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
     let workspace = empty_workspace();
     initialize_default_workspace(&workspace);
 
-    assert_error(&workspace, &["init"], 65, "workspace_already_initialized");
+    assert_error(
+        &workspace,
+        &["init"],
+        65,
+        "global_config_already_initialized",
+    );
 
     let tool_args = [
         "create",
@@ -878,7 +920,7 @@ fn malformed_typed_yaml_is_invalid_definition_and_never_published() {
         assert!(stderr.contains("invalid_definition"), "{id}: {stderr}");
         assert!(output.stdout.is_empty(), "{id}");
         assert!(
-            !workspace
+            !session_home_path()
                 .join("registry/phases")
                 .join(format!("{id}.yaml"))
                 .exists(),

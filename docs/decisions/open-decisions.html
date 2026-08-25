@@ -154,14 +154,6 @@
         <p><strong>Recommendation:</strong> A; choose the exact fields and unavailable-field behavior only with platform evidence.</p>
         <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass Linux, macOS and Windows fixtures for every required field before restoring existing-output replacement.</p>
       </article>
-      <article id="d-057" class="decision">
-        <h3>D-057 - Global Flow Configuration Storage And Migration</h3>
-        <p><strong>Status:</strong> Open before implementing ADR-0152. The decided direction forbids every Workspace-local config layer; current M1.1 still reads <code>.flow/config.yaml</code>, a project registry and root <code>AGENTS.md</code>.</p>
-        <p><strong>Question:</strong> Where should standalone Flow Agent keep its one global configuration and registry, how should global authoring work, and what should happen to existing project-local definitions?</p>
-        <ul><li><strong>A:</strong> Use the protected platform user-configuration directory for one global config/registry, separate from runtime data; provide an explicit import command whose source path the user supplies. Ambient project-local files are not probed. Pro: standard user-global ownership, standalone operation and no Workspace-controlled denial path. Con: backup/sync and migration need a public contract.</li><li><strong>B:</strong> Put global config and registry under <code>FLOW_AGENT_HOME</code> beside runtime data. Pro: one root to provision. Con: mixes portable configuration with potentially large session data and gives a test/runtime override configuration authority.</li><li><strong>C:</strong> Make Meta-Harness the sole config store and let standalone Flow Agent consume exported bundles. Pro: one central manager. Con: weakens standalone Flow Agent and adds a prerequisite the product boundary forbids.</li></ul>
-        <p><strong>Recommendation:</strong> A. Keep Runtime bindings and the protected credential store separate, migrate only from an explicit user-supplied source, and never probe, merge or fall back to ambient local config.</p>
-        <p><strong>Acceptance criterion:</strong> Record the exact paths, permissions, schemas, authoring commands, explicit-import boundary, fixture boundary and atomic migration/recovery rules; define how the context profile removes automatic <code>AGENTS.md</code>; then prove that ambient legacy files—including malformed or inaccessible ones—are never probed and cannot affect implicit configuration resolution or preflight. An explicitly selected Flow/Tool may still read authorized Workspace content under its ordinary capability policy.</p>
-      </article>
       <article id="d-058" class="decision">
         <h3>D-058 - Portable Conversation Archive And Tree Handoff</h3>
         <p><strong>Status:</strong> Open before cross-device Portable continuation or a public tree-navigation/import surface.</p>

@@ -1,7 +1,7 @@
 use super::{SessionProvider, session_credential};
 use crate::{
     runtime::{
-        config_io::load_workspace_config,
+        config_io::load_global_config,
         context::{
             CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID,
         },
@@ -46,7 +46,7 @@ struct ProductiveResumeFixture {
 impl ProductiveResumeFixture {
     fn new(workspace: TempWorkspace) -> Self {
         write_productive_workspace_config(&workspace);
-        let config = load_workspace_config(&workspace).expect("productive config");
+        let config = load_global_config().expect("productive config");
         let execution_fixture = load_productive_execution_fixture_with_credential(
             &workspace,
             "smoke-flow",
@@ -125,7 +125,7 @@ impl ProductiveResumeFixture {
             policy: &self.execution_fixture.policy,
             prior_history,
             registry: &self.execution_fixture.registry,
-            repository_instructions: "",
+            agent_instructions: "",
             root_flow: self.execution_fixture.smoke_flow(),
             root_input: None,
             session_id: "run",

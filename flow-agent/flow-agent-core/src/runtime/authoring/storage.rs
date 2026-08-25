@@ -53,7 +53,7 @@ pub(super) fn ensure_child_absent(parent: &AnchoredDir, leaf: &str) -> Result<()
     match parent.dir.symlink_metadata(leaf) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(path_io_error(&parent.path.join(leaf), source)),
-        Ok(_) => Err(RuntimeError::WorkspaceAlreadyInitialized {
+        Ok(_) => Err(RuntimeError::GlobalConfigAlreadyInitialized {
             path: parent.path.join(leaf),
         }),
     }
@@ -76,7 +76,7 @@ pub(super) fn ensure_relative_path_absent(
                 )));
             }
             Ok(_) if index + 1 == components.len() => {
-                return Err(RuntimeError::WorkspaceAlreadyInitialized {
+                return Err(RuntimeError::GlobalConfigAlreadyInitialized {
                     path: current.path.join(component),
                 });
             }

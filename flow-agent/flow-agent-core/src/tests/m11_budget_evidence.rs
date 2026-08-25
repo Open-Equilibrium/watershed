@@ -1,5 +1,23 @@
-use crate::runtime::m11_budget_evidence::{M11_BUDGET_WORKLOADS, M11BudgetWorkloadId};
+use crate::{
+    runtime::m11_budget_evidence::{
+        M11_BUDGET_WORKLOADS, M11BudgetWorkloadId, run_m11_budget_workload,
+    },
+    tests::helpers::empty_workspace,
+};
 use std::time::Duration;
+
+#[test]
+fn authoring_budget_workloads_use_the_supplied_temporary_global_home() {
+    let temporary_root = empty_workspace("m11-authoring-budget-home");
+
+    run_m11_budget_workload(M11BudgetWorkloadId::AuthoringInit, &temporary_root, 0)
+        .expect("authoring initialization uses the supplied temporary root");
+
+    assert!(
+        temporary_root.join(".flow/config.yaml").is_file(),
+        "the benchmark creates its global authority beneath its supplied temporary root"
+    );
+}
 
 #[test]
 fn optimized_m11_budget_contract_is_the_exact_approved_set() {

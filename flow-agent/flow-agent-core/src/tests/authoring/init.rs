@@ -1,4 +1,4 @@
-use super::super::helpers::empty_workspace;
+use super::super::test_support::session_home_path;
 use crate::runtime::authoring::{
     set_init_post_marker_removal_observer, set_init_serialization_observer,
 };
@@ -7,15 +7,39 @@ use crate::runtime::fs_guards::{
     take_directory_sync_trace_for_test,
 };
 use crate::runtime::types::RuntimeError;
-use crate::{initialize_workspace, validate_workspace_registry};
+use crate::{initialize_global_config, validate_global_registry};
 use std::{
     fs, io,
+    path::PathBuf,
     sync::{Arc, Barrier},
     thread,
 };
 
 const INIT_MARKER: &str =
     "{\"version\":\"flow-authoring-init-v1\",\"registry_root\":\"registry\"}\n";
+
+#[test]
+fn invalid_global_init_does_not_create_the_global_home() {
+    let home = session_home_path();
+    assert!(!home.exists());
+
+    let error = initialize_global_config(Some("../registry"))
+        .expect_err("an unsafe global registry root is rejected");
+
+    assert!(error.to_string().contains("registry_root"), "{error}");
+    assert!(!home.exists());
+}
+
+fn empty_global_home() -> PathBuf {
+    let home = session_home_path();
+    if home.exists() {
+        fs::remove_dir_all(&home).expect("prior isolated global home removes");
+    }
+    initialize_global_config(None).expect("private global home initializes for staging");
+    fs::remove_file(home.join("config.yaml")).expect("staged config removes");
+    fs::remove_dir_all(home.join("registry")).expect("staged registry removes");
+    home
+}
 
 #[test]
 fn authoring_init_transaction() {
@@ -26,12 +50,11 @@ fn authoring_init_transaction() {
         Some("registry/instructions"),
         Some("registry/phases"),
         Some("registry/flows"),
-        Some(".flow"),
-        Some(".flow/config.yaml"),
+        Some("config.yaml"),
     ];
 
-    for (ordinal, transition) in transitions.into_iter().enumerate() {
-        let workspace = empty_workspace(&format!("authoring-init-recovery-{ordinal}"));
+    for transition in transitions {
+        let workspace = empty_global_home();
         fs::write(workspace.join(".flow-init.json"), INIT_MARKER)
             .expect("transaction marker is staged");
         if let Some(transition) = transition {
@@ -45,13 +68,12 @@ fn authoring_init_transaction() {
             }
         }
 
-        initialize_workspace(&workspace, None)
+        initialize_global_config(None)
             .expect("an identity-bound partial initialization is recovered");
 
         assert!(!workspace.join(".flow-init.json").exists());
         assert_eq!(
-            fs::read_to_string(workspace.join(".flow/config.yaml"))
-                .expect("durable config is readable"),
+            fs::read_to_string(workspace.join("config.yaml")).expect("durable config is readable"),
             "registry_root: \"registry\"\n"
         );
         for leaf in ["tools", "instructions", "phases", "flows"] {
@@ -62,8 +84,7 @@ fn authoring_init_transaction() {
 
 #[test]
 fn concurrent_authoring_init_cannot_publish_a_stale_transaction() {
-    let workspace = empty_workspace("authoring-init-concurrent-stale-transaction");
-    let competing_workspace = workspace.as_ref().to_owned();
+    let workspace = empty_global_home();
     let preflight_reached = Arc::new(Barrier::new(2));
     let resume_competing_init = Arc::new(Barrier::new(2));
     let competing_preflight_reached = Arc::clone(&preflight_reached);
@@ -73,12 +94,11 @@ fn concurrent_authoring_init_cannot_publish_a_stale_transaction() {
             competing_preflight_reached.wait();
             competing_resume.wait();
         });
-        initialize_workspace(&competing_workspace, Some("registry-b"))
+        initialize_global_config(Some("registry-b"))
     });
 
     preflight_reached.wait();
-    initialize_workspace(&workspace, Some("registry-a"))
-        .expect("the serialized initialization completes");
+    initialize_global_config(Some("registry-a")).expect("the serialized initialization completes");
     resume_competing_init.wait();
     let error = competing
         .join()
@@ -89,34 +109,24 @@ fn concurrent_authoring_init_cannot_publish_a_stale_transaction() {
     assert!(!workspace.join(".flow-init.json").exists());
     assert!(!workspace.join("registry-b").exists());
     assert_eq!(
-        fs::read_to_string(workspace.join(".flow/config.yaml"))
+        fs::read_to_string(workspace.join("config.yaml"))
             .expect("the authoritative config is readable"),
         "registry_root: \"registry-a\"\n"
     );
-    let retry = initialize_workspace(&workspace, Some("registry-a"))
+    let retry = initialize_global_config(Some("registry-a"))
         .expect_err("the committed workspace remains retry-diagnosable");
     assert!(matches!(
         retry,
-        RuntimeError::WorkspaceAlreadyInitialized { .. }
+        RuntimeError::GlobalConfigAlreadyInitialized { .. }
     ));
 }
 
 #[test]
 fn authoring_init_rejects_unsafe_conflicting_and_foreign_transactions() {
-    for (ordinal, root) in [
-        ".",
-        ".flow",
-        ".flow/registry",
-        ".FLOW",
-        ".Flow/registry",
-        "../registry",
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let workspace = empty_workspace(&format!("authoring-init-unsafe-{ordinal}"));
-        let error = initialize_workspace(&workspace, Some(root))
-            .expect_err("unsafe registry root is rejected");
+    for root in [".", "config.yaml", "config.yaml/registry", "../registry"] {
+        let workspace = empty_global_home();
+        let error =
+            initialize_global_config(Some(root)).expect_err("unsafe registry root is rejected");
         assert!(
             error.to_string().contains("registry_root"),
             "{root}: {error}"
@@ -124,87 +134,81 @@ fn authoring_init_rejects_unsafe_conflicting_and_foreign_transactions() {
         assert!(!workspace.join(".flow-init.json").exists());
     }
 
-    for (ordinal, conflict) in [".flow", "registry"].into_iter().enumerate() {
-        let workspace = empty_workspace(&format!("authoring-init-conflict-{ordinal}"));
+    for conflict in ["config.yaml", "registry"] {
+        let workspace = empty_global_home();
         fs::create_dir(workspace.join(conflict)).expect("conflict is staged");
-        let error = initialize_workspace(&workspace, None)
-            .expect_err("existing authoring state is never replaced");
+        let error =
+            initialize_global_config(None).expect_err("existing authoring state is never replaced");
         assert_eq!(error.exit_code(), 65);
         assert!(matches!(
             error,
-            RuntimeError::WorkspaceAlreadyInitialized { .. }
+            RuntimeError::GlobalConfigAlreadyInitialized { .. }
         ));
     }
 
-    let workspace = empty_workspace("authoring-init-malformed-transaction");
+    let workspace = empty_global_home();
     fs::write(workspace.join(".flow-init.json"), "not-json\n")
         .expect("malformed transaction is staged");
-    let error =
-        initialize_workspace(&workspace, None).expect_err("malformed transaction is rejected");
+    let error = initialize_global_config(None).expect_err("malformed transaction is rejected");
     assert!(
         error.to_string().contains("valid init transaction"),
         "{error}"
     );
 
-    let workspace = empty_workspace("authoring-init-foreign-transaction");
+    let workspace = empty_global_home();
     fs::write(
         workspace.join(".flow-init.json"),
         "{\"version\":\"flow-authoring-init-v1\",\"registry_root\":\"other\"}\n",
     )
     .expect("foreign transaction is staged");
-    let error =
-        initialize_workspace(&workspace, None).expect_err("foreign transaction is rejected");
+    let error = initialize_global_config(None).expect_err("foreign transaction is rejected");
     assert!(matches!(
         error,
-        RuntimeError::WorkspaceAlreadyInitialized { .. }
+        RuntimeError::GlobalConfigAlreadyInitialized { .. }
     ));
 
-    let workspace = empty_workspace("authoring-init-config-mismatch");
+    let workspace = empty_global_home();
     fs::write(workspace.join(".flow-init.json"), INIT_MARKER)
         .expect("transaction marker is staged");
-    fs::create_dir_all(workspace.join(".flow")).expect("Flow directory is staged");
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "registry_root: other\n",
-    )
-    .expect("mismatched config is staged");
-    let error = initialize_workspace(&workspace, None)
-        .expect_err("mismatched recovered config is rejected");
+    fs::write(workspace.join("config.yaml"), "registry_root: other\n")
+        .expect("mismatched config is staged");
+    let error =
+        initialize_global_config(None).expect_err("mismatched recovered config is rejected");
     assert!(error.to_string().contains("does not match"), "{error}");
 }
 
 #[test]
 fn authoring_init_supports_nested_registry_roots_without_replacing_ancestors() {
-    let workspace = empty_workspace("authoring-init-nested");
+    let workspace = empty_global_home();
     fs::create_dir(workspace.join("catalog")).expect("safe ancestor exists");
 
-    initialize_workspace(&workspace, Some("catalog/blocks"))
-        .expect("nested registry root initializes");
+    initialize_global_config(Some("catalog/blocks")).expect("nested registry root initializes");
 
     assert_eq!(
-        fs::read_to_string(workspace.join(".flow/config.yaml")).expect("config is readable"),
+        fs::read_to_string(workspace.join("config.yaml")).expect("config is readable"),
         "registry_root: \"catalog/blocks\"\n"
     );
     for leaf in ["tools", "instructions", "phases", "flows"] {
         assert!(workspace.join("catalog/blocks").join(leaf).is_dir());
     }
 
-    let workspace = empty_workspace("authoring-init-file-ancestor");
+    let workspace = empty_global_home();
     fs::write(workspace.join("catalog"), "not a directory")
         .expect("conflicting registry ancestor is staged");
-    let error = initialize_workspace(&workspace, Some("catalog/blocks"))
+    let error = initialize_global_config(Some("catalog/blocks"))
         .expect_err("a registry ancestor must be a real directory");
     assert!(error.to_string().contains("real directory"), "{error}");
 }
 
 #[test]
 fn authoring_init_retries_nested_registry_parent_sync_before_clearing_transaction() {
-    let workspace = empty_workspace("authoring-init-nested-parent-sync-retry");
+    let workspace = empty_global_home();
     let catalog = workspace.join("catalog");
     fs::create_dir(&catalog).expect("safe ancestor exists");
+    let catalog = fs::canonicalize(catalog).expect("catalog canonicalizes");
     set_directory_sync_error_for_path_for_test(&catalog, io::ErrorKind::Other);
 
-    initialize_workspace(&workspace, Some("catalog/blocks"))
+    initialize_global_config(Some("catalog/blocks"))
         .expect_err("the injected nested-parent sync failure is reported");
     assert!(
         workspace.join(".flow-init.json").is_file(),
@@ -212,7 +216,7 @@ fn authoring_init_retries_nested_registry_parent_sync_before_clearing_transactio
     );
 
     start_directory_sync_trace_for_test();
-    initialize_workspace(&workspace, Some("catalog/blocks"))
+    initialize_global_config(Some("catalog/blocks"))
         .expect("retry re-synchronizes the nested parent and completes");
     let trace = take_directory_sync_trace_for_test();
     assert!(
@@ -224,24 +228,25 @@ fn authoring_init_retries_nested_registry_parent_sync_before_clearing_transactio
 
 #[test]
 fn authoring_init_reports_finalization_failure_after_marker_removal() {
-    let workspace = empty_workspace("authoring-init-committed-finalization-failure");
+    let workspace = empty_global_home();
+    let canonical_home = fs::canonicalize(&workspace).expect("global home canonicalizes");
     let injected_workspace = workspace.clone();
     set_init_post_marker_removal_observer(move || {
         set_directory_sync_error_for_path_for_test(&injected_workspace, io::ErrorKind::Other);
     });
 
-    let error = initialize_workspace(&workspace, None)
+    let error = initialize_global_config(None)
         .expect_err("the post-marker-removal directory sync failure is reported");
 
     assert_eq!(error.exit_code(), 65);
     assert!(matches!(
         &error,
         RuntimeError::PublishedOutputFinalizationFailure { output, .. }
-            if output == workspace.as_ref()
+            if output == &canonical_home
     ));
     assert!(!workspace.join(".flow-init.json").exists());
     assert_eq!(
-        fs::read_to_string(workspace.join(".flow/config.yaml"))
+        fs::read_to_string(workspace.join("config.yaml"))
             .expect("the committed config remains complete"),
         "registry_root: \"registry\"\n"
     );
@@ -249,30 +254,31 @@ fn authoring_init_reports_finalization_failure_after_marker_removal() {
         assert!(workspace.join("registry").join(leaf).is_dir());
     }
 
-    let committed = fs::read(workspace.join(".flow/config.yaml"))
-        .expect("the committed config remains readable");
-    let retry = initialize_workspace(&workspace, None)
+    let committed =
+        fs::read(workspace.join("config.yaml")).expect("the committed config remains readable");
+    let retry = initialize_global_config(None)
         .expect_err("a later invocation must not overwrite the committed workspace");
     assert_eq!(retry.exit_code(), 65);
     assert!(
-        retry.to_string().contains("workspace_already_initialized"),
+        retry
+            .to_string()
+            .contains("global_config_already_initialized"),
         "{retry}"
     );
     assert_eq!(
-        fs::read(workspace.join(".flow/config.yaml"))
-            .expect("the committed config remains readable"),
+        fs::read(workspace.join("config.yaml")).expect("the committed config remains readable"),
         committed
     );
 }
 
 #[test]
 fn authoring_init_quotes_yaml_significant_registry_roots() {
-    let workspace = empty_workspace("authoring-init-yaml-significant-registry-root");
+    let workspace = empty_global_home();
 
-    initialize_workspace(&workspace, Some("catalog #prod"))
+    initialize_global_config(Some("catalog #prod"))
         .expect("YAML-significant registry root initializes");
 
     assert!(workspace.join("catalog #prod/tools").is_dir());
-    validate_workspace_registry(&workspace, None)
-        .expect("the initialized registry root round-trips through workspace config");
+    validate_global_registry(None)
+        .expect("the initialized registry root round-trips through global config");
 }

@@ -3,7 +3,7 @@ use crate::runtime::authoring::{set_authoring_post_publication_failure, write_ne
 use crate::runtime::fs_guards::{AnchoredDir, set_directory_sync_error_for_path_for_test};
 use crate::runtime::m11_budget_evidence::maximum_tool;
 use crate::runtime::types::RuntimeError;
-use crate::{create_registry_block, read_authoring_file, validate_workspace_registry};
+use crate::{create_global_registry_block, read_authoring_file, validate_global_registry};
 use std::{fs, io};
 
 #[test]
@@ -39,11 +39,11 @@ fn authoring_sources_are_bounded_and_confined_to_the_workspace() {
     assert!(error.to_string().contains("exceeds max"), "{error}");
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        workspace.join("config.yaml"),
         "registry_root: missing-registry\n",
     )
     .expect("missing registry root is configured");
-    let error = validate_workspace_registry(&workspace, None)
+    let error = validate_global_registry(None)
         .expect_err("validation must report a missing configured registry root");
     assert!(error.to_string().contains("missing-registry"), "{error}");
 }
@@ -77,7 +77,7 @@ fn authoring_post_publication_failure_retry_syncs_before_duplicate_result() {
     expected.push('\n');
     set_authoring_post_publication_failure();
 
-    let error = create_registry_block(&workspace, block.clone())
+    let error = create_global_registry_block(block.clone())
         .expect_err("post-publication finalization failure remains visible");
 
     assert!(error.to_string().contains("was published"), "{error}");
@@ -85,23 +85,25 @@ fn authoring_post_publication_failure_retry_syncs_before_duplicate_result() {
         fs::read_to_string(&target).expect("the published definition is visible"),
         expected
     );
+    let canonical_target = fs::canonicalize(&target).expect("published definition canonicalizes");
 
     set_directory_sync_error_for_path_for_test(
         target.parent().expect("target parent"),
         io::ErrorKind::Other,
     );
-    let error = create_registry_block(&workspace, block.clone())
+    let error = create_global_registry_block(block.clone())
         .expect_err("retry reports the injected publication finalization failure");
     assert!(matches!(
         error,
-        RuntimeError::PublishedOutputFinalizationFailure { ref output, .. } if output == &target
+        RuntimeError::PublishedOutputFinalizationFailure { ref output, .. }
+            if output == &canonical_target
     ));
     assert_eq!(
         fs::read_to_string(&target).expect("retry preserves the published definition"),
         expected
     );
 
-    let error = create_registry_block(&workspace, block)
+    let error = create_global_registry_block(block)
         .expect_err("a synchronized duplicate remains a stable duplicate");
     assert!(matches!(error, RuntimeError::DefinitionExists { .. }));
     assert_eq!(
