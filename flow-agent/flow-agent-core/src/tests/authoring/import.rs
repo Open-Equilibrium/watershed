@@ -2,6 +2,7 @@ use super::super::{
     helpers::empty_workspace,
     test_support::{copy_dir, fixture_dir, session_home_path},
 };
+use super::support::absent_global_home;
 use crate::{import_global_config_from_workspace, initialize_global_config};
 use std::{fs, path::PathBuf, process::Command};
 
@@ -22,6 +23,7 @@ fn legacy_workspace() -> super::super::test_support::TempWorkspace {
 
 #[test]
 fn explicit_legacy_import_atomically_publishes_the_global_authority() {
+    let global_home = absent_global_home();
     let source = legacy_workspace();
     let source_config = fs::read(source.join(".flow/config.yaml")).expect("source config reads");
     let source_flow =
@@ -31,7 +33,6 @@ fn explicit_legacy_import_atomically_publishes_the_global_authority() {
 
     import_global_config_from_workspace(&source).expect("valid legacy authority imports");
 
-    let global_home = session_home_path();
     assert_eq!(
         fs::read(global_home.join("config.yaml")).expect("global config reads"),
         source_config
@@ -53,6 +54,7 @@ fn explicit_legacy_import_atomically_publishes_the_global_authority() {
 
 #[test]
 fn invalid_legacy_import_leaves_the_global_authority_absent() {
+    let global_home = absent_global_home();
     let source = legacy_workspace();
     fs::write(
         source.join(".flow/config.yaml"),
@@ -64,7 +66,7 @@ fn invalid_legacy_import_leaves_the_global_authority_absent() {
         .expect_err("an invalid legacy authority is rejected");
 
     assert!(error.to_string().contains("registry_root"), "{error}");
-    assert!(!session_home_path().exists());
+    assert!(!global_home.exists());
 }
 
 #[test]

@@ -1,6 +1,15 @@
 use super::super::test_support::session_home_path;
 use crate::initialize_global_config;
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
+
+pub(super) fn absent_global_home() -> PathBuf {
+    let home = session_home_path();
+    if home.exists() {
+        fs::remove_dir(&home).expect("the isolated empty global home removes");
+    }
+    assert!(!home.exists());
+    home
+}
 
 pub(super) fn authoring_workspace(_name: &str) -> PathBuf {
     initialize_global_config(None).expect("global Flow authority initializes");

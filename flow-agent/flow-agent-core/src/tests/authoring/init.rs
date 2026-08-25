@@ -1,4 +1,5 @@
 use super::super::test_support::session_home_path;
+use super::support::absent_global_home;
 use crate::runtime::authoring::{
     set_init_post_marker_removal_observer, set_init_serialization_observer,
 };
@@ -20,8 +21,7 @@ const INIT_MARKER: &str =
 
 #[test]
 fn invalid_global_init_does_not_create_the_global_home() {
-    let home = session_home_path();
-    assert!(!home.exists());
+    let home = absent_global_home();
 
     let error = initialize_global_config(Some("../registry"))
         .expect_err("an unsafe global registry root is rejected");
