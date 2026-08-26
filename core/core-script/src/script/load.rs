@@ -6,7 +6,7 @@ use self::catalog::{RegistryCatalog, enqueue_dependencies};
 pub(super) use self::storage::RegistryFile;
 pub(super) use self::storage::{
     RegistryRoot, RegistryTraversalLimits, RegistryTraversalState,
-    collect_registry_files_with_limits, open_registry_root, open_registry_root_from_workspace_dir,
+    collect_registry_files_with_limits, open_registry_root, open_registry_root_from_root_dir,
     read_registry_file_to_string,
 };
 use crate::script::canonical::{parse_error, registry_source_error};
@@ -48,15 +48,15 @@ pub fn registry_block_definition_bytes(block: &RegistryBlock) -> Result<u64, Reg
 }
 
 impl ResolvedRegistry {
-    pub(super) fn validate_addition_from_workspace_dir_with_limits(
-        workspace_dir: &Dir,
-        workspace: &Path,
+    pub(super) fn validate_addition_from_root_dir_with_limits(
+        root_dir: &Dir,
+        root_path: &Path,
         registry_root: &Path,
         candidate: RegistryBlock,
         max_file_bytes: u64,
         max_total_bytes: u64,
     ) -> Result<(), RegistryError> {
-        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        let root = open_registry_root_from_root_dir(root_dir, root_path, registry_root)?;
         let limits = RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes);
         let candidate_bytes = registry_block_definition_bytes(&candidate)?;
         if candidate_bytes > limits.max_file_bytes {
@@ -92,14 +92,14 @@ impl ResolvedRegistry {
         )
     }
 
-    pub(super) fn load_all_from_workspace_dir_with_limits(
-        workspace_dir: &Dir,
-        workspace: &Path,
+    pub(super) fn load_all_from_root_dir_with_limits(
+        root_dir: &Dir,
+        root_path: &Path,
         registry_root: &Path,
         max_file_bytes: u64,
         max_total_bytes: u64,
     ) -> Result<Self, RegistryError> {
-        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        let root = open_registry_root_from_root_dir(root_dir, root_path, registry_root)?;
         Self::load_all_from_root(
             root,
             RegistryTraversalLimits::standard(max_file_bytes, max_total_bytes),
@@ -186,16 +186,16 @@ impl ResolvedRegistry {
         )
     }
 
-    pub(super) fn load_for_flow_from_workspace_dir_with_limits(
-        workspace_dir: &Dir,
-        workspace: &Path,
+    pub(super) fn load_for_flow_from_root_dir_with_limits(
+        root_dir: &Dir,
+        root_path: &Path,
         registry_root: &Path,
         flow_reference: &str,
         max_file_bytes: u64,
         max_total_bytes: u64,
         max_active_bytes: u64,
     ) -> Result<Self, RegistryError> {
-        let root = open_registry_root_from_workspace_dir(workspace_dir, workspace, registry_root)?;
+        let root = open_registry_root_from_root_dir(root_dir, root_path, registry_root)?;
         Self::load_for_flow_from_root(
             root,
             flow_reference,
@@ -296,13 +296,13 @@ impl ResolvedRegistry {
 }
 
 /// Loads the unique transitive registry closure for one top-level Flow.
-pub fn load_flow_registry_from_workspace(
-    workspace: impl AsRef<Path>,
+pub fn load_flow_registry_from_root(
+    root: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
     flow_reference: &str,
 ) -> Result<ResolvedRegistry, RegistryError> {
     ResolvedRegistry::load_for_flow_with_limits(
-        workspace.as_ref(),
+        root.as_ref(),
         registry_root.as_ref(),
         flow_reference,
         MAX_REGISTRY_FILE_BYTES,
@@ -311,16 +311,16 @@ pub fn load_flow_registry_from_workspace(
     )
 }
 
-/// Loads one Flow registry from an already opened workspace capability.
-pub fn load_flow_registry_from_workspace_dir(
-    workspace_dir: &Dir,
-    workspace_path: impl AsRef<Path>,
+/// Loads one Flow registry from an already opened root-directory capability.
+pub fn load_flow_registry_from_root_dir(
+    root_dir: &Dir,
+    root_path: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
     flow_reference: &str,
 ) -> Result<ResolvedRegistry, RegistryError> {
-    ResolvedRegistry::load_for_flow_from_workspace_dir_with_limits(
-        workspace_dir,
-        workspace_path.as_ref(),
+    ResolvedRegistry::load_for_flow_from_root_dir_with_limits(
+        root_dir,
+        root_path.as_ref(),
         registry_root.as_ref(),
         flow_reference,
         MAX_REGISTRY_FILE_BYTES,
@@ -329,13 +329,13 @@ pub fn load_flow_registry_from_workspace_dir(
     )
 }
 
-/// Validates every block and reference in a workspace registry.
-pub fn validate_registry_from_workspace(
-    workspace: impl AsRef<Path>,
+/// Validates every block and reference beneath an explicitly selected root.
+pub fn validate_registry_from_root(
+    root: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
 ) -> Result<(), RegistryError> {
     ResolvedRegistry::load_all_with_limits(
-        workspace.as_ref(),
+        root.as_ref(),
         registry_root.as_ref(),
         MAX_REGISTRY_FILE_BYTES,
         MAX_REGISTRY_TOTAL_BYTES,
@@ -343,15 +343,15 @@ pub fn validate_registry_from_workspace(
     .map(|_| ())
 }
 
-/// Validates every block and reference from an already opened workspace capability.
-pub fn validate_registry_from_workspace_dir(
-    workspace_dir: &Dir,
-    workspace_path: impl AsRef<Path>,
+/// Validates every block and reference from an already opened root-directory capability.
+pub fn validate_registry_from_root_dir(
+    root_dir: &Dir,
+    root_path: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
 ) -> Result<(), RegistryError> {
-    ResolvedRegistry::load_all_from_workspace_dir_with_limits(
-        workspace_dir,
-        workspace_path.as_ref(),
+    ResolvedRegistry::load_all_from_root_dir_with_limits(
+        root_dir,
+        root_path.as_ref(),
         registry_root.as_ref(),
         MAX_REGISTRY_FILE_BYTES,
         MAX_REGISTRY_TOTAL_BYTES,
@@ -360,15 +360,15 @@ pub fn validate_registry_from_workspace_dir(
 }
 
 /// Validates a candidate block against every existing block without publishing it.
-pub fn validate_registry_addition_from_workspace_dir(
-    workspace_dir: &Dir,
-    workspace_path: impl AsRef<Path>,
+pub fn validate_registry_addition_from_root_dir(
+    root_dir: &Dir,
+    root_path: impl AsRef<Path>,
     registry_root: impl AsRef<Path>,
     candidate: RegistryBlock,
 ) -> Result<(), RegistryError> {
-    ResolvedRegistry::validate_addition_from_workspace_dir_with_limits(
-        workspace_dir,
-        workspace_path.as_ref(),
+    ResolvedRegistry::validate_addition_from_root_dir_with_limits(
+        root_dir,
+        root_path.as_ref(),
         registry_root.as_ref(),
         candidate,
         MAX_REGISTRY_FILE_BYTES,

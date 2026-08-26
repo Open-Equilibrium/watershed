@@ -1,9 +1,10 @@
 use super::super::helpers::empty_workspace;
+use super::super::test_support::absent_global_home;
 use super::support::{authoring_workspace, padded_instruction};
 use crate::runtime::authoring::set_create_post_validation_observer;
 use crate::runtime::m11_budget_evidence::maximum_tool;
 use crate::runtime::types::RuntimeError;
-use crate::{create_registry_block, initialize_workspace, validate_workspace_registry};
+use crate::{create_global_registry_block, validate_global_registry};
 use core_script::{
     MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES, RegistryBlock,
     ToolCommand, parse_registry_block,
@@ -18,12 +19,11 @@ fn authoring_definition_budget() {
     fs::write(&path, padded_instruction("definition-limit", limit))
         .expect("boundary definition is written");
 
-    validate_workspace_registry(&workspace, None).expect("128 KiB definition is accepted");
+    validate_global_registry(None).expect("128 KiB definition is accepted");
 
     fs::write(&path, padded_instruction("definition-limit", limit + 1))
         .expect("excess definition is written");
-    let error = validate_workspace_registry(&workspace, None)
-        .expect_err("128 KiB plus one byte is rejected");
+    let error = validate_global_registry(None).expect_err("128 KiB plus one byte is rejected");
     assert!(error.to_string().contains("131073"), "{error}");
 }
 
@@ -41,13 +41,12 @@ fn authoring_registry_byte_budget() {
         .expect("boundary registry entry is written");
     }
 
-    validate_workspace_registry(&workspace, None).expect("16 MiB registry is accepted");
+    validate_global_registry(None).expect("16 MiB registry is accepted");
 
     let first = workspace.join("registry/instructions/byte-0000.yaml");
     fs::write(&first, padded_instruction("byte-0000", per_entry + 1))
         .expect("excess registry byte is written");
-    let error = validate_workspace_registry(&workspace, None)
-        .expect_err("16 MiB plus one byte is rejected");
+    let error = validate_global_registry(None).expect_err("16 MiB plus one byte is rejected");
     assert!(error.to_string().contains("16777217"), "{error}");
 }
 
@@ -65,9 +64,9 @@ fn authoring_create_counts_the_candidate_toward_the_registry_byte_budget() {
         )
         .expect("boundary registry entry is written");
     }
-    validate_workspace_registry(&workspace, None).expect("full registry is accepted");
+    validate_global_registry(None).expect("full registry is accepted");
 
-    let error = create_registry_block(&workspace, maximum_tool())
+    let error = create_global_registry_block(maximum_tool())
         .expect_err("candidate beyond the aggregate registry budget is rejected");
     assert!(error.to_string().contains("16908288"), "{error}");
     assert!(!workspace.join("registry/tools/maximum-tool.yaml").exists());
@@ -85,8 +84,8 @@ fn authoring_registry_entry_budget() {
         .expect("boundary registry entry is written");
     }
 
-    validate_workspace_registry(&workspace, None).expect("1,024 definitions are accepted");
-    let error = create_registry_block(&workspace, maximum_tool())
+    validate_global_registry(None).expect("1,024 definitions are accepted");
+    let error = create_global_registry_block(maximum_tool())
         .expect_err("authoring cannot publish definition 1,025");
     assert!(error.to_string().contains("entry count"), "{error}");
     assert!(!workspace.join("registry/tools/maximum-tool.yaml").exists());
@@ -96,18 +95,16 @@ fn authoring_registry_entry_budget() {
         padded_instruction("entry-excess", 128),
     )
     .expect("excess registry entry is written");
-    let error =
-        validate_workspace_registry(&workspace, None).expect_err("definition 1,025 is rejected");
+    let error = validate_global_registry(None).expect_err("definition 1,025 is rejected");
     assert!(error.to_string().contains("1025"), "{error}");
 }
 
 #[test]
 fn authoring_transaction_roundtrip() {
-    let workspace = empty_workspace("authoring-transaction-roundtrip");
-    initialize_workspace(&workspace, None).expect("workspace initializes");
+    let _workspace = authoring_workspace("authoring-transaction-roundtrip");
     let block = maximum_tool();
 
-    let path = create_registry_block(&workspace, block.clone()).expect("Tool is published");
+    let path = create_global_registry_block(block.clone()).expect("Tool is published");
 
     let bytes = fs::read(&path).expect("published Tool is readable");
     assert_eq!(
@@ -119,12 +116,12 @@ fn authoring_transaction_roundtrip() {
         parse_registry_block("maximum-tool.yaml", &source).expect("published Tool reloads"),
         block
     );
-    validate_workspace_registry(&workspace, None).expect("published registry validates");
+    validate_global_registry(None).expect("published registry validates");
 }
 
 #[test]
 fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() {
-    let workspace = authoring_workspace("authoring-all-block-kinds");
+    let _workspace = authoring_workspace("authoring-all-block-kinds");
     let definitions = [
         (
             "tool.yaml",
@@ -147,8 +144,7 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
     let mut published = Vec::new();
     for (source_name, source) in definitions {
         let block = parse_registry_block(source_name, source).expect("definition parses");
-        published
-            .push(create_registry_block(&workspace, block).expect("approved block kind publishes"));
+        published.push(create_global_registry_block(block).expect("approved block kind publishes"));
     }
     assert_eq!(
         published
@@ -157,10 +153,9 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
             .collect::<Vec<_>>(),
         ["inspect.yaml", "review.yaml", "review.yaml", "review.yaml"]
     );
-    validate_workspace_registry(&workspace, Some("review"))
-        .expect("selected authored Flow closure validates");
-    let error = validate_workspace_registry(&workspace, Some("missing"))
-        .expect_err("unknown selected Flow is rejected");
+    validate_global_registry(Some("review")).expect("selected authored Flow closure validates");
+    let error =
+        validate_global_registry(Some("missing")).expect_err("unknown selected Flow is rejected");
     assert!(
         error
             .to_string()
@@ -170,28 +165,33 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
 }
 
 #[test]
-fn authoring_uninitialized_workspace_uses_runtime_exit_class() {
-    let workspace = empty_workspace("authoring-uninitialized-workspace");
-    let error = create_registry_block(&workspace, maximum_tool())
-        .expect_err("uninitialized workspace is rejected");
+fn authoring_uninitialized_global_config_uses_runtime_exit_class() {
+    absent_global_home();
+    let workspace = empty_workspace("authoring-uninitialized-global-config");
+    let error = create_global_registry_block(maximum_tool())
+        .expect_err("uninitialized global config is rejected");
 
     assert_eq!(error.exit_code(), 65);
-    assert!(error.to_string().contains("workspace is not initialized"));
+    assert!(
+        error
+            .to_string()
+            .contains("global Flow config is not initialized")
+    );
     assert!(!workspace.join(".flow").exists());
 }
 
 #[cfg(any(unix, windows))]
 #[test]
-fn authoring_rejects_a_hardlinked_workspace_config_before_publication() {
+fn authoring_rejects_a_hardlinked_global_config_before_publication() {
     let workspace = authoring_workspace("authoring-hardlinked-config");
     let outside = empty_workspace("authoring-hardlinked-config-outside");
-    let config_path = workspace.join(".flow/config.yaml");
+    let config_path = workspace.join("config.yaml");
     let outside_config = outside.join("config.yaml");
     fs::write(&outside_config, "registry_root: registry\n").expect("outside config writes");
-    fs::remove_file(&config_path).expect("workspace config removes");
-    fs::hard_link(&outside_config, &config_path).expect("workspace config hard links");
+    fs::remove_file(&config_path).expect("global config removes");
+    fs::hard_link(&outside_config, &config_path).expect("global config hard links");
 
-    let error = create_registry_block(&workspace, maximum_tool())
+    let error = create_global_registry_block(maximum_tool())
         .expect_err("hardlinked config is rejected before authoring publication");
 
     assert!(
@@ -206,17 +206,17 @@ fn authoring_publish_is_atomic_for_missing_duplicate_and_oversized_definitions()
     let workspace = authoring_workspace("authoring-publish-atomicity");
     fs::remove_dir(workspace.join("registry/tools")).expect("Tool directory is removed");
     let block = maximum_tool();
-    let error = create_registry_block(&workspace, block.clone())
+    let error = create_global_registry_block(block.clone())
         .expect_err("missing kind directory is rejected");
     assert_eq!(error.exit_code(), 65);
     assert!(error.to_string().contains("does not exist"), "{error}");
     assert!(!workspace.join("registry/tools/maximum-tool.yaml").exists());
 
     fs::create_dir(workspace.join("registry/tools")).expect("Tool directory is restored");
-    create_registry_block(&workspace, block.clone()).expect("first publication succeeds");
+    create_global_registry_block(block.clone()).expect("first publication succeeds");
     let persisted = fs::read(workspace.join("registry/tools/maximum-tool.yaml"))
         .expect("published definition is readable");
-    let error = create_registry_block(&workspace, block.clone())
+    let error = create_global_registry_block(block.clone())
         .expect_err("duplicate publication never overwrites");
     assert!(matches!(
         error,
@@ -240,7 +240,7 @@ fn authoring_publish_is_atomic_for_missing_duplicate_and_oversized_definitions()
         unreachable!("fixture is predefined")
     };
     argv[0].push('x');
-    let error = create_registry_block(&workspace, oversized)
+    let error = create_global_registry_block(oversized)
         .expect_err("generated definition byte budget is enforced before publication");
     assert!(
         error.to_string().contains("generated registry definition"),
@@ -250,7 +250,7 @@ fn authoring_publish_is_atomic_for_missing_duplicate_and_oversized_definitions()
 
 #[test]
 fn concurrent_authoring_serializes_registry_validation_and_publication() {
-    let workspace = authoring_workspace("authoring-concurrent-publication");
+    let _workspace = authoring_workspace("authoring-concurrent-publication");
     let mut first = maximum_tool();
     let mut second = first.clone();
     for (block, id) in [(&mut first, "first"), (&mut second, "second")] {
@@ -265,12 +265,11 @@ fn concurrent_authoring_serializes_registry_validation_and_publication() {
         argv[0] = "echo".to_owned();
     }
 
-    let second_workspace = workspace.as_ref().to_path_buf();
     let (start_sender, start_receiver) = std::sync::mpsc::channel();
     let (done_sender, done_receiver) = std::sync::mpsc::channel();
     let second_create = std::thread::spawn(move || {
         start_receiver.recv().expect("second create starts");
-        let result = create_registry_block(&second_workspace, second);
+        let result = create_global_registry_block(second);
         let _ = done_sender.send(());
         result
     });
@@ -279,13 +278,12 @@ fn concurrent_authoring_serializes_registry_validation_and_publication() {
         let _ = done_receiver.recv_timeout(std::time::Duration::from_secs(2));
     });
 
-    let first_result = create_registry_block(&workspace, first);
+    let first_result = create_global_registry_block(first);
     let second_result = second_create.join().expect("second create joins");
     assert_eq!(
         usize::from(first_result.is_ok()) + usize::from(second_result.is_ok()),
         1,
         "only one duplicate-name definition may publish: first={first_result:?}, second={second_result:?}"
     );
-    validate_workspace_registry(&workspace, None)
-        .expect("the concurrently updated registry remains unambiguous");
+    validate_global_registry(None).expect("the concurrently updated registry remains unambiguous");
 }

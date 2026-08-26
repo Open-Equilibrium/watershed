@@ -340,7 +340,7 @@ fn productive_execution_at_live_limit() -> (
             policy: &policy,
             prior_history: ContextHistory::default(),
             registry: &registry,
-            repository_instructions: "",
+            agent_instructions: "",
             root_flow,
             root_input: None,
             session_id: "liveproductiveoverflow",

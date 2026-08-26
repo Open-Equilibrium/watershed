@@ -7,7 +7,7 @@ use super::super::{
 use super::support::FakeToolExecutor;
 use super::support::{FakeProvider, ScriptedProvider, disabled_smoke_productive_execution_fixture};
 use crate::runtime::{
-    config_io::load_workspace_config,
+    config_io::load_global_config,
     context::{
         CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID,
     },
@@ -86,7 +86,7 @@ fn run_default_smoke_productive_session<P: ProductiveProvider>(
     fixture: &ProductiveExecutionFixture,
     provider: &mut P,
 ) -> Result<RunOutput, RuntimeError> {
-    let config = load_workspace_config(workspace)?;
+    let config = load_global_config()?;
     run_productive_session_with_provider(
         workspace,
         &fixture.anchored,
@@ -122,7 +122,7 @@ fn recover_interrupted_productive_run<P: ProductiveProvider>(
         execution.policy,
         false,
         execution.credential,
-        execution.repository_instructions,
+        execution.agent_instructions,
         provider,
         &reservation,
         None,
@@ -155,7 +155,7 @@ fn productive_run_persists_one_complete_conversation_bundle() {
 
     let execution = execute_productive_flow(
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "run")
         },
         &mut provider,
@@ -199,7 +199,7 @@ fn productive_run_persists_one_complete_conversation_bundle() {
 #[test]
 fn productive_session_entrypoint_persists_a_resumable_conversation() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_workspace_config(&workspace).expect("productive config");
+    let config = load_global_config().expect("productive config");
     let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
     let mut provider = FakeProvider::default();
@@ -222,7 +222,7 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
         Some(core_script::FlowValue::String("root input".to_owned())),
         true,
         fixture.credential(),
-        "Repository guidance.",
+        "Agent guidance.",
         None,
         &mut provider,
     )
@@ -358,7 +358,7 @@ fn productive_session_human_output_reports_success_and_persists_failure() {
 #[test]
 fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_workspace_config(&workspace).expect("productive config");
+    let config = load_global_config().expect("productive config");
     let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
     let definition = session_definition_metadata(registry, flow).expect("definition metadata");
@@ -377,7 +377,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
             ProductiveExecution {
                 clock: config.event_clock,
                 prior_history,
-                repository_instructions: "Repository guidance.",
+                agent_instructions: "Agent guidance.",
                 ..fixture.execution(flow, "run")
             },
             &mut initial_provider,
@@ -400,7 +400,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     let output = recover_interrupted_productive_run(
         &workspace,
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "run")
         },
         &mut recovery_provider,
@@ -429,7 +429,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
 #[test]
 fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
     let (workspace, fixture) = configured_smoke_productive_execution_fixture();
-    let config = load_workspace_config(&workspace).expect("productive config");
+    let config = load_global_config().expect("productive config");
     let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
     let definition = session_definition_metadata(registry, flow).expect("definition metadata");
@@ -477,7 +477,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
             ProductiveExecution {
                 clock: config.event_clock,
                 prior_history,
-                repository_instructions: "Repository guidance.",
+                agent_instructions: "Agent guidance.",
                 ..fixture.execution(flow, "run")
             },
             &mut initial_provider,
@@ -500,7 +500,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
     let output = recover_interrupted_productive_run(
         &workspace,
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "run")
         },
         &mut recovery_provider,

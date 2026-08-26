@@ -1,4 +1,4 @@
-use flow_agent_core::{EmitMode, RuntimeError, run_flow};
+use flow_agent_core::{EmitMode, RuntimeError, initialize_global_config, run_flow};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -6,7 +6,9 @@ use std::{
 
 #[path = "../../tests/support.rs"]
 mod test_support;
-use test_support::{empty_workspace, session_home_path, workspace_copy, workspace_session_dir};
+use test_support::{
+    copy_dir, empty_workspace, session_home_path, workspace_copy, workspace_session_dir,
+};
 
 #[test]
 fn sessions_are_stored_in_the_user_home_not_the_workspace() {
@@ -101,9 +103,19 @@ fn sessions_are_stored_in_the_user_home_not_the_workspace() {
         #[cfg(not(windows))]
         std::env::set_var("HOME", &*user_home);
     }
+    initialize_global_config(None).expect("the default global Flow authority initializes");
+    fs::copy(
+        session_home.join("config.yaml"),
+        user_home.join(".flow/config.yaml"),
+    )
+    .expect("the default global Flow config fixture is installed explicitly");
+    copy_dir(
+        &session_home.join("registry"),
+        &user_home.join(".flow/registry"),
+    );
     let default_output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
         .expect("the platform user home provides the default session store");
-    let default_store = only_workspace_store(&user_home.join(".flow-agent/workspaces"));
+    let default_store = only_workspace_store(&user_home.join(".flow/workspaces"));
     assert!(
         default_store
             .join("sessions")

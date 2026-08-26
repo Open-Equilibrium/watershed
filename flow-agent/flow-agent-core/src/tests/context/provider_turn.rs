@@ -2,8 +2,7 @@ use crate::{
     runtime::{
         context::{
             CACHE_STABLE_TIER_ZERO_SOURCES, CompiledContext, ContextHistory, ContextModelProfile,
-            compile_provider_turn_context,
-            compile_provider_turn_context_with_repository_instructions,
+            compile_provider_turn_context, compile_provider_turn_context_with_agent_instructions,
         },
         digest::sha256_hex,
         stream_signature::FlowInvocation,
@@ -67,7 +66,7 @@ fn provider_context_preserves_tier_zero_order_scope_and_cache_prefix() {
         .collect::<Vec<_>>();
     let expected_ids = [
         "base-runtime-security",
-        "repository-instructions",
+        "agent-instructions",
         "active-flow-instructions",
         "active-phase-instructions",
         "active-available-tools",
@@ -225,7 +224,7 @@ fn instruction_parameters_require_a_complete_typed_phase_input_map() {
         parent_flow_id: None,
     };
     let compile = |input: Option<&core_script::FlowValue>| {
-        compile_provider_turn_context_with_repository_instructions(
+        compile_provider_turn_context_with_agent_instructions(
             &ContextModelProfile::stub_v0(),
             &registry,
             flow,
@@ -269,7 +268,7 @@ fn instruction_parameters_require_a_complete_typed_phase_input_map() {
         }])
     );
     assert_eq!(
-        context_source_content(&compiled, "repository-instructions"),
+        context_source_content(&compiled, "agent-instructions"),
         serde_json::json!([{"source":"AGENTS.md","content":"Repository rules."}])
     );
 }

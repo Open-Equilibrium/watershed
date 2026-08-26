@@ -1,23 +1,24 @@
 use super::{SessionProvider, session_credential};
 use crate::{
     runtime::{
-        config_io::load_workspace_config,
+        config_io::load_global_config,
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::{
             append_productive_run_checkpoint, conversation_status_page,
             create_conversation_run_with_model_profile, migrate_legacy_session,
         },
         fs_guards::AnchoredWorkspace,
+        instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
         live_events::live_event_channel,
         session::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, continue_conversation_with_provider,
-            read_repository_instructions, resume_conversation_run,
-            resume_conversation_run_with_execution_activation,
+            resume_conversation_run, resume_conversation_run_with_execution_activation,
             resume_conversation_run_with_live_events, run_flow,
             run_flow_with_root_input_and_live_events, run_productive_session_with_provider,
         },
         session_reading::SessionEventReader,
+        session_store::open_flow_agent_home,
         types::{EmitMode, RunOutput, RuntimeError},
     },
     tests::{
@@ -98,7 +99,7 @@ fn public_one_id_continuation_binds_an_already_migrated_legacy_parent_to_the_cur
 #[test]
 fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_provider() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_workspace_config(&workspace).expect("productive config");
+    let config = load_global_config().expect("productive config");
     let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
     let credential = fixture.credential();
@@ -189,28 +190,28 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
 }
 
 #[test]
-fn repository_instructions_are_optional_bounded_and_real() {
-    let workspace = empty_workspace("repository-instructions-absent");
+fn workspace_agent_instructions_are_optional_bounded_and_real() {
+    let workspace = empty_workspace("workspace-instructions-absent");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
     assert_eq!(
-        read_repository_instructions(&anchored).expect("absent instructions are allowed"),
+        read_workspace_agent_instructions(&anchored).expect("absent instructions are allowed"),
         ""
     );
 
-    let workspace = empty_workspace("repository-instructions-present");
-    fs::write(workspace.join("AGENTS.md"), "Repository guidance.\n").expect("instructions write");
+    let workspace = empty_workspace("workspace-instructions-present");
+    fs::write(workspace.join("AGENTS.md"), "Workspace guidance.\n").expect("instructions write");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
     assert_eq!(
-        read_repository_instructions(&anchored).expect("instructions read"),
-        "Repository guidance.\n"
+        read_workspace_agent_instructions(&anchored).expect("instructions read"),
+        "Workspace guidance.\n"
     );
 
-    let workspace = empty_workspace("repository-instructions-directory");
+    let workspace = empty_workspace("workspace-instructions-directory");
     fs::create_dir(workspace.join("AGENTS.md")).expect("directory fixture creates");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
-    assert!(read_repository_instructions(&anchored).is_err());
+    assert!(read_workspace_agent_instructions(&anchored).is_err());
 
-    let workspace = empty_workspace("repository-instructions-oversized");
+    let workspace = empty_workspace("workspace-instructions-oversized");
     let file = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -220,20 +221,43 @@ fn repository_instructions_are_optional_bounded_and_real() {
         .expect("oversized fixture grows");
     drop(file);
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
-    assert!(read_repository_instructions(&anchored).is_err());
+    assert!(read_workspace_agent_instructions(&anchored).is_err());
+}
+
+#[test]
+fn applicable_agent_instructions_load_global_then_harness_workspace() {
+    let workspace = empty_workspace("applicable-agent-instructions");
+    crate::initialize_global_config(None).expect("global Flow authority initializes");
+    fs::write(
+        crate::tests::test_support::session_home_path().join("AGENTS.md"),
+        "Global guidance.\n",
+    )
+    .expect("global instructions write");
+    fs::write(workspace.join("AGENTS.md"), "Workspace guidance.\n")
+        .expect("workspace instructions write");
+    let home = open_flow_agent_home(false, true)
+        .expect("global home opens")
+        .expect("global home exists");
+    let workspace = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
+
+    assert_eq!(
+        read_applicable_agent_instructions(&home, &workspace)
+            .expect("applicable instructions read"),
+        "Global guidance.\n\nWorkspace guidance.\n"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn repository_instructions_refuse_symlinks() {
+fn workspace_agent_instructions_refuse_symlinks() {
     use std::os::unix::fs::symlink;
 
-    let workspace = empty_workspace("repository-instructions-symlink");
-    fs::write(workspace.join("real-agents.md"), "Repository guidance.\n")
+    let workspace = empty_workspace("workspace-instructions-symlink");
+    fs::write(workspace.join("real-agents.md"), "Workspace guidance.\n")
         .expect("target instructions write");
     symlink("real-agents.md", workspace.join("AGENTS.md")).expect("symlink fixture creates");
     let anchored = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
-    assert!(read_repository_instructions(&anchored).is_err());
+    assert!(read_workspace_agent_instructions(&anchored).is_err());
 }
 
 #[test]
@@ -374,7 +398,7 @@ fn valid_conversation_addresses_fail_before_provider_or_run_creation() {
 #[test]
 fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_stream() {
     let (workspace, fixture) = disabled_configured_smoke_productive_execution_fixture();
-    let config = load_workspace_config(&workspace).expect("productive config");
+    let config = load_global_config().expect("productive config");
     let registry = &fixture.registry;
     let flow = fixture.smoke_flow();
     let credential = fixture.credential();
@@ -398,7 +422,7 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
         None,
         false,
         credential,
-        "Repository guidance.",
+        "Agent guidance.",
         None,
         &mut provider,
     )

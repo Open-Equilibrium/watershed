@@ -51,7 +51,7 @@ impl ProductiveExecutionFixture {
             policy: &self.policy,
             prior_history: ContextHistory::default(),
             registry: &self.registry,
-            repository_instructions: "",
+            agent_instructions: "",
             root_flow,
             root_input: None,
             session_id,

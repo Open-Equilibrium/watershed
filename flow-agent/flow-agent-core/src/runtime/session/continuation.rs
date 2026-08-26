@@ -5,7 +5,7 @@ use super::{
 };
 use crate::runtime::{
     auth::resolve_openai_codex_credential,
-    config_io::{ExecutionBackend, load_workspace_config_from, require_execution_backend},
+    config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     conversations::{migrate_legacy_session_if_present, reserve_conversation_continuation},
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
@@ -134,11 +134,12 @@ where
     }
     let workspace = workspace.as_ref();
     let execution_workspace = AnchoredWorkspace::open(workspace)?;
-    let config = load_workspace_config_from(execution_workspace.root())?;
+    let authority = load_global_config_authority()?;
+    let config = &authority.config;
     let ExecutionBackend::OpenAiCodex {
         model,
         model_profile,
-    } = require_execution_backend(&config)?
+    } = require_execution_backend(config)?
     else {
         return Err(RuntimeError::Usage(format!(
             "conversation continuation requires provider {OPENAI_CODEX_PROVIDER_ID}"
@@ -165,11 +166,10 @@ where
             flow_ref,
             policy,
             credential,
-            repository_instructions,
+            agent_instructions,
         } = prepare_recorded_productive_preflight(
-            workspace,
             &execution_workspace,
-            &config,
+            &authority,
             reservation.run_session_id(),
             recorded,
             "continuation lacks Flow id",
@@ -183,7 +183,7 @@ where
         execute_reserved_productive_session(
             workspace,
             &execution_workspace,
-            &config,
+            config,
             &model,
             model_profile,
             &registry,
@@ -192,7 +192,7 @@ where
             root_input,
             capture_jsonl,
             &credential,
-            &repository_instructions,
+            &agent_instructions,
             notifier,
             provider,
             &reservation,

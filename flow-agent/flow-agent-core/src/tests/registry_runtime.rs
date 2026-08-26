@@ -10,7 +10,7 @@ use super::{
         replace_registry_text,
     },
     support::event_timestamp,
-    test_support::{copy_dir, expected_stream, fixture_dir, workspace_copy},
+    test_support::{copy_dir, expected_stream, fixture_dir, session_home_path, workspace_copy},
 };
 use crate::runtime::{
     execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
@@ -25,10 +25,10 @@ use proto::{EventEnvelope, EventType};
 use std::{fs, path::Path};
 
 #[test]
-fn registry_root_must_stay_inside_workspace() {
+fn registry_root_must_stay_inside_global_home() {
     let workspace = workspace_copy("smoke-flow");
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        session_home_path().join("config.yaml"),
         "fixture_profile: stub-model\nregistry_root: ../registry\nstub_model: deterministic\n",
     )
     .expect("config rewrite succeeds");
@@ -51,9 +51,9 @@ fn registry_root_rejects_symlinked_path_components() {
         &fixture_dir("smoke-flow").join("registry"),
         &outside.join("registry"),
     );
-    symlink(&outside, workspace.join("link")).expect("registry root symlink created");
+    symlink(&outside, session_home_path().join("link")).expect("registry root symlink created");
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        session_home_path().join("config.yaml"),
         "fixture_profile: stub-model\nregistry_root: link/registry\nstub_model: deterministic\n",
     )
     .expect("config rewrite succeeds");
@@ -78,9 +78,9 @@ fn registry_root_rejects_junction_path_components() {
         &fixture_dir("smoke-flow").join("registry"),
         &outside.join("registry"),
     );
-    create_windows_junction(&workspace.join("link"), &outside);
+    create_windows_junction(&session_home_path().join("link"), &outside);
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        session_home_path().join("config.yaml"),
         "fixture_profile: stub-model\nregistry_root: link/registry\nstub_model: deterministic\n",
     )
     .expect("config rewrite succeeds");
@@ -170,11 +170,11 @@ fn runtime_executes_subflows_after_all_parent_phases() {
 fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     let workspace = workspace_copy("smoke-flow");
     fs::write(
-        workspace.join("registry/phases/smoke.yaml"),
+        session_home_path().join("registry/phases/smoke.yaml"),
         "phase:\n  id: smoke\n  name: Smoke\n  instruction_refs: []\n  tool_refs: []\n  output:\n    type: string\n",
     )
     .expect("tool-free phase written");
-    let flows = workspace.join("registry/flows");
+    let flows = session_home_path().join("registry/flows");
     let write_flow = |id: &str, refs: &[&str]| {
         fs::write(
             flows.join(format!("{id}.yaml")),
@@ -305,7 +305,7 @@ fn run_flow_rejects_windows_short_alias_of_protected_directory() {
         "fixture requires the Windows short alias for .git"
     );
     fs::write(
-        workspace.join("registry/tools/write-summary.yaml"),
+        session_home_path().join("registry/tools/write-summary.yaml"),
         "tool:\n  id: write-summary\n  name: WriteSummary\n  tool_kind: own-script\n  command: script:write-summary\n  script_runtime: posix-sh\n  script_body: |\n    printf '%s\\n' \"$SUMMARY\" > GIT~1/config\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace\"]\n  protected_path_grants: []\n  network: deny\n",
     )
     .expect("alias write tool written");
@@ -347,7 +347,7 @@ fn protected_path_modes_follow_policy_target() {
 #[test]
 fn run_flow_emits_resolved_ids_for_name_references() {
     let workspace = workspace_copy("hello-flow");
-    let phase_path = workspace.join("registry/phases/inspect.yaml");
+    let phase_path = session_home_path().join("registry/phases/inspect.yaml");
     let source = fs::read_to_string(&phase_path).expect("phase fixture readable");
     fs::write(
         &phase_path,

@@ -314,7 +314,7 @@ pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Opti
         | RuntimeError::Registry(_)
         | RuntimeError::Protocol(_)
         | RuntimeError::PersistedState(_)
-        | RuntimeError::WorkspaceAlreadyInitialized { .. }
+        | RuntimeError::GlobalConfigAlreadyInitialized { .. }
         | RuntimeError::DefinitionExists { .. }
         | RuntimeError::InvalidDefinition { .. }
         | RuntimeError::InvalidReference { .. }

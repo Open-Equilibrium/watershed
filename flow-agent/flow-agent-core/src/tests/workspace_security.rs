@@ -8,7 +8,7 @@ use super::{
         fixture_runtime_policy, replace_registry_text,
     },
     support::assert_denied,
-    test_support::workspace_copy,
+    test_support::{session_home_path, workspace_copy},
 };
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_sink},
@@ -37,27 +37,35 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
     fs::remove_dir_all(workspace.join("out")).expect("fixture output dir removed");
 
     for index in 0..10 {
-        fs::write(
-            workspace.join(format!("registry/tools/write-summary-{index}.yaml")),
-            format!(
-                "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace/out\"]\n  protected_path_grants: []\n  network: deny\n"
-            ),
-        )
-        .expect("tool fixture written");
-        fs::write(
-            workspace.join(format!("registry/phases/summarize-{index}.yaml")),
-            format!(
-                "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
-            ),
-        )
-        .expect("phase fixture written");
-        fs::write(
-            workspace.join(format!("registry/flows/hello-flow-{index}.yaml")),
-            format!(
-                "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n  subflow_refs: []\n"
-            ),
-        )
-        .expect("flow fixture written");
+        let tool = format!(
+            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace/out\"]\n  protected_path_grants: []\n  network: deny\n"
+        );
+        let phase = format!(
+            "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
+        );
+        let flow = format!(
+            "flow:\n  id: hello-flow-{index}\n  name: HelloFlow{index}\n  phase_refs: [inspect, summarize-{index}]\n  subflow_refs: []\n"
+        );
+        for registry in [
+            workspace.join("registry"),
+            session_home_path().join("registry"),
+        ] {
+            fs::write(
+                registry.join(format!("tools/write-summary-{index}.yaml")),
+                &tool,
+            )
+            .expect("tool fixture written");
+            fs::write(
+                registry.join(format!("phases/summarize-{index}.yaml")),
+                &phase,
+            )
+            .expect("phase fixture written");
+            fs::write(
+                registry.join(format!("flows/hello-flow-{index}.yaml")),
+                &flow,
+            )
+            .expect("flow fixture written");
+        }
     }
 
     let barrier = Arc::new(Barrier::new(10));
@@ -190,7 +198,7 @@ fn run_flow_writes_portable_near_limit_output_leaf() {
 fn run_flow_rejects_multi_write_own_script_before_side_effects() {
     let workspace = workspace_copy("hello-flow");
     fs::write(
-        workspace.join("registry/tools/write-summary.yaml"),
+        crate::tests::test_support::session_home_path().join("registry/tools/write-summary.yaml"),
         r#"tool:
   id: write-summary
   name: WriteSummary

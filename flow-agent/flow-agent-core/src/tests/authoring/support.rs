@@ -1,10 +1,10 @@
-use super::super::{helpers::empty_workspace, test_support::TempWorkspace};
-use crate::initialize_workspace;
+use super::super::test_support::session_home_path;
+use crate::initialize_global_config;
+use std::path::PathBuf;
 
-pub(super) fn authoring_workspace(name: &str) -> TempWorkspace {
-    let workspace = empty_workspace(name);
-    initialize_workspace(&workspace, None).expect("workspace initializes");
-    workspace
+pub(super) fn authoring_workspace(_name: &str) -> PathBuf {
+    initialize_global_config(None).expect("global Flow authority initializes");
+    session_home_path()
 }
 
 pub(super) fn padded_instruction(id: &str, bytes: usize) -> String {

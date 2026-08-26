@@ -1,7 +1,7 @@
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_anchored_workspace},
     config_io::{
-        load_workspace_config_from, require_fixture_execution_backend, resume_event_clock,
+        load_global_config_authority, require_fixture_execution_backend, resume_event_clock,
     },
     context_persistence::read_anchored_context_manifest_signature,
     event_writer::{
@@ -144,8 +144,9 @@ fn resume_session_internal_with_cleanup_observer_impl(
         )));
     }
     let execution_workspace = AnchoredWorkspace::open(workspace)?;
-    let config = load_workspace_config_from(execution_workspace.root())?;
-    require_fixture_execution_backend(&config)?;
+    let authority = load_global_config_authority()?;
+    let config = &authority.config;
+    require_fixture_execution_backend(config)?;
     let session_dir_path = workspace_store_path(&execution_workspace)?.join(SESSION_STORAGE_DIR);
     let sessions = open_anchored_runtime_dir(&execution_workspace, SESSION_STORAGE_DIR)?
         .ok_or_else(|| RuntimeError::Io {
@@ -181,9 +182,9 @@ fn resume_session_internal_with_cleanup_observer_impl(
             &metadata,
         )?;
 
-        let registry = core_script::load_flow_registry_from_workspace_dir(
-            &execution_workspace.root().dir,
-            workspace,
+        let registry = core_script::load_flow_registry_from_root_dir(
+            &authority.home.dir,
+            &authority.home.path,
             &config.registry_root,
             &flow_id,
         )?;
@@ -193,7 +194,7 @@ fn resume_session_internal_with_cleanup_observer_impl(
         verify_resume_definition_metadata_values(session_id, &metadata, &registry, flow_block)?;
         let policy =
             core_policy::compile_policy_artifact(&registry, &flow_id, runtime_policy_target())?;
-        let clock = resume_event_clock(&config, inspection.clock)?;
+        let clock = resume_event_clock(config, inspection.clock)?;
         let recorded_context = read_anchored_context_manifest_signature(
             &logs,
             &sessions,

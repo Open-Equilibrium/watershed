@@ -9,7 +9,7 @@ mod history;
 mod provider_turn;
 pub use history::ContextHistory;
 pub use provider_turn::compile_provider_turn_context;
-pub(crate) use provider_turn::compile_provider_turn_context_with_repository_instructions;
+pub(crate) use provider_turn::compile_provider_turn_context_with_agent_instructions;
 
 pub const CONTEXT_PROFILE_ID: &str = "flow-context-v0";
 pub const CONTEXT_PROFILE_VERSION: &str = "0";

@@ -5,9 +5,19 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub(crate) const WORKSPACE_CONFIG_DIR: &str = ".flow";
-pub(crate) const WORKSPACE_CONFIG_LEAF: &str = "config.yaml";
-pub(crate) const WORKSPACE_CONFIG_PATH: &str = ".flow/config.yaml";
+pub(crate) const GLOBAL_CONFIG_LEAF: &str = "config.yaml";
+pub(crate) const GLOBAL_CONFIG_PATH: &str = "FLOW_AGENT_HOME/config.yaml";
+pub(crate) const AGENT_INSTRUCTIONS_LEAF: &str = "AGENTS.md";
+pub(crate) const GLOBAL_INIT_TRANSACTION_LEAF: &str = ".flow-init.json";
+pub(crate) const GLOBAL_INIT_LOCK_LEAF: &str = ".flow-init.lock";
+pub(crate) const GLOBAL_WORKSPACES_DIR: &str = "workspaces";
+pub(crate) const GLOBAL_RESERVED_LEAVES: &[&str] = &[
+    GLOBAL_CONFIG_LEAF,
+    AGENT_INSTRUCTIONS_LEAF,
+    GLOBAL_INIT_TRANSACTION_LEAF,
+    GLOBAL_INIT_LOCK_LEAF,
+    GLOBAL_WORKSPACES_DIR,
+];
 pub(crate) const SESSION_STORAGE_DIR: &str = "sessions";
 pub(crate) const LOG_STORAGE_DIR: &str = "logs";
 /// Maximum canonical uncompressed bytes stored in one event or manifest segment.
@@ -49,7 +59,7 @@ pub const MAX_FLOW_EVENTS: u64 = 155_750;
 pub const MAX_FLOW_INVOCATIONS: u64 = 512;
 /// Maximum live Flow invocations across all active Runs in one process.
 pub const MAX_LIVE_FLOW_INVOCATIONS: usize = 32;
-pub const MAX_WORKSPACE_CONFIG_BYTES: u64 = 1024 * 1024;
+pub const MAX_GLOBAL_CONFIG_BYTES: u64 = 1024 * 1024;
 pub const FIXTURE_CLOCK_UNIX_SECONDS: i64 = 1_767_225_600;
 pub const RUNTIME_ERROR_REASON: &str = "runtime_error";
 /// Stable lifecycle reason used for controlled productive cancellation.

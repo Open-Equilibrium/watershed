@@ -34,7 +34,7 @@ Watershed is AGPL/free software: users can inspect, run, self-host, fork and ver
 
 Watershed is a monorepo, **not** a monolith. The products share `core` libraries and the versioned `proto` contract, but own separate processes and state.
 
-- **Flow Agent** is CLI-only and host-local. Humans, scripts, CI or a Meta-Harness on the same host use its public CLI/event surfaces. Nothing reads its private session store.
+- **Flow Agent** is CLI-only and host-local. Humans, scripts, CI or a Meta-Harness on the same host use its public CLI/event surfaces. It has one global configuration authority and no project-local configuration discovery; project-specific behavior is an explicit Flow. Nothing reads its private session store.
 - **Meta-Harness** is a headless, host-scoped controller. It starts and controls only CLI agents on its own host, while authenticated clients may reach its public API remotely. Each instance owns its agent configurations, sessions, transcripts, agent schedules and AgentPulse metrics.
 - **Liquid** is a local-first workspace and app-building product. Every interactive client reads and writes its local replica. A central Sync Server coordinates replicas; an optional headless Liquid replica lets server-hosted agents use the same workspace action boundary while user devices are offline.
 
@@ -66,6 +66,16 @@ The Sync Server and headless Liquid replica are separate logical roles, though o
 
 Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded. Meta-Harness may start or observe Flow Agent but does not select or manage its Executor or Tool Sandbox.
 
+## Local operation and portable continuity
+
+Watershed's long-term core path is **offline after provisioning**. One device may run its Liquid replica, Meta-Harness, Flow Agent, local model endpoint, Executor and permitted Tools with network interfaces disabled. Remote providers, sync, MCP servers and remote control remain explicit optional capabilities; their absence never masquerades as success or blocks unrelated local work. This target is accepted architecture, not current M1.1 provider parity; the exact provisioning/local-provider contract remains [D-059](docs/decisions/open-decisions.html#d-059), and the executable local-runtime trust boundary remains [D-061](docs/decisions/open-decisions.html#d-061).
+
+A Flow states model/runtime requirements, not host addresses. Each execution location resolves them through a **Runtime binding** that may differ by device. Endpoint paths, credential references, protected credential material, model/runtime artifacts and resource policy remain device-local and never become Flow or Conversation authority. Flow Agent uses only **Global Flow configuration**; it does not discover project-local configuration layers. Project-specific behavior is represented by an explicitly selected or authored Flow. Optional global and harness-start Workspace `AGENTS.md` files are instructions, not configuration authority.
+
+A completed Conversation checkpoint may later move to another device and continue under a compatible Runtime binding. That **Portable continuation** always creates a new child Run in the existing Conversation tree, rechecks the selected Flow, destination capabilities, local actor and resources, and never replays prior provider or Tool effects. Integrations reauthorize their own resources; Liquid access additionally rechecks its Role and session grant. Exact recovery of an incomplete Run remains a stricter local compatibility contract. If disconnected devices continue the same checkpoint independently, they create separate branches rather than claiming the same linear Run; the archive, transfer and ownership protocol remains [D-058](docs/decisions/open-decisions.html#d-058), its authenticity root remains [D-062](docs/decisions/open-decisions.html#d-062), and offline approval/revocation semantics remain [D-060](docs/decisions/open-decisions.html#d-060).
+
+Workspace replication, Conversation portability and model/runtime distribution are separate protocols with different authority, conflict and storage rules. None may read another product's private store or transfer credential-store records, Runtime-binding credential references, approvals or execution authority. Conversation archives remain sensitive because recorded user, provider or Tool content may itself contain secrets.
+
 ## Liquid integration boundary
 
 Liquid's Page/Block/View UX, Workspace object lifecycle, Roles, logic levels, App and Block SDKs, and MCP model are canonical in the [Liquid V-Spec](docs/concept/V-Spec_Liquid.html), [glossary](GLOSSARY.md) and [security model](SECURITY.md).
@@ -78,7 +88,7 @@ Cross-product implications:
 
 ## Integrated agent flow
 
-1. A user or developer selects an agent harness, configuration and friendly execution location in Liquid.
+1. A user or developer selects an agent harness, that adapter's configuration and a friendly execution location in Liquid. Flow Agent requires an explicit Flow from its global authority; other harnesses use their documented selection model. The owning host resolves any device-local Runtime binding.
 2. Liquid calls the Meta-Harness that owns that location; a Meta-Harness schedule or event trigger may start the same run.
 3. Meta-Harness starts and supervises the agent process on its host.
 4. Liquid shows connection state, progress, transcript and a prompt/steering surface.

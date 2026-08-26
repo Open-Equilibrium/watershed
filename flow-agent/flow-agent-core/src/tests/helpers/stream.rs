@@ -1,6 +1,6 @@
 use super::workspace::load_test_registry;
 use crate::runtime::{
-    config_io::load_workspace_config,
+    config_io::load_global_config,
     context_persistence::SessionObjectWriter,
     digest::sha256_hex,
     execution_plan::{
@@ -114,7 +114,7 @@ pub(in crate::tests) fn write_definition_hash_metadata(
         .lines()
         .filter(|line| line.contains("\"event_type\":\"message.completed\""))
         .count();
-    let config = load_workspace_config(workspace).expect("workspace config loads");
+    let config = load_global_config().expect("global config loads");
     let policy = core_policy::compile_policy_artifact(&registry, flow_ref, runtime_policy_target())
         .expect("runtime policy compiles");
     let plan = plan_flow(

@@ -11,7 +11,7 @@ use crate::{
     },
     tests::{
         helpers::{fixture_runtime_policy, load_test_registry, replace_registry_text},
-        test_support::workspace_copy,
+        test_support::{session_home_path, workspace_copy},
     },
 };
 use proto::EventType;
@@ -27,16 +27,20 @@ fn exceed_context_budget_with_valid_instructions(workspace: &Path) {
         ("context-load-b", "ContextLoadB"),
     ];
     for (id, name) in instructions {
-        fs::write(
-            workspace
-                .join("registry/instructions")
-                .join(format!("{id}.yaml")),
-            format!(
-                "instruction:\n  id: {id}\n  name: {name}\n  prompt: \"{}\"\n",
-                "x".repeat(PROMPT_BYTES)
-            ),
-        )
-        .expect("valid large instruction writes");
+        let definition = format!(
+            "instruction:\n  id: {id}\n  name: {name}\n  prompt: \"{}\"\n",
+            "x".repeat(PROMPT_BYTES)
+        );
+        for registry in [
+            workspace.join("registry"),
+            session_home_path().join("registry"),
+        ] {
+            fs::write(
+                registry.join("instructions").join(format!("{id}.yaml")),
+                &definition,
+            )
+            .expect("valid large instruction writes");
+        }
     }
     replace_registry_text(
         workspace,

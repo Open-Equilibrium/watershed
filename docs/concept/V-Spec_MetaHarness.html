@@ -103,6 +103,7 @@ Liquid
       <p>Projections from one or more Meta-Harness instances may be combined visually, but every record retains instance identity, freshness and authority; every live command routes back to the owning instance.</p>
       <p>Liquid <strong>must not duplicate</strong> a Meta-Harness session registry, adapter logic, config resolution, AgentPulse engine or scheduling engine, and it must not invent global cross-instance authority.</p>
       <p><strong>Liquid is a standalone local-first workspace product, not merely Meta-Harness's UI.</strong> Workspace sync is independent from this live control plane. When an owning Meta-Harness is unreachable, Liquid may render cached state only as offline/stale and must not queue commands as if success were guaranteed. Meta-Harness and its agents access Liquid only through the workspace CLI/API/mutation pipeline, never Liquid storage internals.</p>
+      <p>A provisioned local Meta-Harness may start a same-host Flow Agent backed by a local model endpoint without Internet access. This does not let a remote client control an unreachable host. Cross-device Portable continuation uses Flow Agent's future public export/import surface and creates a child Run at the destination; Meta-Harness never copies Flow Agent's private store or transfers a live process claim. Exact archive/ownership behavior remains <a href="../decisions/open-decisions.html#d-058">D-058</a>, archive authenticity remains <a href="../decisions/open-decisions.html#d-062">D-062</a>, and local inference process trust remains <a href="../decisions/open-decisions.html#d-061">D-061</a>.</p>
     </div></section>
 
     <section id="deployment" class="section"><h2>5. Deployment modes</h2><div class="body">
@@ -111,7 +112,7 @@ Liquid
   starts local Meta-Harness sidecar
     starts/monitors Flow Agent, Codex CLI, Claude Code, ...
     stores local sessions/config/metrics</code></pre>
-        <p class="muted">Liquid starts Meta-Harness locally. PowerBar commands go to the sidecar, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals.</p>
+        <p class="muted">Liquid starts Meta-Harness locally. PowerBar commands go to the sidecar, which owns the CLI processes on that host; Liquid Blocks render sessions, transcripts, metrics and approvals. After local provisioning, this mode may bind Flow Agent to a device-local model runtime and operate its core path with network interfaces disabled.</p>
       </div>
       <div class="card"><h3>Mode B — server-host Meta-Harness</h3>
         <pre><code>Liquid Desktop/Mobile → authenticated Meta-Harness API
@@ -193,7 +194,7 @@ liquid integration
     </div></section>
 
     <section id="config" class="section"><h2>8. Central config</h2><div class="body">
-      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Flow Agent, Codex CLI, Claude Code and future adapters. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
+      <p>Meta-Harness is responsible for central config management across agents. It defines shared Watershed building blocks once and resolves them into target-specific runtime configuration for Flow Agent, Codex CLI, Claude Code and future adapters. The Flow Agent target is global-only: it receives no project-local config layer, and project-specific behavior is an explicit Flow in its global authority. Other adapters retain their own documented scope. A host's Runtime binding—endpoint plus capability-dependent model/runtime, optional local-artifact, optional typed credential-reference and resource-policy fields—remains device-local operational state and is not copied into portable shared config; credential material stays in the target's protected store. Config is made of reusable building blocks, not agent-specific vocabulary (example, not final syntax):</p>
       <pre><code>shared block: "review-rust-change"
   instructions: ["review safety", "review tests"]
   tools: ["read", "search", "run-tests"]
@@ -201,7 +202,7 @@ liquid integration
     flow-agent:  flow script + building blocks
     codex-cli:   instruction pack + command args
     claude-code: instruction pack + command args</code></pre>
-      <p>Meta-Harness config resolution is <strong>not</strong> a project VCS/history engine. Config changes must be auditable, reviewable and policy-gated. The storage mechanism is an open decision (<a href="../decisions/open-decisions.html#d-024">D-024</a>); it must still be auditable and reviewable regardless of choice.</p>
+      <p>Meta-Harness config resolution is <strong>not</strong> a project VCS/history engine. Config changes must be auditable, reviewable and policy-gated. Meta-Harness may manage Flow Agent's <code>FLOW_AGENT_HOME</code> authority only through a public config surface; it never writes target-private storage directly. Meta-Harness storage remains <a href="../decisions/open-decisions.html#d-024">D-024</a>; Flow Agent's global path, authoring and explicit-import boundary are canonical in <a href="../../PROTOCOL.md">PROTOCOL.md</a>.</p>
     </div></section>
 
     <section id="agentpulse" class="section"><h2>9. AgentPulse</h2><div class="body">

@@ -1,7 +1,7 @@
 use super::{
     flow_command,
     process::wait_with_input_and_output_before,
-    test_support::{expected_stream, workspace_copy, workspace_session_dir},
+    test_support::{expected_stream, session_home_path, workspace_copy, workspace_session_dir},
 };
 use std::{
     fs,
@@ -34,15 +34,14 @@ fn chat_child_watchdog() -> Duration {
 fn chat_preserves_the_registered_hello_flow_reference() {
     let run_workspace = workspace_copy("hello-flow");
     let chat_workspace = workspace_copy("hello-flow");
-    for workspace in [&run_workspace, &chat_workspace] {
-        let original = workspace.join("registry/flows/hello-flow.yaml");
-        let renamed = workspace.join("registry/flows/hello.yaml");
-        let definition = fs::read_to_string(&original)
-            .expect("hello Flow definition reads")
-            .replacen("id: hello-flow", "id: hello", 1);
-        fs::write(&renamed, definition).expect("hello Flow definition writes");
-        fs::remove_file(original).expect("hello-flow alias definition is absent");
-    }
+    let global_registry = session_home_path().join("registry/flows");
+    let original = global_registry.join("hello-flow.yaml");
+    let renamed = global_registry.join("hello.yaml");
+    let definition = fs::read_to_string(&original)
+        .expect("hello Flow definition reads")
+        .replacen("id: hello-flow", "id: hello", 1);
+    fs::write(&renamed, definition).expect("hello Flow definition writes");
+    fs::remove_file(original).expect("hello-flow alias definition is absent");
 
     let run = flow_command()
         .current_dir(&run_workspace)
@@ -80,7 +79,7 @@ fn chat_skips_blank_lines_before_a_registered_slash_reference() {
 fn chat_failed_flow_exits_with_failed_status() {
     let workspace = workspace_copy("sandbox-negative");
     fs::write(
-        workspace.join("registry/flows/hello-flow.yaml"),
+        session_home_path().join("registry/flows/hello-flow.yaml"),
         "flow:\n  id: hello-flow\n  name: HelloFlow\n  phase_refs: [negative-write]\n  subflow_refs: []\n",
     )
     .expect("chat flow fixture written");

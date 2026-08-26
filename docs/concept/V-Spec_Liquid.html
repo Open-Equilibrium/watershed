@@ -158,14 +158,15 @@ Headless replica ┘</code></pre>
     <section id="agents" class="section"><h2>8. Agent experience</h2><div class="body">
       <ol>
         <li>A user or developer configures a harness in Liquid and gives its execution location a friendly name such as “My laptop” or “Liquid Cloud Server.”</li>
-        <li>The user selects harness, configuration and location, then names the session by intent, such as “Refactor project X.” Infrastructure IDs remain internal.</li>
+        <li>The user selects harness, that adapter's configuration and a location, then names the session by intent, such as “Refactor project X.” Flow Agent requires an explicit Flow from its global authority; other harnesses retain their documented selection model. Global-config management is a separate surface; infrastructure IDs and any device-local Runtime binding remain internal.</li>
         <li>Liquid calls the Meta-Harness that owns the location; a Meta-Harness schedule or event trigger may start the same run.</li>
         <li>Meta-Harness starts, observes and controls the CLI agent on its own host.</li>
         <li>Liquid shows connection/freshness state, progress, transcript and prompt/steering controls. The user can add follow-ups or supervise approvals.</li>
         <li>The run proposes or executes project actions and permitted Liquid actions. Liquid changes always use the assigned Role, CLI/API and History pipeline.</li>
         <li>Meta-Harness retains execution/session records; Liquid retains Workspace History and cached projections.</li>
+        <li>When a verified terminal checkpoint is available on another device, the user may continue it at a new execution location as a child Run. Liquid renders the resulting Conversation branch and rechecks destination authority rather than presenting a runtime transfer as the same live Run.</li>
       </ol>
-      <p>Liquid may combine several Meta-Harness projections visually, but every live command returns to the owning instance and unreachable state is clearly offline/stale.</p>
+      <p>Liquid may combine several Meta-Harness projections visually, but every live command returns to the owning instance and unreachable state is clearly offline/stale. A provisioned same-host stack may execute locally without Internet; remote sessions remain stale while unreachable. Portable continuation transfers no credential-store records/references, Roles, approvals or live process ownership, but its recorded content remains sensitive; disconnected continuations from one checkpoint appear as separate branches.</p>
     </div></section>
 
     <section id="mobile" class="section"><h2>9. Responsive layout, mobile and widgets</h2><div class="body">

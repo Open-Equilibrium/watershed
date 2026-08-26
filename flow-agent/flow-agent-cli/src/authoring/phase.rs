@@ -183,7 +183,7 @@ mod tests {
     #[test]
     fn noncanonical_numeric_input_is_rejected_before_publication() {
         let workspace = empty_workspace();
-        flow_agent_core::initialize_workspace(&workspace, None).expect("workspace initializes");
+        flow_agent_core::initialize_global_config(None).expect("global Flow authority initializes");
         fs::write(workspace.join("contract.yaml"), "type: string\n")
             .expect("output contract writes");
         fs::write(
@@ -214,7 +214,9 @@ mod tests {
             "invalid --loop-max-iterations",
         );
         assert!(
-            !workspace.join("registry/phases/noncanonical.yaml").exists(),
+            !crate::test_support::session_home_path()
+                .join("registry/phases/noncanonical.yaml")
+                .exists(),
             "invalid numeric input never publishes a definition"
         );
     }

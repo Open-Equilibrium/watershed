@@ -1,24 +1,26 @@
 use super::registry_directory;
 use super::storage::{open_relative_directory, write_new_file};
 use crate::runtime::{
-    config_io::{load_workspace_config_from, parse_workspace_config_from_text},
+    config_io::{
+        ensure_global_config_settled, load_global_config_authority_at,
+        parse_global_config_from_text,
+    },
     fs_guards::{
-        AnchoredDir, AnchoredFile, DirectoryErrorMode, decode_utf8, open_anchored_file_for_read,
-        path_io_error, read_opened_file_with_limit, sync_anchored_directory,
+        AnchoredFile, DirectoryErrorMode, decode_utf8, open_anchored_file_for_read, path_io_error,
+        read_opened_file_with_limit, sync_anchored_directory,
     },
-    types::{
-        MAX_WORKSPACE_CONFIG_BYTES, RuntimeError, WORKSPACE_CONFIG_DIR, WORKSPACE_CONFIG_LEAF,
-    },
+    session_store::{flow_agent_home_path, open_flow_agent_home_at},
+    types::{GLOBAL_CONFIG_LEAF, MAX_GLOBAL_CONFIG_BYTES, RuntimeError},
 };
 use core_script::{
-    MAX_REGISTRY_FILE_BYTES, RegistryBlock, load_flow_registry_from_workspace_dir,
-    validate_registry_addition_from_workspace_dir, validate_registry_from_workspace_dir,
+    MAX_REGISTRY_FILE_BYTES, RegistryBlock, load_flow_registry_from_root_dir,
+    validate_registry_addition_from_root_dir, validate_registry_from_root_dir,
 };
 #[cfg(test)]
 use std::cell::RefCell;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
@@ -63,7 +65,7 @@ impl RegistryMutationLock {
             &mut self.file,
             metadata.len(),
             path.diagnostic_path(),
-            MAX_WORKSPACE_CONFIG_BYTES,
+            MAX_GLOBAL_CONFIG_BYTES,
         )?;
         decode_utf8(path.diagnostic_path(), bytes)
     }
@@ -102,20 +104,24 @@ fn observe_create_post_validation() {
 }
 
 /// Creates one validated registry block without overwriting an existing definition.
-pub fn create_registry_block(
-    workspace: impl AsRef<Path>,
+pub fn create_global_registry_block(block: RegistryBlock) -> Result<PathBuf, RuntimeError> {
+    let home_path = flow_agent_home_path()?;
+    create_global_registry_block_at(&home_path, block)
+}
+
+pub(in crate::runtime) fn create_global_registry_block_at(
+    home_path: &std::path::Path,
     block: RegistryBlock,
 ) -> Result<PathBuf, RuntimeError> {
-    let workspace_path = workspace.as_ref();
-    let workspace = AnchoredDir::workspace(workspace_path)?;
-    let flow_dir = workspace
-        .child(WORKSPACE_CONFIG_DIR, false, DirectoryErrorMode::Protocol)?
-        .ok_or_else(|| RuntimeError::PersistedState("workspace is not initialized".to_owned()))?;
-    let config_path = flow_dir.file(WORKSPACE_CONFIG_LEAF);
+    let home = open_flow_agent_home_at(home_path, false, false)?.ok_or_else(|| {
+        RuntimeError::PersistedState("global Flow config is not initialized".to_owned())
+    })?;
+    ensure_global_config_settled(&home)?;
+    let config_path = home.file(GLOBAL_CONFIG_LEAF);
     let mut registry_mutation_lock = RegistryMutationLock::acquire(&config_path)?;
     let config_text = registry_mutation_lock.read_config(&config_path)?;
-    let config = parse_workspace_config_from_text(&config_text)?;
-    let registry = open_relative_directory(&workspace, &config.registry_root)?;
+    let config = parse_global_config_from_text(&config_text)?;
+    let registry = open_relative_directory(&home, &config.registry_root)?;
     let (kind, identity) = block.kind_and_identity();
     let definition_kind = kind.as_str();
     let directory = registry_directory(kind);
@@ -166,13 +172,8 @@ pub fn create_registry_block(
             });
         }
     }
-    validate_registry_addition_from_workspace_dir(
-        &workspace.dir,
-        workspace_path,
-        &config.registry_root,
-        block,
-    )
-    .map_err(|source| {
+    validate_registry_addition_from_root_dir(&home.dir, &home.path, &config.registry_root, block)
+        .map_err(|source| {
         invalid_definition(
             Some(file.diagnostic_path().to_owned()),
             RuntimeError::Registry(source),
@@ -185,14 +186,18 @@ pub fn create_registry_block(
 }
 
 /// Validates either a selected Flow closure or every block in the configured registry.
-pub fn validate_workspace_registry(
-    workspace: impl AsRef<Path>,
+pub fn validate_global_registry(flow_reference: Option<&str>) -> Result<(), RuntimeError> {
+    let home_path = flow_agent_home_path()?;
+    validate_global_registry_at(&home_path, flow_reference)
+}
+
+pub(in crate::runtime) fn validate_global_registry_at(
+    home_path: &std::path::Path,
     flow_reference: Option<&str>,
 ) -> Result<(), RuntimeError> {
-    let workspace_path = workspace.as_ref();
-    let workspace = AnchoredDir::workspace(workspace_path)?;
-    let config = load_workspace_config_from(&workspace)?;
-    let registry_path = workspace_path.join(&config.registry_root);
+    let authority = load_global_config_authority_at(home_path)?;
+    let config = &authority.config;
+    let registry_path = authority.home.path.join(&config.registry_root);
     let invalid_definition = |source| RuntimeError::InvalidDefinition {
         definition_kind: None,
         definition_id: None,
@@ -200,9 +205,9 @@ pub fn validate_workspace_registry(
         source: Box::new(RuntimeError::Registry(source)),
     };
     match flow_reference {
-        Some(reference) => load_flow_registry_from_workspace_dir(
-            &workspace.dir,
-            workspace_path,
+        Some(reference) => load_flow_registry_from_root_dir(
+            &authority.home.dir,
+            &authority.home.path,
             &config.registry_root,
             reference,
         )
@@ -234,9 +239,9 @@ pub fn validate_workspace_registry(
                 invalid_definition(source)
             }
         }),
-        None => validate_registry_from_workspace_dir(
-            &workspace.dir,
-            workspace_path,
+        None => validate_registry_from_root_dir(
+            &authority.home.dir,
+            &authority.home.path,
             &config.registry_root,
         )
         .map_err(invalid_definition),

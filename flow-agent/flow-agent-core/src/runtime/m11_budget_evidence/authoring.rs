@@ -1,7 +1,8 @@
 use super::{M11BudgetOutcome, outcome};
+use crate::runtime::authoring::{DEFAULT_REGISTRY_ROOT, registry_directory};
 use crate::runtime::authoring::{
-    DEFAULT_REGISTRY_ROOT, create_registry_block, initialize_workspace, registry_directory,
-    validate_workspace_registry,
+    init::initialize_global_config_at,
+    registry::{create_global_registry_block_at, validate_global_registry_at},
 };
 use core_script::{
     BlockIdentity, MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES,
@@ -49,10 +50,11 @@ pub(crate) fn maximum_tool() -> RegistryBlock {
 pub(super) fn authoring_max_definition_transaction(
     temp_root: &Path,
 ) -> Result<M11BudgetOutcome, String> {
-    initialize_workspace(temp_root, None).map_err(|error| error.to_string())?;
+    let home = temp_root.join(".flow");
+    initialize_global_config_at(&home, None).map_err(|error| error.to_string())?;
     let block = maximum_tool();
     let started = Instant::now();
-    let path = create_registry_block(temp_root, block).map_err(|error| error.to_string())?;
+    let path = create_global_registry_block_at(&home, block).map_err(|error| error.to_string())?;
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
     if bytes.len() != usize::try_from(MAX_REGISTRY_FILE_BYTES).unwrap_or(usize::MAX) {
         return Err(format!(
@@ -78,18 +80,19 @@ pub(super) fn authoring_max_definition_transaction(
 }
 
 pub(super) fn authoring_init(temp_root: &Path) -> Result<M11BudgetOutcome, String> {
+    let home = temp_root.join(".flow");
     let started = Instant::now();
-    initialize_workspace(temp_root, None).map_err(|error| error.to_string())?;
+    initialize_global_config_at(&home, None).map_err(|error| error.to_string())?;
     let elapsed = started.elapsed();
     for kind in core_script::RegistryBlockKind::ALL {
         let leaf = registry_directory(kind);
-        if !temp_root.join(DEFAULT_REGISTRY_ROOT).join(leaf).is_dir() {
+        if !home.join(DEFAULT_REGISTRY_ROOT).join(leaf).is_dir() {
             return Err(format!(
                 "authoring init omitted {DEFAULT_REGISTRY_ROOT}/{leaf}"
             ));
         }
     }
-    if temp_root.join(".flow-init.json").exists() {
+    if home.join(".flow-init.json").exists() {
         return Err("authoring init left its transaction marker behind".to_owned());
     }
     Ok(outcome(elapsed, 1, 0, 0, 4))
@@ -109,15 +112,15 @@ fn padded_instruction(id: &str, bytes: usize) -> Result<String, String> {
 pub(super) fn authoring_max_registry_validate(
     temp_root: &Path,
 ) -> Result<M11BudgetOutcome, String> {
-    initialize_workspace(temp_root, None).map_err(|error| error.to_string())?;
+    let home = temp_root.join(".flow");
+    initialize_global_config_at(&home, None).map_err(|error| error.to_string())?;
     let entry_bytes = usize::try_from(MAX_REGISTRY_TOTAL_BYTES)
         .map_err(|error| error.to_string())?
         / MAX_REGISTRY_ENTRIES;
     for index in 0..MAX_REGISTRY_ENTRIES {
         let id = format!("entry-{index:04}");
         fs::write(
-            temp_root
-                .join(DEFAULT_REGISTRY_ROOT)
+            home.join(DEFAULT_REGISTRY_ROOT)
                 .join(registry_directory(RegistryBlockKind::Instruction))
                 .join(format!("{id}.yaml")),
             padded_instruction(&id, entry_bytes)?,
@@ -125,8 +128,7 @@ pub(super) fn authoring_max_registry_validate(
         .map_err(|error| error.to_string())?;
     }
     let registry_bytes = fs::read_dir(
-        temp_root
-            .join(DEFAULT_REGISTRY_ROOT)
+        home.join(DEFAULT_REGISTRY_ROOT)
             .join(registry_directory(RegistryBlockKind::Instruction)),
     )
     .map_err(|error| error.to_string())?
@@ -141,7 +143,7 @@ pub(super) fn authoring_max_registry_validate(
         ));
     }
     let started = Instant::now();
-    validate_workspace_registry(temp_root, None).map_err(|error| error.to_string())?;
+    validate_global_registry_at(&home, None).map_err(|error| error.to_string())?;
     let elapsed = started.elapsed();
     Ok(outcome(
         elapsed,

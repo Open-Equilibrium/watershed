@@ -12,7 +12,7 @@ The first MVP is **Flow Agent as a CLI-only harness**. It runs inside normal Git
 
 Build the shared substrate, then Flow Agent, Meta-Harness and Liquid. This dependency/order-of-risk sequence validates execution, then multi-agent governance, then the integrated workspace without letting the broadest surface block earlier validation. All three remain independently usable layers of one platform; integration is canonical in `VISION.md`.
 
-The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Flow Agent and Meta-Harness wedges are validated.
+The initial adoption wedge is technical teams that need reusable, measurable, and reversible AI-agent workflows. Do not attempt separate adoption motions for all three layers before the Flow Agent and Meta-Harness wedges are validated. Long-term architecture must remain valid whether inference is local or remote: the provisioned core path is offline-capable, each Flow's model/runtime requirements resolve through a device-local Runtime binding, and cross-device continuation creates Conversation branches instead of transferring live host ownership. Canonical integration detail is in `VISION.md`.
 
 ## Milestones
 
@@ -91,7 +91,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 15. Durable intent around every explicit provider or provider-requested Tool attempt; an uncertain attempt is never relaunched automatically, and `flow reconcile-tool <conversation-id> <run-session-id> --result <file|->` settles exactly one eligible Tool attempt from bounded external evidence.
 16. Versioned Conversation trees over linear Runs, including creation, continuation, branching, recovery and paged status, as defined in `PROTOCOL.md`.
 17. Explicit `openai-codex` project configuration, browser/device authentication and a protected Flow-owned credential record.
-18. Automatic root `AGENTS.md` loading. Manually referenced Instruction source filenames have no authority or naming semantics and may, for example, be named `SYSTEM.md`.
+18. Ordered global-home and harness-start Workspace `AGENTS.md` loading as a separate instruction/context channel. Manually referenced Instruction source filenames have no authority or naming semantics and may, for example, be named `SYSTEM.md`.
 19. No Watershed-owned project-code VCS behavior.
 
 **DoD:**
@@ -108,6 +108,16 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 - Current gates plus the M1.1 performance and security budgets decided before implementation pass.
 
 **Explicit post-M1.1 Flow Agent work:** later milestones may add typed projections or mappings between Flow, Phase, Instruction, subflow, Tool and addressable artifact inputs/outputs; backward edges or an expression language; general retry/fallback policies; and automatic Tool imports referenced by Instructions. Dynamic proposals to add a Phase, child Phase or Flow at run time—including one-run versus persisted approval and an operator opt-out—also remain deferred. A durable ordered Conversation-status inventory may replace the query-only CV-03 admission bound when larger inventories are required; it must define transaction, recovery, migration and consistency rules without replacing Conversation or migration authority. Any future routing or proposal surface requires a finite schema, permissions, complete allowed/rejected matrix, provenance, replay and approval decision before enablement. The M1.1 routing boundary is canonical in `PROTOCOL.md`.
+
+#### Accepted post-M1.1 architecture corrections
+
+These architecture corrections are accepted; implementation status is recorded in the canonical contracts:
+
+- Use `FLOW_AGENT_HOME` (default `~/.flow`) as the sole Global Flow configuration authority. Project-specific behavior is an explicitly authored/selected Flow; no Workspace-local technical config is discovered or merged. Global and harness-start Workspace `AGENTS.md` remain a separate instruction/context channel without configuration authority. This correction is implemented in M1.1.
+- Add a provider-neutral local-inference path so a provisioned host can run the complete local core path with network interfaces disabled. Portable requirements and device-local Runtime bindings remain separate; provisioning, model/runtime evidence and resource admission remain [D-059](docs/decisions/open-decisions.html#d-059), with the local inference process trust boundary in [D-061](docs/decisions/open-decisions.html#d-061).
+- Add a public, versioned Portable continuation contract. A verified terminal checkpoint imported on another device creates a child Run, rebinds destination authority and capabilities, and never replays completed effects. Disconnected continuations branch; exact in-flight recovery remains distinct. Archive, transfer, fencing and tree-navigation details remain [D-058](docs/decisions/open-decisions.html#d-058), archive authenticity in [D-062](docs/decisions/open-decisions.html#d-062), and offline approvals/revocation in [D-060](docs/decisions/open-decisions.html#d-060).
+
+No implementation or release claim follows from a documentation decision alone. Each remaining target requires its red behavior tests, finite security and compatibility contract, implementation and ordinary repository gates in a separately scoped change.
 
 ### M1.2 — Flow Agent OS isolation
 
@@ -144,7 +154,7 @@ M2 delivers Meta-Harness as a **self-contained, host-scoped headless control pla
 - Meta-Harness CLI (headless user/admin: run/session/config/metrics commands).
 - Local service/daemon shape (sidecar for Liquid or standalone daemon) with the transport-neutral API and D-023 bindings.
 - API/protocol surface for Liquid and BYOA: session registry, live event and transcript streams, artifact/log/handoff queries, config read/write proposals, agent schedule/trigger control, AgentPulse queries, approval/reject/revert (transport: D-023).
-- Central configuration model that resolves shared Watershed building blocks to the correct agent CLI (Flow Agent, Codex CLI, Claude Code and future agents).
+- Central configuration model that resolves shared Watershed building blocks to each target's documented config surface. Flow Agent receives only its global authority and explicit Flows rather than a project-local config layer; device-local Runtime bindings remain owned by the execution host.
 - Control plane: session registry, routing, task state, attention state and agent schedule/trigger skeleton.
 - Host-local Meta-Harness agent executor that rejects cross-host agent-process control and never manages a Flow Executor or Tool Sandbox (backend integration: [D-048](docs/decisions/open-decisions.html#d-048)).
 - Adapters: Flow Agent (via its public runtime surfaces) + at least one external CLI adapter.
@@ -185,7 +195,7 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 - Workspace CLI/API (D-027) exposes compact typed reads, mutation proposals/execution and permitted App actions to agents.
 - Liquid AI uses the same Role, capability, mutation and History boundaries.
 - Liquid AI, CLI/API, App and Meta-Harness integrations join the same permissioned mutation/History pipeline.
-- Optional Meta-Harness projections show friendly harness/config/location/session choices while preserving instance identity, freshness and authority. Live commands route to the owning instance.
+- Optional Meta-Harness projections show friendly harness/adapter-configuration/location/session choices and separate config management while preserving instance identity, freshness and authority. Flow Agent selection requires an explicit Flow from its global authority; other adapters retain their documented selection model. Live commands route to the owning instance; a future portable checkpoint continued elsewhere appears as a new child Run/branch, not the same live process.
 
 **M3b DoD:** a user can prompt Liquid AI to build an interactive App over connected Block data, use it without build/deploy/CI knowledge, inspect or restore its versions through History, share it within the Workspace and allow an agent to invoke only selected App actions through the CLI/API.
 

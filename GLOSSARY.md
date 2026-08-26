@@ -13,6 +13,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Reversible agent action** — An attributed workspace mutation that can be inspected and reverted (see Action, Workspace action history).
 - **Wedge** — The first narrow adoption path used to validate and grow the platform. Flow Agent is the developer/open-source execution wedge, Meta-Harness the team/control/governance wedge, Liquid the long-term workspace/action wedge.
 - **AGPL/free-software posture** — The project's commitment to transparent, inspectable, self-hostable software under the repository's `AGPL-3.0-only` license; not a proprietary/open-core monetization stance.
+- **Offline after provisioning** — The state in which installed Watershed binaries, approved model/runtime artifacts, required Global Flow configuration, one applicable Runtime binding and local-runtime readiness are already present, so the core local Flow, control and Workspace paths operate with network interfaces disabled. Requested remote-only actions fail visibly when unavailable; sync reports offline/stale state and waits resumably without blocking local work.
 - **Topic branch** — Short-lived Git branch for one logical change; can span multiple sessions and is PR'd back to `main` (ADR-0046).
 - **Git upstream** — Remote-tracking branch a local branch uses by default for pull/push; topic branches must not use `origin/main` (ADR-0048).
 - **Commit metadata** — Commit subject, body, comment text and trailers; metadata changes must not change file content (ADR-0048).
@@ -24,6 +25,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **Flow Agent** — Host-local, CLI-only, Rust-core, script-driven deterministic Flow runtime (not a generic coding agent). M1 is fixture-bounded; M1.1 adds practical provider/process execution and M1.2 adds OS isolation. CLI binary: `flow` (ADR-0013).
 - **Meta-Harness** — Self-contained host-scoped headless control plane over CLI agents on one host (session registry, central config resolution, agent schedules/triggers, artifact indexing, AgentPulse), reachable through local or authenticated remote clients. Runs without Liquid; Liquid is its primary rich UI. CLI binary: `meta` (ADR-0013).
 - **Execution location** — User-editable label for the host and owning Meta-Harness target used to start or control a session. Technical identifiers remain internal while routing authority is preserved.
+- **Runtime binding** — Device-local resolution from a Flow's model/runtime requirements to one concrete provider endpoint and its applicable provider/model identity, optional local artifact/quantization/runtime identity, optional typed provider/audience-bound credential reference and resource policy. Credential material remains in its Flow-owned protected store. The binding is operational host state, not Global Flow configuration or Conversation authority; D-059 owns the exact capability-dependent schema.
 
 ## Roles & layers
 
@@ -39,6 +41,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 ## Flow Agent primitives
 
 - **Building Block** — The flexible, modular and recursive unit of configuration; every Tool, Instruction, Phase and Flow is a building block. Flows can contain flows.
+- **Global Flow configuration** — Flow Agent configuration and Building Blocks resolved only from `FLOW_AGENT_HOME` (default `.flow` beneath the user home). Flow Agent does not discover project-local configuration layers; project-specific behavior is expressed by selecting or authoring a Flow. `AGENTS.md` is a separate instruction/context channel without technical configuration authority.
 - **Building-block registry** — The resolver for addressable Tools, Instructions, Phases and Flows. In v0 it safely catalogs one-block YAML entries under a configured root, then retains and resolves only the selected Flow's transitive definition closure, once per unique definition.
 - **Canonical serialization** — Deterministic UTF-8 JSON of the parsed, semantically validated and registry-resolved selected definition closure; equivalent closures serialize to the same bytes for review, audit and golden tests.
 - **Tool** — A Phase-scoped capability with an exact command identity (predefined or own script) and declared parameter, path and network boundaries. Referencing it only makes it available; the provider decides whether and how often to request it.
@@ -74,6 +77,7 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **flow-tool-result-v0** — The fixed Tool-result envelope for status, stdout and stderr flow values, with exit code only when observed; its canonical contract is in `PROTOCOL.md`.
 - **flow-m11-budget-v0** — Optimized Ubuntu JSONL evidence schema for the finite ADR-0107 M1.1 budget matrix; it records exact workloads, raw samples, aggregates and gate outcomes without adjusting measured RSS.
 - **Conversation** — The complete user-facing work history: one append-only tree of navigable entries and all Runs that belong to it. Continuing from an earlier entry creates a branch without deleting descendants.
+- **Portable continuation** — A verified, continuation-eligible terminal Conversation checkpoint continued on another device or Runtime binding as a new child Run. It rebinds authority and capabilities, never replays prior effects, and is distinct from exact interrupted-Run recovery.
 - **Conversation entry** — One versioned history node that links to its parent and to a committed point in one owned linear Run. New productive `flow-conversation-entry-v1` nodes also bind the terminal recovery snapshot used for compact continuation; migrated legacy roots remain v0.
 - **Run** — One complete execution of a Flow inside a Conversation, from Flow start through its Phases to completion or failure. Each continuation or branch starts a new Run. Its technical Run ID is stored as lowercase path-safe `run_session_id`; events use it as `session_id`, and exact replay, Tail or interrupted-Run recovery address it together with its owning `conversation_id`.
 - **Transcript** — The messages and runtime events reachable on a selected conversation branch; the complete tree retains every branch.

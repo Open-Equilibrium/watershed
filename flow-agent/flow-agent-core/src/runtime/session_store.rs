@@ -4,7 +4,7 @@ use crate::runtime::{
 };
 use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredWorkspace, DirectoryErrorMode},
-    types::RuntimeError,
+    types::{GLOBAL_WORKSPACES_DIR, RuntimeError},
 };
 use std::{
     ffi::OsString,
@@ -12,9 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const FLOW_AGENT_HOME_ENV: &str = "FLOW_AGENT_HOME";
-const FLOW_AGENT_HOME_LEAF: &str = ".flow-agent";
-const WORKSPACES_DIR: &str = "workspaces";
+pub(crate) const FLOW_AGENT_HOME_ENV: &str = "FLOW_AGENT_HOME";
+const FLOW_AGENT_HOME_LEAF: &str = ".flow";
 const WORKSPACE_STORE_DOMAIN: &[u8] = b"watershed-flow-agent-workspace-v1\0";
 const WORKSPACE_STORE_PREFIX: &str = "workspace-v1-";
 
@@ -45,7 +44,7 @@ impl WorkspaceStore {
             return Ok(None);
         };
         let Some(workspaces) =
-            home.private_child(WORKSPACES_DIR, create, DirectoryErrorMode::Protocol)?
+            home.private_child(GLOBAL_WORKSPACES_DIR, create, DirectoryErrorMode::Protocol)?
         else {
             return Ok(None);
         };
@@ -87,27 +86,55 @@ impl WorkspaceStore {
 
 pub(crate) fn workspace_store_path(workspace: &AnchoredWorkspace) -> Result<PathBuf, RuntimeError> {
     Ok(flow_agent_home_path()?
-        .join(WORKSPACES_DIR)
+        .join(GLOBAL_WORKSPACES_DIR)
         .join(workspace_store_leaf(workspace)?))
 }
 
-fn open_flow_agent_home(
+pub(crate) fn open_flow_agent_home(
     create: bool,
     read_only: bool,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let home_path = flow_agent_home_path()?;
+    open_flow_agent_home_at(&home_path, create, read_only)
+}
+
+pub(crate) fn open_flow_agent_home_at(
+    home_path: &Path,
+    create: bool,
+    read_only: bool,
+) -> Result<Option<AnchoredDir>, RuntimeError> {
+    let (parent, leaf, _) = open_flow_agent_home_parent_at(home_path, read_only)?;
+    let home = parent.private_child(&leaf, create, DirectoryErrorMode::Protocol)?;
+    if create && home.is_some() {
+        sync_anchored_directory(&parent)?;
+    }
+    Ok(home)
+}
+
+pub(crate) fn open_flow_agent_home_parent(
+    read_only: bool,
+) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {
     let path = flow_agent_home_path()?;
+    open_flow_agent_home_parent_at(&path, read_only)
+}
+
+pub(crate) fn open_flow_agent_home_parent_at(
+    path: &Path,
+    read_only: bool,
+) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {
+    if !path.is_absolute() {
+        return Err(RuntimeError::Usage(
+            "FLOW_AGENT_HOME must name an absolute directory".to_owned(),
+        ));
+    }
     let parent = path.parent().ok_or_else(|| {
-        RuntimeError::Usage(format!(
-            "{FLOW_AGENT_HOME_ENV} must name an absolute directory"
-        ))
+        RuntimeError::Usage("FLOW_AGENT_HOME must name an absolute directory".to_owned())
     })?;
     let leaf = path
         .file_name()
         .and_then(|leaf| leaf.to_str())
         .ok_or_else(|| {
-            RuntimeError::Usage(format!(
-                "{FLOW_AGENT_HOME_ENV} must end in a UTF-8 directory name"
-            ))
+            RuntimeError::Usage("global Flow home must end in a UTF-8 directory name".to_owned())
         })?;
     let parent = fs::canonicalize(parent).map_err(|source| path_io_error(parent, source))?;
     #[cfg(windows)]
@@ -121,14 +148,10 @@ fn open_flow_agent_home(
         let _ = read_only;
         AnchoredDir::workspace(&parent)?
     };
-    let home = parent.private_child(leaf, create, DirectoryErrorMode::Protocol)?;
-    if create && home.is_some() {
-        sync_anchored_directory(&parent)?;
-    }
-    Ok(home)
+    Ok((parent, leaf.to_owned(), path.to_owned()))
 }
 
-fn flow_agent_home_path() -> Result<PathBuf, RuntimeError> {
+pub(crate) fn flow_agent_home_path() -> Result<PathBuf, RuntimeError> {
     let path = match std::env::var_os(FLOW_AGENT_HOME_ENV) {
         Some(path) => PathBuf::from(path),
         None => default_flow_agent_home()?,

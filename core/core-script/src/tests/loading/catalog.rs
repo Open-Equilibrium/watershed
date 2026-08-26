@@ -1,6 +1,6 @@
 use super::super::super::error::{RegistryError, SemanticValidationError};
 use super::super::super::load::{
-    load_flow_registry_from_workspace, parse_registry_block, registry_block_definition_bytes,
+    load_flow_registry_from_root, parse_registry_block, registry_block_definition_bytes,
 };
 use super::super::super::model::{
     BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS,
@@ -18,9 +18,8 @@ use std::path::Path;
 fn registry_loader_resolves_hello_flow_refs_and_canonical_output() {
     let workspace =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../flow-agent/fixtures/hello-flow");
-    let registry =
-        load_flow_registry_from_workspace(&workspace, Path::new("registry"), "hello-flow")
-            .expect("hello-flow registry loads");
+    let registry = load_flow_registry_from_root(&workspace, Path::new("registry"), "hello-flow")
+        .expect("hello-flow registry loads");
 
     assert!(registry.flow_block("hello-flow").is_some());
     assert!(registry.flow_block("HelloFlow").is_some());
@@ -85,7 +84,7 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
     }
     let (workspace, registry_root) = registry_location(&root);
 
-    let registry = load_flow_registry_from_workspace(workspace, registry_root, "Root")
+    let registry = load_flow_registry_from_root(workspace, registry_root, "Root")
         .expect("reachable registry loads by root name");
     let value: Value = serde_json::from_str(
         &registry
@@ -238,7 +237,7 @@ fn candidate_addition_obeys_the_per_file_byte_limit() {
     let candidate_bytes = registry_block_definition_bytes(&candidate).unwrap();
     let max_file_bytes = candidate_bytes - 1;
 
-    let error = ResolvedRegistry::validate_addition_from_workspace_dir_with_limits(
+    let error = ResolvedRegistry::validate_addition_from_root_dir_with_limits(
         &workspace_dir,
         workspace,
         registry_root,

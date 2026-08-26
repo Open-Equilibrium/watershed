@@ -147,14 +147,17 @@ pub(super) fn event_timestamp(sequence: u64) -> String {
 }
 
 pub(super) fn write_registry_definition(workspace: &Path, kind: &str, id: &str, source: &str) {
-    fs::write(
-        workspace
-            .join("registry")
-            .join(kind)
-            .join(format!("{id}.yaml")),
-        source,
-    )
-    .unwrap_or_else(|error| panic!("write {kind}/{id}: {error}"));
+    let relative = Path::new("registry").join(kind).join(format!("{id}.yaml"));
+    for root in [
+        workspace.to_path_buf(),
+        super::test_support::session_home_path(),
+    ] {
+        let path = root.join(&relative);
+        if path.parent().is_some_and(Path::is_dir) {
+            fs::write(&path, source)
+                .unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+        }
+    }
 }
 
 pub(super) fn completed_phase_result<'a>(

@@ -191,17 +191,19 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
         "phase_refs: [inspect, summarize, negative-no-tools]",
     );
     fs::write(
-        workspace.join("registry/instructions/deny-attempt.yaml"),
+        crate::tests::test_support::session_home_path()
+            .join("registry/instructions/deny-attempt.yaml"),
         "instruction:\n  id: deny-attempt\n  name: DenyAttempt\n  prompt: Attempt the sandbox-negative action selected by the fixture.\n",
     )
     .expect("negative instruction written");
     fs::write(
-        workspace.join("registry/tools/negative-tool.yaml"),
+        crate::tests::test_support::session_home_path().join("registry/tools/negative-tool.yaml"),
         "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
     )
     .expect("negative sentinel tool written");
     fs::write(
-        workspace.join("registry/phases/negative-no-tools.yaml"),
+        crate::tests::test_support::session_home_path()
+            .join("registry/phases/negative-no-tools.yaml"),
         "phase:\n  id: negative-no-tools\n  name: NegativeNoTools\n  instruction_refs: [deny-attempt]\n  tool_refs: [negative-tool]\n  output:\n    type: string\n",
     )
     .expect("negative phase written");

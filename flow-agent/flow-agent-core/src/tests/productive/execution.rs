@@ -465,7 +465,7 @@ fn productive_failure_closes_every_open_runtime_scope_without_retrying() {
 
     let execution = execute_productive_flow(
         ProductiveExecution {
-            repository_instructions: "Repository guidance.",
+            agent_instructions: "Agent guidance.",
             ..fixture.execution(flow, "productive-failure-fixture")
         },
         &mut provider,

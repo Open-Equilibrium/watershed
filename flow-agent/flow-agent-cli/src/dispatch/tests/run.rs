@@ -31,7 +31,7 @@ fn activated_backend_selection_remains_authoritative_for_execution() {
     }
 
     let workspace = test_support::workspace_copy("smoke-flow");
-    let config = workspace.join(".flow/config.yaml");
+    let config = test_support::session_home_path().join("config.yaml");
     std::fs::write(
         &config,
         "model: gpt-fixture\nprovider: openai-codex\nregistry_root: registry\n",
@@ -72,7 +72,7 @@ fn cancellation_during_fallible_preflight_is_returned_without_a_session() {
     }
 
     let workspace = test_support::workspace_copy("smoke-flow");
-    let config = workspace.join(".flow/config.yaml");
+    let config = test_support::session_home_path().join("config.yaml");
     std::fs::write(
         config,
         concat!(
@@ -84,7 +84,7 @@ fn cancellation_during_fallible_preflight_is_returned_without_a_session() {
         ),
     )
     .expect("productive config is written");
-    let registry_file = workspace.join("registry/flows/smoke-flow.yaml");
+    let registry_file = test_support::session_home_path().join("registry/flows/smoke-flow.yaml");
     set_run_activation_observer(move || {
         assert_eq!(
             flow_agent_core::request_productive_interrupt(),

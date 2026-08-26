@@ -46,22 +46,21 @@ pub(in crate::script) struct RegistryTraversalState {
 }
 
 pub(in crate::script) fn open_registry_root(
-    workspace: &Path,
+    root_path: &Path,
     registry_root: &Path,
 ) -> Result<RegistryRoot, RegistryError> {
-    let workspace_dir =
-        Dir::open_ambient_dir(workspace, ambient_authority()).map_err(|source| {
-            RegistryError::Io {
-                path: workspace.to_path_buf(),
-                source,
-            }
-        })?;
-    open_registry_root_from_workspace_dir(&workspace_dir, workspace, registry_root)
+    let root_dir = Dir::open_ambient_dir(root_path, ambient_authority()).map_err(|source| {
+        RegistryError::Io {
+            path: root_path.to_path_buf(),
+            source,
+        }
+    })?;
+    open_registry_root_from_root_dir(&root_dir, root_path, registry_root)
 }
 
-pub(in crate::script) fn open_registry_root_from_workspace_dir(
-    workspace_dir: &Dir,
-    workspace: &Path,
+pub(in crate::script) fn open_registry_root_from_root_dir(
+    root_dir: &Dir,
+    root_path: &Path,
     registry_root: &Path,
 ) -> Result<RegistryRoot, RegistryError> {
     if registry_root.components().any(|component| {
@@ -74,17 +73,15 @@ pub(in crate::script) fn open_registry_root_from_workspace_dir(
     }) {
         return Err(RegistryError::UnsafePath {
             path: registry_root.to_path_buf(),
-            message: "registry root must stay within the workspace".to_owned(),
+            message: "registry root must stay within the selected root".to_owned(),
         });
     }
 
-    let mut dir = workspace_dir
-        .try_clone()
-        .map_err(|source| RegistryError::Io {
-            path: workspace.to_path_buf(),
-            source,
-        })?;
-    let mut path = workspace.to_path_buf();
+    let mut dir = root_dir.try_clone().map_err(|source| RegistryError::Io {
+        path: root_path.to_path_buf(),
+        source,
+    })?;
+    let mut path = root_path.to_path_buf();
     for component in registry_root.components() {
         match component {
             std::path::Component::CurDir => {}

@@ -1,6 +1,6 @@
 use super::super::super::error::RegistryError;
 use super::super::super::load::{
-    RegistryTraversalLimits, load_flow_registry_from_workspace, read_registry_file_to_string,
+    RegistryTraversalLimits, load_flow_registry_from_root, read_registry_file_to_string,
 };
 use super::super::super::model::{MAX_REGISTRY_FILE_BYTES, ResolvedRegistry};
 #[cfg(windows)]
@@ -22,23 +22,23 @@ fn load_registry_with_traversal_limits(
 }
 
 #[test]
-fn registry_loader_enforces_workspace_boundary_and_reports_missing_workspace() {
-    let workspace = temp_registry_dir("registry-workspace-boundary");
+fn registry_loader_enforces_selected_root_boundary_and_reports_missing_root() {
+    let root = temp_registry_dir("registry-root-boundary");
     let escaping_root = Path::new("../outside");
-    let err = load_flow_registry_from_workspace(&workspace, escaping_root, "root")
-        .expect_err("registry root must stay within workspace");
+    let err = load_flow_registry_from_root(&root, escaping_root, "root")
+        .expect_err("registry root must stay within the selected root");
     assert!(
         matches!(&err, RegistryError::UnsafePath { path, .. } if path == escaping_root),
         "unexpected error: {err:?}"
     );
-    assert!(err.to_string().contains("stay within the workspace"));
+    assert!(err.to_string().contains("stay within the selected root"));
 
-    let missing_workspace = workspace.join("missing-workspace");
-    let err = load_flow_registry_from_workspace(&missing_workspace, Path::new("registry"), "root")
-        .expect_err("missing workspace must remain an I/O failure");
+    let missing_root = root.join("missing-root");
+    let err = load_flow_registry_from_root(&missing_root, Path::new("registry"), "root")
+        .expect_err("missing selected root must remain an I/O failure");
     assert!(
         matches!(&err, RegistryError::Io { path, source }
-            if path.as_path() == missing_workspace && source.kind() == std::io::ErrorKind::NotFound),
+            if path.as_path() == missing_root && source.kind() == std::io::ErrorKind::NotFound),
         "unexpected error: {err:?}"
     );
 }
@@ -446,7 +446,7 @@ fn registry_loader_rejects_linked_registry_root() {
     #[cfg(windows)]
     create_windows_junction(&linked_root, &outside);
 
-    let err = load_flow_registry_from_workspace(&parent, Path::new("linked-root"), "root")
+    let err = load_flow_registry_from_root(&parent, Path::new("linked-root"), "root")
         .expect_err("linked registry root must be rejected");
 
     assert!(

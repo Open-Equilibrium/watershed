@@ -17,7 +17,7 @@ const TRANSITION_USAGE: &str = concat!(
     "--transition-when-file PATH --end-transition]..."
 );
 
-pub(crate) fn init_command(workspace: &Path, args: &[String]) -> Result<(), RuntimeError> {
+pub(crate) fn init_command(_workspace: &Path, args: &[String]) -> Result<(), RuntimeError> {
     let registry_root = match args {
         [] => None,
         [flag, value] if flag == "--registry-root" => Some(value.as_str()),
@@ -31,11 +31,26 @@ pub(crate) fn init_command(workspace: &Path, args: &[String]) -> Result<(), Runt
         }
         [other, ..] => return Err(RuntimeError::Usage(format!("unknown argument {other:?}"))),
     };
-    flow_agent_core::initialize_workspace(workspace, registry_root)?;
+    flow_agent_core::initialize_global_config(registry_root)?;
     write_stdout("initialized\n")
 }
 
-pub(crate) fn validate_command(workspace: &Path, args: &[String]) -> Result<(), RuntimeError> {
+pub(crate) fn import_command(_workspace: &Path, args: &[String]) -> Result<(), RuntimeError> {
+    let source = match args {
+        [source] if !source.starts_with('-') => source,
+        [] => {
+            return Err(RuntimeError::Usage(
+                "missing legacy workspace path".to_owned(),
+            ));
+        }
+        [flag] => return Err(RuntimeError::Usage(format!("unknown argument {flag:?}"))),
+        [_, other, ..] => return Err(RuntimeError::Usage(format!("unknown argument {other:?}"))),
+    };
+    flow_agent_core::import_global_config_from_workspace(source)?;
+    write_stdout("imported\n")
+}
+
+pub(crate) fn validate_command(_workspace: &Path, args: &[String]) -> Result<(), RuntimeError> {
     let flow_reference = match args {
         [] => None,
         [reference, ..] if reference.starts_with('-') => {
@@ -46,7 +61,7 @@ pub(crate) fn validate_command(workspace: &Path, args: &[String]) -> Result<(), 
         [reference] => Some(reference.as_str()),
         [_, other, ..] => return Err(RuntimeError::Usage(format!("unknown argument {other:?}"))),
     };
-    flow_agent_core::validate_workspace_registry(workspace, flow_reference)?;
+    flow_agent_core::validate_global_registry(flow_reference)?;
     write_stdout("valid\n")
 }
 
@@ -67,7 +82,7 @@ pub(crate) fn create_command(workspace: &Path, args: &[String]) -> Result<(), Ru
         RegistryBlockKind::Flow => RegistryBlock::Flow(flow::parse(workspace, rest)?),
         RegistryBlockKind::Tool => RegistryBlock::Tool(tool::parse(workspace, rest)?),
     };
-    let path = flow_agent_core::create_registry_block(workspace, block)?;
+    let path = flow_agent_core::create_global_registry_block(block)?;
     write_stdout(&format!("{}\n", path.display()))
 }
 
@@ -266,7 +281,8 @@ impl<'a> Cursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cursor, create_command, create_usage, init_command, parse_number, validate_command,
+        Cursor, create_command, create_usage, import_command, init_command, parse_number,
+        validate_command,
     };
     use crate::authoring::test_support::{args, assert_usage};
     use std::path::Path;
@@ -311,6 +327,14 @@ mod tests {
         );
         assert_usage(
             init_command(workspace, &args(&["--unknown"])),
+            "unknown argument",
+        );
+        assert_usage(
+            import_command(workspace, &args(&[])),
+            "missing legacy workspace path",
+        );
+        assert_usage(
+            import_command(workspace, &args(&["one", "two"])),
             "unknown argument",
         );
         assert_usage(

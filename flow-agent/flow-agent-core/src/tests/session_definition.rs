@@ -97,7 +97,8 @@ fn session_metadata_rejects_case_aliased_names() {
 fn resume_ignores_unrelated_registry_additions() {
     let (workspace, _) = workspace_at_write_summary_progress_with_existing_output();
     fs::write(
-        workspace.join("registry/instructions/unrelated.yaml"),
+        crate::tests::test_support::session_home_path()
+            .join("registry/instructions/unrelated.yaml"),
         "instruction:\n  id: unrelated\n  name: Unrelated\n  prompt: Not used by hello-flow\n",
     )
     .expect("unrelated definition written");

@@ -16,7 +16,7 @@ pub fn compile_provider_turn_context(
     session_id: &str,
     history: &ContextHistory,
 ) -> Result<CompiledContext, RuntimeError> {
-    compile_provider_turn_context_with_repository_instructions(
+    compile_provider_turn_context_with_agent_instructions(
         model,
         registry,
         flow_block,
@@ -31,7 +31,7 @@ pub fn compile_provider_turn_context(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn compile_provider_turn_context_with_repository_instructions(
+pub(crate) fn compile_provider_turn_context_with_agent_instructions(
     model: &ContextModelProfile,
     registry: &core_script::ResolvedRegistry,
     flow_block: &core_script::FlowBlock,
@@ -41,7 +41,7 @@ pub(crate) fn compile_provider_turn_context_with_repository_instructions(
     invocation: &FlowInvocation,
     session_id: &str,
     history: &ContextHistory,
-    repository_instructions: &str,
+    agent_instructions: &str,
 ) -> Result<CompiledContext, RuntimeError> {
     validate_provider_turn_scope(registry, flow_block, phase)?;
     let input_budget_tokens = model.input_budget_tokens()?;
@@ -94,11 +94,11 @@ pub(crate) fn compile_provider_turn_context_with_repository_instructions(
             }),
         ),
         context_source(
-            "repository-instructions",
-            if repository_instructions.is_empty() {
+            "agent-instructions",
+            if agent_instructions.is_empty() {
                 serde_json::json!([])
             } else {
-                serde_json::json!([{"source": "AGENTS.md", "content": repository_instructions}])
+                serde_json::json!([{"source": "AGENTS.md", "content": agent_instructions}])
             },
         ),
         // The M1.1 grammar has no Flow-scoped prompt field.

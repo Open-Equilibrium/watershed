@@ -1,26 +1,143 @@
 use super::{
     helpers::{create_directory_alias, empty_workspace},
-    test_support::workspace_copy,
+    test_support::{absent_global_home, session_home_path, workspace_copy},
 };
 use crate::runtime::{
     config_io::{
-        ExecutionBackend, WorkspaceConfig, classify_workspace_config_open_error,
-        load_workspace_config, read_workspace_config_to_string, require_execution_backend,
+        ExecutionBackend, GlobalConfig, load_global_config, require_execution_backend,
         require_fixture_execution_backend, resume_event_clock,
     },
     context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
+    fs_guards::AnchoredWorkspace,
+    instructions::read_applicable_agent_instructions,
     session::run_flow,
-    types::{EmitMode, EventClock, MAX_WORKSPACE_CONFIG_BYTES, RuntimeError},
+    session_store::open_flow_agent_home,
+    types::{EmitMode, EventClock, MAX_GLOBAL_CONFIG_BYTES, RuntimeError},
 };
 use std::{fs, io, path::PathBuf};
 
-#[test]
-fn workspace_config_helpers_reject_unsafe_registry_roots() {
-    let workspace = empty_workspace("workspace-config-helpers");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
-    fs::create_dir(workspace.join("registry")).expect("registry dir");
-    fs::write(workspace.join("registry-file"), "not a dir").expect("registry file");
+fn global_config_path() -> PathBuf {
+    let path = session_home_path().join("config.yaml");
+    if !path.is_file() {
+        crate::initialize_global_config(None).expect("isolated global Flow authority initializes");
+    }
+    path
+}
 
+#[test]
+fn global_configuration_is_the_only_implicit_flow_authority() {
+    let workspace = workspace_copy("smoke-flow");
+    fs::write(
+        workspace.join(".flow/config.yaml"),
+        "this local config must not be parsed: [\n",
+    )
+    .expect("ambient local config is made invalid");
+    fs::remove_dir_all(workspace.join("registry")).expect("ambient local registry is removed");
+    fs::write(
+        session_home_path().join("AGENTS.md"),
+        "provider: forbidden\nregistry_root: forbidden\n",
+    )
+    .expect("global instructions are written");
+    fs::write(
+        workspace.join("AGENTS.md"),
+        "model: forbidden\ncredentials: forbidden\n",
+    )
+    .expect("workspace instructions are written");
+    let home = open_flow_agent_home(false, true)
+        .expect("global home opens")
+        .expect("global home exists");
+    let anchored_workspace = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
+
+    assert_eq!(
+        read_applicable_agent_instructions(&home, &anchored_workspace)
+            .expect("both applicable instruction files are read"),
+        "provider: forbidden\nregistry_root: forbidden\n\nmodel: forbidden\ncredentials: forbidden\n"
+    );
+    assert_eq!(
+        load_global_config()
+            .expect("instructions do not alter global configuration")
+            .registry_root,
+        PathBuf::from("registry")
+    );
+
+    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("the global config and registry are authoritative");
+
+    assert!(!output.failed);
+}
+
+#[test]
+fn missing_global_registry_never_falls_back_to_the_ambient_workspace_registry() {
+    let workspace = workspace_copy("smoke-flow");
+    assert!(workspace.join("registry/flows/smoke-flow.yaml").is_file());
+    fs::remove_dir_all(session_home_path().join("registry")).expect("global registry is removed");
+
+    let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect_err("the ambient Workspace registry is not a fallback");
+
+    assert!(error.to_string().contains("registry"), "{error}");
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
+}
+
+#[test]
+fn unfinished_global_initialization_fails_before_session_mutation() {
+    let workspace = workspace_copy("smoke-flow");
+    fs::write(session_home_path().join(".flow-init.json"), "{}\n")
+        .expect("conflicting transaction marker writes");
+
+    let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect_err("conflicting global state fails closed");
+
+    assert!(
+        error.to_string().contains("unfinished initialization"),
+        "{error}"
+    );
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn inaccessible_ambient_workspace_config_is_never_probed() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let workspace = workspace_copy("smoke-flow");
+    let local_config = workspace.join(".flow/config.yaml");
+    fs::set_permissions(&local_config, fs::Permissions::from_mode(0o000))
+        .expect("ambient config is made inaccessible");
+
+    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect("only the global Flow authority is read");
+
+    assert!(!output.failed);
+}
+
+#[cfg(unix)]
+#[test]
+fn inaccessible_global_config_fails_before_session_mutation() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let workspace = workspace_copy("smoke-flow");
+    let config = global_config_path();
+    let original_permissions = fs::metadata(&config)
+        .expect("global config metadata reads")
+        .permissions();
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o000))
+        .expect("global config is made inaccessible");
+
+    let result = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl);
+    fs::set_permissions(&config, original_permissions).expect("global config permissions restore");
+    let error = result.expect_err("an inaccessible global config fails closed");
+
+    assert!(
+        matches!(&error, RuntimeError::Io { source, .. }
+            if source.kind() == io::ErrorKind::PermissionDenied),
+        "unexpected error: {error:?}"
+    );
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
+}
+
+#[test]
+fn global_config_helpers_reject_unsafe_registry_roots() {
     for (label, source, expected) in [
         (
             "unknown field",
@@ -43,8 +160,8 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
             "document",
         ),
     ] {
-        fs::write(workspace.join(".flow/config.yaml"), source).expect("invalid config written");
-        match load_workspace_config(&workspace).expect_err("invalid config must be rejected") {
+        fs::write(global_config_path(), source).expect("invalid config written");
+        match load_global_config().expect_err("invalid config must be rejected") {
             RuntimeError::Usage(message) => {
                 assert!(message.contains(expected), "{label}: {message}")
             }
@@ -52,23 +169,20 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         }
     }
 
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "stub_model: deterministic\n",
-    )
-    .expect("config without registry root");
+    fs::write(global_config_path(), "stub_model: deterministic\n")
+        .expect("config without registry root");
     assert!(matches!(
-        load_workspace_config(&workspace),
+        load_global_config(),
         Err(RuntimeError::Usage(message)) if message.contains("missing")
     ));
 
     for registry_root in ["registry", "nested/registry", "répertoire/注册表"] {
         fs::write(
-            workspace.join(".flow/config.yaml"),
+            global_config_path(),
             format!("registry_root: {registry_root}\n"),
         )
         .expect("valid config");
-        let config = load_workspace_config(&workspace).expect("config loads");
+        let config = load_global_config().expect("config loads");
         let expected = registry_root
             .split('/')
             .fold(PathBuf::new(), |mut path, component| {
@@ -79,67 +193,72 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         assert_eq!(config.registry_root, expected, "{registry_root}");
     }
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "registry_root: registry # authoring registry\n",
     )
     .expect("commented config");
-    let config = load_workspace_config(&workspace).expect("commented config loads");
+    let config = load_global_config().expect("commented config loads");
     assert_eq!(config.registry_root, PathBuf::from("registry"));
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n",
     )
     .expect("fixture config");
-    let config = load_workspace_config(&workspace).expect("fixture config loads");
+    let config = load_global_config().expect("fixture config loads");
     assert_eq!(config.event_clock, EventClock::fixed_fixture());
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "fixture_profile: stub-model\nregistry_root: registry\n",
     )
     .expect("fixture config without stub model");
     assert!(matches!(
-        load_workspace_config(&workspace),
+        load_global_config(),
         Err(RuntimeError::Usage(message)) if message.contains("requires stub_model")
     ));
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "registry_root: registry\nstub_model: deterministic\n",
     )
     .expect("stub model without fixture profile");
     assert!(matches!(
-        load_workspace_config(&workspace),
+        load_global_config(),
         Err(RuntimeError::Usage(message)) if message.contains("requires fixture_profile")
     ));
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "fixture_profile: live\nregistry_root: registry\nstub_model: deterministic\n",
     )
     .expect("unsupported fixture profile");
     assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("unsupported .flow/config.yaml fixture_profile")
+        load_global_config(),
+        Err(RuntimeError::Usage(message)) if message.contains("unsupported FLOW_AGENT_HOME/config.yaml fixture_profile")
     ));
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "fixture_profile: stub-model\nregistry_root: registry\nstub_model: live\n",
     )
     .expect("unsupported stub model");
     assert!(matches!(
-        load_workspace_config(&workspace),
-        Err(RuntimeError::Usage(message)) if message.contains("unsupported .flow/config.yaml stub_model")
+        load_global_config(),
+        Err(RuntimeError::Usage(message)) if message.contains("unsupported FLOW_AGENT_HOME/config.yaml stub_model")
     ));
 
     for registry_root in [
         ".",
-        ".flow",
-        ".flow/registry",
-        ".FLOW",
-        ".Flow/registry",
+        "config.yaml",
+        "config.yaml/registry",
+        "CONFIG.YAML",
+        "workspaces",
+        "workspaces/registry",
+        ".flow-init.json/registry",
+        ".flow-init.lock/registry",
+        "AGENTS.md",
+        "agents.md/registry",
         "../registry",
         "registry/./nested",
         "registry/../nested",
@@ -149,41 +268,36 @@ fn workspace_config_helpers_reject_unsafe_registry_roots() {
         "bad:name",
     ] {
         fs::write(
-            workspace.join(".flow/config.yaml"),
+            global_config_path(),
             format!("registry_root: {registry_root}\n"),
         )
         .expect("unsafe config");
         assert!(
             matches!(
-                load_workspace_config(&workspace),
+                load_global_config(),
                 Err(RuntimeError::Usage(message))
-                    if message.contains("within the workspace") || message.contains("must not overlap .flow")
+                    if message.contains("within the global Flow home")
+                        || message.contains("global config file")
+                        || message.contains("reserved global Flow path")
             ),
             "{registry_root}"
         );
     }
-    assert!(matches!(
-        read_workspace_config_to_string(&workspace.join("missing-workspace")),
-        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound
-    ));
 
-    let oversized_len = usize::try_from(MAX_WORKSPACE_CONFIG_BYTES).expect("limit fits usize") + 1;
+    let oversized_len = usize::try_from(MAX_GLOBAL_CONFIG_BYTES).expect("limit fits usize") + 1;
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         format!("registry_root: registry\n{}", "x".repeat(oversized_len)),
     )
     .expect("oversized config written");
     assert!(matches!(
-        load_workspace_config(&workspace),
+        load_global_config(),
         Err(RuntimeError::Protocol(message)) if message.contains("exceeds max")
     ));
 }
 
 #[test]
-fn live_workspace_requires_one_explicit_bounded_provider_and_model() {
-    let workspace = empty_workspace("workspace-live-provider-config");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
-
+fn live_global_config_requires_one_explicit_bounded_provider_and_model() {
     for (source, expected) in [
         ("registry_root: registry\n", "requires provider"),
         (
@@ -200,15 +314,15 @@ fn live_workspace_requires_one_explicit_bounded_provider_and_model() {
         ),
         (
             "model: gpt-fixture\nprovider: another\nregistry_root: registry\n",
-            "unsupported .flow/config.yaml provider",
+            "unsupported FLOW_AGENT_HOME/config.yaml provider",
         ),
         (
             "model: ''\nprovider: openai-codex\nregistry_root: registry\n",
             "requires model",
         ),
     ] {
-        fs::write(workspace.join(".flow/config.yaml"), source).expect("live config written");
-        let config = load_workspace_config(&workspace).expect("configuration parses for authoring");
+        fs::write(global_config_path(), source).expect("live config written");
+        let config = load_global_config().expect("configuration parses for authoring");
         assert!(
             matches!(
                 require_execution_backend(&config),
@@ -219,25 +333,25 @@ fn live_workspace_requires_one_explicit_bounded_provider_and_model() {
     }
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         format!(
             "model: {}\nprovider: openai-codex\nregistry_root: registry\n",
             "m".repeat(257)
         ),
     )
     .expect("oversized model config written");
-    let config = load_workspace_config(&workspace).expect("configuration parses for authoring");
+    let config = load_global_config().expect("configuration parses for authoring");
     assert!(matches!(
         require_execution_backend(&config),
         Err(RuntimeError::Usage(message)) if message.contains("at most 256 Unicode scalars")
     ));
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
     )
     .expect("productive config written");
-    let config = load_workspace_config(&workspace).expect("productive config parses");
+    let config = load_global_config().expect("productive config parses");
     assert_eq!(
         require_execution_backend(&config).expect("productive backend resolves"),
         ExecutionBackend::OpenAiCodex {
@@ -252,11 +366,11 @@ fn live_workspace_requires_one_explicit_bounded_provider_and_model() {
     );
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "model: gpt-fixture\nmodel_context_limit: 20480\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
     )
     .expect("invalid productive profile written");
-    let config = load_workspace_config(&workspace).expect("configuration parses for authoring");
+    let config = load_global_config().expect("configuration parses for authoring");
     assert!(matches!(
         require_execution_backend(&config),
         Err(RuntimeError::Usage(message)) if message.contains("must leave a positive input budget")
@@ -264,19 +378,16 @@ fn live_workspace_requires_one_explicit_bounded_provider_and_model() {
 }
 
 #[test]
-fn fixture_workspace_rejects_productive_backend_fields() {
-    let workspace = empty_workspace("workspace-fixture-backend-config");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
-
+fn fixture_global_config_rejects_productive_backend_fields() {
     for field in ["provider: openai-codex", "model: gpt-fixture"] {
         fs::write(
-            workspace.join(".flow/config.yaml"),
+            global_config_path(),
             format!(
                 "fixture_profile: stub-model\nregistry_root: registry\nstub_model: deterministic\n{field}\n"
             ),
         )
         .expect("mixed fixture config written");
-        let config = load_workspace_config(&workspace).expect("mixed fixture config parses");
+        let config = load_global_config().expect("mixed fixture config parses");
         assert!(matches!(
             require_execution_backend(&config),
             Err(RuntimeError::Usage(message))
@@ -287,16 +398,16 @@ fn fixture_workspace_rejects_productive_backend_fields() {
 
 #[test]
 fn execution_backend_helpers_preserve_fixture_and_productive_boundaries() {
-    let workspace = workspace_copy("smoke-flow");
-    let fixture = load_workspace_config(&workspace).expect("fixture config loads");
+    let _workspace = workspace_copy("smoke-flow");
+    let fixture = load_global_config().expect("fixture config loads");
     require_fixture_execution_backend(&fixture).expect("fixture backend is accepted");
 
     fs::write(
-        workspace.join(".flow/config.yaml"),
+        global_config_path(),
         "model: gpt-fixture\nmodel_context_limit: 128000\noutput_reserve: 16384\nprovider: openai-codex\nregistry_root: registry\n",
     )
     .expect("productive config writes");
-    let productive = load_workspace_config(&workspace).expect("productive config loads");
+    let productive = load_global_config().expect("productive config loads");
     assert!(matches!(
         require_fixture_execution_backend(&productive),
         Err(RuntimeError::ExecutionBackendUnavailable)
@@ -314,7 +425,7 @@ fn execution_backend_helpers_preserve_fixture_and_productive_boundaries() {
 
 #[test]
 fn productive_model_validation_counts_unicode_scalars_and_rejects_controls() {
-    let config = |model: &str| WorkspaceConfig {
+    let config = |model: &str| GlobalConfig {
         event_clock: EventClock::wall_clock(),
         model: Some(model.to_owned()),
         model_context_limit: Some(128000),
@@ -348,13 +459,9 @@ fn productive_model_validation_counts_unicode_scalars_and_rejects_controls() {
 }
 
 #[test]
-fn non_fixture_workspace_fails_closed_before_runtime_side_effects() {
+fn non_fixture_global_config_fails_closed_before_runtime_side_effects() {
     let workspace = workspace_copy("hello-flow");
-    fs::write(
-        workspace.join(".flow/config.yaml"),
-        "registry_root: registry\n",
-    )
-    .expect("normal workspace config written");
+    fs::write(global_config_path(), "registry_root: registry\n").expect("global config written");
 
     let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect_err("live execution requires an explicit provider and model");
@@ -369,92 +476,63 @@ fn non_fixture_workspace_fails_closed_before_runtime_side_effects() {
 }
 
 #[test]
-fn workspace_config_reports_non_regular_config_leaf() {
-    let workspace = workspace_copy("hello-flow");
-    let config_path = workspace.join(".flow/config.yaml");
+fn global_config_reports_non_regular_config_leaf() {
+    let _workspace = workspace_copy("hello-flow");
+    let config_path = global_config_path();
     fs::remove_file(&config_path).expect("fixture config removed");
     fs::create_dir(&config_path).expect("config path replaced with directory");
 
-    let err = load_workspace_config(&workspace).expect_err("config directory must fail");
+    let err = load_global_config().expect_err("config directory must fail");
 
     assert!(
         matches!(&err, RuntimeError::Protocol(message)
-            if message.contains("regular file") && !message.contains("symlink")),
+            if message.contains("must be a file") && !message.contains("symlink")),
         "unexpected error: {err:?}"
     );
 }
 
 #[test]
-fn workspace_config_reports_non_directory_flow_parent() {
-    let workspace = workspace_copy("hello-flow");
-    let flow_path = workspace.join(".flow");
-    fs::remove_dir_all(&flow_path).expect("fixture flow directory removed");
-    fs::write(&flow_path, b"not a directory").expect("flow path replaced with a file");
+fn global_config_missing_fails_closed() {
+    let workspace = empty_workspace("missing-global-config");
 
-    let err = load_workspace_config(&workspace).expect_err("flow parent file must fail");
+    let err = load_global_config().expect_err("missing global config must fail");
 
     assert!(
-        matches!(&err, RuntimeError::Protocol(message) if message.contains("directory")),
+        matches!(&err, RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound),
         "unexpected error: {err:?}"
     );
-}
-
-#[test]
-fn workspace_config_preserves_unrelated_open_errors() {
-    let workspace = workspace_copy("hello-flow");
-    let flow_path = workspace.join(".flow");
-    let config_path = flow_path.join("config.yaml");
-    let workspace_dir =
-        cap_std::fs::Dir::open_ambient_dir(&workspace, cap_std::ambient_authority())
-            .expect("workspace opens");
-    let flow_dir = workspace_dir
-        .open_dir(".flow")
-        .expect("flow directory opens");
-
-    let err = classify_workspace_config_open_error(
-        &flow_dir,
-        "config.yaml",
-        config_path.clone(),
-        io::Error::new(io::ErrorKind::PermissionDenied, "injected access failure"),
-        "file",
-    );
-
-    assert!(matches!(
-        err,
-        RuntimeError::Io { path, source }
-            if path == config_path && source.kind() == io::ErrorKind::PermissionDenied
-    ));
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
 #[cfg(unix)]
 #[test]
-fn workspace_config_rejects_symlinked_config_file() {
+fn global_config_rejects_symlinked_config_file() {
     use std::os::unix::fs::symlink;
 
-    let workspace = empty_workspace("workspace-config-symlink");
-    let outside = empty_workspace("outside-workspace-config");
-    fs::create_dir_all(workspace.join(".flow")).expect("flow config dir");
+    let outside = empty_workspace("outside-global-config");
     let outside_config = outside.join("config.yaml");
     fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
-    symlink(&outside_config, workspace.join(".flow/config.yaml")).expect("config symlink");
+    let config_path = global_config_path();
+    fs::remove_file(&config_path).expect("initialized config removes");
+    symlink(&outside_config, &config_path).expect("config symlink");
 
-    let err = load_workspace_config(&workspace).expect_err("config symlink must fail");
+    let err = load_global_config().expect_err("config symlink must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
 }
 
 #[cfg(any(unix, windows))]
 #[test]
-fn workspace_config_rejects_hardlinked_config_file() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = empty_workspace("outside-workspace-config-hardlink");
-    let config_path = workspace.join(".flow/config.yaml");
+fn global_config_rejects_hardlinked_config_file() {
+    let _workspace = workspace_copy("hello-flow");
+    let outside = empty_workspace("outside-global-config-hardlink");
+    let config_path = global_config_path();
     let outside_config = outside.join("config.yaml");
     fs::write(&outside_config, "registry_root: registry\n").expect("outside config written");
     fs::remove_file(&config_path).expect("fixture config removed");
     fs::hard_link(&outside_config, &config_path).expect("config hard link created");
 
-    let err = load_workspace_config(&workspace).expect_err("hard-linked config must fail");
+    let err = load_global_config().expect_err("hard-linked config must fail");
 
     assert!(
         matches!(&err, RuntimeError::Protocol(message) if message.contains("hard-linked")),
@@ -464,14 +542,14 @@ fn workspace_config_rejects_hardlinked_config_file() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn workspace_config_rejects_linked_parent_directory() {
-    let workspace = empty_workspace("workspace-config-linked-parent");
-    let outside = empty_workspace("outside-workspace-config-parent");
+fn global_config_rejects_linked_home_directory() {
+    let global_home = absent_global_home();
+    let outside = empty_workspace("outside-global-config-home");
     fs::write(outside.join("config.yaml"), "registry_root: registry\n")
         .expect("outside config written");
-    create_directory_alias(&workspace.join(".flow"), &outside);
+    create_directory_alias(&global_home, &outside);
 
-    let err = load_workspace_config(&workspace).expect_err("linked config parent must fail");
+    let err = load_global_config().expect_err("linked config parent must fail");
 
     assert!(
         matches!(&err, RuntimeError::Protocol(message)

@@ -70,6 +70,16 @@ pub(crate) fn session_home_path() -> PathBuf {
 }
 
 #[allow(dead_code)]
+pub(crate) fn absent_global_home() -> PathBuf {
+    let home = session_home_path();
+    if home.exists() {
+        fs::remove_dir(&home).expect("the isolated empty global home removes");
+    }
+    assert!(!home.exists());
+    home
+}
+
+#[allow(dead_code)]
 pub(crate) fn workspace_session_dir(workspace: &Path) -> PathBuf {
     workspace_store_dir(workspace).join("sessions")
 }
@@ -185,8 +195,24 @@ fn unique_session_home(label: &str) -> PathBuf {
 
 pub(crate) fn workspace_copy(fixture: &str) -> TempWorkspace {
     let target = TempWorkspace::fresh("watershed-flow-agent");
-    copy_fixture_workspace(&fixture_dir(fixture), &target);
+    let source = fixture_dir(fixture);
+    copy_fixture_workspace(&source, &target);
+    install_global_fixture(&source);
     target
+}
+
+fn install_global_fixture(source: &Path) {
+    let home = session_home_path();
+    if !home.join("config.yaml").is_file() {
+        flow_agent_core::initialize_global_config(None)
+            .expect("isolated global Flow authority initializes");
+    }
+    let source_config = source.join(".flow/config.yaml");
+    if source_config.is_file() {
+        fs::copy(source_config, home.join("config.yaml"))
+            .expect("fixture global config is installed explicitly");
+    }
+    copy_dir(&source.join("registry"), &home.join("registry"));
 }
 
 #[allow(dead_code)]
@@ -225,8 +251,8 @@ fn copy_fixture_workspace(source: &Path, target: &Path) {
     if source_config.exists() {
         let target_config = target.join(".flow/config.yaml");
         fs::create_dir_all(target_config.parent().expect("config path has parent"))
-            .expect("workspace config directory created");
-        fs::copy(source_config, target_config).expect("workspace config copied");
+            .expect("ambient config directory created");
+        fs::copy(source_config, target_config).expect("ambient config copied");
     }
     if source.join("out").is_dir() {
         fs::create_dir_all(target.join("out")).expect("output directory shape copied");
