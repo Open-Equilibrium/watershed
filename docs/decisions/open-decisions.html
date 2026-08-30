@@ -15,28 +15,12 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-2-implementation">M1.2</a>
       <a href="#m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1-2-implementation">
-    <h2>M1.2 - Flow Agent OS Isolation</h2>
-    <div class="grid">
-      <article id="d-065" class="decision">
-        <h3>D-065 - Executor Startup Ceiling</h3>
-        <p><strong>Status:</strong> Open before productive M1.2 implementation; the approved baseline is recorded in the <a href="../../flow-agent/benchmarks/M1_2_BUDGETS.md">M1.2 budget matrix</a>.</p>
-        <p><strong>Evidence:</strong> Four sequential direct-runner no-op launches measured p95 5.369185 ms across 30 fresh-child samples on the fixed Ubuntu 24.04 x64 runner.</p>
-        <p><strong>Question:</strong> Which initial p95 ceiling should the same four launches hold after adding the Flow Agent protocol, companion process, Bubblewrap, seccomp and complete fail-closed teardown?</p>
-        <ul><li><strong>A:</strong> 50 ms, allowing at most 44.630815 ms added aggregate startup overhead. Pro: preserves the existing local no-op dispatch scale while allowing four complete isolation startups. Con: the first implementation may expose a measured small exceedance that requires the documented recalibration review.</li><li><strong>B:</strong> 75 ms, allowing 69.630815 ms added overhead. Pro: more hosted-runner variance headroom. Con: permits 50% more latency without current evidence.</li><li><strong>C:</strong> 100 ms, allowing 94.630815 ms added overhead. Pro: least initial performance pressure. Con: almost twenty times the direct-runner p95 and is not the smallest evidence-backed ceiling.</li></ul>
-        <p><strong>Recommendation:</strong> A; treat any small exceedance through the evidence-based recalibration policy instead of weakening isolation or cleanup.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected ceiling and allowed overhead in the M1.2 budget matrix and ADR log, then make the four-launch Default Sandbox Executor workload a blocking Ubuntu gate before productive M1.2 behavior is enabled.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>

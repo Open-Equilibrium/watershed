@@ -22,6 +22,8 @@ pub(crate) mod live_events;
 pub(crate) mod live_flow_invocations;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) mod m11_budget_evidence;
+#[cfg(feature = "m12-startup-evidence")]
+pub(crate) mod m12_startup_evidence;
 pub(crate) mod oauth_credential;
 pub(crate) mod openai_codex;
 pub(crate) mod phase_control;

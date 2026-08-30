@@ -22,6 +22,8 @@ GATE_TOOLS = (
 )
 M11_BUDGET_FEATURE = "m11-budget-evidence"
 M11_BUDGET_EXAMPLE = "m11_budgets"
+M12_STARTUP_FEATURE = "m12-startup-evidence"
+M12_STARTUP_EXAMPLE = "m12_executor_startup"
 TEST_ISOLATION_CARGO_CONFIG = (
     'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
 )
@@ -125,6 +127,14 @@ class CiWorkflowContractTest(unittest.TestCase):
             if example["name"] == M11_BUDGET_EXAMPLE
         )
         self.assertEqual(reporter["required-features"], [M11_BUDGET_FEATURE])
+        startup_reporter = next(
+            example
+            for example in manifest["example"]
+            if example["name"] == M12_STARTUP_EXAMPLE
+        )
+        self.assertEqual(
+            startup_reporter["required-features"], [M12_STARTUP_FEATURE]
+        )
 
         self.assert_active_ci_gates(workflow)
 
@@ -169,6 +179,19 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "          if-no-files-found: error\n",
                 "          if-no-files-found: error\n"
                 "        continue-on-error: true\n",
+            ),
+            "M1.2 startup baseline execution": workflow.replace(
+                "            --features m12-startup-evidence --example m12_executor_startup \\\n",
+                "            --features m12-startup-evidence --example m11_budgets \\\n",
+            ),
+            "M1.2 startup baseline enforcement tolerated": workflow.replace(
+                "      - name: Enforce M1.2 direct-runner startup baseline\n"
+                "        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_baseline.outcome != 'success'\n"
+                "        shell: bash\n",
+                "      - name: Enforce M1.2 direct-runner startup baseline\n"
+                "        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_baseline.outcome != 'success'\n"
+                "        continue-on-error: true\n"
+                "        shell: bash\n",
             ),
             "RustSec audit removed": workflow.replace(
                 "      - name: Check RustSec advisories\n"
@@ -293,6 +316,45 @@ class CiWorkflowContractTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
+            self.step_lines(workflow, "Run M1.2 direct-runner startup baseline")[1],
+            [
+                "      - name: Run M1.2 direct-runner startup baseline",
+                "        id: m12_startup_baseline",
+                "        if: matrix.os == 'ubuntu-24.04'",
+                "        continue-on-error: true",
+                "        shell: bash",
+                "        run: |",
+                "          mkdir -p target/m12-startup",
+                "          cargo run --locked -p flow-agent-core --release \\",
+                "            --features m12-startup-evidence --example m12_executor_startup \\",
+                "            > target/m12-startup/m12-direct-runner-baseline.jsonl",
+                "",
+            ],
+        )
+        self.assertEqual(
+            self.step_lines(workflow, "Upload M1.2 direct-runner startup baseline")[1],
+            [
+                "      - name: Upload M1.2 direct-runner startup baseline",
+                "        if: matrix.os == 'ubuntu-24.04' && always()",
+                f"        uses: actions/upload-artifact@{UPLOAD_ARTIFACT_SHA} # {UPLOAD_ARTIFACT_RELEASE}",
+                "        with:",
+                "          name: m12-direct-runner-startup-baseline",
+                "          path: target/m12-startup/m12-direct-runner-baseline.jsonl",
+                "          if-no-files-found: error",
+                "",
+            ],
+        )
+        self.assertEqual(
+            self.step_lines(workflow, "Enforce M1.2 direct-runner startup baseline")[1],
+            [
+                "      - name: Enforce M1.2 direct-runner startup baseline",
+                "        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_baseline.outcome != 'success'",
+                "        shell: bash",
+                "        run: exit 1",
+                "",
+            ],
+        )
+        self.assertEqual(
             self.active_folded_step_tokens(workflow, "Check line coverage"),
             [
                 "cargo",
@@ -307,7 +369,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--fail-under-lines",
                 "90",
                 "--ignore-filename-regex",
-                r"((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))",
+                r"((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))",
                 "--show-missing-lines",
             ],
         )

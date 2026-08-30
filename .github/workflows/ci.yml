@@ -121,6 +121,30 @@ jobs:
         shell: bash
         run: exit 1
 
+      - name: Run M1.2 direct-runner startup baseline
+        id: m12_startup_baseline
+        if: matrix.os == 'ubuntu-24.04'
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p target/m12-startup
+          cargo run --locked -p flow-agent-core --release \
+            --features m12-startup-evidence --example m12_executor_startup \
+            > target/m12-startup/m12-direct-runner-baseline.jsonl
+
+      - name: Upload M1.2 direct-runner startup baseline
+        if: matrix.os == 'ubuntu-24.04' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m12-direct-runner-startup-baseline
+          path: target/m12-startup/m12-direct-runner-baseline.jsonl
+          if-no-files-found: error
+
+      - name: Enforce M1.2 direct-runner startup baseline
+        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_baseline.outcome != 'success'
+        shell: bash
+        run: exit 1
+
       - name: Check line coverage
         run: >-
           cargo llvm-cov nextest
@@ -130,7 +154,7 @@ jobs:
           --all-targets
           --all-features
           --fail-under-lines 90
-          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))'
+          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))'
           --show-missing-lines
 
       - name: Check RustSec advisories

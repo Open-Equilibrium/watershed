@@ -1,27 +1,26 @@
-# M1.2 Executor Startup Budget
+# M1.2 Executor Startup Evidence
 
-This file is the single source for the M1.2 startup workload, evidence and gate. Protocol, security and platform behavior remain canonical in `PROTOCOL.md`, `SECURITY.md` and `TESTING.md`.
+This file is the single source for the M1.2 startup workload, evidence and regression policy. Protocol, security and platform behavior remain canonical in `PROTOCOL.md`, `SECURITY.md` and `TESTING.md`.
 
 ## Workload and method
 
-Reuse `P:runner_four_noop_launches` from `M1_1_BUDGETS.md`: one release-mode sample starts `/usr/bin/true` four times sequentially through the direct M1.1 Tool runner with an empty environment and requires four exact successful terminal results with empty output. Useful Tool work and executable lookup are excluded. The later M1.2 gate replaces only the launch path with four one-shot Default Sandbox Executor invocations, so the p95 difference bounds added Flow Agent protocol, companion-process and Sandbox-backend startup without duplicating useful Tool work.
+The direct-runner baseline is independent of the closed M1.1 matrix and uses schema `flow-m12-startup-baseline-v0`. Each sample runs in a fresh measurement child and performs exactly one direct Tool invocation. That invocation starts the fixed no-op child with an empty environment; the child returns one bounded `flow-m12-noop-tool-v0` result containing its independently measured `tool_runtime_ns`.
 
-The fixed Ubuntu 24.04 x64 CI job runs five warmups and 30 measured fresh-child samples, one process at a time:
+The outer `runner_elapsed_ns` interval begins immediately before direct-runner handoff and ends only after process launch, terminal classification, reap and stdout/stderr drain have completed. Reports retain all 30 raw pairs and independent p50, p95 and maximum distributions for `runner_elapsed_ns` and `tool_runtime_ns`. Values are unadjusted; no Tool-runtime subtraction or derived overhead value is used.
+
+The fixed Ubuntu 24.04 x64 CI job runs five warmups followed by 30 measured children, one process at a time:
 
 ```sh
-cargo run --locked -p flow-agent-core --release --features m11-budget-evidence --example m11_budgets > target/m11-budgets/m11-budgets.jsonl
+mkdir -p target/m12-startup
+cargo run --locked -p flow-agent-core --release \
+  --features m12-startup-evidence --example m12_executor_startup \
+  > target/m12-startup/m12-direct-runner-baseline.jsonl
 ```
 
-## Direct-runner baseline
+The dedicated artifact is uploaded even when collection fails. A child or lifecycle failure still produces metadata, one terminal workload-failure record and a failed summary before the process exits nonzero.
 
-GitHub Actions run [32953566534](https://github.com/Open-Equilibrium/watershed/actions/runs/32953566534) measured commit `d48147874dad793f93a44b105fd42198319196cf` on runner image `ubuntu24` version `20260816.277.1`, with four logical CPUs, an Intel Xeon Platinum 8370C and 16,765,378,560 bytes of memory. The `flow-m11-budget-v0` artifact reported 30 passing samples:
+## Evidence and enforcement
 
-| Aggregate | Four launches |
-|---|---:|
-| p50 | 5.291454 ms |
-| p95 | 5.369185 ms |
-| maximum | 5.374238 ms |
+The first fixed-runner artifact is pending. CI enforces the deterministic workload, bounded child report, exact successful terminal result, complete report and artifact retention. Timing remains observable regression evidence and a performance KPI; ADR-0158 rejects an estimated absolute startup hard-fail number, so the report records `p95_limit_ns: null` and no timing observation alone fails the build.
 
-## Gate
-
-The p95 ceiling and allowed added overhead are pending [D-065](../../docs/decisions/open-decisions.html#d-065). Productive M1.2 Executor implementation remains blocked until that decision is recorded in `docs/adr/ADR-LOG.md`.
+Review startup changes against the one-shot architecture target and the retained runner/tool distributions. Address a clear, maintainable regression without weakening isolation, cleanup or correctness; otherwise record the evidence and architectural tradeoff through the decision flow before changing the target or workload.

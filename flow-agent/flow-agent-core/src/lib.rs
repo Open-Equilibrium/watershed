@@ -16,6 +16,12 @@ pub use runtime::m11_budget_evidence::{
     M11_BUDGET_WORKLOADS, M11BudgetOutcome, M11BudgetWorkload, M11BudgetWorkloadId,
     m11_budget_workload_inputs, run_m11_budget_workload,
 };
+#[cfg(feature = "m12-startup-evidence")]
+#[doc(hidden)]
+pub use runtime::m12_startup_evidence::{
+    M12_STARTUP_TOOL_CHILD_ARG, M12DirectRunnerMeasurement, run_m12_direct_runner_startup,
+    write_m12_noop_tool_child_report,
+};
 pub use runtime::{
     AuthLoginMode, AuthStatus, EmitMode, LiveEventNotification, LiveEventNotifier,
     LiveEventNotifyStatus, LiveEventReceiveError, LiveEventReceiver, MAX_FLOW_RUN_INPUT_BYTES,
