@@ -17,7 +17,7 @@ use crate::runtime::{
     validate::validate_session_log_text,
 };
 use proto::{EventEnvelope, EventType};
-use std::{collections::VecDeque, fs, time::Instant};
+use std::{collections::VecDeque, fs};
 
 #[derive(Default)]
 struct OneShotRejectingEventSink {
@@ -35,7 +35,6 @@ impl RuntimeEventSink for ToolStartedRejectingEventSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.event_type == EventType::ToolStarted {
             return Err(RuntimeError::Protocol(
@@ -52,7 +51,6 @@ impl RuntimeEventSink for OneShotRejectingEventSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if !self.rejected && event.event_type == EventType::PhaseCompleted {
             self.rejected = true;

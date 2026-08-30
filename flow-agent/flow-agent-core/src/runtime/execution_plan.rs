@@ -16,8 +16,6 @@ pub struct ScriptWrite {
 #[derive(Debug)]
 pub struct RuntimeExecution {
     pub(crate) context_manifests: RuntimeStreamSignature,
-    #[cfg(test)]
-    pub(crate) event_transition_nanos: Vec<u128>,
     pub(crate) events: RuntimeStreamSignature,
     pub(crate) failed: bool,
     pub(crate) failure_status: Option<String>,

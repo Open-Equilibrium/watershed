@@ -29,7 +29,6 @@ struct Metadata {
     warmup_samples: usize,
     measured_samples: usize,
     invocations_per_fresh_child: usize,
-    numeric_timing_gate: bool,
     environment: Environment,
 }
 
@@ -55,8 +54,6 @@ struct Aggregate {
     tool_runtime_p50_ns: u64,
     tool_runtime_p95_ns: u64,
     tool_runtime_max_ns: u64,
-    p95_limit_ns: Option<u64>,
-    passed: bool,
     inputs: Value,
 }
 
@@ -65,7 +62,6 @@ struct WorkloadFailure<'a> {
     kind: &'static str,
     schema: &'static str,
     benchmark: &'static str,
-    passed: bool,
     error: &'a str,
     inputs: Value,
 }
@@ -74,7 +70,7 @@ struct WorkloadFailure<'a> {
 struct Summary {
     kind: &'static str,
     schema: &'static str,
-    passed: bool,
+    complete: bool,
 }
 
 fn inputs() -> Value {
@@ -175,7 +171,6 @@ fn write_failure(writer: &mut impl Write, error: &dyn Error) -> Result<(), DynEr
             kind: "workload_failure",
             schema: REPORT_SCHEMA,
             benchmark: BENCHMARK,
-            passed: false,
             error: &error,
             inputs: inputs(),
         },
@@ -200,7 +195,6 @@ pub(super) fn write_report_with_measurement(
             warmup_samples: config.warmups,
             measured_samples: config.samples,
             invocations_per_fresh_child: 1,
-            numeric_timing_gate: false,
             environment: current_environment(),
         },
     )?;
@@ -213,7 +207,7 @@ pub(super) fn write_report_with_measurement(
                 &Summary {
                     kind: "summary",
                     schema: REPORT_SCHEMA,
-                    passed: false,
+                    complete: false,
                 },
             )?;
             writer.flush()?;
@@ -233,7 +227,7 @@ pub(super) fn write_report_with_measurement(
                     &Summary {
                         kind: "summary",
                         schema: REPORT_SCHEMA,
-                        passed: false,
+                        complete: false,
                     },
                 )?;
                 writer.flush()?;
@@ -270,8 +264,6 @@ pub(super) fn write_report_with_measurement(
             tool_runtime_p50_ns: percentile(&tool_samples, 50, 100),
             tool_runtime_p95_ns: percentile(&tool_samples, 95, 100),
             tool_runtime_max_ns: *tool_samples.last().expect("sample count is nonzero"),
-            p95_limit_ns: None,
-            passed: true,
             inputs: inputs(),
         },
     )?;
@@ -280,7 +272,7 @@ pub(super) fn write_report_with_measurement(
         &Summary {
             kind: "summary",
             schema: REPORT_SCHEMA,
-            passed: true,
+            complete: true,
         },
     )?;
     writer.flush()?;

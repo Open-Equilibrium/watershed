@@ -28,7 +28,6 @@ use std::{
     path::Path,
     sync::{Arc, Barrier},
     thread,
-    time::Instant,
 };
 
 #[test]
@@ -306,7 +305,6 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
             event: &EventEnvelope,
             _canonical_jsonl: &str,
             _context_manifest: Option<ContextManifestCheckpoint>,
-            _measurement_started_at: Option<Instant>,
         ) -> Result<(), RuntimeError> {
             if event.event_type == EventType::ToolStarted
                 && event

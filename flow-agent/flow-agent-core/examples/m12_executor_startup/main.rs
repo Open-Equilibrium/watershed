@@ -163,8 +163,8 @@ fn run_main() -> Result<(), DynError> {
     }
 
     let config = parse_args(args)?;
-    let passed = write_report(&mut io::stdout().lock(), config)?;
-    if !passed {
+    let complete = write_report(&mut io::stdout().lock(), config)?;
+    if !complete {
         return Err(io::Error::other("M1.2 startup baseline evidence was incomplete").into());
     }
     Ok(())
@@ -245,10 +245,8 @@ mod tests {
             .unwrap()
         );
 
-        let text = String::from_utf8(writer).unwrap();
-        assert!(!text.contains("overhead"));
-        assert!(!text.contains("adjusted"));
-        let records = text
+        let records = String::from_utf8(writer)
+            .unwrap()
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
@@ -267,7 +265,6 @@ mod tests {
         assert_eq!(aggregate["runner_p95_ns"], 40);
         assert_eq!(aggregate["tool_runtime_p50_ns"], 3);
         assert_eq!(aggregate["tool_runtime_p95_ns"], 4);
-        assert_eq!(aggregate["p95_limit_ns"], Value::Null);
     }
 
     #[test]
@@ -277,7 +274,7 @@ mod tests {
         };
         let mut writer = FlushTrackingWriter::default();
 
-        let passed = write_report_with_measurement(
+        let complete = write_report_with_measurement(
             &mut writer,
             Config {
                 warmups: 1,
@@ -287,7 +284,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!passed);
+        assert!(!complete);
         assert!(writer.flushed);
         let records = String::from_utf8(writer.bytes)
             .unwrap()
@@ -299,6 +296,6 @@ mod tests {
         assert_eq!(records[1]["kind"], "workload_failure");
         assert_eq!(records[1]["error"], "injected child diagnostic");
         assert_eq!(records[2]["kind"], "summary");
-        assert_eq!(records[2]["passed"], false);
+        assert_eq!(records[2]["complete"], false);
     }
 }

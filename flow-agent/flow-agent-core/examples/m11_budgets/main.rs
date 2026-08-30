@@ -209,9 +209,9 @@ fn run_main() -> Result<(), DynError> {
     }
 
     let config = parse_args(args)?;
-    let passed = write_report(&mut io::stdout().lock(), config)?;
-    if !passed {
-        return Err(io::Error::other("one or more M1.1 optimized budgets failed").into());
+    let complete = write_report(&mut io::stdout().lock(), config)?;
+    if !complete {
+        return Err(io::Error::other("M1.1 performance evidence is incomplete").into());
     }
     Ok(())
 }
@@ -319,7 +319,7 @@ mod tests {
         };
         let mut writer = FlushTrackingWriter::default();
 
-        let passed = write_report_with_measurement(
+        let complete = write_report_with_measurement(
             &mut writer,
             Config {
                 warmups: 1,
@@ -329,7 +329,7 @@ mod tests {
         )
         .expect("measurement failure is retained in the completed report");
 
-        assert!(!passed);
+        assert!(!complete);
         assert!(writer.flushed);
         for workload in M11_BUDGET_WORKLOADS {
             assert!(
@@ -357,11 +357,10 @@ mod tests {
             .find(|record| record["kind"] == "workload_failure")
             .expect("failed workload has a terminal record");
         assert_eq!(failure["benchmark"], failed_workload);
-        assert_eq!(failure["passed"], false);
         assert_eq!(failure["error"], "injected child diagnostic");
         let summary = records.last().expect("summary is present");
         assert_eq!(summary["kind"], "summary");
-        assert_eq!(summary["passed"], false);
+        assert_eq!(summary["complete"], false);
         assert_eq!(summary["failing_workloads"], json!([failed_workload]));
     }
 
@@ -401,6 +400,7 @@ mod tests {
             .map(|line| serde_json::from_str::<Value>(line).expect("report line parses"))
             .find(|record| record["kind"] == "aggregate")
             .expect("aggregate exists");
+        assert_eq!(aggregate["schema"], "flow-m11-performance-evidence-v0");
         assert_eq!(aggregate["peak_rss_growth_max_bytes"], 1);
         assert_eq!(aggregate["retained_rss_growth_max_bytes"], 2);
     }

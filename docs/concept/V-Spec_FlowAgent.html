@@ -267,7 +267,7 @@ output_reserve: 16384</code></pre>
     <section id="events" class="section"><h2>9. Events &amp; measurement</h2><div class="body">
       <p>Flow Agent's event stream is a <strong>stable public runtime contract</strong>, not just an internal log. Every meaningful runtime transition appends one normalized event; JSONL mode (§3B), future RPC mode (§3C) and replay from the user-global session log (§3E) expose the same events. Live notifications report the earliest pending and highest committed sequences, never a second event copy. Golden flows compare expected event streams, which makes individual flows measurable and optimizable.</p>
       <p>These are the same normalized events defined in <a href="../../PROTOCOL.md">PROTOCOL.md</a> (single source of truth for the event-envelope fields and runtime event families). Exact v0 names are decided by ADR-0036; do not introduce a competing naming convention. Command/request shape is a separate post-M1 surface selected by ADR-0055.</p>
-      <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted ADR-0034 test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines delivery budgets.</p>
+      <p><a href="../../PROTOCOL.md">PROTOCOL.md</a> defines the envelope, canonical JSONL, event families and lifecycle; <a href="../../TESTING.md">TESTING.md</a> defines the emitted ADR-0034 test subset; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> defines performance design and evidence.</p>
     </div></section>
 
     <section id="m0" class="section"><h2>10. M0–M1.2 implementation references</h2><div class="body">

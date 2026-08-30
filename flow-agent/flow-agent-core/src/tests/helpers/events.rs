@@ -5,7 +5,6 @@ use crate::{
     tests::{support::event_timestamp, test_support::expected_stream},
 };
 use proto::{EventEnvelope, EventType};
-use std::time::Instant;
 
 #[derive(Default)]
 pub(in crate::tests) struct CollectingEventSink(pub(in crate::tests) Vec<EventEnvelope>);
@@ -16,7 +15,6 @@ impl RuntimeEventSink for CollectingEventSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         self.0.push(event.clone());
         Ok(())

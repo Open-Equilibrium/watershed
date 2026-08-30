@@ -47,7 +47,7 @@ fn resume_preflight_rejects_an_excess_event_segment_before_side_effects() {
         0,
     )
     .and_then(|mut preflight| {
-        preflight.commit(&event, &canonical, None, None)?;
+        preflight.commit(&event, &canonical, None)?;
         preflight.finish()
     });
 
@@ -170,7 +170,7 @@ fn resume_preflight_rejects_a_shifted_normal_event_before_mutating_state() {
     let before = preflight.events.total_bytes;
 
     let err = preflight
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect_err("the resume marker shift must apply to normal event capacity");
 
     assert!(err.to_string().contains("event budget exceeded"), "{err}");
@@ -215,7 +215,7 @@ fn resume_preflight_rejects_a_shifted_oversized_event_before_mutating_state() {
     let before = preflight.events.total_bytes;
 
     let err = preflight
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect_err("the shifted event must retain the per-event size limit");
 
     assert!(
@@ -278,7 +278,7 @@ fn resume_preflight_rejects_a_sixth_context_segment_before_prior_side_effects() 
         0,
     )
     .and_then(|mut preflight| {
-        preflight.commit(&event, &canonical, Some(checkpoint.clone()), None)?;
+        preflight.commit(&event, &canonical, Some(checkpoint.clone()))?;
         preflight.finish()
     });
 

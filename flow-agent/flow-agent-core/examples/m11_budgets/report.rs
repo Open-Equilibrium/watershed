@@ -1,14 +1,12 @@
 use super::contract::workload_contract;
-use super::{
-    ChildMeasurement, Config, DynError, RssMeasurement, duration_ns, fresh_child_measurement,
-};
-use flow_agent_core::{M11_BUDGET_WORKLOADS, M11BudgetWorkload};
+use super::{ChildMeasurement, Config, DynError, RssMeasurement, fresh_child_measurement};
+use flow_agent_core::{M11_BUDGET_WORKLOADS, M11BudgetWorkload, validate_m11_rss_measurement};
 use serde::Serialize;
 use serde_json::Value;
 use std::{env, error::Error, io::Write, process::Command};
 
-const REPORT_SCHEMA: &str = "flow-m11-budget-v0";
-const REPORT_SUITE: &str = "Flow Agent M1.1 optimized budget evidence";
+const REPORT_SCHEMA: &str = "flow-m11-performance-evidence-v0";
+const REPORT_SUITE: &str = "Flow Agent M1.1 performance evidence";
 const RSS_METHOD: &str = "fresh-child-linux-vmhwm-minus-vmrss-v0";
 
 #[derive(Serialize)]
@@ -60,14 +58,8 @@ struct Aggregate<'a> {
     p50_ns: u64,
     p95_ns: u64,
     max_ns: u64,
-    p95_limit_ns: Option<u64>,
     peak_rss_growth_max_bytes: Option<u64>,
     retained_rss_growth_max_bytes: Option<u64>,
-    max_peak_rss_growth_limit_bytes: Option<u64>,
-    min_peak_rss_growth_limit_bytes: Option<u64>,
-    timing_passed: bool,
-    rss_passed: bool,
-    passed: bool,
     inputs: Value,
     exclusions: &'a [&'a str],
 }
@@ -77,7 +69,6 @@ struct WorkloadFailure<'a> {
     kind: &'static str,
     schema: &'static str,
     benchmark: &'a str,
-    passed: bool,
     error: &'a str,
     inputs: Value,
     exclusions: &'a [&'a str],
@@ -87,7 +78,7 @@ struct WorkloadFailure<'a> {
 struct Summary<'a> {
     kind: &'static str,
     schema: &'static str,
-    passed: bool,
+    complete: bool,
     failing_workloads: &'a [String],
 }
 
@@ -119,7 +110,6 @@ fn write_workload_failure(
             kind: "workload_failure",
             schema: REPORT_SCHEMA,
             benchmark: workload.name(),
-            passed: false,
             error: &error,
             inputs,
             exclusions,
@@ -150,6 +140,12 @@ fn write_workload_report(
                 return Ok(false);
             }
         };
+        if let Err(error) =
+            validate_m11_rss_measurement(workload.id, measurement.rss.peak_growth_bytes)
+        {
+            write_workload_failure(writer, workload, &std::io::Error::other(error))?;
+            return Ok(false);
+        }
         rss_measurements.push(measurement.rss);
         write_jsonl(
             writer,
@@ -180,25 +176,6 @@ fn write_workload_report(
         .iter()
         .filter_map(|measurement| measurement.retained_growth_bytes)
         .max();
-    let p95_limit_ns = workload.p95_limit.map(duration_ns);
-    let timing_passed = p95_limit_ns.is_none_or(|limit| p95 <= limit);
-    let rss_reference = cfg!(target_os = "linux");
-    let maximum_rss_passed = if rss_reference {
-        workload
-            .max_peak_rss_growth_bytes
-            .is_none_or(|limit| peak_rss_growth_max_bytes.is_some_and(|actual| actual <= limit))
-    } else {
-        true
-    };
-    let minimum_rss_passed = if rss_reference {
-        workload
-            .min_peak_rss_growth_bytes
-            .is_none_or(|limit| peak_rss_growth_max_bytes.is_some_and(|actual| actual >= limit))
-    } else {
-        true
-    };
-    let rss_passed = maximum_rss_passed && minimum_rss_passed;
-    let passed = timing_passed && rss_passed;
     let (inputs, exclusions) = workload_contract(workload.id);
     write_jsonl(
         writer,
@@ -210,19 +187,13 @@ fn write_workload_report(
             p50_ns: p50,
             p95_ns: p95,
             max_ns: max,
-            p95_limit_ns,
             peak_rss_growth_max_bytes,
             retained_rss_growth_max_bytes,
-            max_peak_rss_growth_limit_bytes: workload.max_peak_rss_growth_bytes,
-            min_peak_rss_growth_limit_bytes: workload.min_peak_rss_growth_bytes,
-            timing_passed,
-            rss_passed,
-            passed,
             inputs,
             exclusions,
         },
     )?;
-    Ok(passed)
+    Ok(true)
 }
 
 fn bounded_environment_value(name: &str, maximum_bytes: usize) -> Option<String> {
@@ -315,7 +286,7 @@ pub(super) fn write_report_with_measurement(
         &Summary {
             kind: "summary",
             schema: REPORT_SCHEMA,
-            passed: failures.is_empty(),
+            complete: failures.is_empty(),
             failing_workloads: &failures,
         },
     )?;

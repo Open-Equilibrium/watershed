@@ -1,14 +1,10 @@
 #[path = "support/replay.rs"]
 mod replay;
-#[path = "support/rss.rs"]
-mod rss;
 #[path = "support/workspace.rs"]
 mod workspace;
 
 #[allow(unused_imports)]
 pub(crate) use replay::{remove_replay_segments, write_sized_conversation_replay};
-#[allow(unused_imports)]
-pub(crate) use rss::{PeakRssSampler, current_resident_set_size};
 #[allow(unused_imports)]
 pub(crate) use workspace::{
     TempWorkspace, absent_global_home, copy_dir, empty_workspace, empty_workspace_under,

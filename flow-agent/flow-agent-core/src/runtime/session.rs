@@ -200,8 +200,7 @@ pub use new_run::{
 };
 #[cfg(test)]
 pub(crate) use new_run::{
-    run_flow_internal, run_flow_internal_with_cleanup_observer,
-    run_flow_internal_with_stage_observers,
+    run_flow_internal_with_cleanup_observer, run_flow_internal_with_stage_observers,
 };
 
 mod productive_run;

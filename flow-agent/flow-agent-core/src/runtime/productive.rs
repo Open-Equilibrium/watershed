@@ -209,8 +209,6 @@ fn emit_and_commit<S: crate::runtime::event_writer::RuntimeEventSink>(
         &action.event,
         &action.canonical_jsonl,
         action.context_checkpoint.clone(),
-        #[cfg(test)]
-        sink.measurement_started_at(),
     );
     if result.is_err() {
         *event_commit_failed = true;

@@ -34,7 +34,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, mpsc},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[test]
@@ -252,7 +252,6 @@ impl RuntimeEventSink for BlockingFlowStartedSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.event_type == EventType::FlowStarted && !self.blocked {
             self.blocked = true;

@@ -14,7 +14,7 @@ mod runtime;
 #[doc(hidden)]
 pub use runtime::m11_budget_evidence::{
     M11_BUDGET_WORKLOADS, M11BudgetOutcome, M11BudgetWorkload, M11BudgetWorkloadId,
-    m11_budget_workload_inputs, run_m11_budget_workload,
+    m11_budget_workload_inputs, run_m11_budget_workload, validate_m11_rss_measurement,
 };
 #[cfg(feature = "m12-startup-evidence")]
 #[doc(hidden)]

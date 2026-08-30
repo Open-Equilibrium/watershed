@@ -155,23 +155,10 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings\n\n",
                 "",
             ),
-            "optimized performance contract": workflow.replace(
-                "          --release\n"
-                "          --run-ignored ignored-only\n"
-                "          -j 1\n",
-                "",
-            ),
-            "optimized performance tolerated": workflow.replace(
-                "      - name: Run optimized performance tests\n"
-                "        if: matrix.os == 'ubuntu-24.04'\n",
-                "      - name: Run optimized performance tests\n"
-                "        if: matrix.os == 'ubuntu-24.04'\n"
-                "        continue-on-error: true\n",
-            ),
             "coverage threshold": workflow.replace(
                 "          --fail-under-lines 90\n", ""
             ),
-            "M1.1 budget execution": workflow.replace(
+            "M1.1 evidence execution": workflow.replace(
                 "          cargo run --locked -p flow-agent-core --release \\\n",
                 "          true \\\n",
             ),
@@ -265,51 +252,28 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--doc",
             ],
         )
-        _, performance_step_lines = self.conditionally_active_step_lines(
-            workflow,
-            "Run optimized performance tests",
-            "matrix.os == 'ubuntu-24.04'",
-        )
         self.assertEqual(
-            self.folded_step_line_tokens(performance_step_lines),
+            self.step_lines(workflow, "Run M1.1 performance evidence")[1],
             [
-                "cargo",
-                "nextest",
-                "run",
-                "--config",
-                TEST_ISOLATION_CARGO_CONFIG,
-                "--locked",
-                "-p",
-                "flow-agent-core",
-                "--release",
-                "--run-ignored",
-                "ignored-only",
-                "-j",
-                "1",
-            ],
-        )
-        self.assertEqual(
-            self.step_lines(workflow, "Run M1.1 optimized budget suite")[1],
-            [
-                "      - name: Run M1.1 optimized budget suite",
-                "        id: m11_budgets",
+                "      - name: Run M1.1 performance evidence",
+                "        id: m11_evidence",
                 "        if: matrix.os == 'ubuntu-24.04'",
                 "        continue-on-error: true",
                 "        shell: bash",
                 "        run: |",
-                "          mkdir -p target/m11-budgets",
+                "          mkdir -p target/m11-performance",
                 "          cargo run --locked -p flow-agent-core --release \\",
                 "            --features m11-budget-evidence --example m11_budgets \\",
-                "            > target/m11-budgets/m11-budgets.jsonl",
+                "            > target/m11-performance/m11-performance-evidence.jsonl",
                 "",
             ],
         )
         self.assert_active_pinned_gate_actions(workflow)
         self.assertEqual(
-            self.step_lines(workflow, "Enforce M1.1 optimized budgets")[1],
+            self.step_lines(workflow, "Enforce M1.1 evidence integrity")[1],
             [
-                "      - name: Enforce M1.1 optimized budgets",
-                "        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'",
+                "      - name: Enforce M1.1 evidence integrity",
+                "        if: matrix.os == 'ubuntu-24.04' && steps.m11_evidence.outcome != 'success'",
                 "        shell: bash",
                 "        run: exit 1",
                 "",
@@ -473,14 +437,14 @@ class CiWorkflowContractTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            self.step_lines(workflow, "Upload M1.1 optimized budget evidence")[1],
+            self.step_lines(workflow, "Upload M1.1 performance evidence")[1],
             [
-                "      - name: Upload M1.1 optimized budget evidence",
+                "      - name: Upload M1.1 performance evidence",
                 "        if: matrix.os == 'ubuntu-24.04' && always()",
                 f"        uses: actions/upload-artifact@{UPLOAD_ARTIFACT_SHA} # {UPLOAD_ARTIFACT_RELEASE}",
                 "        with:",
-                "          name: m11-optimized-budgets",
-                "          path: target/m11-budgets/m11-budgets.jsonl",
+                "          name: m11-performance-evidence",
+                "          path: target/m11-performance/m11-performance-evidence.jsonl",
                 "          if-no-files-found: error",
                 "",
             ],

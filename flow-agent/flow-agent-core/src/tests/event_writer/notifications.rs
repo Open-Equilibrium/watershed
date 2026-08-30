@@ -15,7 +15,7 @@ use proto::{EventEnvelope, EventType};
 use std::{
     fs,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[test]
@@ -171,7 +171,7 @@ fn validation_failure_closes_the_writer_without_notifying() {
     let reservation = reserve_session_log(&workspace, "invalid001").expect("session reserved");
     let (notifier, receiver) = live_event_channel();
     let mut writer =
-        SerialSessionWriter::start(&reservation, Some(notifier), None).expect("writer starts");
+        SerialSessionWriter::start(&reservation, Some(notifier)).expect("writer starts");
     let invalid = EventEnvelope::new(
         "evt-invalid",
         EventType::SessionStarted,
@@ -184,7 +184,7 @@ fn validation_failure_closes_the_writer_without_notifying() {
     let canonical = invalid.canonical_jsonl().expect("event serializes");
 
     let first_error = writer
-        .commit(&invalid, &canonical, None, Some(Instant::now()))
+        .commit(&invalid, &canonical, None)
         .expect_err("invalid event must close the writer");
     assert!(matches!(first_error, RuntimeError::EventWriter(_)));
     assert_eq!(

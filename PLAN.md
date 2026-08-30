@@ -1,6 +1,6 @@
 # Plan
 
-Implementation milestones with deliverables and a Definition of Done (DoD). Performance targets are canonical in `PERFORMANCE.md`.
+Implementation milestones with deliverables and a Definition of Done (DoD). Performance architecture and evidence are canonical in `PERFORMANCE.md`.
 
 Created: 2026-06-05
 
@@ -47,11 +47,11 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Canonical Flow runtime events, append-only session history, replay, tail and resume.
 - Deterministic, cache-stable `flow-context-v0` compilation and reproducible context manifests.
 - Deterministic in-process policy enforcement/emulation for declared command, parameter, path, protected-path and deny-all network decisions.
-- Cross-platform functional, coverage and Linux performance gates defined by `TESTING.md`, `PERFORMANCE.md` and CI.
+- Cross-platform functional and coverage gates plus Linux performance evidence defined by `TESTING.md`, `PERFORMANCE.md` and CI.
 
 M1 does not provide a real provider adapter, general external process execution, a complete POSIX shell, OS-enforced isolation, positive network grants, or public session export/delete/prune operations.
 
-**DoD:** a fixture-profile workspace runs multi-phase Flows and Subflows headlessly; planning is side-effect-free; each planned fixture side effect is applied at most once; non-fixture execution fails closed; canonical events and context manifests are persisted and replayed/tailed/resumed without repeating completed side effects; one host-local lease authorizes each active workspace/session pair, direct workspace-marker mutation cannot grant or revoke it, process exit releases it, and controlled returns preserve all operation, writer-finalization, marker-validation and lease-release failures plus valid artifacts; policy-emulation and sandbox-negative tests remain explicit about the absence of an OS boundary; and every M1 test, coverage and performance gate passes. Flow Agent remains standalone and has no Watershed-owned project-code VCS behavior.
+**DoD:** a fixture-profile workspace runs multi-phase Flows and Subflows headlessly; planning is side-effect-free; each planned fixture side effect is applied at most once; non-fixture execution fails closed; canonical events and context manifests are persisted and replayed/tailed/resumed without repeating completed side effects; one host-local lease authorizes each active workspace/session pair, direct workspace-marker mutation cannot grant or revoke it, process exit releases it, and controlled returns preserve all operation, writer-finalization, marker-validation and lease-release failures plus valid artifacts; policy-emulation and sandbox-negative tests remain explicit about the absence of an OS boundary; and every M1 test and coverage gate passes with complete performance evidence. Flow Agent remains standalone and has no Watershed-owned project-code VCS behavior.
 
 ### M1.1 — Flow Agent practical execution
 
@@ -105,7 +105,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 - Timeout, cancellation, output caps and Tool logs are tested.
 - Every Conversation branch remains navigable in one append-only history. Latest-entry continuation and explicit older-entry branching create new Runs from the selected terminal compact snapshot after registry-drift validation, never roll back filesystem or external effects, and retain descendants. Exact two-id recovery consumes the same bounded snapshot model without redispatching durable external results.
 - No capability depends on Meta-Harness or Liquid.
-- Current gates plus the M1.1 performance and security budgets decided before implementation pass.
+- Current gates and security boundaries pass; the fixed M1.1 performance evidence is complete and retained.
 
 **Explicit post-M1.1 Flow Agent work:** later milestones may add typed projections or mappings between Flow, Phase, Instruction, subflow, Tool and addressable artifact inputs/outputs; backward edges or an expression language; general retry/fallback policies; and automatic Tool imports referenced by Instructions. Dynamic proposals to add a Phase, child Phase or Flow at run time—including one-run versus persisted approval and an operator opt-out—also remain deferred. A durable ordered Conversation-status inventory may replace the query-only CV-03 admission bound when larger inventories are required; it must define transaction, recovery, migration and consistency rules without replacing Conversation or migration authority. Any future routing or proposal surface requires a finite schema, permissions, complete allowed/rejected matrix, provenance, replay and approval decision before enablement. The M1.1 routing boundary is canonical in `PROTOCOL.md`.
 

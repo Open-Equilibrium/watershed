@@ -38,7 +38,7 @@ use crate::runtime::{
 #[cfg(test)]
 use crate::runtime::{
     conversations::legacy_flat_compatibility_is_available,
-    event_writer::{EventWriterTimings, post_writer_finish_observer},
+    event_writer::post_writer_finish_observer,
     types::{EmitMode, human_session_status_from_failure},
 };
 use proto::EventType;
@@ -53,7 +53,7 @@ pub(crate) fn resume_session(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let _ = legacy_flat_compatibility_is_available(workspace, session_id)?;
-    resume_session_internal(workspace, session_id, None, None, emit == EmitMode::Jsonl)
+    resume_session_internal(workspace, session_id, None, emit == EmitMode::Jsonl)
 }
 
 /// Resumes a session with bounded, non-blocking committed-event notifications.
@@ -68,7 +68,7 @@ pub(crate) fn resume_session_with_live_events(
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     let _ = legacy_flat_compatibility_is_available(workspace, session_id)?;
-    let mut output = resume_session_internal(workspace, session_id, Some(notifier), None, false)?;
+    let mut output = resume_session_internal(workspace, session_id, Some(notifier), false)?;
     output.stdout.clear();
     Ok(output)
 }
@@ -78,14 +78,12 @@ pub(crate) fn resume_session_internal(
     workspace: impl AsRef<Path>,
     session_id: &str,
     notifier: Option<LiveEventNotifier>,
-    timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
 ) -> Result<RunOutput, RuntimeError> {
     resume_session_internal_with_cleanup_observer_impl(
         workspace,
         session_id,
         notifier,
-        timings,
         capture_jsonl,
         human_session_status_from_failure,
         |_| {},
@@ -102,8 +100,6 @@ pub(crate) fn resume_migrating_conversation_run_internal(
         workspace,
         run_session_id,
         notifier,
-        #[cfg(test)]
-        None,
         capture_jsonl,
         human_run_status_from_failure,
         |_| {},
@@ -121,7 +117,6 @@ pub(crate) fn resume_session_internal_with_cleanup_observer(
         workspace,
         session_id,
         None,
-        None,
         capture_jsonl,
         human_session_status_from_failure,
         before_cleanup,
@@ -132,7 +127,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
     workspace: impl AsRef<Path>,
     session_id: &str,
     notifier: Option<LiveEventNotifier>,
-    #[cfg(test)] timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
     human_status: fn(&str, &str, Option<&str>) -> String,
     before_cleanup: impl FnOnce(&AnchoredFile),
@@ -221,8 +215,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
                     &action.event,
                     &action.canonical_jsonl,
                     action.context_checkpoint.clone(),
-                    #[cfg(test)]
-                    None,
                 )?;
             }
         }
@@ -300,8 +292,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
             validation: inspection.validation,
             commit_reservation: None,
             notifier,
-            #[cfg(test)]
-            timings,
         })?;
         if capture_jsonl {
             serial_writer.enable_jsonl_capture();

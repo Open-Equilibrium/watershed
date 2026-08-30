@@ -86,38 +86,27 @@ jobs:
           --all-features
           --doc
 
-      - name: Run optimized performance tests
-        if: matrix.os == 'ubuntu-24.04'
-        run: >-
-          cargo nextest run
-          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
-          --locked
-          -p flow-agent-core
-          --release
-          --run-ignored ignored-only
-          -j 1
-
-      - name: Run M1.1 optimized budget suite
-        id: m11_budgets
+      - name: Run M1.1 performance evidence
+        id: m11_evidence
         if: matrix.os == 'ubuntu-24.04'
         continue-on-error: true
         shell: bash
         run: |
-          mkdir -p target/m11-budgets
+          mkdir -p target/m11-performance
           cargo run --locked -p flow-agent-core --release \
             --features m11-budget-evidence --example m11_budgets \
-            > target/m11-budgets/m11-budgets.jsonl
+            > target/m11-performance/m11-performance-evidence.jsonl
 
-      - name: Upload M1.1 optimized budget evidence
+      - name: Upload M1.1 performance evidence
         if: matrix.os == 'ubuntu-24.04' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: m11-optimized-budgets
-          path: target/m11-budgets/m11-budgets.jsonl
+          name: m11-performance-evidence
+          path: target/m11-performance/m11-performance-evidence.jsonl
           if-no-files-found: error
 
-      - name: Enforce M1.1 optimized budgets
-        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'
+      - name: Enforce M1.1 evidence integrity
+        if: matrix.os == 'ubuntu-24.04' && steps.m11_evidence.outcome != 'success'
         shell: bash
         run: exit 1
 

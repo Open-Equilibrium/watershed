@@ -27,7 +27,7 @@ fn exact_recovery_verifies_and_suppresses_the_committed_event_prefix() {
     let mut initial = ConversationEventWriter::open(&workspace, "review", "review-1", false)
         .expect("initial writer opens");
     initial
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect("initial event commits");
     initial.finish().expect("initial writer finishes");
 
@@ -35,7 +35,7 @@ fn exact_recovery_verifies_and_suppresses_the_committed_event_prefix() {
         ConversationEventWriter::open_for_recovery(&workspace, "review", "review-1", true, None)
             .expect("recovery writer opens");
     resumed
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect("matching prefix event replays");
     resumed.finish().expect("recovery writer finishes");
 
@@ -59,7 +59,7 @@ fn exact_recovery_rejects_a_replaced_event_prefix_after_preflight() {
     let mut initial = ConversationEventWriter::open(&workspace, "review", "review-1", false)
         .expect("initial writer opens");
     initial
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect("initial event commits");
     initial.finish().expect("initial writer finishes");
 
@@ -74,7 +74,7 @@ fn exact_recovery_rejects_a_replaced_event_prefix_after_preflight() {
     fs::rename(&replacement_path, &events_path).expect("replacement prefix publishes");
 
     let error = resumed
-        .commit(&event, &canonical, None, None)
+        .commit(&event, &canonical, None)
         .expect_err("replaced event prefix must fail closed");
     assert!(
         error.to_string().contains("changed after preflight"),
@@ -104,7 +104,7 @@ fn failed_event_checkpoint_sync_does_not_notify() {
         .canonical_jsonl()
         .expect("session start canonicalizes");
     writer
-        .commit(&events[0], &started, None, None)
+        .commit(&events[0], &started, None)
         .expect("session start commits");
     receiver
         .recv_timeout(Duration::from_millis(500))
@@ -115,7 +115,7 @@ fn failed_event_checkpoint_sync_does_not_notify() {
         .canonical_jsonl()
         .expect("session completion canonicalizes");
     writer
-        .commit(&events[1], &completed, None, None)
+        .commit(&events[1], &completed, None)
         .expect_err("event synchronization failure is reported");
 
     assert_eq!(
@@ -233,12 +233,12 @@ fn rotated_event_checkpoint_retry_resyncs_segment_parent_before_success() {
             .expect("full-prefix recovery writer opens");
     for (event, line) in &prefix {
         writer
-            .commit(event, line, None, None)
+            .commit(event, line, None)
             .expect("event prefix replays");
     }
     set_conversation_stream_parent_sync_error_for_path_for_test(&run, io::ErrorKind::Other);
     writer
-        .commit(&target, &canonical, None, None)
+        .commit(&target, &canonical, None)
         .expect_err("rotated event parent-sync failure is reported");
     assert_eq!(
         fs::read(&rotated_path).expect("empty rotated event segment reads"),
@@ -261,12 +261,12 @@ fn rotated_event_checkpoint_retry_resyncs_segment_parent_before_success() {
     .expect("rotated event recovery writer opens");
     for (event, line) in &prefix {
         recovered
-            .commit(event, line, None, None)
+            .commit(event, line, None)
             .expect("event prefix replays after parent-sync failure");
     }
     reset_conversation_stream_parent_sync_count_for_path_for_test(&run);
     recovered
-        .commit(&target, &canonical, None, None)
+        .commit(&target, &canonical, None)
         .expect("exact event checkpoint retry succeeds");
     assert!(
         conversation_stream_parent_sync_count_for_path_for_test(&run) > 0,

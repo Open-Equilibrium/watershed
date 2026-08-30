@@ -60,7 +60,7 @@ fn incremental_reader_rejects_a_suffix_above_the_in_memory_limit() {
     let path = reservation.session_path.diagnostic_path().to_owned();
     let mut appender =
         SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
-    let started = super::super::performance::sized_synthetic_event_line(
+    let started = super::super::event_data_capacity::sized_event_line(
         session_id,
         1,
         EventType::SessionStarted,
@@ -75,7 +75,7 @@ fn incremental_reader_rejects_a_suffix_above_the_in_memory_limit() {
     assert_eq!(reader.read_after(0).expect("session start reads").len(), 1);
 
     for sequence in 2..=258 {
-        let metric = super::super::performance::sized_synthetic_event_line(
+        let metric = super::super::event_data_capacity::sized_event_line(
             session_id,
             sequence,
             EventType::MetricSample,

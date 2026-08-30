@@ -21,6 +21,6 @@ The dedicated artifact is uploaded even when collection fails. A child or lifecy
 
 ## Evidence and enforcement
 
-The first fixed-runner artifact is pending. CI enforces the deterministic workload, bounded child report, exact successful terminal result, complete report and artifact retention. Timing remains observable regression evidence and a performance KPI; ADR-0158 rejects an estimated absolute startup hard-fail number, so the report records `p95_limit_ns: null` and no timing observation alone fails the build.
+The first fixed-runner artifact is pending. CI enforces the deterministic workload, bounded child report, exact successful terminal result, complete report and artifact retention. Timing remains observable regression evidence and a performance KPI; no timing observation alone fails the build.
 
 Review startup changes against the one-shot architecture target and the retained runner/tool distributions. Address a clear, maintainable regression without weakening isolation, cleanup or correctness; otherwise record the evidence and architectural tradeoff through the decision flow before changing the target or workload.

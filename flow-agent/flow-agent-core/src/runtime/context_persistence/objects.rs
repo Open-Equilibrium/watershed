@@ -406,11 +406,6 @@ impl SessionObjectWriter {
         self.object_count = self.objects.len();
         self.preflight_object_count = self.object_count;
     }
-
-    #[cfg(test)]
-    pub(crate) fn seed_published_inventory_for_memory_test(&mut self) {
-        self.seed_published_inventory_for_test(crate::runtime::types::MAX_SESSION_OBJECTS, None);
-    }
 }
 
 fn parse_session_object_digest(value: &str) -> Result<[u8; 32], RuntimeError> {
