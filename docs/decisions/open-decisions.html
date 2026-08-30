@@ -15,12 +15,35 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1-2-implementation">M1.2</a>
       <a href="#m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1-2-implementation">
+    <h2>M1.2 - Flow Agent OS Isolation</h2>
+    <div class="grid">
+      <article id="d-063" class="decision">
+        <h3>D-063 - Executor Startup Workload And Budget</h3>
+        <p><strong>Status:</strong> Open before M1.2 implementation; <a href="../../PERFORMANCE.md">PERFORMANCE.md</a> requires an evidence-based Ubuntu startup budget first.</p>
+        <p><strong>Question:</strong> Which workload and decision sequence should bound the added one-shot Executor and Sandbox startup cost?</p>
+        <ul><li><strong>A:</strong> Add one fixed no-op productive Tool workload, measure the M1.1 direct runner in fresh processes on Ubuntu 24.04 x64, then select the smallest maintainable p95 ceiling above that evidence plus explicit protocol and Sandbox overhead. Pro: evidence-based and isolates Watershed overhead. Con: requires an evidence run and a second maintainer decision before runtime implementation.</li><li><strong>B:</strong> Reuse the existing 50 ms local dispatch ceiling for the complete M1.2 path. Pro: no new budget surface. Con: it was not measured for Bubblewrap, seccomp or a companion process and may be arbitrary or infeasible.</li><li><strong>C:</strong> Begin without a numeric gate and measure later. Pro: fastest initial coding. Con: violates the accepted pre-implementation performance rule.</li></ul>
+        <p><strong>Recommendation:</strong> A; keep Tool runtime outside the sample and report direct-runner, protocol-process and Sandbox startup components separately.</p>
+        <p><strong>Acceptance criterion:</strong> Record the exact command, Tool, sample count, warmup rule, reference runner, M1.1 p95 evidence, allowed M1.2 overhead and selected p95 ceiling in one canonical M1.2 budget file before productive Executor implementation begins.</p>
+      </article>
+      <article id="d-064" class="decision">
+        <h3>D-064 - Default Executor Packaging And Backend Boundary</h3>
+        <p><strong>Status:</strong> Open before M1.2 implementation; the protocol is decided, but the repository has no Executor package, installer or backend dependency boundary.</p>
+        <p><strong>Question:</strong> How should the official companion be packaged and installed while keeping Custom Executors independent?</p>
+        <ul><li><strong>A:</strong> Add one cohesive workspace package with a separate <code>flow-executor</code> binary, shared private protocol types and a repository-owned prefix installer that installs <code>flow</code> plus the companion by default or omits the companion with <code>--no-default-executor</code>. Use fixed absolute OS backend programs/interfaces selected per target and fail readiness when prerequisites are absent. Pro: clear process/security ownership and independently testable installation paths. Con: adds one package and an installer surface; exact Bubblewrap/seccomp and Seatbelt bindings still require supply-chain evidence.</li><li><strong>B:</strong> Add the companion as a second binary inside the existing CLI package and install both through one package operation. Pro: fewer packages. Con: couples CLI and security-backend dependencies and makes the ownership boundary less cohesive.</li><li><strong>C:</strong> Reinvoke the <code>flow</code> binary in a hidden Executor mode. Pro: one shipped binary. Con: obscures the companion boundary, broadens one binary's dependency and privilege surface and complicates independent administration.</li></ul>
+        <p><strong>Recommendation:</strong> A, with no public Rust-library or third-party compatibility promise; accept backend dependencies only after license, maintenance and exact-target evidence.</p>
+        <p><strong>Acceptance criterion:</strong> Record the package/binary names, private shared-type owner, installer artifact and target prefix, Bubblewrap/seccomp integration, Seatbelt integration and prerequisite-install policy; then require clean standard and opt-out installation tests on the exact supported runners before a support claim.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>
