@@ -15,12 +15,59 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
+      <a href="#m1-2-implementation">M1.2</a>
       <a href="#m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
+
+  <section id="m1-2-implementation">
+    <h2>M1.2 - Flow Agent OS Isolation</h2>
+    <div class="grid">
+      <article id="d-066" class="decision">
+        <h3>D-066 - Linux Writable Protected Paths</h3>
+        <p><strong>Status:</strong> Open M1.2 security blocker. Bubblewrap mounts and classic seccomp cannot reject creation or rename of a protected, previously absent name inside a writable root: a writable bind permits the operation, while seccomp cannot safely dereference pathname pointers.</p>
+        <p><strong>Question:</strong> Which finite filesystem capability model should the Ubuntu backend enforce?</p>
+        <ul><li><strong>A:</strong> Add a pathname-mediating filesystem such as a small FUSE projection. Pro: preserves the current protected-path semantics. Con: adds security-critical code, dependencies, lifecycle and startup work.</li><li><strong>B:</strong> Replace the pre-release policy grammar with capabilities that map exactly to pre-opened read-only or writable mounts. Pro: smallest auditable backend and no legacy compatibility burden. Con: broad writable roots cannot also contain per-name exclusions; authoring and fixtures must adopt the simpler model.</li><li><strong>C:</strong> Keep the grammar and reject every non-mount-expressible writable policy. Pro: immediate fail-closed behavior. Con: productive write use cases remain unavailable.</li></ul>
+        <p><strong>Recommendation:</strong> B. The project is pre-release, and a smaller capability grammar is safer than a new pathname broker.</p>
+        <p><strong>Acceptance criterion:</strong> Every accepted Linux artifact has one deterministic mount mapping; pre-opened source identities close replacement races; real Ubuntu 24.04 tests prove traversal, symlink, hardlink, create, rename and replacement attacks fail for all descendants; unsupported combinations fail before Tool launch.</p>
+      </article>
+      <article id="d-067" class="decision">
+        <h3>D-067 - macOS M1.2 Support Boundary</h3>
+        <p><strong>Status:</strong> Open M1.2 platform blocker. Apple documents signed App Sandbox applications and embedded helpers, not stable request-specific Seatbelt profiles for arbitrary CLI Tools. Chromium still uses deprecated/private Seatbelt interfaces with no replacement, and Seatbelt alone does not prove kill-and-reap containment after <code>setsid</code> or double-fork.</p>
+        <p><strong>Question:</strong> What should M1.2 claim on macOS 26 arm64?</p>
+        <ul><li><strong>A:</strong> Ship the official backend on Ubuntu only; macOS fails readiness without launching a Tool. Pro: smallest honest fail-closed release with no private-API debt. Con: macOS productive Tools move to a later milestone.</li><li><strong>B:</strong> Accept a macOS-26-only private Seatbelt FFI and prove it through the complete hostile matrix. Pro: preserves the current platform target if the proof succeeds. Con: deprecated undocumented API, uncertain future support and no proven descendant teardown mechanism.</li><li><strong>C:</strong> Adopt a supported container or VM boundary. Pro: stronger process and network containment. Con: contradicts the current no-VM scope and materially expands packaging and startup work.</li></ul>
+        <p><strong>Recommendation:</strong> A. Reconsider B or C only with a public stable boundary and a finite process-tree proof.</p>
+        <p><strong>Acceptance criterion:</strong> For A, Ubuntu passes the full backend matrix and macOS deterministically returns <code>executor_policy_unsupported</code> before Tool launch. For B or C, real macOS 26 arm64 tests must additionally prove filesystem races, deny-all networking, <code>setsid</code>/double-fork teardown and no surviving descriptors or descendants.</p>
+      </article>
+      <article id="d-068" class="decision">
+        <h3>D-068 - Default Executor Resolution</h3>
+        <p><strong>Status:</strong> Open before the standard installer and <code>flow executor configure --default</code>. The Executor may never be selected through <code>PATH</code>, a shell, the Workspace or environment variables, but the no-override absolute path is not yet defined.</p>
+        <p><strong>Question:</strong> How should a standard prefix installation resolve its Default Sandbox Executor?</p>
+        <ul><li><strong>A:</strong> Install <code>flow</code> and <code>flow-executor</code> as administrator-owned siblings and derive the executor's absolute path from the resolved running <code>flow</code> executable. Pro: no second mutable installation manifest. Con: the installer and readiness check must reject unsafe ownership, links and replacement.</li><li><strong>B:</strong> Store one protected installation manifest containing the absolute default path, separate from the current-user override. Pro: explicit path and independent layouts. Con: more state, locking, migration and corruption behavior.</li><li><strong>C:</strong> Require every user to configure an absolute custom path. Pro: no implicit resolution. Con: violates the standard installation's ready-by-default contract.</li></ul>
+        <p><strong>Recommendation:</strong> A; <code>--no-default-executor</code> simply omits the sibling, and <code>configure --default</code> removes only the protected user override.</p>
+        <p><strong>Acceptance criterion:</strong> Both installation modes pass from arbitrary working directories with an empty <code>PATH</code>; unsafe, absent, replaced or wrong-version siblings fail readiness without fallback; custom configuration remains a protected absolute override.</p>
+      </article>
+      <article id="d-069" class="decision">
+        <h3>D-069 - Executor Response And Evidence Contract</h3>
+        <p><strong>Status:</strong> Open before protocol implementation. Pre-Tool failures need a machine-readable response; the policy-digest byte domain, productive probe cadence and durable home for enforcement evidence are unspecified.</p>
+        <p><strong>Question:</strong> Which closed v0 response and audit contract should the one-shot boundary use?</p>
+        <ul><li><strong>A:</strong> Use one tagged canonical response with either success (<code>tool_result</code> plus enforcement evidence) or a stable typed error; hash the exact canonical policy bytes including their final LF; probe once before productive Run reservation while every execute independently validates enforcement; persist validated evidence with the terminal Tool attempt. Pro: deterministic errors, early failure and durable auditability. Con: deliberately changes the pre-release attempt schema.</li><li><strong>B:</strong> Map process exit codes and stderr to errors and keep evidence ephemeral. Pro: smaller schema. Con: ambiguous diagnostics, weaker validation and no durable proof.</li><li><strong>C:</strong> Probe before every Tool and persist only a digest. Pro: frequent readiness check and smaller records. Con: duplicate process startup and insufficient forensic evidence.</li></ul>
+        <p><strong>Recommendation:</strong> A; stderr remains bounded diagnostics and never carries protocol semantics.</p>
+        <p><strong>Acceptance criterion:</strong> Closed-schema conformance tests cover success and every stable error, duplicate/unknown fields, size and framing limits, ID/digest/evidence mismatch, probe/execute races, terminal persistence and recovery without redispatch.</p>
+      </article>
+      <article id="d-070" class="decision">
+        <h3>D-070 - Cross-Process Filesystem Identity</h3>
+        <p><strong>Status:</strong> Open M1.2 race-safety blocker. Passing only JSON path strings discards Flow Agent's anchored Workspace identity and permits replacement between validation and Executor mount setup.</p>
+        <p><strong>Question:</strong> How should the official Executor receive race-stable Workspace and policy-root identities?</p>
+        <ul><li><strong>A:</strong> Pass pre-opened directory descriptors in fixed inherited slots and bind each slot to a declared identity in the canonical JSON request. Pro: preserves anchored objects and supports Ubuntu's race-resistant <code>--bind-fd</code>. Con: adds a Unix descriptor side channel that Custom Executors must explicitly support or reject.</li><li><strong>B:</strong> Send path plus device/inode identity and have the Executor reopen and compare. Pro: JSON-only framing. Con: leaves a reopen-to-mount race and cannot prove the mounted object stayed identical.</li><li><strong>C:</strong> Let the Executor resolve paths independently. Pro: simplest transport. Con: breaks the hostile replacement-race requirement.</li></ul>
+        <p><strong>Recommendation:</strong> A for official Unix backends; JSON remains the sole semantic request, while inherited descriptors are bounded referenced capabilities.</p>
+        <p><strong>Acceptance criterion:</strong> The request declares every descriptor slot and expected identity; unexpected or missing descriptors fail closed; all other inherited descriptors are closed; replacement of any source path before or during launch cannot change the mounted object in the real hostile matrix.</p>
+      </article>
+    </div>
+  </section>
 
   <section id="m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>
