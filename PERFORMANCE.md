@@ -60,6 +60,10 @@ The event budgets measure individual events, not averages of batch averages; ord
 
 ADR-0107 selects the E3 evidence scope, balanced bundle A and finite evidence matrix; ADR-0123 adds the bounded status-summary contract and reuses its fixed status-page workload. The [M1.1 budget matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) is the single source for every selected numeric cap, deadline and optimized gate, its exact counting rule, functional boundary proof, named performance workload, measurement-validation fixture and justified exclusion. Its evidence must pass before M1.1 product behavior begins. Under ADR-0106, every optimized workload sample and warmup runs in a fresh child process. Linux peak RSS growth is `post-workload VmHWM - pre-workload VmRSS`, which includes rather than subtracts recorded lifetime-high-water slack; retained growth is `post-workload VmRSS - pre-workload VmRSS`. Reports remain unadjusted. Because `flow-tool-result-v0` stores each non-inline stdout/stderr stream as one immutable object, the per-stream collector caps in [TR-01/TR-02](flow-agent/benchmarks/M1_1_BUDGETS.md#tool-runner) remain below the existing per-object limit.
 
+### M1.2 Executor startup budget
+
+The M1.2 one-shot process and Sandbox architecture is canonical in `PROTOCOL.md`; ADR-0146 selects no numeric startup budget. The repository performance gate covers only the version-matched official Default Sandbox Executor path on the fixed Ubuntu 24.04 x64 reference CI image; other platforms retain the functional-test policy above, and Custom Executor performance remains administrator-owned. Before implementation begins, define the workload, measure the M1.1 direct runner on that image, and record an initial evidence-based budget with explicit allowed Flow Agent protocol and Executor/backend overhead. Once the official Ubuntu path is runnable, measure it with the same workload and require the gate before productive M1.2 behavior; later recalibration follows the policy above. Measurements must separate Tool runtime, and fail-closed cleanup or isolation cannot be traded for latency.
+
 ## Meta-Harness
 
 Product target:
