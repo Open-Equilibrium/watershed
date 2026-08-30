@@ -1,6 +1,6 @@
 use super::super::load::parse_registry_block;
-use super::super::model::{RegistryBlock, ScriptRuntime};
-use super::super::parser::{MAX_YAML_BYTES, MAX_YAML_DEPTH};
+use super::super::model::{FlowValue, RegistryBlock, ScriptRuntime};
+use super::super::parser::{MAX_YAML_BYTES, MAX_YAML_DEPTH, parse_safe_yaml_config};
 use super::super::paths::{is_valid_block_id, is_valid_command_id};
 use proptest::prelude::*;
 
@@ -65,6 +65,34 @@ fn parser_rejects_unsafe_yaml() {
         let error = parse_registry_block(name, &source).expect_err(name);
         assert!(error.to_string().starts_with(name), "{name}: {error}");
     }
+}
+
+#[test]
+fn parser_rejects_implicit_null_with_neutral_diagnostic() {
+    let error = parse_registry_block(
+        "implicit-null.yaml",
+        "instruction:\n  id: inspect\n  name: Inspect\n  prompt:",
+    )
+    .expect_err("an omitted value is YAML null");
+
+    assert_eq!(
+        error.to_string(),
+        "implicit-null.yaml: YAML null values are not allowed"
+    );
+}
+
+#[test]
+fn parser_preserves_quoted_merge_key_as_literal_map_key() {
+    let value: FlowValue = parse_safe_yaml_config(
+        "quoted-merge-key.yaml",
+        "type: map\nvalue:\n  \"<<\":\n    type: string\n    value: literal\n",
+    )
+    .expect("a quoted merge-key spelling is a literal YAML string key");
+
+    let FlowValue::Map(fields) = value else {
+        panic!("expected a map flow value");
+    };
+    assert_eq!(fields.get("<<"), Some(&FlowValue::String("literal".into())));
 }
 
 #[test]

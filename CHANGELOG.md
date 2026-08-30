@@ -15,7 +15,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 - M1.2 uses a Flow-owned one-shot Executor protocol and default-installed Sandbox Executor on Ubuntu/macOS; custom integrations remain administrator-owned, while Windows and positive Tool egress are post-MVP (ADR-0146).
 - Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback (ADR-0077).
-- Dev/CI uses exact Node 24.19.0 LTS and pnpm 11.22.0 pins without adding a product Node runtime (ADR-0080).
+- Dev/CI uses exact Node 24.20.0 LTS and pnpm 11.24.0 pins without adding a product Node runtime (ADR-0080).
 - Protocol v0 applies one exclusive JSON container-recursion limit of 128 across wire, constructed-event and canonical-JSON boundaries (ADR-0089).
 - The M1 runtime satisfies the architecture-hardening entry criteria in `PLAN.md`; M1.1 provider and general subprocess work must preserve those boundaries (ADR-0079).
 - M1 provider context fixed as deterministic, cache-stable `flow-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved (ADR-0058).

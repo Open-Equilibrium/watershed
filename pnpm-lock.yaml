@@ -50,15 +50,15 @@ packages:
   signal-exit@3.0.7:
     resolution: {integrity: sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ==}
 
-  zod@4.4.3:
-    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+  zod@4.5.4:
+    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
 snapshots:
 
   clawpatch@0.7.2:
     dependencies:
       proper-lockfile: 4.1.2
-      zod: 4.4.3
+      zod: 4.5.4
 
   fsevents@2.3.2:
     optional: true
@@ -83,4 +83,4 @@ snapshots:
 
   signal-exit@3.0.7: {}
 
-  zod@4.4.3: {}
+  zod@4.5.4: {}

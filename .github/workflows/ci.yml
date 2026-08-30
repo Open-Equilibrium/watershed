@@ -58,7 +58,7 @@ jobs:
           }
 
       - name: Install gate tools
-        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
         with:
           tool: cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
