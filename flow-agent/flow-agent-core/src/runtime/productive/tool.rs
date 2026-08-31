@@ -422,7 +422,8 @@ pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String
 pub(super) struct ToolAttemptOutput {
     pub(super) enforcement: proto::EnforcementReceiptV0,
     pub(super) request_hash: String,
-    pub(super) schema: String,
+    #[serde(rename = "schema")]
+    _schema: String,
     pub(super) tool_result: serde_json::Value,
 }
 
@@ -472,11 +473,6 @@ fn recovered_tool_value_bound(
     if output.request_hash != expected_request_hash {
         return Err(RuntimeError::Protocol(
             "recovered Tool output does not match the prepared request hash".to_owned(),
-        ));
-    }
-    if output.schema != TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool output has an unsupported schema".to_owned(),
         ));
     }
     proto::validate_enforcement_receipt_v0(

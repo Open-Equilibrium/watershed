@@ -27,6 +27,7 @@ pub(in super::super) enum FakeToolExecutionFault {
     None,
     PrepareError,
     ExecutorError,
+    InvalidTerminal,
     RequestHashMismatch,
     ReceiptMismatch,
 }
@@ -132,9 +133,20 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         } else {
             prepared.request_hash
         };
+        let outcome = if matches!(self.fault, FakeToolExecutionFault::InvalidTerminal) {
+            ToolExecutionOutcome {
+                status: RunAttemptOutcome::Completed,
+                classification: None,
+                exit_code: Some(7),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            }
+        } else {
+            self.outcome.clone()
+        };
         Ok(ExecutorToolExecution {
             enforcement: test_enforcement_receipt(policy_digest, prepared.runtime_profile),
-            outcome: self.outcome.clone(),
+            outcome,
             request_hash,
         })
     }

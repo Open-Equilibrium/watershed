@@ -142,7 +142,7 @@ pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
         Some(selection) => (selection, None),
         None => (
             ExecutorSelection::new(
-                default_executor_path(&flow)?,
+                default_executor_path(&flow),
                 ExecutorSelectionSource::Default,
             ),
             Some(flow.as_path()),
@@ -152,18 +152,12 @@ pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
     Ok(selection.with_probe(probed))
 }
 
-pub(crate) fn default_executor_path(flow: &Path) -> Result<PathBuf, RuntimeError> {
-    let parent = flow.parent().ok_or_else(|| {
-        RuntimeError::executor(
-            proto::ExecutorErrorCodeV0::Unavailable,
-            "running Flow executable has no installation directory",
-        )
-    })?;
-    Ok(parent.join(if cfg!(windows) {
+pub(crate) fn default_executor_path(flow: &Path) -> PathBuf {
+    flow.with_file_name(if cfg!(windows) {
         "flow-executor.exe"
     } else {
         "flow-executor"
-    }))
+    })
 }
 
 fn ensure_supported_platform() -> Result<(), RuntimeError> {

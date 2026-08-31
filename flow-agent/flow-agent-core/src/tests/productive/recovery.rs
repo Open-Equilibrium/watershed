@@ -168,6 +168,10 @@ fn productive_recovery_fails_closed_on_corrupted_committed_provider_errors() {
             "schema": "flow-provider-error-v0",
         }),
         serde_json::json!({
+            "message": null,
+            "schema": "flow-provider-error-v0",
+        }),
+        serde_json::json!({
             "message": "x".repeat(MAX_PROVIDER_ERROR_MESSAGE_CHARS + 1),
             "schema": "flow-provider-error-v0",
         }),
@@ -297,6 +301,48 @@ fn productive_recovery_resumes_a_cancelled_provider_attempt() {
     ));
     assert!(provider.bodies.is_empty());
     assert!(attempts.intents.is_empty());
+    assert_controlled_cancellation_lifecycle(&sink.0);
+}
+
+#[test]
+fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let mut tools = FakeToolExecutor::default();
+    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+        attempt_id: "tool-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some(CANCELLED_REASON.to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: None,
+    });
+
+    let execution = execute_productive_flow_with_tool_executor_and_recovery(
+        fixture.execution(flow, "productive-cancelled-tool-recovery"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut tools,
+        &mut recovery,
+    )
+    .expect("recovered Tool cancellation closes the enclosing lifecycle");
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::Cancelled)
+    ));
+    assert_eq!(provider.bodies.len(), 1);
+    assert!(tools.invocations.is_empty(), "the Tool must not redispatch");
+    assert_eq!(attempts.intents.len(), 1, "only the Provider intent is new");
     assert_controlled_cancellation_lifecycle(&sink.0);
 }
 

@@ -4,7 +4,8 @@ use crate::{
     ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0,
     ExecutorProbeV0, ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
     ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
-    ExecutorToolStatusV0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, RuntimeReadProfileV0,
+    ExecutorToolStatusV0, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
+    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0,
     UnixObjectIdentityV0, canonical_executor_probe_v0, canonical_executor_request_v0,
     canonical_executor_response_v0, decode_executor_stream_v0, encode_executor_stream_v0,
     parse_executor_probe_v0, parse_executor_request_v0, parse_executor_response_v0,
@@ -41,7 +42,7 @@ fn request() -> ExecutorRequestV0 {
             descriptor: EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0,
             origin: ExecutorMountOriginV0::Workspace,
             source_identity: identity(1, 2, ExecutorObjectKindV0::Directory),
-            target: "/workspace".to_owned(),
+            target: "/workspace/input".to_owned(),
         },
         ExecutorMountV0 {
             access: ExecutorMountAccessV0::ReadOnly,
@@ -56,7 +57,7 @@ fn request() -> ExecutorRequestV0 {
             access: mounts[0].access,
             descriptor: mounts[0].descriptor,
             origin: mounts[0].origin,
-            source: "workspace".to_owned(),
+            source: "workspace/input".to_owned(),
             source_identity: mounts[0].source_identity.clone(),
             target: mounts[0].target.clone(),
         },
@@ -93,6 +94,10 @@ fn request() -> ExecutorRequestV0 {
         tool_kind: "predefined-command".to_owned(),
         working_directory: "/workspace".to_owned(),
     }
+}
+
+fn refresh_policy_digest(request: &mut ExecutorRequestV0) {
+    request.policy_digest = resolved_policy_digest_v0(&request.resolved_policy).unwrap();
 }
 
 fn probe() -> ExecutorProbeV0 {
@@ -150,24 +155,43 @@ fn executor_response_is_closed_and_bound_to_request_and_policy() {
         },
         enforcement: receipt(),
     };
-    let mut text = crate::canonical_json(&serde_json::to_value(response).unwrap()).unwrap();
-    text.push('\n');
+    let text = canonical_wire(&response);
 
-    let parsed = parse_executor_response_v0(text.as_bytes(), "run-1-tool-1", &"a".repeat(64))
+    let parsed = parse_executor_response_v0(&text, "run-1-tool-1", &"a".repeat(64))
         .expect("matching terminal evidence");
     assert!(matches!(parsed, ExecutorResponseV0::Completed { .. }));
 
-    let mismatch =
-        parse_executor_response_v0(text.as_bytes(), "run-1-tool-1", &"b".repeat(64)).unwrap_err();
+    let mismatch = parse_executor_response_v0(&text, "run-1-tool-1", &"b".repeat(64)).unwrap_err();
     assert_eq!(
         mismatch.to_string(),
         "Executor applied the wrong policy digest"
     );
 
-    let unknown = text.replacen("{", "{\"unexpected\":true,", 1);
-    assert!(
-        parse_executor_response_v0(unknown.as_bytes(), "run-1-tool-1", &"a".repeat(64),).is_err()
+    let mismatch = parse_executor_response_v0(&text, "other-request", &"a".repeat(64)).unwrap_err();
+    assert_eq!(
+        mismatch.to_string(),
+        "Executor response request id does not match"
     );
+
+    let mut inactive = response.clone();
+    let ExecutorResponseV0::Completed { enforcement, .. } = &mut inactive else {
+        unreachable!("fixture is a completed response");
+    };
+    enforcement.isolation_active = false;
+    let error =
+        parse_executor_response_v0(&canonical_wire(&inactive), "run-1-tool-1", &"a".repeat(64))
+            .unwrap_err();
+    assert_eq!(error.to_string(), "Executor isolation was not active");
+
+    let mut unknown = serde_json::to_value(&response).expect("response serializes");
+    unknown
+        .as_object_mut()
+        .expect("response is an object")
+        .insert("unexpected".to_owned(), serde_json::Value::Bool(true));
+    let error =
+        parse_executor_response_v0(&canonical_wire(&unknown), "run-1-tool-1", &"a".repeat(64))
+            .unwrap_err();
+    assert!(error.to_string().contains("unknown field `unexpected`"));
 }
 
 #[test]
@@ -177,6 +201,7 @@ fn executor_response_preserves_bounded_non_utf8_tool_streams() {
         (&[0][..], "AA=="),
         (&[0, 0xff][..], "AP8="),
         (&[0, 0xff, b'\n'][..], "AP8K"),
+        (&[0x6b, 0xef, 0xf3][..], "a+/z"),
     ] {
         let encoded = encode_executor_stream_v0(bytes);
         assert_eq!(encoded, expected);
@@ -289,54 +314,183 @@ fn executor_request_rejects_unbound_policy_fields() {
 
 #[test]
 fn executor_request_rejects_invalid_limits_mounts_environment_and_ids() {
-    let mut cases = Vec::new();
+    type Mutation = fn(&mut ExecutorRequestV0);
+    let cases: &[(&str, Mutation, &str)] = &[
+        (
+            "empty request id",
+            |candidate| candidate.request_id.clear(),
+            "Executor request_id is invalid",
+        ),
+        (
+            "zero output limit",
+            |candidate| {
+                candidate.limits.max_stdout_bytes = 0;
+                candidate.resolved_policy.limits = candidate.limits.clone();
+                refresh_policy_digest(candidate);
+            },
+            "Executor limits must be nonzero",
+        ),
+        (
+            "oversized output limit",
+            |candidate| {
+                candidate.limits.max_stderr_bytes = MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64 + 1;
+                candidate.resolved_policy.limits = candidate.limits.clone();
+                refresh_policy_digest(candidate);
+            },
+            "Executor stream limits exceed the protocol bound",
+        ),
+        (
+            "non-contiguous descriptor",
+            |candidate| {
+                candidate.mounts[1].descriptor += 1;
+                candidate.resolved_policy.mounts[1].descriptor = candidate.mounts[1].descriptor;
+                refresh_policy_digest(candidate);
+            },
+            "Executor mount descriptor is invalid",
+        ),
+        (
+            "workspace target outside workspace",
+            |candidate| {
+                candidate.mounts[0].target = "/outside".to_owned();
+                candidate.resolved_policy.mounts[0].target = candidate.mounts[0].target.clone();
+                refresh_policy_digest(candidate);
+            },
+            "Executor workspace mount target is outside /workspace",
+        ),
+        (
+            "writable runtime mount",
+            |candidate| {
+                candidate.mounts[1].access = ExecutorMountAccessV0::ReadWrite;
+                candidate.resolved_policy.mounts[1].access = candidate.mounts[1].access;
+                refresh_policy_digest(candidate);
+            },
+            "Executor runtime mount capability is invalid",
+        ),
+        (
+            "control character in environment",
+            |candidate| {
+                candidate
+                    .environment
+                    .insert("BAD\nNAME".to_owned(), "value".to_owned());
+            },
+            "Executor environment name is invalid",
+        ),
+        (
+            "too many argv entries",
+            |candidate| candidate.argv = vec![String::new(); 2_049],
+            "Executor argv entry bound is invalid",
+        ),
+        (
+            "oversized exec vector",
+            |candidate| candidate.argv = vec!["x".repeat(4_096); 33],
+            "Executor argv exceeds its byte limit",
+        ),
+        (
+            "too many environment entries",
+            |candidate| {
+                candidate.environment = (0..257)
+                    .map(|index| (format!("KEY_{index}"), "value".to_owned()))
+                    .collect();
+            },
+            "Executor environment has too many entries",
+        ),
+        (
+            "too many mounts",
+            |candidate| {
+                let template = candidate.mounts[0].clone();
+                candidate.mounts = (0..=MAX_EXECUTOR_MOUNTS_V0)
+                    .map(|index| ExecutorMountV0 {
+                        descriptor: EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 + index as u32,
+                        target: format!("/workspace/mount-{index}"),
+                        ..template.clone()
+                    })
+                    .collect();
+            },
+            "Executor mount list exceeds its limit",
+        ),
+        (
+            "duplicate mount target",
+            |candidate| {
+                candidate.mounts.push(ExecutorMountV0 {
+                    descriptor: EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 + candidate.mounts.len() as u32,
+                    ..candidate.mounts[0].clone()
+                });
+            },
+            "Executor mount target is invalid",
+        ),
+        (
+            "too many workspace mounts",
+            |candidate| {
+                let template = candidate.mounts[0].clone();
+                candidate.mounts = (0..=MAX_EXECUTOR_WORKSPACE_MOUNTS_V0)
+                    .map(|index| ExecutorMountV0 {
+                        descriptor: EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 + index as u32,
+                        target: format!("/workspace/mount-{index}"),
+                        ..template.clone()
+                    })
+                    .collect();
+            },
+            "Executor mount provenance bounds are invalid",
+        ),
+        (
+            "traversing workspace source",
+            |candidate| {
+                candidate.resolved_policy.mounts[0].source = "workspace/../outside".to_owned();
+                refresh_policy_digest(candidate);
+            },
+            "Executor resolved mount does not match the inherited capability",
+        ),
+        (
+            "absolute workspace source",
+            |candidate| {
+                candidate.resolved_policy.mounts[0].source = "/workspace/input".to_owned();
+                refresh_policy_digest(candidate);
+            },
+            "Executor resolved mount does not match the inherited capability",
+        ),
+        (
+            "non-object resolved policy artifact",
+            |candidate| {
+                candidate.resolved_policy.artifact = serde_json::json!([]);
+                refresh_policy_digest(candidate);
+            },
+            "Executor resolved policy artifacts must be objects",
+        ),
+        (
+            "unsupported request schema",
+            |candidate| candidate.schema = "flow-executor-request-v1".to_owned(),
+            "unsupported Executor request schema",
+        ),
+        (
+            "non-canonical policy digest",
+            |candidate| candidate.policy_digest = "A".repeat(64),
+            "Executor policy_digest is not lowercase SHA-256",
+        ),
+    ];
 
-    let mut candidate = request();
-    candidate.request_id.clear();
-    cases.push(("empty request id", candidate));
-
-    let mut candidate = request();
-    candidate.limits.max_stdout_bytes = 0;
-    candidate.resolved_policy.limits = candidate.limits.clone();
-    candidate.policy_digest = resolved_policy_digest_v0(&candidate.resolved_policy).unwrap();
-    cases.push(("zero output limit", candidate));
-
-    let mut candidate = request();
-    candidate.limits.max_stderr_bytes = MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64 + 1;
-    candidate.resolved_policy.limits = candidate.limits.clone();
-    candidate.policy_digest = resolved_policy_digest_v0(&candidate.resolved_policy).unwrap();
-    cases.push(("oversized output limit", candidate));
-
-    let mut candidate = request();
-    candidate.mounts[1].descriptor += 1;
-    candidate.resolved_policy.mounts[1].descriptor = candidate.mounts[1].descriptor;
-    candidate.policy_digest = resolved_policy_digest_v0(&candidate.resolved_policy).unwrap();
-    cases.push(("non-contiguous descriptor", candidate));
-
-    let mut candidate = request();
-    candidate.mounts[0].target = "/outside".to_owned();
-    candidate.resolved_policy.mounts[0].target = candidate.mounts[0].target.clone();
-    candidate.policy_digest = resolved_policy_digest_v0(&candidate.resolved_policy).unwrap();
-    cases.push(("workspace target outside workspace", candidate));
-
-    let mut candidate = request();
-    candidate.mounts[1].access = ExecutorMountAccessV0::ReadWrite;
-    candidate.resolved_policy.mounts[1].access = candidate.mounts[1].access;
-    candidate.policy_digest = resolved_policy_digest_v0(&candidate.resolved_policy).unwrap();
-    cases.push(("writable runtime mount", candidate));
-
-    let mut candidate = request();
-    candidate
-        .environment
-        .insert("BAD\nNAME".to_owned(), "value".to_owned());
-    cases.push(("control character in environment", candidate));
-
-    for (name, candidate) in cases {
-        assert!(
-            parse_executor_request_v0(&canonical_wire(&candidate)).is_err(),
-            "accepted request with {name}"
-        );
+    for &(name, mutate, expected) in cases {
+        let mut candidate = request();
+        mutate(&mut candidate);
+        let error = parse_executor_request_v0(&canonical_wire(&candidate))
+            .expect_err(&format!("accepted request with {name}"));
+        assert_eq!(error.to_string(), expected, "{name}");
     }
+}
+
+#[test]
+fn executor_request_byte_limit_is_enforced_on_encode_and_parse() {
+    let mut oversized = request();
+    oversized.resolved_policy.artifact = serde_json::json!({
+        "padding": "x".repeat(MAX_EXECUTOR_REQUEST_BYTES_V0)
+    });
+    oversized.policy_digest = resolved_policy_digest_v0(&oversized.resolved_policy).unwrap();
+
+    let error = canonical_executor_request_v0(&oversized).unwrap_err();
+    assert_eq!(error.to_string(), "Executor request exceeds its byte limit");
+
+    let error =
+        parse_executor_request_v0(&vec![b' '; MAX_EXECUTOR_REQUEST_BYTES_V0 + 1]).unwrap_err();
+    assert_eq!(error.to_string(), "Executor request exceeds its byte limit");
 }
 
 #[test]
@@ -482,6 +636,15 @@ fn executor_probe_round_trips_exact_and_host_system_runtime_manifests() {
     let probe = probe();
     let bytes = canonical_executor_probe_v0(&probe).expect("valid runtime manifest");
     assert_eq!(parse_executor_probe_v0(&bytes).unwrap(), probe);
+}
+
+#[test]
+fn executor_probe_requires_at_least_one_protocol_version() {
+    let mut probe = probe();
+    probe.protocol_versions.clear();
+
+    let error = parse_executor_probe_v0(&canonical_wire(&probe)).unwrap_err();
+    assert_eq!(error.to_string(), "Executor probe list bounds are invalid");
 }
 
 #[test]

@@ -6,7 +6,9 @@ use crate::runtime::{
         RunObjectStore, append_run_attempt_intent, append_run_attempt_result, inspect_run_attempts,
     },
     digest::sha256_hex,
-    productive::{read_tool_reconciliation_file, reconcile_tool_attempt},
+    productive::{
+        MAX_TOOL_RECONCILIATION_BYTES, read_tool_reconciliation_file, reconcile_tool_attempt,
+    },
     run_attempts::{
         RunAttemptIntent, RunAttemptKind, RunAttemptLifecycle, RunAttemptOutcome, RunAttemptResult,
     },
@@ -34,6 +36,23 @@ fn reconciliation_output(request_hash: &str, tool_result: serde_json::Value) -> 
         "tool_result": tool_result,
     }))
     .expect("Tool reconciliation output canonicalizes")
+}
+
+fn tool_result(status: &str, exit_code: Option<i32>) -> serde_json::Value {
+    let mut result = serde_json::json!({
+        "type": "map",
+        "value": {
+            "schema": {"type": "string", "value": "flow-tool-result-v0"},
+            "status": {"type": "string", "value": status},
+            "stderr": {"type": "string", "value": ""},
+            "stdout": {"type": "string", "value": ""}
+        }
+    });
+    if let Some(exit_code) = exit_code {
+        result["value"]["exit_code"] =
+            serde_json::json!({"type": "integer", "value": exit_code.to_string()});
+    }
+    result
 }
 
 #[test]
@@ -196,6 +215,116 @@ fn tool_reconciliation_rejects_invalid_terminal_evidence_without_mutation() {
             fs::read(&run_log).expect("Run Log reads after rejection"),
             before
         );
+    }
+}
+
+#[test]
+fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
+    let workspace = empty_workspace("reconcile-tool-invalid-envelope");
+    create_review_run(&workspace);
+    append_run_attempt_intent(&workspace, "review", "review-1", &tool_intent("tool-001"))
+        .expect("uncertain Tool intent is durable");
+    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("review/runs/review-1/run-log.jsonl");
+    let before = fs::read(&run_log).expect("Run Log reads before rejection");
+    let valid = reconciliation_output(REQUEST_HASH, tool_result("completed", Some(0)));
+    let mut invalid_enforcement: serde_json::Value =
+        serde_json::from_str(&valid).expect("valid reconciliation parses");
+    invalid_enforcement["enforcement"]["applied_policy_digest"] = "invalid".into();
+    let invalid_enforcement =
+        proto::canonical_json(&invalid_enforcement).expect("invalid enforcement canonicalizes");
+
+    for (name, source, expected) in [
+        (
+            "oversized",
+            "x".repeat(MAX_TOOL_RECONCILIATION_BYTES + 1),
+            "exceeds",
+        ),
+        ("invalid-json", "{".to_owned(), "duplicate-free JSON"),
+        (
+            "duplicate-key",
+            r#"{"schema":"flow-tool-attempt-output-v1","schema":"flow-tool-attempt-output-v1"}"#
+                .to_owned(),
+            "duplicate-free JSON",
+        ),
+        ("noncanonical", format!("{valid}\n"), "canonical JSON bytes"),
+        (
+            "unsupported-schema",
+            valid.replace("flow-tool-attempt-output-v1", "flow-tool-attempt-output-v9"),
+            "unsupported schema",
+        ),
+        (
+            "missing-fields",
+            r#"{"schema":"flow-tool-attempt-output-v1"}"#.to_owned(),
+            "output is invalid",
+        ),
+        (
+            "invalid-enforcement",
+            invalid_enforcement,
+            "enforcement receipt is invalid",
+        ),
+        (
+            "invalid-flow-value",
+            reconciliation_output(
+                REQUEST_HASH,
+                serde_json::json!({"type": "unsupported", "value": null}),
+            ),
+            "result is invalid",
+        ),
+    ] {
+        let error = reconcile_tool_attempt(&workspace, "review", "review-1", &source)
+            .expect_err("invalid reconciliation evidence must fail closed");
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert_eq!(
+            fs::read(&run_log).expect("Run Log reads after rejection"),
+            before,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn tool_reconciliation_preserves_non_exit_terminal_classifications() {
+    for (name, status, outcome, classification) in [
+        (
+            "failed",
+            "failed",
+            RunAttemptOutcome::Failed,
+            "reconciled_failure",
+        ),
+        (
+            "cancelled",
+            "cancelled",
+            RunAttemptOutcome::Cancelled,
+            "cancelled",
+        ),
+    ] {
+        let workspace = empty_workspace(&format!("reconcile-tool-{name}"));
+        create_review_run(&workspace);
+        append_run_attempt_intent(&workspace, "review", "review-1", &tool_intent("tool-001"))
+            .expect("uncertain Tool intent is durable");
+        let source = reconciliation_output(REQUEST_HASH, tool_result(status, None));
+
+        reconcile_tool_attempt(&workspace, "review", "review-1", &source)
+            .expect("valid non-exit terminal evidence reconciles");
+
+        let states = inspect_run_attempts(&workspace, "review", "review-1")
+            .expect("reconciled attempt reads");
+        assert_eq!(states[0].outcome, Some(outcome), "{name}");
+        let run_log = fs::read_to_string(
+            crate::tests::helpers::workspace_session_dir(&workspace)
+                .join("review/runs/review-1/run-log.jsonl"),
+        )
+        .expect("reconciled Run Log reads");
+        let terminal: serde_json::Value = serde_json::from_str(
+            run_log
+                .lines()
+                .last()
+                .expect("reconciliation has a terminal record"),
+        )
+        .expect("terminal reconciliation record parses");
+        assert_eq!(terminal["classification"], classification, "{name}");
+        assert!(terminal["exit_code"].is_null(), "{name}");
     }
 }
 

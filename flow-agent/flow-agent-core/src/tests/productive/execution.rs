@@ -154,6 +154,7 @@ fn productive_tool_started_commit_failure_settles_without_dispatch() {
 fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_uncertain() {
     for fault in [
         FakeToolExecutionFault::ExecutorError,
+        FakeToolExecutionFault::InvalidTerminal,
         FakeToolExecutionFault::RequestHashMismatch,
         FakeToolExecutionFault::ReceiptMismatch,
     ] {
@@ -184,6 +185,7 @@ fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_unc
         assert_eq!(attempts.intents.len(), 2, "{fault:?}");
         assert_eq!(attempts.results.len(), 1, "{fault:?}");
         assert_eq!(attempts.intents[1].0, RunAttemptKind::Tool, "{fault:?}");
+        assert_eq!(provider.bodies.len(), 1, "{fault:?}");
         assert!(
             attempts
                 .results

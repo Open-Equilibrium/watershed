@@ -17,7 +17,7 @@ fn default_executor_is_the_flow_binary_sibling() {
         Path::new("/trusted/bin/flow")
     };
 
-    let selected = default_executor_path(flow).expect("flow has a binary parent");
+    let selected = default_executor_path(flow);
 
     assert_eq!(
         selected,
@@ -106,6 +106,86 @@ fn executor_override_rejects_an_oversized_document() {
     let error = store.read().expect_err("oversized document is rejected");
 
     assert!(error.to_string().contains("oversized"), "{error}");
+}
+
+#[test]
+fn executor_override_rejects_an_oversized_path_without_publishing() {
+    let root = crate::tests::helpers::empty_workspace("executor-config-write-oversized");
+    let config = root.join("executor.json");
+    let oversized = root.join("x".repeat(EXECUTOR_CONFIG_MAX_BYTES as usize));
+    let store = ExecutorConfigStore::at(config.clone());
+
+    let error = store
+        .configure(&oversized)
+        .expect_err("oversized override is rejected before publication");
+
+    assert!(error.to_string().contains("oversized"), "{error}");
+    assert!(!config.exists());
+}
+
+#[test]
+fn executor_override_creates_a_missing_nested_parent_and_round_trips() {
+    let root = crate::tests::helpers::empty_workspace("executor-config-nested-parent");
+    let config = root
+        .join("nested")
+        .join("configuration")
+        .join("executor.json");
+    let executable = env::current_exe().expect("test executable has an absolute path");
+    let store = ExecutorConfigStore::at(config.clone());
+
+    assert!(!config.parent().expect("configuration has parent").exists());
+    store
+        .configure(&executable)
+        .expect("nested override is stored");
+
+    assert!(config.parent().expect("configuration has parent").is_dir());
+    assert_eq!(
+        store
+            .read()
+            .expect("nested override reads")
+            .expect("nested override exists")
+            .path(),
+        executable
+    );
+}
+
+#[test]
+fn executor_override_publishes_after_a_contended_lock_is_released() {
+    use std::{fs::OpenOptions, sync::mpsc, thread, time::Duration};
+
+    let root = crate::tests::helpers::empty_workspace("executor-config-lock-release");
+    let config = root.join("executor.json");
+    let executable = env::current_exe().expect("test executable has an absolute path");
+    let lock_path = root.join(".executor.lock");
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path)
+        .expect("lock is staged");
+    lock.lock().expect("lock is held");
+    let (ready, receiver) = mpsc::channel();
+    let releaser = thread::spawn(move || {
+        ready.send(()).expect("lock holder signals readiness");
+        thread::sleep(Duration::from_millis(50));
+        drop(lock);
+    });
+    receiver.recv().expect("lock holder is ready");
+
+    ExecutorConfigStore::at(config.clone())
+        .configure(&executable)
+        .expect("override publishes after lock release");
+    releaser.join().expect("lock holder exits");
+
+    assert_eq!(
+        ExecutorConfigStore::at(config)
+            .read()
+            .expect("published override reads")
+            .expect("published override exists")
+            .path(),
+        executable
+    );
 }
 
 #[test]

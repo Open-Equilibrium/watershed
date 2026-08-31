@@ -135,6 +135,29 @@ fn executor_readiness_failure_precedes_new_run_reservation() {
     );
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_tool_preflight_fails_before_provider_dispatch_or_run_reservation() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    let mut provider = FakeProvider::default();
+
+    let error = run_default_smoke_productive_session(&workspace, &fixture, &mut provider)
+        .expect_err("macOS must reject productive Tool execution before reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+    ));
+    assert!(provider.bodies.is_empty(), "the provider must not dispatch");
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("conversation")
+            .exists(),
+        "platform rejection must not create a durable conversation reservation"
+    );
+}
+
 #[test]
 fn provider_only_new_run_does_not_probe_an_executor() {
     let (workspace, fixture) = disabled_smoke_productive_execution_fixture();

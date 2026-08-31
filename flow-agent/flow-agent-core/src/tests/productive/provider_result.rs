@@ -4,9 +4,10 @@ use crate::runtime::{
     digest::sha256_hex,
     openai_codex::{ProviderTokenUsage, ProviderToolCall, ProviderTurn},
     productive::{
-        durable_provider_output, parse_provider_result, provider_turn_from_durable_output,
-        verify_provider_result_session_objects,
+        MAX_DURABLE_PROVIDER_OUTPUT_BYTES, durable_provider_output, parse_provider_result,
+        provider_turn_from_durable_output, verify_provider_result_session_objects,
     },
+    types::MAX_SESSION_OBJECT_BYTES,
 };
 use std::{cell::Cell, collections::BTreeMap};
 #[test]
@@ -98,6 +99,47 @@ fn recovered_provider_output_objects_must_match_their_digest_uris() {
         .expect_err("provider output whose bytes do not match its URI must fail closed");
 
     assert!(error.to_string().contains("does not match its URI digest"));
+}
+
+#[test]
+fn provider_output_capacity_fails_closed_before_live_or_recovered_use() {
+    let oversized = ProviderTurn {
+        token_usage: None,
+        response_id: "response-oversized".to_owned(),
+        output_text: "x".repeat(MAX_DURABLE_PROVIDER_OUTPUT_BYTES),
+        retained_items: Vec::new(),
+        tool_calls: Vec::new(),
+    };
+    let error = match durable_provider_output(&oversized) {
+        Err(error) => error,
+        Ok(_) => panic!("snapshot envelope must push maximum text beyond the durable byte limit"),
+    };
+    assert!(error.to_string().contains("durable recovery byte limit"));
+
+    let unused_uri = format!("session-object:sha256:{}", "a".repeat(64));
+    let max_objects = MAX_DURABLE_PROVIDER_OUTPUT_BYTES.div_ceil(MAX_SESSION_OBJECT_BYTES as usize);
+    for (name, reference, expected) in [
+        (
+            "empty",
+            serde_json::json!({
+                "provider_output_objects": [],
+                "schema": "flow-provider-output-v2"
+            }),
+            "unsupported schema",
+        ),
+        (
+            "too-many",
+            serde_json::json!({
+                "provider_output_objects": vec![unused_uri; max_objects + 1],
+                "schema": "flow-provider-output-v2"
+            }),
+            "too many objects",
+        ),
+    ] {
+        let error = provider_turn_from_durable_output(&reference, &ObjectRecovery::default())
+            .expect_err("invalid recovered capacity metadata must fail closed");
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+    }
 }
 
 #[test]
