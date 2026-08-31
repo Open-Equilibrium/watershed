@@ -1,4 +1,6 @@
-use super::super::super::helpers::{empty_workspace, write_productive_workspace_config};
+use super::super::super::helpers::{
+    disable_smoke_echo_tool, empty_workspace, write_productive_workspace_config,
+};
 use super::super::{REQUEST_HASH, append_uncertain_provider_intent, create_review_run};
 use crate::runtime::{
     context::ContextObject,
@@ -340,6 +342,7 @@ fn tool_reconciliation_rejects_a_run_object_whose_bytes_do_not_match_its_digest_
 #[test]
 fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
     let workspace = workspace_copy("smoke-flow");
+    disable_smoke_echo_tool(&workspace);
     write_productive_workspace_config(&workspace);
     create_review_run(&workspace);
     append_uncertain_provider_intent(&workspace);
@@ -356,7 +359,10 @@ fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
         "unexpected Resume error: {error}"
     );
     #[cfg(not(windows))]
-    assert!(error.to_string().contains("uncertain"));
+    assert!(
+        error.to_string().contains("uncertain"),
+        "unexpected Resume error: {error}"
+    );
     assert_eq!(
         fs::read(&run_log).expect("Run Log reads after rejected Resume"),
         before
