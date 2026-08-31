@@ -41,11 +41,9 @@ impl PolicyArtifact {
 
         for command in &self.commands {
             command.validate()?;
-            if matches!(self.target, PolicyTarget::LinuxLandlockSeccomp)
-                && !command.network.allow.is_empty()
-            {
+            if !command.network.allow.is_empty() {
                 return Err(policy_artifact_error(format!(
-                    "tool {} network allow must be empty for linux-landlock-seccomp policy artifacts",
+                    "tool {} network allow must be empty for linux-bubblewrap-seccomp policy artifacts",
                     command.tool_id
                 )));
             }
@@ -109,10 +107,8 @@ impl PolicyArtifact {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PolicyTarget {
-    /// Linux Landlock/seccomp policy target.
-    LinuxLandlockSeccomp,
-    /// macOS Seatbelt policy target.
-    MacosSeatbelt,
+    /// Ubuntu 24.04 x64 Bubblewrap/seccomp policy target.
+    LinuxBubblewrapSeccomp,
 }
 
 /// Error returned when a policy artifact fails validation.

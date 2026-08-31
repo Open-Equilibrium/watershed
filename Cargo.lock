@@ -267,6 +267,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "flow-agent-executor"
+version = "0.0.0"
+dependencies = [
+ "core-policy",
+ "proto",
+ "rustix",
+ "serde_json",
+ "signal-hook",
+]
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -814,6 +825,7 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "unicode-normalization",
 ]
 

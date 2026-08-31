@@ -121,8 +121,9 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
                 "tool_id": "tool-1",
                 "tool_name": "Tool",
                 "tool_kind": "predefined-command",
-                "read_scope": [],
-                "write_scope": [],
+                "read_only_mounts": [],
+                "runtime_profile": "exact",
+                "writable_mounts": [],
                 "allowed_parameters": [],
                 "network_access": "deny"
             }),
@@ -427,7 +428,7 @@ fn event_specific_payload_invariants_are_bounded() {
         (EventType::PhaseEntered, "phase_kind", Some(json!("step"))),
         (EventType::PhaseEntered, "iteration", Some(json!(0))),
         (EventType::MessageDelta, "role", Some(json!("critic"))),
-        (EventType::ToolStarted, "read_scope", None),
+        (EventType::ToolStarted, "read_only_mounts", None),
         (EventType::ToolStarted, "tool_kind", Some(json!("shell"))),
         (
             EventType::ToolStarted,
@@ -436,7 +437,7 @@ fn event_specific_payload_invariants_are_bounded() {
         ),
         (
             EventType::ToolStarted,
-            "read_scope",
+            "read_only_mounts",
             Some(json!("workspace")),
         ),
         (

@@ -30,7 +30,7 @@ fn policy_artifact_rejects_malformed_network_allow_entries() {
 }
 
 #[test]
-fn policy_artifact_rejects_non_empty_linux_network_allow_entries() {
+fn policy_artifact_rejects_non_empty_bubblewrap_network_allow_entries() {
     let artifact = policy_artifact_with_network_allow("192.0.2.0/24", 443);
 
     let err = artifact
@@ -39,7 +39,7 @@ fn policy_artifact_rejects_non_empty_linux_network_allow_entries() {
 
     assert_eq!(
         err.to_string(),
-        "tool network-tool network allow must be empty for linux-landlock-seccomp policy artifacts"
+        "tool network-tool network allow must be empty for linux-bubblewrap-seccomp policy artifacts"
     );
 }
 

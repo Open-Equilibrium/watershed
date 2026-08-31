@@ -4,6 +4,7 @@ members = [
     "core/core-script",
     "flow-agent/flow-agent-cli",
     "flow-agent/flow-agent-core",
+    "flow-agent/flow-agent-executor",
     "proto/proto",
 ]
 resolver = "3"

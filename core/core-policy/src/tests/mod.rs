@@ -1,13 +1,8 @@
 mod artifact;
 mod compile;
 
-use crate::{PolicyTarget, TrustedPredefinedCommand};
+use crate::TrustedPredefinedCommand;
 use std::{collections::BTreeSet, path::Path};
-
-const POLICY_TARGETS: [PolicyTarget; 2] = [
-    PolicyTarget::LinuxLandlockSeccomp,
-    PolicyTarget::MacosSeatbelt,
-];
 
 #[test]
 fn trusted_predefined_command_identities_are_stable_and_complete() {

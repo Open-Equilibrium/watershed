@@ -67,8 +67,9 @@ fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
             "tool_name": "ReadFile",
             "allowed_parameters": [],
             "tool_id": "read-file",
-            "write_scope": [],
-            "read_scope": ["workspace"],
+            "writable_mounts": [],
+            "read_only_mounts": ["workspace"],
+            "runtime_profile": "exact",
             "network_access": "deny",
             "tool_kind": "predefined-command"
         }),
@@ -80,7 +81,7 @@ fn canonical_event_jsonl_sorts_keys_and_ends_with_lf() {
     assert!(jsonl.ends_with('\n'));
     assert_eq!(
         jsonl,
-        "{\"event_id\":\"evt-001\",\"event_type\":\"tool.started\",\"flow_id\":\"flow-001\",\"payload\":{\"allowed_parameters\":[],\"network_access\":\"deny\",\"read_scope\":[\"workspace\"],\"tool_id\":\"read-file\",\"tool_kind\":\"predefined-command\",\"tool_name\":\"ReadFile\",\"write_scope\":[]},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n"
+        "{\"event_id\":\"evt-001\",\"event_type\":\"tool.started\",\"flow_id\":\"flow-001\",\"payload\":{\"allowed_parameters\":[],\"network_access\":\"deny\",\"read_only_mounts\":[\"workspace\"],\"runtime_profile\":\"exact\",\"tool_id\":\"read-file\",\"tool_kind\":\"predefined-command\",\"tool_name\":\"ReadFile\",\"writable_mounts\":[]},\"protocol_version\":\"0\",\"sequence\":1,\"session_id\":\"smoke001\",\"source\":\"flow-agent-cli\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n"
     );
 }
 

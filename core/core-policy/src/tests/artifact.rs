@@ -11,6 +11,21 @@ mod filesystem;
 mod network;
 
 #[test]
+fn policy_target_is_only_linux_bubblewrap_seccomp() {
+    assert_eq!(
+        serde_json::to_string(&PolicyTarget::LinuxBubblewrapSeccomp)
+            .expect("policy target serializes"),
+        r#""linux-bubblewrap-seccomp""#
+    );
+    for obsolete in [r#""linux-landlock-seccomp""#, r#""macos-seatbelt""#] {
+        assert!(
+            serde_json::from_str::<PolicyTarget>(obsolete).is_err(),
+            "obsolete target {obsolete} must fail closed"
+        );
+    }
+}
+
+#[test]
 fn policy_artifact_rejects_unsupported_policy_version() {
     let mut artifact = valid_policy_artifact("version-tool");
     artifact.policy_version = "1".to_owned();
@@ -205,7 +220,7 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
             timeout_ms: 1000,
         },
         source_flow_definition_id: "sort-flow".to_owned(),
-        target: PolicyTarget::LinuxLandlockSeccomp,
+        target: PolicyTarget::LinuxBubblewrapSeccomp,
     };
 
     let json = canonical_artifact_json(&artifact).expect("canonical JSON");
@@ -338,7 +353,7 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
             timeout_ms: 1000,
         },
         source_flow_definition_id: format!("{tool_id}-flow"),
-        target: PolicyTarget::LinuxLandlockSeccomp,
+        target: PolicyTarget::LinuxBubblewrapSeccomp,
     }
 }
 
