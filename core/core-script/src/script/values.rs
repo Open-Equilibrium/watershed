@@ -1,7 +1,6 @@
 use crate::script::model::{
-    FlowValue, InstructionBlock, MAX_FLOW_VALUE_BYTES, MAX_FLOW_VALUE_DEPTH,
-    MAX_FLOW_VALUE_KEY_CHARS, MAX_FLOW_VALUE_MEMBERS, MAX_FLOW_VALUE_NODES, ValueContract,
-    ValuePathSegment, ValuePredicate,
+    FlowValue, InstructionBlock, MAX_FLOW_VALUE_DEPTH, MAX_FLOW_VALUE_KEY_CHARS,
+    MAX_FLOW_VALUE_MEMBERS, ValueContract, ValuePathSegment, ValuePredicate,
 };
 
 /// Matches a Tool parameter pattern against one complete value.
@@ -20,7 +19,7 @@ pub fn parameter_pattern_matches(pattern: &str, value: &str) -> Result<bool, Str
         .map(|compiled| compiled.is_match(value))
         .map_err(|error| error.to_string())
 }
-use std::{collections::BTreeMap, fmt, io::Write};
+use std::{collections::BTreeMap, fmt};
 use unicode_normalization::UnicodeNormalization;
 
 /// Failure to validate, compare, or render an M1.1 runtime value.
@@ -73,99 +72,34 @@ pub fn build_session_object_uri(digest: &str) -> Result<String, FlowValueError> 
 
 /// Validates the finite shape, canonical forms, and global bounds of one runtime value.
 pub fn validate_flow_value(value: &FlowValue) -> Result<(), FlowValueError> {
-    let mut nodes = 0;
-    validate_flow_value_structure(value, 1, &mut nodes, "$")?;
-    validate_flow_value_bytes(value)?;
+    guard_flow_value_serialization_depth(value, 1)?;
     let json_value = serde_json::to_value(value)
         .map_err(|error| FlowValueError::new(format!("$ cannot be serialized: {error}")))?;
     proto::validate_flow_value_v0(&json_value)
         .map_err(|error| FlowValueError::new(error.to_string()))
 }
 
-fn validate_flow_value_structure(
+// This guard only bounds recursive serde before the canonical proto validator runs.
+fn guard_flow_value_serialization_depth(
     value: &FlowValue,
     depth: usize,
-    nodes: &mut usize,
-    path: &str,
 ) -> Result<(), FlowValueError> {
     if depth > MAX_FLOW_VALUE_DEPTH {
         return Err(FlowValueError::new(format!(
-            "{path} depth {depth} exceeds max {MAX_FLOW_VALUE_DEPTH}"
+            "$ depth {depth} exceeds max {MAX_FLOW_VALUE_DEPTH}"
         )));
     }
-    *nodes = nodes.saturating_add(1);
-    if *nodes > MAX_FLOW_VALUE_NODES {
-        return Err(FlowValueError::new(format!(
-            "$ node count exceeds max {MAX_FLOW_VALUE_NODES}"
-        )));
-    }
-
     match value {
-        FlowValue::List(values) => {
-            if values.len() > MAX_FLOW_VALUE_MEMBERS {
-                return Err(FlowValueError::new(format!(
-                    "{path} member count exceeds max {MAX_FLOW_VALUE_MEMBERS}"
-                )));
-            }
-            for (index, value) in values.iter().enumerate() {
-                validate_flow_value_structure(
-                    value,
-                    depth + 1,
-                    nodes,
-                    &format!("{path}[{index}]"),
-                )?;
-            }
-        }
-        FlowValue::Map(values) => {
-            if values.len() > MAX_FLOW_VALUE_MEMBERS {
-                return Err(FlowValueError::new(format!(
-                    "{path} member count exceeds max {MAX_FLOW_VALUE_MEMBERS}"
-                )));
-            }
-            for (key, value) in values {
-                validate_flow_value_structure(value, depth + 1, nodes, &format!("{path}.{key}"))?;
-            }
-        }
+        FlowValue::List(values) => values
+            .iter()
+            .try_for_each(|value| guard_flow_value_serialization_depth(value, depth + 1)),
+        FlowValue::Map(values) => values
+            .values()
+            .try_for_each(|value| guard_flow_value_serialization_depth(value, depth + 1)),
         FlowValue::Boolean(_)
         | FlowValue::Integer(_)
         | FlowValue::String(_)
-        | FlowValue::SessionObject(_) => {}
-    }
-    Ok(())
-}
-
-fn validate_flow_value_bytes(value: &FlowValue) -> Result<(), FlowValueError> {
-    let mut counter = FlowValueByteLimitWriter::default();
-    match serde_json::to_writer(&mut counter, value) {
-        Ok(()) => Ok(()),
-        Err(_) if counter.exceeded => Err(FlowValueError::new(format!(
-            "$ canonical JSON exceeds max {MAX_FLOW_VALUE_BYTES} bytes"
-        ))),
-        Err(error) => Err(FlowValueError::new(format!(
-            "$ cannot be serialized: {error}"
-        ))),
-    }
-}
-
-#[derive(Default)]
-struct FlowValueByteLimitWriter {
-    bytes: usize,
-    exceeded: bool,
-}
-
-impl Write for FlowValueByteLimitWriter {
-    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        let next = self.bytes.checked_add(buffer.len());
-        if next.is_none_or(|bytes| bytes > MAX_FLOW_VALUE_BYTES) {
-            self.exceeded = true;
-            return Err(std::io::Error::other("flow value byte limit exceeded"));
-        }
-        self.bytes = next.expect("checked above");
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        | FlowValue::SessionObject(_) => Ok(()),
     }
 }
 
