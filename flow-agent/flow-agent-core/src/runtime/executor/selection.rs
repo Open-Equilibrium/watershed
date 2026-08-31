@@ -192,7 +192,11 @@ mod tests {
         fs::write(&path, b"validated").expect("candidate is staged");
         let executable = File::open(&path).expect("candidate opens");
         let probe = proto::parse_executor_probe_v0(
-            br#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["static-self-reexec"]}"#,
+            concat!(
+                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["static-self-reexec"]}"#,
+                "\n"
+            )
+            .as_bytes(),
         )
         .expect("test probe is valid");
         let selection = ExecutorSelection::new(path.clone(), ExecutorSelectionSource::Custom)
