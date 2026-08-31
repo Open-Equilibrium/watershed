@@ -1,5 +1,5 @@
 mod invocation;
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "m11-budget-evidence")))]
 mod unix_process;
 
 use crate::runtime::run_attempts::RunAttemptOutcome;
@@ -11,11 +11,10 @@ pub(crate) use invocation::{encoded_exec_vector_bytes, validate_tool_invocation}
 pub(crate) use unix_process::{
     PrimaryTrigger, READY_CANCELLATION_MARKER, force_reap_timeout_for_test, visible_exit_code,
 };
-#[cfg(unix)]
-pub(crate) use unix_process::{ToolRunControl, execute_tool_invocation};
 #[cfg(all(unix, any(test, feature = "m11-budget-evidence")))]
 pub(crate) use unix_process::{
-    measure_ready_process_group_cleanup, measure_ready_tool_cancellation,
+    ToolRunControl, execute_tool_invocation, measure_ready_process_group_cleanup,
+    measure_ready_tool_cancellation,
 };
 
 pub(crate) const MAX_TOOL_EXEC_ENTRIES: usize = 2_048;
