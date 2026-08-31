@@ -20,7 +20,8 @@ use crate::runtime::{
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
     productive::{
-        ProductiveExecution, ProductiveProvider, execute_productive_flow_with_prepared_executor,
+        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor,
+        execute_productive_flow_with_tool_executor_and_recovery,
     },
     run_attempts::ProductiveRecovery,
     session_definition::session_definition_metadata,
@@ -106,21 +107,25 @@ fn finalize_productive_run(
     Ok(output)
 }
 
-fn execute_and_finalize_productive_run<P: ProductiveProvider>(
+fn execute_and_finalize_productive_run<P, T>(
     finalization: ProductiveRunFinalization<'_>,
     execution: ProductiveExecution<'_>,
     provider: &mut P,
-    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
+    tool_executor: &mut T,
     mut writer: ConversationEventWriter,
     mut recovery: ProductiveRecoveryWriter,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    T: ProductiveToolExecutor,
+{
     let mut attempts = ConversationAttemptLog::open_with_run_objects(
         finalization.workspace,
         finalization.reservation.conversation_id(),
         finalization.reservation.run_session_id(),
         recovery.run_objects(),
     )?;
-    let runtime_result = execute_productive_flow_with_prepared_executor(
+    let runtime_result = execute_productive_flow_with_tool_executor_and_recovery(
         execution,
         provider,
         &mut attempts,
@@ -353,7 +358,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
+pub(crate) fn execute_reserved_productive_recovery<P, T>(
     workspace: &Path,
     execution_workspace: &AnchoredWorkspace,
     model: &str,
@@ -365,10 +370,14 @@ pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
     credential: &crate::runtime::oauth_credential::CredentialRecord,
     agent_instructions: &str,
     provider: &mut P,
-    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
+    tool_executor: &mut T,
     reservation: &crate::runtime::conversations::ProductiveConversationReservation,
     notifier: Option<LiveEventNotifier>,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    T: ProductiveToolExecutor,
+{
     let conversation_id = reservation.conversation_id().to_owned();
     let run_session_id = reservation.run_session_id().to_owned();
     let clock = reservation.recovery_event_clock().ok_or_else(|| {

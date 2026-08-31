@@ -49,29 +49,6 @@ where
     )
 }
 
-pub(crate) fn execute_productive_flow_with_prepared_executor<P, A, S>(
-    execution: ProductiveExecution<'_>,
-    provider: &mut P,
-    attempts: &mut A,
-    sink: &mut S,
-    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
-    recovery: &mut dyn ProductiveRecovery,
-) -> Result<RuntimeExecution, RuntimeError>
-where
-    P: ProductiveProvider,
-    A: ProductiveAttemptLog,
-    S: RuntimeEventSink,
-{
-    execute_productive_flow_with_tool_executor_and_recovery(
-        execution,
-        provider,
-        attempts,
-        sink,
-        tool_executor,
-        recovery,
-    )
-}
-
 #[cfg(test)]
 pub(crate) fn execute_productive_flow_with_recovery<P, A, S>(
     execution: ProductiveExecution<'_>,

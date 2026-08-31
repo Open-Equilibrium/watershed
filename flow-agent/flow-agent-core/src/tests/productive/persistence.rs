@@ -6,8 +6,8 @@ use super::super::{
 #[cfg(unix)]
 use super::support::FakeToolExecutor;
 use super::support::{
-    FakeProvider, ScriptedProvider, disabled_smoke_productive_execution_fixture,
-    smoke_productive_execution_fixture,
+    FakeProvider, ScriptedProvider, UnsupportedToolExecutor,
+    disabled_smoke_productive_execution_fixture, smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     config_io::load_global_config,
@@ -148,14 +148,18 @@ fn provider_only_new_run_does_not_probe_an_executor() {
     assert!(!output.failed);
 }
 
-fn recover_interrupted_productive_run<P: ProductiveProvider>(
+fn recover_interrupted_productive_run<P, T>(
     workspace: &Path,
     execution: ProductiveExecution<'_>,
     provider: &mut P,
-) -> RunOutput {
+    tool_executor: &mut T,
+) -> RunOutput
+where
+    P: ProductiveProvider,
+    T: crate::runtime::productive::ProductiveToolExecutor,
+{
     let reservation = reserve_conversation_run_recovery(workspace, "conversation", "run")
         .expect("interrupted run reserves for exact recovery");
-    let mut tool_executor = None;
     let output = execute_reserved_productive_recovery(
         workspace,
         execution.workspace,
@@ -168,7 +172,7 @@ fn recover_interrupted_productive_run<P: ProductiveProvider>(
         execution.credential,
         execution.agent_instructions,
         provider,
-        &mut tool_executor,
+        tool_executor,
         &reservation,
         None,
     )
@@ -442,6 +446,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     assert_eq!(initial_provider.bodies.len(), 1);
 
     let mut recovery_provider = FakeProvider::default();
+    let mut tool_executor = UnsupportedToolExecutor;
     let output = recover_interrupted_productive_run(
         &workspace,
         ProductiveExecution {
@@ -449,6 +454,7 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
             ..fixture.execution(flow, "run")
         },
         &mut recovery_provider,
+        &mut tool_executor,
     );
 
     assert!(!output.failed);
@@ -549,6 +555,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
             ..fixture.execution(flow, "run")
         },
         &mut recovery_provider,
+        &mut tools,
     );
 
     assert!(!output.failed);
@@ -556,6 +563,7 @@ fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
         recovery_provider.bodies.is_empty(),
         "provider must not rerun"
     );
+    assert_eq!(tools.invocations.len(), 1, "Tool must not rerun");
     let recovered_attempts =
         inspect_run_attempts(&workspace, "conversation", "run").expect("attempts");
     assert_eq!(recovered_attempts.len(), 3);

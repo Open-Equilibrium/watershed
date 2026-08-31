@@ -23,12 +23,11 @@ mod provider_turn;
 mod reconciliation;
 mod tool;
 mod tool_result;
-pub(crate) use execution::execute_productive_flow_with_prepared_executor;
+pub(crate) use execution::execute_productive_flow_with_tool_executor_and_recovery;
 #[cfg(test)]
 pub(crate) use execution::{
     execute_productive_flow, execute_productive_flow_with_recovery,
     execute_productive_flow_with_tool_executor,
-    execute_productive_flow_with_tool_executor_and_recovery,
 };
 pub(crate) use platform::ensure_productive_execution_platform;
 pub(crate) use platform::ensure_productive_tool_execution_platform;
