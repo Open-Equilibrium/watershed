@@ -55,7 +55,7 @@ M1 does not provide a real provider adapter, general external process execution,
 
 ### M1.1 — Flow Agent practical execution
 
-**Status:** The final M1.1 Maintainer decisions are implemented; repository closeout is in progress.
+**Status:** Complete.
 
 #### M1.1 entry criteria — architecture hardening
 
@@ -120,6 +120,8 @@ These architecture corrections are accepted; implementation status is recorded i
 No implementation or release claim follows from a documentation decision alone. Each remaining target requires its red behavior tests, finite security and compatibility contract, implementation and ordinary repository gates in a separately scoped change.
 
 ### M1.2 — Flow Agent OS isolation
+
+**Status:** Implementation complete; repository closeout is in progress.
 
 **Purpose:** establish a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
 
