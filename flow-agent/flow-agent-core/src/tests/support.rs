@@ -69,7 +69,7 @@ fn session_home_setup_preserves_the_environment_and_live_home() {
     drop(replacements);
 }
 
-pub(super) fn run_isolated_test(child_env: &str) -> bool {
+pub(crate) fn run_isolated_test(child_env: &str) -> bool {
     if std::env::var_os(child_env).is_some() || std::env::var_os("NEXTEST").is_some() {
         return false;
     }

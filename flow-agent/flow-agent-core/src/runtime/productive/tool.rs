@@ -278,12 +278,21 @@ where
             Ok(dispatch) => {
                 let execution = context.tool_executor.execute_prepared(prepared);
                 drop(dispatch);
-                execution
+                match execution {
+                    Ok(execution) => execution,
+                    Err(error) => {
+                        emit_uncertain_tool_failure(
+                            builder,
+                            invocation,
+                            tool,
+                            &attempt_id,
+                            context.sink,
+                            &mut context.event_commit_failed,
+                        )?;
+                        return Err(error);
+                    }
+                }
             }
-            Err(error) => Err(error),
-        };
-        let execution = match execution {
-            Ok(execution) => execution,
             Err(error)
                 if matches!(error, RuntimeError::Cancelled)
                     || crate::runtime::cancellation::ensure_productive_dispatch_allowed()

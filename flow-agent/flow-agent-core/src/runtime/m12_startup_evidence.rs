@@ -85,7 +85,7 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
     };
 
     let started = Instant::now();
-    let mut executor = PreparedExecutor::prepare_selected()
+    let executor = PreparedExecutor::prepare_selected()
         .map_err(|_| "selected Executor did not prepare for M1.2 evidence")?;
     let execution = executor
         .execute(

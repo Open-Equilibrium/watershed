@@ -99,8 +99,9 @@ impl PreparedExecutor {
     }
 
     /// Executes one policy-bound Tool through a fresh one-shot Executor process.
+    #[cfg(feature = "m12-startup-evidence")]
     pub(crate) fn execute(
-        &mut self,
+        &self,
         workspace: &AnchoredWorkspace,
         policy: &core_policy::PolicyArtifact,
         command_policy: &core_policy::CommandPolicy,
@@ -689,7 +690,7 @@ fn execute_one_shot(
         {
             let pid = rustix::process::Pid::from_raw(child.child_mut().id() as i32)
                 .ok_or_else(|| invalid_response("Executor process id is invalid"))?;
-            rustix::process::kill_process_group(pid, rustix::process::Signal::TERM)
+            rustix::process::kill_process(pid, rustix::process::Signal::TERM)
                 .map_err(|_| invalid_response("Executor cancellation signal failed"))?;
             cancellation_sent = true;
             cancellation_deadline = now.checked_add(Duration::from_secs(5));
@@ -896,6 +897,92 @@ mod tests {
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn one_shot_cancellation_signals_the_executor_before_forced_group_cleanup() {
+        const CHILD_ENV: &str = "WATERSHED_EXECUTOR_LEADER_CANCELLATION_CHILD";
+        if crate::tests::run_isolated_test(CHILD_ENV) {
+            return;
+        }
+
+        let workspace = crate::tests::empty_workspace();
+        let ready = workspace.join("ready");
+        let child_signalled = workspace.join("child-signalled");
+        let response_path = workspace.join("response.json");
+        let request = one_shot_request();
+        let response = proto::ExecutorResponseV0::Completed {
+            enforcement: proto::EnforcementReceiptV0 {
+                applied_policy_digest: request.policy_digest.clone(),
+                backend: proto::EXECUTOR_BACKEND_V0.to_owned(),
+                backend_version: "test".to_owned(),
+                executor: proto::EXECUTOR_NAME_V0.to_owned(),
+                executor_version: "test".to_owned(),
+                isolation_active: true,
+                platform: proto::EXECUTOR_PLATFORM_V0.to_owned(),
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            },
+            request_id: request.request_id.clone(),
+            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+            tool_result: proto::ExecutorToolResultV0 {
+                classification: Some(proto::ExecutorToolClassificationV0::Cancelled),
+                exit_code: None,
+                status: proto::ExecutorToolStatusV0::Cancelled,
+                stderr_base64: proto::encode_executor_stream_v0(&[]),
+                stdout_base64: proto::encode_executor_stream_v0(&[]),
+            },
+        };
+        std::fs::write(
+            &response_path,
+            proto::canonical_executor_response_v0(&response).expect("response is canonical"),
+        )
+        .expect("response fixture is written");
+        let script = format!(
+            "trap \"/bin/sleep 0.1; /bin/cat -- '{response}'; exit 0\" TERM\n\
+             (trap \"printf signalled > '{child_signalled}'; exit 0\" TERM; while :; do /bin/sleep 1; done) &\n\
+             printf ready > '{ready}'\n\
+             while :; do /bin/sleep 1; done\n",
+            response = response_path.display(),
+            child_signalled = child_signalled.display(),
+            ready = ready.display(),
+        );
+        let ready_for_interrupt = ready.clone();
+        crate::begin_productive_operation().expect("productive operation begins");
+        let interrupter = std::thread::spawn(move || {
+            let started = Instant::now();
+            while !ready_for_interrupt.is_file() {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "fake Executor did not become ready"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(
+                crate::request_productive_interrupt(),
+                crate::ProductiveInterruptAction::Cancel
+            );
+        });
+
+        let executor = File::open("/bin/sh").expect("shell executor opens");
+        let terminal = execute_one_shot(&executor, &[], &request, script.as_bytes())
+            .expect("Executor returns canonical cancellation evidence");
+        interrupter.join().expect("interrupt thread joins");
+        crate::settle_productive_operation();
+
+        assert!(matches!(
+            terminal,
+            proto::ExecutorResponseV0::Completed {
+                tool_result: proto::ExecutorToolResultV0 {
+                    status: proto::ExecutorToolStatusV0::Cancelled,
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(
+            !child_signalled.exists(),
+            "graceful cancellation must reach only the Executor leader"
+        );
+    }
 
     #[test]
     fn predefined_policy_id_is_not_compared_to_resolved_sandbox_executable() {

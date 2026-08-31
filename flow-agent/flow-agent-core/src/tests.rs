@@ -4,6 +4,8 @@ mod test_support;
 pub(crate) use test_support::empty_workspace;
 
 mod support;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use support::run_isolated_test;
 
 mod helpers;
 
