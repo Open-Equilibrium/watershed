@@ -378,6 +378,17 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (M12_EXECUTOR, "readelf -l", "grep -q 'INTERP'", "exit 1"):
             self.assertIn(required, static)
 
+        bwrap_install = "\n".join(
+            assert_step_state(
+                self, workflow, "Install stock M1.2 Bubblewrap", condition=UBUNTU
+            )
+        )
+        for required in (
+            "sudo apt-get update",
+            "sudo apt-get install --yes --no-install-recommends bubblewrap",
+        ):
+            self.assertIn(required, bwrap_install)
+
         bwrap = "\n".join(
             assert_step_state(
                 self, workflow, "Check M1.2 Bubblewrap availability", condition=UBUNTU
