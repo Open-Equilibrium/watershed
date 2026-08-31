@@ -97,10 +97,16 @@ readiness_config_created=0
 readiness_pid=
 readiness_pgid=
 readiness_group_has_descendant() {
-    for readiness_member in $(/usr/bin/pgrep -g "$readiness_pgid" 2>/dev/null || :); do
-        [ "$readiness_member" = "$readiness_pid" ] || return 0
-    done
-    return 1
+    if readiness_members=$(/usr/bin/pgrep -g "$readiness_pgid" 2>/dev/null); then
+        for readiness_member in $readiness_members; do
+            [ "$readiness_member" = "$readiness_pid" ] || return 0
+        done
+        return 1
+    else
+        readiness_scan_status=$?
+        [ "$readiness_scan_status" -eq 1 ] && return 1
+        return 0
+    fi
 }
 wait_for_readiness_group() {
     wait_attempts=20

@@ -200,6 +200,13 @@ class PrefixInstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             bundle = self.bundle(root)
+            installer = bundle / "install.sh"
+            source = installer.read_text(encoding="utf-8")
+            self.assertEqual(source.count("/usr/bin/pgrep"), 1)
+            installer.write_text(
+                source.replace("/usr/bin/pgrep", "/missing/pgrep"),
+                encoding="utf-8",
+            )
             marker = root / "readiness-started"
             (bundle / "flow").write_text(
                 "#!/bin/sh\n"
