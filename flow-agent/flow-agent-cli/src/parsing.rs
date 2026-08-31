@@ -1,4 +1,5 @@
 mod auth;
+mod executor;
 mod reconcile;
 mod resume;
 mod run;
@@ -6,6 +7,7 @@ mod sessions;
 mod tail;
 
 pub(crate) use auth::{AuthCommand, auth_args};
+pub(crate) use executor::{ExecutorCommand, executor_args};
 pub(crate) use reconcile::reconcile_tool_args;
 pub(crate) use resume::{ResumeCommand, resume_args};
 pub(crate) use run::run_args;
@@ -144,6 +146,10 @@ pub(crate) fn usage() -> String {
             "  flow validate [FLOW_REF]\n",
             "  flow create <tool|instruction|phase|flow> --help\n",
             "  {auth}\n",
+            "  flow executor status\n",
+            "  flow executor check\n",
+            "  flow executor configure --path <absolute-path>\n",
+            "  flow executor configure --default\n",
             "  flow replay <conversation-id> <run-session-id> [--emit jsonl]\n",
             "  flow tail <conversation-id> <run-session-id> [--emit jsonl] [--no-follow] [--timeout-ms N]\n",
             "  {reconcile_tool}\n",

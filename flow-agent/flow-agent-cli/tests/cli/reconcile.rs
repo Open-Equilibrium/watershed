@@ -6,6 +6,26 @@ use std::{fs, io::Write, process::Stdio};
 
 const TOOL_RESULT: &str = r#"{"type":"map","value":{"exit_code":{"type":"integer","value":"0"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}"#;
 
+fn reconciliation_output() -> String {
+    proto::canonical_json(&serde_json::json!({
+        "enforcement": {
+            "applied_policy_digest": "0".repeat(64),
+            "backend": proto::EXECUTOR_BACKEND_V0,
+            "backend_version": "test",
+            "executor": proto::EXECUTOR_NAME_V0,
+            "executor_version": "test",
+            "isolation_active": true,
+            "platform": proto::EXECUTOR_PLATFORM_V0,
+            "runtime_profile": "exact",
+        },
+        "request_hash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "schema": "flow-tool-attempt-output-v1",
+        "tool_result": serde_json::from_str::<serde_json::Value>(TOOL_RESULT)
+            .expect("Tool result fixture parses"),
+    }))
+    .expect("Tool reconciliation output canonicalizes")
+}
+
 fn seed_pending_tool_attempt(workspace: &std::path::Path) {
     let initialized = flow_command()
         .current_dir(workspace)
@@ -35,7 +55,8 @@ fn reconcile_tool_reads_canonical_evidence_from_file_or_stdin() {
     for source in ["result.json", "-"] {
         let workspace = empty_workspace();
         seed_pending_tool_attempt(&workspace);
-        fs::write(workspace.join("result.json"), TOOL_RESULT).expect("result fixture is written");
+        let result = reconciliation_output();
+        fs::write(workspace.join("result.json"), &result).expect("result fixture is written");
         let mut command = flow_command();
         command
             .current_dir(&workspace)
@@ -53,7 +74,7 @@ fn reconcile_tool_reads_canonical_evidence_from_file_or_stdin() {
                 .stdin
                 .take()
                 .expect("stdin is piped")
-                .write_all(TOOL_RESULT.as_bytes())
+                .write_all(result.as_bytes())
                 .expect("result is written to stdin");
         }
         let output = child

@@ -4,7 +4,7 @@ use super::{
 use core_script::{
     AllowedParameter, NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkDeny,
     NetworkPolicy, NetworkTransport, ParameterValueType, RegistryBlockKind, ScriptRuntime,
-    ToolBlock, ToolCommand, ToolKind,
+    ToolBlock, ToolCommand, ToolKind, ToolRuntimeProfile,
 };
 use flow_agent_core::RuntimeError;
 use std::path::Path;
@@ -22,8 +22,8 @@ pub(super) const USAGE: &str = concat!(
     "--parameter-required <true|false> [--parameter-allowed-value VALUE]... ",
     "[--parameter-value-pattern REGEX] [--parameter-max-length N] ",
     "[--parameter-min I64] [--parameter-max I64] --end-parameter]...\n",
-    "  [--read-scope PATH]... [--write-scope PATH]... ",
-    "[--protected-path-grant PATH]...\n",
+    "  [--runtime-profile <exact|host-system-read>] ",
+    "[--read-only-mount PATH]... [--writable-mount PATH]...\n",
     "  <--network deny|--network-default deny ",
     "[--network-allow --network-kind cidr --network-transport <tcp|udp> ",
     "--network-cidr CIDR --network-port PORT --end-network-allow]...>",
@@ -37,9 +37,9 @@ struct Fields {
     argv: Vec<String>,
     script_body: Option<ContentSource>,
     parameters: Vec<AllowedParameter>,
-    read_scope: Vec<String>,
-    write_scope: Vec<String>,
-    protected_path_grants: Vec<String>,
+    runtime_profile: Option<ToolRuntimeProfile>,
+    read_only_mounts: Vec<String>,
+    writable_mounts: Vec<String>,
     network: Option<NetworkPolicy>,
     network_allow: Vec<NetworkAllowEntry>,
 }
@@ -67,11 +67,15 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
                 set_once_with(&mut fields.script_body, flag, || Ok(ContentSource::Stdin))?
             }
             "--parameter" => fields.parameters.push(parse_parameter(&mut cursor)?),
-            "--read-scope" => fields.read_scope.push(cursor.value(flag)?.to_owned()),
-            "--write-scope" => fields.write_scope.push(cursor.value(flag)?.to_owned()),
-            "--protected-path-grant" => fields
-                .protected_path_grants
-                .push(cursor.value(flag)?.to_owned()),
+            "--runtime-profile" => {
+                let value = cursor.value(flag)?;
+                let profile = ToolRuntimeProfile::parse(value).ok_or_else(|| {
+                    RuntimeError::Usage(format!("invalid --runtime-profile {value:?}"))
+                })?;
+                set_once(&mut fields.runtime_profile, profile, flag)?;
+            }
+            "--read-only-mount" => fields.read_only_mounts.push(cursor.value(flag)?.to_owned()),
+            "--writable-mount" => fields.writable_mounts.push(cursor.value(flag)?.to_owned()),
             "--network" => {
                 let value = cursor.value(flag)?;
                 let deny = NetworkDeny::parse(value)
@@ -159,9 +163,9 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
         script_runtime,
         script_body,
         allowed_parameters: fields.parameters,
-        read_scope: fields.read_scope,
-        write_scope: fields.write_scope,
-        protected_path_grants: fields.protected_path_grants,
+        runtime_profile: fields.runtime_profile.unwrap_or_default(),
+        read_only_mounts: fields.read_only_mounts,
+        writable_mounts: fields.writable_mounts,
         network,
     })
 }
@@ -268,6 +272,40 @@ mod tests {
         test_support::{args, assert_usage, empty_workspace},
     };
     use std::{fs, path::Path};
+
+    fn minimal_predefined_tool() -> Vec<String> {
+        args(&[
+            "--id",
+            "inspect",
+            "--name",
+            "Inspect",
+            "--tool-kind",
+            "predefined-command",
+            "--command-id",
+            "agent-report",
+            "--network",
+            "deny",
+        ])
+    }
+
+    #[test]
+    fn filesystem_policy_flags_and_profiles_are_closed() {
+        for obsolete in ["--read-scope", "--write-scope", "--protected-path-grant"] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend([obsolete.to_owned(), "workspace".to_owned()]);
+
+            assert_usage(parse(Path::new("."), &arguments), "unknown argument");
+        }
+
+        for profile in ["broad", "HOST-SYSTEM-READ"] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend(["--runtime-profile".to_owned(), profile.to_owned()]);
+            assert_usage(
+                parse(Path::new("."), &arguments),
+                "invalid --runtime-profile",
+            );
+        }
+    }
 
     #[test]
     fn network_allow_groups_follow_top_level_occurrence_order() {
