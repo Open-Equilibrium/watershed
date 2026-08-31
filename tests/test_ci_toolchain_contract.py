@@ -24,6 +24,12 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
 M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
+M12_CONTAINER = "watershed-m12"
+M12_IMAGE = (
+    "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba"
+    "065f7503eab3078a2d7a57a2ab987517"
+)
+M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 
 
 def workflow_text() -> str:
@@ -132,6 +138,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             "node-version-file: .node-version",
             "\n".join(step_lines(workflow, "Install pinned Node")),
         )
+        self.assertIn(
+            "persist-credentials: false",
+            "\n".join(step_lines(workflow, "Checkout")),
+        )
         self.assertIn(".node-version", step_run(workflow, "Check Node version"))
         self.assertIn("package.json", step_run(workflow, "Enable Corepack"))
         self.assertIn("rust-toolchain.toml", step_run(workflow, "Select pinned Rust"))
@@ -200,7 +210,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                 1,
             ),
             workflow.replace("cargo test --locked -p flow-agent-executor", "true", 1),
-            workflow.replace("grep -q 'INTERP'", "grep -q 'NOT_INTERP'", 1),
+            workflow.replace('grep -q "INTERP"', 'grep -q "NOT_INTERP"', 1),
         )
         for mutated in mutations:
             with self.subTest(mutated=mutated), self.assertRaises(AssertionError):
@@ -352,6 +362,56 @@ class CiWorkflowContractTest(unittest.TestCase):
     def assert_m12_release_boundary(self, workflow: str) -> None:
         single_commands = {
             "Install M1.2 executor target": f"rustup target add {M12_TARGET}",
+            "Run M1.2 installer contract tests": (
+                "node scripts/run-python.mjs -m unittest install.tests.test_install"
+            ),
+        }
+        for name, command in single_commands.items():
+            assert_step_state(self, workflow, name, condition=UBUNTU)
+            self.assertEqual(step_run(workflow, name), command)
+
+        start = "\n".join(
+            assert_step_state(
+                self, workflow, "Start controlled M1.2 Ubuntu", condition=UBUNTU
+            )
+        )
+        for required in (
+            M12_IMAGE,
+            "--privileged",
+            "--security-opt apparmor=unconfined",
+            'src=$GITHUB_WORKSPACE,dst=/work,readonly',
+            "dst=/opt/rust,readonly",
+            "dst=/opt/cargo-registry,readonly",
+            "type=volume,dst=/work/target",
+        ):
+            self.assertIn(required, start)
+        for forbidden in (
+            "/var/run/docker.sock",
+            "sysctl",
+            "apparmor_parser",
+            'src=$HOME,dst=',
+        ):
+            self.assertNotIn(forbidden, start)
+
+        provision = "\n".join(
+            assert_step_state(
+                self, workflow, "Provision M1.2 Ubuntu dependencies", condition=UBUNTU
+            )
+        )
+        for required in (
+            f"docker exec {M12_CONTAINER}",
+            "bubblewrap",
+            "binutils",
+            "build-essential",
+            "musl-tools",
+            "python3",
+            "procps",
+            "util-linux",
+            "/opt/cargo-registry",
+        ):
+            self.assertIn(required, provision)
+
+        for name, command in {
             "Build M1.2 executor": (
                 "cargo build --locked --release -p flow-agent-executor "
                 f"--bin flow-executor --target {M12_TARGET}"
@@ -362,32 +422,21 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Build M1.2 installer CLI": (
                 "cargo build --locked --release -p flow-agent-cli --bin flow"
             ),
-            "Run M1.2 installer contract tests": (
-                "node scripts/run-python.mjs -m unittest install.tests.test_install"
-            ),
-        }
-        for name, command in single_commands.items():
+        }.items():
             assert_step_state(self, workflow, name, condition=UBUNTU)
-            self.assertEqual(step_run(workflow, name), command)
+            build = step_run(workflow, name)
+            self.assertIn("docker exec", build)
+            self.assertIn(M12_CONTAINER, build)
+            self.assertIn(command, build)
+            self.assertIn("CARGO_NET_OFFLINE=true", build)
 
         static = "\n".join(
             assert_step_state(
                 self, workflow, "Check M1.2 executor is static", condition=UBUNTU
             )
         )
-        for required in (M12_EXECUTOR, "readelf -l", "grep -q 'INTERP'", "exit 1"):
+        for required in (M12_EXECUTOR, "readelf -l", 'grep -q "INTERP"', "exit 1"):
             self.assertIn(required, static)
-
-        bwrap_install = "\n".join(
-            assert_step_state(
-                self, workflow, "Install stock M1.2 Bubblewrap", condition=UBUNTU
-            )
-        )
-        for required in (
-            "sudo apt-get update",
-            "sudo apt-get install --yes --no-install-recommends bubblewrap",
-        ):
-            self.assertIn(required, bwrap_install)
 
         bwrap = "\n".join(
             assert_step_state(
@@ -402,21 +451,25 @@ class CiWorkflowContractTest(unittest.TestCase):
                 self, workflow, "Run M1.2 executor tests", condition=UBUNTU
             )
         )
-        self.assertIn("BWRAP_UNDER_TEST: /usr/bin/bwrap", executor_tests)
+        self.assertIn("BWRAP_UNDER_TEST=/usr/bin/bwrap", executor_tests)
         self.assertIn(
-            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST: ${{ github.workspace }}/target/release/flow-executor",
+            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             executor_tests,
         )
-        self.assertIn(f"/{M12_EXECUTOR}", executor_tests)
-        self.assertEqual(
+        self.assertIn(f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}", executor_tests)
+        self.assertIn(
+            "cargo test --locked -p flow-agent-executor --test official_linux",
             step_run(workflow, "Run M1.2 executor tests"),
-            "cargo test --locked -p flow-agent-executor",
         )
 
         assert_step_state(
             self, workflow, "Run M1.2 installer acceptance", condition=UBUNTU
         )
         installer = step_run(workflow, "Run M1.2 installer acceptance")
+        self.assertIn("docker exec", installer)
+        self.assertIn(M12_CONTAINER, installer)
+        self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
+        installer_contract = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         for required in (
             "install/install.sh",
             "target/release/flow",
@@ -438,7 +491,18 @@ class CiWorkflowContractTest(unittest.TestCase):
             'executor configure --path "$executor"',
             '"$custom_prefix/bin/flow" executor check',
         ):
-            self.assertIn(required, installer)
+            self.assertIn(required, installer_contract)
+
+        cleanup = assert_step_state(
+            self,
+            workflow,
+            "Stop controlled M1.2 Ubuntu",
+            condition=f"{UBUNTU} && always()",
+        )
+        self.assertIn(
+            f"docker rm --force {M12_CONTAINER}",
+            "\n".join(cleanup),
+        )
 
         assert_step_state(
             self, workflow, "Check M1.2 unsupported platforms", condition=NON_UBUNTU

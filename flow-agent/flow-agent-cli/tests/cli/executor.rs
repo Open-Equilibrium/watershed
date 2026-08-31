@@ -51,7 +51,7 @@ fn executor_commands_fail_closed_on_unsupported_platform_without_config_mutation
 
     for args in commands {
         let output = flow_command()
-            .env_clear()
+            .env_remove("PATH")
             .env("APPDATA", config_root.as_os_str())
             .env("HOME", config_root.as_os_str())
             .env("XDG_CONFIG_HOME", config_root.as_os_str())

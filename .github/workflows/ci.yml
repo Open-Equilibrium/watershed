@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install pinned Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -90,51 +92,100 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         run: rustup target add x86_64-unknown-linux-musl
 
+      - name: Start controlled M1.2 Ubuntu
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          rust_root="$(dirname "$(dirname "$(rustup which rustc)")")"
+          cargo_registry="${CARGO_HOME:-$HOME/.cargo}/registry"
+          docker run --detach --rm --init \
+            --name watershed-m12 \
+            --privileged \
+            --security-opt apparmor=unconfined \
+            --workdir /work \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
+            --mount "type=bind,src=$rust_root,dst=/opt/rust,readonly" \
+            --mount "type=bind,src=$cargo_registry,dst=/opt/cargo-registry,readonly" \
+            --mount "type=volume,dst=/work/target" \
+            ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 \
+            sleep infinity
+
+      - name: Provision M1.2 Ubuntu dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec watershed-m12 /bin/sh -ec '
+            apt-get update
+            apt-get install --yes --no-install-recommends \
+              bubblewrap binutils build-essential musl-tools python3 procps util-linux
+            rm -rf /var/lib/apt/lists/*
+            mkdir -p /cargo
+            ln -s /opt/cargo-registry /cargo/registry
+          '
+
       - name: Build M1.2 executor
         if: matrix.os == 'ubuntu-24.04'
-        run: cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          watershed-m12
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
 
       - name: Build M1.2 dynamic rejection fixture
         if: matrix.os == 'ubuntu-24.04'
-        run: cargo build --locked --release -p flow-agent-executor --bin flow-executor
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          watershed-m12
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor
 
       - name: Build M1.2 installer CLI
         if: matrix.os == 'ubuntu-24.04'
-        run: cargo build --locked --release -p flow-agent-cli --bin flow
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          watershed-m12
+          cargo build --locked --release -p flow-agent-cli --bin flow
 
       - name: Check M1.2 executor is static
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          executor=target/x86_64-unknown-linux-musl/release/flow-executor
-          if readelf -l "$executor" | grep -q 'INTERP'; then
-            echo 'flow-executor must not contain an ELF interpreter' >&2
-            exit 1
-          fi
-
-      - name: Install stock M1.2 Bubblewrap
-        if: matrix.os == 'ubuntu-24.04'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap
+          docker exec watershed-m12 /bin/sh -ec '
+            executor=target/x86_64-unknown-linux-musl/release/flow-executor
+            if readelf -l "$executor" | grep -q "INTERP"; then
+              echo "flow-executor must not contain an ELF interpreter" >&2
+              exit 1
+            fi
+          '
 
       - name: Check M1.2 Bubblewrap availability
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          test "$(command -v bwrap)" = /usr/bin/bwrap
-          dpkg-query --show --showformat='${Status} ${Version}\n' bubblewrap
-          /usr/bin/bwrap --version
+          test "$(docker exec watershed-m12 command -v bwrap)" = /usr/bin/bwrap
+          docker exec watershed-m12 dpkg-query --show '--showformat=${Status} ${Version}\n' bubblewrap
+          docker exec watershed-m12 /usr/bin/bwrap --version
 
       - name: Run M1.2 executor tests
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
-        env:
-          BWRAP_UNDER_TEST: /usr/bin/bwrap
-          FLOW_EXECUTOR_DYNAMIC_UNDER_TEST: ${{ github.workspace }}/target/release/flow-executor
-          FLOW_EXECUTOR_UNDER_TEST: ${{ github.workspace }}/target/x86_64-unknown-linux-musl/release/flow-executor
-        run: cargo test --locked -p flow-agent-executor
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          --env BWRAP_UNDER_TEST=/usr/bin/bwrap
+          --env FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
+          --env FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
+          watershed-m12
+          cargo test --locked -p flow-agent-executor --test official_linux
 
       - name: Run M1.2 installer contract tests
         if: matrix.os == 'ubuntu-24.04'
@@ -144,72 +195,10 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          bundle="$RUNNER_TEMP/m12-install-bundle"
-          standard_prefix="$RUNNER_TEMP/m12-standard-prefix"
-          custom_prefix="$RUNNER_TEMP/m12-custom-prefix"
-          config="$RUNNER_TEMP/m12-config"
-          home="$RUNNER_TEMP/m12-home"
-          agent_home="$RUNNER_TEMP/m12-agent-home"
-          fixture_home="$RUNNER_TEMP/m12-fixture-home"
-          fixture_output="$RUNNER_TEMP/m12-fixture-smoke.jsonl"
-          fixture_workspace="$RUNNER_TEMP/m12-fixture-workspace"
-          productive_workspace="$RUNNER_TEMP/m12-productive-workspace"
-          install -d -m 0755 "$bundle"
-          install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace"
-          install -m 0755 install/install.sh "$bundle/install.sh"
-          install -m 0755 target/release/flow "$bundle/flow"
-          install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/flow-executor"
-          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
-          test -x "$standard_prefix/bin/flow"
-          test -x "$standard_prefix/bin/flow-executor"
-          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$standard_prefix/bin/flow" executor check </dev/null)
-          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor)
-          test -x "$custom_prefix/bin/flow"
-          test ! -e "$custom_prefix/bin/flow-executor"
-          set +e
-          unavailable=$(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check 2>&1)
-          unavailable_status=$?
-          set -e
-          test "$unavailable_status" -eq 65
-          case "$unavailable" in
-            executor_unavailable:*) ;;
-            *) exit 1 ;;
-          esac
-          (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry)
-          cp -R flow-agent/fixtures/smoke-flow/registry/. "$fixture_home/registry/"
-          printf '%s\n' \
-            'fixture_profile: stub-model' \
-            'stub_model: deterministic' \
-            >> "$fixture_home/config.yaml"
-          (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow)
-          (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output")
-          cmp flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"
-          install -d -m 0700 "$config/flow-agent"
-          cp -R flow-agent/fixtures/smoke-flow/registry "$agent_home/registry"
-          printf '%s\n' \
-            'model: gpt-ci-inert' \
-            'provider: openai-codex' \
-            'model_context_limit: 128000' \
-            'output_reserve: 16384' \
-            'registry_root: registry' \
-            > "$agent_home/config.yaml"
-          printf '%s\n' \
-            '{"openai-codex":{"type":"oauth","access":"ci-inert-access","refresh":"ci-inert-refresh","expires":18446744073709551615,"accountId":"ci-inert-account","isFedramp":false}}' \
-            > "$config/flow-agent/credentials.json"
-          chmod 0600 "$agent_home/config.yaml" "$config/flow-agent/credentials.json"
-          set +e
-          productive_unavailable=$(cd "$productive_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow 2>&1)
-          productive_unavailable_status=$?
-          set -e
-          test "$productive_unavailable_status" -eq 65
-          case "$productive_unavailable" in
-            executor_unavailable:*) ;;
-            *) exit 1 ;;
-          esac
-          test ! -e "$productive_workspace/.flow"
-          executor="$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"
-          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor configure --path "$executor")
-          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check </dev/null)
+          docker exec \
+            --env RUNNER_TEMP=/tmp/m12 \
+            watershed-m12 \
+            /bin/sh scripts/run-m12-installer-acceptance.sh
 
       - name: Check M1.2 unsupported platforms
         if: matrix.os != 'ubuntu-24.04'
@@ -246,10 +235,20 @@ jobs:
         shell: bash
         run: |
           mkdir -p target/m12-startup
-          cargo run --locked -p flow-agent-core --release \
-            --features m12-startup-evidence --example m12_executor_startup \
-            -- --executor "$PWD/target/x86_64-unknown-linux-musl/release/flow-executor" \
+          docker exec \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env PATH=/opt/rust/bin:/usr/bin:/bin \
+            watershed-m12 \
+            /bin/sh -ec 'cargo run --locked -p flow-agent-core --release \
+              --features m12-startup-evidence --example m12_executor_startup \
+              -- --executor "$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"' \
             > target/m12-startup/m12-executor-startup.jsonl
+
+      - name: Stop controlled M1.2 Ubuntu
+        if: matrix.os == 'ubuntu-24.04' && always()
+        shell: bash
+        run: docker rm --force watershed-m12 2>/dev/null || true
 
       - name: Upload M1.2 executor startup evidence
         if: matrix.os == 'ubuntu-24.04' && always()
