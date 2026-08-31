@@ -162,6 +162,40 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertIn(b"failed readiness", installed.stderr)
             self.assertEqual(list((prefix / "bin").iterdir()), [])
 
+    def test_signal_at_each_publication_boundary_rolls_back(self):
+        boundaries = (
+            (
+                '/bin/ln -- "$flow_stage" "$flow_target" || fail \'cannot publish flow\'\n',
+                "--no-default-executor",
+            ),
+            (
+                '/bin/ln -- "$executor_stage" "$executor_target" || fail \'cannot publish flow-executor\'\n',
+                None,
+            ),
+        )
+        for publication, opt_out in boundaries:
+            with self.subTest(publication=publication), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                self.assertEqual(source.count(publication), 1)
+                installer.write_text(
+                    source.replace(
+                        publication,
+                        publication + '/bin/kill -TERM "$$"\n',
+                    ),
+                    encoding="utf-8",
+                )
+                installer.chmod(0o755)
+                prefix = root / "prefix"
+
+                args = (opt_out,) if opt_out else ()
+                installed = self.install(bundle, prefix, *args)
+
+                self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
+                self.assertEqual(list((prefix / "bin").iterdir()), [])
+
     def test_signal_during_readiness_terminates_descendants_and_rolls_back(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

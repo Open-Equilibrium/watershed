@@ -544,11 +544,17 @@ enum PrimaryTrigger {
 }
 
 fn select_primary(primary: &mut Option<PrimaryTrigger>, candidate: PrimaryTrigger) -> bool {
-    if primary.is_some() {
-        return false;
+    match (*primary, candidate) {
+        (Some(_), PrimaryTrigger::CollectorFailed) => {
+            *primary = Some(candidate);
+            false
+        }
+        (Some(_), _) => false,
+        (None, _) => {
+            *primary = Some(candidate);
+            true
+        }
     }
-    *primary = Some(candidate);
-    true
 }
 
 fn start_cleanup(
@@ -825,7 +831,7 @@ mod tests {
     use std::process::Command;
 
     #[test]
-    fn collector_failure_does_not_replace_an_established_terminal_cause() {
+    fn collector_failure_replaces_an_established_terminal_cause() {
         for established in [
             PrimaryTrigger::Cancelled,
             PrimaryTrigger::TimedOut,
@@ -838,7 +844,7 @@ mod tests {
                 &mut primary,
                 PrimaryTrigger::CollectorFailed
             ));
-            assert_eq!(primary, Some(established));
+            assert_eq!(primary, Some(PrimaryTrigger::CollectorFailed));
         }
     }
 

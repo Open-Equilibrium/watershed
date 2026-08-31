@@ -145,16 +145,20 @@ stop_readiness() {
 }
 cleanup() {
     stop_readiness
-    /bin/rm -f -- "$flow_stage" "$executor_stage" || :
     if [ "$readiness_config_created" -eq 1 ]; then
         /bin/rm -rf -- "$readiness_config" || :
     fi
-    if [ "$published_executor" -eq 1 ]; then
+    if [ "$published_executor" -eq 1 ] || {
+        [ -e "$executor_stage" ] && [ "$executor_stage" -ef "$executor_target" ]
+    }; then
         /bin/rm -f -- "$executor_target" || :
     fi
-    if [ "$published_flow" -eq 1 ]; then
+    if [ "$published_flow" -eq 1 ] || {
+        [ -e "$flow_stage" ] && [ "$flow_stage" -ef "$flow_target" ]
+    }; then
         /bin/rm -f -- "$flow_target" || :
     fi
+    /bin/rm -f -- "$flow_stage" "$executor_stage" || :
 }
 signal_exit() {
     signal_status=$1
