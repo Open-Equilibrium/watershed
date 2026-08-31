@@ -15,29 +15,12 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-2">M1.2</a>
       <a href="#post-m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1-2">
-    <h2>M1.2 - Linux Tool Runtime Surface</h2>
-    <div class="grid">
-      <article id="d-071" class="decision">
-        <h3>D-071 - Files Needed To Start A Sandboxed Tool</h3>
-        <p><strong>Status:</strong> Open M1.2 release blocker. A Linux program normally needs an interpreter, loader and shared libraries before it can start. Mounting broad system folders makes those programs work, but also lets the Tool read unrelated host configuration outside its declared capabilities.</p>
-        <p><strong>Responsibility:</strong> This is Watershed's responsibility because the official Executor constructs the Tool's filesystem view. An already compromised administrator, kernel or trusted installation remains outside the boundary; deciding which ordinary host files an untrusted Tool can read is inside it.</p>
-        <p><strong>Reference check:</strong> Codex's minimal Linux policy exposes broad read-only system roots such as <code>/bin</code>, <code>/usr</code>, <code>/etc</code> and library folders. Its current helper can preserve descriptor identity on older Bubblewrap versions through <code>/proc/self/fd</code> mounts and a trusted in-sandbox identity check. Pi's optional example delegates to an external sandbox library and blocks selected credential paths rather than defining an exact runtime capability set. Both approaches fit those products, but neither proves Watershed's narrower exact-read contract.</p>
-        <p><strong>Question:</strong> Which runtime files may the official Ubuntu Executor expose in addition to a Tool's declared Workspace mounts?</p>
-        <ul><li><strong>A:</strong> Ship a small Watershed-managed runtime and initially support only its included interpreter and commands. Pro: finite, reproducible and easiest to audit. Con: adds packaged third-party runtime maintenance and limits arbitrary predefined commands.</li><li><strong>B:</strong> Require an administrator-owned exact runtime manifest for each trusted executable, including its interpreter and libraries; ship one exact manifest for the standard own-script runtime. Pro: preserves arbitrary predefined commands without broad host reads. Con: administrators must maintain the manifest, and the standard package must safely prepare and verify its own.</li><li><strong>C:</strong> Mount common host system folders read-only. Pro: simplest and broadly compatible. Con: silently grants reads beyond the declared capability model and can expose unrelated host configuration.</li></ul>
-        <p><strong>Recommendation:</strong> B. It keeps the approved exact-capability model, avoids bundling a second userland, and places custom executable dependencies with the administrator who chose that executable.</p>
-        <p><strong>Acceptance criterion:</strong> The selected model has one bounded canonical runtime-capability list; every source object is opened without following links and retains its identity through mount setup; undeclared host paths remain absent; interpreter and dynamically linked Tool smoke tests pass; missing, replaced, extra or incompatible runtime objects fail before Tool launch; installation and update behavior are automated on clean Ubuntu 24.04 x64.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="post-m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>
