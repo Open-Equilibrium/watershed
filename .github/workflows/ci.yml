@@ -86,6 +86,91 @@ jobs:
           --all-features
           --doc
 
+      - name: Install M1.2 executor target
+        if: matrix.os == 'ubuntu-24.04'
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Build M1.2 executor
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
+
+      - name: Build M1.2 dynamic rejection fixture
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo build --locked --release -p flow-agent-executor --bin flow-executor
+
+      - name: Build M1.2 installer CLI
+        if: matrix.os == 'ubuntu-24.04'
+        run: cargo build --locked --release -p flow-agent-cli --bin flow
+
+      - name: Check M1.2 executor is static
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          executor=target/x86_64-unknown-linux-musl/release/flow-executor
+          if readelf -l "$executor" | grep -q 'INTERP'; then
+            echo 'flow-executor must not contain an ELF interpreter' >&2
+            exit 1
+          fi
+
+      - name: Check M1.2 Bubblewrap availability
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          test "$(command -v bwrap)" = /usr/bin/bwrap
+          dpkg-query --show --showformat='${Status} ${Version}\n' bubblewrap
+          /usr/bin/bwrap --version
+
+      - name: Run M1.2 executor tests
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        env:
+          BWRAP_UNDER_TEST: /usr/bin/bwrap
+          FLOW_EXECUTOR_DYNAMIC_UNDER_TEST: ${{ github.workspace }}/target/release/flow-executor
+          FLOW_EXECUTOR_UNDER_TEST: ${{ github.workspace }}/target/x86_64-unknown-linux-musl/release/flow-executor
+        run: cargo test --locked -p flow-agent-executor
+
+      - name: Run M1.2 installer contract tests
+        if: matrix.os == 'ubuntu-24.04'
+        run: node scripts/run-python.mjs -m unittest install.tests.test_install
+
+      - name: Run M1.2 installer acceptance
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          bundle="$RUNNER_TEMP/m12-install-bundle"
+          standard_prefix="$RUNNER_TEMP/m12-standard-prefix"
+          custom_prefix="$RUNNER_TEMP/m12-custom-prefix"
+          config="$RUNNER_TEMP/m12-config"
+          home="$RUNNER_TEMP/m12-home"
+          install -d -m 0755 "$bundle"
+          install -d -m 0700 "$config" "$home"
+          install -m 0755 install/install.sh "$bundle/install.sh"
+          install -m 0755 target/release/flow "$bundle/flow"
+          install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/flow-executor"
+          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
+          test -x "$standard_prefix/bin/flow"
+          test -x "$standard_prefix/bin/flow-executor"
+          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$standard_prefix/bin/flow" executor check </dev/null)
+          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor)
+          test -x "$custom_prefix/bin/flow"
+          test ! -e "$custom_prefix/bin/flow-executor"
+          set +e
+          unavailable=$(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check 2>&1)
+          unavailable_status=$?
+          set -e
+          test "$unavailable_status" -eq 65
+          case "$unavailable" in
+            executor_unavailable:*) ;;
+            *) exit 1 ;;
+          esac
+          executor="$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"
+          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor configure --path "$executor")
+          (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check </dev/null)
+
+      - name: Check M1.2 unsupported platforms
+        if: matrix.os != 'ubuntu-24.04'
+        run: cargo test --locked -p flow-agent-cli executor_check_fails_closed_on_unsupported_platform
+
       - name: Run M1.1 performance evidence
         id: m11_evidence
         if: matrix.os == 'ubuntu-24.04'
@@ -110,8 +195,8 @@ jobs:
         shell: bash
         run: exit 1
 
-      - name: Run M1.2 direct-runner startup baseline
-        id: m12_startup_baseline
+      - name: Run M1.2 executor startup evidence
+        id: m12_startup_evidence
         if: matrix.os == 'ubuntu-24.04'
         continue-on-error: true
         shell: bash
@@ -119,18 +204,19 @@ jobs:
           mkdir -p target/m12-startup
           cargo run --locked -p flow-agent-core --release \
             --features m12-startup-evidence --example m12_executor_startup \
-            > target/m12-startup/m12-direct-runner-baseline.jsonl
+            -- --executor "$PWD/target/x86_64-unknown-linux-musl/release/flow-executor" \
+            > target/m12-startup/m12-executor-startup.jsonl
 
-      - name: Upload M1.2 direct-runner startup baseline
+      - name: Upload M1.2 executor startup evidence
         if: matrix.os == 'ubuntu-24.04' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: m12-direct-runner-startup-baseline
-          path: target/m12-startup/m12-direct-runner-baseline.jsonl
+          name: m12-executor-startup-evidence
+          path: target/m12-startup/m12-executor-startup.jsonl
           if-no-files-found: error
 
-      - name: Enforce M1.2 direct-runner startup baseline
-        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_baseline.outcome != 'success'
+      - name: Enforce M1.2 executor startup evidence
+        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_evidence.outcome != 'success'
         shell: bash
         run: exit 1
 
