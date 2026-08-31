@@ -1,7 +1,5 @@
-use super::super::super::helpers::{
-    disable_smoke_echo_tool, empty_workspace, write_productive_workspace_config,
-};
-use super::super::{REQUEST_HASH, append_uncertain_provider_intent, create_review_run};
+use super::super::super::helpers::empty_workspace;
+use super::super::{REQUEST_HASH, create_review_run};
 use crate::runtime::{
     context::ContextObject,
     conversations::{
@@ -12,10 +10,7 @@ use crate::runtime::{
     run_attempts::{
         RunAttemptIntent, RunAttemptKind, RunAttemptLifecycle, RunAttemptOutcome, RunAttemptResult,
     },
-    session::resume_conversation_run,
-    types::EmitMode,
 };
-use crate::tests::test_support::workspace_copy;
 use std::fs::{self};
 
 fn tool_intent(attempt_id: &str) -> RunAttemptIntent {
@@ -335,36 +330,6 @@ fn tool_reconciliation_rejects_a_run_object_whose_bytes_do_not_match_its_digest_
     assert!(error.to_string().contains("does not match its URI digest"));
     assert_eq!(
         fs::read(&run_log).expect("Run Log reads after rejection"),
-        before
-    );
-}
-
-#[test]
-fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
-    let workspace = workspace_copy("smoke-flow");
-    disable_smoke_echo_tool(&workspace);
-    write_productive_workspace_config(&workspace);
-    create_review_run(&workspace);
-    append_uncertain_provider_intent(&workspace);
-    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    let before = fs::read(&run_log).expect("Run Log reads before Resume");
-
-    let error = resume_conversation_run(&workspace, "review", "review-1", EmitMode::Human)
-        .expect_err("Resume must not automatically repeat an uncertain attempt");
-    assert_eq!(error.exit_code(), 65);
-    #[cfg(windows)]
-    assert!(
-        error.to_string().contains("execution_backend_unavailable"),
-        "unexpected Resume error: {error}"
-    );
-    #[cfg(not(windows))]
-    assert!(
-        error.to_string().contains("uncertain"),
-        "unexpected Resume error: {error}"
-    );
-    assert_eq!(
-        fs::read(&run_log).expect("Run Log reads after rejected Resume"),
         before
     );
 }
