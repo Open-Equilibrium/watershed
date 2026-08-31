@@ -1,11 +1,10 @@
 use super::{
     contract::{
-        MAX_CONVERSATION_STATUS_BYTES, MAX_CONVERSATION_STATUS_RECORDS, RUN_LOG_RECORD_SCHEMA_V0,
-        RUN_LOG_RECORD_SCHEMA_V1, TOOL_RUN_LOG_PAGE_SCHEMA, protocol, validate_attempt_id,
-        validate_hash, validate_record_schema, validate_timestamp,
+        MAX_CONVERSATION_STATUS_BYTES, MAX_CONVERSATION_STATUS_RECORDS, RUN_LOG_RECORD_SCHEMA_V1,
+        TOOL_RUN_LOG_PAGE_SCHEMA, protocol, validate_attempt_id, validate_hash,
+        validate_record_schema, validate_timestamp,
     },
     conversation_stream::{read_anchored_jsonl, read_anchored_jsonl_quantum},
-    legacy_manifest::LegacySourceManifest,
     productive_storage::ensure_productive_metadata_growth,
     status::{StatusAppendKind, append_anchored_jsonl_with_status, recover_status_transaction},
     storage::{
@@ -15,8 +14,8 @@ use super::{
 use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredFile, DirectoryErrorMode},
     run_attempts::{
-        LegacyToolObservationOutcome, RunAttemptIntent, RunAttemptKind, RunAttemptLifecycle,
-        RunAttemptOutcome, RunAttemptResult, RunAttemptState,
+        RunAttemptIntent, RunAttemptKind, RunAttemptLifecycle, RunAttemptOutcome, RunAttemptResult,
+        RunAttemptState,
     },
     types::RuntimeError,
 };
@@ -49,17 +48,12 @@ pub(crate) enum RunLogRecord {
         output_reserve: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         safety_margin: Option<usize>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        legacy_session_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        legacy_source_manifest: Option<Box<LegacySourceManifest>>,
     },
     Intent {
         schema: String,
         attempt_id: String,
         attempt_kind: RunAttemptKind,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        request_hash: Option<String>,
+        request_hash: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_id: Option<String>,
         timestamp: String,
@@ -78,21 +72,6 @@ pub(crate) enum RunLogRecord {
         timestamp: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         durable_output: Option<serde_json::Value>,
-    },
-    LegacyToolObservation {
-        schema: String,
-        observation_id: String,
-        flow_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        phase_id: Option<String>,
-        tool_id: String,
-        start_sequence: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        terminal_sequence: Option<u64>,
-        outcome: LegacyToolObservationOutcome,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        exit_code: Option<i32>,
-        timestamp: String,
     },
 }
 
@@ -156,7 +135,7 @@ impl RunAttemptLedger {
             schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
             attempt_id: intent.attempt_id.clone(),
             attempt_kind: intent.attempt_kind,
-            request_hash: Some(intent.request_hash.clone()),
+            request_hash: intent.request_hash.clone(),
             tool_id: intent.tool_id.clone(),
             timestamp: intent.timestamp.clone(),
         };
@@ -168,7 +147,7 @@ impl RunAttemptLedger {
                 attempt_kind: intent.attempt_kind,
                 lifecycle: RunAttemptLifecycle::Uncertain,
                 outcome: None,
-                request_hash: Some(intent.request_hash.clone()),
+                request_hash: intent.request_hash.clone(),
                 timestamp: intent.timestamp.clone(),
                 tool_id: intent.tool_id.clone(),
             },
@@ -190,14 +169,9 @@ impl RunAttemptLedger {
                 "run attempt result contradicts its durable intent",
             ));
         }
-        let schema = if prior.request_hash.is_some() {
-            RUN_LOG_RECORD_SCHEMA_V1
-        } else {
-            RUN_LOG_RECORD_SCHEMA_V0
-        };
         let tool_id = prior.tool_id.clone();
         let record = RunLogRecord::TerminalResult {
-            schema: schema.to_owned(),
+            schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
             attempt_id: result.attempt_id.clone(),
             attempt_kind: result.attempt_kind,
             tool_id,
@@ -280,7 +254,7 @@ pub(crate) fn project_tool_run_log_page(
                 let RunLogRecord::Definition { schema, .. } = &record else {
                     return Err(protocol("run log must begin with a definition record"));
                 };
-                if schema != RUN_LOG_RECORD_SCHEMA_V0 {
+                if schema != RUN_LOG_RECORD_SCHEMA_V1 {
                     return Err(protocol("run log definition has an unsupported schema"));
                 }
             } else {
@@ -406,11 +380,6 @@ fn run_log_record_matches_tool(record: &RunLogRecord, tool_id: &str) -> Result<b
             schema,
             *attempt_kind == RunAttemptKind::Tool && record_tool_id.as_deref() == Some(tool_id),
         ),
-        RunLogRecord::LegacyToolObservation {
-            schema,
-            tool_id: record_tool_id,
-            ..
-        } => (schema, record_tool_id == tool_id),
     };
     validate_record_schema(schema)?;
     Ok(matches)
@@ -433,7 +402,7 @@ fn inspect_anchored_run_attempts(
     let Some(RunLogRecord::Definition { schema, .. }) = records.first() else {
         return Err(protocol("run log must begin with a definition record"));
     };
-    if schema != RUN_LOG_RECORD_SCHEMA_V0 {
+    if schema != RUN_LOG_RECORD_SCHEMA_V1 {
         return Err(protocol("run log definition has an unsupported schema"));
     }
     let mut order = Vec::new();
@@ -465,66 +434,6 @@ fn validate_attempt_tool_identity(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn validate_legacy_tool_observation(
-    observation_id: &str,
-    flow_id: &str,
-    phase_id: Option<&str>,
-    tool_id: &str,
-    start_sequence: u64,
-    terminal_sequence: Option<u64>,
-    outcome: LegacyToolObservationOutcome,
-    exit_code: Option<i32>,
-    timestamp: &str,
-) -> Result<(), RuntimeError> {
-    for (value, label) in [
-        (observation_id, "observation id"),
-        (flow_id, "flow id"),
-        (tool_id, "Tool id"),
-    ] {
-        if value.is_empty() {
-            return Err(protocol(format!(
-                "legacy Tool observation {label} must be non-empty"
-            )));
-        }
-    }
-    if phase_id.is_some_and(str::is_empty) {
-        return Err(protocol(
-            "legacy Tool observation phase id must be non-empty",
-        ));
-    }
-    if start_sequence == 0 {
-        return Err(protocol(
-            "legacy Tool observation start sequence must be one-based",
-        ));
-    }
-    if terminal_sequence.is_some_and(|sequence| sequence <= start_sequence) {
-        return Err(protocol(
-            "legacy Tool observation terminal sequence must follow its start sequence",
-        ));
-    }
-    match (outcome, terminal_sequence) {
-        (LegacyToolObservationOutcome::Uncertain, None) => {}
-        (LegacyToolObservationOutcome::Uncertain, Some(_)) => {
-            return Err(protocol(
-                "uncertain legacy Tool observation must not have a terminal sequence",
-            ));
-        }
-        (_, Some(_)) => {}
-        (_, None) => {
-            return Err(protocol(
-                "terminal outcome for a legacy Tool observation requires a terminal sequence",
-            ));
-        }
-    }
-    if exit_code.is_some() && outcome != LegacyToolObservationOutcome::Completed {
-        return Err(protocol(
-            "legacy Tool observation exit code requires a completed outcome",
-        ));
-    }
-    validate_timestamp(timestamp)
-}
-
 fn apply_run_attempt_record(
     record: &RunLogRecord,
     states: &mut BTreeMap<String, RunAttemptState>,
@@ -543,17 +452,7 @@ fn apply_run_attempt_record(
             timestamp,
         } => {
             validate_record_schema(schema)?;
-            match (schema.as_str(), request_hash.as_deref()) {
-                (RUN_LOG_RECORD_SCHEMA_V0, None) => {}
-                (RUN_LOG_RECORD_SCHEMA_V1, Some(hash)) => {
-                    validate_hash(hash, "run attempt request hash")?;
-                }
-                _ => {
-                    return Err(protocol(
-                        "run attempt request hash does not match its record schema",
-                    ));
-                }
-            }
+            validate_hash(request_hash, "run attempt request hash")?;
             validate_attempt_id(attempt_id)?;
             validate_timestamp(timestamp)?;
             validate_attempt_tool_identity(*attempt_kind, tool_id.as_deref())?;
@@ -590,15 +489,10 @@ fn apply_run_attempt_record(
             let state = states
                 .get_mut(attempt_id)
                 .ok_or_else(|| protocol("run attempt result has no durable intent"))?;
-            let expected_schema = if state.request_hash.is_some() {
-                RUN_LOG_RECORD_SCHEMA_V1
-            } else {
-                RUN_LOG_RECORD_SCHEMA_V0
-            };
             if state.attempt_kind != *attempt_kind
                 || state.lifecycle != RunAttemptLifecycle::Uncertain
                 || state.tool_id != *tool_id
-                || schema != expected_schema
+                || schema != RUN_LOG_RECORD_SCHEMA_V1
             {
                 return Err(protocol(
                     "run attempt result contradicts its durable intent",
@@ -606,31 +500,6 @@ fn apply_run_attempt_record(
             }
             state.lifecycle = RunAttemptLifecycle::Completed;
             state.outcome = Some(*outcome);
-        }
-        RunLogRecord::LegacyToolObservation {
-            schema,
-            observation_id,
-            flow_id,
-            phase_id,
-            tool_id,
-            start_sequence,
-            terminal_sequence,
-            outcome,
-            exit_code,
-            timestamp,
-        } => {
-            validate_record_schema(schema)?;
-            validate_legacy_tool_observation(
-                observation_id,
-                flow_id,
-                phase_id.as_deref(),
-                tool_id,
-                *start_sequence,
-                *terminal_sequence,
-                *outcome,
-                *exit_code,
-                timestamp,
-            )?;
         }
     }
     Ok(())

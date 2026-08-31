@@ -3,10 +3,7 @@ use super::{
     test_support::{absent_global_home, session_home_path, workspace_copy},
 };
 use crate::runtime::{
-    config_io::{
-        ExecutionBackend, GlobalConfig, load_global_config, require_execution_backend,
-        require_fixture_execution_backend, resume_event_clock,
-    },
+    config_io::{ExecutionBackend, GlobalConfig, load_global_config, require_execution_backend},
     context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
     fs_guards::AnchoredWorkspace,
     instructions::read_applicable_agent_instructions,
@@ -397,10 +394,13 @@ fn fixture_global_config_rejects_productive_backend_fields() {
 }
 
 #[test]
-fn execution_backend_helpers_preserve_fixture_and_productive_boundaries() {
+fn execution_backend_preserves_fixture_and_productive_boundaries() {
     let _workspace = workspace_copy("smoke-flow");
     let fixture = load_global_config().expect("fixture config loads");
-    require_fixture_execution_backend(&fixture).expect("fixture backend is accepted");
+    assert_eq!(
+        require_execution_backend(&fixture).expect("fixture backend is accepted"),
+        ExecutionBackend::Fixture
+    );
 
     fs::write(
         global_config_path(),
@@ -409,18 +409,9 @@ fn execution_backend_helpers_preserve_fixture_and_productive_boundaries() {
     .expect("productive config writes");
     let productive = load_global_config().expect("productive config loads");
     assert!(matches!(
-        require_fixture_execution_backend(&productive),
-        Err(RuntimeError::ExecutionBackendUnavailable)
+        require_execution_backend(&productive),
+        Ok(ExecutionBackend::OpenAiCodex { .. })
     ));
-
-    let fixture_clock = EventClock::fixed_fixture();
-    let recorded_clock = EventClock {
-        base_unix_seconds: 1_700_000_000,
-    };
-    assert_eq!(
-        resume_event_clock(&fixture, recorded_clock).expect("fixture resume clock resolves"),
-        fixture_clock
-    );
 }
 
 #[test]

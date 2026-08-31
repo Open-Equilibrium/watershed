@@ -17,9 +17,6 @@ fn verify_productive_model_profile(
     model: &str,
     profile: crate::runtime::context::ContextModelProfile,
 ) -> Result<(), RuntimeError> {
-    if recorded.legacy_definition {
-        return Ok(());
-    }
     if recorded.model.as_deref() == Some(model)
         && recorded.model_profile_id.as_deref() == Some(profile.id)
         && recorded.model_context_limit == Some(profile.context_limit)

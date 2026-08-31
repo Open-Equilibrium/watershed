@@ -27,10 +27,7 @@ mod stub_provider;
 use stub_provider::{emit_stub_provider_turn, stub_phase_result, stub_provider_requests_tools};
 
 pub(super) fn should_terminalize_runtime_error(side_effect_mode: ToolSideEffectMode) -> bool {
-    matches!(
-        side_effect_mode,
-        ToolSideEffectMode::Apply | ToolSideEffectMode::Resume { .. }
-    )
+    side_effect_mode == ToolSideEffectMode::Apply
 }
 
 pub(super) fn should_terminalize_error(

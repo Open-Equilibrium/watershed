@@ -32,8 +32,6 @@ pub(crate) mod policy_resolution;
 pub(crate) mod productive;
 pub(crate) mod productive_capacity;
 pub(crate) mod responses;
-pub(crate) mod resume;
-pub(crate) mod resume_inspection;
 pub(crate) mod run_attempts;
 pub(crate) mod run_input;
 pub(crate) mod segmented_appender;
@@ -62,8 +60,8 @@ pub use auth::{
     AuthLoginMode, AuthStatus, login_openai_codex, logout_openai_codex, openai_codex_auth_status,
 };
 pub use authoring::{
-    create_global_registry_block, import_global_config_from_workspace, initialize_global_config,
-    read_authoring_file, validate_global_registry,
+    create_global_registry_block, initialize_global_config, read_authoring_file,
+    validate_global_registry,
 };
 pub use cancellation::{
     ProductiveInterruptAction, begin_productive_operation, request_productive_interrupt,

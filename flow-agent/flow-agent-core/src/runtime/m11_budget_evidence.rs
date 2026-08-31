@@ -51,8 +51,6 @@ pub enum M11BudgetWorkloadId {
     ConversationStatusPage,
     /// Bounded Run Log projection page.
     RunLogProjectionPage,
-    /// One Conversation migration quantum.
-    ConversationMigrationQuantum,
     /// One Conversation replay quantum.
     ConversationReplayQuantum,
     /// Full Run streaming replay.
@@ -77,7 +75,6 @@ impl M11BudgetWorkloadId {
             Self::AuthoringMaxRegistryValidate => "authoring_max_registry_validate",
             Self::ConversationStatusPage => "conversation_status_page",
             Self::RunLogProjectionPage => "run_log_projection_page",
-            Self::ConversationMigrationQuantum => "conversation_migration_quantum",
             Self::ConversationReplayQuantum => "conversation_replay_quantum",
             Self::ConversationFullRunStreamingReplay => "conversation_full_run_streaming_replay",
             Self::ConversationHistoryValidationQuantum => "conversation_history_validation_quantum",
@@ -192,8 +189,7 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
             "canonical_output_bytes": MAX_CONVERSATION_STATUS_BYTES,
             "next_record_behind_cursor": true,
         }),
-        M11BudgetWorkloadId::ConversationMigrationQuantum
-        | M11BudgetWorkloadId::ConversationReplayQuantum => json!({
+        M11BudgetWorkloadId::ConversationReplayQuantum => json!({
             "stored_input_bytes": MAX_CONVERSATION_SCAN_BYTES,
             "records": MAX_CONVERSATION_SCAN_BYTES / MAX_CONVERSATION_RECORD_BYTES as u64,
             "stored_bytes_per_record": MAX_CONVERSATION_RECORD_BYTES,
@@ -226,7 +222,7 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
 }
 
 /// The exact finite set of observational workloads selected for M1.1.
-pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 15] = [
+pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 14] = [
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RssDetectionFixture,
     },
@@ -256,9 +252,6 @@ pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 15] = [
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunLogProjectionPage,
-    },
-    M11BudgetWorkload {
-        id: M11BudgetWorkloadId::ConversationMigrationQuantum,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationReplayQuantum,
@@ -314,17 +307,8 @@ pub fn run_m11_budget_workload(
         M11BudgetWorkloadId::RunLogProjectionPage => {
             conversations::run_log_projection_page(temp_root)
         }
-        M11BudgetWorkloadId::ConversationMigrationQuantum => {
-            conversations::conversation_operation_quantum(
-                temp_root,
-                conversations::QuantumKind::Migration,
-            )
-        }
         M11BudgetWorkloadId::ConversationReplayQuantum => {
-            conversations::conversation_operation_quantum(
-                temp_root,
-                conversations::QuantumKind::Replay,
-            )
+            conversations::conversation_replay_quantum(temp_root)
         }
         M11BudgetWorkloadId::ConversationFullRunStreamingReplay => {
             conversations::conversation_full_run_streaming_replay(temp_root)

@@ -393,21 +393,4 @@ fn protocol_accepts_multiple_message_deltas_in_one_leaf_phase() {
     )
     .expect("a second same-role message delta is valid");
     assert_eq!(appended.len(), 1);
-
-    let active_tool = [
-        session_event_line("meta001", "evt-001", EventType::SessionStarted, 1),
-        flow_started_line("evt-002", 2),
-        phase_entered_line("evt-003", 3),
-        tool_started_line("evt-004", 4),
-    ]
-    .concat();
-    let events = validate_protocol_jsonl_text(Path::new("active-tool.jsonl"), &active_tool)
-        .expect("non-terminal stream may leave a started tool");
-    let state = SessionAppendValidationState::from_prior_events(
-        Path::new("active-tool.jsonl"),
-        "meta001",
-        &events,
-    )
-    .expect("active tool state validates");
-    assert_eq!(state.tool_without_progress(), Some("tool"));
 }

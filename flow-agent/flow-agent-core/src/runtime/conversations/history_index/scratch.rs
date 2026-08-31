@@ -29,7 +29,6 @@ const INDEX_SCHEMA: &str = "flow-conversation-history-validation-v1";
 const INDEX_MARKER_LIMIT: u64 = 4096;
 const LEASE_LEAF: &str = "lease";
 const MARKER_LEAF: &str = "marker.json";
-pub(super) const ANCESTRY_LEAF: &str = "ancestry.bin";
 const INDEX_RUN_PREFIX: &str = "g";
 const EVENT_POINTER_RUN_PREFIX: &str = "pointer-";
 const EVENT_IDENTIFIER_RUN_PREFIX: &str = "event-ident-";
@@ -638,7 +637,6 @@ fn valid_scratch_leaf(leaf: &str) -> bool {
 fn valid_scratch_member(member: &str) -> bool {
     member == MARKER_LEAF
         || member == LEASE_LEAF
-        || member == ANCESTRY_LEAF
         || valid_scratch_run_member(member)
         || member
             .strip_prefix(EVENT_POINTER_RUN_PREFIX)

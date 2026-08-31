@@ -6,7 +6,7 @@ use super::{
 use crate::runtime::{
     auth::resolve_openai_codex_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
-    conversations::{migrate_legacy_session_if_present, reserve_conversation_continuation},
+    conversations::reserve_conversation_continuation,
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
@@ -147,10 +147,6 @@ where
     };
     let _activation = activate(true)?;
     reconcile_productive_preflight(platform_preflight())?;
-    reconcile_productive_preflight(migrate_legacy_session_if_present(
-        workspace,
-        conversation_id,
-    ))?;
     let reservation = reconcile_productive_preflight(reserve_conversation_continuation(
         workspace,
         conversation_id,

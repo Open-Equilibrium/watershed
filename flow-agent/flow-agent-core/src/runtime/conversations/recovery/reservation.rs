@@ -4,7 +4,7 @@ use super::super::{
         CONVERSATION_RUNS_DIR, RUN_CONTEXTS_STEM, RUN_EVENTS_LEAF, RUN_EVENTS_STEM,
         RUN_OBJECTS_DIR, RUN_SESSION_LOCK_LEAF, protocol, validate_id,
     },
-    history_index::{CONVERSATION_ENTRY_SCHEMA_V1, with_conversation_history_index},
+    history_index::with_conversation_history_index,
     lifecycle::{
         conversation_candidate_is_occupied, reclaim_unpublished_productive_run, reconcile_releases,
     },
@@ -32,14 +32,12 @@ use crate::runtime::{
 use std::path::Path;
 
 use super::selection::{
-    conversation_entry_ancestry_history, conversation_run_definition,
-    read_productive_recovery_header, selected_entry_recovery_history,
+    conversation_run_definition, read_productive_recovery_header, selected_entry_recovery_history,
 };
 
 pub(crate) struct ProductiveConversationReservation {
     conversation_id: String,
     conversation_lease: SessionOwnershipLease,
-    legacy_lease: SessionOwnershipLease,
     parent_entry_id: Option<String>,
     prior_history: ContextHistory,
     prior_event_count: usize,
@@ -69,7 +67,6 @@ struct ProductiveContinuationReservationState {
 }
 
 struct ConversationRunOwnership {
-    legacy: SessionOwnershipLease,
     conversation: SessionOwnershipLease,
     run: SessionOwnershipLease,
 }
@@ -81,36 +78,20 @@ impl ConversationRunOwnership {
         run_session_id: &str,
         marker: &Path,
     ) -> Result<Self, RuntimeError> {
-        let legacy = SessionOwnershipLease::acquire(workspace, conversation_id, marker)?;
         let conversation_key = conversation_ownership_key(conversation_id);
-        let conversation =
-            match SessionOwnershipLease::acquire(workspace, &conversation_key, marker) {
-                Ok(lease) => lease,
-                Err(error) => {
-                    return reconcile_operation_and_cleanup(Err(error), legacy.release());
-                }
-            };
+        let conversation = SessionOwnershipLease::acquire(workspace, &conversation_key, marker)?;
         let run_key = run_ownership_key(conversation_id, run_session_id);
         let run = match SessionOwnershipLease::acquire(workspace, &run_key, marker) {
             Ok(lease) => lease,
             Err(error) => {
-                let release = reconcile_releases(Ok(()), conversation.release(), legacy.release());
-                return reconcile_operation_and_cleanup(Err(error), release);
+                return reconcile_operation_and_cleanup(Err(error), conversation.release());
             }
         };
-        Ok(Self {
-            legacy,
-            conversation,
-            run,
-        })
+        Ok(Self { conversation, run })
     }
 
     fn release(self) -> Result<(), RuntimeError> {
-        reconcile_releases(
-            self.run.release(),
-            self.conversation.release(),
-            self.legacy.release(),
-        )
+        reconcile_releases(self.run.release(), self.conversation.release())
     }
 }
 
@@ -150,8 +131,7 @@ impl ProductiveConversationReservation {
     pub(crate) fn release(self) -> Result<(), RuntimeError> {
         let run = self.run_lease.release();
         let conversation = self.conversation_lease.release();
-        let legacy = self.legacy_lease.release();
-        reconcile_releases(run, conversation, legacy)
+        reconcile_releases(run, conversation)
     }
 }
 
@@ -196,14 +176,12 @@ pub(crate) fn reserve_new_conversation_run(
             }
         }
         let ConversationRunOwnership {
-            legacy: legacy_lease,
             conversation: conversation_lease,
             run: run_lease,
         } = ownership;
         return Ok(ProductiveConversationReservation {
             conversation_id: candidate.clone(),
             conversation_lease,
-            legacy_lease,
             parent_entry_id: None,
             prior_history: ContextHistory::default(),
             prior_event_count: 0,
@@ -235,15 +213,8 @@ pub(crate) fn reserve_conversation_continuation(
         .join(CONVERSATION_RUNS_DIR)
         .join(conversation_id)
         .join(RUN_SESSION_LOCK_LEAF);
-    let legacy_lease = SessionOwnershipLease::acquire(workspace, conversation_id, &marker)?;
     let conversation_key = conversation_ownership_key(conversation_id);
-    let conversation_lease =
-        match SessionOwnershipLease::acquire(workspace, &conversation_key, &marker) {
-            Ok(lease) => lease,
-            Err(error) => {
-                return reconcile_operation_and_cleanup(Err(error), legacy_lease.release());
-            }
-        };
+    let conversation_lease = SessionOwnershipLease::acquire(workspace, &conversation_key, &marker)?;
 
     let operation = with_conversation_history_index(
         workspace,
@@ -252,7 +223,7 @@ pub(crate) fn reserve_conversation_continuation(
         None,
         #[cfg(test)]
         None,
-        |index, summary| {
+        |_index, summary| {
             let selected = match from_entry_id {
                 Some(entry_id) => summary.selected.ok_or_else(|| {
                     RuntimeError::PersistedState(format!(
@@ -265,19 +236,10 @@ pub(crate) fn reserve_conversation_continuation(
                     ))
                 })?,
             };
-            let (prior_history, prior_event_count) = if selected.schema
-                == CONVERSATION_ENTRY_SCHEMA_V1
-            {
-                selected_entry_recovery_history(workspace, conversation_id, &selected)?
-            } else {
-                conversation_entry_ancestry_history(workspace, conversation_id, index, &selected)?
-            };
-            let recorded_definition = conversation_run_definition(
-                workspace,
-                conversation_id,
-                &selected.run_session_id,
-                Some(&selected),
-            )?;
+            let (prior_history, prior_event_count) =
+                selected_entry_recovery_history(workspace, conversation_id, &selected)?;
+            let recorded_definition =
+                conversation_run_definition(workspace, conversation_id, &selected.run_session_id)?;
             let runs = required_child(
                 &conversation,
                 CONVERSATION_RUNS_DIR,
@@ -335,7 +297,6 @@ pub(crate) fn reserve_conversation_continuation(
         Ok(state) => Ok(ProductiveConversationReservation {
             conversation_id: conversation_id.to_owned(),
             conversation_lease,
-            legacy_lease,
             parent_entry_id: Some(state.parent_entry_id),
             prior_history: state.prior_history,
             prior_event_count: state.prior_event_count,
@@ -345,11 +306,7 @@ pub(crate) fn reserve_conversation_continuation(
             run_lease: state.run_lease,
             run_session_id: state.run_session_id,
         }),
-        Err(error) => {
-            let release =
-                reconcile_releases(Ok(()), conversation_lease.release(), legacy_lease.release());
-            reconcile_operation_and_cleanup(Err(error), release)
-        }
+        Err(error) => reconcile_operation_and_cleanup(Err(error), conversation_lease.release()),
     }
 }
 
@@ -364,7 +321,6 @@ pub(crate) fn reserve_conversation_run_recovery(
     SessionOwnershipLease::ensure_store_available(workspace)?;
     let marker = run.file(RUN_SESSION_LOCK_LEAF);
     let ConversationRunOwnership {
-        legacy: legacy_lease,
         conversation: conversation_lease,
         run: run_lease,
     } = ConversationRunOwnership::acquire(
@@ -434,7 +390,7 @@ pub(crate) fn reserve_conversation_run_recovery(
             unreachable!("recovery header reader only returns Header records")
         };
         let recorded_definition =
-            conversation_run_definition(workspace, conversation_id, run_session_id, None)?;
+            conversation_run_definition(workspace, conversation_id, run_session_id)?;
         if recorded_definition.flow_definition_id.as_deref() != Some(&flow_definition_id)
             || recorded_definition.registry_hash.as_deref() != Some(&registry_hash)
             || recorded_definition.flow_definition_hash.as_deref() != Some(&flow_definition_hash)
@@ -476,7 +432,6 @@ pub(crate) fn reserve_conversation_run_recovery(
         Ok(state) => Ok(ProductiveConversationReservation {
             conversation_id: conversation_id.to_owned(),
             conversation_lease,
-            legacy_lease,
             parent_entry_id: state.parent_entry_id,
             prior_history: state.prior_history,
             prior_event_count: state.prior_event_count,
@@ -487,11 +442,7 @@ pub(crate) fn reserve_conversation_run_recovery(
             run_session_id: run_session_id.to_owned(),
         }),
         Err(error) => {
-            let release = reconcile_releases(
-                run_lease.release(),
-                conversation_lease.release(),
-                legacy_lease.release(),
-            );
+            let release = reconcile_releases(run_lease.release(), conversation_lease.release());
             reconcile_operation_and_cleanup(Err(error), release)
         }
     }

@@ -176,49 +176,6 @@ fn session_object_retry_and_reopen_preserve_accounting() {
     fs::remove_dir_all(workspace).expect("workspace removed");
 }
 
-#[test]
-fn session_object_preflight_rejects_the_persisted_total_before_writing() {
-    let workspace = empty_workspace("session-object-preflight-total");
-    let reservation =
-        reserve_session_log(&workspace, "objectpreflight001").expect("session reserved");
-    let bytes = b"xx".to_vec();
-    let object = ContextObject {
-        digest: sha256_hex(&bytes),
-        bytes,
-    };
-    let object_path = crate::tests::helpers::workspace_session_dir(&workspace).join(format!(
-        "{}.object.sha256-{}",
-        reservation.session_id, object.digest
-    ));
-    let mut writer = SessionObjectWriter::open(
-        reservation.session_path.parent.clone(),
-        &reservation.session_id,
-    )
-    .expect("object writer opens");
-    writer.accounted_bytes = MAX_SESSION_OBJECT_TOTAL_BYTES - 1;
-
-    let preflight_error = writer
-        .preflight_all(std::slice::from_ref(&object))
-        .expect_err("preflight rejects an object above the persisted total budget");
-
-    assert!(
-        preflight_error.to_string().contains("object data size"),
-        "{preflight_error}"
-    );
-    assert_eq!(writer.accounted_bytes, MAX_SESSION_OBJECT_TOTAL_BYTES - 1);
-    let mut write_attempted = false;
-    let persist_error = writer
-        .persist_with(&object, |_path, _bytes| {
-            write_attempted = true;
-            Ok(())
-        })
-        .expect_err("persistence rejects the same total budget");
-    assert_eq!(persist_error.to_string(), preflight_error.to_string());
-    assert!(!write_attempted, "the rejected object must not be written");
-    assert!(!object_path.exists());
-    reservation.rollback().expect("reservation rolls back");
-}
-
 fn fill_session_object_inventory(
     writer: &mut SessionObjectWriter,
     count: usize,
@@ -444,46 +401,6 @@ fn session_object_partial_batch_publication_remains_accounted() {
         !retry_write_attempted,
         "the over-limit retry fails before writing"
     );
-
-    reservation.rollback().expect("reservation rolls back");
-}
-
-#[test]
-fn session_object_count_preflight_is_transactional_and_matches_persistence() {
-    let workspace = empty_workspace("session-object-count-preflight");
-    let reservation =
-        reserve_session_log(&workspace, "objectcountpreflight001").expect("session reserved");
-    let bytes = b"new object above the limit".to_vec();
-    let object = ContextObject {
-        digest: sha256_hex(&bytes),
-        bytes,
-    };
-    let mut writer = SessionObjectWriter::open(
-        reservation.session_path.parent.clone(),
-        &reservation.session_id,
-    )
-    .expect("writer opens");
-    fill_session_object_inventory(&mut writer, MAX_SESSION_OBJECTS, None);
-    let accounted_bytes = writer.accounted_bytes;
-    let object_count = writer.object_count;
-    let preflight_object_count = writer.preflight_object_count;
-
-    let preflight_error = writer
-        .preflight_all(std::slice::from_ref(&object))
-        .expect_err("preflight rejects the excess digest");
-    assert_eq!(writer.accounted_bytes, accounted_bytes);
-    assert_eq!(writer.object_count, object_count);
-    assert_eq!(writer.preflight_object_count, preflight_object_count);
-
-    let mut write_attempted = false;
-    let persist_error = writer
-        .persist_with(&object, |_path, _bytes| {
-            write_attempted = true;
-            Ok(())
-        })
-        .expect_err("persistence rejects the same excess digest");
-    assert_eq!(persist_error.to_string(), preflight_error.to_string());
-    assert!(!write_attempted);
 
     reservation.rollback().expect("reservation rolls back");
 }

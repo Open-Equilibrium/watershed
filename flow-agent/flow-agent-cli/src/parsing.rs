@@ -141,7 +141,6 @@ pub(crate) fn usage() -> String {
             "Usage:\n",
             "  flow run <flow> [--inputs <file|->] [--emit jsonl]\n",
             "  flow init [--registry-root PATH]\n",
-            "  flow import <legacy-workspace>\n",
             "  flow validate [FLOW_REF]\n",
             "  flow create <tool|instruction|phase|flow> --help\n",
             "  {auth}\n",

@@ -1,15 +1,8 @@
 use crate::runtime::{
     digest::prefixed_sha256_hex,
-    fs_guards::{
-        AnchoredDir, AnchoredFile, ensure_anchored_real_file, path_io_error,
-        read_anchored_to_string_with_limit,
-    },
-    session_bundle::SessionBundlePaths,
-    types::{MAX_SESSION_METADATA_BYTES, RuntimeError},
+    fs_guards::{AnchoredFile, path_io_error},
+    types::RuntimeError,
 };
-#[cfg(test)]
-use crate::runtime::{fs_guards::open_runtime_dir, types::LOG_STORAGE_DIR};
-use std::{io, path::Path};
 
 pub struct SessionDefinitionMetadata {
     pub(crate) flow_definition_id: String,
@@ -27,27 +20,6 @@ pub struct SessionLogMetadata {
     pub(crate) model_context_limit: Option<usize>,
     pub(crate) output_reserve: Option<usize>,
     pub(crate) safety_margin: Option<usize>,
-    pub(crate) legacy_definition: bool,
-}
-
-pub fn resumable_flow_id(
-    path: &Path,
-    session_id: &str,
-    event_flow_id: Option<&str>,
-    metadata: &SessionLogMetadata,
-) -> Result<String, RuntimeError> {
-    let recorded_flow_id = metadata.flow_definition_id.as_deref().ok_or_else(|| {
-        RuntimeError::Protocol(format!(
-            "session {session_id} registry drift: missing flow_definition_id metadata"
-        ))
-    })?;
-    if event_flow_id.is_some_and(|event_flow_id| event_flow_id != recorded_flow_id) {
-        return Err(RuntimeError::Protocol(format!(
-            "{} session {session_id} flow definition metadata does not match durable events",
-            path.display()
-        )));
-    }
-    Ok(recorded_flow_id.to_owned())
 }
 
 pub fn session_definition_metadata(
@@ -67,21 +39,6 @@ pub fn session_definition_metadata(
 
 pub fn sha256_hash_text(bytes: &[u8]) -> String {
     prefixed_sha256_hex(bytes)
-}
-
-#[cfg(test)]
-pub fn verify_resume_definition_metadata(
-    workspace: &Path,
-    session_id: &str,
-    registry: &core_script::ResolvedRegistry,
-    flow_block: &core_script::FlowBlock,
-) -> Result<(), RuntimeError> {
-    // WHY: resume hashes bind a partial session to the registry definitions that produced
-    // it; incomplete metadata cannot prove the prefix matches the current registry.
-    let logs = open_runtime_dir(workspace, LOG_STORAGE_DIR)?
-        .ok_or_else(|| missing_definition_metadata(session_id))?;
-    let metadata = require_anchored_session_log_metadata(&logs, session_id)?;
-    verify_resume_definition_metadata_values(session_id, &metadata, registry, flow_block)
 }
 
 pub fn verify_resume_definition_metadata_values(
@@ -118,26 +75,6 @@ pub fn verify_resume_definition_metadata_values(
     Ok(())
 }
 
-pub fn require_anchored_session_log_metadata(
-    logs: &AnchoredDir,
-    session_id: &str,
-) -> Result<SessionLogMetadata, RuntimeError> {
-    let path = SessionBundlePaths::metadata_in(logs, session_id);
-    if let Some(alias) = ascii_case_alias(&path)? {
-        return Err(RuntimeError::Protocol(format!(
-            "{} contains non-canonical session metadata name {}",
-            logs.path.display(),
-            alias.leaf.display()
-        )));
-    }
-    ensure_anchored_real_file(&path)
-        .map_err(|error| map_missing_definition_metadata(error, session_id))?;
-    parse_session_log_metadata(&read_anchored_to_string_with_limit(
-        &path,
-        MAX_SESSION_METADATA_BYTES,
-    )?)
-}
-
 pub fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, RuntimeError> {
     let expected = path
         .leaf
@@ -165,40 +102,4 @@ pub fn ascii_case_alias(path: &AnchoredFile) -> Result<Option<AnchoredFile>, Run
         }
     }
     Ok(None)
-}
-
-pub fn map_missing_definition_metadata(error: RuntimeError, session_id: &str) -> RuntimeError {
-    if matches!(
-        &error,
-        RuntimeError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound
-    ) {
-        missing_definition_metadata(session_id)
-    } else {
-        error
-    }
-}
-
-pub fn missing_definition_metadata(session_id: &str) -> RuntimeError {
-    RuntimeError::Protocol(format!(
-        "session {session_id} registry drift: missing definition metadata"
-    ))
-}
-
-pub fn parse_session_log_metadata(text: &str) -> Result<SessionLogMetadata, RuntimeError> {
-    let mut metadata = SessionLogMetadata::default();
-    for (line_number, line) in text.lines().enumerate() {
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(RuntimeError::Protocol(format!(
-                "session metadata line {} is not key=value",
-                line_number + 1
-            )));
-        };
-        match key {
-            "flow_definition_id" => metadata.flow_definition_id = Some(value.to_owned()),
-            "registry_hash" => metadata.registry_hash = Some(value.to_owned()),
-            "flow_definition_hash" => metadata.flow_definition_hash = Some(value.to_owned()),
-            _ => {}
-        }
-    }
-    Ok(metadata)
 }

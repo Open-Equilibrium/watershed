@@ -45,7 +45,7 @@ fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
             "provider_output_objects": [
                 "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
             ],
-            "schema": "flow-provider-output-v1"
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_result(&workspace, "review", "review-1", &result)
@@ -141,8 +141,10 @@ fn productive_recovery_round_trips_every_committed_boundary() {
         exit_code: None,
         timestamp: "2026-01-01T00:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_intent(&workspace, "review", "review-1", &intent)
@@ -245,8 +247,10 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
         exit_code: None,
         timestamp: "2026-07-30T12:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_intent(
@@ -316,8 +320,10 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
                 exit_code: None,
                 timestamp: "2026-07-30T12:00:03Z".to_owned(),
                 durable_output: Some(serde_json::json!({
-                    "provider_output_objects": [],
-                    "schema": "flow-provider-output-v1"
+                    "provider_output_objects": [
+                        "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    ],
+                    "schema": "flow-provider-output-v2"
                 })),
             },
         )
@@ -665,8 +671,10 @@ fn header_only_recovery_with_completed_attempt(
         exit_code: None,
         timestamp: "2026-08-16T12:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_result(&workspace, "review", "review-1", &result)

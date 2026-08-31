@@ -111,13 +111,6 @@ pub(crate) fn open_flow_agent_home_at(
     Ok(home)
 }
 
-pub(crate) fn open_flow_agent_home_parent(
-    read_only: bool,
-) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {
-    let path = flow_agent_home_path()?;
-    open_flow_agent_home_parent_at(&path, read_only)
-}
-
 pub(crate) fn open_flow_agent_home_parent_at(
     path: &Path,
     read_only: bool,

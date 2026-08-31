@@ -47,10 +47,6 @@ pub enum EventType {
     PhaseCompleted,
     /// A phase iteration failed without looping or transitioning.
     PhaseFailed,
-    /// An M1 legacy step started.
-    StepStarted,
-    /// An M1 legacy step completed.
-    StepCompleted,
     /// Assistant message content chunk.
     MessageDelta,
     /// Assistant message completed.
@@ -77,7 +73,7 @@ pub enum EventType {
 
 impl EventType {
     /// Every v0 event type in canonical protocol order.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 22] = [
         Self::SessionStarted,
         Self::SessionPaused,
         Self::SessionResumed,
@@ -89,8 +85,6 @@ impl EventType {
         Self::PhaseEntered,
         Self::PhaseCompleted,
         Self::PhaseFailed,
-        Self::StepStarted,
-        Self::StepCompleted,
         Self::MessageDelta,
         Self::MessageCompleted,
         Self::ToolStarted,
@@ -114,8 +108,6 @@ impl EventType {
                 | Self::PhaseEntered
                 | Self::PhaseCompleted
                 | Self::PhaseFailed
-                | Self::StepStarted
-                | Self::StepCompleted
                 | Self::MessageDelta
                 | Self::MessageCompleted
                 | Self::ToolStarted
@@ -142,8 +134,6 @@ impl EventType {
             Self::PhaseEntered => "phase.entered",
             Self::PhaseCompleted => "phase.completed",
             Self::PhaseFailed => "phase.failed",
-            Self::StepStarted => "step.started",
-            Self::StepCompleted => "step.completed",
             Self::MessageDelta => "message.delta",
             Self::MessageCompleted => "message.completed",
             Self::ToolStarted => "tool.started",

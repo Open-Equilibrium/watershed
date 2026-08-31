@@ -1,4 +1,4 @@
-use super::{PROVIDER_ERROR_SCHEMA_V0, PROVIDER_OUTPUT_SCHEMA_V1, PROVIDER_OUTPUT_SCHEMA_V2};
+use super::{PROVIDER_ERROR_SCHEMA_V0, PROVIDER_OUTPUT_SCHEMA_V2};
 use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
@@ -151,15 +151,12 @@ pub(crate) fn provider_turn_from_durable_output(
 ) -> Result<ProviderTurn, RuntimeError> {
     let reference: ProviderOutputReference =
         serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
-    let token_usage = match reference.schema.as_str() {
-        PROVIDER_OUTPUT_SCHEMA_V1 if reference.token_usage.is_none() => None,
-        PROVIDER_OUTPUT_SCHEMA_V2 => reference.token_usage,
-        _ => {
-            return Err(RuntimeError::Protocol(
-                "recovered provider output has an unsupported schema".to_owned(),
-            ));
-        }
-    };
+    if reference.schema != PROVIDER_OUTPUT_SCHEMA_V2 {
+        return Err(RuntimeError::Protocol(
+            "recovered provider output has an unsupported schema".to_owned(),
+        ));
+    }
+    let token_usage = reference.token_usage;
     if reference.provider_output_objects.is_empty() {
         return Err(RuntimeError::Protocol(
             "recovered provider output has an unsupported schema".to_owned(),

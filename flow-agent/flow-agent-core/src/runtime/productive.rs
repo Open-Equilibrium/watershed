@@ -52,7 +52,6 @@ pub(crate) use tool::{recovered_tool_terminal, tool_result_value, tool_terminal}
 
 const PROVIDER_CANCELLED_SCHEMA_V0: &str = "flow-provider-cancelled-v0";
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
-const PROVIDER_OUTPUT_SCHEMA_V1: &str = "flow-provider-output-v1";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
 const TOOL_ATTEMPT_OUTPUT_SCHEMA_V0: &str = "flow-tool-attempt-output-v0";
 

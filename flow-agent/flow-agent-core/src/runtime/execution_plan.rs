@@ -24,6 +24,7 @@ pub struct RuntimeExecution {
     pub(crate) actions: Arc<Vec<FlowExecutionAction>>,
 }
 
+#[cfg(test)]
 impl RuntimeExecution {
     pub(crate) fn matches_plan(&self, plan: &FlowExecutionPlan) -> bool {
         self.events == plan.execution.events
@@ -265,25 +266,19 @@ pub struct PlannedToolContext<'a> {
 pub enum ToolSideEffectMode {
     Apply,
     Plan,
-    PreflightResume { prefix_event_count: u64 },
-    Resume { prefix_event_count: u64 },
 }
 
 impl ToolSideEffectMode {
-    pub(crate) fn should_execute_tool(self, completed_sequence: u64) -> bool {
+    pub(crate) fn should_execute_tool(self, _completed_sequence: u64) -> bool {
         match self {
             Self::Apply => true,
             Self::Plan => false,
-            Self::PreflightResume { .. } => false,
-            Self::Resume { prefix_event_count } => completed_sequence > prefix_event_count,
         }
     }
 
     pub(crate) fn should_preflight_tool(self, completed_sequence: u64) -> bool {
-        match self {
-            Self::PreflightResume { prefix_event_count } => completed_sequence > prefix_event_count,
-            Self::Apply | Self::Plan | Self::Resume { .. } => false,
-        }
+        let _ = completed_sequence;
+        false
     }
 }
 

@@ -23,9 +23,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod resume;
-pub use resume::{ResumeEventSink, ResumePreflightSink, RuntimePrefixSink};
-
 #[cfg(test)]
 type PostWriterFinishObserver = Box<dyn FnOnce(&AnchoredFile)>;
 

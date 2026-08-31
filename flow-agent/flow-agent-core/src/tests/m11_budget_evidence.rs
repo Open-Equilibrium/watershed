@@ -33,7 +33,6 @@ fn m11_performance_evidence_contract_is_the_exact_selected_set() {
         "authoring_max_registry_validate",
         "conversation_status_page",
         "run_log_projection_page",
-        "conversation_migration_quantum",
         "conversation_replay_quantum",
         "conversation_full_run_streaming_replay",
         "conversation_history_validation_quantum",

@@ -1,9 +1,10 @@
 use super::super::{
-    helpers::empty_workspace,
+    helpers::{empty_workspace, workspace_session_dir},
     test_support::{self},
 };
-use super::{create_review_run, create_terminal_review_run};
+use super::{create_conversation_run, create_review_run, create_terminal_review_run};
 use crate::runtime::{
+    session::run_flow,
     session_authority::SessionOwnershipLease,
     session_reading::{
         SessionEventReader, replay_conversation_run, replay_conversation_run_streaming,
@@ -27,6 +28,34 @@ fn human_conversation_replay_uses_run_terminology() {
         .expect("terminal conversation Run replays");
 
     assert_eq!(output.stdout, "run review-1 replayed\n");
+}
+
+#[test]
+fn same_id_fixture_fallback_refuses_an_existing_productive_conversation() {
+    let workspace = test_support::workspace_copy("smoke-flow");
+    run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
+    let fixture_path = workspace_session_dir(&workspace).join("smoke-flow.jsonl");
+    let fixture_before = fs::read(&fixture_path).expect("fixture stream reads");
+    create_conversation_run(
+        &workspace,
+        "smoke-flow",
+        "other-run",
+        "review-flow",
+        super::REGISTRY_HASH,
+        super::FLOW_HASH,
+    )
+    .expect("productive conversation with a distinct Run is created");
+
+    let error = replay_conversation_run(&workspace, "smoke-flow", "smoke-flow", EmitMode::Jsonl)
+        .expect_err("an existing productive conversation must not fall back to Fixture data");
+
+    assert!(
+        matches!(error, RuntimeError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound)
+    );
+    assert_eq!(
+        fs::read(fixture_path).expect("fixture stream remains readable"),
+        fixture_before
+    );
 }
 
 #[test]

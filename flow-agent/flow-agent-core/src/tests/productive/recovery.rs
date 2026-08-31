@@ -47,14 +47,6 @@ fn productive_recovery_rejects_incomplete_or_mismatched_attempts_before_redispat
             "completed",
             None,
         )),
-        InjectedAttemptRecovery::ProviderResult(provider_result(
-            RunAttemptKind::Provider,
-            "completed",
-            Some(serde_json::json!({
-                "provider_output_objects": [],
-                "schema": "flow-provider-output-v1",
-            })),
-        )),
     ];
 
     for mut recovery in recoveries {

@@ -36,8 +36,6 @@ pub enum EventStateIdentifierKind {
     PhaseExecution,
     /// Phase definition identifier.
     Phase,
-    /// Legacy Step identifier.
-    Step,
     /// Tool definition identifier.
     Tool,
     /// Tool attempt identifier.

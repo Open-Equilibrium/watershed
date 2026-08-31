@@ -6,11 +6,7 @@ use super::{
 use crate::runtime::{
     auth::resolve_openai_codex_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
-    conversations::{
-        RUN_EVENTS_LEAF, existing_anchored_run, legacy_flat_compatibility_is_available,
-        migrate_legacy_session, migrate_legacy_session_if_present,
-        reserve_conversation_run_recovery,
-    },
+    conversations::reserve_conversation_run_recovery,
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
@@ -19,86 +15,6 @@ use crate::runtime::{
     types::{EmitMode, RunOutput, RuntimeError},
 };
 use std::path::Path;
-
-fn resume_legacy_conversation_run_if_present(
-    workspace: &Path,
-    conversation_id: &str,
-    run_session_id: &str,
-    notifier: Option<LiveEventNotifier>,
-    capture_jsonl: bool,
-) -> Result<Option<RunOutput>, RuntimeError> {
-    if conversation_id == run_session_id
-        && legacy_flat_compatibility_is_available(workspace, run_session_id)?
-    {
-        let (mut output, migration) = if let Some(notifier) = notifier {
-            let mut output = crate::runtime::resume::resume_migrating_conversation_run_internal(
-                workspace,
-                run_session_id,
-                None,
-                true,
-            )?;
-            let migration = migrate_legacy_session(workspace, run_session_id);
-            announce_migrated_legacy_resume(
-                &notifier,
-                conversation_id,
-                run_session_id,
-                &output,
-                migration.is_ok(),
-            )?;
-            output.stdout.clear();
-            (output, migration)
-        } else {
-            (
-                crate::runtime::resume::resume_migrating_conversation_run_internal(
-                    workspace,
-                    run_session_id,
-                    None,
-                    capture_jsonl,
-                )?,
-                migrate_legacy_session(workspace, run_session_id),
-            )
-        };
-        migration?;
-        output.session_path = existing_anchored_run(workspace, conversation_id, run_session_id)?
-            .file(RUN_EVENTS_LEAF)
-            .diagnostic_path()
-            .to_owned();
-        return Ok(Some(output));
-    }
-    if conversation_id == run_session_id {
-        migrate_legacy_session_if_present(workspace, run_session_id)?;
-    }
-    Ok(None)
-}
-
-fn announce_migrated_legacy_resume(
-    notifier: &LiveEventNotifier,
-    conversation_id: &str,
-    run_session_id: &str,
-    output: &RunOutput,
-    migrated: bool,
-) -> Result<(), RuntimeError> {
-    let appended = output.stdout.lines().count();
-    if appended == 0 {
-        return Ok(());
-    }
-    let first = output
-        .event_count
-        .checked_sub(appended)
-        .and_then(|prefix| prefix.checked_add(1))
-        .and_then(|sequence| u64::try_from(sequence).ok())
-        .ok_or_else(|| RuntimeError::Protocol("legacy resume event range overflow".to_owned()))?;
-    let last = u64::try_from(output.event_count)
-        .map_err(|_| RuntimeError::Protocol("legacy resume event count overflow".to_owned()))?;
-    if migrated {
-        notifier.try_notify_conversation_run(conversation_id, run_session_id, first);
-        notifier.try_notify_conversation_run(conversation_id, run_session_id, last);
-    } else {
-        notifier.try_notify(run_session_id, first);
-        notifier.try_notify(run_session_id, last);
-    }
-    Ok(())
-}
 
 /// Resumes one exactly addressed productive run without repeating completed external work.
 pub fn resume_conversation_run(
@@ -200,18 +116,6 @@ where
     let config = &authority.config;
     let backend = reconcile_productive_preflight(require_execution_backend(config))?;
     let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
-    let legacy_notifier = notifier
-        .as_ref()
-        .map(LiveEventNotifier::duplicate_for_same_operation);
-    if let Some(output) = resume_legacy_conversation_run_if_present(
-        workspace,
-        conversation_id,
-        run_session_id,
-        legacy_notifier,
-        capture_jsonl,
-    )? {
-        return Ok(output);
-    }
     let ExecutionBackend::OpenAiCodex {
         model,
         model_profile,

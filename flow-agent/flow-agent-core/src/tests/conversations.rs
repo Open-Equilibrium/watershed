@@ -18,7 +18,6 @@ mod conversation_writer;
 mod history_index;
 mod history_scratch;
 mod history_support;
-mod legacy_migration;
 mod lifecycle;
 mod query;
 mod recovery;
@@ -40,13 +39,17 @@ const REQUEST_HASH: &str =
 
 fn entry(id: &str, parent: Option<&str>, run_id: &str, sequence: u64) -> ConversationEntry {
     ConversationEntry {
-        schema: "flow-conversation-entry-v0".to_owned(),
+        schema: "flow-conversation-entry-v1".to_owned(),
         entry_id: id.to_owned(),
         parent_entry_id: parent.map(str::to_owned),
-        recovery_snapshot_hash: None,
+        recovery_snapshot_hash: "d".repeat(64),
         run_session_id: run_id.to_owned(),
         event_sequence: sequence,
-        entry_type: ConversationEntryType::Checkpoint,
+        entry_type: if parent.is_some() {
+            ConversationEntryType::Continuation
+        } else {
+            ConversationEntryType::Checkpoint
+        },
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
     }
 }

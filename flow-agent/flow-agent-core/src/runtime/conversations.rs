@@ -8,7 +8,7 @@ pub(crate) use contract::{
     CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, CONVERSATION_STATUS_LEAF,
     MAX_CONVERSATION_IO_BUFFER_BYTES, MAX_CONVERSATION_SCAN_BYTES, MAX_CONVERSATION_SCAN_RECORDS,
     MAX_CONVERSATION_STATUS_BYTES, MAX_CONVERSATION_STATUS_RECORDS, RUN_EVENTS_STEM, RUN_LOG_LEAF,
-    RUN_LOG_RECORD_SCHEMA_V0, TOOL_RUN_LOG_PAGE_SCHEMA,
+    RUN_LOG_RECORD_SCHEMA_V1, TOOL_RUN_LOG_PAGE_SCHEMA,
 };
 pub(crate) use contract::{MAX_CONVERSATION_RECORD_BYTES, RUN_EVENTS_LEAF};
 
@@ -24,7 +24,7 @@ pub(crate) use history_index::append_productive_run_checkpoint;
 pub(crate) use history_index::read_conversation_history;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use history_index::{
-    CONVERSATION_ENTRY_SCHEMA_V0, ConversationEntry, ConversationEntryType,
+    CONVERSATION_ENTRY_SCHEMA_V1, ConversationEntry, ConversationEntryType,
 };
 #[cfg(test)]
 pub(crate) use history_index::{
@@ -49,22 +49,6 @@ pub(crate) use attempt_log::ConversationAttemptLog;
 
 mod conversation_writer;
 pub(crate) use conversation_writer::ConversationEventWriter;
-
-mod legacy_manifest;
-mod legacy_migration;
-#[cfg(test)]
-pub(crate) use legacy_migration::legacy_session_is_terminal;
-#[cfg(test)]
-pub(crate) use legacy_migration::{
-    LegacyEventScanPoint, LegacyMigrationControlFile, LegacyMigrationCrashPoint,
-    set_legacy_event_scan_observer, set_legacy_migration_control_write_failure,
-    set_legacy_migration_crash_point, set_legacy_migration_roots_observer,
-    set_legacy_object_copy_observer,
-};
-pub(crate) use legacy_migration::{
-    legacy_flat_compatibility_is_available, migrate_legacy_session,
-    migrate_legacy_session_if_present,
-};
 
 mod lifecycle;
 #[cfg(all(test, unix))]

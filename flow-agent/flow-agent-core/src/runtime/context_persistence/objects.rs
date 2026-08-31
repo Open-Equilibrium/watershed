@@ -23,36 +23,8 @@ pub struct SessionObjectWriter {
     pub(crate) accounted_bytes: u64,
     pub(crate) object_count: usize,
     pub(crate) object_parent: AnchoredDir,
-    pub(crate) preflight_accounted_bytes: u64,
-    pub(crate) preflight_object_count: usize,
     pub(crate) session_id: String,
-    objects: BTreeMap<[u8; 32], SessionObjectState>,
-}
-
-#[derive(Default, Eq, PartialEq)]
-struct SessionObjectState {
-    preflight: bool,
-    published: bool,
-}
-
-impl SessionObjectState {
-    const PUBLISHED: Self = Self {
-        preflight: true,
-        published: true,
-    };
-
-    fn snapshot(&self) -> Self {
-        Self {
-            preflight: self.preflight,
-            published: self.published,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum InventoryView {
-    Preflight,
-    Published,
+    objects: BTreeSet<[u8; 32]>,
 }
 
 #[derive(Clone, Copy)]
@@ -69,32 +41,19 @@ struct ValidatedObject<'objects> {
     object_bytes: u64,
 }
 
-struct ValidatedObjectBatch<'objects> {
-    accounted_bytes: u64,
-    object_count: usize,
-    objects: Vec<ValidatedObject<'objects>>,
-}
-
 impl SessionObjectWriter {
     pub(crate) fn open(object_parent: AnchoredDir, session_id: &str) -> Result<Self, RuntimeError> {
         let (objects, accounted_bytes) = session_objects(&object_parent, session_id)?;
         let objects = objects
             .into_keys()
-            .map(|digest| {
-                Ok((
-                    parse_session_object_digest(&digest)?,
-                    SessionObjectState::PUBLISHED,
-                ))
-            })
-            .collect::<Result<BTreeMap<_, _>, RuntimeError>>()?;
+            .map(|digest| parse_session_object_digest(&digest))
+            .collect::<Result<BTreeSet<_>, RuntimeError>>()?;
         let object_count = objects.len();
         ensure_session_object_count(&object_parent, object_count)?;
         Ok(Self {
             accounted_bytes,
             object_count,
             object_parent,
-            preflight_accounted_bytes: accounted_bytes,
-            preflight_object_count: object_count,
             session_id: session_id.to_owned(),
             objects,
         })
@@ -103,7 +62,7 @@ impl SessionObjectWriter {
     #[cfg(test)]
     pub(crate) fn persist_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
         let validated = self.validate_all(objects)?;
-        self.persist_validated_batch_with(validated.objects, write_session_object)
+        self.persist_validated_batch_with(validated, write_session_object)
     }
 
     pub(crate) fn persist_manifest_objects(
@@ -113,7 +72,6 @@ impl SessionObjectWriter {
     ) -> Result<(), RuntimeError> {
         let validated = self.validate_all(objects)?;
         let supplied = validated
-            .objects
             .iter()
             .map(|object| object.object.digest.as_str())
             .collect::<BTreeSet<_>>();
@@ -124,44 +82,15 @@ impl SessionObjectWriter {
                 "context manifest object references do not match supplied objects".to_owned(),
             ));
         }
-        self.persist_validated_batch_with(validated.objects, write_session_object)
-    }
-
-    pub(crate) fn preflight_all(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError> {
-        let validated = self.validate_all_from(
-            objects,
-            self.preflight_accounted_bytes.max(self.accounted_bytes),
-            self.preflight_object_count.max(self.object_count),
-            InventoryView::Preflight,
-        )?;
-        self.preflight_accounted_bytes = validated.accounted_bytes;
-        self.preflight_object_count = validated.object_count;
-        for object in validated.objects {
-            let state = self.objects.entry(object.digest).or_default();
-            state.preflight = true;
-        }
-        Ok(())
+        self.persist_validated_batch_with(validated, write_session_object)
     }
 
     fn validate_all<'objects>(
         &self,
         objects: &'objects [ContextObject],
-    ) -> Result<ValidatedObjectBatch<'objects>, RuntimeError> {
-        self.validate_all_from(
-            objects,
-            self.accounted_bytes,
-            self.object_count,
-            InventoryView::Published,
-        )
-    }
-
-    fn validate_all_from<'objects>(
-        &self,
-        objects: &'objects [ContextObject],
-        mut accounted_bytes: u64,
-        mut object_count: usize,
-        view: InventoryView,
-    ) -> Result<ValidatedObjectBatch<'objects>, RuntimeError> {
+    ) -> Result<Vec<ValidatedObject<'objects>>, RuntimeError> {
+        let mut accounted_bytes = self.accounted_bytes;
+        let mut object_count = self.object_count;
         let mut unique = BTreeMap::new();
         for object in objects {
             let object_bytes = Self::validate_object(object)?;
@@ -170,10 +99,7 @@ impl SessionObjectWriter {
         }
 
         for (digest, (_, object_bytes)) in &unique {
-            let known = self.objects.get(digest).is_some_and(|state| match view {
-                InventoryView::Preflight => state.preflight,
-                InventoryView::Published => state.published,
-            });
+            let known = self.objects.contains(digest);
             if !known {
                 object_count = object_count.saturating_add(1);
                 ensure_session_object_count(&self.object_parent, object_count)?;
@@ -184,10 +110,7 @@ impl SessionObjectWriter {
 
         let mut validated = Vec::with_capacity(unique.len());
         for (digest, (object, object_bytes)) in unique {
-            let state = self
-                .objects
-                .get(&digest)
-                .map_or_else(SessionObjectState::default, SessionObjectState::snapshot);
+            let published = self.objects.contains(&digest);
             let path = SessionBundlePaths::object_in(
                 &self.object_parent,
                 &self.session_id,
@@ -196,14 +119,14 @@ impl SessionObjectWriter {
             let disposition = match path.metadata() {
                 Ok(_) => {
                     Self::verify_existing(&path, object)?;
-                    if state.published {
+                    if published {
                         ObjectDisposition::ExistingPublished
                     } else {
                         ObjectDisposition::ExistingUnpublished
                     }
                 }
                 Err(RuntimeError::Io { source, .. })
-                    if source.kind() == io::ErrorKind::NotFound && !state.published =>
+                    if source.kind() == io::ErrorKind::NotFound && !published =>
                 {
                     ObjectDisposition::Absent
                 }
@@ -224,11 +147,7 @@ impl SessionObjectWriter {
                 object_bytes,
             });
         }
-        Ok(ValidatedObjectBatch {
-            accounted_bytes,
-            object_count,
-            objects: validated,
-        })
+        Ok(validated)
     }
 
     fn validate_object(object: &ContextObject) -> Result<u64, RuntimeError> {
@@ -288,7 +207,7 @@ impl SessionObjectWriter {
         object: &ContextObject,
         write_new: impl FnOnce(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
-        let validated = self.validate_all(std::slice::from_ref(object))?.objects;
+        let validated = self.validate_all(std::slice::from_ref(object))?;
         let mut write_new = Some(write_new);
         self.persist_validated_batch_with(validated, |path, bytes| {
             write_new
@@ -303,7 +222,7 @@ impl SessionObjectWriter {
         objects: &[ContextObject],
         write_new: impl FnMut(&AnchoredFile, &[u8]) -> Result<(), RuntimeError>,
     ) -> Result<(), RuntimeError> {
-        let validated = self.validate_all(objects)?.objects;
+        let validated = self.validate_all(objects)?;
         self.persist_validated_batch_with(validated, write_new)
     }
 
@@ -369,17 +288,9 @@ impl SessionObjectWriter {
     }
 
     fn record_publication(&mut self, digest: [u8; 32], object_bytes: u64) {
-        let state = self.objects.entry(digest).or_default();
-        if !state.published {
-            state.published = true;
+        if self.objects.insert(digest) {
             self.object_count = self.object_count.saturating_add(1);
             self.accounted_bytes = self.accounted_bytes.saturating_add(object_bytes);
-        }
-        if !state.preflight {
-            state.preflight = true;
-            self.preflight_object_count = self.preflight_object_count.saturating_add(1);
-            self.preflight_accounted_bytes =
-                self.preflight_accounted_bytes.saturating_add(object_bytes);
         }
     }
 
@@ -393,18 +304,17 @@ impl SessionObjectWriter {
         for index in 0..count {
             let mut digest = [0_u8; 32];
             digest[24..].copy_from_slice(&u64::try_from(index).unwrap_or(u64::MAX).to_be_bytes());
-            self.objects.insert(digest, SessionObjectState::PUBLISHED);
+            self.objects.insert(digest);
         }
         if let Some(required_digest) = required_digest {
             let digest = parse_session_object_digest(required_digest)
                 .expect("test session object digest is valid");
-            if !self.objects.contains_key(&digest) {
+            if !self.objects.contains(&digest) {
                 self.objects.pop_first();
-                self.objects.insert(digest, SessionObjectState::PUBLISHED);
+                self.objects.insert(digest);
             }
         }
         self.object_count = self.objects.len();
-        self.preflight_object_count = self.object_count;
     }
 }
 

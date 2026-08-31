@@ -14,21 +14,6 @@ use serde::Serialize;
 use std::fs;
 use std::{collections::BTreeSet, path::Path};
 
-pub(super) const CONVERSATION_MIGRATIONS_DIR: &str = ".migrations";
-const MIGRATION_TRANSACTION_SUFFIX: &str = ".json";
-
-pub(super) fn migration_transaction_leaf(session_id: &str) -> String {
-    format!("{session_id}{MIGRATION_TRANSACTION_SUFFIX}")
-}
-
-pub(super) fn migration_transaction_stage_leaf(session_id: &str) -> String {
-    format!(".{session_id}{MIGRATION_TRANSACTION_SUFFIX}.staged")
-}
-
-pub(super) fn migration_transaction_id(leaf: &str) -> Option<&str> {
-    leaf.strip_suffix(MIGRATION_TRANSACTION_SUFFIX)
-}
-
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ConversationScanMetrics {
@@ -78,15 +63,6 @@ pub(super) fn record_conversation_read_request(_bytes: usize) {
     });
 }
 
-pub(super) fn record_conversation_write_request(_bytes: usize) {
-    #[cfg(any(test, feature = "m11-budget-evidence"))]
-    CONVERSATION_OPERATION_METRICS.with(|slot| {
-        if let Some(metrics) = slot.borrow_mut().as_mut() {
-            metrics.max_write_request_bytes = metrics.max_write_request_bytes.max(_bytes);
-        }
-    });
-}
-
 pub(crate) struct ConversationScanQuantum {
     entries: usize,
     stored_bytes: u64,
@@ -112,20 +88,6 @@ impl ConversationScanQuantum {
         }
         self.entries += 1;
         self.stored_bytes += stored_bytes;
-        Ok(())
-    }
-
-    pub(super) fn admit_directory_entry(&mut self, stored_bytes: u64) -> Result<(), RuntimeError> {
-        if stored_bytes > MAX_CONVERSATION_SCAN_BYTES {
-            return Err(protocol("conversation entry exceeds one scan quantum"));
-        }
-        if self.entries == MAX_CONVERSATION_SCAN_RECORDS
-            || self.stored_bytes.saturating_add(stored_bytes) > MAX_CONVERSATION_SCAN_BYTES
-        {
-            self.flush();
-        }
-        self.entries += 1;
-        self.stored_bytes = self.stored_bytes.saturating_add(stored_bytes);
         Ok(())
     }
 

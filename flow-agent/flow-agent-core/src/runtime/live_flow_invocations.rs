@@ -56,10 +56,6 @@ impl LiveFlowInvocations {
     ) -> Result<Self, RuntimeError> {
         let Some((prefix_event_count, acquire_slots)) = (match side_effect_mode {
             ToolSideEffectMode::Apply => Some((0, true)),
-            ToolSideEffectMode::Resume { prefix_event_count } => Some((prefix_event_count, true)),
-            ToolSideEffectMode::PreflightResume { prefix_event_count } => {
-                Some((prefix_event_count, false))
-            }
             ToolSideEffectMode::Plan => None,
         }) else {
             return Ok(Self {

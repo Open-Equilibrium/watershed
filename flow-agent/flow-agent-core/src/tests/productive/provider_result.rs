@@ -1,6 +1,7 @@
 use super::super::{helpers::load_test_registry, test_support::workspace_copy};
 use super::support::{CountingObjectRecovery, ObjectRecovery};
 use crate::runtime::{
+    digest::sha256_hex,
     openai_codex::{ProviderTokenUsage, ProviderToolCall, ProviderTurn},
     productive::{
         durable_provider_output, parse_provider_result, provider_turn_from_durable_output,
@@ -46,42 +47,11 @@ fn provider_attempt_output_round_trips_and_rejects_ambiguous_recovery_data() {
         turn.tool_calls[0].arguments
     );
 
-    let mut legacy_reference = durable.reference.clone();
-    legacy_reference["schema"] = serde_json::json!("flow-provider-output-v1");
-    legacy_reference
-        .as_object_mut()
-        .expect("reference object")
-        .remove("token_usage");
-    let legacy = provider_turn_from_durable_output(&legacy_reference, &recovery)
-        .expect("legacy provider output recovers without usage");
-    assert_eq!(legacy.token_usage, None);
-
-    for reference in [
-        serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
-        }),
-        serde_json::json!({
-            "provider_output_objects": ["session-object:sha256:unused"],
-            "schema": "flow-provider-output-v0"
-        }),
-        serde_json::json!({
-            "provider_output_objects": ["a", "b", "c", "d", "e"],
-            "schema": "flow-provider-output-v1"
-        }),
-        serde_json::json!({
-            "extra": true,
-            "provider_output_objects": ["session-object:sha256:unused"],
-            "schema": "flow-provider-output-v1"
-        }),
-        serde_json::json!({
-            "provider_output_objects": ["session-object:sha256:unused"],
-            "schema": "flow-provider-output-v1",
-            "token_usage": {"input_tokens": 1}
-        }),
-    ] {
-        assert!(provider_turn_from_durable_output(&reference, &recovery).is_err());
-    }
+    let unsupported = serde_json::json!({
+        "provider_output_objects": ["session-object:sha256:unused"],
+        "schema": "flow-provider-output-v9"
+    });
+    assert!(provider_turn_from_durable_output(&unsupported, &recovery).is_err());
 
     for bytes in [
         b"not-json".to_vec(),
@@ -89,12 +59,13 @@ fn provider_attempt_output_round_trips_and_rejects_ambiguous_recovery_data() {
         br#"{"extra":true,"output_text":"","response_id":"x","retained_items":[],"tool_calls":[]}"#
             .to_vec(),
     ] {
+        let digest = sha256_hex(&bytes);
         let reference = serde_json::json!({
-            "provider_output_objects": ["session-object:sha256:fixture"],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [format!("session-object:sha256:{digest}")],
+            "schema": "flow-provider-output-v2"
         });
         let recovery = ObjectRecovery(BTreeMap::from([(
-            "session-object:sha256:fixture".to_owned(),
+            format!("session-object:sha256:{digest}"),
             bytes,
         )]));
         assert!(provider_turn_from_durable_output(&reference, &recovery).is_err());

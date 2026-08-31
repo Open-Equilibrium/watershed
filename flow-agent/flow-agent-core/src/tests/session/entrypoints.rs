@@ -1,22 +1,12 @@
 use crate::{
     runtime::{
-        conversations::set_legacy_migration_roots_observer,
-        resume::resume_session,
         session::{resume_conversation_run_with_execution_activation, run_flow},
         types::{EmitMode, RuntimeError, render_human_failure_status},
         validate::validate_protocol_jsonl_text,
     },
     tests::test_support::workspace_copy,
 };
-use std::{cell::Cell, fs, path::Path, rc::Rc};
-
-struct TestActivationGuard(Rc<Cell<bool>>);
-
-impl Drop for TestActivationGuard {
-    fn drop(&mut self) {
-        self.0.set(false);
-    }
-}
+use std::{fs, path::Path};
 
 #[cfg(windows)]
 use crate::{
@@ -67,62 +57,6 @@ fn persisted_session_store_is_current_user_only_on_windows() {
         "{} must grant access to the current Windows user only",
         output.session_path.display()
     );
-}
-
-#[test]
-fn activated_legacy_resume_binds_its_loaded_backend_before_migration() {
-    let workspace = workspace_copy("smoke-flow");
-    let legacy =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("legacy fixture run completes");
-    let prefix = legacy
-        .stdout
-        .lines()
-        .next()
-        .expect("fixture stream starts")
-        .to_owned()
-        + "\n";
-    fs::write(&legacy.session_path, prefix).expect("legacy stream is made resumable");
-    let context_path = crate::tests::helpers::workspace_log_dir(&workspace)
-        .join(format!("{}.contexts.jsonl", legacy.session_id));
-    let context_prefix = fs::read_to_string(&context_path)
-        .expect("fixture context stream reads")
-        .lines()
-        .next()
-        .expect("fixture context stream starts")
-        .to_owned()
-        + "\n";
-    fs::write(context_path, context_prefix).expect("context stream is made resumable");
-    let active = Rc::new(Cell::new(false));
-    let mode = Rc::new(Cell::new(None));
-    set_legacy_migration_roots_observer({
-        let active = Rc::clone(&active);
-        move || {
-            assert!(active.get(), "activation guard must outlive migration");
-            Ok(())
-        }
-    });
-
-    let output = resume_conversation_run_with_execution_activation(
-        &workspace,
-        &legacy.session_id,
-        &legacy.session_id,
-        None,
-        EmitMode::Human,
-        {
-            let active = Rc::clone(&active);
-            let mode = Rc::clone(&mode);
-            move |productive| {
-                mode.set(Some(productive));
-                assert!(!active.replace(true), "activation guard is unique");
-                Ok(TestActivationGuard(active))
-            }
-        },
-    )
-    .expect("activated legacy resume completes");
-
-    assert_eq!(output.session_id, legacy.session_id);
-    assert_eq!(mode.get(), Some(false));
-    assert!(!active.get(), "activation guard releases after resume");
 }
 
 #[cfg(windows)]
@@ -248,7 +182,7 @@ fn run_flow_allocates_unique_session_id_for_repeated_valid_runs() {
 }
 
 #[test]
-fn human_run_reports_status_and_resume_rejects_terminal_session() {
+fn human_run_reports_terminal_status() {
     let workspace = workspace_copy("smoke-flow");
 
     let run = run_flow(&workspace, "smoke-flow", EmitMode::Human).expect("flow runs");
@@ -256,16 +190,6 @@ fn human_run_reports_status_and_resume_rejects_terminal_session() {
     assert_eq!(
         run.stdout,
         "flow smoke-flow (session smoke-flow) completed\n"
-    );
-
-    let before = fs::read_to_string(&run.session_path).expect("terminal session readable");
-    assert!(matches!(
-        resume_session(&workspace, &run.session_id, EmitMode::Jsonl),
-        Err(RuntimeError::TerminalSession(session_id)) if session_id == run.session_id
-    ));
-    assert_eq!(
-        fs::read_to_string(&run.session_path).expect("terminal session remains readable"),
-        before
     );
 
     let failed_workspace = workspace_copy("sandbox-negative");

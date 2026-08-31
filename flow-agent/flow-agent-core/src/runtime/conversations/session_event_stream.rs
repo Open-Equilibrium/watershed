@@ -1,12 +1,9 @@
 use super::{
-    contract::{CONVERSATION_RUNS_DIR, RUN_EVENTS_LEAF, RUN_EVENTS_STEM, protocol},
-    conversation_stream::{
-        jsonl_segment_from_open_file, open_anchored_jsonl_segment, run_segment_leaf,
-    },
+    contract::{CONVERSATION_RUNS_DIR, RUN_EVENTS_LEAF},
+    conversation_stream::open_anchored_jsonl_segment,
     storage::ConversationScanQuantum,
 };
 use crate::runtime::{
-    digest::finish_sha256,
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredWorkspace,
         DirectoryErrorMode, ensure_anchored_real_file, open_anchored_file_for_read,
@@ -24,7 +21,6 @@ use crate::runtime::{
     validate::SessionAppendValidationState,
 };
 use proto::EventEnvelope;
-use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{self, Read, Seek, SeekFrom},
@@ -32,87 +28,6 @@ use std::{
 };
 
 const MAX_IN_MEMORY_REPLAY_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-
-pub(super) fn visit_anchored_run_events(
-    run: &AnchoredDir,
-    session_id: &str,
-    mut visit: impl FnMut(&EventEnvelope, &str) -> Result<(), RuntimeError>,
-) -> Result<(), RuntimeError> {
-    let path = run.file(RUN_EVENTS_LEAF);
-    let segments = segmented_jsonl_files(&path, EVENT_STREAM_LIMITS)?;
-    let segment_count = segments.len();
-    let mut validation = SessionAppendValidationState::empty(session_id);
-    let mut quantum = ConversationScanQuantum::new();
-    for (index, segment) in segments.into_iter().enumerate() {
-        open_anchored_jsonl_segment(&segment, MAX_SESSION_SEGMENT_BYTES)?.scan(
-            MAX_CANONICAL_EVENT_BYTES,
-            index + 1 != segment_count,
-            &mut quantum,
-            |text| {
-                validation.validate_appended_with(path.diagnostic_path(), text, |event| {
-                    visit(event, text)
-                })
-            },
-        )?;
-    }
-    quantum.finish();
-    Ok(())
-}
-
-pub(super) fn visit_run_events_with_signatures(
-    run: &AnchoredDir,
-    session_id: &str,
-    count: usize,
-    visit: impl FnMut(&EventEnvelope, &str) -> Result<(), RuntimeError>,
-) -> Result<Vec<(u64, String)>, RuntimeError> {
-    let mut signatures = Vec::with_capacity(count);
-    visit_run_events_inner(run, session_id, count, Some(&mut signatures), visit)?;
-    Ok(signatures)
-}
-
-fn visit_run_events_inner(
-    run: &AnchoredDir,
-    session_id: &str,
-    count: usize,
-    mut signatures: Option<&mut Vec<(u64, String)>>,
-    mut visit: impl FnMut(&EventEnvelope, &str) -> Result<(), RuntimeError>,
-) -> Result<(), RuntimeError> {
-    let path = run.file(RUN_EVENTS_LEAF);
-    let mut validation = SessionAppendValidationState::empty(session_id);
-    let mut quantum = ConversationScanQuantum::new();
-    for index in 0..count {
-        let segment_path = run.file(run_segment_leaf(RUN_EVENTS_STEM, index));
-        let (file, metadata) = open_anchored_file_for_read(&segment_path)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || metadata.len() > MAX_SESSION_SEGMENT_BYTES
-        {
-            return Err(protocol("migrated stream segment is invalid"));
-        }
-        let stored_bytes = metadata.len();
-        let mut hasher = signatures.is_some().then(Sha256::new);
-        jsonl_segment_from_open_file(
-            file,
-            segment_path.diagnostic_path().to_owned(),
-            stored_bytes,
-        )?
-        .scan(MAX_CANONICAL_EVENT_BYTES, true, &mut quantum, |text| {
-            if let Some(hasher) = hasher.as_mut() {
-                hasher.update(text.as_bytes());
-            }
-            validation
-                .validate_appended_with(path.diagnostic_path(), text, |event| visit(event, text))
-        })?;
-        if let Some(hasher) = hasher {
-            signatures
-                .as_mut()
-                .expect("signature collection is enabled")
-                .push((stored_bytes, finish_sha256(hasher)));
-        }
-    }
-    quantum.finish();
-    Ok(())
-}
 
 pub(crate) fn ensure_in_memory_replay_output_limit(
     output_bytes: usize,
@@ -204,12 +119,17 @@ impl SessionEventReader {
                 path: session_dir_path,
                 source: io::Error::from(io::ErrorKind::NotFound),
             })?;
-        let conversation = sessions
-            .child(conversation_id, false, DirectoryErrorMode::Protocol)?
-            .ok_or_else(|| RuntimeError::Io {
+        let Some(conversation) =
+            sessions.child(conversation_id, false, DirectoryErrorMode::Protocol)?
+        else {
+            if conversation_id == run_session_id {
+                return Self::open_flat_anchored(&workspace, &sessions, run_session_id);
+            }
+            return Err(RuntimeError::Io {
                 path: sessions.path.join(conversation_id),
                 source: io::Error::from(io::ErrorKind::NotFound),
-            })?;
+            });
+        };
         let runs = conversation
             .child(CONVERSATION_RUNS_DIR, false, DirectoryErrorMode::Protocol)?
             .ok_or_else(|| RuntimeError::Io {

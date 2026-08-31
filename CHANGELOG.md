@@ -13,6 +13,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 
 ### Changed
 
+- Before the first release, Flow Agent removed `flow import` and compatibility for automatic flat-session migration, `flow-conversation-entry-v0`, `flow-run-log-record-v0`, `flow-provider-output-v1`, legacy Phase/Step events and Tool observations.
 - M1.2 uses a Flow-owned one-shot Executor protocol and default-installed Sandbox Executor on Ubuntu/macOS; custom integrations remain administrator-owned, while Windows and positive Tool egress are post-MVP (ADR-0146).
 - Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback (ADR-0077).
 - Dev/CI uses exact Node 24.20.0 LTS and pnpm 11.24.0 pins without adding a product Node runtime (ADR-0080).
@@ -27,7 +28,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - OAuth callback input, Responses output items and provider failures follow the reachable bounded contracts selected by ADR-0137–ADR-0139.
 - M1 local events use serial authoritative append before a capacity-one, caller-owned, non-blocking high-watermark notification; receivers replay by sequence and the core owns no arbitrary output transport (ADR-0059, ADR-0062).
 - M1 is the Flow Agent deterministic runtime foundation: fixture-bounded execution and in-process policy emulation are explicit; real providers and tools belong to M1.1, and OS isolation belongs to M1.2 (ADR-0075, ADR-0076).
-- The complete unreleased execution domain uses Flow Agent, Flow, Subflow, `flow.*`, `flow_id`, `flow-context-v0`, `flow-agent*`, `flow-agent-cli`, `flow` and `.flow`, without legacy terminology aliases or vocabulary migration (ADR-0074); storage migration is defined in [PROTOCOL.md](PROTOCOL.md).
+- The complete unreleased execution domain uses Flow Agent, Flow, Subflow, `flow.*`, `flow_id`, `flow-context-v0`, `flow-agent*`, `flow-agent-cli`, `flow` and `.flow`, without legacy terminology aliases or vocabulary migration (ADR-0074).
 - Canonical registry serialization is deterministic UTF-8 JSON of the validated, resolved building-block model.
 - CI actions are pinned, Windows is included, and release-mode performance observations are retained without estimated timing or RSS gates.
 - Licensing is `AGPL-3.0-only`; contributions use DCO without a CLA.

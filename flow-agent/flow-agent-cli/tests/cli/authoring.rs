@@ -1,7 +1,7 @@
 use super::{
     flow_command,
     process::{wait_with_input_and_output_before, wait_with_output_before},
-    test_support::{copy_dir, empty_workspace, fixture_dir, session_home_path},
+    test_support::{empty_workspace, session_home_path},
 };
 use core_script::{RegistryBlock, ToolCommand, parse_registry_block};
 use std::{fs, path::Path, process::Stdio, time::Duration};
@@ -17,42 +17,6 @@ fn initialize_default_workspace(workspace: &Path) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-#[test]
-fn import_requires_one_explicit_legacy_workspace_and_publishes_globally() {
-    let source = empty_workspace();
-    let fixture = fixture_dir("smoke-flow");
-    fs::create_dir(source.join(".flow")).expect("legacy config directory is staged");
-    fs::copy(
-        fixture.join(".flow/config.yaml"),
-        source.join(".flow/config.yaml"),
-    )
-    .expect("legacy config is staged");
-    copy_dir(&fixture.join("registry"), &source.join("registry"));
-    let harness_workspace = empty_workspace();
-    let global_home = harness_workspace.join("import-home");
-
-    let output = flow_command()
-        .env("FLOW_AGENT_HOME", &global_home)
-        .current_dir(&harness_workspace)
-        .args([
-            "import",
-            source.to_str().expect("fixture path is valid UTF-8"),
-        ])
-        .output()
-        .expect("explicit import should run");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"imported\n");
-    assert!(global_home.join("config.yaml").is_file());
-    assert!(global_home.join("registry/flows/smoke-flow.yaml").is_file());
-    assert!(!harness_workspace.join(".flow").exists());
-    assert!(source.join(".flow/config.yaml").is_file());
 }
 
 #[test]

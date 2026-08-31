@@ -65,15 +65,6 @@ impl RunAttemptOutcome {
             .find(|outcome| outcome.as_str() == value)
     }
 
-    pub(crate) const fn from_tool_terminal_event(event_type: EventType) -> Option<Self> {
-        match event_type {
-            EventType::ToolCompleted => Some(Self::Completed),
-            EventType::ToolFailed => Some(Self::Failed),
-            EventType::ToolTimedOut => Some(Self::TimedOut),
-            _ => None,
-        }
-    }
-
     pub(crate) const fn tool_terminal_event(self) -> EventType {
         match self {
             Self::Completed => EventType::ToolCompleted,
@@ -86,72 +77,6 @@ impl RunAttemptOutcome {
 impl std::fmt::Display for RunAttemptOutcome {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LegacyToolObservationOutcome {
-    Uncertain,
-    Completed,
-    Failed,
-    TimedOut,
-}
-
-impl LegacyToolObservationOutcome {
-    const ALL: [Self; 4] = [
-        Self::Uncertain,
-        Self::Completed,
-        Self::Failed,
-        Self::TimedOut,
-    ];
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Uncertain => "uncertain",
-            Self::Completed => RunAttemptOutcome::Completed.as_str(),
-            Self::Failed => RunAttemptOutcome::Failed.as_str(),
-            Self::TimedOut => RunAttemptOutcome::TimedOut.as_str(),
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|outcome| outcome.as_str() == value)
-    }
-
-    pub(crate) const fn from_terminal(outcome: RunAttemptOutcome) -> Option<Self> {
-        match outcome {
-            RunAttemptOutcome::Completed => Some(Self::Completed),
-            RunAttemptOutcome::Failed => Some(Self::Failed),
-            RunAttemptOutcome::TimedOut => Some(Self::TimedOut),
-            RunAttemptOutcome::Cancelled => None,
-        }
-    }
-
-    pub(crate) const fn is_uncertain(self) -> bool {
-        matches!(self, Self::Uncertain)
-    }
-}
-
-impl Serialize for LegacyToolObservationOutcome {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for LegacyToolObservationOutcome {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).ok_or_else(|| {
-            serde::de::Error::custom(format!("unknown legacy Tool observation outcome: {value}"))
-        })
     }
 }
 
@@ -311,7 +236,7 @@ pub(crate) struct RunAttemptState {
     pub(crate) attempt_kind: RunAttemptKind,
     pub(crate) lifecycle: RunAttemptLifecycle,
     pub(crate) outcome: Option<RunAttemptOutcome>,
-    pub(crate) request_hash: Option<String>,
+    pub(crate) request_hash: String,
     pub(crate) timestamp: String,
     pub(crate) tool_id: Option<String>,
 }

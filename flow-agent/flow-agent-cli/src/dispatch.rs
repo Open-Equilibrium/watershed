@@ -1,5 +1,5 @@
 use crate::{
-    authoring::{create_command, import_command, init_command, validate_command},
+    authoring::{create_command, init_command, validate_command},
     interrupt::InterruptCoordinator,
     output::write_stdout,
     parsing::{
@@ -45,10 +45,6 @@ fn dispatch_in_workspace(
     match command {
         "init" => {
             init_command(workspace, &args[1..])?;
-            Ok(ExitCode::SUCCESS)
-        }
-        "import" => {
-            import_command(workspace, &args[1..])?;
             Ok(ExitCode::SUCCESS)
         }
         "validate" => {

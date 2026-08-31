@@ -372,33 +372,7 @@ fn smoke_apply_plan(session_id: &str) -> (PathBuf, FlowExecutionPlan) {
 }
 
 #[test]
-fn resume_commits_only_events_after_the_persisted_prefix() {
-    let (workspace, plan) = smoke_apply_plan("resumesuffix001");
-    let mut sink = CollectingEventSink::default();
-    apply_flow_with_sink(
-        FlowApplication {
-            workspace: &workspace,
-            session_id: "resumesuffix001",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Resume {
-                    prefix_event_count: 2,
-                },
-            ),
-            plan: &plan,
-        },
-        Some(&mut sink),
-    )
-    .expect("resume applies the uncommitted suffix");
-
-    assert!(
-        sink.0.iter().all(|event| event.sequence > 2),
-        "resume must not re-commit persisted events"
-    );
-}
-
-#[test]
-fn production_apply_and_resume_reject_live_flow_overflow() {
+fn production_apply_rejects_live_flow_overflow() {
     let (started, observed) = mpsc::channel();
     let release = Arc::new((Mutex::new(false), Condvar::new()));
     let workers = (0..MAX_LIVE_FLOW_INVOCATIONS)
@@ -451,21 +425,6 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
         },
         Some(&mut overflow_sink),
     );
-    let (resume_workspace, resume_plan) = smoke_apply_plan("liveresumeoverflow");
-    let resume_overflow = apply_flow_with_sink(
-        FlowApplication {
-            workspace: &resume_workspace,
-            session_id: "liveresumeoverflow",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Resume {
-                    prefix_event_count: 2,
-                },
-            ),
-            plan: &resume_plan,
-        },
-        None,
-    );
     let (productive_overflow, productive_sink, provider_calls) =
         productive_execution_at_live_limit();
     let (released, wake) = &*release;
@@ -499,8 +458,6 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
     let diagnostic = &overflow_sink.0[1];
     assert_eq!(diagnostic.payload["code"], "runtime_error");
     assert_eq!(diagnostic.payload["message"], "runtime execution failed");
-    let error = resume_overflow.expect_err("resume must reacquire every active prefix flow");
-    assert!(error.to_string().contains("max 32"), "{error}");
     let productive_overflow =
         productive_overflow.expect("productive live invocation failure is terminalized");
     let error = productive_overflow

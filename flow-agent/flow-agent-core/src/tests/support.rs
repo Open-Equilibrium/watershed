@@ -1,7 +1,6 @@
 use crate::runtime::{
     execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
-    fs_guards::{open_anchored_session_log_append_file, path_io_error},
-    session_lock::SessionReservation,
+    fs_guards::path_io_error,
     types::{EventClock, RuntimeError},
     validate::{SessionAppendValidationState, validate_session_log_text},
 };
@@ -91,27 +90,6 @@ impl FlowExecutionOptions {
     }
 }
 
-pub(super) fn write_initial_session_log_with_clock(
-    reservation: &SessionReservation,
-    session_id: &str,
-    clock: EventClock,
-) -> Result<(), RuntimeError> {
-    let stream = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        session_id.to_owned(),
-        1,
-        clock.timestamp(1).expect("fixture timestamp is valid"),
-        "flow-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .map_err(|err| RuntimeError::Protocol(format!("failed to serialize initial event: {err}")))?;
-    let mut file = open_anchored_session_log_append_file(&reservation.session_path)?;
-    file.write_all(stream.as_bytes())
-        .map_err(|source| path_io_error(reservation.session_path.diagnostic_path(), source))
-}
-
 pub(super) fn validate_appended_session_log_text(
     path: &Path,
     expected_session_id: &str,
@@ -123,13 +101,6 @@ pub(super) fn validate_appended_session_log_text(
     }
     SessionAppendValidationState::from_prior_events(path, expected_session_id, prior_events)?
         .validate_appended(path, text)
-}
-
-pub(super) fn write_initial_session_log(
-    reservation: &SessionReservation,
-    session_id: &str,
-) -> Result<(), RuntimeError> {
-    write_initial_session_log_with_clock(reservation, session_id, EventClock::fixed_fixture())
 }
 
 pub(super) fn append_session_log_line(path: &Path, line: &str) -> Result<(), RuntimeError> {

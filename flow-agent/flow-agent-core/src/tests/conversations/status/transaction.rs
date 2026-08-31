@@ -7,8 +7,6 @@ use crate::runtime::{
         set_status_transaction_crash_point,
     },
     fs_guards::set_directory_sync_error_for_path_for_test,
-    session_authority::SessionOwnershipLease,
-    types::RuntimeError,
 };
 use std::{fs, fs::OpenOptions, io, io::Write};
 #[test]
@@ -429,51 +427,6 @@ fn conversation_status_recovery_anchors_an_empty_rotated_segment_before_clearing
         Some("prior")
     );
     assert!(!transaction.exists(), "the durable transaction is cleared");
-}
-
-#[test]
-fn conversation_status_recovery_respects_the_legacy_lease() {
-    let workspace = empty_workspace("conversation-status-legacy-lease");
-    create_review_run(&workspace);
-    commit_review_event(&workspace);
-    set_status_transaction_crash_point(StatusTransactionCrashPoint::CanonicalMutationApplied);
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review-1", 1))
-        .expect_err("the status transaction remains pending");
-
-    let conversation = crate::tests::helpers::workspace_session_dir(&workspace).join("review");
-    let transaction = conversation.join(".status-transaction.json");
-    let summary = conversation.join("status.json");
-    let transaction_before = fs::read(&transaction).expect("pending transaction reads");
-    let summary_before = fs::read(&summary).expect("pending summary reads");
-    let legacy = SessionOwnershipLease::acquire(&workspace, "review", &conversation)
-        .expect("legacy ownership is held by another operation");
-
-    let error = conversation_status_page(&workspace, None)
-        .expect_err("status recovery must respect active legacy ownership");
-    assert!(
-        matches!(error, RuntimeError::ActiveSession { ref session_id, .. } if session_id == "review"),
-        "{error}"
-    );
-    assert_eq!(
-        fs::read(&transaction).expect("pending transaction remains readable"),
-        transaction_before
-    );
-    assert_eq!(
-        fs::read(&summary).expect("pending summary remains readable"),
-        summary_before
-    );
-
-    legacy.release().expect("legacy ownership releases");
-    let page = conversation_status_page(&workspace, None)
-        .expect("status recovery proceeds after legacy ownership releases");
-    assert_eq!(
-        page.conversations[0].latest_entry_id.as_deref(),
-        Some("root")
-    );
-    assert!(
-        !transaction.exists(),
-        "the completed transaction is removed"
-    );
 }
 
 #[test]

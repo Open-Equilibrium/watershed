@@ -22,8 +22,7 @@ pub(super) fn workload_contract(id: M11BudgetWorkloadId) -> (Value, &'static [&'
         M11BudgetWorkloadId::RunLogProjectionPage => {
             &["unrelated Tool records and dormant Run Logs"]
         }
-        M11BudgetWorkloadId::ConversationMigrationQuantum
-        | M11BudgetWorkloadId::ConversationReplayQuantum
+        M11BudgetWorkloadId::ConversationReplayQuantum
         | M11BudgetWorkloadId::ConversationHistoryValidationQuantum => {
             &["dormant inventory outside one fixed scan quantum"]
         }

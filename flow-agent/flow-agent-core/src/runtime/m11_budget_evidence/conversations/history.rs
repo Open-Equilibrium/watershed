@@ -1,6 +1,6 @@
 use super::super::{M11BudgetOutcome, outcome};
 use crate::runtime::conversations::{
-    CONVERSATION_ENTRY_SCHEMA_V0, CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR,
+    CONVERSATION_ENTRY_SCHEMA_V1, CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR,
     ConversationEntry, ConversationEntryType, MAX_CONVERSATION_SCAN_BYTES,
     MAX_HISTORY_INDEX_ID_BYTES, RUN_EVENTS_LEAF, canonical_json,
     validate_conversation_history_for_budget,
@@ -160,13 +160,17 @@ fn benchmark_entry_id(ordinal: u64, length: usize) -> String {
 
 fn benchmark_history_record(id: &str, parent: Option<&str>) -> Result<String, String> {
     canonical_json(&ConversationEntry {
-        schema: CONVERSATION_ENTRY_SCHEMA_V0.to_owned(),
+        schema: CONVERSATION_ENTRY_SCHEMA_V1.to_owned(),
         entry_id: id.to_owned(),
         parent_entry_id: parent.map(str::to_owned),
-        recovery_snapshot_hash: None,
+        recovery_snapshot_hash: "c".repeat(64),
         run_session_id: "bench".to_owned(),
         event_sequence: 1,
-        entry_type: ConversationEntryType::Checkpoint,
+        entry_type: if parent.is_some() {
+            ConversationEntryType::Continuation
+        } else {
+            ConversationEntryType::Checkpoint
+        },
         timestamp: "2026-08-01T00:00:00Z".to_owned(),
     })
     .map_err(|error| error.to_string())

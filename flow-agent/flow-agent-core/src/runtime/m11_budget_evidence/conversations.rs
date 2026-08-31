@@ -5,16 +5,16 @@ mod run_log;
 mod status;
 
 use crate::runtime::{
-    conversations::{RUN_LOG_RECORD_SCHEMA_V0, RunLogRecord},
+    conversations::{RUN_LOG_RECORD_SCHEMA_V1, RunLogRecord},
     fs_guards::{AnchoredWorkspace, ensure_anchored_runtime_dirs},
 };
 use std::path::{Path, PathBuf};
 
 pub(super) use history::HISTORY_VALIDATION_RECORDS;
 pub(super) use history::conversation_history_validation_quantum;
+pub(super) use quantum::conversation_replay_quantum;
 #[cfg(test)]
 pub(crate) use quantum::verify_conversation_operation_boundaries_for_test;
-pub(super) use quantum::{QuantumKind, conversation_operation_quantum};
 pub(super) use replay::conversation_full_run_streaming_replay;
 pub(super) use run_log::{SYNC_APPEND_RECORD_BYTES, SYNC_APPEND_RECORDS};
 pub(super) use run_log::{run_log_eight_sync_appends, run_log_projection_page};
@@ -26,7 +26,7 @@ fn definition_record(
     flow_definition_hash: String,
 ) -> RunLogRecord {
     RunLogRecord::Definition {
-        schema: RUN_LOG_RECORD_SCHEMA_V0.to_owned(),
+        schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
         flow_definition_id: flow_definition_id.to_owned(),
         registry_hash,
         flow_definition_hash,
@@ -35,8 +35,6 @@ fn definition_record(
         model_context_limit: None,
         output_reserve: None,
         safety_margin: None,
-        legacy_session_id: None,
-        legacy_source_manifest: None,
     }
 }
 

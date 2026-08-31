@@ -2,7 +2,7 @@ use super::super::{M11BudgetOutcome, outcome};
 use crate::runtime::{
     conversations::{
         CONVERSATION_RUNS_DIR, MAX_CONVERSATION_RECORD_BYTES, MAX_CONVERSATION_STATUS_BYTES,
-        MAX_CONVERSATION_STATUS_RECORDS, RUN_LOG_LEAF, RUN_LOG_RECORD_SCHEMA_V0,
+        MAX_CONVERSATION_STATUS_RECORDS, RUN_LOG_LEAF, RUN_LOG_RECORD_SCHEMA_V1,
         RunLogProjectionPage, RunLogRecord, TOOL_RUN_LOG_PAGE_SCHEMA, append_jsonl, canonical_json,
         project_tool_run_log_page, read_jsonl,
     },
@@ -21,10 +21,10 @@ const PROJECTION_ATTEMPTS: usize = MAX_CONVERSATION_STATUS_RECORDS / 2;
 
 fn intent_record(index: usize) -> RunLogRecord {
     RunLogRecord::Intent {
-        schema: RUN_LOG_RECORD_SCHEMA_V0.to_owned(),
+        schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
         attempt_id: format!("tool-{index:04}"),
         attempt_kind: RunAttemptKind::Tool,
-        request_hash: None,
+        request_hash: format!("sha256:{index:064x}"),
         tool_id: Some("inspect".to_owned()),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
     }
@@ -32,7 +32,7 @@ fn intent_record(index: usize) -> RunLogRecord {
 
 fn terminal_record(index: usize, padding_bytes: usize) -> RunLogRecord {
     RunLogRecord::TerminalResult {
-        schema: RUN_LOG_RECORD_SCHEMA_V0.to_owned(),
+        schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
         attempt_id: format!("tool-{index:04}"),
         attempt_kind: RunAttemptKind::Tool,
         tool_id: Some("inspect".to_owned()),

@@ -78,7 +78,7 @@ fn conversation_io_buffer_budget() {
     crate::runtime::m11_budget_evidence::verify_conversation_operation_boundaries_for_test(
         &empty_workspace("conversation-io-buffer-budget"),
     )
-    .expect("real migration and replay stay within their finite scan and I/O bounds");
+    .expect("replay stays within its finite scan and I/O bounds");
 }
 
 #[test]

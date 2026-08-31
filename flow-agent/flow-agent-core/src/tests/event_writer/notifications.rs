@@ -1,12 +1,11 @@
 use super::super::{
-    helpers::{empty_workspace, reserve_session_log, write_definition_hash_metadata},
-    test_support::{expected_stream, stream_prefix, workspace_copy},
+    helpers::{empty_workspace, reserve_session_log},
+    test_support::workspace_copy,
 };
 use super::support::{enqueue_test_event, progress_writer};
 use crate::runtime::{
     event_writer::{RuntimeEventSink, SerialSessionWriter},
     live_events::{LiveEventNotifyStatus, LiveEventReceiveError, live_event_channel},
-    resume::resume_session_with_live_events,
     session::run_flow_with_live_events,
     session_reading::SessionEventReader,
     types::RuntimeError,
@@ -124,44 +123,6 @@ fn saturated_and_disconnected_sessions_are_isolated() {
             .lines()
             .count(),
         output.event_count
-    );
-}
-
-#[test]
-fn resumed_notifications_replay_exactly_the_appended_suffix() {
-    let workspace = workspace_copy("smoke-flow");
-    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
-    let prefix = stream_prefix(&expected_stream("smoke-flow", "smoke-flow.jsonl"), 2);
-    let prefix_events = prefix.lines().count() as u64;
-    fs::write(session_dir.join("smoke-flow.jsonl"), &prefix).expect("partial log written");
-    write_definition_hash_metadata(&workspace, "smoke-flow", "smoke-flow");
-    let (notifier, receiver) = live_event_channel();
-
-    let output = resume_session_with_live_events(&workspace, "smoke-flow", notifier)
-        .expect("resume completes");
-    let notification = receiver
-        .recv_timeout(Duration::from_millis(50))
-        .expect("resumed suffix wakes receiver");
-    let mut reader =
-        SessionEventReader::open(&workspace, "smoke-flow").expect("resumed session opens");
-    let appended = reader
-        .read_after(prefix_events)
-        .expect("resumed suffix replays");
-
-    assert_eq!(
-        notification.highest_committed_sequence,
-        output.event_count as u64
-    );
-    assert_eq!(notification.first_committed_sequence, prefix_events + 1);
-    assert_eq!(
-        appended.first().map(|event| &event.event_type),
-        Some(&EventType::SessionResumed)
-    );
-    assert!(
-        appended
-            .iter()
-            .enumerate()
-            .all(|(index, event)| event.sequence == prefix_events + index as u64 + 1)
     );
 }
 

@@ -33,11 +33,13 @@ pub use anchored_file::{
     open_anchored_file_for_read, open_anchored_file_for_update, open_anchored_real_file_for_read,
     open_anchored_session_log_append_file, read_anchored_file_with_limit,
     read_anchored_to_string_with_limit, remove_owned_anchored_file,
-    validate_open_session_log_append_file, validate_real_file, verify_owned_anchored_file,
+    validate_open_session_log_append_file, verify_owned_anchored_file,
     verify_owned_anchored_marker, with_anchored_replacement_temp,
 };
 #[cfg(test)]
-pub use anchored_file::{replacement_temp_path, set_owned_file_remove_observer};
+pub use anchored_file::{
+    replacement_temp_path, set_owned_file_remove_observer, validate_real_file,
+};
 pub(crate) use anchored_file::{reserve_new_anchored_file, with_anchored_replacement_temp_checked};
 
 mod durability;
@@ -53,9 +55,11 @@ pub(crate) use durability::{
 pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
 
 mod runtime_dirs;
+pub use runtime_dirs::RuntimeDirs;
 #[cfg(test)]
 pub use runtime_dirs::ensure_runtime_dirs;
-pub use runtime_dirs::{RuntimeDirs, open_runtime_dir};
+#[cfg(test)]
+pub use runtime_dirs::open_runtime_dir;
 pub(crate) use runtime_dirs::{
     ensure_anchored_runtime_dirs, open_anchored_runtime_dir, open_anchored_runtime_dir_read_only,
 };
@@ -86,11 +90,13 @@ mod segmented_jsonl;
 pub(crate) use segmented_jsonl::verify_segmented_jsonl_inventory;
 #[cfg(test)]
 pub use segmented_jsonl::with_segmented_jsonl_discovery_metrics_for_test;
+#[cfg(any(test, target_os = "linux", feature = "m11-budget-evidence"))]
+pub use segmented_jsonl::{SegmentedJsonlLeaf, parse_segmented_jsonl_leaf};
 pub use segmented_jsonl::{
-    SegmentedJsonlLeaf, canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
-    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, parse_segmented_jsonl_leaf,
-    retry_event_segment_discovery, segmented_jsonl_files, segmented_jsonl_leaf,
-    segmented_jsonl_leaf_stem, segmented_jsonl_path, segmented_jsonl_segment_count,
+    canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
+    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, retry_event_segment_discovery,
+    segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem, segmented_jsonl_path,
+    segmented_jsonl_segment_count,
 };
 
 #[derive(Clone, Debug)]

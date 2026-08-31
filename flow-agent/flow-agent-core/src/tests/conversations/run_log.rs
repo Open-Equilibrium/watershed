@@ -9,15 +9,13 @@ use crate::runtime::{
         RunLogProjectionPage, RunLogRecord, append_jsonl, canonical_json, inspect_run_attempts,
         project_tool_run_log, project_tool_run_log_page, read_jsonl,
     },
-    run_attempts::{
-        LegacyToolObservationOutcome, ProductiveAttemptLog, RunAttemptKind, RunAttemptOutcome,
-    },
+    run_attempts::{ProductiveAttemptLog, RunAttemptKind, RunAttemptOutcome},
 };
-use std::{fs, io::Write};
+use std::fs;
 
 fn terminal_record(index: usize, padding_bytes: usize) -> RunLogRecord {
     RunLogRecord::TerminalResult {
-        schema: "flow-run-log-record-v0".to_owned(),
+        schema: "flow-run-log-record-v1".to_owned(),
         attempt_id: format!("tool-{index:04}"),
         attempt_kind: RunAttemptKind::Tool,
         tool_id: Some("inspect".to_owned()),
@@ -31,10 +29,10 @@ fn terminal_record(index: usize, padding_bytes: usize) -> RunLogRecord {
 
 fn intent_record(index: usize) -> RunLogRecord {
     RunLogRecord::Intent {
-        schema: "flow-run-log-record-v0".to_owned(),
+        schema: "flow-run-log-record-v1".to_owned(),
         attempt_id: format!("tool-{index:04}"),
         attempt_kind: RunAttemptKind::Tool,
-        request_hash: None,
+        request_hash: format!("sha256:{index:064x}"),
         tool_id: Some("inspect".to_owned()),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
     }
@@ -136,7 +134,7 @@ fn conversation_page_byte_budget() {
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "provider-sparse".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
-            request_hash: Some(REQUEST_HASH.to_owned()),
+            request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
         },
@@ -211,7 +209,7 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "tool-001".to_owned(),
             attempt_kind: RunAttemptKind::Tool,
-            request_hash: Some(REQUEST_HASH.to_owned()),
+            request_hash: REQUEST_HASH.to_owned(),
             tool_id: Some("inspect".to_owned()),
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
         },
@@ -219,10 +217,8 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "provider-001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
-            request_hash: Some(
-                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-                    .to_owned(),
-            ),
+            request_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                .to_owned(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
         },
@@ -248,30 +244,6 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
             timestamp: "2026-07-30T12:00:01Z".to_owned(),
             durable_output: None,
         },
-        RunLogRecord::LegacyToolObservation {
-            schema: "flow-run-log-record-v0".to_owned(),
-            observation_id: "legacy-001".to_owned(),
-            flow_id: "flow-001".to_owned(),
-            phase_id: Some("phase-001".to_owned()),
-            tool_id: "inspect".to_owned(),
-            start_sequence: 1,
-            terminal_sequence: Some(2),
-            outcome: LegacyToolObservationOutcome::Completed,
-            exit_code: Some(0),
-            timestamp: "2026-07-30T12:00:01Z".to_owned(),
-        },
-        RunLogRecord::LegacyToolObservation {
-            schema: "flow-run-log-record-v0".to_owned(),
-            observation_id: "legacy-002".to_owned(),
-            flow_id: "flow-001".to_owned(),
-            phase_id: None,
-            tool_id: "other".to_owned(),
-            start_sequence: 3,
-            terminal_sequence: None,
-            outcome: LegacyToolObservationOutcome::Uncertain,
-            exit_code: None,
-            timestamp: "2026-07-30T12:00:02Z".to_owned(),
-        },
     ];
     for record in records {
         append_jsonl(&path, &record).expect("projection fixture record appends");
@@ -279,154 +251,12 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
 
     let page = project_tool_run_log_page(&workspace, "review", "review-1", "inspect", None)
         .expect("Tool projection reads");
-    assert_eq!(page.records.len(), 3);
+    assert_eq!(page.records.len(), 2);
     assert!(matches!(page.records[0], RunLogRecord::Intent { .. }));
     assert!(matches!(
         page.records[1],
         RunLogRecord::TerminalResult { .. }
     ));
-    assert!(matches!(
-        page.records[2],
-        RunLogRecord::LegacyToolObservation { .. }
-    ));
-
-    let foreign = projection_workspace("run-log-projection-foreign-schema");
-    append_jsonl(
-        &crate::tests::helpers::workspace_session_dir(&foreign)
-            .join("review/runs/review-1/run-log.jsonl"),
-        &RunLogRecord::LegacyToolObservation {
-            schema: "flow-run-log-record-v9".to_owned(),
-            observation_id: "legacy-001".to_owned(),
-            flow_id: "flow-001".to_owned(),
-            phase_id: None,
-            tool_id: "inspect".to_owned(),
-            start_sequence: 1,
-            terminal_sequence: None,
-            outcome: LegacyToolObservationOutcome::Uncertain,
-            exit_code: None,
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
-    )
-    .expect("foreign record appends");
-    let error = project_tool_run_log_page(&foreign, "review", "review-1", "inspect", None)
-        .expect_err("foreign record schema fails closed");
-    assert!(error.to_string().contains("unsupported schema"), "{error}");
-}
-
-#[test]
-fn run_log_rejects_an_unknown_legacy_tool_observation_outcome() {
-    let workspace = projection_workspace("run-log-unknown-legacy-outcome");
-    let path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("review/runs/review-1/run-log.jsonl");
-    let mut log = fs::OpenOptions::new()
-        .append(true)
-        .open(&path)
-        .expect("run log opens");
-    writeln!(
-        log,
-        "{}",
-        serde_json::json!({
-            "record_type": "legacy-tool-observation",
-            "schema": "flow-run-log-record-v0",
-            "observation_id": "legacy-001",
-            "flow_id": "flow-001",
-            "tool_id": "inspect",
-            "start_sequence": 1,
-            "outcome": "unknown",
-            "timestamp": "2026-07-30T12:00:00Z",
-        })
-    )
-    .expect("unknown legacy outcome appends");
-
-    project_tool_run_log_page(&workspace, "review", "review-1", "inspect", None)
-        .expect_err("unknown persisted legacy outcomes must fail closed");
-}
-
-#[test]
-fn run_log_rejects_semantically_invalid_legacy_tool_observations() {
-    let valid = || RunLogRecord::LegacyToolObservation {
-        schema: "flow-run-log-record-v0".to_owned(),
-        observation_id: "legacy-001".to_owned(),
-        flow_id: "flow-001".to_owned(),
-        phase_id: Some("phase-001".to_owned()),
-        tool_id: "inspect".to_owned(),
-        start_sequence: 1,
-        terminal_sequence: Some(2),
-        outcome: LegacyToolObservationOutcome::Completed,
-        exit_code: Some(0),
-        timestamp: "2026-07-30T12:00:00Z".to_owned(),
-    };
-    let mut cases = Vec::new();
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { observation_id, .. } = &mut record {
-        observation_id.clear();
-    }
-    cases.push((record, "observation id"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { flow_id, .. } = &mut record {
-        flow_id.clear();
-    }
-    cases.push((record, "flow id"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { phase_id, .. } = &mut record {
-        *phase_id = Some(String::new());
-    }
-    cases.push((record, "phase id"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { tool_id, .. } = &mut record {
-        tool_id.clear();
-    }
-    cases.push((record, "Tool id"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { start_sequence, .. } = &mut record {
-        *start_sequence = 0;
-    }
-    cases.push((record, "start sequence"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation {
-        terminal_sequence, ..
-    } = &mut record
-    {
-        *terminal_sequence = Some(1);
-    }
-    cases.push((record, "terminal sequence"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { outcome, .. } = &mut record {
-        *outcome = LegacyToolObservationOutcome::Uncertain;
-    }
-    cases.push((record, "uncertain"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation {
-        terminal_sequence, ..
-    } = &mut record
-    {
-        *terminal_sequence = None;
-    }
-    cases.push((record, "terminal outcome"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { outcome, .. } = &mut record {
-        *outcome = LegacyToolObservationOutcome::Failed;
-    }
-    cases.push((record, "exit code"));
-    let mut record = valid();
-    if let RunLogRecord::LegacyToolObservation { timestamp, .. } = &mut record {
-        *timestamp = "not-a-timestamp".to_owned();
-    }
-    cases.push((record, "timestamp"));
-
-    for (index, (record, expected)) in cases.into_iter().enumerate() {
-        let workspace = projection_workspace(&format!("run-log-invalid-legacy-{index}"));
-        let path = crate::tests::helpers::workspace_session_dir(&workspace)
-            .join("review/runs/review-1/run-log.jsonl");
-        append_jsonl(&path, &record).expect("invalid legacy observation appends as a fixture");
-
-        let error = project_tool_run_log_page(&workspace, "review", "review-1", "inspect", None)
-            .expect_err("projection rejects the invalid legacy observation");
-        assert!(error.to_string().contains(expected), "{error}");
-        let error = inspect_run_attempts(&workspace, "review", "review-1")
-            .expect_err("inspection rejects the invalid legacy observation");
-        assert!(error.to_string().contains(expected), "{error}");
-    }
 }
 
 #[test]
@@ -439,11 +269,11 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
     .expect("definition reads")
     .remove(0);
     let request_hash = REQUEST_HASH;
-    let intent = |schema: &str, hash: Option<&str>, attempt_id: &str| RunLogRecord::Intent {
+    let intent = |schema: &str, hash: &str, attempt_id: &str| RunLogRecord::Intent {
         schema: schema.to_owned(),
         attempt_id: attempt_id.to_owned(),
         attempt_kind: RunAttemptKind::Provider,
-        request_hash: hash.map(str::to_owned),
+        request_hash: hash.to_owned(),
         tool_id: None,
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
     };
@@ -463,8 +293,6 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             flow_definition_id,
             registry_hash,
             flow_definition_hash,
-            legacy_session_id,
-            legacy_source_manifest,
             ..
         } => RunLogRecord::Definition {
             schema: "flow-run-log-record-v9".to_owned(),
@@ -476,18 +304,16 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             model_context_limit: None,
             output_reserve: None,
             safety_margin: None,
-            legacy_session_id: legacy_session_id.clone(),
-            legacy_source_manifest: legacy_source_manifest.clone(),
         },
         _ => unreachable!("new run begins with a definition"),
     };
-    let valid_intent = intent("flow-run-log-record-v1", Some(request_hash), "provider-001");
+    let valid_intent = intent("flow-run-log-record-v1", request_hash, "provider-001");
     let intent_with_kind_and_tool =
         |attempt_id: &str, attempt_kind, tool_id: Option<&str>| RunLogRecord::Intent {
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: attempt_id.to_owned(),
             attempt_kind,
-            request_hash: Some(request_hash.to_owned()),
+            request_hash: request_hash.to_owned(),
             tool_id: tool_id.map(str::to_owned),
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
         };
@@ -523,22 +349,6 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             "duplicate-definition",
             vec![definition.clone(), definition.clone()],
             "more than one definition",
-        ),
-        (
-            "v0-with-hash",
-            vec![
-                definition.clone(),
-                intent("flow-run-log-record-v0", Some(request_hash), "provider-001"),
-            ],
-            "request hash does not match",
-        ),
-        (
-            "v1-without-hash",
-            vec![
-                definition.clone(),
-                intent("flow-run-log-record-v1", None, "provider-001"),
-            ],
-            "request hash does not match",
         ),
         (
             "duplicate-intent",
@@ -618,9 +428,9 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             vec![
                 definition.clone(),
                 intent_with_kind_and_tool("tool-004", RunAttemptKind::Tool, Some("inspect")),
-                result_with_schema_and_tool("flow-run-log-record-v0", "tool-004", Some("inspect")),
+                result_with_schema_and_tool("flow-run-log-record-v9", "tool-004", Some("inspect")),
             ],
-            "contradicts its durable intent",
+            "unsupported schema",
         ),
     ];
 
@@ -660,7 +470,7 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
         .join("review/runs/review-1/run-log.jsonl");
     let body = [
         definition,
-        intent("flow-run-log-record-v1", Some(request_hash), "provider-001"),
+        intent("flow-run-log-record-v1", request_hash, "provider-001"),
         result("provider-001", RunAttemptKind::Provider, "completed"),
     ]
     .iter()
@@ -714,7 +524,7 @@ fn run_attempt_inspection_rejects_a_result_for_a_different_attempt() {
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "provider-001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
-            request_hash: Some(REQUEST_HASH.to_owned()),
+            request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
         },

@@ -16,7 +16,7 @@ pub enum LiveEventNotifyStatus {
 /// A best-effort wake-up for events already committed to one session log.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveEventNotification {
-    /// Conversation owning a nested run; absent for a flat session.
+    /// Conversation owning a productive Run; absent for an explicit fixture session.
     pub conversation_id: Option<String>,
     /// Session whose committed log should be read.
     pub session_id: String,
@@ -60,13 +60,6 @@ pub struct LiveEventNotifier {
 }
 
 impl LiveEventNotifier {
-    pub(crate) fn duplicate_for_same_operation(&self) -> Self {
-        Self {
-            sender: self.sender.clone(),
-            state: self.state.clone(),
-        }
-    }
-
     /// Advances the committed high-watermark and attempts a wake-up without waiting.
     ///
     /// Call this only after `committed_sequence` is readable from the authoritative session

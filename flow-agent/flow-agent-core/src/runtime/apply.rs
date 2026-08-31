@@ -283,11 +283,7 @@ fn terminalize_planned_fixture_error(
         events: event_signature.signature(),
         failed: true,
         failure_status,
-        terminal_error: if matches!(
-            application.options.side_effect_mode,
-            ToolSideEffectMode::Resume { .. }
-        ) || !known_tool_failure
-        {
+        terminal_error: if !known_tool_failure {
             Some(error)
         } else {
             None
