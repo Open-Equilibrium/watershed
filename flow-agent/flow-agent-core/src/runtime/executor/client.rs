@@ -13,9 +13,9 @@ use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
-    io::{Read as _, Write as _},
+    io::{Read, Write as _},
     os::{
-        fd::{AsRawFd as _, FromRawFd as _, OwnedFd},
+        fd::{AsRawFd as _, OwnedFd},
         unix::process::CommandExt as _,
     },
     path::{Component, Path},
@@ -649,6 +649,12 @@ fn execute_one_shot(
             stderr_eof = read_available(&mut stderr, &mut stderr_read)
                 .map_err(|_| invalid_response("Executor stderr read failed"))?;
         }
+        if stdout_read.overflowed {
+            return Err(invalid_response("Executor response exceeds its byte limit"));
+        }
+        if stderr_read.overflowed {
+            return Err(invalid_response("Executor stderr exceeds its byte limit"));
+        }
         if process_status.is_none() {
             match super::child_exited_without_reaping(child.child_mut()) {
                 Ok(true) => {
@@ -692,9 +698,6 @@ fn execute_one_shot(
             ));
         }
         thread::sleep(Duration::from_millis(10));
-    }
-    if stdout_read.overflowed {
-        return Err(invalid_response("Executor response exceeds its byte limit"));
     }
     let status = process_status.expect("terminal process status was observed before drain");
     if !status.success() {
@@ -771,6 +774,9 @@ fn read_available(reader: &mut impl Read, output: &mut BoundedRead) -> std::io::
                     .bytes
                     .extend_from_slice(&buffer[..read.min(remaining)]);
                 output.overflowed |= read > remaining;
+                if output.overflowed {
+                    return Ok(false);
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
@@ -981,7 +987,59 @@ mod tests {
     #[test]
     fn one_shot_completion_cleans_its_process_group_once() {
         super::super::reset_process_group_cleanup_calls_for_test();
-        let request = proto::ExecutorRequestV0 {
+        let request = one_shot_request();
+        let response = proto::ExecutorResponseV0::Error {
+            code: proto::ExecutorErrorCodeV0::Unavailable,
+            message: "unavailable".to_owned(),
+            request_id: request.request_id.clone(),
+            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+        };
+        let response = String::from_utf8(
+            proto::canonical_executor_response_v0(&response).expect("canonical response"),
+        )
+        .expect("response is UTF-8");
+        let request_bytes = format!("printf '%s' '{response}'").into_bytes();
+        let executor = File::open("/bin/sh").expect("shell executor opens");
+
+        assert!(execute_one_shot(&executor, &[], &request, &request_bytes).is_err());
+        assert_eq!(
+            super::super::process_group_cleanup_calls_for_test(),
+            1,
+            "a synchronously reaped Executor leader must not be signaled again by ChildGuard"
+        );
+    }
+
+    #[test]
+    fn continuous_executor_output_cannot_starve_its_deadline_or_cleanup() {
+        for writer in [
+            "exec /bin/cat /dev/zero",
+            "exec /bin/sh -c '/bin/cat /dev/zero >&2'",
+        ] {
+            super::super::reset_process_group_cleanup_calls_for_test();
+            let request = one_shot_request();
+            let executor = File::open("/bin/sh").expect("shell executor opens");
+            let request_bytes = writer.as_bytes();
+            let started = Instant::now();
+
+            let error = match execute_one_shot(&executor, &[], &request, request_bytes) {
+                Err(error) => error,
+                Ok(_) => panic!("a capped Executor stream is rejected"),
+            };
+            assert!(error.to_string().contains("byte limit"));
+            assert!(
+                started.elapsed() < Duration::from_secs(6),
+                "a continuous Executor stream must not outlive its five-second cleanup bound"
+            );
+            assert_eq!(
+                super::super::process_group_cleanup_calls_for_test(),
+                1,
+                "a capped Executor stream must clean up its process group"
+            );
+        }
+    }
+
+    fn one_shot_request() -> proto::ExecutorRequestV0 {
+        proto::ExecutorRequestV0 {
             argv: Vec::new(),
             environment: BTreeMap::new(),
             executable: "/bin/sh".to_owned(),
@@ -1011,25 +1069,6 @@ mod tests {
             tool_id: "tool".to_owned(),
             tool_kind: "command".to_owned(),
             working_directory: "/".to_owned(),
-        };
-        let response = proto::ExecutorResponseV0::Error {
-            code: proto::ExecutorErrorCodeV0::Unavailable,
-            message: "unavailable".to_owned(),
-            request_id: request.request_id.clone(),
-            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
-        };
-        let response = String::from_utf8(
-            proto::canonical_executor_response_v0(&response).expect("canonical response"),
-        )
-        .expect("response is UTF-8");
-        let request_bytes = format!("printf '%s' '{response}'").into_bytes();
-        let executor = File::open("/bin/sh").expect("shell executor opens");
-
-        assert!(execute_one_shot(&executor, &[], &request, &request_bytes).is_err());
-        assert_eq!(
-            super::super::process_group_cleanup_calls_for_test(),
-            1,
-            "a synchronously reaped Executor leader must not be signaled again by ChildGuard"
-        );
+        }
     }
 }
