@@ -4,7 +4,6 @@ use crate::runtime::{
     stream_signature::{FlowInvocation, RuntimeStreamSignature, RuntimeStreamSignatureBuilder},
     types::{EventClock, RuntimeError},
 };
-use core_policy::ProtectedPathMatchMode;
 use proto::EventEnvelope;
 use std::sync::Arc;
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -85,7 +84,6 @@ pub struct PlannedFixtureAction {
     pub(crate) completion_sequence: u64,
     pub(crate) effect: PlannedFixtureEffect,
     pub(crate) failure_transition: PlannedFailureTransition,
-    pub(crate) protected_path_match_mode: ProtectedPathMatchMode,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -208,7 +206,6 @@ impl FlowExecutionPlan {
                                 "contents": write.as_ref().map(|write| write.contents.as_slice()),
                             }),
                         },
-                        "protected_path_match_mode": action.protected_path_match_mode.as_str(),
                         "phase_failure_payload": action.failure_transition.phase_failure_payload,
                     }))
                     .expect("typed fixture plan snapshot is canonical JSON");
@@ -247,7 +244,6 @@ pub struct RuntimeFailure {
 #[derive(Clone, Copy)]
 pub struct RuntimeToolPolicy<'a> {
     pub(crate) command: &'a core_policy::CommandPolicy,
-    pub(crate) protected_path_match_mode: ProtectedPathMatchMode,
     pub(crate) stub_model_fixture_profile: bool,
 }
 
@@ -308,28 +304,4 @@ impl FlowExecutionOptions {
         self.root_input = Some(input);
         self
     }
-}
-
-#[cfg(target_os = "macos")]
-pub fn runtime_policy_target() -> core_policy::PolicyTarget {
-    core_policy::PolicyTarget::MacosSeatbelt
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn runtime_policy_target() -> core_policy::PolicyTarget {
-    core_policy::PolicyTarget::LinuxLandlockSeccomp
-}
-
-#[cfg(windows)]
-pub fn runtime_protected_path_match_mode(
-    _target: &core_policy::PolicyTarget,
-) -> ProtectedPathMatchMode {
-    ProtectedPathMatchMode::CaseInsensitive
-}
-
-#[cfg(not(windows))]
-pub fn runtime_protected_path_match_mode(
-    target: &core_policy::PolicyTarget,
-) -> ProtectedPathMatchMode {
-    core_policy::protected_path_match_mode_for_policy_target(target)
 }

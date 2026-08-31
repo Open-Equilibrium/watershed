@@ -10,9 +10,8 @@ use crate::runtime::{
     execution_plan::{
         FlowExecutionAction, FlowExecutionOptions, FlowExecutionPlan, PlannedToolContext,
         RuntimeExecution, RuntimeFailure, RuntimeToolPolicy, ToolSideEffectMode,
-        runtime_protected_path_match_mode,
     },
-    fs_guards::{AnchoredDir, AnchoredWorkspace},
+    fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
     openai_codex::ProviderTurn,
     planning::{emit_planned_tool, plan_flow},
@@ -22,7 +21,7 @@ use crate::runtime::{
         execute_productive_flow_with_tool_executor,
     },
     stream_signature::FlowInvocation,
-    tool_runner::{ToolExecutionOutcome, ToolInvocation},
+    tool_runner::ToolInvocation,
     types::{
         EventClock, MAX_CANONICAL_EVENT_BYTES, MAX_FLOW_EVENTS, MAX_FLOW_INVOCATIONS,
         MAX_LIVE_FLOW_INVOCATIONS, MAX_SESSION_EVENT_BYTES, RuntimeError,
@@ -200,7 +199,6 @@ fn emit_hello_fixture_for_failure_budget(
             phase,
             policy: RuntimeToolPolicy {
                 command,
-                protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
                 stub_model_fixture_profile: false,
             },
             phase_failure_payload: &phase_failure_payload,
@@ -292,17 +290,40 @@ impl ProductiveProvider for ImmediateProductiveProvider {
 struct LiveLimitToolExecutor;
 
 impl ProductiveToolExecutor for LiveLimitToolExecutor {
+    type Prepared = ();
+
     fn supports_productive_tools(&self) -> bool {
         true
     }
 
-    fn execute(
+    fn prepare(
         &mut self,
         _invocation: &ToolInvocation,
-        _workspace: &AnchoredDir,
-        _timeout: Duration,
-    ) -> Result<ToolExecutionOutcome, RuntimeError> {
+        _workspace: &AnchoredWorkspace,
+        _policy: &core_policy::PolicyArtifact,
+        _command_policy: &core_policy::CommandPolicy,
+        _request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError> {
         panic!("the live invocation limit must reject before productive Tool dispatch")
+    }
+
+    fn request_hash<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
+        unreachable!()
+    }
+
+    fn policy_digest<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
+        unreachable!()
+    }
+
+    fn runtime_profile(&self, _prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
+        unreachable!()
+    }
+
+    fn execute_prepared(
+        &mut self,
+        _prepared: Self::Prepared,
+    ) -> Result<crate::runtime::executor::ExecutorToolExecution, RuntimeError> {
+        unreachable!()
     }
 }
 

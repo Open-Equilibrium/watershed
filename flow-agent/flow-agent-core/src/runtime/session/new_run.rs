@@ -9,7 +9,7 @@ use crate::runtime::{
     auth::resolve_openai_codex_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     event_writer::SerialSessionWriter,
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target},
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
     fs_guards::{AnchoredFile, AnchoredWorkspace},
     instructions::read_applicable_agent_instructions,
     live_events::LiveEventNotifier,
@@ -220,11 +220,8 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     )?;
     let definition_metadata =
         reconcile_productive_preflight(session_definition_metadata(&registry, flow_block))?;
-    let policy = reconcile_productive_preflight(core_policy::compile_policy_artifact(
-        &registry,
-        flow_ref,
-        runtime_policy_target(),
-    ))?;
+    let policy =
+        reconcile_productive_preflight(core_policy::compile_policy_artifact(&registry, flow_ref))?;
     if let ExecutionBackend::OpenAiCodex {
         model,
         model_profile,

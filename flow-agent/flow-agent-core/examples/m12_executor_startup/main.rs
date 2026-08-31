@@ -1,8 +1,7 @@
 mod report;
 
 use flow_agent_core::{
-    M12_STARTUP_TOOL_CHILD_ARG, M12DirectRunnerMeasurement, run_m12_direct_runner_startup,
-    write_m12_noop_tool_child_report,
+    M12ExecutorStartupMeasurement, configure_executor_path, run_m12_executor_startup,
 };
 use report::{write_jsonl, write_report};
 use serde::{Deserialize, Serialize};
@@ -22,13 +21,16 @@ const MAX_SAMPLE_COUNT: usize = 1_000;
 const MAX_MEASUREMENT_CHILD_BYTES: usize = 256;
 const MAX_CHILD_DIAGNOSTIC_BYTES: usize = 1_024;
 const MEASUREMENT_CHILD_ARG: &str = "--measure-child";
-const MEASUREMENT_CHILD_SCHEMA: &str = "flow-m12-startup-sample-v0";
+const MEASUREMENT_CHILD_SCHEMA: &str = "flow-m12-executor-startup-sample-v0";
 const FLOW_AGENT_HOME_ENV: &str = "FLOW_AGENT_HOME";
 const FLOW_AGENT_HOME_LEAF: &str = ".flow";
+const XDG_CONFIG_HOME_ENV: &str = "XDG_CONFIG_HOME";
+const XDG_CONFIG_HOME_LEAF: &str = ".config";
 type DynError = Box<dyn Error + Send + Sync>;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct Config {
+    executor: PathBuf,
     warmups: usize,
     samples: usize,
 }
@@ -37,8 +39,7 @@ struct Config {
 #[serde(deny_unknown_fields)]
 struct ChildMeasurement {
     schema: String,
-    runner_elapsed_ns: u64,
-    tool_runtime_ns: u64,
+    executor_elapsed_ns: u64,
 }
 
 struct TempRoot(PathBuf);
@@ -68,14 +69,11 @@ fn duration_ns(duration: Duration) -> u64 {
 
 fn measure_once() -> Result<ChildMeasurement, DynError> {
     let workspace = TempRoot::create()?;
-    let M12DirectRunnerMeasurement {
-        runner_elapsed,
-        tool_runtime,
-    } = run_m12_direct_runner_startup(workspace.path()).map_err(io::Error::other)?;
+    let M12ExecutorStartupMeasurement { executor_elapsed } =
+        run_m12_executor_startup(workspace.path()).map_err(io::Error::other)?;
     Ok(ChildMeasurement {
         schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
-        runner_elapsed_ns: duration_ns(runner_elapsed),
-        tool_runtime_ns: duration_ns(tool_runtime),
+        executor_elapsed_ns: duration_ns(executor_elapsed),
     })
 }
 
@@ -85,13 +83,18 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
         .to_owned()
 }
 
-fn fresh_child_measurement() -> Result<ChildMeasurement, DynError> {
+fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError> {
     let session_root = TempRoot::create()?;
     let output = Command::new(env::current_exe()?)
         .arg(MEASUREMENT_CHILD_ARG)
+        .arg(executor)
         .env(
             FLOW_AGENT_HOME_ENV,
             session_root.path().join(FLOW_AGENT_HOME_LEAF),
+        )
+        .env(
+            XDG_CONFIG_HOME_ENV,
+            session_root.path().join(XDG_CONFIG_HOME_LEAF),
         )
         .output()?;
     if !output.status.success() {
@@ -107,11 +110,6 @@ fn fresh_child_measurement() -> Result<ChildMeasurement, DynError> {
     let measurement: ChildMeasurement = serde_json::from_slice(&output.stdout)?;
     if measurement.schema != MEASUREMENT_CHILD_SCHEMA {
         return Err(io::Error::other("fresh measurement child schema did not match").into());
-    }
-    if measurement.tool_runtime_ns > measurement.runner_elapsed_ns {
-        return Err(
-            io::Error::other("Tool runtime exceeded the enclosing direct-runner interval").into(),
-        );
     }
     Ok(measurement)
 }
@@ -133,31 +131,43 @@ where
     I: IntoIterator<Item = S>,
     S: Into<String>,
 {
-    let mut config = Config {
-        warmups: DEFAULT_WARMUPS,
-        samples: DEFAULT_SAMPLES,
-    };
+    let mut executor = None;
+    let mut warmups = DEFAULT_WARMUPS;
+    let mut samples = DEFAULT_SAMPLES;
     let mut args = args.into_iter().map(Into::into);
     while let Some(flag) = args.next() {
         let value = args
             .next()
             .ok_or_else(|| io::Error::other(format!("{flag} requires a value")))?;
         match flag.as_str() {
-            "--warmup" => config.warmups = parse_positive(&value, "--warmup")?,
-            "--samples" => config.samples = parse_positive(&value, "--samples")?,
+            "--executor" => {
+                if executor.is_some() {
+                    return Err(io::Error::other("--executor may only be provided once").into());
+                }
+                let path = PathBuf::from(value);
+                if !path.is_absolute() {
+                    return Err(io::Error::other("--executor must be an absolute path").into());
+                }
+                executor = Some(path);
+            }
+            "--warmup" => warmups = parse_positive(&value, "--warmup")?,
+            "--samples" => samples = parse_positive(&value, "--samples")?,
             _ => return Err(io::Error::other(format!("unknown argument {flag}")).into()),
         }
     }
-    Ok(config)
+    Ok(Config {
+        executor: executor.ok_or_else(|| io::Error::other("--executor is required"))?,
+        warmups,
+        samples,
+    })
 }
 
 fn run_main() -> Result<(), DynError> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.as_slice() == [M12_STARTUP_TOOL_CHILD_ARG] {
-        write_m12_noop_tool_child_report(&mut io::stdout().lock()).map_err(io::Error::other)?;
-        return Ok(());
-    }
-    if args.as_slice() == [MEASUREMENT_CHILD_ARG] {
+    if let [measurement_child, executor] = args.as_slice()
+        && measurement_child == MEASUREMENT_CHILD_ARG
+    {
+        configure_executor_path(Path::new(executor)).map_err(io::Error::other)?;
         write_jsonl(&mut io::stdout().lock(), &measure_once()?)?;
         return Ok(());
     }
@@ -165,7 +175,7 @@ fn run_main() -> Result<(), DynError> {
     let config = parse_args(args)?;
     let complete = write_report(&mut io::stdout().lock(), config)?;
     if !complete {
-        return Err(io::Error::other("M1.2 startup baseline evidence was incomplete").into());
+        return Err(io::Error::other("M1.2 Executor startup evidence was incomplete").into());
     }
     Ok(())
 }
@@ -182,7 +192,26 @@ mod tests {
     use super::{ChildMeasurement, Config, DynError, MEASUREMENT_CHILD_SCHEMA, parse_args};
     use crate::report::{percentile, write_report_with_measurement};
     use serde_json::Value;
-    use std::io::{self, Write};
+    use std::{
+        io::{self, Write},
+        path::PathBuf,
+    };
+
+    fn executor_path() -> PathBuf {
+        PathBuf::from(if cfg!(windows) {
+            r"C:\flow-executor.exe"
+        } else {
+            "/flow-executor"
+        })
+    }
+
+    fn config(warmups: usize, samples: usize) -> Config {
+        Config {
+            executor: executor_path(),
+            warmups,
+            samples,
+        }
+    }
 
     #[derive(Default)]
     struct FlushTrackingWriter {
@@ -203,13 +232,25 @@ mod tests {
     }
 
     #[test]
-    fn defaults_match_the_approved_sampling_contract() {
+    fn defaults_require_one_absolute_executor_path() {
         assert_eq!(
-            parse_args(Vec::<String>::new()).unwrap(),
+            parse_args(["--executor", executor_path().to_str().unwrap()]).unwrap(),
             Config {
+                executor: executor_path(),
                 warmups: 5,
                 samples: 30,
             }
+        );
+        assert!(parse_args(Vec::<String>::new()).is_err());
+        assert!(parse_args(["--executor", "relative/flow-executor"]).is_err());
+        assert!(
+            parse_args([
+                "--executor",
+                executor_path().to_str().unwrap(),
+                "--executor",
+                executor_path().to_str().unwrap(),
+            ])
+            .is_err()
         );
     }
 
@@ -221,29 +262,18 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_keeps_runner_and_tool_runtime_distributions_separate() {
+    fn aggregate_retains_the_executor_distribution() {
         let mut observation = 0_u64;
         let mut measure = || -> Result<ChildMeasurement, DynError> {
             observation += 1;
             Ok(ChildMeasurement {
                 schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
-                runner_elapsed_ns: observation * 10,
-                tool_runtime_ns: observation,
+                executor_elapsed_ns: observation * 10,
             })
         };
         let mut writer = Vec::new();
 
-        assert!(
-            write_report_with_measurement(
-                &mut writer,
-                Config {
-                    warmups: 1,
-                    samples: 3,
-                },
-                &mut measure,
-            )
-            .unwrap()
-        );
+        assert!(write_report_with_measurement(&mut writer, config(1, 3), &mut measure,).unwrap());
 
         let records = String::from_utf8(writer)
             .unwrap()
@@ -261,10 +291,47 @@ mod tests {
             .iter()
             .find(|record| record["kind"] == "aggregate")
             .unwrap();
-        assert_eq!(aggregate["runner_p50_ns"], 30);
-        assert_eq!(aggregate["runner_p95_ns"], 40);
-        assert_eq!(aggregate["tool_runtime_p50_ns"], 3);
-        assert_eq!(aggregate["tool_runtime_p95_ns"], 4);
+        assert_eq!(aggregate["executor_p50_ns"], 30);
+        assert_eq!(aggregate["executor_p95_ns"], 40);
+    }
+
+    #[test]
+    fn report_identifies_the_real_executor_boundary() {
+        let mut measure = || -> Result<ChildMeasurement, DynError> {
+            Ok(ChildMeasurement {
+                schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
+                executor_elapsed_ns: 1,
+            })
+        };
+        let mut writer = Vec::new();
+
+        assert!(write_report_with_measurement(&mut writer, config(1, 1), &mut measure,).unwrap());
+
+        let records = String::from_utf8(writer)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let metadata = &records[0];
+        assert_eq!(metadata["schema"], "flow-m12-executor-startup-v0");
+        let sample = records
+            .iter()
+            .find(|record| record["kind"] == "sample")
+            .unwrap();
+        assert_eq!(sample["executor_elapsed_ns"], 1);
+        let aggregate = records
+            .iter()
+            .find(|record| record["kind"] == "aggregate")
+            .unwrap();
+        assert_eq!(
+            aggregate["inputs"]["boundary"],
+            "prepared_selected_executor"
+        );
+        assert_eq!(aggregate["inputs"]["tool"], "/bin/echo");
+        assert_eq!(aggregate["inputs"]["tool_arguments"], Value::Array(vec![]));
+        assert_eq!(aggregate["inputs"]["tool_environment"], "empty");
+        assert_eq!(aggregate["inputs"]["runtime_profile"], "exact");
+        assert_eq!(aggregate["inputs"]["tool_executions_per_child"], 1);
     }
 
     #[test]
@@ -274,15 +341,8 @@ mod tests {
         };
         let mut writer = FlushTrackingWriter::default();
 
-        let complete = write_report_with_measurement(
-            &mut writer,
-            Config {
-                warmups: 1,
-                samples: 1,
-            },
-            &mut measure,
-        )
-        .unwrap();
+        let complete =
+            write_report_with_measurement(&mut writer, config(1, 1), &mut measure).unwrap();
 
         assert!(!complete);
         assert!(writer.flushed);

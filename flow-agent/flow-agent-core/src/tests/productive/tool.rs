@@ -1,4 +1,4 @@
-use super::support::{DefaultRecovery, ObjectRecovery};
+use super::support::{DefaultRecovery, ObjectRecovery, fake_tool_attempt_output};
 use crate::runtime::{
     productive::{recovered_tool_terminal, recovered_tool_value, tool_result_value, tool_terminal},
     run_attempts::{RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
@@ -15,6 +15,34 @@ fn attempt_result(outcome: &str, durable_output: Option<serde_json::Value>) -> R
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
         durable_output,
     }
+}
+
+fn attempt_output(tool_result: serde_json::Value) -> serde_json::Value {
+    fake_tool_attempt_output(tool_result)
+}
+
+#[test]
+fn receiptless_v0_tool_attempt_is_not_recoverable() {
+    let result = attempt_result(
+        "completed",
+        Some(serde_json::json!({
+            "schema": "flow-tool-attempt-output-v0",
+            "tool_result": {
+                "type": "map",
+                "value": {
+                    "schema": {"type": "string", "value": "flow-tool-result-v0"},
+                    "status": {"type": "string", "value": "completed"},
+                    "exit_code": {"type": "integer", "value": "0"},
+                    "stdout": {"type": "string", "value": ""},
+                    "stderr": {"type": "string", "value": ""}
+                }
+            }
+        })),
+    );
+
+    let error = recovered_tool_value(&result, &DefaultRecovery)
+        .expect_err("receipt-less attempt output must fail closed");
+    assert!(error.to_string().contains("unsupported schema"));
 }
 
 #[test]
@@ -80,13 +108,7 @@ fn tool_results_enforce_their_durable_value_contracts() {
             None => assert!(value["value"].get("exit_code").is_none()),
         }
 
-        let mut result = attempt_result(
-            expected_status,
-            Some(serde_json::json!({
-                "schema": "flow-tool-attempt-output-v0",
-                "tool_result": value,
-            })),
-        );
+        let mut result = attempt_result(expected_status, Some(attempt_output(value)));
         result.classification = outcome
             .classification
             .map(|classification| classification.as_str().to_owned());
@@ -133,24 +155,24 @@ fn tool_results_enforce_their_durable_value_contracts() {
         attempt_result("completed", None),
         attempt_result(
             "completed",
-            Some(serde_json::json!({
-                "schema": "wrong",
-                "tool_result": {"type": "string", "value": "value"}
-            })),
+            Some({
+                let mut output =
+                    attempt_output(serde_json::json!({"type": "string", "value": "value"}));
+                output["schema"] = "wrong".into();
+                output
+            }),
         ),
         attempt_result(
             "completed",
-            Some(serde_json::json!({
-                "schema": "flow-tool-attempt-output-v0",
-                "tool_result": {"type": "integer", "value": "01"}
-            })),
+            Some(attempt_output(
+                serde_json::json!({"type": "integer", "value": "01"}),
+            )),
         ),
         attempt_result(
             "completed",
-            Some(serde_json::json!({
-                "schema": "flow-tool-attempt-output-v0",
-                "tool_result": {"type": "string", "value": "not a Tool result envelope"}
-            })),
+            Some(attempt_output(serde_json::json!({
+                "type": "string", "value": "not a Tool result envelope"
+            }))),
         ),
     ] {
         assert!(recovered_tool_value(&result, &DefaultRecovery).is_err());
@@ -171,10 +193,9 @@ fn recovered_tool_stream_objects_must_match_their_digest_uris() {
     let recovery = ObjectRecovery(std::collections::BTreeMap::from([(uri, vec![0xfe])]));
     let result = attempt_result(
         "completed",
-        Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": serde_json::to_value(durable.value).expect("Tool value JSON"),
-        })),
+        Some(attempt_output(
+            serde_json::to_value(durable.value).expect("Tool value JSON"),
+        )),
     );
     let error = recovered_tool_value(&result, &recovery)
         .expect_err("Tool stream whose bytes do not match its URI must fail closed");
@@ -225,10 +246,9 @@ fn recovered_tool_results_enforce_terminal_matrix_and_stream_caps() {
         };
         let mut result = attempt_result(
             status,
-            Some(serde_json::json!({
-                "schema": "flow-tool-attempt-output-v0",
-                "tool_result": serde_json::to_value(durable.value).expect("Tool value JSON"),
-            })),
+            Some(attempt_output(
+                serde_json::to_value(durable.value).expect("Tool value JSON"),
+            )),
         );
         result.classification = classification.map(str::to_owned);
         result.exit_code = outcome.exit_code;
@@ -269,10 +289,9 @@ fn recovered_tool_results_enforce_terminal_matrix_and_stream_caps() {
         let recovery = ObjectRecovery::from_objects(&durable.objects);
         let mut result = attempt_result(
             "completed",
-            Some(serde_json::json!({
-                "schema": "flow-tool-attempt-output-v0",
-                "tool_result": serde_json::to_value(durable.value).expect("Tool value JSON"),
-            })),
+            Some(attempt_output(
+                serde_json::to_value(durable.value).expect("Tool value JSON"),
+            )),
         );
         result.exit_code = Some(0);
         let error = recovered_tool_value(&result, &recovery)
@@ -298,10 +317,8 @@ fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {
         stderr: b"stderr".to_vec(),
     })
     .expect("valid Tool result becomes durable");
-    let valid_output = serde_json::json!({
-        "schema": "flow-tool-attempt-output-v0",
-        "tool_result": serde_json::to_value(durable.value).expect("Tool value serializes"),
-    });
+    let valid_output =
+        attempt_output(serde_json::to_value(durable.value).expect("Tool value serializes"));
     let cases: [(&str, RecoveredToolMutation, &str); 6] = [
         (
             "outer-schema",
@@ -360,10 +377,9 @@ fn recovered_tool_results_reject_semantically_inconsistent_durable_values() {
 
     let mut non_map = attempt_result(
         "completed",
-        Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": {"type": "string", "value": "not a map"}
-        })),
+        Some(attempt_output(serde_json::json!({
+            "type": "string", "value": "not a map"
+        }))),
     );
     non_map.exit_code = Some(0);
     let error = recovered_tool_value(&non_map, &DefaultRecovery)

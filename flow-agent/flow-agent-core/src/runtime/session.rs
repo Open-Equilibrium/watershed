@@ -2,7 +2,7 @@ use crate::runtime::{
     cancellation::{ProductiveTerminalClaim, claim_productive_terminal},
     config_io::GlobalConfigAuthority,
     context::ContextModelProfile,
-    execution_plan::runtime_policy_target,
+    executor::PreparedExecutor,
     fs_guards::AnchoredWorkspace,
     instructions::read_applicable_agent_instructions,
     session_definition::{SessionLogMetadata, verify_resume_definition_metadata_values},
@@ -10,6 +10,9 @@ use crate::runtime::{
 };
 #[cfg(test)]
 use std::cell::RefCell;
+
+#[cfg(test)]
+type ProductiveExecutorReadinessObserver = Box<dyn FnOnce() -> Result<(), RuntimeError>>;
 
 fn verify_productive_model_profile(
     run_session_id: &str,
@@ -35,6 +38,7 @@ std::thread_local! {
     static PRODUCTIVE_PRE_RUN_CREATE_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
     static PRODUCTIVE_PRE_RUN_PUBLISH_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
     static PRODUCTIVE_RUN_COMMIT_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
+    static PRODUCTIVE_EXECUTOR_READINESS_OBSERVER: RefCell<Option<ProductiveExecutorReadinessObserver>> = RefCell::new(None);
     static RUN_POST_CONFIG_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
     static RUN_PRE_PLAN_OBSERVER: RefCell<Option<Box<dyn FnOnce()>>> = RefCell::new(None);
 }
@@ -52,6 +56,13 @@ pub(crate) fn set_productive_pre_run_publish_observer(observer: impl FnOnce() + 
 #[cfg(test)]
 pub(crate) fn set_productive_run_commit_observer(observer: impl FnOnce() + 'static) {
     PRODUCTIVE_RUN_COMMIT_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(test)]
+pub(crate) fn set_productive_executor_readiness_observer(
+    observer: impl FnOnce() -> Result<(), RuntimeError> + 'static,
+) {
+    PRODUCTIVE_EXECUTOR_READINESS_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
 #[cfg(test)]
@@ -111,6 +122,22 @@ where
     }
 }
 
+fn prepare_productive_tool_executor(
+    policy: &core_policy::PolicyArtifact,
+) -> Result<Option<PreparedExecutor>, RuntimeError> {
+    if policy.commands.is_empty() {
+        return Ok(None);
+    }
+    #[cfg(test)]
+    if let Some(observer) = PRODUCTIVE_EXECUTOR_READINESS_OBSERVER.with_borrow_mut(Option::take) {
+        observer()?;
+    }
+    reconcile_productive_preflight(
+        crate::runtime::productive::ensure_productive_tool_execution_platform(),
+    )?;
+    PreparedExecutor::prepare_selected().map(Some)
+}
+
 struct RecordedProductivePreflight {
     registry: core_script::ResolvedRegistry,
     flow_ref: String,
@@ -163,11 +190,8 @@ where
         &registry,
         flow_block,
     ))?;
-    let policy = reconcile_productive_preflight(core_policy::compile_policy_artifact(
-        &registry,
-        flow_ref,
-        runtime_policy_target(),
-    ))?;
+    let policy =
+        reconcile_productive_preflight(core_policy::compile_policy_artifact(&registry, flow_ref))?;
     let credential = reconcile_productive_preflight(resolve_credential())?;
     let agent_instructions = reconcile_productive_preflight(read_applicable_agent_instructions(
         &authority.home,

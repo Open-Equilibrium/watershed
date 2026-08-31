@@ -154,11 +154,12 @@ pub(in crate::tests) fn tool_started_line(event_id: &str, sequence: u64) -> Stri
         serde_json::json!({
             "allowed_parameters": [],
             "network_access": "deny",
-            "read_scope": ["workspace"],
+            "read_only_mounts": ["workspace"],
             "tool_id": "tool",
             "tool_kind": "predefined-command",
             "tool_name": "Tool",
-            "write_scope": [],
+            "runtime_profile": "exact",
+            "writable_mounts": [],
         }),
     )
 }

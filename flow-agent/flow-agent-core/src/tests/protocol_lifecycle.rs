@@ -224,11 +224,12 @@ fn distinct_attempts_may_invoke_the_same_tool_in_one_phase() {
                 "allowed_parameters": [],
                 "attempt_id": attempt_id,
                 "network_access": "deny",
-                "read_scope": ["workspace"],
+                "read_only_mounts": ["workspace"],
                 "tool_id": "tool",
                 "tool_kind": "predefined-command",
                 "tool_name": "Tool",
-                "write_scope": [],
+                "runtime_profile": "exact",
+                "writable_mounts": [],
             }),
         )
     };

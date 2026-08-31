@@ -1,168 +1,139 @@
-//! Feature-gated direct-runner evidence for the M1.2 startup baseline.
+//! Feature-gated observational evidence for the M1.2 Executor startup boundary.
 
-use serde::{Deserialize, Serialize};
 use std::{
-    hint::black_box,
-    io::Write,
     path::Path,
     time::{Duration, Instant},
 };
 
-#[cfg(unix)]
 use crate::runtime::{
-    fs_guards::AnchoredWorkspace,
-    run_attempts::RunAttemptOutcome,
-    tool_runner::{ToolInvocation, ToolRunControl, execute_tool_invocation},
+    executor::PreparedExecutor, fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome,
+    tool_runner::ToolInvocation,
 };
-#[cfg(unix)]
-use std::{env, sync::atomic::AtomicBool};
 
-const TOOL_REPORT_SCHEMA: &str = "flow-m12-noop-tool-v0";
-const MAX_TOOL_REPORT_BYTES: usize = 128;
-#[cfg(unix)]
-const TOOL_DEADLINE: Duration = Duration::from_secs(5);
-
-/// The sole internal argument that selects the fixed no-op Tool child.
-pub const M12_STARTUP_TOOL_CHILD_ARG: &str = "--m12-noop-tool-child";
-
-/// One unadjusted M1.2 direct-runner startup observation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct M12DirectRunnerMeasurement {
-    /// Direct-runner handoff through terminal classification, reap and output drain.
-    pub runner_elapsed: Duration,
-    /// Runtime independently observed inside the fixed no-op Tool child.
-    pub tool_runtime: Duration,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct NoopToolReport {
-    schema: String,
-    tool_runtime_ns: u64,
-}
-
-fn duration_ns(duration: Duration) -> u64 {
-    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
-}
-
-/// Writes the bounded, schema-tagged result of the exact fixed no-op Tool work.
-pub fn write_m12_noop_tool_child_report(writer: &mut impl Write) -> Result<(), String> {
-    let started = Instant::now();
-    let _ = black_box(0_u8);
-    let report = NoopToolReport {
-        schema: TOOL_REPORT_SCHEMA.to_owned(),
-        tool_runtime_ns: duration_ns(started.elapsed()),
-    };
-    let encoded = serde_json::to_vec(&report).map_err(|_| "no-op Tool report did not encode")?;
-    if encoded.len() + 1 > MAX_TOOL_REPORT_BYTES {
-        return Err("no-op Tool report exceeded its byte bound".to_owned());
-    }
-    writer
-        .write_all(&encoded)
-        .and_then(|()| writer.write_all(b"\n"))
-        .map_err(|_| "no-op Tool report could not be written".to_owned())
-}
-
-#[cfg(any(unix, test))]
-fn parse_noop_tool_report(bytes: &[u8], runner_elapsed: Duration) -> Result<Duration, String> {
-    if bytes.is_empty() || bytes.len() > MAX_TOOL_REPORT_BYTES {
-        return Err("no-op Tool report violated its byte bound".to_owned());
-    }
-    let report: NoopToolReport =
-        serde_json::from_slice(bytes).map_err(|_| "no-op Tool report was not exact JSON")?;
-    if report.schema != TOOL_REPORT_SCHEMA {
-        return Err("no-op Tool report schema did not match".to_owned());
-    }
-    let runtime = Duration::from_nanos(report.tool_runtime_ns);
-    if runtime > runner_elapsed {
-        return Err("no-op Tool runtime exceeded the enclosing runner interval".to_owned());
-    }
-    Ok(runtime)
-}
-
-/// Measures one fixed no-op Tool invocation through the M1.1 direct runner.
-#[cfg(unix)]
-pub fn run_m12_direct_runner_startup(
-    workspace: &Path,
-) -> Result<M12DirectRunnerMeasurement, String> {
-    let executable = env::current_exe()
-        .map_err(|_| "measurement child executable did not resolve")?
-        .into_os_string()
-        .into_string()
-        .map_err(|_| "measurement child executable was not UTF-8")?;
-    let workspace =
-        AnchoredWorkspace::open(workspace).map_err(|_| "direct-runner workspace did not open")?;
-    let cancelled = AtomicBool::new(false);
-    let invocation = ToolInvocation {
-        executable,
-        argv: vec![M12_STARTUP_TOOL_CHILD_ARG.to_owned()],
-    };
-
-    let started = Instant::now();
-    let outcome = execute_tool_invocation(
-        &invocation,
-        workspace.root(),
-        ToolRunControl {
-            cancelled: &cancelled,
-            deadline: Instant::now() + TOOL_DEADLINE,
+fn fixed_executor_policy() -> core_policy::PolicyArtifact {
+    core_policy::PolicyArtifact {
+        commands: vec![core_policy::CommandPolicy {
+            allowed_parameters: Vec::new(),
+            argv: Vec::new(),
+            command_id: "agent-echo".to_owned(),
+            environment: core_policy::EnvironmentPolicy {
+                allow: Vec::new(),
+                default: core_policy::EnvironmentDefault::Clear,
+            },
+            executable: "registry:agent-echo".to_owned(),
+            filesystem: core_policy::FilesystemPolicy {
+                read_only_mounts: vec!["workspace".to_owned()],
+                writable_mounts: Vec::new(),
+            },
+            network: core_policy::NetworkPolicy {
+                allow: Vec::new(),
+                default: core_policy::NetworkDefault::Deny,
+            },
+            runtime_profile: core_policy::ToolRuntimeProfile::Exact,
+            script_runtime: None,
+            tool_id: "m12-startup-noop".to_owned(),
+            tool_kind: core_policy::ToolKind::PredefinedCommand,
+        }],
+        phase_scope: vec![core_policy::PhaseScope {
+            phase_id: "evidence".to_owned(),
+            tool_ids: vec!["m12-startup-noop".to_owned()],
+        }],
+        policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
+        runtime_limits: core_policy::RuntimeLimits {
+            headless: true,
+            timeout_ms: 5_000,
         },
-    );
-    let runner_elapsed = started.elapsed();
-    if outcome.status != RunAttemptOutcome::Completed
-        || outcome.classification.is_some()
-        || outcome.exit_code != Some(0)
-        || !outcome.stderr.is_empty()
-    {
-        return Err("direct runner did not return one exact successful Tool result".to_owned());
+        source_flow_definition_id: "m12-executor-startup".to_owned(),
+        target: core_policy::PolicyTarget::LinuxBubblewrapSeccomp,
     }
-    let tool_runtime = parse_noop_tool_report(&outcome.stdout, runner_elapsed)?;
-    Ok(M12DirectRunnerMeasurement {
-        runner_elapsed,
-        tool_runtime,
-    })
 }
 
-/// Reports that the selected direct runner is unavailable off Unix.
-#[cfg(not(unix))]
-pub fn run_m12_direct_runner_startup(_: &Path) -> Result<M12DirectRunnerMeasurement, String> {
-    Err("M1.2 startup evidence requires the selected Ubuntu reference platform".to_owned())
+/// One unadjusted observation through the selected and prepared Executor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct M12ExecutorStartupMeasurement {
+    /// Preparation and readiness through validated Tool result and enforcement receipt.
+    pub executor_elapsed: Duration,
+}
+
+fn is_lower_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Measures one fixed no-op Tool through the real prepared Executor boundary.
+pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMeasurement, String> {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return Err(
+            "M1.2 startup evidence requires the Ubuntu 24.04 x64 reference platform".to_owned(),
+        );
+    }
+    let policy = fixed_executor_policy();
+    policy
+        .validate()
+        .map_err(|_| "M1.2 evidence policy was invalid")?;
+    let command_policy = policy
+        .commands
+        .first()
+        .ok_or("M1.2 evidence command was missing")?;
+    let workspace =
+        AnchoredWorkspace::open(workspace).map_err(|_| "M1.2 evidence workspace did not open")?;
+    let invocation = ToolInvocation {
+        executable: "/bin/echo".to_owned(),
+        argv: Vec::new(),
+    };
+
+    let started = Instant::now();
+    let mut executor = PreparedExecutor::prepare_selected()
+        .map_err(|_| "selected Executor did not prepare for M1.2 evidence")?;
+    let execution = executor
+        .execute(
+            &workspace,
+            &policy,
+            command_policy,
+            &invocation,
+            "m12-startup-evidence",
+        )
+        .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
+
+    if execution.outcome.status != RunAttemptOutcome::Completed
+        || execution.outcome.classification.is_some()
+        || execution.outcome.exit_code != Some(0)
+        || execution.outcome.stdout != b"\n"
+        || !execution.outcome.stderr.is_empty()
+    {
+        return Err("Executor did not return the exact no-op Tool result".to_owned());
+    }
+    if !execution.enforcement.isolation_active
+        || execution.enforcement.runtime_profile != proto::RuntimeReadProfileV0::Exact
+        || !is_lower_sha256(&execution.enforcement.applied_policy_digest)
+        || !is_lower_sha256(&execution.request_hash)
+    {
+        return Err("Executor did not return the exact enforcement evidence".to_owned());
+    }
+    let executor_elapsed = started.elapsed();
+
+    Ok(M12ExecutorStartupMeasurement { executor_elapsed })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        MAX_TOOL_REPORT_BYTES, TOOL_REPORT_SCHEMA, parse_noop_tool_report,
-        write_m12_noop_tool_child_report,
-    };
-    use std::time::Duration;
+    use super::fixed_executor_policy;
 
     #[test]
-    fn fixed_tool_report_is_bounded_and_schema_tagged() {
-        let mut report = Vec::new();
-        write_m12_noop_tool_child_report(&mut report).unwrap();
+    fn fixed_evidence_policy_is_an_exact_empty_echo() {
+        let policy = fixed_executor_policy();
 
-        assert!(report.len() <= MAX_TOOL_REPORT_BYTES);
-        let runtime = parse_noop_tool_report(&report, Duration::from_secs(1)).unwrap();
-        assert!(runtime <= Duration::from_secs(1));
-        assert!(
-            String::from_utf8(report)
-                .unwrap()
-                .contains(TOOL_REPORT_SCHEMA)
+        policy.validate().unwrap();
+        let command = &policy.commands[0];
+        assert_eq!(command.command_id, "agent-echo");
+        assert!(command.argv.is_empty());
+        assert!(command.environment.allow.is_empty());
+        assert_eq!(
+            command.runtime_profile,
+            core_policy::ToolRuntimeProfile::Exact
         );
-    }
-
-    #[test]
-    fn tool_report_rejects_schema_drift_and_unbounded_output() {
-        assert!(
-            parse_noop_tool_report(
-                br#"{"schema":"other","tool_runtime_ns":0}"#,
-                Duration::from_secs(1)
-            )
-            .is_err()
-        );
-        assert!(
-            parse_noop_tool_report(&[b' '; MAX_TOOL_REPORT_BYTES + 1], Duration::from_secs(1))
-                .is_err()
-        );
+        assert_eq!(command.filesystem.read_only_mounts, ["workspace"]);
     }
 }

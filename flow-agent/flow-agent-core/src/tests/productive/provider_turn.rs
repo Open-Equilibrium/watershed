@@ -591,10 +591,7 @@ fn accumulated_provider_input_overflow_stops_before_another_dispatch() {
     assert_eq!(attempts.results[tool_attempt].2, "completed");
     assert_eq!(
         attempts.durable_outputs[tool_attempt],
-        Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": tool_result,
-        })),
+        Some(super::support::fake_tool_attempt_output(tool_result)),
         "the actual Tool result is durable before the model-input boundary stops the Run"
     );
     let tool_completed = sink
@@ -711,6 +708,7 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
     let mut tools = FakeToolExecutor {
         cancel_before_outcome: false,
         error_after_interrupt: false,
+        fault: Default::default(),
         invocations: Vec::new(),
         outcome: ToolExecutionOutcome {
             status: RunAttemptOutcome::Failed,

@@ -4,7 +4,7 @@ mod tool;
 use super::super::support::run_isolated_test;
 use super::support::{
     CompletionBoundaryRecordingRecovery, DefinitiveFailureProvider, FakeProvider, FakeToolExecutor,
-    InterruptingSink, MemoryAttempts, MemorySink, ScriptedProvider,
+    InjectedAttemptRecovery, InterruptingSink, MemoryAttempts, MemorySink, ScriptedProvider,
     assert_controlled_cancellation_lifecycle, execute_scripted_productive_case,
     execute_scripted_productive_case_with_tools,
     execute_scripted_productive_case_with_tools_and_recovery, single_tool_provider_turn,
@@ -440,6 +440,10 @@ fn cancellation_winning_provider_and_tool_errors_persist_cancelled_attempts() {
     assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);
     assert_eq!(attempts.results[1].2, CANCELLED_REASON);
     assert_eq!(attempts.results[1].3.as_deref(), Some(CANCELLED_REASON));
+    assert!(
+        attempts.durable_outputs[1].is_none(),
+        "Flow must not fabricate an Executor receipt after cancellation hides its error"
+    );
     assert_eq!(
         sink.0
             .iter()
@@ -448,6 +452,37 @@ fn cancellation_winning_provider_and_tool_errors_persist_cancelled_attempts() {
             .payload["error"],
         CANCELLED_REASON
     );
+    assert_controlled_cancellation_lifecycle(&sink.0);
+
+    crate::begin_productive_operation().expect("Tool recovery operation begins");
+    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+        attempt_id: "tool-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some(CANCELLED_REASON.to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: None,
+    });
+    let (execution, _, _, sink, tools) = execute_scripted_productive_case_with_tools_and_recovery(
+        "tool-error-cancellation-recovery-fixture",
+        [single_tool_provider_turn(
+            "response-tool-error-cancellation-recovery",
+            "call-tool-error-cancellation-recovery",
+        )],
+        |_| {},
+        |_| {},
+        &mut recovery,
+    )
+    .expect("receipt-less cancelled Tool recovery closes without redispatch");
+    crate::settle_productive_operation();
+
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::Cancelled)
+    ));
+    assert!(tools.invocations.is_empty(), "recovery must not redispatch");
     assert_controlled_cancellation_lifecycle(&sink.0);
 }
 

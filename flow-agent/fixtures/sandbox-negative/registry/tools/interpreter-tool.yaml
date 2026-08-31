@@ -6,7 +6,7 @@ tool:
     command_id: agent-negative
     argv: ["interpreter"]
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: []
-  protected_path_grants: []
+  runtime_profile: exact
+  read_only_mounts: ["workspace"]
+  writable_mounts: []
   network: deny

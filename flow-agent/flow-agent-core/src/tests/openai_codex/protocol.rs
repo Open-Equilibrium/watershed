@@ -38,9 +38,9 @@ fn test_tool() -> core_script::ToolBlock {
                 max: Some(10),
             },
         ],
-        read_scope: vec!["workspace".to_owned()],
-        write_scope: Vec::new(),
-        protected_path_grants: Vec::new(),
+        runtime_profile: core_script::ToolRuntimeProfile::Exact,
+        read_only_mounts: vec!["workspace".to_owned()],
+        writable_mounts: Vec::new(),
         network: core_script::NetworkPolicy::Deny(core_script::NetworkDeny),
     }
 }

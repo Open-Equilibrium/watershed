@@ -93,9 +93,10 @@ pub(crate) use recovery_record::ProductiveRecoveryRecord;
 
 mod recovery;
 pub(crate) use recovery::{
-    ProductiveConversationReservation, ProductiveRecoveryWriter, reserve_conversation_continuation,
-    reserve_conversation_run_recovery, reserve_new_conversation_run,
-    with_conversation_run_ownership,
+    ProductiveConversationReservation, ProductiveRecoveryWriter,
+    read_conversation_continuation_definition, read_conversation_recovery_definition,
+    reserve_conversation_continuation, reserve_conversation_run_recovery,
+    reserve_new_conversation_run, with_conversation_run_ownership,
 };
 
 mod status;

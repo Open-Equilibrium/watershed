@@ -5,7 +5,10 @@ use super::super::{
 };
 #[cfg(unix)]
 use super::support::FakeToolExecutor;
-use super::support::{FakeProvider, ScriptedProvider, disabled_smoke_productive_execution_fixture};
+use super::support::{
+    FakeProvider, ScriptedProvider, disabled_smoke_productive_execution_fixture,
+    smoke_productive_execution_fixture,
+};
 use crate::runtime::{
     config_io::load_global_config,
     context::{
@@ -25,8 +28,9 @@ use crate::runtime::{
     },
     session::{
         continue_conversation_with_provider, execute_reserved_productive_recovery,
-        run_productive_session_with_provider, set_productive_pre_run_create_observer,
-        set_productive_pre_run_publish_observer, set_productive_run_commit_observer,
+        run_productive_session_with_provider, set_productive_executor_readiness_observer,
+        set_productive_pre_run_create_observer, set_productive_pre_run_publish_observer,
+        set_productive_run_commit_observer,
     },
     session_definition::{SessionDefinitionMetadata, session_definition_metadata},
     types::{RunOutput, RuntimeError},
@@ -105,6 +109,45 @@ fn run_default_smoke_productive_session<P: ProductiveProvider>(
     )
 }
 
+#[test]
+fn executor_readiness_failure_precedes_new_run_reservation() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    set_productive_executor_readiness_observer(|| {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::Unavailable,
+            "injected Executor readiness failure",
+        ))
+    });
+    let error =
+        run_default_smoke_productive_session(&workspace, &fixture, &mut FakeProvider::default())
+            .expect_err("failed readiness must stop before reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
+    ));
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("conversation")
+            .exists(),
+        "readiness failure must not create a durable conversation reservation"
+    );
+}
+
+#[test]
+fn provider_only_new_run_does_not_probe_an_executor() {
+    let (workspace, fixture) = disabled_smoke_productive_execution_fixture();
+    set_productive_executor_readiness_observer(|| {
+        panic!("provider-only policy must not inspect Executor readiness")
+    });
+    let output =
+        run_default_smoke_productive_session(&workspace, &fixture, &mut FakeProvider::default())
+            .expect("provider-only productive Run succeeds without an Executor");
+
+    assert!(!output.failed);
+}
+
 fn recover_interrupted_productive_run<P: ProductiveProvider>(
     workspace: &Path,
     execution: ProductiveExecution<'_>,
@@ -112,6 +155,7 @@ fn recover_interrupted_productive_run<P: ProductiveProvider>(
 ) -> RunOutput {
     let reservation = reserve_conversation_run_recovery(workspace, "conversation", "run")
         .expect("interrupted run reserves for exact recovery");
+    let mut tool_executor = None;
     let output = execute_reserved_productive_recovery(
         workspace,
         execution.workspace,
@@ -124,6 +168,7 @@ fn recover_interrupted_productive_run<P: ProductiveProvider>(
         execution.credential,
         execution.agent_instructions,
         provider,
+        &mut tool_executor,
         &reservation,
         None,
     )

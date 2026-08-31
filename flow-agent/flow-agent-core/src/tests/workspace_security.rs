@@ -14,7 +14,7 @@ use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_sink},
     context::ContextManifestCheckpoint,
     event_writer::RuntimeEventSink,
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_protected_path_match_mode},
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
     fixture_tools::{plan_own_script, preflight_own_script_outputs, write_script_output},
     fs_guards::{AnchoredDir, replacement_temp_path},
     planning::plan_flow,
@@ -37,7 +37,7 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
 
     for index in 0..10 {
         let tool = format!(
-            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace/out\"]\n  protected_path_grants: []\n  network: deny\n"
+            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: [\"workspace/out\"]\n  network: deny\n"
         );
         let phase = format!(
             "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
@@ -208,9 +208,9 @@ fn run_flow_rejects_multi_write_own_script_before_side_effects() {
     printf 'partial\n' > out/partial.txt
     printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
+  runtime_profile: exact
+  read_only_mounts: ["workspace"]
+  writable_mounts: ["workspace/out"]
   network: deny
 "#,
     )
@@ -230,8 +230,18 @@ fn run_flow_rejects_multi_write_own_script_before_side_effects() {
 
 #[test]
 fn run_flow_rejects_non_file_declared_write_paths_before_side_effects() {
-    for (leaf_is_directory, expected) in [(true, "must be a file"), (false, "must be a directory")]
-    {
+    for (leaf_is_directory, reason, expected) in [
+        (
+            true,
+            core_policy::DenyReasonCode::WriteDenied,
+            "must be a file",
+        ),
+        (
+            false,
+            core_policy::DenyReasonCode::SymlinkEscapeDenied,
+            "must be a directory",
+        ),
+    ] {
         let workspace = workspace_copy("hello-flow");
         let output_parent = workspace.join("out");
         if leaf_is_directory {
@@ -247,7 +257,7 @@ fn run_flow_rejects_non_file_declared_write_paths_before_side_effects() {
         let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
             .expect_err("non-file declared write path must fail preflight");
 
-        assert_denied(err, core_policy::DenyReasonCode::WriteDenied, expected);
+        assert_denied(err, reason, expected);
         assert_no_session_artifacts(&workspace, "hello-flow");
     }
 }
@@ -404,7 +414,7 @@ fn run_flow_rejects_junction_summary_ancestor_without_side_effects() {
 
 #[cfg(any(unix, windows))]
 #[test]
-fn own_script_internal_directory_alias_cannot_escape_write_scope() {
+fn own_script_internal_directory_alias_cannot_escape_writable_mount() {
     let workspace = workspace_copy("hello-flow");
     fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
     fs::create_dir(workspace.join("private")).expect("ungranted directory created");
@@ -419,30 +429,22 @@ fn own_script_internal_directory_alias_cannot_escape_write_scope() {
         .iter()
         .find(|command| command.tool_id == "write-summary")
         .expect("write-summary policy exists");
-    let match_mode = runtime_protected_path_match_mode(&policy.target);
-    let write = plan_own_script(tool, match_mode, write_policy)
+    let write = plan_own_script(tool, write_policy)
         .expect("own-script plan compiles")
         .expect("own-script plan writes output");
     let anchored_workspace = AnchoredDir::workspace(&workspace).expect("workspace anchors");
     let expected_alias = if cfg!(windows) { "reparse" } else { "symlink" };
 
-    let preflight_err =
-        preflight_own_script_outputs(&anchored_workspace, Some(&write), match_mode, write_policy)
-            .expect_err("preflight rejects the aliased write ancestor");
+    let preflight_err = preflight_own_script_outputs(&anchored_workspace, Some(&write))
+        .expect_err("preflight rejects the aliased write ancestor");
     assert_denied(
         preflight_err,
         core_policy::DenyReasonCode::SymlinkEscapeDenied,
         expected_alias,
     );
 
-    let apply_err = write_script_output(
-        &anchored_workspace,
-        &write.target,
-        &write.contents,
-        match_mode,
-        write_policy,
-    )
-    .expect_err("apply rejects the aliased write ancestor");
+    let apply_err = write_script_output(&anchored_workspace, &write.target, &write.contents)
+        .expect_err("apply rejects the aliased write ancestor");
     assert_denied(
         apply_err,
         core_policy::DenyReasonCode::SymlinkEscapeDenied,

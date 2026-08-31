@@ -310,6 +310,52 @@ pub(crate) fn reserve_conversation_continuation(
     }
 }
 
+pub(crate) fn read_conversation_continuation_definition(
+    workspace: &Path,
+    conversation_id: &str,
+    from_entry_id: Option<&str>,
+) -> Result<(String, SessionLogMetadata), RuntimeError> {
+    validate_id(conversation_id, "conversation")?;
+    if let Some(entry_id) = from_entry_id {
+        validate_id(entry_id, "conversation entry")?;
+    }
+    with_conversation_history_index(
+        workspace,
+        conversation_id,
+        from_entry_id,
+        None,
+        #[cfg(test)]
+        None,
+        |_index, summary| {
+            let selected = match from_entry_id {
+                Some(entry_id) => summary.selected.ok_or_else(|| {
+                    RuntimeError::PersistedState(format!(
+                        "conversation {conversation_id} has no entry {entry_id}"
+                    ))
+                })?,
+                None => summary.latest.ok_or_else(|| {
+                    RuntimeError::PersistedState(format!(
+                        "conversation {conversation_id} has no committed entry to continue"
+                    ))
+                })?,
+            };
+            let definition =
+                conversation_run_definition(workspace, conversation_id, &selected.run_session_id)?;
+            Ok((selected.run_session_id, definition))
+        },
+    )
+}
+
+pub(crate) fn read_conversation_recovery_definition(
+    workspace: &Path,
+    conversation_id: &str,
+    run_session_id: &str,
+) -> Result<SessionLogMetadata, RuntimeError> {
+    validate_id(conversation_id, "conversation")?;
+    validate_id(run_session_id, "run session")?;
+    conversation_run_definition(workspace, conversation_id, run_session_id)
+}
+
 pub(crate) fn reserve_conversation_run_recovery(
     workspace: &Path,
     conversation_id: &str,

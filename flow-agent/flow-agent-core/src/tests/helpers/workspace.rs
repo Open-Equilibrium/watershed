@@ -1,6 +1,5 @@
 use crate::{
     runtime::{
-        execution_plan::runtime_policy_target,
         fs_guards::AnchoredWorkspace,
         session_authority::session_ownership_is_active,
         session_lock::SessionReservation,
@@ -53,8 +52,8 @@ pub(in crate::tests) fn fixture_runtime_policy(
 ) -> (core_script::ResolvedRegistry, core_policy::PolicyArtifact) {
     let workspace = fixture_dir(fixture);
     let registry = load_test_registry(&workspace, flow_id);
-    let policy = core_policy::compile_policy_artifact(&registry, flow_id, runtime_policy_target())
-        .expect("fixture policy compiles");
+    let policy =
+        core_policy::compile_policy_artifact(&registry, flow_id).expect("fixture policy compiles");
     (registry, policy)
 }
 
@@ -190,9 +189,9 @@ pub(in crate::tests) fn add_bad_write_tool_to_summarize(workspace: &Path, script
   script_body: |
     {script_body}
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
+  runtime_profile: exact
+  read_only_mounts: ["workspace"]
+  writable_mounts: ["workspace/out"]
   network: deny
 "#
     );

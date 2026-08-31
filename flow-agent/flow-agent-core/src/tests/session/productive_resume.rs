@@ -8,17 +8,18 @@ use crate::{
         conversations::{
             ConversationAttemptLog, ConversationEventWriter, ProductiveRecoveryWriter,
             create_conversation_run_with_model_profile, read_conversation_history,
-            set_conversation_file_sync_error_for_path_for_test,
+            reserve_conversation_run_recovery, set_conversation_file_sync_error_for_path_for_test,
         },
         live_events::live_event_channel,
         productive::{ProductiveExecution, execute_productive_flow_with_recovery},
         session::{
             resume_conversation_run_with_provider,
             resume_conversation_run_with_provider_and_live_events,
+            set_productive_executor_readiness_observer,
         },
         session_definition::session_definition_metadata,
         session_reading::SessionEventReader,
-        types::{EmitMode, EventClock},
+        types::{EmitMode, EventClock, RuntimeError},
     },
     tests::{
         helpers::{
@@ -132,6 +133,40 @@ impl ProductiveResumeFixture {
             workspace: &self.execution_fixture.anchored,
         }
     }
+}
+
+#[test]
+fn executor_readiness_failure_precedes_recovery_reservation() {
+    let fixture = ProductiveResumeFixture::new(workspace_copy("smoke-flow"));
+    drop(fixture.create_recovery(&ContextHistory::default()));
+    set_productive_executor_readiness_observer(|| {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "injected unsupported Tool platform",
+        ))
+    });
+    let mut provider = SessionProvider::default();
+
+    let error = resume_conversation_run_with_provider(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        EmitMode::Human,
+        fixture.execution_fixture.credential(),
+        &mut provider,
+    )
+    .expect_err("failed readiness must stop before recovery reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+    ));
+    assert_eq!(provider.calls, 0);
+    reserve_conversation_run_recovery(&fixture.workspace, "conversation", "run")
+        .expect("failed readiness leaves recovery reservation available")
+        .release()
+        .expect("recovery reservation releases");
 }
 
 #[test]

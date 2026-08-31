@@ -167,6 +167,55 @@ fn open_anchored_windows_publishable_directory(parent: &Dir, leaf: &str) -> io::
 }
 
 impl AnchoredDir {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    pub(crate) fn open_capability_nofollow(
+        &self,
+        relative: &str,
+    ) -> Result<std::os::fd::OwnedFd, RuntimeError> {
+        use rustix::fs::{Mode, OFlags};
+
+        let mut descriptor = rustix::io::dup(self.dir.as_ref()).map_err(|source| {
+            path_io_error(
+                &self.path,
+                std::io::Error::from_raw_os_error(source.raw_os_error()),
+            )
+        })?;
+        if relative.is_empty() {
+            return Ok(descriptor);
+        }
+        for component in std::path::Path::new(relative).components() {
+            let std::path::Component::Normal(component) = component else {
+                return Err(RuntimeError::Protocol(
+                    "workspace capability path is not canonical".to_owned(),
+                ));
+            };
+            descriptor = rustix::fs::openat(
+                &descriptor,
+                component,
+                OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|source| {
+                path_io_error(
+                    &self.path.join(relative),
+                    std::io::Error::from_raw_os_error(source.raw_os_error()),
+                )
+            })?;
+            let stat = rustix::fs::fstat(&descriptor).map_err(|source| {
+                path_io_error(
+                    &self.path.join(relative),
+                    std::io::Error::from_raw_os_error(source.raw_os_error()),
+                )
+            })?;
+            if rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::Symlink {
+                return Err(RuntimeError::Protocol(
+                    "workspace capability path must not contain symlinks".to_owned(),
+                ));
+            }
+        }
+        Ok(descriptor)
+    }
+
     pub(crate) fn workspace(path: &Path) -> Result<Self, RuntimeError> {
         let dir = Dir::open_ambient_dir(path, ambient_authority())
             .map_err(|source| path_io_error(path, source))?;
@@ -315,15 +364,6 @@ impl AnchoredDir {
             validate_opened_private_directory(&path, &child.dir)?;
         }
         Ok(Some(child))
-    }
-
-    #[cfg(windows)]
-    pub(crate) fn open_existing_child(
-        &self,
-        leaf: &str,
-        error_mode: DirectoryErrorMode,
-    ) -> Result<Self, RuntimeError> {
-        self.open_existing_child_with_publication(leaf.as_ref(), error_mode, false)
     }
 
     fn open_existing_child_with_publication(

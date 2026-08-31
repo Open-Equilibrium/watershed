@@ -1,12 +1,12 @@
 use super::productive_run::execute_reserved_productive_session;
 use super::{
-    RecordedProductivePreflight, prepare_recorded_productive_preflight,
-    reconcile_productive_preflight,
+    RecordedProductivePreflight, prepare_productive_tool_executor,
+    prepare_recorded_productive_preflight, reconcile_productive_preflight,
 };
 use crate::runtime::{
     auth::resolve_openai_codex_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
-    conversations::reserve_conversation_continuation,
+    conversations::{read_conversation_continuation_definition, reserve_conversation_continuation},
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
@@ -147,32 +147,37 @@ where
     };
     let _activation = activate(true)?;
     reconcile_productive_preflight(platform_preflight())?;
+    let (recorded_run_session_id, recorded_definition) = reconcile_productive_preflight(
+        read_conversation_continuation_definition(workspace, conversation_id, from_entry_id),
+    )?;
+    let RecordedProductivePreflight {
+        registry,
+        flow_ref,
+        policy,
+        credential,
+        agent_instructions,
+    } = prepare_recorded_productive_preflight(
+        &execution_workspace,
+        &authority,
+        &recorded_run_session_id,
+        &recorded_definition,
+        "continuation lacks Flow id",
+        &model,
+        model_profile,
+        resolve_credential,
+    )?;
+    let mut tool_executor = prepare_productive_tool_executor(&policy)?;
     let reservation = reconcile_productive_preflight(reserve_conversation_continuation(
         workspace,
         conversation_id,
         from_entry_id,
     ))?;
     let operation = (|| {
-        let recorded =
-            reconcile_productive_preflight(reservation.recorded_definition().ok_or_else(|| {
-                RuntimeError::Protocol("continuation lacks run definition".to_owned())
-            }))?;
-        let RecordedProductivePreflight {
-            registry,
-            flow_ref,
-            policy,
-            credential,
-            agent_instructions,
-        } = prepare_recorded_productive_preflight(
-            &execution_workspace,
-            &authority,
-            reservation.run_session_id(),
-            recorded,
-            "continuation lacks Flow id",
-            &model,
-            model_profile,
-            resolve_credential,
-        )?;
+        if reservation.recorded_definition() != Some(&recorded_definition) {
+            return Err(RuntimeError::Protocol(
+                "continuation definition changed during preflight".to_owned(),
+            ));
+        }
         let flow_block = registry
             .flow_block(&flow_ref)
             .expect("recorded productive preflight verified the Flow");
@@ -191,6 +196,7 @@ where
             &agent_instructions,
             notifier,
             provider,
+            &mut tool_executor,
             &reservation,
         )
     })();

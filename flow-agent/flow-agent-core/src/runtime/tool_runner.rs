@@ -50,6 +50,7 @@ pub(crate) struct ToolExecutionOutcome {
 }
 
 impl ToolExecutionOutcome {
+    #[cfg(any(unix, test))]
     pub(crate) fn cancelled() -> Self {
         Self {
             status: RunAttemptOutcome::Cancelled,

@@ -100,11 +100,12 @@ pub(crate) fn tool_started_payload(
             .map(|parameter| parameter.name.as_str())
             .collect::<Vec<_>>(),
         "network_access": tool_network_access(&tool.network),
-        "read_scope": command_policy.filesystem.read_roots,
+        "read_only_mounts": command_policy.filesystem.read_only_mounts,
+        "runtime_profile": command_policy.runtime_profile.as_str(),
         "tool_id": tool.identity.id,
         "tool_kind": tool_kind(&tool.tool_kind),
         "tool_name": tool.identity.name,
-        "write_scope": command_policy.filesystem.write_roots,
+        "writable_mounts": command_policy.filesystem.writable_mounts,
     });
     if let Some(attempt_id) = attempt_id {
         payload

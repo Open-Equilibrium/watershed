@@ -3,13 +3,16 @@ use super::observe_productive_result_persist;
 use super::provider_result::read_verified_session_object;
 use super::tool_result::{build_tool_result, parse_tool_result};
 use super::{
-    ProductiveContext, ProductiveToolExecutor, TOOL_ATTEMPT_OUTPUT_SCHEMA_V0, emit_and_commit,
+    ProductiveContext, ProductiveToolExecutor, TOOL_ATTEMPT_OUTPUT_SCHEMA_V1, emit_and_commit,
     mark_recovery_failure, tool_dispatch_reservation,
 };
+#[cfg(test)]
+use crate::runtime::tool_runner::ToolInvocation;
 use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
     event_construction::{RuntimeEventBuilder, tool_started_payload},
+    executor::ExecutorToolExecution,
     policy_resolution::command_policy_for_phase,
     run_attempts::{
         ProductiveAttemptLog, ProductiveRecovery, RunAttemptKind, RunAttemptOutcome,
@@ -17,25 +20,81 @@ use crate::runtime::{
     },
     session_definition::sha256_hash_text,
     stream_signature::FlowInvocation,
-    tool_runner::{
-        MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome, ToolInvocation, build_tool_invocation,
-    },
-    types::RuntimeError,
+    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome, build_tool_invocation},
+    types::{RUNTIME_ERROR_REASON, RuntimeError},
 };
 use proto::EventType;
 use serde::Deserialize;
+#[cfg(test)]
 use std::time::Duration;
-#[cfg(unix)]
+#[cfg(all(test, unix))]
 use std::time::Instant;
 
+#[cfg(test)]
 pub(crate) struct SystemProductiveToolExecutor;
 
+#[cfg(test)]
 impl ProductiveToolExecutor for SystemProductiveToolExecutor {
+    type Prepared = ExecutorToolExecution;
+
     fn supports_productive_tools(&self) -> bool {
         cfg!(unix)
     }
 
-    fn execute(
+    fn prepare(
+        &mut self,
+        invocation: &ToolInvocation,
+        workspace: &crate::runtime::fs_guards::AnchoredWorkspace,
+        policy: &core_policy::PolicyArtifact,
+        command_policy: &core_policy::CommandPolicy,
+        request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError> {
+        let request_hash = canonical_request_hash(&serde_json::json!({
+            "command": command_policy,
+            "invocation": {
+                "argv": &invocation.argv,
+                "executable": &invocation.executable,
+            },
+            "policy": policy,
+            "request_id": request_id,
+        }))?;
+        let policy_digest =
+            canonical_request_hash(&serde_json::to_value(policy).map_err(RuntimeError::Json)?)?;
+        let outcome = self.execute(
+            invocation,
+            workspace.root(),
+            Duration::from_millis(policy.runtime_limits.timeout_ms),
+        )?;
+        Ok(ExecutorToolExecution {
+            enforcement: test_enforcement_receipt(policy_digest, command_policy.runtime_profile),
+            outcome,
+            request_hash,
+        })
+    }
+
+    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        &prepared.request_hash
+    }
+
+    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        &prepared.enforcement.applied_policy_digest
+    }
+
+    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
+        prepared.enforcement.runtime_profile
+    }
+
+    fn execute_prepared(
+        &mut self,
+        prepared: Self::Prepared,
+    ) -> Result<ExecutorToolExecution, RuntimeError> {
+        Ok(prepared)
+    }
+}
+
+#[cfg(test)]
+impl SystemProductiveToolExecutor {
+    pub(crate) fn execute(
         &mut self,
         invocation: &ToolInvocation,
         workspace: &crate::runtime::fs_guards::AnchoredDir,
@@ -65,6 +124,28 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn test_enforcement_receipt(
+    applied_policy_digest: String,
+    profile: core_script::ToolRuntimeProfile,
+) -> proto::EnforcementReceiptV0 {
+    proto::EnforcementReceiptV0 {
+        applied_policy_digest,
+        backend: proto::EXECUTOR_BACKEND_V0.to_owned(),
+        backend_version: "test".to_owned(),
+        executor: proto::EXECUTOR_NAME_V0.to_owned(),
+        executor_version: "test".to_owned(),
+        isolation_active: true,
+        platform: proto::EXECUTOR_PLATFORM_V0.to_owned(),
+        runtime_profile: match profile {
+            core_script::ToolRuntimeProfile::Exact => proto::RuntimeReadProfileV0::Exact,
+            core_script::ToolRuntimeProfile::HostSystemRead => {
+                proto::RuntimeReadProfileV0::HostSystemRead
+            }
+        },
+    }
+}
+
 pub(super) fn execute_productive_tool<P, A, S, T>(
     context: &mut ProductiveContext<'_, P, A, S, T>,
     builder: &mut RuntimeEventBuilder,
@@ -87,10 +168,6 @@ where
             tool.identity.id
         ))
     })?;
-    let request_hash = canonical_request_hash(&serde_json::json!({
-        "argv": invocation_spec.argv,
-        "executable": invocation_spec.executable,
-    }))?;
     context.execution.workspace.verify_binding()?;
     context.tool_attempts = context.tool_attempts.saturating_add(1);
     let attempt_id = format!("tool-{:06}", context.tool_attempts);
@@ -99,6 +176,16 @@ where
             .provider_attempts
             .saturating_add(context.tool_attempts),
     )?;
+    let prepared = context.tool_executor.prepare(
+        &invocation_spec,
+        context.execution.workspace,
+        context.execution.policy,
+        command_policy,
+        &attempt_id,
+    )?;
+    let request_hash = context.tool_executor.request_hash(&prepared).to_owned();
+    let expected_policy_digest = context.tool_executor.policy_digest(&prepared).to_owned();
+    let expected_runtime_profile = context.tool_executor.runtime_profile(&prepared);
     let recovered = mark_recovery_failure(
         &mut context.recovery_failed,
         context.recovery.recover_attempt(
@@ -109,7 +196,54 @@ where
         ),
     )?;
     let recovered_attempt = recovered.is_some();
-    if recovered.is_none() {
+    if let Some(result) = recovered.as_ref() {
+        emit_and_commit(
+            builder,
+            Some(invocation),
+            EventType::ToolStarted,
+            tool_started_payload(tool, command_policy, Some(&attempt_id)),
+            context.sink,
+            &mut context.event_commit_failed,
+        )?;
+        if result.attempt_kind != RunAttemptKind::Tool {
+            context.recovery_failed = true;
+            return Err(RuntimeError::Protocol(
+                "recovered Tool attempt has the wrong kind".to_owned(),
+            ));
+        }
+        if result.outcome == RunAttemptOutcome::Cancelled {
+            mark_recovery_failure(
+                &mut context.recovery_failed,
+                recovered_tool_terminal(result),
+            )?;
+            emit_cancelled_tool(
+                builder,
+                invocation,
+                tool,
+                &attempt_id,
+                context.sink,
+                &mut context.event_commit_failed,
+            )?;
+            return Err(RuntimeError::Cancelled);
+        }
+    }
+    let (durable_value, result) = if let Some(result) = recovered {
+        let receipt = recovered_tool_receipt(&result)?;
+        context
+            .tool_executor
+            .validate_enforcement_receipt(&prepared, &receipt)?;
+        let value = mark_recovery_failure(
+            &mut context.recovery_failed,
+            recovered_tool_value_bound(
+                &result,
+                context.recovery,
+                &request_hash,
+                &expected_policy_digest,
+                expected_runtime_profile,
+            ),
+        )?;
+        (value, result)
+    } else {
         crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
         context
             .sink
@@ -121,84 +255,111 @@ where
             Some(&tool.identity.id),
             &timestamp,
         )?;
-    }
-    let tool_started = emit_and_commit(
-        builder,
-        Some(invocation),
-        EventType::ToolStarted,
-        tool_started_payload(tool, command_policy, Some(&attempt_id)),
-        context.sink,
-        &mut context.event_commit_failed,
-    );
-    if let Err(error) = tool_started {
-        if !recovered_attempt {
-            let outcome = ToolExecutionOutcome::cancelled();
-            let durable = tool_result_value(&outcome)?;
-            context.attempts.persist_objects(&durable.objects)?;
-            let canonical = serde_json::to_value(&durable.value).map_err(RuntimeError::Json)?;
-            let result = RunAttemptResult {
-                attempt_id: attempt_id.clone(),
-                attempt_kind: RunAttemptKind::Tool,
-                outcome: RunAttemptOutcome::Cancelled,
-                classification: Some(ToolTerminalClassification::Cancelled.as_str().to_owned()),
-                exit_code: None,
-                timestamp: timestamp.clone(),
-                durable_output: Some(serde_json::json!({
-                    "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V0,
-                    "tool_result": canonical,
-                })),
-            };
-            let commit = crate::runtime::cancellation::claim_productive_durable_commit()?;
-            context.attempts.terminal(&result)?;
-            mark_recovery_failure(
+        if let Err(error) = emit_and_commit(
+            builder,
+            Some(invocation),
+            EventType::ToolStarted,
+            tool_started_payload(tool, command_policy, Some(&attempt_id)),
+            context.sink,
+            &mut context.event_commit_failed,
+        ) {
+            persist_cancelled_tool_attempt(
+                context.attempts,
+                context.recovery,
                 &mut context.recovery_failed,
-                context
-                    .recovery
-                    .record_attempt(Some(&tool.identity.id), &request_hash, &result),
+                tool,
+                &attempt_id,
+                &request_hash,
+                &timestamp,
             )?;
-            drop(commit);
+            return Err(error);
         }
-        return Err(error);
-    }
-    let (durable_value, result) = if let Some(result) = recovered {
-        if result.attempt_kind != RunAttemptKind::Tool {
-            context.recovery_failed = true;
-            return Err(RuntimeError::Protocol(
-                "recovered Tool attempt has the wrong kind".to_owned(),
-            ));
-        }
-        let value = mark_recovery_failure(
-            &mut context.recovery_failed,
-            recovered_tool_value(&result, context.recovery),
-        )?;
-        (value, result)
-    } else {
         let execution = match crate::runtime::cancellation::claim_productive_effect_dispatch() {
-            Ok(_dispatch) => context.tool_executor.execute(
-                &invocation_spec,
-                context.execution.workspace.root(),
-                Duration::from_millis(context.execution.policy.runtime_limits.timeout_ms),
-            ),
+            Ok(dispatch) => {
+                let execution = context.tool_executor.execute_prepared(prepared);
+                drop(dispatch);
+                execution
+            }
             Err(error) => Err(error),
         };
-        let mut outcome = match execution {
-            Ok(mut outcome) => {
-                if outcome.status == RunAttemptOutcome::Completed
-                    && crate::runtime::cancellation::ensure_productive_dispatch_allowed().is_err()
-                {
-                    outcome.mark_cancelled();
-                }
-                outcome
-            }
+        let execution = match execution {
+            Ok(execution) => execution,
             Err(error)
-                if matches!(&error, RuntimeError::Cancelled)
+                if matches!(error, RuntimeError::Cancelled)
                     || crate::runtime::cancellation::ensure_productive_dispatch_allowed()
                         .is_err() =>
             {
-                ToolExecutionOutcome::cancelled()
+                persist_cancelled_tool_attempt(
+                    context.attempts,
+                    context.recovery,
+                    &mut context.recovery_failed,
+                    tool,
+                    &attempt_id,
+                    &request_hash,
+                    &timestamp,
+                )?;
+                emit_cancelled_tool(
+                    builder,
+                    invocation,
+                    tool,
+                    &attempt_id,
+                    context.sink,
+                    &mut context.event_commit_failed,
+                )?;
+                return Err(RuntimeError::Cancelled);
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                emit_uncertain_tool_failure(
+                    builder,
+                    invocation,
+                    tool,
+                    &attempt_id,
+                    context.sink,
+                    &mut context.event_commit_failed,
+                )?;
+                return Err(error);
+            }
         };
+        let ExecutorToolExecution {
+            enforcement,
+            mut outcome,
+            request_hash: executed_request_hash,
+        } = execution;
+        let validate_execution = || -> Result<(), RuntimeError> {
+            if executed_request_hash != request_hash {
+                return Err(RuntimeError::Protocol(
+                    "Executor result does not match its prepared request".to_owned(),
+                ));
+            }
+            proto::validate_enforcement_receipt_v0(
+                &enforcement,
+                &expected_policy_digest,
+                expected_runtime_profile,
+            )
+            .map_err(|_| {
+                RuntimeError::Protocol(
+                    "Executor enforcement receipt does not match its prepared request".to_owned(),
+                )
+            })?;
+            tool_terminal(&outcome)?;
+            Ok(())
+        };
+        if let Err(error) = validate_execution() {
+            emit_uncertain_tool_failure(
+                builder,
+                invocation,
+                tool,
+                &attempt_id,
+                context.sink,
+                &mut context.event_commit_failed,
+            )?;
+            return Err(error);
+        }
+        if outcome.status == RunAttemptOutcome::Completed
+            && crate::runtime::cancellation::ensure_productive_dispatch_allowed().is_err()
+        {
+            outcome.mark_cancelled();
+        }
         let mut durable = tool_result_value(&outcome)?;
         #[cfg(test)]
         observe_productive_result_persist(RunAttemptKind::Tool);
@@ -224,7 +385,9 @@ where
             exit_code: outcome.exit_code,
             timestamp: timestamp.clone(),
             durable_output: Some(serde_json::json!({
-                "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V0,
+                "enforcement": enforcement,
+                "request_hash": request_hash,
+                "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V1,
                 "tool_result": canonical,
             })),
         };
@@ -276,6 +439,79 @@ where
     Ok(durable_value)
 }
 
+fn cancelled_tool_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult {
+    RunAttemptResult {
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some(ToolTerminalClassification::Cancelled.as_str().to_owned()),
+        exit_code: None,
+        timestamp: timestamp.to_owned(),
+        durable_output: None,
+    }
+}
+
+fn persist_cancelled_tool_attempt<A: ProductiveAttemptLog>(
+    attempts: &mut A,
+    recovery: &mut dyn ProductiveRecovery,
+    recovery_failed: &mut bool,
+    tool: &core_script::ToolBlock,
+    attempt_id: &str,
+    request_hash: &str,
+    timestamp: &str,
+) -> Result<(), RuntimeError> {
+    let result = cancelled_tool_result(attempt_id, timestamp);
+    attempts.terminal(&result)?;
+    mark_recovery_failure(
+        recovery_failed,
+        recovery.record_attempt(Some(&tool.identity.id), request_hash, &result),
+    )
+}
+
+fn emit_cancelled_tool<S: crate::runtime::event_writer::RuntimeEventSink>(
+    builder: &mut RuntimeEventBuilder,
+    invocation: &FlowInvocation,
+    tool: &core_script::ToolBlock,
+    attempt_id: &str,
+    sink: &mut S,
+    event_commit_failed: &mut bool,
+) -> Result<(), RuntimeError> {
+    emit_and_commit(
+        builder,
+        Some(invocation),
+        EventType::ToolFailed,
+        serde_json::json!({
+            "attempt_id": attempt_id,
+            "error": crate::runtime::types::CANCELLED_REASON,
+            "tool_id": tool.identity.id,
+        }),
+        sink,
+        event_commit_failed,
+    )
+}
+
+fn emit_uncertain_tool_failure<S: crate::runtime::event_writer::RuntimeEventSink>(
+    builder: &mut RuntimeEventBuilder,
+    invocation: &FlowInvocation,
+    tool: &core_script::ToolBlock,
+    attempt_id: &str,
+    sink: &mut S,
+    event_commit_failed: &mut bool,
+) -> Result<(), RuntimeError> {
+    emit_and_commit(
+        builder,
+        Some(invocation),
+        EventType::ToolFailed,
+        serde_json::json!({
+            "attempt_id": attempt_id,
+            "error": RUNTIME_ERROR_REASON,
+            "tool_id": tool.identity.id,
+        }),
+        sink,
+        event_commit_failed,
+    )
+}
+
 pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String, RuntimeError> {
     let bytes = proto::canonical_json(value)
         .map_err(|error| RuntimeError::Protocol(format!("request hashing failed: {error}")))?;
@@ -284,26 +520,76 @@ pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ToolAttemptOutput {
-    schema: String,
-    tool_result: serde_json::Value,
+pub(super) struct ToolAttemptOutput {
+    pub(super) enforcement: proto::EnforcementReceiptV0,
+    pub(super) request_hash: String,
+    pub(super) schema: String,
+    pub(super) tool_result: serde_json::Value,
 }
 
-pub(crate) fn recovered_tool_value(
+fn recovered_tool_receipt(
     result: &RunAttemptResult,
-    recovery: &dyn ProductiveRecovery,
-) -> Result<core_script::FlowValue, RuntimeError> {
-    recovered_tool_terminal(result)?;
-    let output: ToolAttemptOutput =
-        serde_json::from_value(result.durable_output.clone().ok_or_else(|| {
-            RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
-        })?)
-        .map_err(RuntimeError::Json)?;
-    if output.schema != TOOL_ATTEMPT_OUTPUT_SCHEMA_V0 {
+) -> Result<proto::EnforcementReceiptV0, RuntimeError> {
+    let durable_output = result.durable_output.as_ref().ok_or_else(|| {
+        RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
+    })?;
+    if durable_output
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
+    {
         return Err(RuntimeError::Protocol(
             "recovered Tool output has an unsupported schema".to_owned(),
         ));
     }
+    serde_json::from_value(durable_output.get("enforcement").cloned().ok_or_else(|| {
+        RuntimeError::Protocol("recovered Tool output has no enforcement receipt".to_owned())
+    })?)
+    .map_err(RuntimeError::Json)
+}
+
+fn recovered_tool_value_bound(
+    result: &RunAttemptResult,
+    recovery: &dyn ProductiveRecovery,
+    expected_request_hash: &str,
+    expected_policy_digest: &str,
+    expected_runtime_profile: proto::RuntimeReadProfileV0,
+) -> Result<core_script::FlowValue, RuntimeError> {
+    recovered_tool_terminal(result)?;
+    let durable_output = result.durable_output.clone().ok_or_else(|| {
+        RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
+    })?;
+    if durable_output
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
+    {
+        return Err(RuntimeError::Protocol(
+            "recovered Tool output has an unsupported schema".to_owned(),
+        ));
+    }
+    let output: ToolAttemptOutput =
+        serde_json::from_value(durable_output).map_err(RuntimeError::Json)?;
+    if output.request_hash != expected_request_hash {
+        return Err(RuntimeError::Protocol(
+            "recovered Tool output does not match the prepared request hash".to_owned(),
+        ));
+    }
+    if output.schema != TOOL_ATTEMPT_OUTPUT_SCHEMA_V1 {
+        return Err(RuntimeError::Protocol(
+            "recovered Tool output has an unsupported schema".to_owned(),
+        ));
+    }
+    proto::validate_enforcement_receipt_v0(
+        &output.enforcement,
+        expected_policy_digest,
+        expected_runtime_profile,
+    )
+    .map_err(|_| {
+        RuntimeError::Protocol(
+            "recovered Tool enforcement receipt does not match the prepared request".to_owned(),
+        )
+    })?;
     let tool_result = core_script::parse_flow_value_v0(output.tool_result).map_err(|error| {
         RuntimeError::Protocol(format!("recovered Tool result is invalid: {error}"))
     })?;
@@ -321,6 +607,39 @@ pub(crate) fn recovered_tool_value(
         ));
     }
     Ok(tool_result)
+}
+
+#[cfg(test)]
+pub(crate) fn recovered_tool_value(
+    result: &RunAttemptResult,
+    recovery: &dyn ProductiveRecovery,
+) -> Result<core_script::FlowValue, RuntimeError> {
+    let durable_output = result.durable_output.as_ref().ok_or_else(|| {
+        RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
+    })?;
+    if durable_output
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
+    {
+        return Err(RuntimeError::Protocol(
+            "recovered Tool output has an unsupported schema".to_owned(),
+        ));
+    }
+    let receipt = recovered_tool_receipt(result)?;
+    let request_hash = durable_output
+        .get("request_hash")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            RuntimeError::Protocol("recovered Tool output has no request hash".to_owned())
+        })?;
+    recovered_tool_value_bound(
+        result,
+        recovery,
+        request_hash,
+        &receipt.applied_policy_digest,
+        receipt.runtime_profile,
+    )
 }
 
 pub(super) fn validate_tool_result_streams(

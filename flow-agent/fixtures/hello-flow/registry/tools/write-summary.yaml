@@ -7,7 +7,7 @@ tool:
   script_body: |
     printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: ["workspace/out"]
-  protected_path_grants: []
+  runtime_profile: exact
+  read_only_mounts: ["workspace"]
+  writable_mounts: ["workspace/out"]
   network: deny

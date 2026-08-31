@@ -5,7 +5,7 @@ use crate::{
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::{
             append_productive_run_checkpoint, conversation_status_page,
-            create_conversation_run_with_model_profile,
+            create_conversation_run_with_model_profile, reserve_conversation_continuation,
         },
         fs_guards::AnchoredWorkspace,
         instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
@@ -15,7 +15,7 @@ use crate::{
             continue_conversation_with_live_events, continue_conversation_with_provider,
             resume_conversation_run, resume_conversation_run_with_execution_activation,
             resume_conversation_run_with_live_events, run_flow_with_root_input_and_live_events,
-            run_productive_session_with_provider,
+            run_productive_session_with_provider, set_productive_executor_readiness_observer,
         },
         session_reading::SessionEventReader,
         session_store::open_flow_agent_home,
@@ -25,13 +25,86 @@ use crate::{
         conversations::{write_terminal_recovery_snapshot, write_terminal_run},
         helpers::{
             disabled_configured_smoke_productive_execution_fixture, empty_workspace,
-            write_productive_workspace_config,
+            smoke_productive_execution_fixture, write_productive_workspace_config,
         },
         test_support::workspace_copy,
     },
 };
 use proto::EventType;
 use std::{fs, fs::OpenOptions, path::Path};
+
+#[test]
+fn executor_readiness_failure_precedes_continuation_reservation() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
+    write_productive_workspace_config(&workspace);
+    let definition = crate::runtime::session_definition::session_definition_metadata(
+        &fixture.registry,
+        fixture.smoke_flow(),
+    )
+    .expect("definition metadata");
+    let profile = ContextModelProfile {
+        context_limit: 128_000,
+        id: OPERATOR_MODEL_PROFILE_ID,
+        output_reserve: 16_384,
+        safety_margin: CONTEXT_SAFETY_MARGIN,
+    };
+    create_conversation_run_with_model_profile(
+        &workspace,
+        "conversation",
+        "run",
+        &definition.flow_definition_id,
+        &definition.registry_hash,
+        &definition.flow_definition_hash,
+        ("gpt-fixture", profile),
+    )
+    .expect("recorded Tool-bearing run is created");
+    crate::tests::conversations::write_terminal_run(&workspace, "conversation", "run");
+    append_productive_run_checkpoint(
+        &workspace,
+        "conversation",
+        "run",
+        None,
+        &write_terminal_recovery_snapshot(&workspace, "conversation", "run"),
+        2,
+        "2026-07-30T12:00:01Z",
+    )
+    .expect("root checkpoint appends");
+    set_productive_executor_readiness_observer(|| {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "injected unsupported Tool platform",
+        ))
+    });
+    let mut provider = SessionProvider::default();
+
+    let error = continue_conversation_with_provider(
+        &workspace,
+        "conversation",
+        None,
+        None,
+        None,
+        false,
+        fixture.credential(),
+        &mut provider,
+    )
+    .expect_err("failed readiness must stop before continuation reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+    ));
+    assert_eq!(provider.calls, 0);
+    assert!(
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("conversation/runs/conversation")
+            .exists()
+    );
+    reserve_conversation_continuation(&workspace, "conversation", None)
+        .expect("failed readiness leaves continuation reservation available")
+        .release()
+        .expect("continuation reservation releases");
+}
 
 #[test]
 fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_provider() {

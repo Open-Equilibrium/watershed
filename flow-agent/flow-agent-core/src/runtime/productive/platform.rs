@@ -15,6 +15,21 @@ pub(crate) fn ensure_productive_execution_platform() -> Result<(), RuntimeError>
     }
 }
 
+pub(crate) fn ensure_productive_tool_execution_platform() -> Result<(), RuntimeError> {
+    let release = current_productive_execution_release();
+    if std::env::consts::OS == "linux"
+        && std::env::consts::ARCH == "x86_64"
+        && release.as_deref().is_some_and(ubuntu_24_04_release)
+    {
+        Ok(())
+    } else {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "productive Tool execution requires Ubuntu 24.04 x86_64",
+        ))
+    }
+}
+
 pub(crate) fn productive_execution_supported_release(
     target_os: &str,
     target_arch: &str,

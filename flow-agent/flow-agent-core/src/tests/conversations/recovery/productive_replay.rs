@@ -496,7 +496,12 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         exit_code: Some(0),
         timestamp: "2026-07-30T12:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
+            "enforcement": crate::runtime::productive::test_enforcement_receipt(
+                "0".repeat(64),
+                core_script::ToolRuntimeProfile::Exact,
+            ),
+            "request_hash": request_hash,
+            "schema": "flow-tool-attempt-output-v1",
             "tool_result": {"type": "string", "value": "inspected"}
         })),
     };

@@ -117,12 +117,10 @@ impl RuntimeEventBuilder {
         tool: &core_script::ToolBlock,
         policy: RuntimeToolPolicy<'_>,
     ) -> Result<(), RuntimeError> {
-        let protected_path_match_mode = policy.protected_path_match_mode.as_str();
         let canonical = proto::canonical_json(&serde_json::json!({
             "command_policy": policy.command,
             "domain": TOOL_EXECUTION_INTENT_DOMAIN,
             "flow_id": invocation.flow_id,
-            "protected_path_match_mode": protected_path_match_mode,
             "stub_model_fixture_profile": policy.stub_model_fixture_profile,
             "tool": tool,
         }))
@@ -159,7 +157,6 @@ impl RuntimeEventBuilder {
             completion_sequence,
             effect,
             failure_transition,
-            protected_path_match_mode: policy.protected_path_match_mode,
         };
         self.actions
             .push(FlowExecutionAction::Fixture(Box::new(action.clone())));

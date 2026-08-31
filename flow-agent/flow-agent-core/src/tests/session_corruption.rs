@@ -202,11 +202,12 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             serde_json::json!({
                 "allowed_parameters": [],
                 "network_access": "deny",
-                "read_scope": [],
+                "read_only_mounts": [],
                 "tool_id": "echo",
                 "tool_kind": "predefined-command",
                 "tool_name": "Echo",
-                "write_scope": [],
+                "runtime_profile": "exact",
+                "writable_mounts": [],
             }),
         ),
         event_line(
@@ -256,11 +257,12 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             serde_json::json!({
                 "allowed_parameters": [],
                 "network_access": "deny",
-                "read_scope": [],
+                "read_only_mounts": [],
                 "tool_id": "echo",
                 "tool_kind": "predefined-command",
                 "tool_name": "Echo",
-                "write_scope": [],
+                "runtime_profile": "exact",
+                "writable_mounts": [],
             }),
         ),
         event_line(

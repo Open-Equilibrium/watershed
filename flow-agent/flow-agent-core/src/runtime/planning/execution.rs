@@ -6,7 +6,7 @@ use crate::runtime::{
     },
     execution_plan::{
         PlannedFailureTransition, PlannedFlowFailureBoundary, PlannedToolContext, RuntimeFailure,
-        RuntimeToolPolicy, ToolSideEffectMode, runtime_protected_path_match_mode,
+        RuntimeToolPolicy, ToolSideEffectMode,
     },
     failures::{
         emit_runtime_error_failure, emit_runtime_failure, emit_runtime_flow_failure,
@@ -300,9 +300,6 @@ fn emit_phase_iteration(
                 command_policy_for_phase(context.policy, &phase.identity.id, tool)?;
             let tool_policy = RuntimeToolPolicy {
                 command: command_policy,
-                protected_path_match_mode: runtime_protected_path_match_mode(
-                    &context.policy.target,
-                ),
                 stub_model_fixture_profile: context.stub_model_fixture_profile,
             };
             match emit_planned_tool(
@@ -407,8 +404,7 @@ pub fn emit_planned_tool(
         tool,
     } = context;
     builder.record_tool_intent(invocation, tool, policy)?;
-    let (effect, planned_progress) =
-        compile_fixture_tool_effect(tool, policy.protected_path_match_mode, policy.command)?;
+    let (effect, planned_progress) = compile_fixture_tool_effect(tool, policy.command)?;
     builder.emit(
         Some(invocation),
         EventType::ToolStarted,

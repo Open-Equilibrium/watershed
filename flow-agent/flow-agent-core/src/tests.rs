@@ -13,6 +13,7 @@ mod credential_store;
 mod deadlines;
 mod event_data_capacity;
 mod event_writer;
+mod executor;
 mod fixture_tools;
 mod fs_guards;
 mod live_events;

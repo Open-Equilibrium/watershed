@@ -3,9 +3,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::{env, error::Error, io::Write, process::Command};
 
-const REPORT_SCHEMA: &str = "flow-m12-startup-baseline-v0";
-const REPORT_SUITE: &str = "Flow Agent M1.2 direct-runner startup baseline";
-const BENCHMARK: &str = "direct_runner_single_noop_tool";
+const REPORT_SCHEMA: &str = "flow-m12-executor-startup-v0";
+const REPORT_SUITE: &str = "Flow Agent M1.2 Executor startup evidence";
+const BENCHMARK: &str = "prepared_selected_executor_single_noop_tool";
 
 #[derive(Serialize)]
 struct Environment {
@@ -28,7 +28,7 @@ struct Metadata {
     benchmark_suite: &'static str,
     warmup_samples: usize,
     measured_samples: usize,
-    invocations_per_fresh_child: usize,
+    tool_executions_per_fresh_child: usize,
     environment: Environment,
 }
 
@@ -38,8 +38,7 @@ struct RawSample {
     schema: &'static str,
     benchmark: &'static str,
     sample: usize,
-    runner_elapsed_ns: u64,
-    tool_runtime_ns: u64,
+    executor_elapsed_ns: u64,
 }
 
 #[derive(Serialize)]
@@ -48,12 +47,9 @@ struct Aggregate {
     schema: &'static str,
     benchmark: &'static str,
     count: usize,
-    runner_p50_ns: u64,
-    runner_p95_ns: u64,
-    runner_max_ns: u64,
-    tool_runtime_p50_ns: u64,
-    tool_runtime_p95_ns: u64,
-    tool_runtime_max_ns: u64,
+    executor_p50_ns: u64,
+    executor_p95_ns: u64,
+    executor_max_ns: u64,
     inputs: Value,
 }
 
@@ -75,19 +71,21 @@ struct Summary {
 
 fn inputs() -> Value {
     json!({
+        "boundary": "prepared_selected_executor",
         "fresh_measurement_child": true,
-        "direct_tool_invocations_per_child": 1,
-        "tool": "fixed schema-tagged no-op child",
+        "executor_selection": "explicit absolute path configured before interval",
+        "tool_executions_per_child": 1,
+        "tool": "/bin/echo",
+        "tool_arguments": [],
         "tool_environment": "empty",
-        "runner_interval": [
-            "direct-runner handoff",
-            "process launch",
-            "reap",
-            "stdout/stderr drain",
-            "terminal classification"
+        "runtime_profile": "exact",
+        "executor_interval": [
+            "selected Executor preparation and readiness",
+            "canonical request and capability preparation",
+            "one-shot Executor and Sandbox lifecycle",
+            "validated terminal Tool result and enforcement receipt"
         ],
-        "distributions": ["runner_elapsed_ns", "tool_runtime_ns"],
-        "subtraction": false
+        "distribution": "executor_elapsed_ns"
     })
 }
 
@@ -178,7 +176,8 @@ fn write_failure(writer: &mut impl Write, error: &dyn Error) -> Result<(), DynEr
 }
 
 pub(super) fn write_report(writer: &mut impl Write, config: Config) -> Result<bool, DynError> {
-    write_report_with_measurement(writer, config, &mut fresh_child_measurement)
+    let executor = config.executor.clone();
+    write_report_with_measurement(writer, config, &mut || fresh_child_measurement(&executor))
 }
 
 pub(super) fn write_report_with_measurement(
@@ -194,7 +193,7 @@ pub(super) fn write_report_with_measurement(
             benchmark_suite: REPORT_SUITE,
             warmup_samples: config.warmups,
             measured_samples: config.samples,
-            invocations_per_fresh_child: 1,
+            tool_executions_per_fresh_child: 1,
             environment: current_environment(),
         },
     )?;
@@ -215,8 +214,7 @@ pub(super) fn write_report_with_measurement(
         }
     }
 
-    let mut runner_samples = Vec::with_capacity(config.samples);
-    let mut tool_samples = Vec::with_capacity(config.samples);
+    let mut executor_samples = Vec::with_capacity(config.samples);
     for sample in 0..config.samples {
         let measurement = match measure() {
             Ok(measurement) => measurement,
@@ -241,16 +239,13 @@ pub(super) fn write_report_with_measurement(
                 schema: REPORT_SCHEMA,
                 benchmark: BENCHMARK,
                 sample,
-                runner_elapsed_ns: measurement.runner_elapsed_ns,
-                tool_runtime_ns: measurement.tool_runtime_ns,
+                executor_elapsed_ns: measurement.executor_elapsed_ns,
             },
         )?;
-        runner_samples.push(measurement.runner_elapsed_ns);
-        tool_samples.push(measurement.tool_runtime_ns);
+        executor_samples.push(measurement.executor_elapsed_ns);
     }
 
-    runner_samples.sort_unstable();
-    tool_samples.sort_unstable();
+    executor_samples.sort_unstable();
     write_jsonl(
         writer,
         &Aggregate {
@@ -258,12 +253,9 @@ pub(super) fn write_report_with_measurement(
             schema: REPORT_SCHEMA,
             benchmark: BENCHMARK,
             count: config.samples,
-            runner_p50_ns: percentile(&runner_samples, 50, 100),
-            runner_p95_ns: percentile(&runner_samples, 95, 100),
-            runner_max_ns: *runner_samples.last().expect("sample count is nonzero"),
-            tool_runtime_p50_ns: percentile(&tool_samples, 50, 100),
-            tool_runtime_p95_ns: percentile(&tool_samples, 95, 100),
-            tool_runtime_max_ns: *tool_samples.last().expect("sample count is nonzero"),
+            executor_p50_ns: percentile(&executor_samples, 50, 100),
+            executor_p95_ns: percentile(&executor_samples, 95, 100),
+            executor_max_ns: *executor_samples.last().expect("sample count is nonzero"),
             inputs: inputs(),
         },
     )?;

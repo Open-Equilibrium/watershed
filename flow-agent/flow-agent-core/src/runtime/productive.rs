@@ -4,17 +4,17 @@ use crate::runtime::run_attempts::RunAttemptKind;
 use crate::runtime::{
     context::ContextModelProfile,
     conversations::MAX_CONVERSATION_RECORD_BYTES,
-    fs_guards::{AnchoredDir, AnchoredWorkspace},
+    executor::{ExecutorToolExecution, PreparedExecutor, PreparedExecutorTool},
+    fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
     openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_at},
     productive_capacity::ProductiveDispatchReservation,
     responses::MAX_RESPONSES_DECODED_STREAM_BYTES,
-    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome, ToolInvocation},
+    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolInvocation},
     types::{
         CANCELLED_REASON, EventClock, MAX_SESSION_OBJECT_BYTES, RUNTIME_ERROR_REASON, RuntimeError,
     },
 };
-use std::time::Duration;
 
 mod execution;
 mod platform;
@@ -23,13 +23,15 @@ mod provider_turn;
 mod reconciliation;
 mod tool;
 mod tool_result;
-pub(crate) use execution::execute_productive_flow_with_recovery;
+pub(crate) use execution::execute_productive_flow_with_prepared_executor;
 #[cfg(test)]
 pub(crate) use execution::{
-    execute_productive_flow, execute_productive_flow_with_tool_executor,
+    execute_productive_flow, execute_productive_flow_with_recovery,
+    execute_productive_flow_with_tool_executor,
     execute_productive_flow_with_tool_executor_and_recovery,
 };
 pub(crate) use platform::ensure_productive_execution_platform;
+pub(crate) use platform::ensure_productive_tool_execution_platform;
 #[cfg(test)]
 pub(crate) use platform::productive_execution_supported_release;
 #[cfg(test)]
@@ -48,12 +50,14 @@ pub(crate) use tool::SystemProductiveToolExecutor;
 #[cfg(test)]
 pub(crate) use tool::recovered_tool_value;
 #[cfg(test)]
-pub(crate) use tool::{recovered_tool_terminal, tool_result_value, tool_terminal};
+pub(crate) use tool::{
+    recovered_tool_terminal, test_enforcement_receipt, tool_result_value, tool_terminal,
+};
 
 const PROVIDER_CANCELLED_SCHEMA_V0: &str = "flow-provider-cancelled-v0";
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
-const TOOL_ATTEMPT_OUTPUT_SCHEMA_V0: &str = "flow-tool-attempt-output-v0";
+const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
 
 #[cfg(test)]
 type ProductiveResultPersistObserver = (RunAttemptKind, Box<dyn FnOnce()>);
@@ -154,14 +158,144 @@ impl ProductiveProvider for OpenAiCodexProvider {
 }
 
 pub(crate) trait ProductiveToolExecutor {
+    type Prepared;
+
     fn supports_productive_tools(&self) -> bool;
 
-    fn execute(
+    fn prepare(
         &mut self,
         invocation: &ToolInvocation,
-        workspace: &AnchoredDir,
-        timeout: Duration,
-    ) -> Result<ToolExecutionOutcome, RuntimeError>;
+        workspace: &AnchoredWorkspace,
+        policy: &core_policy::PolicyArtifact,
+        command_policy: &core_policy::CommandPolicy,
+        request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError>;
+
+    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str;
+
+    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str;
+
+    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0;
+
+    fn validate_enforcement_receipt(
+        &self,
+        prepared: &Self::Prepared,
+        receipt: &proto::EnforcementReceiptV0,
+    ) -> Result<(), RuntimeError> {
+        proto::validate_enforcement_receipt_v0(
+            receipt,
+            self.policy_digest(prepared),
+            self.runtime_profile(prepared),
+        )
+        .map_err(|_| {
+            RuntimeError::Protocol(
+                "Executor enforcement receipt does not match its prepared request".to_owned(),
+            )
+        })
+    }
+
+    fn execute_prepared(
+        &mut self,
+        prepared: Self::Prepared,
+    ) -> Result<ExecutorToolExecution, RuntimeError>;
+}
+
+impl ProductiveToolExecutor for PreparedExecutor {
+    type Prepared = PreparedExecutorTool;
+
+    fn supports_productive_tools(&self) -> bool {
+        true
+    }
+
+    fn validate_enforcement_receipt(
+        &self,
+        prepared: &Self::Prepared,
+        receipt: &proto::EnforcementReceiptV0,
+    ) -> Result<(), RuntimeError> {
+        self.validate_prepared_receipt(prepared, receipt)
+    }
+
+    fn prepare(
+        &mut self,
+        invocation: &ToolInvocation,
+        workspace: &AnchoredWorkspace,
+        policy: &core_policy::PolicyArtifact,
+        command_policy: &core_policy::CommandPolicy,
+        request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError> {
+        self.prepare_tool(workspace, policy, command_policy, invocation, request_id)
+    }
+
+    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        prepared.request_hash()
+    }
+
+    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        prepared.policy_digest()
+    }
+
+    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
+        prepared.runtime_profile()
+    }
+
+    fn execute_prepared(
+        &mut self,
+        prepared: Self::Prepared,
+    ) -> Result<ExecutorToolExecution, RuntimeError> {
+        PreparedExecutor::execute_prepared(self, prepared)
+    }
+}
+
+impl ProductiveToolExecutor for Option<PreparedExecutor> {
+    type Prepared = PreparedExecutorTool;
+
+    fn supports_productive_tools(&self) -> bool {
+        self.is_some()
+    }
+
+    fn prepare(
+        &mut self,
+        invocation: &ToolInvocation,
+        workspace: &AnchoredWorkspace,
+        policy: &core_policy::PolicyArtifact,
+        command_policy: &core_policy::CommandPolicy,
+        request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError> {
+        self.as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .prepare_tool(workspace, policy, command_policy, invocation, request_id)
+    }
+
+    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        prepared.request_hash()
+    }
+
+    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        prepared.policy_digest()
+    }
+
+    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
+        prepared.runtime_profile()
+    }
+
+    fn execute_prepared(
+        &mut self,
+        prepared: Self::Prepared,
+    ) -> Result<ExecutorToolExecution, RuntimeError> {
+        self.as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .execute_prepared(prepared)
+    }
+
+    fn validate_enforcement_receipt(
+        &self,
+        prepared: &Self::Prepared,
+        receipt: &proto::EnforcementReceiptV0,
+    ) -> Result<(), RuntimeError> {
+        self.as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .validate_prepared_receipt(prepared, receipt)
+    }
 }
 
 struct ProductiveContext<'a, P, A, S, T> {

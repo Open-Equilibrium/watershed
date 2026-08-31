@@ -351,22 +351,21 @@ fn productive_recovery_verifies_referenced_tool_result_objects_before_continuing
         classification: None,
         exit_code: Some(0),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": {
-                "type": "map",
-                "value": {
-                    "schema": {"type": "string", "value": "flow-tool-result-v0"},
-                    "status": {"type": "string", "value": "completed"},
-                    "exit_code": {"type": "integer", "value": "0"},
-                    "stdout": {
-                        "type": "session-object",
-                        "value": "session-object:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    "stderr": {"type": "string", "value": ""}
-                }
-            }
-        })),
+        durable_output: Some(super::support::fake_tool_attempt_output(
+            serde_json::json!({
+                    "type": "map",
+                    "value": {
+                        "schema": {"type": "string", "value": "flow-tool-result-v0"},
+                        "status": {"type": "string", "value": "completed"},
+                        "exit_code": {"type": "integer", "value": "0"},
+                        "stdout": {
+                            "type": "session-object",
+                            "value": "session-object:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        },
+                        "stderr": {"type": "string", "value": ""}
+                    }
+            }),
+        )),
     });
 
     let error = execute_productive_flow_with_tool_executor_and_recovery(

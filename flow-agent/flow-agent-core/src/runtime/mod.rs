@@ -13,6 +13,7 @@ pub(crate) mod error;
 pub(crate) mod event_construction;
 pub(crate) mod event_writer;
 pub(crate) mod execution_plan;
+pub(crate) mod executor;
 pub(crate) mod failures;
 pub(crate) mod fixture_effects;
 pub(crate) mod fixture_tools;
@@ -68,6 +69,10 @@ pub use cancellation::{
     settle_productive_operation,
 };
 pub use conversations::{conversation_status, project_tool_run_log};
+pub use executor::{
+    ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
+    configure_executor_path, executor_check, executor_status,
+};
 pub use live_events::{
     LiveEventNotification, LiveEventNotifier, LiveEventNotifyStatus, LiveEventReceiveError,
     LiveEventReceiver, live_event_channel,

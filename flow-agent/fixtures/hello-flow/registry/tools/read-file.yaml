@@ -11,7 +11,7 @@ tool:
       required: true
       value_pattern: "^[A-Za-z0-9_./-]+$"
       max_length: 128
-  read_scope: ["workspace"]
-  write_scope: []
-  protected_path_grants: []
+  runtime_profile: exact
+  read_only_mounts: ["workspace"]
+  writable_mounts: []
   network: deny

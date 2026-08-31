@@ -3,9 +3,7 @@ use super::{
     test_support::workspace_copy,
 };
 use crate::runtime::{
-    execution_plan::{
-        FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target,
-    },
+    execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
     planning::plan_flow,
     run_input::{MAX_FLOW_RUN_INPUT_BYTES, parse_flow_run_input, read_flow_run_input_file},
     types::{EventClock, RuntimeError},
@@ -36,8 +34,7 @@ fn selected_root_flow_input_is_typed_canonical_and_enters_the_first_phase() {
     let registry = load_test_registry(&workspace, "smoke-flow");
     let flow = registry.flow_block("smoke-flow").expect("flow exists");
     let policy =
-        core_policy::compile_policy_artifact(&registry, "smoke-flow", runtime_policy_target())
-            .expect("policy compiles");
+        core_policy::compile_policy_artifact(&registry, "smoke-flow").expect("policy compiles");
     let options = FlowExecutionOptions::with_stub_model_fixture_profile(
         EventClock::fixed_fixture(),
         ToolSideEffectMode::Plan,

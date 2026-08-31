@@ -26,6 +26,19 @@ fn tool_intent(attempt_id: &str) -> RunAttemptIntent {
     }
 }
 
+fn reconciliation_output(request_hash: &str, tool_result: serde_json::Value) -> String {
+    proto::canonical_json(&serde_json::json!({
+        "enforcement": crate::runtime::productive::test_enforcement_receipt(
+            "0".repeat(64),
+            core_script::ToolRuntimeProfile::Exact,
+        ),
+        "request_hash": request_hash,
+        "schema": "flow-tool-attempt-output-v1",
+        "tool_result": tool_result,
+    }))
+    .expect("Tool reconciliation output canonicalizes")
+}
+
 #[test]
 fn run_log_synchronizes_intent_before_result_and_surfaces_uncertain_attempts() {
     let workspace = empty_workspace("run-log");
@@ -88,9 +101,12 @@ fn tool_reconciliation_settles_exactly_one_uncertain_tool_without_redispatch() {
     create_review_run(&workspace);
     append_run_attempt_intent(&workspace, "review", "review-1", &tool_intent("tool-001"))
         .expect("uncertain Tool intent is durable");
-    let result = r#"{"type":"map","value":{"exit_code":{"type":"integer","value":"0"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}"#;
+    let result = reconciliation_output(
+        REQUEST_HASH,
+        serde_json::json!({"type":"map","value":{"exit_code":{"type":"integer","value":"0"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}),
+    );
 
-    reconcile_tool_attempt(&workspace, "review", "review-1", result)
+    reconcile_tool_attempt(&workspace, "review", "review-1", &result)
         .expect("one uncertain Tool attempt reconciles");
     let states = inspect_run_attempts(&workspace, "review", "review-1")
         .expect("reconciled attempt state reads");
@@ -101,7 +117,7 @@ fn tool_reconciliation_settles_exactly_one_uncertain_tool_without_redispatch() {
     let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
         .join("review/runs/review-1/run-log.jsonl");
     let before = fs::read(&run_log).expect("Run Log reads before zero-match rejection");
-    assert!(reconcile_tool_attempt(&workspace, "review", "review-1", result).is_err());
+    assert!(reconcile_tool_attempt(&workspace, "review", "review-1", &result).is_err());
     assert_eq!(
         fs::read(&run_log).expect("Run Log reads after zero-match rejection"),
         before
@@ -112,7 +128,7 @@ fn tool_reconciliation_settles_exactly_one_uncertain_tool_without_redispatch() {
     append_run_attempt_intent(&workspace, "review", "review-1", &tool_intent("tool-003"))
         .expect("second additional Tool intent is durable");
     let before = fs::read(&run_log).expect("Run Log reads before ambiguous rejection");
-    assert!(reconcile_tool_attempt(&workspace, "review", "review-1", result).is_err());
+    assert!(reconcile_tool_attempt(&workspace, "review", "review-1", &result).is_err());
     assert_eq!(
         fs::read(&run_log).expect("Run Log reads after ambiguous rejection"),
         before
@@ -127,8 +143,11 @@ fn tool_reconciliation_settles_exactly_one_uncertain_tool_without_redispatch() {
         &tool_intent("tool-failed"),
     )
     .expect("failed Tool intent is durable");
-    let failed_result = r#"{"type":"map","value":{"exit_code":{"type":"integer","value":"7"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"failed"},"stderr":{"type":"string","value":"failed"},"stdout":{"type":"string","value":""}}}"#;
-    reconcile_tool_attempt(&failed_workspace, "review", "review-1", failed_result)
+    let failed_result = reconciliation_output(
+        REQUEST_HASH,
+        serde_json::json!({"type":"map","value":{"exit_code":{"type":"integer","value":"7"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"failed"},"stderr":{"type":"string","value":"failed"},"stdout":{"type":"string","value":""}}}),
+    );
+    reconcile_tool_attempt(&failed_workspace, "review", "review-1", &failed_result)
         .expect("bounded failure evidence reconciles");
     let failed_states = inspect_run_attempts(&failed_workspace, "review", "review-1")
         .expect("failed reconciliation state reads");
@@ -158,7 +177,7 @@ fn tool_reconciliation_rejects_invalid_terminal_evidence_without_mutation() {
     let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
         .join("review/runs/review-1/run-log.jsonl");
     let before = fs::read(&run_log).expect("Run Log reads before rejection");
-    let invalid_results = [
+    let invalid_tool_results = [
         r#"{"type":"string","value":"not a map"}"#,
         r#"{"type":"map","value":{"schema":{"type":"string","value":"flow-tool-result-v0"}}}"#,
         r#"{"type":"map","value":{"status":{"type":"string","value":"pending"}}}"#,
@@ -168,8 +187,12 @@ fn tool_reconciliation_rejects_invalid_terminal_evidence_without_mutation() {
         r#"{"type":"map","value":{"exit_code":{"type":"integer","value":"7"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}"#,
     ];
 
-    for invalid_result in invalid_results {
-        let error = reconcile_tool_attempt(&workspace, "review", "review-1", invalid_result)
+    for invalid_tool_result in invalid_tool_results {
+        let invalid_result = reconciliation_output(
+            REQUEST_HASH,
+            serde_json::from_str(invalid_tool_result).expect("invalid Tool result JSON parses"),
+        );
+        let error = reconcile_tool_attempt(&workspace, "review", "review-1", &invalid_result)
             .expect_err("invalid terminal evidence is rejected");
         assert!(!error.to_string().is_empty());
         assert_eq!(
@@ -177,6 +200,30 @@ fn tool_reconciliation_rejects_invalid_terminal_evidence_without_mutation() {
             before
         );
     }
+}
+
+#[test]
+fn tool_reconciliation_rejects_evidence_for_a_different_attempt_without_mutation() {
+    let workspace = empty_workspace("reconcile-tool-wrong-attempt");
+    create_review_run(&workspace);
+    append_run_attempt_intent(&workspace, "review", "review-1", &tool_intent("tool-001"))
+        .expect("uncertain Tool intent is durable");
+    let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
+        .join("review/runs/review-1/run-log.jsonl");
+    let before = fs::read(&run_log).expect("Run Log reads before rejection");
+    let result = reconciliation_output(
+        &"2".repeat(64),
+        serde_json::json!({"type":"map","value":{"exit_code":{"type":"integer","value":"0"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}),
+    );
+
+    let error = reconcile_tool_attempt(&workspace, "review", "review-1", &result)
+        .expect_err("evidence for a different request must fail closed");
+
+    assert!(error.to_string().contains("request hash does not match"));
+    assert_eq!(
+        fs::read(&run_log).expect("Run Log reads after rejection"),
+        before
+    );
 }
 
 #[test]
@@ -205,7 +252,7 @@ fn reconciliation_file_accepts_a_durable_run_object_result() {
         .expect("run object store opens")
         .persist(std::slice::from_ref(&object))
         .expect("reconciliation object persists");
-    let result = serde_json::json!({
+    let tool_result = serde_json::json!({
         "type": "map",
         "value": {
             "exit_code": {"type": "integer", "value": "0"},
@@ -217,7 +264,7 @@ fn reconciliation_file_accepts_a_durable_run_object_result() {
     });
     fs::write(
         workspace.join("reconciliation.json"),
-        serde_json::to_vec(&result).expect("reconciliation serializes"),
+        reconciliation_output(REQUEST_HASH, tool_result),
     )
     .expect("reconciliation file writes");
 
@@ -265,7 +312,7 @@ fn tool_reconciliation_rejects_a_run_object_whose_bytes_do_not_match_its_digest_
         b"tampered stdout",
     )
     .expect("object bytes are replaced under the original digest path");
-    let result = serde_json::json!({
+    let tool_result = serde_json::json!({
         "type": "map",
         "value": {
             "exit_code": {"type": "integer", "value": "0"},
@@ -275,7 +322,7 @@ fn tool_reconciliation_rejects_a_run_object_whose_bytes_do_not_match_its_digest_
             "stdout": {"type": "session-object", "value": uri},
         }
     });
-    let source = proto::canonical_json(&result).expect("reconciliation result canonicalizes");
+    let source = reconciliation_output(REQUEST_HASH, tool_result);
     let run_log = crate::tests::helpers::workspace_session_dir(&workspace)
         .join("review/runs/review-1/run-log.jsonl");
     let before = fs::read(&run_log).expect("Run Log reads before rejection");

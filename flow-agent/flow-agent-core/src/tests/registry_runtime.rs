@@ -2,8 +2,6 @@ mod own_script;
 
 #[cfg(windows)]
 use super::helpers::create_windows_junction;
-#[cfg(windows)]
-use super::support::assert_denied;
 use super::{
     helpers::{
         assert_invalid_stream, empty_workspace, fixture_runtime_policy, flow_id_for_definition,
@@ -20,7 +18,6 @@ use crate::runtime::{
     types::{EmitMode, EventClock, MAX_FLOW_INVOCATIONS, RuntimeError},
     validate::validate_session_log_text,
 };
-use core_policy::ProtectedPathMatchMode;
 use proto::{EventEnvelope, EventType};
 use std::{fs, path::Path};
 
@@ -292,55 +289,6 @@ fn run_flow_rejects_unknown_predefined_command_without_side_effects() {
         !crate::tests::helpers::workspace_log_dir(&workspace)
             .join("smoke-flow.log")
             .exists()
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn run_flow_rejects_windows_short_alias_of_protected_directory() {
-    let workspace = workspace_copy("hello-flow");
-    fs::create_dir(workspace.join(".git")).expect("protected directory created");
-    assert!(
-        workspace.join("GIT~1").is_dir(),
-        "fixture requires the Windows short alias for .git"
-    );
-    fs::write(
-        session_home_path().join("registry/tools/write-summary.yaml"),
-        "tool:\n  id: write-summary\n  name: WriteSummary\n  tool_kind: own-script\n  command: script:write-summary\n  script_runtime: posix-sh\n  script_body: |\n    printf '%s\\n' \"$SUMMARY\" > GIT~1/config\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: [\"workspace\"]\n  protected_path_grants: []\n  network: deny\n",
-    )
-    .expect("alias write tool written");
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("resolved protected directory alias must fail before execution");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::ProtectedPathDenied,
-        "protected path",
-    );
-    assert!(
-        !workspace.join(".git/config").exists(),
-        "protected target must remain untouched"
-    );
-    assert!(
-        !crate::tests::helpers::workspace_session_dir(&workspace).exists(),
-        "protected alias must fail during preflight"
-    );
-}
-
-#[test]
-fn protected_path_modes_follow_policy_target() {
-    use core_policy::protected_path_match_mode_for_policy_target;
-
-    assert_eq!(
-        protected_path_match_mode_for_policy_target(
-            &core_policy::PolicyTarget::LinuxLandlockSeccomp
-        ),
-        ProtectedPathMatchMode::CaseSensitive
-    );
-    assert_eq!(
-        protected_path_match_mode_for_policy_target(&core_policy::PolicyTarget::MacosSeatbelt),
-        ProtectedPathMatchMode::CaseInsensitive
     );
 }
 

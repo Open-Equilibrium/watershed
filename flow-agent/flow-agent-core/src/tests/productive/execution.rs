@@ -1,6 +1,6 @@
 use super::super::{support::write_registry_definition, test_support::workspace_copy};
 use super::support::{
-    FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider,
+    FakeToolExecutionFault, FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider,
     disabled_smoke_productive_execution_fixture, load_productive_execution_fixture,
     single_tool_provider_turn, smoke_productive_execution_fixture,
 };
@@ -148,6 +148,56 @@ fn productive_tool_started_commit_failure_settles_without_dispatch() {
                     && outcome == RunAttemptOutcome::Cancelled.as_str()
             })
     );
+}
+
+#[test]
+fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_uncertain() {
+    for fault in [
+        FakeToolExecutionFault::ExecutorError,
+        FakeToolExecutionFault::RequestHashMismatch,
+        FakeToolExecutionFault::ReceiptMismatch,
+    ] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor {
+            fault,
+            ..FakeToolExecutor::default()
+        };
+
+        let execution = execute_productive_flow_with_tool_executor(
+            fixture.execution(flow, "productive-executor-boundary-failure"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+        )
+        .expect("Executor boundary failure remains a terminal failed session");
+
+        assert!(execution.failed, "{fault:?}");
+        assert_eq!(tools.invocations.len(), 1, "{fault:?}");
+        assert_eq!(attempts.intents.len(), 2, "{fault:?}");
+        assert_eq!(attempts.results.len(), 1, "{fault:?}");
+        assert_eq!(attempts.intents[1].0, RunAttemptKind::Tool, "{fault:?}");
+        assert!(
+            attempts
+                .results
+                .iter()
+                .all(|(kind, _, _, _)| *kind != RunAttemptKind::Tool),
+            "untrusted Executor output must leave the Tool attempt uncertain: {fault:?}"
+        );
+        let tool_failed = sink
+            .0
+            .iter()
+            .find(|event| event.event_type == EventType::ToolFailed)
+            .expect("ToolStarted has a matching ToolFailed event");
+        assert_eq!(tool_failed.payload["error"], "runtime_error", "{fault:?}");
+    }
 }
 
 #[test]

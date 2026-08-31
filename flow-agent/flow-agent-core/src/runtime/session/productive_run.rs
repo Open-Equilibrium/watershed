@@ -1,4 +1,4 @@
-use super::reconcile_productive_preflight;
+use super::{prepare_productive_tool_executor, reconcile_productive_preflight};
 #[cfg(test)]
 use super::{
     productive_pre_run_create_observer, productive_pre_run_publish_observer,
@@ -19,7 +19,9 @@ use crate::runtime::{
     execution_plan::RuntimeExecution,
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
-    productive::{ProductiveExecution, ProductiveProvider, execute_productive_flow_with_recovery},
+    productive::{
+        ProductiveExecution, ProductiveProvider, execute_productive_flow_with_prepared_executor,
+    },
     run_attempts::ProductiveRecovery,
     session_definition::session_definition_metadata,
     stage_results::reconcile_controlled_stages,
@@ -108,6 +110,7 @@ fn execute_and_finalize_productive_run<P: ProductiveProvider>(
     finalization: ProductiveRunFinalization<'_>,
     execution: ProductiveExecution<'_>,
     provider: &mut P,
+    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
     mut writer: ConversationEventWriter,
     mut recovery: ProductiveRecoveryWriter,
 ) -> Result<RunOutput, RuntimeError> {
@@ -117,11 +120,12 @@ fn execute_and_finalize_productive_run<P: ProductiveProvider>(
         finalization.reservation.run_session_id(),
         recovery.run_objects(),
     )?;
-    let runtime_result = execute_productive_flow_with_recovery(
+    let runtime_result = execute_productive_flow_with_prepared_executor(
         execution,
         provider,
         &mut attempts,
         &mut writer,
+        tool_executor,
         &mut recovery,
     );
     finalize_productive_run(finalization, runtime_result, &mut writer, &recovery)
@@ -144,6 +148,7 @@ pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
     notifier: Option<LiveEventNotifier>,
     provider: &mut P,
 ) -> Result<RunOutput, RuntimeError> {
+    let mut tool_executor = prepare_productive_tool_executor(policy)?;
     let reservation = reconcile_productive_preflight(reserve_new_conversation_run(
         workspace,
         &flow_block.identity.id,
@@ -163,6 +168,7 @@ pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
         agent_instructions,
         notifier,
         provider,
+        &mut tool_executor,
         &reservation,
     );
     let cleanup = reservation.release();
@@ -185,6 +191,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
     agent_instructions: &str,
     notifier: Option<LiveEventNotifier>,
     provider: &mut P,
+    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
     reservation: &crate::runtime::conversations::ProductiveConversationReservation,
 ) -> Result<RunOutput, RuntimeError> {
     let definition =
@@ -338,6 +345,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
                 workspace: execution_workspace,
             },
             provider,
+            tool_executor,
             writer,
             recovery,
         )
@@ -357,6 +365,7 @@ pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
     credential: &crate::runtime::oauth_credential::CredentialRecord,
     agent_instructions: &str,
     provider: &mut P,
+    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
     reservation: &crate::runtime::conversations::ProductiveConversationReservation,
     notifier: Option<LiveEventNotifier>,
 ) -> Result<RunOutput, RuntimeError> {
@@ -400,6 +409,7 @@ pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
             workspace: execution_workspace,
         },
         provider,
+        tool_executor,
         writer,
         recovery,
     )
