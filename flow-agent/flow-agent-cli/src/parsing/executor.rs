@@ -2,14 +2,13 @@ use flow_agent_core::RuntimeError;
 use std::path::PathBuf;
 
 pub(super) const EXECUTOR_USAGE: &str = concat!(
-    "usage: flow executor status|check\n",
+    "usage: flow executor check\n",
     "       flow executor configure --path <absolute-path>\n",
     "       flow executor configure --default",
 );
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ExecutorCommand {
-    Status,
     Check,
     ConfigurePath(PathBuf),
     ConfigureDefault,
@@ -17,9 +16,6 @@ pub(crate) enum ExecutorCommand {
 
 pub(crate) fn executor_args(args: &[String]) -> Result<ExecutorCommand, RuntimeError> {
     match args {
-        [executor, status] if executor == "executor" && status == "status" => {
-            Ok(ExecutorCommand::Status)
-        }
         [executor, check] if executor == "executor" && check == "check" => {
             Ok(ExecutorCommand::Check)
         }
@@ -58,10 +54,7 @@ mod tests {
 
     #[test]
     fn executor_grammar_is_closed() {
-        assert_eq!(
-            executor_args(&strings(&["executor", "status"])).unwrap(),
-            ExecutorCommand::Status
-        );
+        assert!(executor_args(&strings(&["executor", "status"])).is_err());
         assert_eq!(
             executor_args(&strings(&["executor", "check"])).unwrap(),
             ExecutorCommand::Check

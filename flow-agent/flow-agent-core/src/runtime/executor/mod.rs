@@ -82,5 +82,5 @@ pub(crate) use selection::default_executor_path;
 pub(crate) use selection::resolve_executor;
 pub use selection::{
     ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
-    configure_executor_path, executor_check, executor_status,
+    configure_executor_path, executor_check,
 };

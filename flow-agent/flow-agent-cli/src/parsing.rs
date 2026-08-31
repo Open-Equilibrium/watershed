@@ -146,7 +146,6 @@ pub(crate) fn usage() -> String {
             "  flow validate [FLOW_REF]\n",
             "  flow create <tool|instruction|phase|flow> --help\n",
             "  {auth}\n",
-            "  flow executor status\n",
             "  flow executor check\n",
             "  flow executor configure --path <absolute-path>\n",
             "  flow executor configure --default\n",

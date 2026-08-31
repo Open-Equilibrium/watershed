@@ -71,7 +71,7 @@ pub use cancellation::{
 pub use conversations::{conversation_status, project_tool_run_log};
 pub use executor::{
     ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
-    configure_executor_path, executor_check, executor_status,
+    configure_executor_path, executor_check,
 };
 pub use live_events::{
     LiveEventNotification, LiveEventNotifier, LiveEventNotifyStatus, LiveEventReceiveError,

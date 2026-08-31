@@ -3,8 +3,7 @@ use flow_agent_core::RuntimeError;
 
 pub(super) fn executor_command(command: ExecutorCommand) -> Result<(), RuntimeError> {
     match command {
-        ExecutorCommand::Status => report_ready("selected", flow_agent_core::executor_status()?),
-        ExecutorCommand::Check => report_ready("ready", flow_agent_core::executor_check()?),
+        ExecutorCommand::Check => report_ready(flow_agent_core::executor_check()?),
         ExecutorCommand::ConfigurePath(path) => {
             let selection = flow_agent_core::configure_executor_path(&path)?;
             write_stdout(&format!(
@@ -19,12 +18,9 @@ pub(super) fn executor_command(command: ExecutorCommand) -> Result<(), RuntimeEr
     }
 }
 
-fn report_ready(
-    state: &str,
-    selection: flow_agent_core::ExecutorSelection,
-) -> Result<(), RuntimeError> {
+fn report_ready(selection: flow_agent_core::ExecutorSelection) -> Result<(), RuntimeError> {
     write_stdout(&format!(
-        "Executor {state}: {} {:?}\n",
+        "Executor ready: {} {:?}\n",
         selection.source().as_str(),
         selection.path()
     ))

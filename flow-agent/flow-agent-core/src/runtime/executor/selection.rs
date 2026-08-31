@@ -106,11 +106,6 @@ impl ExecutorSelection {
     }
 }
 
-/// Returns the ready effective Executor selection.
-pub fn executor_status() -> Result<ExecutorSelection, RuntimeError> {
-    resolve_executor()
-}
-
 /// Performs the no-Tool-spawn readiness check and returns the effective selection.
 pub fn executor_check() -> Result<ExecutorSelection, RuntimeError> {
     resolve_executor()
