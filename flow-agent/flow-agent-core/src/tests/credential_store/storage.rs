@@ -25,7 +25,7 @@ fn credential_lock_deadline() {
         .replace_with_clock(&prior, || Duration::ZERO, |_| {})
         .expect("initial credential");
     let lock_path = path.with_extension("lock");
-    let held = StoreLock::acquire(lock_path.clone(), false, || Duration::ZERO, |_| {})
+    let held = StoreLock::acquire(lock_path.clone(), || Duration::ZERO, |_| {})
         .expect("first mutation lock acquires");
 
     let calls = Cell::new(0usize);
@@ -47,7 +47,7 @@ fn credential_lock_deadline() {
     drop(held);
 
     fs::write(&lock_path, b"abandoned").expect("abandoned lock file is staged");
-    StoreLock::acquire(lock_path, false, || Duration::ZERO, |_| {})
+    StoreLock::acquire(lock_path, || Duration::ZERO, |_| {})
         .expect("a stale lock file does not block authentication");
 }
 
@@ -90,7 +90,7 @@ fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replaceme
         Some(replacement.clone())
     );
     assert_no_credential_staging_files(&workspace);
-    StoreLock::acquire(lock, false, || Duration::ZERO, |_| {})
+    StoreLock::acquire(lock, || Duration::ZERO, |_| {})
         .expect("published failure releases the credential lock");
 
     let resolved = store
@@ -121,7 +121,6 @@ fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes()
     let workspace = empty_workspace("credential-published-protection-failure");
     let parent = workspace.join("private");
     let path = parent.join("credentials.json");
-    let lock = path.with_extension("lock");
     let store = CredentialStore::protected_at(path);
     store
         .replace(&credential(300_000))
@@ -152,7 +151,8 @@ fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes()
         Some(replacement.clone())
     );
     assert_no_credential_staging_files(&parent);
-    StoreLock::acquire(lock, true, || Duration::ZERO, |_| {})
+    store
+        .acquire_lock_for_test(|| Duration::ZERO, |_| {})
         .expect("published failure releases the protected credential lock");
 
     start_directory_sync_trace_for_test();
@@ -342,13 +342,12 @@ fn credential_store_convenience_methods_and_error_paths_release_lock_ownership()
     store.replace(&current).expect("credential stores");
     assert_eq!(store.read().expect("credential reads"), Some(current));
     assert!(lock.exists());
-    StoreLock::acquire(lock.clone(), false, || Duration::ZERO, |_| {})
+    StoreLock::acquire(lock.clone(), || Duration::ZERO, |_| {})
         .expect("completed mutation releases its lock");
     assert!(store.logout().expect("credential logs out"));
     assert!(!store.logout().expect("empty logout succeeds"));
     assert!(lock.exists());
-    StoreLock::acquire(lock.clone(), false, || Duration::ZERO, |_| {})
-        .expect("logout releases its lock");
+    StoreLock::acquire(lock.clone(), || Duration::ZERO, |_| {}).expect("logout releases its lock");
 
     fs::write(&path, b"not-json").expect("malformed fixture write");
     assert!(
@@ -357,6 +356,5 @@ fn credential_store_convenience_methods_and_error_paths_release_lock_ownership()
             .is_err()
     );
     assert!(lock.exists());
-    StoreLock::acquire(lock, false, || Duration::ZERO, |_| {})
-        .expect("failed mutation releases its lock");
+    StoreLock::acquire(lock, || Duration::ZERO, |_| {}).expect("failed mutation releases its lock");
 }

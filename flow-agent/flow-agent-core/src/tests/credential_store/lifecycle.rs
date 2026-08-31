@@ -1,7 +1,7 @@
 use super::super::helpers::empty_workspace;
 use super::support::credential;
 use crate::runtime::{
-    credential_store::{CREDENTIAL_STORE_MAX_BYTES, CredentialStore, StoreLock},
+    credential_store::{CREDENTIAL_STORE_MAX_BYTES, CredentialStore},
     oauth_credential::{CredentialRecord, MAX_OAUTH_FIELD_BYTES, MAX_OAUTH_SECRET_BYTES},
     types::RuntimeError,
 };
@@ -292,7 +292,6 @@ fn assert_credential_refresh_reuses_a_winner_after_lock_contention(protected: bo
     } else {
         workspace.join("credentials.json")
     };
-    let lock = path.with_extension("lock");
     let store = if protected {
         CredentialStore::protected_at(path.clone())
     } else {
@@ -302,7 +301,8 @@ fn assert_credential_refresh_reuses_a_winner_after_lock_contention(protected: bo
         .replace_with_clock(&credential(300_000), || Duration::ZERO, |_| {})
         .expect("near-expiry credential stores");
     let held = RefCell::new(Some(
-        StoreLock::acquire(lock, protected, || Duration::ZERO, |_| {})
+        store
+            .acquire_lock_for_test(|| Duration::ZERO, |_| {})
             .expect("competing refresh lock acquires"),
     ));
     let winner = credential(900_000);

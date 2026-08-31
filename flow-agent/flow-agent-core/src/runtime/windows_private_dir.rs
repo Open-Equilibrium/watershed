@@ -2,19 +2,19 @@ use crate::runtime::windows_anchored_dir::{
     NativeDirectoryOpenError, open_native_anchored_directory,
 };
 use cap_std::fs::Dir;
+#[cfg(test)]
+use std::path::Path;
 use std::{
     ffi::{OsStr, c_void},
     fs, io, mem,
     os::windows::{ffi::OsStrExt as _, io::AsRawHandle as _},
-    path::Path,
     ptr, slice,
 };
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_DIRECTORY_FILE, FILE_SYNCHRONOUS_IO_NONALERT,
 };
 use windows_sys::Win32::Security::{
-    Authorization::{SetNamedSecurityInfoW, SetSecurityInfo},
-    GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
+    Authorization::SetSecurityInfo, GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::{
     Foundation::{
@@ -29,10 +29,10 @@ use windows_sys::Win32::{
         },
         CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
         GetSecurityDescriptorControl, GetTokenInformation, INHERITED_ACE, OBJECT_INHERIT_ACE,
-        OWNER_SECURITY_INFORMATION, PSID, SE_DACL_PRESENT, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES,
-        TOKEN_QUERY, TOKEN_USER, TokenUser,
+        OWNER_SECURITY_INFORMATION, PSID, SE_DACL_PRESENT, SE_DACL_PROTECTED, TOKEN_QUERY,
+        TOKEN_USER, TokenUser,
     },
-    Storage::FileSystem::{CreateDirectoryW, FILE_ALL_ACCESS},
+    Storage::FileSystem::FILE_ALL_ACCESS,
     System::{
         SystemServices::ACCESS_ALLOWED_ACE_TYPE,
         Threading::{GetCurrentProcess, OpenProcessToken},
@@ -161,21 +161,6 @@ fn private_directory_security_descriptor() -> io::Result<LocalAllocation> {
     security_descriptor(&format!("O:{sid}D:P(A;OICI;FA;;;{sid})"))
 }
 
-pub(super) fn create(path: &Path) -> io::Result<()> {
-    let descriptor = private_directory_security_descriptor()?;
-    let attributes = SECURITY_ATTRIBUTES {
-        nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: descriptor.0,
-        bInheritHandle: 0,
-    };
-    let path = wide(path.as_os_str());
-    if unsafe { CreateDirectoryW(path.as_ptr(), &attributes) } == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
 pub(super) fn create_anchored(parent: &Dir, leaf: &str) -> io::Result<()> {
     let descriptor = private_directory_security_descriptor()?;
     open_native_anchored_directory(
@@ -288,6 +273,7 @@ fn opened_handle_has_current_user_only_access(
     Ok(unsafe { EqualSid(ace_sid, current_user.as_ptr()) } != 0)
 }
 
+#[cfg(test)]
 pub(super) fn file_is_current_user_only(path: &Path) -> io::Result<bool> {
     let file = fs::File::open(path)?;
     opened_handle_is_current_user_only(file.as_raw_handle() as HANDLE, 0)
@@ -334,6 +320,7 @@ pub(super) fn set_opened_file_current_user_only(file: &fs::File) -> io::Result<(
     }
 }
 
+#[cfg(test)]
 pub(super) fn set_file_current_user_only(path: &Path) -> io::Result<()> {
     let current_user = CurrentUserSid::get()?;
     let sid = current_user.as_sddl()?;
@@ -345,7 +332,9 @@ pub(super) fn set_world_access(path: &Path) -> io::Result<()> {
     set_named_dacl(path, "D:P(A;OICI;FA;;;WD)", ptr::null_mut())
 }
 
+#[cfg(test)]
 fn set_named_dacl(path: &Path, sddl: &str, owner: PSID) -> io::Result<()> {
+    use windows_sys::Win32::Security::Authorization::SetNamedSecurityInfoW;
     let descriptor = security_descriptor(sddl)?;
     let mut present = 0;
     let mut defaulted = 0;

@@ -1,5 +1,7 @@
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use crate::runtime::executor::default_executor_path;
 use crate::runtime::executor::{
-    EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore, ExecutorSelectionSource, default_executor_path,
+    EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore, ExecutorSelectionSource,
 };
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 use crate::runtime::executor::{
@@ -9,24 +11,14 @@ use crate::runtime::executor::{
 use crate::runtime::types::RuntimeError;
 use std::{env, fs, path::Path};
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn default_executor_is_the_flow_binary_sibling() {
-    let flow = if cfg!(windows) {
-        Path::new(r"C:\trusted\bin\flow.exe")
-    } else {
-        Path::new("/trusted/bin/flow")
-    };
+    let flow = Path::new("/trusted/bin/flow");
 
     let selected = default_executor_path(flow);
 
-    assert_eq!(
-        selected,
-        flow.with_file_name(if cfg!(windows) {
-            "flow-executor.exe"
-        } else {
-            "flow-executor"
-        })
-    );
+    assert_eq!(selected, flow.with_file_name("flow-executor"));
 }
 
 #[test]

@@ -5,9 +5,8 @@ use super::platform::{
 use super::{
     auth_store_failure,
     platform::{
-        acquire_file_lock, create_private_directory, file_lock_is_contended, open_lock_file,
-        private_create_new_file, release_file_lock, sync_credential_directory, verify_private_file,
-        verify_private_parent,
+        acquire_file_lock, create_new_file, file_lock_is_contended, open_lock_file,
+        release_file_lock, sync_credential_directory,
     },
     store_io,
 };
@@ -17,7 +16,7 @@ use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use std::{
     ffi::OsStr,
     fs::{self, File},
-    io::{self, Write},
+    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
@@ -25,6 +24,8 @@ use std::{
 
 #[cfg(test)]
 use std::cell::Cell;
+#[cfg(test)]
+use std::io;
 
 pub(crate) const CREDENTIAL_LOCK_DEADLINE: Duration = Duration::from_secs(5);
 const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(10);
@@ -47,11 +48,10 @@ pub(crate) struct StoreLock {
 impl StoreLock {
     pub(crate) fn acquire(
         path: PathBuf,
-        protect: bool,
         now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
     ) -> Result<Self, RuntimeError> {
-        let file = open_lock_file(&path, protect)?;
+        let file = open_lock_file(&path)?;
         Self::acquire_opened(file, &path, now, wait)
     }
 
@@ -211,11 +211,7 @@ fn canonical_decimal(value: &str, max: u64) -> bool {
         && value.parse::<u64>().is_ok_and(|value| value <= max)
 }
 
-pub(super) fn replace_atomically(
-    path: &Path,
-    bytes: &[u8],
-    protect: bool,
-) -> Result<(), RuntimeError> {
+pub(super) fn replace_atomically(path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
     let parent = path.parent().ok_or_else(auth_store_failure)?;
     let destination = path.file_name().ok_or_else(auth_store_failure)?;
     let temporary = parent.join(credential_staging_leaf(
@@ -224,20 +220,13 @@ pub(super) fn replace_atomically(
         TEMPORARY_COUNTER.fetch_add(1, Ordering::Relaxed),
     ));
     let operation = (|| {
-        let mut file = private_create_new_file(&temporary, protect)
-            .map_err(|error| store_io(&temporary, error))?;
+        let mut file = create_new_file(&temporary).map_err(|error| store_io(&temporary, error))?;
         file.write_all(bytes)
             .and_then(|()| file.write_all(b"\n"))
             .and_then(|()| file.sync_all())
             .map_err(|error| store_io(&temporary, error))?;
         fs::rename(&temporary, path).map_err(|error| store_io(path, error))?;
-        let finalization = (|| {
-            if protect {
-                credential_protection_checkpoint(path)?;
-                verify_private_file(path)?;
-            }
-            sync_credential_directory(parent)
-        })();
+        let finalization = sync_credential_directory(parent);
         finalization.map_err(
             |source| RuntimeError::PublishedCredentialFinalizationFailure {
                 source: Box::new(source),
@@ -296,32 +285,10 @@ fn credential_protection_checkpoint(path: &Path) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-pub(super) fn ensure_parent(
-    path: &Path,
-    protect: bool,
-    durable_ancestor: &Path,
-) -> Result<(), RuntimeError> {
+pub(super) fn ensure_parent(path: &Path, durable_ancestor: &Path) -> Result<(), RuntimeError> {
     validate_durable_ancestor(path, durable_ancestor)?;
-    if path.exists() {
-        if protect {
-            verify_private_parent(path)?;
-        }
-    } else if !protect {
+    if !path.exists() {
         fs::create_dir_all(path).map_err(|error| store_io(path, error))?;
-    } else {
-        let base = path.parent().ok_or_else(auth_store_failure)?;
-        if !base.exists() {
-            fs::create_dir_all(base).map_err(|error| store_io(base, error))?;
-        }
-        if !base.is_dir() {
-            return Err(auth_store_failure());
-        }
-        match create_private_directory(path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(store_io(path, error)),
-        }
-        verify_private_parent(path)?;
     }
     if path == durable_ancestor {
         return Ok(());

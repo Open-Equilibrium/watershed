@@ -1,5 +1,7 @@
 mod client;
+#[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
 mod config;
+#[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
 mod probe;
 mod selection;
 
@@ -77,7 +79,7 @@ fn terminate_child_or_fail_stop(child: &mut std::process::Child) {
 pub(crate) use client::{ExecutorToolExecution, PreparedExecutor, PreparedExecutorTool};
 #[cfg(test)]
 pub(crate) use config::{EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore};
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 pub(crate) use selection::default_executor_path;
 pub(crate) use selection::resolve_executor;
 pub use selection::{

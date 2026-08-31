@@ -45,7 +45,7 @@ fn harden_private_open_file(file: &File) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-pub(super) fn open_lock_file(path: &Path, protect: bool) -> Result<File, RuntimeError> {
+pub(super) fn open_lock_file(path: &Path) -> Result<File, RuntimeError> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -54,14 +54,6 @@ pub(super) fn open_lock_file(path: &Path, protect: bool) -> Result<File, Runtime
         .mode(0o600)
         .open(path)
         .map_err(|error| store_io(path, error))?;
-    if protect {
-        let metadata = fs::symlink_metadata(path).map_err(|error| store_io(path, error))?;
-        if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o777 & !0o600 != 0 {
-            return Err(auth_store_failure());
-        }
-        harden_private_open_file(&file).map_err(|error| store_io(path, error))?;
-        verify_private_open_file(path, &file)?;
-    }
     Ok(file)
 }
 
@@ -99,12 +91,6 @@ fn harden_private_anchored_file(path: &AnchoredFile, file: &File) -> Result<(), 
 }
 
 #[cfg(windows)]
-fn harden_private_file(path: &Path) -> io::Result<bool> {
-    crate::runtime::windows_private_dir::set_file_current_user_only(path)?;
-    crate::runtime::windows_private_dir::file_is_current_user_only(path)
-}
-
-#[cfg(windows)]
 pub(super) fn open_anchored_lock_file(path: &AnchoredFile) -> Result<File, RuntimeError> {
     use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
     use cap_std::fs::OpenOptionsExt as _;
@@ -126,7 +112,7 @@ pub(super) fn open_anchored_lock_file(path: &AnchoredFile) -> Result<File, Runti
 }
 
 #[cfg(windows)]
-pub(super) fn open_lock_file(path: &Path, protect: bool) -> Result<File, RuntimeError> {
+pub(super) fn open_lock_file(path: &Path) -> Result<File, RuntimeError> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -134,14 +120,11 @@ pub(super) fn open_lock_file(path: &Path, protect: bool) -> Result<File, Runtime
         .truncate(false)
         .open(path)
         .map_err(|error| store_io(path, error))?;
-    if protect && !harden_private_file(path).map_err(|error| store_io(path, error))? {
-        return Err(auth_store_failure());
-    }
     Ok(file)
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(super) fn open_lock_file(_path: &Path, _protect: bool) -> Result<File, RuntimeError> {
+pub(super) fn open_lock_file(_path: &Path) -> Result<File, RuntimeError> {
     Err(auth_store_failure())
 }
 
@@ -207,35 +190,12 @@ pub(super) fn file_lock_is_contended(_error: &io::Error) -> bool {
 }
 
 #[cfg(unix)]
-pub(super) fn create_private_directory(path: &Path) -> io::Result<()> {
-    fs::DirBuilder::new().mode(0o700).create(path)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-}
-
-#[cfg(windows)]
-pub(super) fn create_private_directory(path: &Path) -> io::Result<()> {
-    crate::runtime::windows_private_dir::create(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn create_private_directory(_path: &Path) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "credential protection is unsupported",
-    ))
-}
-
-#[cfg(unix)]
-pub(super) fn private_create_new_file(path: &Path, protect: bool) -> io::Result<File> {
-    let file = OpenOptions::new()
+pub(super) fn create_new_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(path)?;
-    if protect {
-        harden_private_open_file(&file)?;
-    }
-    Ok(file)
+        .open(path)
 }
 
 #[cfg(unix)]
@@ -274,58 +234,16 @@ pub(super) fn private_create_new_anchored_file(path: &AnchoredFile) -> Result<Fi
 }
 
 #[cfg(windows)]
-pub(super) fn private_create_new_file(path: &Path, protect: bool) -> io::Result<File> {
-    let file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    if protect && !harden_private_file(path)? {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "credential file is not current-user-only",
-        ));
-    }
-    Ok(file)
+pub(super) fn create_new_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new().write(true).create_new(true).open(path)
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(super) fn private_create_new_file(_path: &Path, _protect: bool) -> io::Result<File> {
+pub(super) fn create_new_file(_path: &Path) -> io::Result<File> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "credential protection is unsupported",
     ))
-}
-
-#[cfg(unix)]
-pub(super) fn verify_private_parent(path: &Path) -> Result<(), RuntimeError> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| store_io(path, error))?;
-    if !metadata.file_type().is_dir() || metadata.permissions().mode() & 0o777 != 0o700 {
-        return Err(auth_store_failure());
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-pub(super) fn verify_private_parent(path: &Path) -> Result<(), RuntimeError> {
-    let dir = cap_std::fs::Dir::open_ambient_dir(path, cap_std::ambient_authority())
-        .map_err(|error| store_io(path, error))?;
-    if !crate::runtime::windows_private_dir::opened_is_current_user_only(&dir)
-        .map_err(|error| store_io(path, error))?
-    {
-        return Err(auth_store_failure());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn verify_private_parent(_path: &Path) -> Result<(), RuntimeError> {
-    Err(auth_store_failure())
-}
-
-#[cfg(unix)]
-pub(super) fn verify_private_file(path: &Path) -> Result<(), RuntimeError> {
-    let metadata = fs::symlink_metadata(path).map_err(|error| store_io(path, error))?;
-    if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o777 != 0o600 {
-        return Err(auth_store_failure());
-    }
-    Ok(())
 }
 
 #[cfg(any(unix, windows))]
@@ -355,21 +273,6 @@ pub(super) fn verify_private_open_file(path: &Path, file: &File) -> Result<(), R
         return Err(auth_store_failure());
     }
     Ok(())
-}
-
-#[cfg(windows)]
-pub(super) fn verify_private_file(path: &Path) -> Result<(), RuntimeError> {
-    if !crate::runtime::windows_private_dir::file_is_current_user_only(path)
-        .map_err(|error| store_io(path, error))?
-    {
-        return Err(auth_store_failure());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn verify_private_file(_path: &Path) -> Result<(), RuntimeError> {
-    Err(auth_store_failure())
 }
 
 #[cfg(all(test, windows))]

@@ -1,14 +1,14 @@
+#[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+use super::probe::ProbedExecutor;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use super::{
     config::ExecutorConfigStore,
     probe::{ProbedExecutor, probe_executor},
 };
 use crate::runtime::types::RuntimeError;
-use std::{
-    env,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use std::{fs::File, sync::Arc};
+use std::{env, fs::File, sync::Arc};
 
 /// Authority that selected the effective productive Executor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -58,6 +58,7 @@ impl PartialEq for ExecutorSelection {
 impl Eq for ExecutorSelection {}
 
 impl ExecutorSelection {
+    #[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
     pub(super) fn new(path: PathBuf, source: ExecutorSelectionSource) -> Self {
         Self {
             #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -76,7 +77,7 @@ impl ExecutorSelection {
         self
     }
 
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    #[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
     fn with_probe(self, _probed: ProbedExecutor) -> Self {
         self
     }
@@ -112,8 +113,8 @@ pub fn executor_check() -> Result<ExecutorSelection, RuntimeError> {
 }
 
 /// Validates and atomically selects an administrator-supplied absolute Executor.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, RuntimeError> {
-    ensure_supported_platform()?;
     if !path.is_absolute() {
         return Err(RuntimeError::Usage(
             "Executor path must be absolute".to_owned(),
@@ -125,14 +126,26 @@ pub fn configure_executor_path(path: &Path) -> Result<ExecutorSelection, Runtime
     Ok(selection.with_probe(probed))
 }
 
+/// Rejects productive Executor configuration on unsupported platforms.
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+pub fn configure_executor_path(_path: &Path) -> Result<ExecutorSelection, RuntimeError> {
+    unsupported_platform()
+}
+
 /// Removes only the protected custom override and restores default sibling selection.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub fn configure_default_executor() -> Result<bool, RuntimeError> {
-    ensure_supported_platform()?;
     ExecutorConfigStore::platform_default()?.configure_default()
 }
 
+/// Rejects productive Executor configuration on unsupported platforms.
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+pub fn configure_default_executor() -> Result<bool, RuntimeError> {
+    unsupported_platform()
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
-    ensure_supported_platform()?;
     let store = ExecutorConfigStore::platform_default()?;
     let flow = env::current_exe().map_err(|error| RuntimeError::Io {
         path: PathBuf::from("<current executable>"),
@@ -152,23 +165,22 @@ pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
     Ok(selection.with_probe(probed))
 }
 
-pub(crate) fn default_executor_path(flow: &Path) -> PathBuf {
-    flow.with_file_name(if cfg!(windows) {
-        "flow-executor.exe"
-    } else {
-        "flow-executor"
-    })
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+pub(crate) fn resolve_executor() -> Result<ExecutorSelection, RuntimeError> {
+    unsupported_platform()
 }
 
-fn ensure_supported_platform() -> Result<(), RuntimeError> {
-    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Ok(())
-    } else {
-        Err(RuntimeError::executor(
-            proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            "productive Executor support requires Ubuntu 24.04 x64",
-        ))
-    }
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) fn default_executor_path(flow: &Path) -> PathBuf {
+    flow.with_file_name("flow-executor")
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn unsupported_platform<T>() -> Result<T, RuntimeError> {
+    Err(RuntimeError::executor(
+        proto::ExecutorErrorCodeV0::PolicyUnsupported,
+        "productive Executor support requires Ubuntu 24.04 x64",
+    ))
 }
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]

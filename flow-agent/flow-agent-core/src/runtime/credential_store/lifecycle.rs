@@ -2,10 +2,7 @@
 use super::storage::nearest_existing_credential_ancestor;
 use super::{
     auth_store_failure,
-    platform::{
-        default_credential_store_path, sync_credential_directory, verify_private_file,
-        verify_private_parent,
-    },
+    platform::{default_credential_store_path, sync_credential_directory},
     storage::{
         StoreLock, ensure_parent, recover_abandoned_stages, replace_atomically,
         validate_durable_ancestor,
@@ -99,6 +96,9 @@ impl CredentialStore {
     }
 
     pub(crate) fn platform_default() -> Result<Self, RuntimeError> {
+        #[cfg(not(any(unix, windows)))]
+        return Err(auth_store_failure());
+
         let path = default_credential_store_path()?;
         #[cfg(windows)]
         let durable_ancestor = path
@@ -126,6 +126,11 @@ impl CredentialStore {
     }
 
     pub(crate) fn read(&self) -> Result<Option<CredentialRecord>, RuntimeError> {
+        #[cfg(not(any(unix, windows)))]
+        if self.protect_parent {
+            return Err(auth_store_failure());
+        }
+
         #[cfg(any(unix, windows))]
         if self.protect_parent {
             let Some(parent) = self.open_protected_parent(false)? else {
@@ -142,16 +147,10 @@ impl CredentialStore {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(store_io(parent, error)),
         }
-        if self.protect_parent {
-            verify_private_parent(parent)?;
-        }
         match fs::symlink_metadata(&self.path) {
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(store_io(&self.path, error)),
-        }
-        if self.protect_parent {
-            verify_private_file(&self.path)?;
         }
         let mut file = File::open(&self.path).map_err(|error| store_io(&self.path, error))?;
         if file
@@ -223,8 +222,8 @@ impl CredentialStore {
             return Ok(replacement);
         }
         let parent = self.path.parent().ok_or_else(auth_store_failure)?;
-        ensure_parent(parent, self.protect_parent, &self.durable_ancestor)?;
-        let _lock = StoreLock::acquire(self.lock_path(), self.protect_parent, lock_now, wait)?;
+        ensure_parent(parent, &self.durable_ancestor)?;
+        let _lock = StoreLock::acquire(self.lock_path(), lock_now, wait)?;
         let current = self
             .read_locked_and_finalize(parent)?
             .ok_or_else(authentication_required)?;
@@ -253,6 +252,11 @@ impl CredentialStore {
         wait: impl FnMut(Duration),
         mutation: impl FnOnce(Option<&CredentialRecord>) -> Option<CredentialRecord>,
     ) -> Result<(), RuntimeError> {
+        #[cfg(not(any(unix, windows)))]
+        if self.protect_parent {
+            return Err(auth_store_failure());
+        }
+
         #[cfg(any(unix, windows))]
         if self.protect_parent {
             let parent = self
@@ -268,8 +272,8 @@ impl CredentialStore {
             return self.write_document_anchored(&parent, replacement);
         }
         let parent = self.path.parent().ok_or_else(auth_store_failure)?;
-        ensure_parent(parent, self.protect_parent, &self.durable_ancestor)?;
-        let _lock = StoreLock::acquire(self.lock_path(), self.protect_parent, now, wait)?;
+        ensure_parent(parent, &self.durable_ancestor)?;
+        let _lock = StoreLock::acquire(self.lock_path(), now, wait)?;
         let current = self.read_locked_and_finalize(parent)?;
         let replacement = mutation(current.as_ref());
         if let Some(credential) = &replacement {
@@ -290,11 +294,30 @@ impl CredentialStore {
 
     fn write_document(&self, replacement: Option<CredentialRecord>) -> Result<(), RuntimeError> {
         let bytes = encode_credential_document(replacement)?;
-        replace_atomically(&self.path, &bytes, self.protect_parent)
+        replace_atomically(&self.path, &bytes)
     }
 
     fn lock_path(&self) -> PathBuf {
         self.path.with_extension("lock")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn acquire_lock_for_test(
+        &self,
+        now: impl FnMut() -> Duration,
+        wait: impl FnMut(Duration),
+    ) -> Result<StoreLock, RuntimeError> {
+        #[cfg(any(unix, windows))]
+        if self.protect_parent {
+            let parent = self
+                .open_protected_parent(true)?
+                .ok_or_else(auth_store_failure)?;
+            return StoreLock::acquire_anchored(&parent.file(self.lock_leaf()?), now, wait);
+        }
+        if self.protect_parent {
+            return Err(auth_store_failure());
+        }
+        StoreLock::acquire(self.lock_path(), now, wait)
     }
 
     #[cfg(any(unix, windows))]
