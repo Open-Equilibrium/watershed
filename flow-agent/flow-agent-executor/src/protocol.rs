@@ -7,16 +7,26 @@ use std::io::{self, Read, Write};
 
 pub(crate) fn run() -> Result<(), String> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
-    match arguments.as_slice() {
-        [mode] if mode == "--probe" => write_probe(),
-        [] => execute_request(),
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    run_with(&arguments, stdin.lock(), stdout.lock())
+}
+
+pub(crate) fn run_with(
+    arguments: &[String],
+    input: impl Read,
+    output: impl Write,
+) -> Result<(), String> {
+    match arguments {
+        [mode] if mode == "--probe" => write_probe(output),
+        [] => execute_request(input, output),
         [mode, request_fd] if mode == "--inner" => run_inner(request_fd),
         [mode] if mode == "--inner-self-test" => Ok(()),
         _ => Err("usage: flow-executor [--probe]".to_owned()),
     }
 }
 
-fn write_probe() -> Result<(), String> {
+fn write_probe(mut output: impl Write) -> Result<(), String> {
     let state = crate::backend::probe();
     let probe = ExecutorProbeV0 {
         schema: EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
@@ -31,17 +41,17 @@ fn write_probe() -> Result<(), String> {
         supported_policy_features: state.features,
     };
     let bytes = canonical_executor_probe_v0(&probe).map_err(|error| error.to_string())?;
-    io::stdout()
+    output
         .write_all(&bytes)
         .map_err(|error| format!("failed to write Executor probe: {error}"))
 }
 
-fn execute_request() -> Result<(), String> {
-    let bytes = read_bounded(io::stdin(), MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
+fn execute_request(input: impl Read, mut output: impl Write) -> Result<(), String> {
+    let bytes = read_bounded(input, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
     let request = parse_executor_request_v0(&bytes).map_err(|error| error.to_string())?;
     let response = crate::backend::execute(request);
     let bytes = canonical_executor_response_v0(&response).map_err(|error| error.to_string())?;
-    io::stdout()
+    output
         .write_all(&bytes)
         .map_err(|error| format!("failed to write Executor response: {error}"))
 }

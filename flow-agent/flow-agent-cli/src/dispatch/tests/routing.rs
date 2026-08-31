@@ -111,3 +111,18 @@ fn usage_errors_precede_workspace_access() {
         assert!(matches!(error, RuntimeError::Usage(_)));
     }
 }
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+#[test]
+fn executor_check_dispatches_in_process_and_reports_the_unsupported_platform() {
+    let args = ["executor".to_owned(), "check".to_owned()];
+
+    let error = dispatch_in_workspace(&args, &InterruptCoordinator::new(), Path::new("."))
+        .expect_err("unsupported productive platform must fail closed");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+    ));
+}

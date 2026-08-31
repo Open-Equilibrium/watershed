@@ -871,7 +871,7 @@ pub fn decode_executor_stream_v0(encoded: &str) -> Result<Vec<u8>, ExecutorProto
             Some(base64_value(chunk[2])?)
         };
         let d = if chunk[3] == b'=' {
-            if !last || c.is_none() || c.is_some_and(|value| value & 0x03 != 0) {
+            if !last || c.is_some_and(|value| value & 0x03 != 0) {
                 return Err(invalid_base64());
             }
             None

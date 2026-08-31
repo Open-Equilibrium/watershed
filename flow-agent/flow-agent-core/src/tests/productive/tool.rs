@@ -22,30 +22,6 @@ fn attempt_output(tool_result: serde_json::Value) -> serde_json::Value {
 }
 
 #[test]
-fn receiptless_v0_tool_attempt_is_not_recoverable() {
-    let result = attempt_result(
-        "completed",
-        Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": {
-                "type": "map",
-                "value": {
-                    "schema": {"type": "string", "value": "flow-tool-result-v0"},
-                    "status": {"type": "string", "value": "completed"},
-                    "exit_code": {"type": "integer", "value": "0"},
-                    "stdout": {"type": "string", "value": ""},
-                    "stderr": {"type": "string", "value": ""}
-                }
-            }
-        })),
-    );
-
-    let error = recovered_tool_value(&result, &DefaultRecovery)
-        .expect_err("receipt-less attempt output must fail closed");
-    assert!(error.to_string().contains("unsupported schema"));
-}
-
-#[test]
 fn tool_results_enforce_their_durable_value_contracts() {
     for (outcome, expected_status, expected_event, expected_error) in [
         (

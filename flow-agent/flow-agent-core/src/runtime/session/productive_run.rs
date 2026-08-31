@@ -33,7 +33,6 @@ use std::path::Path;
 struct ProductiveRunFinalization<'a> {
     capture_jsonl: bool,
     flow_id: &'a str,
-    recovering: bool,
     reservation: &'a crate::runtime::conversations::ProductiveConversationReservation,
     workspace: &'a Path,
 }
@@ -46,23 +45,12 @@ fn finalize_productive_run(
 ) -> Result<RunOutput, RuntimeError> {
     let finish_result = writer.finish();
     let runtime = reconcile_controlled_stages(runtime_result, finish_result, Ok(()))?;
-    let (missing_snapshot, missing_events) = if finalization.recovering {
-        (
-            "productive run recovery emitted no terminal snapshot",
-            "productive run recovery emitted no events",
-        )
-    } else {
-        (
-            "productive run emitted no terminal recovery snapshot",
-            "productive run emitted no events",
-        )
-    };
-    let recovery_snapshot_hash = recovery
-        .terminal_snapshot_hash()
-        .ok_or_else(|| RuntimeError::Protocol(missing_snapshot.to_owned()))?;
+    let recovery_snapshot_hash = recovery.terminal_snapshot_hash().ok_or_else(|| {
+        RuntimeError::Protocol("productive run emitted no terminal snapshot".to_owned())
+    })?;
     let (sequence, timestamp) = writer
         .last_checkpoint()
-        .ok_or_else(|| RuntimeError::Protocol(missing_events.to_owned()))?;
+        .ok_or_else(|| RuntimeError::Protocol("productive run emitted no events".to_owned()))?;
     let conversation_id = finalization.reservation.conversation_id();
     let run_session_id = finalization.reservation.run_session_id();
     append_productive_run_checkpoint(
@@ -330,7 +318,6 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
             ProductiveRunFinalization {
                 capture_jsonl,
                 flow_id: &flow_block.identity.id,
-                recovering: false,
                 reservation,
                 workspace,
             },
@@ -398,7 +385,6 @@ where
         ProductiveRunFinalization {
             capture_jsonl,
             flow_id: &flow_block.identity.id,
-            recovering: true,
             reservation,
             workspace,
         },

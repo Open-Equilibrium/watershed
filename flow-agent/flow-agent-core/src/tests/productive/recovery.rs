@@ -1,8 +1,8 @@
 use super::support::{
     FakeProvider, FakeToolExecutor, InjectedAttemptRecovery, MemoryAttempts, MemorySink,
     RecoveryObjectTerminal, ScriptedProvider, assert_controlled_cancellation_lifecycle,
-    disabled_smoke_productive_execution_fixture, single_tool_provider_turn,
-    smoke_productive_execution_fixture,
+    disabled_smoke_productive_execution_fixture, fake_tool_attempt_output,
+    single_tool_provider_turn, smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     openai_codex::ProviderTurn,
@@ -331,6 +331,86 @@ fn productive_recovery_rejects_a_provider_result_in_the_tool_slot() {
             .iter()
             .any(|event| event.event_type == EventType::ToolCompleted)
     );
+}
+
+#[test]
+fn productive_recovery_rejects_tampered_tool_bindings_before_redispatch() {
+    type OutputMutation = fn(&mut serde_json::Value);
+    let cases: [(&str, OutputMutation, &str); 3] = [
+        (
+            "missing-receipt",
+            |output| {
+                output
+                    .as_object_mut()
+                    .expect("attempt output is a map")
+                    .remove("enforcement");
+            },
+            "has no enforcement receipt",
+        ),
+        (
+            "wrong-request-hash",
+            |output| output["request_hash"] = "1".repeat(64).into(),
+            "does not match the prepared request hash",
+        ),
+        (
+            "wrong-runtime-profile",
+            |output| output["enforcement"]["runtime_profile"] = "host-system-read".into(),
+            "enforcement receipt does not match",
+        ),
+    ];
+
+    for (name, mutate, expected) in cases {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut output = fake_tool_attempt_output(serde_json::json!({
+            "type": "map",
+            "value": {
+                "schema": {"type": "string", "value": "flow-tool-result-v0"},
+                "status": {"type": "string", "value": "completed"},
+                "exit_code": {"type": "integer", "value": "0"},
+                "stdout": {"type": "string", "value": "stdout"},
+                "stderr": {"type": "string", "value": ""}
+            }
+        }));
+        mutate(&mut output);
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Completed,
+            classification: None,
+            exit_code: Some(0),
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(output),
+        });
+
+        let error = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, &format!("productive-tool-tamper-{name}")),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect_err("tampered durable Tool evidence must fail closed");
+
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert_eq!(provider.bodies.len(), 1, "{name}");
+        assert!(tools.invocations.is_empty(), "{name}");
+        assert!(
+            !sink
+                .0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolCompleted),
+            "{name}"
+        );
+    }
 }
 
 #[test]

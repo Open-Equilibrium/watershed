@@ -149,7 +149,7 @@ where
     context.execution.workspace.verify_binding()?;
     context
         .sink
-        .reserve_productive_dispatch(provider_dispatch_reservation(compiled)?)?;
+        .reserve_productive_dispatch(provider_dispatch_reservation(compiled))?;
     context.attempts.intent(
         RunAttemptKind::Provider,
         attempt_id,

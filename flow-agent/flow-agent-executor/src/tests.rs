@@ -3,7 +3,7 @@ use crate::{
         BubblewrapCapabilities, MountBinding, MountSource, SandboxPlan, seccomp_policy,
         validate_mount_contract,
     },
-    platform,
+    platform, protocol,
 };
 use core_policy::{
     CommandPolicy, EnvironmentDefault, EnvironmentPolicy, FilesystemPolicy, NetworkDefault,
@@ -17,6 +17,61 @@ use proto::{
     UnixObjectIdentityV0, resolved_policy_digest_v0,
 };
 use std::collections::BTreeMap;
+use std::io::Cursor;
+
+#[test]
+fn protocol_probe_is_one_canonical_document() {
+    let mut output = Vec::new();
+
+    protocol::run_with(&["--probe".to_owned()], Cursor::new([]), &mut output)
+        .expect("probe writes");
+
+    let probe = proto::parse_executor_probe_v0(&output).expect("probe is exact protocol JSON");
+    assert_eq!(probe.schema, proto::EXECUTOR_PROBE_SCHEMA_V0);
+    assert_eq!(probe.executor, proto::EXECUTOR_NAME_V0);
+    assert_eq!(probe.platform, proto::EXECUTOR_PLATFORM_V0);
+    assert_eq!(
+        output,
+        proto::canonical_executor_probe_v0(&probe).expect("probe canonicalizes")
+    );
+}
+
+#[test]
+fn protocol_rejects_oversized_and_malformed_requests_without_output() {
+    let mut output = Vec::new();
+    let oversized = vec![b' '; proto::MAX_EXECUTOR_REQUEST_BYTES_V0 + 1];
+
+    let oversized_error = protocol::run_with(&[], Cursor::new(oversized), &mut output)
+        .expect_err("oversized request must fail before dispatch");
+    assert!(oversized_error.contains("exceeds its byte limit"));
+    assert!(output.is_empty());
+
+    let malformed_error = protocol::run_with(&[], Cursor::new(b"{\n"), &mut output)
+        .expect_err("malformed request must fail before dispatch");
+    assert!(!malformed_error.is_empty());
+    assert!(output.is_empty());
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+#[test]
+fn protocol_returns_a_typed_error_on_an_unsupported_platform() {
+    let request = exact_request(&[], &[]);
+    let input = proto::canonical_executor_request_v0(&request).expect("request canonicalizes");
+    let mut output = Vec::new();
+
+    protocol::run_with(&[], Cursor::new(input), &mut output)
+        .expect("unsupported platform is a typed response");
+
+    assert!(matches!(
+        proto::parse_executor_response_v0(&output, &request.request_id, &request.policy_digest)
+            .expect("response is exact protocol JSON"),
+        proto::ExecutorResponseV0::Error {
+            request_id,
+            code: proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            ..
+        } if request_id == request.request_id
+    ));
+}
 
 #[test]
 fn stock_bubblewrap_uses_descriptor_paths_and_a_trusted_inner_verifier() {
@@ -92,8 +147,16 @@ fn sandbox_plan_has_no_host_or_network_fallback() {
 }
 
 #[test]
-fn sandbox_rejects_mounts_that_own_the_internal_run_tree() {
-    for target in ["/run", "/run/user-controlled"] {
+fn sandbox_rejects_mounts_that_overlap_executor_reserved_paths() {
+    for target in [
+        "/",
+        "/proc",
+        "/proc/self/fd/12",
+        "/dev",
+        "/dev/null",
+        "/run",
+        "/run/user-controlled",
+    ] {
         let error = SandboxPlan::new(
             BubblewrapCapabilities::stock(),
             vec![MountBinding {
@@ -107,9 +170,13 @@ fn sandbox_rejects_mounts_that_own_the_internal_run_tree() {
                 target: target.to_owned(),
             }],
         )
-        .expect_err("the trusted inner image parent must remain Executor-owned");
+        .expect_err("Executor-owned roots must remain unavailable to request mounts");
 
-        assert!(error.to_string().contains("reserved path"));
+        assert_eq!(error.code, proto::ExecutorErrorCodeV0::PolicyUnsupported);
+        assert_eq!(
+            error.to_string(),
+            "mount target overlaps an Executor-reserved path"
+        );
     }
 }
 
@@ -143,6 +210,127 @@ fn host_system_read_is_a_fixed_reviewed_ubuntu_set() {
             ("/usr", "/usr"),
         ]
     );
+}
+
+#[test]
+fn policy_translation_rejects_reachable_policy_command_and_manifest_conflicts() {
+    type Mutate = fn(&mut ExecutorRequestV0);
+    let cases: [(&str, Mutate, &str); 6] = [
+        (
+            "invalid policy",
+            |request| {
+                request.resolved_policy.artifact["policy_version"] = serde_json::json!("1");
+            },
+            "request policy is invalid",
+        ),
+        (
+            "unsupported target",
+            |request| {
+                request.resolved_policy.artifact["target"] = serde_json::json!("future-sandbox");
+            },
+            "request policy is invalid",
+        ),
+        (
+            "Tool absent from policy",
+            |request| {
+                request.tool_id = "other".to_owned();
+                request.resolved_policy.tool_id = request.tool_id.clone();
+            },
+            "request Tool is absent from its policy",
+        ),
+        (
+            "resolved command substitution",
+            |request| {
+                request.resolved_policy.command["command_id"] = serde_json::json!("agent-read");
+            },
+            "resolved command does not exactly match its policy artifact",
+        ),
+        (
+            "fixture-only command",
+            |request| {
+                let command = &mut request.resolved_policy.artifact["commands"][0];
+                command["command_id"] = serde_json::json!("agent-negative");
+                command["executable"] = serde_json::json!("registry:agent-negative");
+                request.resolved_policy.command = command.clone();
+            },
+            "request command is absent from the official executable manifest",
+        ),
+        (
+            "runtime manifest source substitution",
+            |request| {
+                request
+                    .resolved_policy
+                    .mounts
+                    .iter_mut()
+                    .find(|mount| mount.target == "/bin/echo")
+                    .expect("fixture has executable runtime mount")
+                    .source = "/usr/bin/cat".to_owned();
+            },
+            "request mount set does not exactly match its policy and runtime manifest",
+        ),
+    ];
+
+    for (name, mutate, message) in cases {
+        let mut request = exact_request(&[], &[]);
+        mutate(&mut request);
+
+        let error = reachable_backend_error(request, name);
+
+        assert_eq!(
+            error.code,
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "{name}"
+        );
+        assert!(error.to_string().contains(message), "{name}: {error}");
+    }
+}
+
+#[test]
+fn execution_fields_cannot_escalate_the_selected_tool_policy() {
+    type Mutate = fn(&mut ExecutorRequestV0);
+    let cases: [(&str, Mutate); 6] = [
+        ("Tool kind", |request| {
+            request.tool_kind = "own-script".to_owned();
+            request.resolved_policy.tool_kind = request.tool_kind.clone();
+        }),
+        ("runtime profile", |request| {
+            request.runtime_profile = RuntimeReadProfileV0::HostSystemRead;
+            request.resolved_policy.runtime_profile = request.runtime_profile;
+        }),
+        ("executable", |request| {
+            request.executable = "/bin/cat".to_owned();
+        }),
+        ("timeout", |request| {
+            request.limits.timeout_ms += 1;
+            request.resolved_policy.limits = request.limits.clone();
+        }),
+        ("working directory", |request| {
+            request.working_directory = "/tmp".to_owned();
+        }),
+        ("environment", |request| {
+            request
+                .environment
+                .insert("UNDECLARED".to_owned(), "value".to_owned());
+        }),
+    ];
+
+    for (name, mutate) in cases {
+        let mut request = exact_request(&[], &[]);
+        mutate(&mut request);
+
+        let error = reachable_backend_error(request, name);
+
+        assert_eq!(
+            error.code,
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "{name}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "request execution fields do not match the selected Tool policy",
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -232,6 +420,20 @@ fn productive_execution_fails_closed_outside_the_official_linux_target() {
             ..
         }
     ));
+}
+
+fn reachable_backend_error(request: ExecutorRequestV0, case: &str) -> crate::backend::BackendError {
+    let mut request = request;
+    request.policy_digest =
+        resolved_policy_digest_v0(&request.resolved_policy).expect("policy digest");
+    let bytes = proto::canonical_executor_request_v0(&request)
+        .unwrap_or_else(|error| panic!("{case} must reach the backend: {error}"));
+    let request = proto::parse_executor_request_v0(&bytes)
+        .unwrap_or_else(|error| panic!("{case} must survive protocol parsing: {error}"));
+    match validate_mount_contract(&request) {
+        Ok(()) => panic!("{case} must be rejected by the backend"),
+        Err(error) => error,
+    }
 }
 
 fn exact_request(read_only: &[&str], writable: &[&str]) -> ExecutorRequestV0 {

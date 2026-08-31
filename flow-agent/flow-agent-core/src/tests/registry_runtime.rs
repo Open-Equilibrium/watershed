@@ -93,9 +93,8 @@ fn registry_root_rejects_junction_path_components() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(target_os = "macos")]
 #[test]
-fn run_flow_accepts_reviewed_macos_network_allowlist() {
+fn run_flow_rejects_positive_tool_egress_before_fixture_execution() {
     let workspace = workspace_copy("smoke-flow");
     replace_registry_text(
         &workspace,
@@ -104,11 +103,16 @@ fn run_flow_accepts_reviewed_macos_network_allowlist() {
         "  network:\n    default: deny\n    allow:\n      - kind: cidr\n        transport: tcp\n        cidr: 192.0.2.0/24\n        port: 443\n",
     );
 
-    let output = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect("macOS runtime compiles its target policy");
+    let error = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
+        .expect_err("M1.2 rejects positive tool egress before fixture execution");
 
-    assert!(!output.failed);
-    assert!(output.stdout.contains("\"network_access\":\"declared\""));
+    assert!(matches!(
+        error,
+        RuntimeError::Policy(core_policy::PolicyCompileError::NonEmptyNetworkAllowlist {
+            tool_id
+        }) if tool_id == "echo"
+    ));
+    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
 #[test]

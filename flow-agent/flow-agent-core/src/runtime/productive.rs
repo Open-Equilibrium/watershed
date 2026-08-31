@@ -199,52 +199,6 @@ pub(crate) trait ProductiveToolExecutor {
     ) -> Result<ExecutorToolExecution, RuntimeError>;
 }
 
-impl ProductiveToolExecutor for PreparedExecutor {
-    type Prepared = PreparedExecutorTool;
-
-    fn supports_productive_tools(&self) -> bool {
-        true
-    }
-
-    fn validate_enforcement_receipt(
-        &self,
-        prepared: &Self::Prepared,
-        receipt: &proto::EnforcementReceiptV0,
-    ) -> Result<(), RuntimeError> {
-        self.validate_prepared_receipt(prepared, receipt)
-    }
-
-    fn prepare(
-        &mut self,
-        invocation: &ToolInvocation,
-        workspace: &AnchoredWorkspace,
-        policy: &core_policy::PolicyArtifact,
-        command_policy: &core_policy::CommandPolicy,
-        request_id: &str,
-    ) -> Result<Self::Prepared, RuntimeError> {
-        self.prepare_tool(workspace, policy, command_policy, invocation, request_id)
-    }
-
-    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
-        prepared.request_hash()
-    }
-
-    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
-        prepared.policy_digest()
-    }
-
-    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
-        prepared.runtime_profile()
-    }
-
-    fn execute_prepared(
-        &mut self,
-        prepared: Self::Prepared,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
-        PreparedExecutor::execute_prepared(self, prepared)
-    }
-}
-
 impl ProductiveToolExecutor for Option<PreparedExecutor> {
     type Prepared = PreparedExecutorTool;
 
@@ -368,16 +322,12 @@ pub(crate) const PRODUCTIVE_CLOSURE_OBJECT_BYTES: u64 = MAX_SESSION_OBJECT_BYTES
 
 pub(crate) fn provider_dispatch_reservation(
     compiled: &crate::runtime::context::CompiledContext,
-) -> Result<ProductiveDispatchReservation, RuntimeError> {
+) -> ProductiveDispatchReservation {
     let context_bytes = u64::try_from(compiled.manifest.line.len()).unwrap_or(u64::MAX);
-    let context_object_bytes = compiled.objects.iter().try_fold(0_u64, |total, object| {
-        total
-            .checked_add(u64::try_from(object.bytes.len()).unwrap_or(u64::MAX))
-            .ok_or_else(|| {
-                RuntimeError::Protocol("provider context object byte count overflow".to_owned())
-            })
-    })?;
-    Ok(ProductiveDispatchReservation {
+    let context_object_bytes = compiled.objects.iter().fold(0_u64, |total, object| {
+        total.saturating_add(u64::try_from(object.bytes.len()).unwrap_or(u64::MAX))
+    });
+    ProductiveDispatchReservation {
         context_bytes,
         event_bytes: PROVIDER_EVENT_RESERVATION_BYTES,
         event_count: u64::try_from(MAX_PROVIDER_MESSAGE_DELTA_CHUNKS + PRODUCTIVE_CLOSURE_RECORDS)
@@ -385,11 +335,8 @@ pub(crate) fn provider_dispatch_reservation(
         event_record_bytes: u64::try_from(MAX_CONVERSATION_RECORD_BYTES + 1).unwrap_or(u64::MAX),
         metadata_bytes: PRODUCTIVE_METADATA_RESERVATION_BYTES,
         object_bytes: context_object_bytes
-            .checked_add(MAX_DURABLE_PROVIDER_OUTPUT_BYTES as u64)
-            .and_then(|bytes| bytes.checked_add(PRODUCTIVE_CLOSURE_OBJECT_BYTES))
-            .ok_or_else(|| {
-                RuntimeError::Protocol("provider object reservation overflow".to_owned())
-            })?,
+            .saturating_add(MAX_DURABLE_PROVIDER_OUTPUT_BYTES as u64)
+            .saturating_add(PRODUCTIVE_CLOSURE_OBJECT_BYTES),
         object_count: compiled
             .objects
             .len()
@@ -397,7 +344,7 @@ pub(crate) fn provider_dispatch_reservation(
                 MAX_DURABLE_PROVIDER_OUTPUT_BYTES.div_ceil(MAX_SESSION_OBJECT_BYTES as usize),
             )
             .saturating_add(PRODUCTIVE_CLOSURE_OBJECTS),
-    })
+    }
 }
 
 pub(crate) fn tool_dispatch_reservation() -> ProductiveDispatchReservation {
