@@ -29,8 +29,11 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
         "the official backend is stock Ubuntu Bubblewrap"
     );
 
-    let static_probe = probe(&executor);
-    assert!(static_probe.ready, "official static artifact must be ready");
+    let (static_probe, static_diagnostics) = probe(&executor);
+    assert!(
+        static_probe.ready,
+        "official static artifact must be ready: {static_diagnostics}"
+    );
     assert_eq!(static_probe.executor, EXECUTOR_NAME_V0);
     assert_eq!(static_probe.executor_version, env!("CARGO_PKG_VERSION"));
     assert_eq!(static_probe.backend, EXECUTOR_BACKEND_V0);
@@ -54,8 +57,12 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
             "official probe omits {feature}"
         );
     }
-    let dynamic_probe = probe(&dynamic_executor);
+    let (dynamic_probe, dynamic_diagnostics) = probe(&dynamic_executor);
     assert!(!dynamic_probe.ready, "dynamic artifact must fail readiness");
+    assert!(
+        dynamic_diagnostics.contains("official Executor requires static-self-reexec"),
+        "dynamic artifact must explain readiness failure: {dynamic_diagnostics}"
+    );
     assert!(
         !dynamic_probe
             .supported_policy_features
@@ -532,7 +539,7 @@ fn assert_receipt(receipt: &EnforcementReceiptV0, profile: RuntimeReadProfileV0)
     assert_eq!(receipt.runtime_profile, profile);
 }
 
-fn probe(executor: &Path) -> ExecutorProbeV0 {
+fn probe(executor: &Path) -> (ExecutorProbeV0, String) {
     let output = Command::new(executor)
         .arg("--probe")
         .output()
@@ -542,7 +549,10 @@ fn probe(executor: &Path) -> ExecutorProbeV0 {
         "probe stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    parse_executor_probe_v0(&output.stdout).expect("probe is canonical")
+    (
+        parse_executor_probe_v0(&output.stdout).expect("probe is canonical"),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
 }
 
 fn configured_artifacts() -> Option<(PathBuf, PathBuf)> {

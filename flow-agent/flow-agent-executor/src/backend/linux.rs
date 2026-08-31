@@ -15,7 +15,10 @@ use rustix::fd::{AsRawFd, BorrowedFd, OwnedFd};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::{fs::MetadataExt, process::CommandExt},
+    os::unix::{
+        fs::MetadataExt,
+        process::{CommandExt, ExitStatusExt},
+    },
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
         Arc,
@@ -31,27 +34,41 @@ const INNER_EXECUTABLE: &str = "/run/watershed/flow-executor";
 const INTERNAL_DESCRIPTOR_BASE: i32 =
     proto::EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 as i32 + proto::MAX_EXECUTOR_MOUNTS_V0 as i32;
 const CLEANUP_GRACE: Duration = Duration::from_millis(250);
+const MAX_SELF_TEST_STDERR_BYTES: u64 = 768;
 
 pub(super) fn probe() -> ProbeState {
     let mut state = ProbeState {
         backend_version: "unavailable".to_owned(),
         ready: false,
         features: Vec::new(),
+        readiness_error: None,
     };
-    if !crate::platform::official_host() || !crate::platform::statically_linked_self() {
+    if !crate::platform::official_host() {
+        state.readiness_error =
+            Some("productive Executor support requires Ubuntu 24.04 x64".to_owned());
+        return state;
+    }
+    if !crate::platform::statically_linked_self() {
+        state.readiness_error = Some("official Executor requires static-self-reexec".to_owned());
         return state;
     }
     state
         .features
         .push(EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0.to_owned());
-    if validate_runtime_manifest_sources().is_err() {
+    if let Err(error) = validate_runtime_manifest_sources() {
+        state.readiness_error = Some(error.message);
         return state;
     }
-    let Ok((version, capabilities)) = bubblewrap_capabilities() else {
-        return state;
+    let (version, capabilities) = match bubblewrap_capabilities() {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            state.readiness_error = Some(error.message);
+            return state;
+        }
     };
     state.backend_version = version;
-    if self_test(capabilities).is_err() {
+    if let Err(error) = self_test(capabilities) {
+        state.readiness_error = Some(error.message);
         return state;
     }
     state.ready = true;
@@ -277,24 +294,80 @@ fn self_test(capabilities: BubblewrapCapabilities) -> Result<(), BackendError> {
         .map_err(|error| BackendError::setup(format!("failed to open Executor image: {error}")))?;
     let internal = InternalDescriptors::install_self_test(seccomp, self_image)?;
     let plan = SandboxPlan::new(capabilities, Vec::new())?;
-    let status = sandbox_command(
+    let mut command = sandbox_command(
         &plan,
         -1,
         internal.seccomp.as_raw_fd(),
         internal.self_image.as_raw_fd(),
-    )
-    .arg("--")
-    .arg(INNER_EXECUTABLE)
-    .arg("--inner-self-test")
-    .stdin(Stdio::null())
-    .stdout(Stdio::null())
-    .stderr(Stdio::null())
-    .status()
-    .map_err(|error| BackendError::setup(format!("Bubblewrap self-test failed: {error}")))?;
+    );
+    command
+        .arg("--")
+        .arg(INNER_EXECUTABLE)
+        .arg("--inner-self-test");
+    run_self_test_command(command)
+}
+
+fn run_self_test_command(mut command: Command) -> Result<(), BackendError> {
+    command
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| {
+        BackendError::setup(format!("Bubblewrap self-test failed to start: {error}"))
+    })?;
+    let stderr = child
+        .stderr
+        .take()
+        .expect("self-test command configures stderr as piped before spawn");
+    let collector = thread::spawn(move || {
+        let mut stderr = stderr;
+        let mut bytes = Vec::new();
+        stderr
+            .by_ref()
+            .take(MAX_SELF_TEST_STDERR_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        let truncated = bytes.len() as u64 > MAX_SELF_TEST_STDERR_BYTES;
+        bytes.truncate(MAX_SELF_TEST_STDERR_BYTES as usize);
+        std::io::copy(&mut stderr, &mut std::io::sink())?;
+        Ok::<_, std::io::Error>((bytes, truncated))
+    });
+    let status = child.wait().map_err(|error| {
+        BackendError::setup(format!(
+            "Bubblewrap self-test exit status is unavailable: {error}"
+        ))
+    })?;
+    let (stderr, truncated) = collector
+        .join()
+        .map_err(|_| BackendError::setup("Bubblewrap self-test stderr collector failed"))?
+        .map_err(|error| {
+            BackendError::setup(format!(
+                "Bubblewrap self-test stderr could not be collected: {error}"
+            ))
+        })?;
     if status.success() {
         Ok(())
     } else {
-        Err(BackendError::setup("Bubblewrap self-test failed"))
+        let termination = status.code().map_or_else(
+            || {
+                status.signal().map_or_else(
+                    || "without an exit status".to_owned(),
+                    |signal| format!("with signal {signal}"),
+                )
+            },
+            |code| format!("with exit code {code}"),
+        );
+        let mut message = format!("Bubblewrap self-test failed {termination}");
+        let stderr = String::from_utf8_lossy(&stderr);
+        let stderr = stderr.trim();
+        if !stderr.is_empty() {
+            message.push_str(": ");
+            message.push_str(stderr);
+        }
+        if truncated {
+            message.push_str(" [stderr truncated]");
+        }
+        Err(BackendError::setup(message))
     }
 }
 
@@ -816,11 +889,31 @@ fn tool_result(outcome: &ProcessOutcome) -> ExecutorToolResultV0 {
 #[cfg(test)]
 mod tests {
     use super::{
-        PrimaryTrigger, mark_undeclared_descriptors_close_on_exec, select_primary,
-        terminate_and_reap,
+        MAX_SELF_TEST_STDERR_BYTES, PrimaryTrigger, mark_undeclared_descriptors_close_on_exec,
+        run_self_test_command, select_primary, terminate_and_reap,
     };
     use rustix::fd::AsRawFd;
     use std::process::Command;
+
+    #[test]
+    fn self_test_failure_captures_exit_code_and_bounded_stderr() {
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "i=0; while [ \"$i\" -lt 2048 ]; do printf x >&2; i=$((i + 1)); done; exit 7",
+        ]);
+
+        let error = run_self_test_command(command).expect_err("self-test command must fail");
+
+        assert_eq!(error.code, proto::ExecutorErrorCodeV0::SandboxSetupFailed);
+        assert!(
+            error
+                .message
+                .starts_with("Bubblewrap self-test failed with exit code 7: ")
+        );
+        assert!(error.message.ends_with(" [stderr truncated]"));
+        assert!(error.message.len() <= MAX_SELF_TEST_STDERR_BYTES as usize + 96);
+    }
 
     #[test]
     fn collector_failure_replaces_an_established_terminal_cause() {

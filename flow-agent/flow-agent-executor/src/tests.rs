@@ -1,6 +1,6 @@
 use crate::{
     backend::{
-        BubblewrapCapabilities, MountBinding, MountSource, SandboxPlan, seccomp_policy,
+        BubblewrapCapabilities, MountBinding, MountSource, ProbeState, SandboxPlan, seccomp_policy,
         validate_mount_contract,
     },
     platform, protocol,
@@ -22,9 +22,15 @@ use std::io::Cursor;
 #[test]
 fn protocol_probe_is_one_canonical_document() {
     let mut output = Vec::new();
+    let mut diagnostics = Vec::new();
 
-    protocol::run_with(&["--probe".to_owned()], Cursor::new([]), &mut output)
-        .expect("probe writes");
+    protocol::run_with_diagnostics(
+        &["--probe".to_owned()],
+        Cursor::new([]),
+        &mut output,
+        &mut diagnostics,
+    )
+    .expect("probe writes");
 
     let probe = proto::parse_executor_probe_v0(&output).expect("probe is exact protocol JSON");
     assert_eq!(probe.schema, proto::EXECUTOR_PROBE_SCHEMA_V0);
@@ -34,6 +40,41 @@ fn protocol_probe_is_one_canonical_document() {
         output,
         proto::canonical_executor_probe_v0(&probe).expect("probe canonicalizes")
     );
+    assert_eq!(diagnostics.is_empty(), probe.ready);
+}
+
+#[test]
+fn readiness_diagnostic_is_single_line_sanitized_and_bounded() {
+    let mut output = Vec::new();
+    let mut diagnostics = Vec::new();
+    let reason = format!(
+        "first\n\t\0{}",
+        "x".repeat(protocol::MAX_READINESS_DIAGNOSTIC_BYTES * 2)
+    );
+
+    protocol::write_probe(
+        ProbeState {
+            backend_version: "unavailable".to_owned(),
+            ready: false,
+            features: Vec::new(),
+            readiness_error: Some(reason),
+        },
+        &mut output,
+        &mut diagnostics,
+    )
+    .expect("probe and diagnostic write");
+
+    let probe = proto::parse_executor_probe_v0(&output).expect("probe remains canonical");
+    assert!(!probe.ready);
+    assert_eq!(
+        output,
+        proto::canonical_executor_probe_v0(&probe).expect("probe canonicalizes")
+    );
+    assert!(diagnostics.len() <= protocol::MAX_READINESS_DIAGNOSTIC_BYTES);
+    let diagnostic = String::from_utf8(diagnostics).expect("diagnostic is UTF-8");
+    assert!(diagnostic.starts_with("flow-executor readiness: first "));
+    assert_eq!(diagnostic.lines().count(), 1);
+    assert!(!diagnostic.contains('\0'));
 }
 
 #[test]

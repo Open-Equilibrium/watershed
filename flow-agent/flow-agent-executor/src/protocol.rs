@@ -5,20 +5,34 @@ use proto::{
 };
 use std::io::{self, Read, Write};
 
+pub(crate) const MAX_READINESS_DIAGNOSTIC_BYTES: usize = 1024;
+const READINESS_DIAGNOSTIC_PREFIX: &str = "flow-executor readiness: ";
+
 pub(crate) fn run() -> Result<(), String> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     let stdin = io::stdin();
     let stdout = io::stdout();
-    run_with(&arguments, stdin.lock(), stdout.lock())
+    let stderr = io::stderr();
+    run_with_diagnostics(&arguments, stdin.lock(), stdout.lock(), stderr.lock())
 }
 
+#[cfg(test)]
 pub(crate) fn run_with(
     arguments: &[String],
     input: impl Read,
     output: impl Write,
 ) -> Result<(), String> {
+    run_with_diagnostics(arguments, input, output, io::sink())
+}
+
+pub(crate) fn run_with_diagnostics(
+    arguments: &[String],
+    input: impl Read,
+    output: impl Write,
+    diagnostics: impl Write,
+) -> Result<(), String> {
     match arguments {
-        [mode] if mode == "--probe" => write_probe(output),
+        [mode] if mode == "--probe" => write_probe(crate::backend::probe(), output, diagnostics),
         [] => execute_request(input, output),
         [mode, request_fd] if mode == "--inner" => run_inner(request_fd),
         [mode] if mode == "--inner-self-test" => Ok(()),
@@ -26,24 +40,66 @@ pub(crate) fn run_with(
     }
 }
 
-fn write_probe(mut output: impl Write) -> Result<(), String> {
-    let state = crate::backend::probe();
+pub(crate) fn write_probe(
+    state: crate::backend::ProbeState,
+    mut output: impl Write,
+    mut diagnostics: impl Write,
+) -> Result<(), String> {
+    let crate::backend::ProbeState {
+        backend_version,
+        ready,
+        features,
+        readiness_error,
+    } = state;
     let probe = ExecutorProbeV0 {
         schema: EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
         executor: EXECUTOR_NAME_V0.to_owned(),
         executor_version: env!("CARGO_PKG_VERSION").to_owned(),
         backend: EXECUTOR_BACKEND_V0.to_owned(),
-        backend_version: state.backend_version,
+        backend_version,
         platform: EXECUTOR_PLATFORM_V0.to_owned(),
         protocol_versions: vec![EXECUTOR_PROTOCOL_VERSION_V0.to_owned()],
-        ready: state.ready,
+        ready,
         runtime_mounts: crate::backend::runtime_mount_manifest(),
-        supported_policy_features: state.features,
+        supported_policy_features: features,
     };
     let bytes = canonical_executor_probe_v0(&probe).map_err(|error| error.to_string())?;
     output
         .write_all(&bytes)
-        .map_err(|error| format!("failed to write Executor probe: {error}"))
+        .map_err(|error| format!("failed to write Executor probe: {error}"))?;
+    if let Some(error) = readiness_error {
+        write_readiness_diagnostic(&mut diagnostics, &error)?;
+    }
+    Ok(())
+}
+
+fn write_readiness_diagnostic(mut output: impl Write, reason: &str) -> Result<(), String> {
+    let content_limit =
+        MAX_READINESS_DIAGNOSTIC_BYTES.saturating_sub(READINESS_DIAGNOSTIC_PREFIX.len() + 1);
+    let mut content = String::with_capacity(content_limit);
+    let mut pending_space = false;
+    for character in reason.chars() {
+        if character.is_control() || character.is_whitespace() {
+            pending_space = !content.is_empty();
+            continue;
+        }
+        let separator_bytes = usize::from(pending_space);
+        if content.len() + separator_bytes + character.len_utf8() > content_limit {
+            break;
+        }
+        if pending_space {
+            content.push(' ');
+            pending_space = false;
+        }
+        content.push(character);
+    }
+    if content.is_empty() {
+        content.push_str("unavailable");
+    }
+    let diagnostic = format!("{READINESS_DIAGNOSTIC_PREFIX}{content}\n");
+    output
+        .write_all(diagnostic.as_bytes())
+        .map_err(|error| format!("failed to write Executor readiness diagnostic: {error}"))
 }
 
 fn execute_request(input: impl Read, mut output: impl Write) -> Result<(), String> {

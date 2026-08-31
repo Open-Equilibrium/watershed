@@ -467,6 +467,7 @@ pub(crate) struct ProbeState {
     pub(crate) backend_version: String,
     pub(crate) ready: bool,
     pub(crate) features: Vec<String>,
+    pub(crate) readiness_error: Option<String>,
 }
 
 pub(crate) fn probe() -> ProbeState {
@@ -479,6 +480,7 @@ pub(crate) fn probe() -> ProbeState {
         backend_version: "unavailable".to_owned(),
         ready: false,
         features: Vec::new(),
+        readiness_error: Some("productive Executor support requires Ubuntu 24.04 x64".to_owned()),
     }
 }
 
