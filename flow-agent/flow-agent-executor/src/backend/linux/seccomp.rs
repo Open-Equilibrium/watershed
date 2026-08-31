@@ -1,4 +1,8 @@
-use std::{fs::File, io::Write, os::fd::OwnedFd};
+use std::{
+    fs::File,
+    io::{Seek, SeekFrom, Write},
+    os::fd::OwnedFd,
+};
 
 const BPF_LD_W_ABS: u16 = 0x20;
 const BPF_JMP_JEQ_K: u16 = 0x15;
@@ -60,6 +64,8 @@ pub(super) fn sealed_filter() -> Result<OwnedFd, String> {
         .map_err(|error| format!("failed to write seccomp program: {error}"))?;
     file.flush()
         .map_err(|error| format!("failed to flush seccomp program: {error}"))?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("failed to rewind seccomp program: {error}"))?;
     let descriptor = OwnedFd::from(file);
     rustix::fs::fcntl_add_seals(
         &descriptor,
@@ -114,11 +120,23 @@ fn filter_bytes() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::filter_bytes;
+    use std::{fs::File, io::Read};
 
     #[test]
     fn raw_filter_is_a_nonempty_sock_filter_array() {
         let filter = filter_bytes();
         assert!(!filter.is_empty());
         assert_eq!(filter.len() % 8, 0);
+    }
+
+    #[test]
+    fn sealed_filter_is_ready_for_stock_bubblewrap_to_read() {
+        let mut filter = File::from(super::sealed_filter().expect("filter is sealed"));
+        let mut bytes = Vec::new();
+        filter
+            .read_to_end(&mut bytes)
+            .expect("sealed filter is readable");
+
+        assert_eq!(bytes, filter_bytes());
     }
 }
