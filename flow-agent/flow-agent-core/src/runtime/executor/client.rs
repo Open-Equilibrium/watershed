@@ -313,7 +313,7 @@ impl PreparedExecutor {
                         "Executor runtime manifest source was not retained",
                     )
                 })?;
-                Ok(PreparedMount {
+                Ok::<_, RuntimeError>(PreparedMount {
                     access: proto::ExecutorMountAccessV0::ReadOnly,
                     descriptor: rustix::io::dup(&retained.descriptor)
                         .map_err(runtime_open_error)?,
@@ -684,7 +684,7 @@ fn execute_one_shot(
         {
             let pid = rustix::process::Pid::from_raw(child.child_mut().id() as i32)
                 .ok_or_else(|| invalid_response("Executor process id is invalid"))?;
-            rustix::process::kill_process_group(pid, rustix::process::Signal::Term)
+            rustix::process::kill_process_group(pid, rustix::process::Signal::TERM)
                 .map_err(|_| invalid_response("Executor cancellation signal failed"))?;
             cancellation_sent = true;
             cancellation_deadline = now.checked_add(Duration::from_secs(5));

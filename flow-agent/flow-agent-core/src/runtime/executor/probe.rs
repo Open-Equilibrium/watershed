@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn executable_links_fail_closed() {
-        let root = crate::tests::empty_workspace("executor-linked-candidate");
+        let root = crate::tests::empty_workspace();
         let target = root.join("target");
         fs::write(&target, b"executable").expect("target is staged");
         fs::set_permissions(&target, fs::Permissions::from_mode(0o700))

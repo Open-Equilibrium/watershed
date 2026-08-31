@@ -41,7 +41,7 @@ fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
     if let Some(process_group) = process_group {
         #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
         PROCESS_GROUP_CLEANUP_CALLS.set(PROCESS_GROUP_CLEANUP_CALLS.get() + 1);
-        let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::Kill);
+        let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::KILL);
     }
     let _ = child.kill();
     let started = std::time::Instant::now();
