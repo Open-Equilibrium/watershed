@@ -102,7 +102,6 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         internal.request.as_raw_fd(),
         internal.seccomp.as_raw_fd(),
         internal.self_image.as_raw_fd(),
-        internal.highest_preserved,
     );
     command
         .arg("--chdir")
@@ -283,7 +282,6 @@ fn self_test(capabilities: BubblewrapCapabilities) -> Result<(), BackendError> {
         -1,
         internal.seccomp.as_raw_fd(),
         internal.self_image.as_raw_fd(),
-        internal.highest_preserved,
     )
     .arg("--")
     .arg(INNER_EXECUTABLE)
@@ -305,7 +303,6 @@ fn sandbox_command(
     request_descriptor: i32,
     seccomp_descriptor: i32,
     self_descriptor: i32,
-    highest_preserved: i32,
 ) -> Command {
     let mut command = Command::new(BUBBLEWRAP);
     command.args(&plan.arguments);
@@ -324,9 +321,7 @@ fn sandbox_command(
         .arg("--dev")
         .arg("/dev")
         .arg("--seccomp")
-        .arg(seccomp_descriptor.to_string())
-        .arg("--preserve-fds")
-        .arg(highest_preserved.saturating_sub(2).to_string());
+        .arg(seccomp_descriptor.to_string());
     if request_descriptor >= 0 {
         command.arg("--setenv").arg("FLOW_EXECUTOR_INNER").arg("1");
     }
@@ -337,7 +332,6 @@ struct InternalDescriptors {
     request: OwnedFd,
     seccomp: OwnedFd,
     self_image: OwnedFd,
-    highest_preserved: i32,
 }
 
 impl InternalDescriptors {
@@ -358,12 +352,10 @@ impl InternalDescriptors {
         let request = relocate(request, INTERNAL_DESCRIPTOR_BASE)?;
         let seccomp = relocate(seccomp, request.as_raw_fd() + 1)?;
         let self_image = relocate(self_image, seccomp.as_raw_fd() + 1)?;
-        let highest_preserved = self_image.as_raw_fd();
         Ok(Self {
             request,
             seccomp,
             self_image,
-            highest_preserved,
         })
     }
 
