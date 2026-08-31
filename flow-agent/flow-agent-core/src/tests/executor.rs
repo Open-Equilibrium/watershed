@@ -36,8 +36,10 @@ fn protected_override_round_trips_and_default_removes_only_the_override() {
     let unrelated = root.join("unrelated");
     fs::write(&unrelated, b"preserved").expect("unrelated file is staged");
     let executable = env::current_exe().expect("test executable has an absolute path");
+    let replacement = root.join("replacement-executor");
     let store = ExecutorConfigStore::at(config.clone());
 
+    assert!(store.read().expect("absent override reads").is_none());
     store
         .configure(&executable)
         .expect("absolute override is stored");
@@ -55,6 +57,17 @@ fn protected_override_round_trips_and_default_removes_only_the_override() {
             serde_json::to_string(selected.path()).expect("path serializes")
         )
     );
+    store
+        .configure(&replacement)
+        .expect("existing override is replaced");
+    assert_eq!(
+        store
+            .read()
+            .expect("replaced override reads")
+            .expect("replacement exists")
+            .path(),
+        replacement
+    );
     assert!(store.configure_default().expect("override removes"));
     assert!(
         !store
@@ -65,6 +78,7 @@ fn protected_override_round_trips_and_default_removes_only_the_override() {
         fs::read(&unrelated).expect("unrelated file remains"),
         b"preserved"
     );
+    assert!(store.read().expect("removed override reads").is_none());
 }
 
 #[test]
@@ -149,6 +163,15 @@ fn executor_override_rejects_unsafe_file_and_parent_objects_without_replacing_th
         .configure(&executable)
         .expect_err("directory target is rejected");
     assert!(error.to_string().contains("configuration is unsafe"));
+    assert!(directory_target.is_dir());
+
+    let error = ExecutorConfigStore::at(directory_target.clone())
+        .configure_default()
+        .expect_err("unsafe target is not removed by reset");
+    assert!(
+        error.to_string().contains("configuration is unsafe"),
+        "{error}"
+    );
     assert!(directory_target.is_dir());
 }
 

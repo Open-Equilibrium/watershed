@@ -883,6 +883,139 @@ unsafe extern "C" {
     fn c_dup2(old_fd: i32, new_fd: i32) -> i32;
 }
 
+#[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+mod unsupported_platform_tests {
+    use super::{PreparedExecutor, PreparedExecutorTool};
+    use crate::runtime::{
+        fs_guards::AnchoredWorkspace, tool_runner::ToolInvocation, types::RuntimeError,
+    };
+
+    #[test]
+    fn prepared_tool_metadata_and_receipt_validation_remain_bound_on_unsupported_platforms() {
+        let prepared = prepared_tool();
+        assert_eq!(prepared.request_hash(), "sha256:request");
+        assert_eq!(prepared.policy_digest(), &"a".repeat(64));
+        assert_eq!(
+            prepared.runtime_profile(),
+            proto::RuntimeReadProfileV0::HostSystemRead
+        );
+
+        let executor = PreparedExecutor {};
+        assert!(
+            executor
+                .validate_prepared_receipt(&prepared, &receipt(&prepared, true))
+                .is_ok()
+        );
+        assert_policy_unsupported(executor.execute_prepared(prepared_tool()));
+
+        let mut inactive = receipt(&prepared, false);
+        inactive.applied_policy_digest = "b".repeat(64);
+        assert_invalid_response(executor.validate_prepared_receipt(&prepared, &inactive));
+    }
+
+    #[test]
+    fn prepare_tool_fails_closed_before_reading_its_candidate_inputs() {
+        let workspace = AnchoredWorkspace::open(std::env::temp_dir().as_path())
+            .expect("temporary directory is an anchored workspace");
+        let policy = executor_policy();
+        let command = &policy.commands[0];
+        let invocation = ToolInvocation {
+            executable: "/bin/echo".to_owned(),
+            argv: Vec::new(),
+        };
+
+        assert_policy_unsupported(PreparedExecutor {}.prepare_tool(
+            &workspace,
+            &policy,
+            command,
+            &invocation,
+            "unsupported-platform-request",
+        ));
+    }
+
+    fn prepared_tool() -> PreparedExecutorTool {
+        PreparedExecutorTool {
+            policy_digest: "a".repeat(64),
+            request_hash: "sha256:request".to_owned(),
+            runtime_profile: proto::RuntimeReadProfileV0::HostSystemRead,
+        }
+    }
+
+    fn receipt(
+        prepared: &PreparedExecutorTool,
+        isolation_active: bool,
+    ) -> proto::EnforcementReceiptV0 {
+        proto::EnforcementReceiptV0 {
+            applied_policy_digest: prepared.policy_digest().to_owned(),
+            backend: "backend".to_owned(),
+            backend_version: "1".to_owned(),
+            executor: "executor".to_owned(),
+            executor_version: "1".to_owned(),
+            isolation_active,
+            platform: "unsupported".to_owned(),
+            runtime_profile: prepared.runtime_profile(),
+        }
+    }
+
+    fn executor_policy() -> core_policy::PolicyArtifact {
+        core_policy::PolicyArtifact {
+            commands: vec![core_policy::CommandPolicy {
+                allowed_parameters: Vec::new(),
+                argv: Vec::new(),
+                command_id: "echo".to_owned(),
+                environment: core_policy::EnvironmentPolicy {
+                    allow: Vec::new(),
+                    default: core_policy::EnvironmentDefault::Clear,
+                },
+                executable: "registry:echo".to_owned(),
+                filesystem: core_policy::FilesystemPolicy {
+                    read_only_mounts: vec!["workspace".to_owned()],
+                    writable_mounts: Vec::new(),
+                },
+                network: core_policy::NetworkPolicy {
+                    allow: Vec::new(),
+                    default: core_policy::NetworkDefault::Deny,
+                },
+                runtime_profile: core_policy::ToolRuntimeProfile::Exact,
+                script_runtime: None,
+                tool_id: "echo".to_owned(),
+                tool_kind: core_policy::ToolKind::PredefinedCommand,
+            }],
+            phase_scope: vec![core_policy::PhaseScope {
+                phase_id: "phase".to_owned(),
+                tool_ids: vec!["echo".to_owned()],
+            }],
+            policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
+            runtime_limits: core_policy::RuntimeLimits {
+                headless: true,
+                timeout_ms: 1_000,
+            },
+            source_flow_definition_id: "flow".to_owned(),
+            target: core_policy::PolicyTarget::LinuxBubblewrapSeccomp,
+        }
+    }
+
+    fn assert_policy_unsupported<T>(result: Result<T, RuntimeError>) {
+        match result {
+            Err(RuntimeError::Executor(error)) => {
+                assert_eq!(error.code(), proto::ExecutorErrorCodeV0::PolicyUnsupported);
+            }
+            Err(error) => panic!("unexpected error: {error}"),
+            Ok(_) => panic!("unsupported platform must fail closed"),
+        }
+    }
+
+    fn assert_invalid_response(result: Result<(), RuntimeError>) {
+        match result {
+            Err(RuntimeError::Executor(error)) => {
+                assert_eq!(error.code(), proto::ExecutorErrorCodeV0::InvalidResponse);
+            }
+            Err(error) => panic!("unexpected error: {error}"),
+            Ok(()) => panic!("invalid receipt must be rejected"),
+        }
+    }
+}
+
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::{

@@ -291,6 +291,38 @@ fn protocol_failure(code: proto::ExecutorErrorCodeV0, message: &str) -> RuntimeE
     RuntimeError::executor(code, message)
 }
 
+#[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+mod unsupported_platform_tests {
+    use super::probe_executor;
+    use crate::runtime::{
+        executor::{ExecutorSelection, ExecutorSelectionSource},
+        types::RuntimeError,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn probing_fails_closed_without_attempting_to_run_an_executor() {
+        let selection = ExecutorSelection::new(
+            "administrator-selected-executor".into(),
+            ExecutorSelectionSource::Custom,
+        );
+
+        let error = probe_executor(&selection, Some(Path::new("official-flow")))
+            .err()
+            .expect("unsupported platforms cannot probe a productive Executor");
+
+        match error {
+            RuntimeError::Executor(failure) => {
+                assert_eq!(
+                    failure.code(),
+                    proto::ExecutorErrorCodeV0::PolicyUnsupported
+                );
+            }
+            other => panic!("unexpected Executor failure: {other}"),
+        }
+    }
+}
+
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::{open_validated_executable, owner_is_trusted, validate_probe};

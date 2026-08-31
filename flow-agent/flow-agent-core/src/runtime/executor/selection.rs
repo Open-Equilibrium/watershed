@@ -217,3 +217,33 @@ mod tests {
         assert_eq!(fs::read(path).expect("replacement reads"), b"replacement");
     }
 }
+
+#[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+mod unsupported_platform_tests {
+    use super::{ExecutorSelection, ExecutorSelectionSource};
+    use std::path::PathBuf;
+
+    #[test]
+    fn selection_metadata_survives_the_unsupported_platform_probe_noop() {
+        let selection = ExecutorSelection::new(
+            PathBuf::from("administrator-selected-executor"),
+            ExecutorSelectionSource::Custom,
+        )
+        .with_probe(super::ProbedExecutor {});
+        let same_selection = ExecutorSelection::new(
+            PathBuf::from("administrator-selected-executor"),
+            ExecutorSelectionSource::Custom,
+        );
+        let default_selection = ExecutorSelection::new(
+            PathBuf::from("administrator-selected-executor"),
+            ExecutorSelectionSource::Default,
+        );
+
+        assert_eq!(selection.path(), same_selection.path());
+        assert_eq!(selection.source(), ExecutorSelectionSource::Custom);
+        assert_eq!(selection.source().as_str(), "custom");
+        assert_eq!(default_selection.source().as_str(), "default");
+        assert_eq!(selection, same_selection);
+        assert_ne!(selection, default_selection);
+    }
+}

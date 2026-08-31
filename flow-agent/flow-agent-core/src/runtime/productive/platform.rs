@@ -17,10 +17,13 @@ pub(crate) fn ensure_productive_execution_platform() -> Result<(), RuntimeError>
 
 pub(crate) fn ensure_productive_tool_execution_platform() -> Result<(), RuntimeError> {
     let release = current_productive_execution_release();
-    if std::env::consts::OS == "linux"
-        && std::env::consts::ARCH == "x86_64"
-        && release.as_deref().is_some_and(ubuntu_24_04_release)
-    {
+    if release.as_deref().is_some_and(|release| {
+        productive_tool_execution_supported_release(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            release,
+        )
+    }) {
         Ok(())
     } else {
         Err(RuntimeError::executor(
@@ -40,6 +43,14 @@ pub(crate) fn productive_execution_supported_release(
         ("macos", "aarch64") => macos_26_release(release),
         _ => false,
     }
+}
+
+pub(crate) fn productive_tool_execution_supported_release(
+    target_os: &str,
+    target_arch: &str,
+    release: &str,
+) -> bool {
+    target_os == "linux" && target_arch == "x86_64" && ubuntu_24_04_release(release)
 }
 
 #[cfg(target_os = "linux")]

@@ -1,10 +1,10 @@
 use super::super::test_support::workspace_copy;
 use super::support::{
-    DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutor,
-    MemoryAttempts, MemorySink, ScriptedProvider, UnsupportedToolExecutor,
+    DefinitiveFailureProvider, FailingRecoveryBoundary, FakeProvider, FakeToolExecutionFault,
+    FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider, UnsupportedToolExecutor,
     disabled_smoke_productive_execution_fixture, execute_failing_recovery_case,
-    execute_scripted_productive_case, load_productive_execution_fixture_for_flow,
-    smoke_productive_execution_fixture,
+    execute_scripted_productive_case, execute_scripted_productive_case_with_tools,
+    load_productive_execution_fixture_for_flow, smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     context::{CONTEXT_SAFETY_MARGIN, ContextHistory, ContextModelProfile},
@@ -97,6 +97,48 @@ fn productive_provider_rejects_undeclared_tool_arguments_before_execution() {
         "unexpected terminal error: {:?}",
         execution.terminal_error
     );
+    assert_eq!(
+        attempts.intents.len(),
+        1,
+        "only the provider attempt commits"
+    );
+    assert!(tools.invocations.is_empty());
+    assert!(
+        !sink
+            .0
+            .iter()
+            .any(|event| event.event_type == EventType::ToolStarted)
+    );
+}
+
+#[test]
+fn productive_tool_prepare_failure_stops_before_attempt_or_dispatch() {
+    let turn = ProviderTurn {
+        token_usage: None,
+        response_id: "response-tool-prepare-failure".to_owned(),
+        output_text: String::new(),
+        retained_items: Vec::new(),
+        tool_calls: vec![ProviderToolCall {
+            call_id: "call-tool-prepare-failure".to_owned(),
+            name: "echo".to_owned(),
+            arguments: "{}".to_owned(),
+        }],
+    };
+
+    let (execution, _, attempts, sink, tools) = execute_scripted_productive_case_with_tools(
+        "productive-tool-prepare-failure",
+        [turn],
+        |_| {},
+        |tools| tools.fault = FakeToolExecutionFault::PrepareError,
+    )
+    .expect("Tool preparation failure becomes a typed failed run");
+
+    assert!(execution.failed);
+    assert!(execution.terminal_error.as_ref().is_some_and(|error| {
+        error
+            .to_string()
+            .contains("fixture Executor preparation failure")
+    }));
     assert_eq!(
         attempts.intents.len(),
         1,

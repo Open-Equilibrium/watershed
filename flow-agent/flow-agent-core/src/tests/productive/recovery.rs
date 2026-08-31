@@ -301,36 +301,49 @@ fn productive_recovery_resumes_a_cancelled_provider_attempt() {
 }
 
 #[test]
-fn productive_recovery_rejects_a_provider_result_in_the_tool_slot() {
-    let (_workspace, fixture) = smoke_productive_execution_fixture();
-    let flow = fixture.smoke_flow();
-    let mut provider = ScriptedProvider {
-        bodies: Vec::new(),
-        turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
-    };
-    let mut attempts = MemoryAttempts::default();
-    let mut sink = MemorySink::default();
-    let mut tools = FakeToolExecutor::default();
-    let mut recovery = InjectedAttemptRecovery::ToolWrongKind;
+fn productive_recovery_rejects_invalid_tool_attempts_before_redispatch() {
+    for (name, mut recovery, expected) in [
+        (
+            "recovery-error",
+            InjectedAttemptRecovery::ToolError,
+            "fixture Tool recovery failure",
+        ),
+        (
+            "wrong-kind",
+            InjectedAttemptRecovery::ToolWrongKind,
+            "wrong kind",
+        ),
+    ] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
 
-    let error = execute_productive_flow_with_tool_executor_and_recovery(
-        fixture.execution(flow, "productive-wrong-tool-recovery-fixture"),
-        &mut provider,
-        &mut attempts,
-        &mut sink,
-        &mut tools,
-        &mut recovery,
-    )
-    .expect_err("wrong-kind Tool recovery stops exact recovery");
+        let error = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, &format!("productive-invalid-tool-recovery-{name}")),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect_err("invalid Tool recovery stops exact recovery");
 
-    assert!(error.to_string().contains("wrong kind"));
-    assert!(tools.invocations.is_empty());
-    assert!(
-        !sink
-            .0
-            .iter()
-            .any(|event| event.event_type == EventType::ToolCompleted)
-    );
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert!(tools.invocations.is_empty(), "{name}");
+        assert!(
+            !sink
+                .0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolCompleted),
+            "{name}"
+        );
+    }
 }
 
 #[test]

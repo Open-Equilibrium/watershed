@@ -25,6 +25,7 @@ pub(in super::super) struct FakeToolExecutor {
 pub(in super::super) enum FakeToolExecutionFault {
     #[default]
     None,
+    PrepareError,
     ExecutorError,
     RequestHashMismatch,
     ReceiptMismatch,
@@ -64,6 +65,11 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         request_id: &str,
     ) -> Result<Self::Prepared, RuntimeError> {
         let _ = (policy, command_policy, request_id);
+        if matches!(self.fault, FakeToolExecutionFault::PrepareError) {
+            return Err(RuntimeError::Protocol(
+                "fixture Executor preparation failure".to_owned(),
+            ));
+        }
         let policy_digest = "0".repeat(64);
         let request_hash = super::fake_tool_request_hash();
         Ok(FakePreparedTool {

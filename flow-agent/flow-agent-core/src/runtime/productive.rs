@@ -34,6 +34,8 @@ pub(crate) use platform::ensure_productive_tool_execution_platform;
 #[cfg(test)]
 pub(crate) use platform::productive_execution_supported_release;
 #[cfg(test)]
+pub(crate) use platform::productive_tool_execution_supported_release;
+#[cfg(test)]
 pub(crate) use provider_result::MAX_ACCUMULATED_PROVIDER_INPUT_BYTES;
 pub(crate) use provider_result::MAX_DURABLE_PROVIDER_OUTPUT_BYTES;
 #[cfg(test)]

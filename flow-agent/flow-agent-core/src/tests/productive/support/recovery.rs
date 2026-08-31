@@ -108,6 +108,7 @@ impl ProductiveRecovery for CompletionBoundaryRecordingRecovery {
 pub(in super::super) enum InjectedAttemptRecovery {
     ProviderError,
     ProviderResult(RunAttemptResult),
+    ToolError,
     ToolResult(RunAttemptResult),
     ToolWrongKind,
 }
@@ -127,6 +128,9 @@ impl ProductiveRecovery for InjectedAttemptRecovery {
             Self::ProviderResult(result) if kind == RunAttemptKind::Provider => {
                 Ok(Some(result.clone()))
             }
+            Self::ToolError if kind == RunAttemptKind::Tool => Err(RuntimeError::Protocol(
+                "fixture Tool recovery failure".to_owned(),
+            )),
             Self::ToolResult(result) if kind == RunAttemptKind::Tool => Ok(Some(result.clone())),
             Self::ToolWrongKind if kind == RunAttemptKind::Tool => Ok(Some(RunAttemptResult {
                 attempt_id: "tool-000001".to_owned(),
