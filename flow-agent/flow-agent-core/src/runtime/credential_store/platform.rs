@@ -14,7 +14,7 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt as _;
 #[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle as _;
 
