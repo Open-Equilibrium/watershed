@@ -169,7 +169,7 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          test "$(docker exec watershed-m12 command -v bwrap)" = /usr/bin/bwrap
+          docker exec watershed-m12 /bin/sh -ec 'test "$(command -v bwrap)" = /usr/bin/bwrap'
           docker exec watershed-m12 dpkg-query --show '--showformat=${Status} ${Version}\n' bubblewrap
           docker exec watershed-m12 /usr/bin/bwrap --version
 
