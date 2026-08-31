@@ -46,7 +46,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 - Fixture/stub execution only when the workspace explicitly selects the canonical fixture profile; other workspaces fail closed before provider or tool side effects.
 - Canonical Flow runtime events, append-only session history, replay, tail and resume.
 - Deterministic, cache-stable `flow-context-v0` compilation and reproducible context manifests.
-- Deterministic in-process policy enforcement/emulation for declared command, parameter, path, protected-path and deny-all network decisions.
+- Deterministic in-process policy enforcement/emulation for declared command, parameter, exact-mount and deny-all network decisions.
 - Cross-platform functional and coverage gates plus Linux performance evidence defined by `TESTING.md`, `PERFORMANCE.md` and CI.
 
 M1 does not provide a real provider adapter, general external process execution, a complete POSIX shell, OS-enforced isolation, positive network grants, or public session export/delete/prune operations.
@@ -84,7 +84,7 @@ The M1 deterministic runtime foundation satisfies the following criteria. They r
 8. Phase-scoped Tool availability: the provider may request an available Tool zero or more times; a Tool reference never invokes it automatically.
 9. Provider-requested invocation parameters validated against each Tool's `allowed_parameters`, with canonical bounded Tool results for events and Run Logs.
 10. A general bounded external subprocess runner.
-11. Predefined commands launched by direct exec without shell parsing, PATH lookup or ambient environment inheritance.
+11. Predefined command identity and arguments resolved without shell parsing, `PATH` lookup or ambient environment inheritance; productive launch uses the Executor boundary.
 12. Own-script execution through one fixed runner with a bounded runtime and no implicit interpreter selection.
 13. Timeouts, cancellation and bounded stdout and stderr.
 14. Per-Tool Run Log projections plus actual `tool.timed_out` and Tool-failure events.
@@ -121,27 +121,27 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Purpose:** replace M1.1's productive direct-Tool path with a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
+**Purpose:** establish a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
 
 **Deliverables:**
 
-1. A versioned one-shot Executor protocol for exactly one Tool invocation: Flow Agent owns policy validation, Executor selection and lifecycle, bounded request/result validation, durable attempt state and fail-closed errors. The companion process receives one JSON request on stdin, returns one JSON result on stdout and is resolved only from an administrator-configured absolute path. No daemon, socket, pool or remote transport is in M1.2.
-2. One official Default Sandbox Executor installed by the standard Flow Agent installation path. `--no-default-executor` is an explicit administrator opt-out; it preserves authoring, validation and fixture execution but leaves productive execution fail-closed until a Custom Executor is configured. Flow Agent provides the protocol, implementer documentation, actionable diagnostics and an advisory compatibility probe, but makes no third-party compatibility or security guarantee.
-3. Ubuntu 24.04 x64 enforcement through Bubblewrap namespaces/mounts plus seccomp, with inherited descendant confinement and deny-all Tool networking. There is no Landlock-only or unsandboxed fallback.
-4. macOS 26 arm64 enforcement through a native Seatbelt profile with semantic parity to the canonical policy and deny-all Tool networking, inherited by descendants.
+1. A versioned one-shot Executor protocol for exactly one Tool invocation: Flow Agent owns policy validation, Executor selection and lifecycle, bounded request/result validation, durable attempt state and fail-closed errors. The standard installation resolves its administrator-owned sibling `flow-executor`; an administrator may select a protected absolute Custom Executor override. No daemon, socket, pool or remote transport is in M1.2.
+2. One official Default Sandbox Executor installed by the standard Flow Agent installation path. `--no-default-executor` is an explicit administrator opt-out; it preserves authoring, validation and fixture execution but leaves productive Tool execution fail-closed until a Custom Executor is configured on the supported Ubuntu 24.04 x64 platform. Flow Agent provides the protocol, implementer documentation, actionable diagnostics and an advisory compatibility probe, but makes no third-party compatibility or security guarantee.
+3. Ubuntu 24.04 x64 enforcement through stock Bubblewrap namespaces/mounts plus seccomp, with inherited descendant confinement and deny-all Tool networking. The Executor accepts older supported Bubblewrap versions through descriptor-backed mount compatibility; there is no bundled, Landlock-only or unsandboxed fallback.
+4. Exact pre-opened `read_only_mounts` and `writable_mounts` plus `runtime_profile`. `exact` is the default readiness-advertised executable/interpreter/library manifest; `host-system-read` is an explicit Agentic Engineer choice that adds only the Executor's fixed reviewed system roots. Flow users, providers and Tools cannot select, widen or escalate either profile, and no fallback exists.
 5. The unchanged deterministic Fixture executor and fake-Executor conformance fixtures, so M1/M1.1 contracts remain testable before, during and after backend implementation.
-6. A hostile escape matrix covering traversal, symlinks, hardlinks, rename/create races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, protected paths, process/session escape, timeout, cancellation and teardown.
+6. A hostile escape matrix covering exact mount boundaries, traversal, links and replacement races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, process/session escape, timeout, cancellation and teardown.
 
 **DoD:**
 
-- A standard supported-platform installation passes its readiness self-test and runs a productive Flow out of the box; both standard and opt-out installation paths have automated acceptance tests.
+- A standard Ubuntu installation proves Executor/backend readiness before durable Run reservation and runs a productive Flow out of the box; both standard and opt-out installation paths have automated acceptance tests.
 - Real Tool processes cannot exceed declared read, write, deny-all network or process boundaries on every exact platform for which support is claimed. Provider traffic remains Flow Agent traffic outside the Tool Sandbox.
 - Protocol conformance tests cover success, unsupported versions and policy, malformed/oversized output, timeout, premature exit, missing evidence and unavailable configuration without spawning a Tool after failed preflight.
 - Negative tests exercise the official applied OS boundary, not M1 policy emulation, and demonstrate equivalence between canonical policy and applied restrictions.
-- Descendants inherit restrictions; backend, protocol or readiness failure never falls back to M1.1 direct execution; platform differences and tested coverage are explicit.
+- Descendants inherit restrictions; backend, protocol or readiness failure never launches a weaker path; the canonical enforcement receipt and policy digest are persisted with the terminal Tool attempt.
 - The architecture and plain-language comparison with Pi Coding Agent and Codex CLI remain visible in [`docs/concept/flow-agent-executor-architecture.md`](docs/concept/flow-agent-executor-architecture.md).
 
-**Explicit post-M1.2 work:** Windows productive execution remains disabled until [D-047](docs/decisions/open-decisions.html#d-047) selects and proves a boundary. Positive CIDR/port grants remain disabled until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven. OCI/Docker/Podman, Lima/Apple Container, Firecracker/Cloud Hypervisor, gVisor, Kata Containers and Gondolin are non-binding future integration candidates, not support promises. A later milestone may add an independently reviewed backend or Custom Executor without transferring Executor ownership to Meta-Harness or Liquid.
+**Explicit post-M1.2 work:** Official productive macOS execution remains fail-closed. A post-M1.2 review may reconsider it only after supported controls can prevent or contain process creation and guarantee descendant teardown without private-API debt. Windows productive execution remains disabled until [D-047](docs/decisions/open-decisions.html#d-047) selects and proves a boundary. Positive CIDR/port grants remain disabled until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven. OCI/Docker/Podman, Lima/Apple Container, Firecracker/Cloud Hypervisor, gVisor, Kata Containers and Gondolin are non-binding future integration candidates, not support promises. A later milestone may add an independently reviewed backend or Custom Executor without transferring Executor ownership to Meta-Harness or Liquid.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 

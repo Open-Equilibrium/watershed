@@ -1,6 +1,6 @@
 # Current implementation architecture
 
-These diagrams map the current Rust workspace and major Flow Agent responsibility paths. They do not depict the planned M1.2 boundary; see the [Flow Agent Executor architecture](concept/flow-agent-executor-architecture.md) for that target. Product topology is canonical in [`VISION.md`](../VISION.md); runtime behavior and storage contracts are canonical in [`PROTOCOL.md`](../PROTOCOL.md). Security and evidence remain in [`SECURITY.md`](../SECURITY.md) and [`TESTING.md`](../TESTING.md).
+These diagrams map the Rust workspace and major Flow Agent responsibility paths. The [Flow Agent Executor architecture](concept/flow-agent-executor-architecture.md) explains the M1.2 isolation design. Product topology is canonical in [`VISION.md`](../VISION.md); runtime behavior and storage contracts are canonical in [`PROTOCOL.md`](../PROTOCOL.md). Security and evidence remain in [`SECURITY.md`](../SECURITY.md) and [`TESTING.md`](../TESTING.md).
 
 ## Rust workspace crates
 
@@ -11,6 +11,7 @@ flowchart TD
   C[flow-agent-cli] --> F[flow-agent-core]
   C --> S[core-script]
   C --> R[proto]
+  E[flow-agent-executor] --> R
   F --> P[core-policy]
   F --> S
   F --> R
@@ -19,7 +20,7 @@ flowchart TD
   S --> R
 ```
 
-The package manifests are the executable dependency source of truth.
+The package manifests are the executable dependency source of truth. `flow-agent-executor` is the companion binary launched through the protocol, not a library dependency of Flow Agent core.
 
 ## Flow Agent runtime responsibilities
 
@@ -33,13 +34,16 @@ flowchart TD
   S --> P[fixture planning]
   P --> A[apply]
   A --> F[fixture effects and Tools]
-  S --> R[M1.1 productive runtime]
+  S --> R[productive runtime]
   R --> O[OpenAI Codex provider]
   R --> Y[policy resolution]
-  Y --> T[bounded direct Tool runner]
+  Y --> E[one-shot Executor client]
+  E --> X[flow-executor]
+  X --> B[Ubuntu Bubblewrap and seccomp]
+  B --> T[Tool process and descendants]
 ```
 
-The fixture path is deterministic and in process. The current M1.1 productive Tool runner manages process stability but provides no OS-isolation boundary.
+The Fixture path is deterministic and in process and makes no OS-isolation claim. Productive Tool execution uses the one-shot Executor contract; official productive targets without the Ubuntu boundary fail closed.
 
 ### Persistence and inputs
 
@@ -49,7 +53,7 @@ flowchart TD
   C --> W[conversation writer]
   W --> J[Event and context JSONL]
   W --> L[Live-event watermarks]
-  C --> Q[Run Log, recovery and status]
+  C --> Q[Run Log, recovery, enforcement receipt and status]
   G[Global config and registry] --> S
   A[Global and Workspace AGENTS.md] --> S
   X[Execution Workspace] --> S
@@ -57,6 +61,6 @@ flowchart TD
 
 See the [Flow Agent V-Spec](concept/V-Spec_FlowAgent.html#architecture) for responsibility boundaries. Current module declarations live in [`flow-agent-core/src/runtime/mod.rs`](../flow-agent/flow-agent-core/src/runtime/mod.rs); CLI composition lives in [`flow-agent-cli/src/dispatch.rs`](../flow-agent/flow-agent-cli/src/dispatch.rs).
 
-## Current configuration boundary
+## Configuration boundary
 
-Current M1.1 resolves technical configuration only from `FLOW_AGENT_HOME`, defaulting to `~/.flow` on Unix and `%USERPROFILE%\.flow` on Windows. Its `config.yaml` selects a registry only beneath that global home. Workspace `.flow` files and registries are never implicit inputs. Global-home and harness-start Workspace `AGENTS.md` files are loaded separately as ordered instructions and cannot alter technical authority. [`PROTOCOL.md`](../PROTOCOL.md#m11-authoring-cli-grammar-adr-0091-adr-0097-adr-0104-adr-0110) owns the authoring contract.
+Flow Agent resolves technical configuration only from `FLOW_AGENT_HOME`, defaulting to `~/.flow` on Unix and `%USERPROFILE%\.flow` on Windows. Its `config.yaml` selects a registry only beneath that global home. Workspace `.flow` files and registries are never implicit inputs. Global-home and harness-start Workspace `AGENTS.md` files are loaded separately as ordered instructions and cannot alter technical authority. Executor selection is a separate protected administrator setting: the default derives the sibling `flow-executor`, while a Custom Executor requires an absolute override. [`PROTOCOL.md`](../PROTOCOL.md) owns both contracts.
