@@ -264,6 +264,11 @@ impl PreparedRequest {
             .zip(&self.request.mounts)
             .map(|(source, mount)| (source.as_raw_fd(), mount.descriptor as i32))
             .collect::<Vec<_>>();
+        let _standard_descriptor_reservations = [
+            std::fs::File::open("/dev/null").expect("standard descriptor reserve opens"),
+            std::fs::File::open("/dev/null").expect("standard descriptor reserve opens"),
+            std::fs::File::open("/dev/null").expect("standard descriptor reserve opens"),
+        ];
         let mut command = Command::new(executor);
         command
             .env_clear()
@@ -290,12 +295,17 @@ impl PreparedRequest {
             });
         }
         let mut child = command.spawn().expect("Executor launches");
-        child
-            .stdin
-            .take()
-            .expect("Executor stdin is piped")
-            .write_all(&request)
-            .expect("request is written");
+        let mut stdin = child.stdin.take().expect("Executor stdin is piped");
+        if let Err(error) = stdin.write_all(&request) {
+            drop(stdin);
+            let output = child.wait_with_output().expect("Executor is reaped");
+            panic!(
+                "request could not be written: {error}; Executor status: {}; stderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        drop(stdin);
         RunningRequest {
             child,
             policy_digest,

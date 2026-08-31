@@ -574,6 +574,19 @@ fn execute_one_shot(
         .zip(&request.mounts)
         .map(|(source, mount)| (source.as_raw_fd(), mount.descriptor as i32))
         .collect::<Vec<_>>();
+    let reserve_standard_descriptor = || {
+        File::open("/dev/null").map_err(|_| {
+            executor_error(
+                proto::ExecutorErrorCodeV0::Unavailable,
+                "one-shot Executor process could not reserve standard descriptors",
+            )
+        })
+    };
+    let _standard_descriptor_reservations = [
+        reserve_standard_descriptor()?,
+        reserve_standard_descriptor()?,
+        reserve_standard_descriptor()?,
+    ];
     let mut command = Command::new(inherited_path);
     command
         .env_clear()
@@ -1030,6 +1043,61 @@ mod tests {
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn one_shot_executor_works_without_parent_standard_descriptors() {
+        const CHILD_ENV: &str = "WATERSHED_EXECUTOR_WITHOUT_STDIO_CHILD";
+        if std::env::var_os(CHILD_ENV).is_none() && std::env::var_os("NEXTEST").is_none() {
+            let test_name = std::thread::current()
+                .name()
+                .expect("test thread has a name")
+                .to_owned();
+            let mut command =
+                Command::new(std::env::current_exe().expect("core test executable resolves"));
+            command
+                .args(["--exact", &test_name, "--nocapture"])
+                .env(CHILD_ENV, "1");
+            unsafe {
+                command.pre_exec(|| {
+                    for descriptor in 0..=2 {
+                        rustix::io::close(descriptor);
+                    }
+                    Ok(())
+                });
+            }
+            let status = command.status().expect("isolated core test starts");
+            assert!(status.success(), "isolated core test failed");
+            return;
+        }
+        if std::env::var_os("NEXTEST").is_some() {
+            for descriptor in 0..=2 {
+                rustix::io::close(descriptor);
+            }
+        }
+
+        let request = one_shot_request();
+        let response = proto::ExecutorResponseV0::Error {
+            code: proto::ExecutorErrorCodeV0::Unavailable,
+            message: "unavailable".to_owned(),
+            request_id: request.request_id.clone(),
+            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+        };
+        let response = String::from_utf8(
+            proto::canonical_executor_response_v0(&response).expect("response is canonical"),
+        )
+        .expect("response is UTF-8");
+        let script = format!("printf '%s' '{response}'");
+        let executor = File::open("/bin/sh").expect("shell executor opens");
+
+        let error = execute_one_shot(&executor, &[], &request, script.as_bytes())
+            .expect_err("fake Executor returns its canonical unavailable response");
+        match error {
+            crate::runtime::types::RuntimeError::Executor(error) => {
+                assert_eq!(error.code(), proto::ExecutorErrorCodeV0::Unavailable);
+            }
+            error => panic!("unexpected error: {error}"),
+        }
+    }
 
     #[test]
     fn one_shot_cancellation_signals_the_executor_before_forced_group_cleanup() {
