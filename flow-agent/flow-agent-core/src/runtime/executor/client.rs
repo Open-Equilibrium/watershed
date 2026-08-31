@@ -1071,7 +1071,9 @@ mod tests {
         }
         if std::env::var_os("NEXTEST").is_some() {
             for descriptor in 0..=2 {
-                rustix::io::close(descriptor);
+                // SAFETY: nextest gives this test its own process, and the test deliberately
+                // invalidates only that process's inherited standard descriptors.
+                unsafe { rustix::io::close(descriptor) };
             }
         }
 
