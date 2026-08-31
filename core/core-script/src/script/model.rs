@@ -59,6 +59,8 @@ pub const MAX_REGISTRY_TRAVERSAL_DEPTH: usize = 64;
 pub const MAX_BLOCK_NAME_CHARS: usize = 256;
 /// Maximum UTF-8 bytes in an Instruction prompt or own-script body.
 pub const MAX_REGISTRY_DEFINITION_BYTES: usize = 64 * 1024;
+/// Maximum exact read-only and writable mount capabilities declared by one Tool.
+pub const MAX_FILESYSTEM_MOUNTS: usize = 64;
 
 /// Shared id/name pair for every registry block.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -146,15 +148,48 @@ pub struct ToolBlock {
     pub script_body: Option<String>,
     /// Parameters accepted by the tool.
     pub allowed_parameters: Vec<AllowedParameter>,
-    /// Workspace-relative read scopes.
-    pub read_scope: Vec<String>,
-    /// Workspace-relative write scopes.
-    pub write_scope: Vec<String>,
-    /// Protected paths this tool may access.
-    pub protected_path_grants: Vec<String>,
+    /// Runtime objects made readable in addition to exact filesystem mounts.
+    #[serde(default)]
+    pub runtime_profile: ToolRuntimeProfile,
+    /// Exact Workspace directory capabilities mounted read-only.
+    pub read_only_mounts: Vec<String>,
+    /// Exact Workspace directory capabilities mounted writable.
+    pub writable_mounts: Vec<String>,
     /// Network policy declared for this tool.
     pub network: NetworkPolicy,
 }
+
+/// Named runtime-read profile selected for one Tool.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ToolRuntimeProfile {
+    /// Resolve only the exact administrator-owned runtime object manifest.
+    #[default]
+    Exact,
+    /// Add the official Executor's reviewed read-only host system roots.
+    HostSystemRead,
+}
+
+impl ToolRuntimeProfile {
+    /// All supported runtime-read profiles.
+    pub const ALL: [Self; 2] = [Self::Exact, Self::HostSystemRead];
+
+    /// Returns the canonical serialized token.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::HostSystemRead => "host-system-read",
+        }
+    }
+
+    /// Parses a canonical serialized token.
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|profile| profile.as_str() == value)
+    }
+}
+
+impl_token_serde!(ToolRuntimeProfile, "Tool runtime profile");
 
 /// Tool execution family.
 #[derive(Clone, Debug, Eq, PartialEq)]

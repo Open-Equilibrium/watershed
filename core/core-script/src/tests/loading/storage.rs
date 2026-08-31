@@ -418,9 +418,8 @@ tool:
   script_body: |
     echo outside
   allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
+  read_only_mounts: []
+  writable_mounts: []
   network: deny
 "#,
     )

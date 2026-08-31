@@ -1,7 +1,7 @@
 use super::{PolicyArtifactValidationError, policy_artifact_error};
-use crate::protected_paths::{
-    DEFAULT_PROTECTED_PATHS, ProtectedPathMatchMode, normalize_protected_path_match_input,
-    protected_path_grant_is_inside_scope,
+use core_script::{
+    MAX_FILESYSTEM_MOUNTS, WORKSPACE_SCOPE_ROOT, normalize_safe_relative_path,
+    strip_workspace_scope,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -10,76 +10,40 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FilesystemPolicy {
-    /// Exact or glob-pattern protected paths this command may access.
-    pub protected_path_grants: Vec<String>,
-    /// Default protected path patterns.
-    pub protected_paths: Vec<String>,
-    /// Workspace-relative read roots.
-    pub read_roots: Vec<String>,
-    /// Workspace-relative write roots.
-    pub write_roots: Vec<String>,
+    /// Exact workspace mounts exposed read-only to this command.
+    pub read_only_mounts: Vec<String>,
+    /// Exact workspace mounts exposed read-write to this command.
+    pub writable_mounts: Vec<String>,
 }
 
 impl FilesystemPolicy {
-    pub(super) fn validate(
-        &self,
-        tool_id: &str,
-        protected_path_match_mode: ProtectedPathMatchMode,
-    ) -> Result<(), PolicyArtifactValidationError> {
-        if !matches_default_protected_paths(&self.protected_paths) {
+    pub(super) fn validate(&self, tool_id: &str) -> Result<(), PolicyArtifactValidationError> {
+        let mount_count = self
+            .read_only_mounts
+            .len()
+            .saturating_add(self.writable_mounts.len());
+        if mount_count > MAX_FILESYSTEM_MOUNTS {
             return Err(policy_artifact_error(format!(
-                "tool {tool_id} filesystem protected_paths must match SECURITY.md defaults"
+                "tool {tool_id} filesystem mount count {mount_count} exceeds the maximum of {MAX_FILESYSTEM_MOUNTS}"
             )));
         }
 
-        let declared_scopes = self.validate_roots(tool_id, protected_path_match_mode)?;
-
-        for grant in &self.protected_path_grants {
-            let Some(normalized_grant) =
-                normalize_protected_path_match_input(protected_path_match_mode, grant)
-            else {
-                return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must be a safe relative path or pattern"
-                )));
-            };
-
-            if !declared_scopes
-                .iter()
-                .any(|scope| protected_path_grant_is_inside_scope(&normalized_grant, scope))
+        let mut declared_mounts = BTreeSet::new();
+        for mount in self.read_only_mounts.iter().chain(&self.writable_mounts) {
+            if normalize_safe_relative_path(mount).as_deref() != Some(mount)
+                || mount != WORKSPACE_SCOPE_ROOT && strip_workspace_scope(mount).is_none()
             {
                 return Err(policy_artifact_error(format!(
-                    "tool {tool_id} protected_path_grant {grant:?} must stay inside read_roots or write_roots"
+                    "tool {tool_id} filesystem mount {mount:?} must be workspace or a safe path below workspace"
+                )));
+            }
+            if !declared_mounts.insert(mount) {
+                return Err(policy_artifact_error(format!(
+                    "tool {tool_id} filesystem mount {mount:?} is declared more than once"
                 )));
             }
         }
 
         Ok(())
     }
-
-    fn validate_roots(
-        &self,
-        tool_id: &str,
-        protected_path_match_mode: ProtectedPathMatchMode,
-    ) -> Result<Vec<String>, PolicyArtifactValidationError> {
-        let mut declared_scopes = Vec::new();
-        for root in self.read_roots.iter().chain(&self.write_roots) {
-            let Some(normalized_root) = core_script::normalize_safe_relative_path(root) else {
-                return Err(policy_artifact_error(format!(
-                    "tool {tool_id} filesystem root {root:?} must be a safe relative path"
-                )));
-            };
-            declared_scopes.push(
-                normalize_protected_path_match_input(protected_path_match_mode, &normalized_root)
-                    .expect("safe relative roots are valid protected-path match inputs"),
-            );
-        }
-
-        Ok(declared_scopes)
-    }
-}
-
-fn matches_default_protected_paths(paths: &[String]) -> bool {
-    paths.len() == DEFAULT_PROTECTED_PATHS.len()
-        && paths.iter().map(String::as_str).collect::<BTreeSet<_>>()
-            == DEFAULT_PROTECTED_PATHS.iter().copied().collect()
 }

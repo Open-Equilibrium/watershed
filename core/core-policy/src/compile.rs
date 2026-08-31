@@ -5,7 +5,6 @@ use crate::{
         FilesystemPolicy, NetworkPolicy, PhaseScope, PolicyArtifact, PolicyArtifactValidationError,
         PolicyTarget, RuntimeLimits, policy_artifact_error,
     },
-    protected_paths::DEFAULT_PROTECTED_PATHS,
 };
 use core_script::NetworkDefault;
 use std::{
@@ -236,15 +235,11 @@ pub(crate) fn command_policy_from_tool(
         },
         executable,
         filesystem: FilesystemPolicy {
-            protected_path_grants: tool.protected_path_grants.clone(),
-            protected_paths: DEFAULT_PROTECTED_PATHS
-                .iter()
-                .map(|path| (*path).to_owned())
-                .collect(),
-            read_roots: tool.read_scope.clone(),
-            write_roots: tool.write_scope.clone(),
+            read_only_mounts: tool.read_only_mounts.clone(),
+            writable_mounts: tool.writable_mounts.clone(),
         },
         network,
+        runtime_profile: tool.runtime_profile,
         script_runtime,
         tool_id: tool.identity.id.clone(),
         tool_kind: tool.tool_kind.clone(),

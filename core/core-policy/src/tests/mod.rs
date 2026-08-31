@@ -1,6 +1,5 @@
 mod artifact;
 mod compile;
-mod protected_paths;
 
 use crate::{PolicyTarget, TrustedPredefinedCommand};
 use std::{collections::BTreeSet, path::Path};

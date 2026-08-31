@@ -141,6 +141,22 @@ fn policy_compiler_preserves_macos_network_allowlists() {
 }
 
 #[test]
+fn policy_compiler_preserves_the_selected_runtime_profile() {
+    let registry = smoke_registry_with_tool(|tool| {
+        tool.runtime_profile = core_script::ToolRuntimeProfile::HostSystemRead;
+    });
+
+    let artifact =
+        compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::LinuxLandlockSeccomp)
+            .expect("the selected runtime profile compiles");
+
+    assert_eq!(
+        artifact.commands[0].runtime_profile,
+        core_script::ToolRuntimeProfile::HostSystemRead
+    );
+}
+
+#[test]
 fn policy_compiler_rejects_unknown_predefined_commands() {
     let registry = smoke_registry_with_tool(|tool| {
         tool.command = core_script::ToolCommand::Predefined {

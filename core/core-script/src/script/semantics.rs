@@ -1,12 +1,13 @@
 use crate::script::error::SemanticValidationError;
 use crate::script::model::{
-    BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_PHASE_LOOP_ITERATIONS,
-    MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy, ParameterValueType, PhaseBlock, RegistryBlock,
-    RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
+    BlockIdentity, FlowBlock, InstructionBlock, MAX_BLOCK_NAME_CHARS, MAX_FILESYSTEM_MOUNTS,
+    MAX_PHASE_LOOP_ITERATIONS, MAX_REGISTRY_DEFINITION_BYTES, NetworkPolicy, ParameterValueType,
+    PhaseBlock, RegistryBlock, RegistryBlockKind, ScriptRuntime, ToolBlock, ToolCommand, ToolKind,
 };
 use crate::script::paths::{
-    is_valid_allowed_parameter_name, is_valid_block_id, is_valid_canonical_cidr,
-    is_valid_command_id, normalize_protected_path_pattern, normalize_safe_relative_path,
+    WORKSPACE_SCOPE_ROOT, is_valid_allowed_parameter_name, is_valid_block_id,
+    is_valid_canonical_cidr, is_valid_command_id, normalize_safe_relative_path,
+    strip_workspace_scope,
 };
 use crate::script::values::{
     parameter_pattern_matches, validate_predicate_against_contract, validate_predicate_definition,
@@ -371,27 +372,41 @@ pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticVa
         }
     }
 
-    for (field, scopes) in [
-        ("read_scope", &tool.read_scope),
-        ("write_scope", &tool.write_scope),
+    let mount_count = tool
+        .read_only_mounts
+        .len()
+        .saturating_add(tool.writable_mounts.len());
+    if mount_count > MAX_FILESYSTEM_MOUNTS {
+        return Err(invalid_tool(
+            tool,
+            &format!(
+                "filesystem mount count {mount_count} exceeds the maximum of {MAX_FILESYSTEM_MOUNTS}"
+            ),
+        ));
+    }
+
+    let mut declared_mounts = BTreeSet::new();
+    for (field, mounts) in [
+        ("read_only_mounts", &tool.read_only_mounts),
+        ("writable_mounts", &tool.writable_mounts),
     ] {
-        for scope in scopes {
-            if normalize_safe_relative_path(scope).is_none() {
+        for mount in mounts {
+            if normalize_safe_relative_path(mount).is_none()
+                || mount != WORKSPACE_SCOPE_ROOT && strip_workspace_scope(mount).is_none()
+            {
                 return Err(invalid_tool(
                     tool,
-                    &format!("{field} entry {scope:?} must be a safe relative path"),
+                    &format!(
+                        "{field} entry {mount:?} must be workspace or a safe path below workspace"
+                    ),
                 ));
             }
-        }
-    }
-    for grant in &tool.protected_path_grants {
-        if normalize_protected_path_pattern(grant).is_none() {
-            return Err(invalid_tool(
-                tool,
-                &format!(
-                    "protected_path_grants entry {grant:?} must be a safe relative path or pattern"
-                ),
-            ));
+            if !declared_mounts.insert(mount) {
+                return Err(invalid_tool(
+                    tool,
+                    &format!("filesystem mount {mount:?} is declared more than once"),
+                ));
+            }
         }
     }
 

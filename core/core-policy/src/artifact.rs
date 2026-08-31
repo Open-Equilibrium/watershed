@@ -1,4 +1,4 @@
-use crate::{POLICY_VERSION_V0, protected_paths::ProtectedPathMatchMode};
+use crate::POLICY_VERSION_V0;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, fmt};
 
@@ -30,16 +30,6 @@ pub struct PolicyArtifact {
     pub target: PolicyTarget,
 }
 
-/// Returns the documented protected path match mode for a policy target.
-pub fn protected_path_match_mode_for_policy_target(
-    target: &PolicyTarget,
-) -> ProtectedPathMatchMode {
-    match target {
-        PolicyTarget::LinuxLandlockSeccomp => ProtectedPathMatchMode::CaseSensitive,
-        PolicyTarget::MacosSeatbelt => ProtectedPathMatchMode::CaseInsensitive,
-    }
-}
-
 impl PolicyArtifact {
     /// Validates artifact invariants after compile or deserialization.
     pub fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
@@ -49,9 +39,8 @@ impl PolicyArtifact {
             ));
         }
 
-        let protected_path_match_mode = protected_path_match_mode_for_policy_target(&self.target);
         for command in &self.commands {
-            command.validate(protected_path_match_mode)?;
+            command.validate()?;
             if matches!(self.target, PolicyTarget::LinuxLandlockSeccomp)
                 && !command.network.allow.is_empty()
             {
@@ -176,8 +165,6 @@ pub enum DenyReasonCode {
     EnvironmentDenied,
     /// Tool was invoked out of phase.
     ToolOutOfPhase,
-    /// Protected path access was denied.
-    ProtectedPathDenied,
     /// Symlink escape was denied.
     SymlinkEscapeDenied,
     /// Interpreter escape was denied.
@@ -186,12 +173,11 @@ pub enum DenyReasonCode {
 
 impl DenyReasonCode {
     /// Every stable denial reason represented in policy artifacts.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 6] = [
         Self::WriteDenied,
         Self::NetworkDenied,
         Self::EnvironmentDenied,
         Self::ToolOutOfPhase,
-        Self::ProtectedPathDenied,
         Self::SymlinkEscapeDenied,
         Self::InterpreterEscapeDenied,
     ];
@@ -203,7 +189,6 @@ impl DenyReasonCode {
             Self::NetworkDenied => "network_denied",
             Self::EnvironmentDenied => "environment_denied",
             Self::ToolOutOfPhase => "tool_out_of_phase",
-            Self::ProtectedPathDenied => "protected_path_denied",
             Self::SymlinkEscapeDenied => "symlink_escape_denied",
             Self::InterpreterEscapeDenied => "interpreter_escape_denied",
         }
@@ -254,10 +239,8 @@ pub fn canonical_artifact_json(artifact: &PolicyArtifact) -> Result<String, Poli
             parameter.allowed_values.sort();
         }
         command.environment.allow.sort();
-        command.filesystem.protected_path_grants.sort();
-        command.filesystem.protected_paths.sort();
-        command.filesystem.read_roots.sort();
-        command.filesystem.write_roots.sort();
+        command.filesystem.read_only_mounts.sort();
+        command.filesystem.writable_mounts.sort();
         command.network.allow.sort_by(|a, b| {
             a.transport
                 .as_str()
