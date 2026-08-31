@@ -6,6 +6,21 @@ mod selection;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const EXECUTOR_REAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+thread_local! {
+    static PROCESS_GROUP_CLEANUP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+pub(super) fn reset_process_group_cleanup_calls_for_test() {
+    PROCESS_GROUP_CLEANUP_CALLS.set(0);
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+pub(super) fn process_group_cleanup_calls_for_test() -> usize {
+    PROCESS_GROUP_CLEANUP_CALLS.get()
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn child_exited_without_reaping(child: &std::process::Child) -> rustix::io::Result<bool> {
     let pid = rustix::process::Pid::from_raw(child.id() as i32).ok_or(rustix::io::Errno::INVAL)?;
@@ -24,6 +39,8 @@ fn terminate_child_bounded(child: &mut std::process::Child) -> bool {
     // Signal the group before reaping its leader. The unreaped leader retains
     // the numeric PID/PGID, so this signal cannot race with identifier reuse.
     if let Some(process_group) = process_group {
+        #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+        PROCESS_GROUP_CLEANUP_CALLS.set(PROCESS_GROUP_CLEANUP_CALLS.get() + 1);
         let _ = rustix::process::kill_process_group(process_group, rustix::process::Signal::Kill);
     }
     let _ = child.kill();

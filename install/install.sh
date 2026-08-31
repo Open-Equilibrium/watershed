@@ -90,21 +90,45 @@ executor_target=$bin/flow-executor
 flow_stage=$bin/.flow.install.$$
 executor_stage=$bin/.flow-executor.install.$$
 readiness_config=$bin/.flow-readiness-config.$$
+readiness_status_file=$readiness_config/status
 published_flow=0
 published_executor=0
 readiness_config_created=0
 readiness_pid=
 readiness_pgid=
-readiness_group_exists() {
-    /usr/bin/pgrep -g "$readiness_pgid" >/dev/null 2>&1
+readiness_group_has_descendant() {
+    for readiness_member in $(/usr/bin/pgrep -g "$readiness_pgid" 2>/dev/null || :); do
+        [ "$readiness_member" = "$readiness_pid" ] || return 0
+    done
+    return 1
 }
 wait_for_readiness_group() {
     wait_attempts=20
-    while readiness_group_exists; do
+    while readiness_group_has_descendant; do
         [ "$wait_attempts" -gt 0 ] || return 1
         /bin/sleep 0.05
         wait_attempts=$((wait_attempts - 1))
     done
+}
+wait_for_readiness_status() {
+    # Six seconds permits the five-second checker timeout plus reporting overhead.
+    readiness_attempts=120
+    while [ ! -e "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ]; do
+        [ "$readiness_attempts" -gt 0 ] || return 1
+        /bin/sleep 0.05
+        readiness_attempts=$((readiness_attempts - 1))
+    done
+    [ -f "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ] || return 1
+    readiness_status_metadata=$(/usr/bin/stat -c '%u:%h:%s' -- "$readiness_status_file") || return 1
+    case "$readiness_status_metadata" in
+        "$current_owner:1:2"|"$current_owner:1:3"|"$current_owner:1:4") ;;
+        *) return 1 ;;
+    esac
+    readiness_status=$(/bin/cat -- "$readiness_status_file") || return 1
+    case "$readiness_status" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$readiness_status" -le 255 ] || return 1
 }
 stop_readiness() {
     [ -n "$readiness_pid" ] || return 0
@@ -115,10 +139,7 @@ stop_readiness() {
         /bin/kill -KILL -- "$readiness_pid" 2>/dev/null || :
         wait_for_readiness_group || :
     fi
-    readiness_state=$(/usr/bin/ps -o stat= -p "$readiness_pid" 2>/dev/null || :)
-    case "$readiness_state" in
-        ''|*Z*) wait "$readiness_pid" 2>/dev/null || : ;;
-    esac
+    wait "$readiness_pid" 2>/dev/null || :
     readiness_pid=
     readiness_pgid=
 }
@@ -164,19 +185,22 @@ if [ "$install_executor" -eq 1 ]; then
     /bin/mkdir -m 0700 -- "$readiness_config" || fail 'cannot isolate readiness configuration'
     readiness_config_created=1
     /usr/bin/setsid /bin/sh -c '
+        umask 077
         PATH=
         HOME=$1
         XDG_CONFIG_HOME=$1
         export PATH HOME XDG_CONFIG_HOME
-        cd / && exec "$2" executor check </dev/null
-    ' flow-readiness "$readiness_config" "$flow_target" &
+        if cd / && "$2" executor check </dev/null; then
+            readiness_status=0
+        else
+            readiness_status=$?
+        fi
+        printf "%s\\n" "$readiness_status" > "$3.pending" && /bin/mv -f -- "$3.pending" "$3" || :
+        while :; do /bin/sleep 3600; done
+    ' flow-readiness "$readiness_config" "$flow_target" "$readiness_status_file" &
     readiness_pid=$!
     readiness_pgid=$readiness_pid
-    if wait "$readiness_pid"; then
-        readiness_status=0
-    else
-        readiness_status=$?
-    fi
+    wait_for_readiness_status || fail 'installed Default Executor did not report readiness'
     stop_readiness
     if [ "$readiness_status" -ne 0 ]; then
         fail 'installed Default Executor failed readiness'

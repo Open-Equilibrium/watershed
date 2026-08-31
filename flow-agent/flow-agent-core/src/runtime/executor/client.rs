@@ -143,7 +143,7 @@ impl PreparedExecutor {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let response = execute_one_shot(
-                &self.selection,
+                self.selection.executable(),
                 &prepared.mounts,
                 &prepared.request,
                 &prepared.request_bytes,
@@ -529,6 +529,10 @@ impl ChildGuard {
     fn child_mut(&mut self) -> &mut Child {
         self.child.as_mut().expect("child guard remains armed")
     }
+
+    fn take(&mut self) -> Child {
+        self.child.take().expect("child guard remains armed")
+    }
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -543,12 +547,12 @@ impl Drop for ChildGuard {
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn execute_one_shot(
-    selection: &ExecutorSelection,
+    executable: &File,
     mounts: &[PreparedMount],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
 ) -> Result<proto::ExecutorResponseV0, RuntimeError> {
-    let executor = duplicate_executor_descriptor(selection.executable())?;
+    let executor = duplicate_executor_descriptor(executable)?;
     let inherited_path = format!("/proc/self/fd/{}", executor.as_raw_fd());
     let high_base = executor
         .as_raw_fd()
@@ -648,16 +652,15 @@ fn execute_one_shot(
         if process_status.is_none() {
             match super::child_exited_without_reaping(child.child_mut()) {
                 Ok(true) => {
-                    super::terminate_child_or_fail_stop(child.child_mut());
-                    process_status = Some(
-                        child
-                            .child_mut()
-                            .try_wait()
-                            .map_err(|_| invalid_response("Executor process could not be reaped"))?
-                            .ok_or_else(|| {
-                                invalid_response("Executor process exit status is unavailable")
-                            })?,
-                    );
+                    let mut completed_child = child.take();
+                    super::terminate_child_or_fail_stop(&mut completed_child);
+                    let status = completed_child
+                        .try_wait()
+                        .map_err(|_| invalid_response("Executor process could not be reaped"))?
+                        .ok_or_else(|| {
+                            invalid_response("Executor process exit status is unavailable")
+                        })?;
+                    process_status = Some(status);
                     drain_deadline = Instant::now().checked_add(Duration::from_secs(1));
                 }
                 Ok(false) => {}
@@ -871,10 +874,11 @@ unsafe extern "C" {
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        duplicate_executor_descriptor, executor_prelaunch_error, validate_executor_executable,
-        validate_receipt_identity,
+        duplicate_executor_descriptor, execute_one_shot, executor_prelaunch_error,
+        validate_executor_executable, validate_receipt_identity,
     };
     use std::{
+        collections::BTreeMap,
         fs::File,
         os::fd::AsRawFd as _,
         os::unix::process::CommandExt as _,
@@ -971,6 +975,61 @@ mod tests {
         assert_eq!(
             rustix::process::test_kill_process_group(process_group),
             Err(rustix::io::Errno::SRCH)
+        );
+    }
+
+    #[test]
+    fn one_shot_completion_cleans_its_process_group_once() {
+        super::super::reset_process_group_cleanup_calls_for_test();
+        let request = proto::ExecutorRequestV0 {
+            argv: Vec::new(),
+            environment: BTreeMap::new(),
+            executable: "/bin/sh".to_owned(),
+            limits: proto::ExecutorLimitsV0 {
+                max_stderr_bytes: 0,
+                max_stdout_bytes: 0,
+                timeout_ms: 100,
+            },
+            mounts: Vec::new(),
+            resolved_policy: proto::ExecutorResolvedPolicyV0 {
+                artifact: serde_json::json!({}),
+                command: serde_json::json!({}),
+                limits: proto::ExecutorLimitsV0 {
+                    max_stderr_bytes: 0,
+                    max_stdout_bytes: 0,
+                    timeout_ms: 100,
+                },
+                mounts: Vec::new(),
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+                tool_id: "tool".to_owned(),
+                tool_kind: "command".to_owned(),
+            },
+            policy_digest: "a".repeat(64),
+            request_id: "request-1".to_owned(),
+            runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            schema: proto::EXECUTOR_REQUEST_SCHEMA_V0.to_owned(),
+            tool_id: "tool".to_owned(),
+            tool_kind: "command".to_owned(),
+            working_directory: "/".to_owned(),
+        };
+        let response = proto::ExecutorResponseV0::Error {
+            code: proto::ExecutorErrorCodeV0::Unavailable,
+            message: "unavailable".to_owned(),
+            request_id: request.request_id.clone(),
+            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+        };
+        let response = String::from_utf8(
+            proto::canonical_executor_response_v0(&response).expect("canonical response"),
+        )
+        .expect("response is UTF-8");
+        let request_bytes = format!("printf '%s' '{response}'").into_bytes();
+        let executor = File::open("/bin/sh").expect("shell executor opens");
+
+        assert!(execute_one_shot(&executor, &[], &request, &request_bytes).is_err());
+        assert_eq!(
+            super::super::process_group_cleanup_calls_for_test(),
+            1,
+            "a synchronously reaped Executor leader must not be signaled again by ChildGuard"
         );
     }
 }

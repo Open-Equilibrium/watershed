@@ -55,11 +55,20 @@ class PrefixInstallerTest(unittest.TestCase):
             path.chmod(0o755)
         return bundle
 
-    def install(self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str):
+    def install(
+        self, bundle: pathlib.Path, prefix: pathlib.Path, *args: str, trace: bool = False
+    ):
         unrelated_cwd = prefix.parent / "unrelated-cwd"
         unrelated_cwd.mkdir(exist_ok=True)
         return subprocess.run(
-            ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix), *args],
+            [
+                "/bin/sh",
+                *(["-x"] if trace else []),
+                str(bundle / "install.sh"),
+                "--prefix",
+                str(prefix),
+                *args,
+            ],
             cwd=unrelated_cwd,
             env={"PATH": ""},
             stdout=subprocess.PIPE,
@@ -83,6 +92,18 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertEqual(installed.returncode, 0, installed.stderr)
             self.assertTrue((opt_out / "bin" / "flow").is_file())
             self.assertFalse((opt_out / "bin" / "flow-executor").exists())
+
+    def test_successful_readiness_cleans_while_its_process_group_is_reserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            installed = self.install(self.bundle(root), root / "prefix", trace=True)
+
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            trace = installed.stderr.decode("utf-8", errors="replace")
+            wait_index = trace.index("+ wait ")
+            self.assertLess(trace.index("/bin/kill"), wait_index)
+            self.assertNotIn("/bin/kill", trace[wait_index:])
+            self.assertNotIn("/bin/kill -KILL", trace)
 
     def test_existing_targets_and_unsafe_bundle_inputs_fail_without_upgrade(self):
         with tempfile.TemporaryDirectory() as temporary:
