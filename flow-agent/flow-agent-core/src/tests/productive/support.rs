@@ -28,13 +28,17 @@ pub(super) use sinks::{
 };
 pub(super) use tools::{FakeToolExecutionFault, FakeToolExecutor, UnsupportedToolExecutor};
 
+fn fake_tool_request_hash() -> String {
+    crate::runtime::session_definition::sha256_hash_text(b"fake Tool request")
+}
+
 pub(super) fn fake_tool_attempt_output(tool_result: serde_json::Value) -> serde_json::Value {
     serde_json::json!({
         "enforcement": crate::runtime::productive::test_enforcement_receipt(
             "0".repeat(64),
             core_script::ToolRuntimeProfile::Exact,
         ),
-        "request_hash": "1".repeat(64),
+        "request_hash": fake_tool_request_hash(),
         "schema": "flow-tool-attempt-output-v1",
         "tool_result": tool_result,
     })

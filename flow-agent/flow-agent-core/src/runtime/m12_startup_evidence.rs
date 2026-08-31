@@ -6,7 +6,10 @@ use std::{
 };
 
 use crate::runtime::{
-    executor::PreparedExecutor, fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome,
+    digest::{is_lowercase_sha256_hex, strip_sha256_prefix},
+    executor::PreparedExecutor,
+    fs_guards::AnchoredWorkspace,
+    run_attempts::RunAttemptOutcome,
     tool_runner::ToolInvocation,
 };
 
@@ -55,11 +58,8 @@ pub struct M12ExecutorStartupMeasurement {
     pub executor_elapsed: Duration,
 }
 
-fn is_lower_sha256(value: &str) -> bool {
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+fn is_prefixed_lower_sha256(value: &str) -> bool {
+    strip_sha256_prefix(value).is_some_and(is_lowercase_sha256_hex)
 }
 
 /// Measures one fixed no-op Tool through the real prepared Executor boundary.
@@ -107,8 +107,8 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
     }
     if !execution.enforcement.isolation_active
         || execution.enforcement.runtime_profile != proto::RuntimeReadProfileV0::Exact
-        || !is_lower_sha256(&execution.enforcement.applied_policy_digest)
-        || !is_lower_sha256(&execution.request_hash)
+        || !is_lowercase_sha256_hex(&execution.enforcement.applied_policy_digest)
+        || !is_prefixed_lower_sha256(&execution.request_hash)
     {
         return Err("Executor did not return the exact enforcement evidence".to_owned());
     }
@@ -119,7 +119,7 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
 
 #[cfg(test)]
 mod tests {
-    use super::fixed_executor_policy;
+    use super::{fixed_executor_policy, is_prefixed_lower_sha256};
 
     #[test]
     fn fixed_evidence_policy_is_an_exact_empty_echo() {
@@ -135,5 +135,18 @@ mod tests {
             core_policy::ToolRuntimeProfile::Exact
         );
         assert_eq!(command.filesystem.read_only_mounts, ["workspace"]);
+    }
+
+    #[test]
+    fn startup_evidence_accepts_only_the_run_log_request_hash_format() {
+        assert!(is_prefixed_lower_sha256(&format!(
+            "sha256:{}",
+            "a".repeat(64)
+        )));
+        assert!(!is_prefixed_lower_sha256(&"a".repeat(64)));
+        assert!(!is_prefixed_lower_sha256(&format!(
+            "sha256:{}",
+            "A".repeat(64)
+        )));
     }
 }

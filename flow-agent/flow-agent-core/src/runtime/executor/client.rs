@@ -277,7 +277,7 @@ impl PreparedExecutor {
         };
         let request_bytes =
             proto::canonical_executor_request_v0(&request).map_err(invalid_request)?;
-        let request_hash = crate::runtime::digest::sha256_hex(&request_bytes);
+        let request_hash = executor_request_hash(&request_bytes);
         Ok(PreparedExecutorTool {
             mounts,
             policy_digest,
@@ -334,6 +334,11 @@ impl PreparedExecutor {
         }
         Ok(mounts)
     }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn executor_request_hash(request_bytes: &[u8]) -> String {
+    crate::runtime::digest::prefixed_sha256_hex(request_bytes)
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -881,7 +886,7 @@ unsafe extern "C" {
 mod tests {
     use super::{
         duplicate_executor_descriptor, execute_one_shot, executor_prelaunch_error,
-        validate_executor_executable, validate_receipt_identity,
+        executor_request_hash, validate_executor_executable, validate_receipt_identity,
     };
     use std::{
         collections::BTreeMap,
@@ -896,6 +901,15 @@ mod tests {
     fn predefined_policy_id_is_not_compared_to_resolved_sandbox_executable() {
         assert!(validate_executor_executable("/bin/cat").is_ok());
         assert!(validate_executor_executable("registry:agent-read").is_err());
+    }
+
+    #[test]
+    fn prepared_executor_request_hash_uses_run_log_format() {
+        let hash = executor_request_hash(b"canonical Executor request");
+        let digest = hash
+            .strip_prefix(crate::runtime::digest::SHA256_PREFIX)
+            .expect("Executor request hash has the canonical prefix");
+        assert!(proto::decode_lowercase_sha256_hex(digest).is_some());
     }
 
     #[test]

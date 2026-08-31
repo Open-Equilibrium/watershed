@@ -65,7 +65,7 @@ impl ProductiveToolExecutor for FakeToolExecutor {
     ) -> Result<Self::Prepared, RuntimeError> {
         let _ = (policy, command_policy, request_id);
         let policy_digest = "0".repeat(64);
-        let request_hash = "1".repeat(64);
+        let request_hash = super::fake_tool_request_hash();
         Ok(FakePreparedTool {
             invocation: invocation.clone(),
             policy_digest,
@@ -122,7 +122,7 @@ impl ProductiveToolExecutor for FakeToolExecutor {
             prepared.policy_digest
         };
         let request_hash = if matches!(self.fault, FakeToolExecutionFault::RequestHashMismatch) {
-            "2".repeat(64)
+            crate::runtime::session_definition::sha256_hash_text(b"mismatched fake Tool request")
         } else {
             prepared.request_hash
         };
