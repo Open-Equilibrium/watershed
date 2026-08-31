@@ -205,6 +205,7 @@ if [ "$install_executor" -eq 1 ]; then
     if [ "$readiness_status" -ne 0 ]; then
         fail 'installed Default Executor failed readiness'
     fi
+    /bin/rm -- "$readiness_status_file" || fail 'cannot remove readiness status'
     /bin/rmdir -- "$readiness_config" || fail 'cannot remove readiness configuration'
     readiness_config_created=0
 fi
