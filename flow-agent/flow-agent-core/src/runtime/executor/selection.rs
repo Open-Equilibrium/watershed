@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn validated_executor_identity_survives_path_replacement() {
-        let root = crate::tests::helpers::empty_workspace("executor-open-identity");
+        let root = crate::tests::empty_workspace("executor-open-identity");
         let path = root.join("flow-executor");
         fs::write(&path, b"validated").expect("candidate is staged");
         let executable = File::open(&path).expect("candidate opens");

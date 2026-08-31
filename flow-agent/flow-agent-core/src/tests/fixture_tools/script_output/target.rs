@@ -6,6 +6,8 @@ use crate::runtime::fixture_tools::validate_script_write_target;
 use crate::runtime::{
     fixture_tools::anchored_workspace_write_path, fs_guards::with_anchored_replacement_temp,
 };
+#[cfg(unix)]
+use std::fs;
 
 #[cfg(unix)]
 #[test]

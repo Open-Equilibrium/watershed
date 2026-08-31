@@ -1,7 +1,7 @@
 use crate::{
     runtime::{
-        session::{resume_conversation_run_with_execution_activation, run_flow},
-        types::{EmitMode, RuntimeError, render_human_failure_status},
+        session::run_flow,
+        types::{EmitMode, render_human_failure_status},
         validate::validate_protocol_jsonl_text,
     },
     tests::test_support::workspace_copy,
@@ -19,10 +19,12 @@ use crate::{
         session::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, resume_conversation_run,
+            resume_conversation_run_with_execution_activation,
             resume_conversation_run_with_live_events, run_flow_with_execution_activation,
             run_flow_with_live_events, run_flow_with_root_input,
             run_flow_with_root_input_and_live_events,
         },
+        types::RuntimeError,
     },
     tests::helpers::{disable_smoke_echo_tool, write_productive_workspace_config},
 };

@@ -9,7 +9,7 @@ use std::path::Path;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{
     fs,
-    io::{self, Read as _},
+    io::{self, Read},
     os::{
         fd::AsRawFd as _,
         unix::fs::{MetadataExt as _, PermissionsExt as _},
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn executable_links_fail_closed() {
-        let root = crate::tests::helpers::empty_workspace("executor-linked-candidate");
+        let root = crate::tests::empty_workspace("executor-linked-candidate");
         let target = root.join("target");
         fs::write(&target, b"executable").expect("target is staged");
         fs::set_permissions(&target, fs::Permissions::from_mode(0o700))

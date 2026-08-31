@@ -5,7 +5,6 @@ use super::{
     },
     test_support::workspace_copy,
 };
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
 use crate::runtime::{
     fs_guards::{
         AnchoredWorkspace, ensure_runtime_dirs, set_directory_sync_error_for_path_for_test,
