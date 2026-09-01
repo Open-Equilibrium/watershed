@@ -90,13 +90,17 @@ case "$productive_output" in
     ;;
 esac
 test ! -e "$config/flow-agent/executor.json"
-/usr/bin/python3 - "$productive_workspace" <<'PY'
+/usr/bin/python3 - "$agent_home" <<'PY'
 import json
 import pathlib
 import sys
 
-workspace = pathlib.Path(sys.argv[1])
-logs = list((workspace / ".flow" / "conversations").glob("*/runs/*/run-log.jsonl"))
+home = pathlib.Path(sys.argv[1])
+logs = list(
+    (home / "workspaces").glob(
+        "workspace-v1-*/conversations/*/runs/*/run-log.jsonl"
+    )
+)
 assert len(logs) == 1, logs
 records = [json.loads(line) for line in logs[0].read_text(encoding="utf-8").splitlines()]
 provider_intents = [
