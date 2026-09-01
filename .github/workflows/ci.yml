@@ -232,7 +232,7 @@ jobs:
 
       - name: Run M1.2 executor startup evidence
         id: m12_startup_evidence
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.os == 'ubuntu-24.04' && !cancelled()
         continue-on-error: true
         shell: bash
         run: |
