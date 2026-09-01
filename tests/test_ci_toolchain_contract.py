@@ -504,10 +504,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             'productive run without an Executor returned exit',
             'productive run without an Executor returned an unexpected diagnostic',
             'productive Executor preflight mutated the workspace',
+            'executor="$bundle/flow-executor"',
             'executor configure --path "$executor"',
             '"$custom_prefix/bin/flow" executor check',
         ):
             self.assertIn(required, installer_contract)
+        self.assertNotIn('executor="$PWD/target/', installer_contract)
 
         cleanup = assert_step_state(
             self,

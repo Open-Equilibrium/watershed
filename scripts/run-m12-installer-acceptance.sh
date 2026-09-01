@@ -86,6 +86,6 @@ if [ -e "$productive_workspace/.flow" ]; then
   printf 'productive Executor preflight mutated the workspace\n' >&2
   exit 1
 fi
-executor="$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"
+executor="$bundle/flow-executor"
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor configure --path "$executor")
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check </dev/null)
