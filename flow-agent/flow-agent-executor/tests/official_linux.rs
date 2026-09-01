@@ -531,7 +531,9 @@ fn assert_terminal(
     assert_eq!(
         result.status,
         status,
-        "unexpected terminal result; stdout: {}; stderr: {}",
+        "unexpected terminal result; classification: {:?}; exit code: {:?}; stdout: {}; stderr: {}",
+        result.classification,
+        result.exit_code,
         String::from_utf8_lossy(&stdout),
         String::from_utf8_lossy(&stderr)
     );
