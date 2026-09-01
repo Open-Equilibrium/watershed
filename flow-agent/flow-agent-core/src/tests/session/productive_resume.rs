@@ -154,7 +154,7 @@ fn executor_readiness_failure_precedes_recovery_reservation() {
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || panic!("credential resolution must follow Executor readiness"),
         &mut provider,
     )
     .expect_err("failed readiness must stop before recovery reservation");
@@ -200,7 +200,7 @@ fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut provider,
     )
     .expect_err("Resume must not automatically repeat an uncertain attempt");
@@ -249,7 +249,7 @@ fn exact_productive_resume_reuses_the_committed_attempt_and_finishes_the_address
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut recovery_provider,
     )
     .expect("exact productive resume completes");
@@ -371,7 +371,7 @@ fn exact_productive_resume_resyncs_a_complete_recovery_record_before_publication
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut second_retry_provider,
     )
     .expect_err("reopen must resynchronize the visible terminal record");
@@ -400,7 +400,7 @@ fn exact_productive_resume_resyncs_a_complete_recovery_record_before_publication
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut final_retry_provider,
     )
     .expect("the synchronized terminal record resumes exactly once");

@@ -9,6 +9,7 @@ use crate::runtime::{
     digest::{is_lowercase_sha256_hex, strip_sha256_prefix},
     executor::{ExecutorDispatchOutcome, PreparedExecutor},
     fs_guards::AnchoredWorkspace,
+    productive::ensure_productive_tool_execution_platform,
     run_attempts::RunAttemptOutcome,
     tool_runner::ToolInvocation,
 };
@@ -62,13 +63,15 @@ fn is_prefixed_lower_sha256(value: &str) -> bool {
     strip_sha256_prefix(value).is_some_and(is_lowercase_sha256_hex)
 }
 
+/// Rejects public M1.2 Executor checks outside the canonical contract host.
+pub fn ensure_m12_executor_host() -> Result<(), String> {
+    ensure_productive_tool_execution_platform()
+        .map_err(|_| "M1.2 Executor startup requires Ubuntu 24.04 x64".to_owned())
+}
+
 /// Measures one fixed no-op Tool through the real prepared Executor boundary.
 pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMeasurement, String> {
-    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        return Err(
-            "M1.2 startup evidence requires the Ubuntu 24.04 x64 reference platform".to_owned(),
-        );
-    }
+    ensure_m12_executor_host()?;
     let policy = fixed_executor_policy();
     policy
         .validate()

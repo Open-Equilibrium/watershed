@@ -1,5 +1,7 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use super::ExecutorSelection;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use super::process::{child_exited_without_reaping, terminate_child_or_fail_stop};
 use super::resolve_executor;
 use crate::runtime::{
     fs_guards::AnchoredWorkspace,
@@ -562,7 +564,7 @@ impl Drop for ChildGuard {
         let Some(child) = self.child.as_mut() else {
             return;
         };
-        super::terminate_child_or_fail_stop(child);
+        terminate_child_or_fail_stop(child);
     }
 }
 
@@ -690,10 +692,10 @@ fn execute_one_shot(
             return Err(invalid_response("Executor stderr exceeds its byte limit"));
         }
         if process_status.is_none() {
-            match super::child_exited_without_reaping(child.child_mut()) {
+            match child_exited_without_reaping(child.child_mut()) {
                 Ok(true) => {
                     let mut completed_child = child.take();
-                    super::terminate_child_or_fail_stop(&mut completed_child);
+                    terminate_child_or_fail_stop(&mut completed_child);
                     let status = completed_child
                         .try_wait()
                         .map_err(|_| invalid_response("Executor process could not be reaped"))?
@@ -1040,6 +1042,9 @@ mod unsupported_platform_tests {
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
+    use super::super::process::{
+        process_group_cleanup_calls_for_test, reset_process_group_cleanup_calls_for_test,
+    };
     use super::{
         c_close, duplicate_executor_descriptor, execute_one_shot, executor_request_hash,
         validate_executor_executable, validate_receipt_identity,
@@ -1263,56 +1268,29 @@ mod tests {
     }
 
     #[test]
-    fn faulty_executor_cleanup_is_bounded_and_reaps_its_process_group() {
-        let mut command = Command::new("/bin/sh");
-        command
-            .args([
-                "-c",
-                "trap '' TERM; (trap '' TERM; while :; do sleep 1; done) & wait",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        unsafe {
-            command.pre_exec(|| {
-                rustix::process::setsid()
-                    .map(|_| ())
-                    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
-            });
-        }
-        let mut child = command.spawn().expect("stubborn process group starts");
-        let process_group = rustix::process::Pid::from_raw(child.id() as i32)
-            .expect("child process group id is valid");
-        let started = Instant::now();
-        assert!(super::super::terminate_child_bounded(&mut child));
-        assert!(started.elapsed() < Duration::from_secs(2));
-        assert!(matches!(child.try_wait(), Ok(Some(_))));
-        assert_eq!(
-            rustix::process::test_kill_process_group(process_group),
-            Err(rustix::io::Errno::SRCH)
-        );
-    }
-
-    #[test]
     fn one_shot_completion_cleans_its_process_group_once() {
-        super::super::reset_process_group_cleanup_calls_for_test();
+        reset_process_group_cleanup_calls_for_test();
         let request = one_shot_request();
-        let response = proto::ExecutorResponseV0::Error {
+        let expected_response = proto::ExecutorResponseV0::Error {
             code: proto::ExecutorErrorCodeV0::Unavailable,
             message: "unavailable".to_owned(),
             request_id: request.request_id.clone(),
             schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
         };
         let response = String::from_utf8(
-            proto::canonical_executor_response_v0(&response).expect("canonical response"),
+            proto::canonical_executor_response_v0(&expected_response).expect("canonical response"),
         )
         .expect("response is UTF-8");
         let request_bytes = format!("printf '%s' '{response}'").into_bytes();
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
-        assert!(execute_one_shot(&executor, &[], &request, &request_bytes).is_err());
         assert_eq!(
-            super::super::process_group_cleanup_calls_for_test(),
+            execute_one_shot(&executor, &[], &request, &request_bytes)
+                .expect("canonical Executor response is accepted"),
+            expected_response
+        );
+        assert_eq!(
+            process_group_cleanup_calls_for_test(),
             1,
             "a synchronously reaped Executor leader must not be signaled again by ChildGuard"
         );
@@ -1324,7 +1302,7 @@ mod tests {
             "exec /bin/cat /dev/zero",
             "exec /bin/sh -c '/bin/cat /dev/zero >&2'",
         ] {
-            super::super::reset_process_group_cleanup_calls_for_test();
+            reset_process_group_cleanup_calls_for_test();
             let request = one_shot_request();
             let executor = File::open("/bin/sh").expect("shell executor opens");
             let request_bytes = writer.as_bytes();
@@ -1340,7 +1318,7 @@ mod tests {
                 "a continuous Executor stream must not outlive its five-second cleanup bound"
             );
             assert_eq!(
-                super::super::process_group_cleanup_calls_for_test(),
+                process_group_cleanup_calls_for_test(),
                 1,
                 "a capped Executor stream must clean up its process group"
             );

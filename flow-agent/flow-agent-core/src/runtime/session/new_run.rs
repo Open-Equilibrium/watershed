@@ -228,7 +228,6 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     } = backend
     {
         reconcile_productive_preflight(ensure_productive_execution_platform())?;
-        let credential = reconcile_productive_preflight(resolve_openai_codex_credential())?;
         let agent_instructions = reconcile_productive_preflight(
             read_applicable_agent_instructions(&authority.home, &execution_workspace),
         )?;
@@ -244,7 +243,7 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
             &policy,
             root_input,
             capture_jsonl,
-            &credential,
+            resolve_openai_codex_credential,
             &agent_instructions,
             notifier,
             &mut provider,

@@ -71,7 +71,7 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
         "dynamic artifact must not claim static self-reexec"
     );
 
-    exact_profile_is_binary_safe_and_hides_host_files(&executor, &static_probe);
+    exact_profile_hides_host_and_executor_bootstrap_files(&executor, &static_probe);
     filesystem_capabilities_are_exact_and_race_safe(&executor, &static_probe);
     interpreter_environment_and_credentials_cannot_escape(&executor, &static_probe);
     host_profile_is_explicit_and_network_remains_denied(&executor, &static_probe);
@@ -81,13 +81,13 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
     cancellation_cleans_the_full_process_tree(&executor, &static_probe);
 }
 
-fn exact_profile_is_binary_safe_and_hides_host_files(executor: &Path, probe: &ExecutorProbeV0) {
+fn exact_profile_hides_host_and_executor_bootstrap_files(executor: &Path, probe: &ExecutorProbeV0) {
     let workspace = Workspace::new();
     let prepared = PreparedRequest::new(
         probe,
         &workspace,
         RuntimeReadProfileV0::Exact,
-        "[ ! -e /etc/os-release ] || exit 23; printf '\\377'",
+        "[ ! -e /run/watershed/flow-executor ] || exit 23; if ( : < /proc/1/exe ) 2>/dev/null; then exit 24; fi; for fd in /proc/1/fd/*; do if ( : < \"$fd\" ) 2>/dev/null; then exit 25; fi; done; if ( : < /proc/1/mem ) 2>/dev/null; then exit 26; fi; for image in /proc/1/map_files/*; do if ( : < \"$image\" ) 2>/dev/null; then exit 27; fi; done; [ ! -e /etc/os-release ] || exit 28; printf '\\377'",
         limits(4_096, 4_096, 2_000),
     );
     let expected_digest = prepared.policy_digest().to_owned();

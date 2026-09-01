@@ -18,6 +18,27 @@ const EXECUTOR_CONFIG_LOCK_DEADLINE: Duration = Duration::from_secs(5);
 const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 static STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+thread_local! {
+    static PARENT_MISSING_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+fn set_parent_missing_observer(observer: impl FnOnce() + 'static) {
+    PARENT_MISSING_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+fn parent_missing_observer() {
+    if let Some(observer) = PARENT_MISSING_OBSERVER.with_borrow_mut(Option::take) {
+        observer();
+    }
+}
+
+#[cfg(not(all(test, target_os = "linux", target_arch = "x86_64")))]
+fn parent_missing_observer() {}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct ExecutorConfigDocument {
@@ -151,7 +172,13 @@ impl ExecutorConfigStore {
                     .parent()
                     .ok_or_else(|| config_failure("Executor configuration base is unavailable"))?;
                 fs::create_dir_all(base).map_err(|error| config_io(base, error))?;
-                create_private_directory(&parent)?;
+                parent_missing_observer();
+                match create_private_directory(&parent) {
+                    Ok(()) => {}
+                    Err(RuntimeError::Io { source, .. })
+                        if source.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(error) => return Err(error),
+                }
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 fs::create_dir_all(&parent).map_err(|error| config_io(&parent, error))?;
@@ -390,5 +417,34 @@ mod tests {
             .expect("platform Executor configuration path resolves");
 
         assert_eq!(executor.path, credential.with_file_name("executor.json"));
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn protected_configuration_settles_a_first_use_parent_race() {
+        let root = crate::tests::helpers::empty_workspace("executor-config-parent-race");
+        let config = root.join("flow-agent/executor.json");
+        let outer_path = root.join("outer-executor");
+        let peer_path = root.join("peer-executor");
+        let peer_config = config.clone();
+        super::set_parent_missing_observer(move || {
+            ExecutorConfigStore::protected_at(peer_config)
+                .configure(&peer_path)
+                .expect("the peer wins first-use configuration");
+        });
+
+        let store = ExecutorConfigStore::protected_at(config);
+        store
+            .configure(&outer_path)
+            .expect("the raced configuration serializes after its peer");
+
+        assert_eq!(
+            store
+                .read()
+                .expect("the serialized configuration reads")
+                .expect("the serialized configuration exists")
+                .path(),
+            outer_path
+        );
     }
 }

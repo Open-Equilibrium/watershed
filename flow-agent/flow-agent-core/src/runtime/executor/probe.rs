@@ -1,6 +1,8 @@
 use super::ExecutorSelection;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use super::ExecutorSelectionSource;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use super::process::{child_exited_without_reaping, terminate_child_or_fail_stop};
 use crate::runtime::types::RuntimeError;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::fs::File;
@@ -94,24 +96,24 @@ fn probe_linux_executor(
     });
     let started = Instant::now();
     loop {
-        match super::child_exited_without_reaping(&child) {
+        match child_exited_without_reaping(&child) {
             Ok(true) => break,
             Ok(false) if started.elapsed() < PROBE_TIMEOUT => {
                 thread::sleep(Duration::from_millis(10))
             }
             Ok(false) => {
-                super::terminate_child_or_fail_stop(&mut child);
+                terminate_child_or_fail_stop(&mut child);
                 return Err(executor_unavailable("Executor readiness timed out"));
             }
             Err(_) => {
-                super::terminate_child_or_fail_stop(&mut child);
+                terminate_child_or_fail_stop(&mut child);
                 return Err(executor_unavailable(
                     "Executor readiness could not be observed",
                 ));
             }
         }
     }
-    super::terminate_child_or_fail_stop(&mut child);
+    terminate_child_or_fail_stop(&mut child);
     let status = child
         .try_wait()
         .map_err(|_| executor_unavailable("Executor readiness process could not be reaped"))?
@@ -139,7 +141,12 @@ fn probe_linux_executor(
             "Executor readiness response is invalid",
         )
     })?;
-    validate_probe(selection, &probe)?;
+    let readiness_diagnostic = (!stderr.overflowed).then(|| String::from_utf8_lossy(&stderr.bytes));
+    let readiness_diagnostic = readiness_diagnostic
+        .as_deref()
+        .map(str::trim)
+        .filter(|diagnostic| !diagnostic.is_empty());
+    validate_probe(selection, &probe, readiness_diagnostic)?;
     Ok(ProbedExecutor { executable, probe })
 }
 
@@ -161,10 +168,11 @@ fn receive_bounded_read(
         })
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 fn validate_probe(
     selection: &ExecutorSelection,
     probe: &proto::ExecutorProbeV0,
+    readiness_diagnostic: Option<&str>,
 ) -> Result<(), RuntimeError> {
     if !probe
         .protocol_versions
@@ -176,7 +184,12 @@ fn validate_probe(
             "Executor does not support Flow protocol v0",
         ));
     }
-    if !probe.ready || probe.platform != proto::EXECUTOR_PLATFORM_V0 {
+    if !probe.ready {
+        return Err(executor_unavailable(
+            readiness_diagnostic.unwrap_or("Executor readiness requirements are not satisfied"),
+        ));
+    }
+    if probe.platform != proto::EXECUTOR_PLATFORM_V0 {
         return Err(executor_unavailable(
             "Executor readiness requirements are not satisfied",
         ));
@@ -282,9 +295,84 @@ fn owner_is_trusted(owner: u32, effective_uid: u32) -> bool {
     owner == 0 || owner == effective_uid
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 fn executor_unavailable(message: &str) -> RuntimeError {
     protocol_failure(proto::ExecutorErrorCodeV0::Unavailable, message)
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::validate_probe;
+    use crate::runtime::{
+        executor::{ExecutorSelection, ExecutorSelectionSource},
+        types::RuntimeError,
+    };
+
+    #[test]
+    fn unready_probe_reports_its_bounded_actionable_diagnostic() {
+        let selection = ExecutorSelection::new(
+            "administrator-selected-executor".into(),
+            ExecutorSelectionSource::Custom,
+        );
+        let probe = proto::parse_executor_probe_v0(
+            concat!(
+                r#"{"backend":"bubblewrap-seccomp","backend_version":"unavailable","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":false,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":[]}"#,
+                "\n"
+            )
+            .as_bytes(),
+        )
+        .expect("fake probe is valid");
+        let diagnostic = "flow-executor readiness: official Executor requires static-self-reexec";
+
+        let error = validate_probe(&selection, &probe, Some(diagnostic))
+            .expect_err("unready fake probe is rejected");
+        let rendered = error.to_string();
+
+        match error {
+            RuntimeError::Executor(failure) => {
+                assert_eq!(failure.code(), proto::ExecutorErrorCodeV0::Unavailable);
+                assert!(rendered.contains(diagnostic), "{rendered}");
+            }
+            other => panic!("unexpected readiness failure: {other}"),
+        }
+    }
+
+    #[test]
+    fn custom_probe_protocol_semantics_are_platform_neutral() {
+        let selection = ExecutorSelection::new(
+            "administrator-selected-executor".into(),
+            ExecutorSelectionSource::Custom,
+        );
+        let probe = proto::parse_executor_probe_v0(
+            concat!(
+                r#"{"backend":"custom","backend_version":"1","executor":"custom","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":[]}"#,
+                "\n"
+            )
+            .as_bytes(),
+        )
+        .expect("custom probe is valid wire data");
+        validate_probe(&selection, &probe, None).expect("supported custom probe is ready");
+
+        let mut unknown_version = probe.clone();
+        unknown_version.protocol_versions = vec!["1".to_owned()];
+        let error = validate_probe(&selection, &unknown_version, None)
+            .expect_err("unknown protocol versions fail closed");
+        assert!(matches!(
+            error,
+            RuntimeError::Executor(ref failure)
+                if failure.code() == proto::ExecutorErrorCodeV0::ProtocolMismatch
+        ));
+
+        let mut wrong_platform = probe;
+        wrong_platform.platform = "other".to_owned();
+        let error = validate_probe(&selection, &wrong_platform, None)
+            .expect_err("mismatched platforms fail closed");
+        assert!(matches!(
+            error,
+            RuntimeError::Executor(ref failure)
+                if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
+        ));
+    }
 }
 
 fn protocol_failure(code: proto::ExecutorErrorCodeV0, message: &str) -> RuntimeError {
@@ -380,7 +468,7 @@ mod tests {
         .expect("test probe is valid");
         probe.executor_version = "mismatch".to_owned();
 
-        let error = validate_probe(&selection, &probe)
+        let error = validate_probe(&selection, &probe, None)
             .expect_err("official Executor version mismatch is rejected");
 
         assert!(error.to_string().contains("incompatible"), "{error}");

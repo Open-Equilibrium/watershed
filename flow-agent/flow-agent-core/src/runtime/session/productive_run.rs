@@ -125,7 +125,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
+pub(crate) fn run_productive_session_with_provider<P, C>(
     workspace: &Path,
     execution_workspace: &AnchoredWorkspace,
     config: &crate::runtime::config_io::GlobalConfig,
@@ -136,12 +136,17 @@ pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
     policy: &core_policy::PolicyArtifact,
     root_input: Option<core_script::FlowValue>,
     capture_jsonl: bool,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    resolve_credential: C,
     agent_instructions: &str,
     notifier: Option<LiveEventNotifier>,
     provider: &mut P,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
     let mut tool_executor = prepare_productive_tool_executor(policy)?;
+    let credential = reconcile_productive_preflight(resolve_credential())?;
     let reservation = reconcile_productive_preflight(reserve_new_conversation_run(
         workspace,
         &flow_block.identity.id,
@@ -157,7 +162,7 @@ pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
         policy,
         root_input,
         capture_jsonl,
-        credential,
+        &credential,
         agent_instructions,
         notifier,
         provider,

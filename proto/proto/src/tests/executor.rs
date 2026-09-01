@@ -5,11 +5,12 @@ use crate::{
     ExecutorProbeV0, ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
     ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
     ExecutorToolStatusV0, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
-    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0,
-    UnixObjectIdentityV0, canonical_executor_probe_v0, canonical_executor_request_v0,
-    canonical_executor_response_v0, decode_executor_stream_v0, encode_executor_stream_v0,
-    parse_executor_probe_v0, parse_executor_request_v0, parse_executor_response_v0,
-    resolved_policy_digest_v0, validate_enforcement_receipt_v0,
+    MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
+    MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0, UnixObjectIdentityV0,
+    canonical_executor_probe_v0, canonical_executor_request_v0, canonical_executor_response_v0,
+    decode_executor_stream_v0, encode_executor_stream_v0, parse_executor_probe_v0,
+    parse_executor_request_v0, parse_executor_response_v0, resolved_policy_digest_v0,
+    validate_enforcement_receipt_v0,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -217,7 +218,7 @@ fn executor_response_preserves_bounded_non_utf8_tool_streams() {
 }
 
 #[test]
-fn executor_response_requires_one_canonical_lf_terminated_document() {
+fn executor_wire_framing_matrix_is_platform_neutral() {
     let response = serde_json::json!({
         "outcome": "error",
         "schema": EXECUTOR_RESPONSE_SCHEMA_V0,
@@ -235,17 +236,32 @@ fn executor_response_requires_one_canonical_lf_terminated_document() {
         )
         .is_ok()
     );
-    assert!(
-        parse_executor_response_v0(canonical.as_bytes(), "request-1", &"a".repeat(64),).is_err()
-    );
-    assert!(
-        parse_executor_response_v0(
-            format!("{canonical}\n{canonical}\n").as_bytes(),
-            "request-1",
-            &"a".repeat(64),
-        )
-        .is_err()
-    );
+    let invalid = [
+        ("missing LF", canonical.as_bytes().to_vec()),
+        ("malformed JSON", b"not-json\n".to_vec()),
+        (
+            "duplicate member",
+            format!(
+                "{}\n",
+                canonical.replace("\"message\":", "\"message\":\"duplicate\",\"message\":")
+            )
+            .into_bytes(),
+        ),
+        (
+            "multiple documents",
+            format!("{canonical}\n{canonical}\n").into_bytes(),
+        ),
+        (
+            "oversized document",
+            vec![b' '; MAX_EXECUTOR_RESPONSE_BYTES_V0 + 1],
+        ),
+    ];
+    for (name, wire) in invalid {
+        assert!(
+            parse_executor_response_v0(&wire, "request-1", &"a".repeat(64)).is_err(),
+            "accepted {name}"
+        );
+    }
 }
 
 #[test]

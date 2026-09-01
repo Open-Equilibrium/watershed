@@ -154,7 +154,6 @@ where
         registry,
         flow_ref,
         policy,
-        credential,
         agent_instructions,
     } = prepare_recorded_productive_preflight(
         &execution_workspace,
@@ -164,9 +163,9 @@ where
         "continuation lacks Flow id",
         &model,
         model_profile,
-        resolve_credential,
     )?;
     let mut tool_executor = prepare_productive_tool_executor(&policy)?;
+    let credential = reconcile_productive_preflight(resolve_credential())?;
     let reservation = reconcile_productive_preflight(reserve_conversation_continuation(
         workspace,
         conversation_id,
@@ -206,16 +205,20 @@ where
 
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn continue_conversation_with_provider<P: ProductiveProvider>(
+pub(crate) fn continue_conversation_with_provider<P, C>(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
     from_entry_id: Option<&str>,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
     capture_jsonl: bool,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    resolve_credential: C,
     provider: &mut P,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
     continue_conversation_internal_with_provider(
         workspace,
         conversation_id,
@@ -226,6 +229,6 @@ pub(crate) fn continue_conversation_with_provider<P: ProductiveProvider>(
         |_| Ok(()),
         || Ok(()),
         provider,
-        || Ok(credential.clone()),
+        resolve_credential,
     )
 }

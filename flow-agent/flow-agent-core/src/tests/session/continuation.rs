@@ -84,7 +84,7 @@ fn executor_readiness_failure_precedes_continuation_reservation() {
         None,
         None,
         false,
-        fixture.credential(),
+        || panic!("credential resolution must follow Executor readiness"),
         &mut provider,
     )
     .expect_err("failed readiness must stop before continuation reservation");
@@ -131,7 +131,7 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
         &fixture.policy,
         None,
         false,
-        credential,
+        || Ok(credential.clone()),
         "",
         None,
         &mut initial_provider,
@@ -185,7 +185,7 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
             None,
             None,
             false,
-            credential,
+            || Ok(credential.clone()),
             &mut continuation_provider,
         )
         .expect_err("productive parent profile is required to match");
@@ -431,7 +431,7 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
         &fixture.policy,
         None,
         false,
-        credential,
+        || Ok(credential.clone()),
         "Agent guidance.",
         None,
         &mut provider,
@@ -454,7 +454,7 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
         )),
         Some(notifier),
         false,
-        credential,
+        || Ok(credential.clone()),
         &mut provider,
     )
     .expect("productive continuation completes");
@@ -528,7 +528,7 @@ fn conversation_continuation_rejects_registry_drift_before_auth_or_run_creation(
         None,
         None,
         false,
-        &session_credential(),
+        || Ok(session_credential()),
         &mut provider,
     )
     .expect_err("registry drift must reject continuation");

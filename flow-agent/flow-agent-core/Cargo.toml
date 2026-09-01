@@ -10,6 +10,7 @@ publish.workspace = true
 
 [features]
 m11-budget-evidence = []
+m12-install-acceptance = []
 m12-startup-evidence = []
 
 [dependencies]
@@ -40,4 +41,8 @@ required-features = ["m11-budget-evidence"]
 
 [[example]]
 name = "m12_executor_startup"
+required-features = ["m12-startup-evidence"]
+
+[[example]]
+name = "custom_executor_conformance"
 required-features = ["m12-startup-evidence"]

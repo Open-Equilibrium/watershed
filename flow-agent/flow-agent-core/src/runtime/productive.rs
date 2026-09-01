@@ -155,6 +155,10 @@ impl ProductiveProvider for OpenAiCodexProvider {
         credential: &CredentialRecord,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
+        #[cfg(feature = "m12-install-acceptance")]
+        if let Some(turn) = crate::runtime::m12_install_acceptance::maybe_provider_turn(body)? {
+            return Ok(turn);
+        }
         request_responses_at(OPENAI_CODEX_RESPONSES_URL, credential, body)
     }
 }

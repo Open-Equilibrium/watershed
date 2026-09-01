@@ -27,7 +27,6 @@ use std::{
 };
 
 const BUBBLEWRAP: &str = "/usr/bin/bwrap";
-const INNER_EXECUTABLE: &str = "/run/watershed/flow-executor";
 const INTERNAL_DESCRIPTOR_BASE: i32 =
     proto::EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 as i32 + proto::MAX_EXECUTOR_MOUNTS_V0 as i32;
 const CLEANUP_GRACE: Duration = Duration::from_millis(250);
@@ -119,13 +118,12 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         &plan,
         internal.request.as_raw_fd(),
         internal.seccomp.as_raw_fd(),
-        internal.self_image.as_raw_fd(),
     );
     command
         .arg("--chdir")
         .arg(&request.working_directory)
         .arg("--")
-        .arg(INNER_EXECUTABLE)
+        .arg(descriptor_path(internal.self_image.as_raw_fd()))
         .arg("--inner")
         .arg(internal.request.as_raw_fd().to_string())
         .arg(status_descriptor.as_raw_fd().to_string())
@@ -316,15 +314,10 @@ fn self_test(capabilities: BubblewrapCapabilities) -> Result<(), BackendError> {
         .map_err(|error| BackendError::setup(format!("failed to open Executor image: {error}")))?;
     let internal = InternalDescriptors::install_self_test(seccomp, self_image)?;
     let plan = SandboxPlan::new(capabilities, Vec::new())?;
-    let mut command = sandbox_command(
-        &plan,
-        -1,
-        internal.seccomp.as_raw_fd(),
-        internal.self_image.as_raw_fd(),
-    );
+    let mut command = sandbox_command(&plan, -1, internal.seccomp.as_raw_fd());
     command
         .arg("--")
-        .arg(INNER_EXECUTABLE)
+        .arg(descriptor_path(internal.self_image.as_raw_fd()))
         .arg("--inner-self-test");
     run_self_test_command(command)
 }
@@ -397,20 +390,12 @@ fn sandbox_command(
     plan: &SandboxPlan,
     request_descriptor: i32,
     seccomp_descriptor: i32,
-    self_descriptor: i32,
 ) -> Command {
     let mut command = Command::new(BUBBLEWRAP);
     command.args(&plan.arguments);
     command
         .arg("--dir")
-        .arg("/run")
-        .arg("--dir")
-        .arg("/run/watershed")
-        .arg("--dir")
         .arg("/workspace")
-        .arg("--ro-bind")
-        .arg(format!("/proc/self/fd/{self_descriptor}"))
-        .arg(INNER_EXECUTABLE)
         .arg("--proc")
         .arg("/proc")
         .arg("--dev")
@@ -421,6 +406,10 @@ fn sandbox_command(
         command.arg("--setenv").arg("FLOW_EXECUTOR_INNER").arg("1");
     }
     command
+}
+
+fn descriptor_path(descriptor: i32) -> String {
+    format!("/proc/self/fd/{descriptor}")
 }
 
 struct InternalDescriptors {

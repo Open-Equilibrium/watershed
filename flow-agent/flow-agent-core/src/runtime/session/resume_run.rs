@@ -133,7 +133,6 @@ where
         registry,
         flow_ref,
         policy,
-        credential,
         agent_instructions,
     } = prepare_recorded_productive_preflight(
         &execution_workspace,
@@ -143,9 +142,9 @@ where
         "productive run recovery lacks a Flow id",
         &model,
         model_profile,
-        resolve_credential,
     )?;
     let mut tool_executor = prepare_productive_tool_executor(&policy)?;
+    let credential = reconcile_productive_preflight(resolve_credential())?;
     let reservation = reconcile_productive_preflight(reserve_conversation_run_recovery(
         workspace,
         conversation_id,
@@ -182,14 +181,18 @@ where
 }
 
 #[cfg(test)]
-pub(crate) fn resume_conversation_run_with_provider<P: ProductiveProvider>(
+pub(crate) fn resume_conversation_run_with_provider<P, C>(
     workspace: impl AsRef<Path>,
     conversation_id: &str,
     run_session_id: &str,
     emit: EmitMode,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    resolve_credential: C,
     provider: &mut P,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
     resume_conversation_run_internal(
         workspace,
         conversation_id,
@@ -199,7 +202,7 @@ pub(crate) fn resume_conversation_run_with_provider<P: ProductiveProvider>(
         |_| Ok(()),
         || Ok(()),
         provider,
-        || Ok(credential.clone()),
+        resolve_credential,
     )
 }
 

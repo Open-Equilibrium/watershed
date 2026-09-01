@@ -90,6 +90,24 @@ fn run_default_smoke_productive_session<P: ProductiveProvider>(
     fixture: &ProductiveExecutionFixture,
     provider: &mut P,
 ) -> Result<RunOutput, RuntimeError> {
+    run_default_smoke_productive_session_with_credential_resolver(
+        workspace,
+        fixture,
+        || Ok(fixture.credential().clone()),
+        provider,
+    )
+}
+
+fn run_default_smoke_productive_session_with_credential_resolver<P, C>(
+    workspace: &Path,
+    fixture: &ProductiveExecutionFixture,
+    resolve_credential: C,
+    provider: &mut P,
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
     let config = load_global_config()?;
     run_productive_session_with_provider(
         workspace,
@@ -102,7 +120,7 @@ fn run_default_smoke_productive_session<P: ProductiveProvider>(
         &fixture.policy,
         None,
         false,
-        fixture.credential(),
+        resolve_credential,
         "",
         None,
         provider,
@@ -118,9 +136,13 @@ fn executor_readiness_failure_precedes_new_run_reservation() {
             "injected Executor readiness failure",
         ))
     });
-    let error =
-        run_default_smoke_productive_session(&workspace, &fixture, &mut FakeProvider::default())
-            .expect_err("failed readiness must stop before reservation");
+    let error = run_default_smoke_productive_session_with_credential_resolver(
+        &workspace,
+        &fixture,
+        || panic!("credential resolution must follow Executor readiness"),
+        &mut FakeProvider::default(),
+    )
+    .expect_err("failed readiness must stop before reservation");
 
     assert!(matches!(
         error,
@@ -293,7 +315,7 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
         &fixture.policy,
         Some(core_script::FlowValue::String("root input".to_owned())),
         true,
-        fixture.credential(),
+        || Ok(fixture.credential().clone()),
         "Agent guidance.",
         None,
         &mut provider,
@@ -335,7 +357,7 @@ fn productive_session_entrypoint_persists_a_resumable_conversation() {
         None,
         Some(notifier),
         false,
-        fixture.credential(),
+        || Ok(fixture.credential().clone()),
         &mut continuation_provider,
     )
     .expect("live continuation completes");

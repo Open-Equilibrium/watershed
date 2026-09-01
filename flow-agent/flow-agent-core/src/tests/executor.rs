@@ -12,6 +12,9 @@ use crate::runtime::types::RuntimeError;
 use std::{env, fs, path::Path};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod conformance;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn default_executor_is_the_flow_binary_sibling() {
     let flow = Path::new("/trusted/bin/flow");

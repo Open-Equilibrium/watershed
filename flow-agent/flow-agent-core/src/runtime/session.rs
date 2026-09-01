@@ -142,12 +142,10 @@ struct RecordedProductivePreflight {
     registry: core_script::ResolvedRegistry,
     flow_ref: String,
     policy: core_policy::PolicyArtifact,
-    credential: crate::runtime::oauth_credential::CredentialRecord,
     agent_instructions: String,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn prepare_recorded_productive_preflight<C>(
+fn prepare_recorded_productive_preflight(
     execution_workspace: &AnchoredWorkspace,
     authority: &GlobalConfigAuthority,
     run_session_id: &str,
@@ -155,11 +153,7 @@ fn prepare_recorded_productive_preflight<C>(
     missing_flow_id_message: &'static str,
     model: &str,
     model_profile: ContextModelProfile,
-    resolve_credential: C,
-) -> Result<RecordedProductivePreflight, RuntimeError>
-where
-    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
-{
+) -> Result<RecordedProductivePreflight, RuntimeError> {
     let config = &authority.config;
     let flow_ref = reconcile_productive_preflight(
         recorded
@@ -192,7 +186,6 @@ where
     ))?;
     let policy =
         reconcile_productive_preflight(core_policy::compile_policy_artifact(&registry, flow_ref))?;
-    let credential = reconcile_productive_preflight(resolve_credential())?;
     let agent_instructions = reconcile_productive_preflight(read_applicable_agent_instructions(
         &authority.home,
         execution_workspace,
@@ -201,7 +194,6 @@ where
         registry,
         flow_ref: flow_ref.to_owned(),
         policy,
-        credential,
         agent_instructions,
     })
 }

@@ -16,7 +16,9 @@ pub use runtime::m11_budget_evidence::{
 };
 #[cfg(feature = "m12-startup-evidence")]
 #[doc(hidden)]
-pub use runtime::m12_startup_evidence::{M12ExecutorStartupMeasurement, run_m12_executor_startup};
+pub use runtime::m12_startup_evidence::{
+    M12ExecutorStartupMeasurement, ensure_m12_executor_host, run_m12_executor_startup,
+};
 pub use runtime::{
     AuthLoginMode, AuthStatus, EmitMode, ExecutorSelection, ExecutorSelectionSource,
     LiveEventNotification, LiveEventNotifier, LiveEventNotifyStatus, LiveEventReceiveError,
