@@ -94,6 +94,18 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         run: rustup target add x86_64-unknown-linux-musl
 
+      - name: Enable stock Bubblewrap user namespaces
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends apparmor apparmor-profiles
+          sudo install -m 0644 \
+            /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
+            /etc/apparmor.d/bwrap-userns-restrict
+          sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
+
       - name: Start controlled M1.2 Ubuntu
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
@@ -352,6 +364,7 @@ jobs:
           chown -R watershed:watershed /cargo /work/target "$RUNNER_TEMP"
           /usr/sbin/runuser --user watershed --preserve-environment -- /bin/sh -s <<'UNPRIVILEGED'
           set -eu
+          test "$(grep -Ec '^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$' /proc/self/status)" = 4
           cargo nextest run \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
             --locked \

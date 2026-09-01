@@ -312,6 +312,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "cargo nextest run",
             "cargo llvm-cov report",
             f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
+            "^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$",
             "--fail-under-lines 90",
             "--show-missing-lines",
         ):
@@ -445,6 +446,23 @@ class CiWorkflowContractTest(unittest.TestCase):
         for name, command in single_commands.items():
             assert_step_state(self, workflow, name, condition=UBUNTU)
             self.assertEqual(step_run(workflow, name), command)
+
+        apparmor = "\n".join(
+            assert_step_state(
+                self,
+                workflow,
+                "Enable stock Bubblewrap user namespaces",
+                condition=UBUNTU,
+            )
+        )
+        for required in (
+            "apparmor apparmor-profiles",
+            "/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
+            "/etc/apparmor.d/bwrap-userns-restrict",
+            "apparmor_parser --replace",
+            "kernel.apparmor_restrict_unprivileged_userns",
+        ):
+            self.assertIn(required, apparmor)
 
         start = "\n".join(
             assert_step_state(
