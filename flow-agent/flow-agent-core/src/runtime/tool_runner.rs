@@ -49,7 +49,7 @@ pub(crate) struct ToolExecutionOutcome {
 }
 
 impl ToolExecutionOutcome {
-    #[cfg(any(unix, test))]
+    #[cfg(any(test, all(unix, feature = "m11-budget-evidence")))]
     pub(crate) fn cancelled() -> Self {
         Self {
             status: RunAttemptOutcome::Cancelled,
