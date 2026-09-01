@@ -422,7 +422,7 @@ mod tests {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[test]
     fn protected_configuration_settles_a_first_use_parent_race() {
-        let root = crate::tests::helpers::empty_workspace("executor-config-parent-race");
+        let root = crate::tests::empty_workspace();
         let config = root.join("flow-agent/executor.json");
         let outer_path = root.join("outer-executor");
         let peer_path = root.join("peer-executor");

@@ -1054,7 +1054,7 @@ mod tests {
         fs::File,
         os::fd::AsRawFd as _,
         os::unix::process::CommandExt as _,
-        process::{Command, Stdio},
+        process::Command,
         time::{Duration, Instant},
     };
 
