@@ -6,10 +6,26 @@ fail() {
     exit 1
 }
 
+usage() {
+    printf '%s\n' \
+        'Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]' \
+        '' \
+        'Install Flow Agent on Ubuntu 24.04 x64 from sibling bundle artifacts.' \
+        '' \
+        'Options:' \
+        '  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.' \
+        '  --no-default-executor       Install flow without the bundled Default Executor.' \
+        '  -h, --help                  Show this help.'
+}
+
 prefix=
 install_executor=1
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
         --prefix)
             [ "$#" -ge 2 ] || fail 'missing value for --prefix'
             [ -z "$prefix" ] || fail '--prefix may be supplied only once'

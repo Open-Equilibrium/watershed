@@ -6,12 +6,56 @@ pub(super) const EXECUTOR_USAGE: &str = concat!(
     "       flow executor configure --path <absolute-path>\n",
     "       flow executor configure --default",
 );
+const EXECUTOR_HELP: &str = concat!(
+    "Usage:\n",
+    "  flow executor check\n",
+    "  flow executor configure --path <absolute-path>\n",
+    "  flow executor configure --default\n",
+);
+const EXECUTOR_CHECK_HELP: &str = concat!(
+    "Usage:\n",
+    "  flow executor check\n",
+    "\n",
+    "Checks the configured Executor and reports its readiness.\n",
+);
+const EXECUTOR_CONFIGURE_HELP: &str = concat!(
+    "Usage:\n",
+    "  flow executor configure --path <absolute-path>\n",
+    "  flow executor configure --default\n",
+    "\n",
+    "Options:\n",
+    "  --path <absolute-path>  Select an administrator-supplied Executor.\n",
+    "  --default               Select the bundled Executor.\n",
+);
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ExecutorCommand {
     Check,
     ConfigurePath(PathBuf),
     ConfigureDefault,
+}
+
+pub(super) fn executor_help(args: &[String]) -> Option<&'static str> {
+    match args {
+        [executor, help] if executor == "executor" && matches!(help.as_str(), "--help" | "-h") => {
+            Some(EXECUTOR_HELP)
+        }
+        [executor, check, help]
+            if executor == "executor"
+                && check == "check"
+                && matches!(help.as_str(), "--help" | "-h") =>
+        {
+            Some(EXECUTOR_CHECK_HELP)
+        }
+        [executor, configure, help]
+            if executor == "executor"
+                && configure == "configure"
+                && matches!(help.as_str(), "--help" | "-h") =>
+        {
+            Some(EXECUTOR_CONFIGURE_HELP)
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn executor_args(args: &[String]) -> Result<ExecutorCommand, RuntimeError> {

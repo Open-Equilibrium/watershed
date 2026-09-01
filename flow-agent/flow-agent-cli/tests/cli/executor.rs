@@ -2,6 +2,54 @@ use super::{flow_command, test_support::empty_workspace_under};
 use std::{fs, path::Path};
 
 #[test]
+fn executor_help_is_specific_successful_and_human_readable() {
+    for (args, expected) in [
+        (
+            vec!["executor", "--help"],
+            concat!(
+                "Usage:\n",
+                "  flow executor check\n",
+                "  flow executor configure --path <absolute-path>\n",
+                "  flow executor configure --default\n",
+            ),
+        ),
+        (
+            vec!["executor", "check", "--help"],
+            concat!(
+                "Usage:\n",
+                "  flow executor check\n",
+                "\n",
+                "Checks the configured Executor and reports its readiness.\n",
+            ),
+        ),
+        (
+            vec!["executor", "configure", "--help"],
+            concat!(
+                "Usage:\n",
+                "  flow executor configure --path <absolute-path>\n",
+                "  flow executor configure --default\n",
+                "\n",
+                "Options:\n",
+                "  --path <absolute-path>  Select an administrator-supplied Executor.\n",
+                "  --default               Select the bundled Executor.\n",
+            ),
+        ),
+    ] {
+        let output = flow_command()
+            .args(args)
+            .output()
+            .expect("flow help command runs");
+
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert_eq!(
+            std::str::from_utf8(&output.stdout).expect("stdout is UTF-8"),
+            expected
+        );
+        assert!(output.stderr.is_empty(), "{output:?}");
+    }
+}
+
+#[test]
 fn executor_commands_have_closed_grammar() {
     let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
     for (args, expected) in [

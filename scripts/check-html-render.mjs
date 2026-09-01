@@ -165,6 +165,37 @@ async function assertVisibleLayout(page, expectedText, viewport, label) {
   }
 }
 
+async function assertNoHorizontalOverflow(page, label) {
+  const layout = await page.evaluate(() => {
+    const root = document.documentElement;
+    const overflowing = [...document.querySelectorAll("body *")]
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          element: element.tagName.toLowerCase(),
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          width: Math.round(rect.width),
+        };
+      })
+      .filter(({ left, right }) => left < -1 || right > root.clientWidth + 1)
+      .slice(0, 3);
+
+    return {
+      clientWidth: root.clientWidth,
+      overflowing,
+      scrollWidth: root.scrollWidth,
+    };
+  });
+
+  if (layout.scrollWidth > layout.clientWidth + 1) {
+    throw new Error(
+      `${label}: horizontal overflow (${layout.scrollWidth}px content in ${layout.clientWidth}px viewport); ` +
+        `offenders: ${JSON.stringify(layout.overflowing)}`,
+    );
+  }
+}
+
 async function checkDocument(browser, doc, viewport) {
   const label = `${doc.relativePath} ${viewport.name} ${viewport.width}x${viewport.height}`;
   const context = await browser.newContext({
@@ -191,6 +222,9 @@ async function checkDocument(browser, doc, viewport) {
     }
 
     await assertVisibleLayout(page, expectedText, viewport, label);
+    if (viewport.name === "mobile") {
+      await assertNoHorizontalOverflow(page, label);
+    }
 
     if (consoleErrors.length > 0) {
       throw new Error(`${label}: console errors: ${consoleErrors.join("; ")}`);

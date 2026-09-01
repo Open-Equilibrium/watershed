@@ -30,6 +30,9 @@ pub(crate) fn informational_output(args: &[String]) -> Option<String> {
     {
         return Some(format!("flow {}\n", env!("CARGO_PKG_VERSION")));
     }
+    if let Some(contents) = executor::executor_help(args) {
+        return Some(contents.to_owned());
+    }
     match args {
         [help] if matches!(help.as_str(), "--help" | "-h") => Some(format!("{}\n", usage())),
         [_, help] if matches!(help.as_str(), "--help" | "-h") => Some(format!("{}\n", usage())),

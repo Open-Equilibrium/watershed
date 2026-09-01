@@ -28,6 +28,34 @@ PROBE_DOCUMENT = (
     "requires Linux /bin/sh and /usr/bin/setsid",
 )
 class PrefixInstallerTest(unittest.TestCase):
+    def test_help_succeeds_without_installing(self):
+        expected = (
+            "Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]\n"
+            "\n"
+            "Install Flow Agent on Ubuntu 24.04 x64 from sibling bundle artifacts.\n"
+            "\n"
+            "Options:\n"
+            "  --prefix <absolute-prefix>  Install into <absolute-prefix>/bin.\n"
+            "  --no-default-executor       Install flow without the bundled Default Executor.\n"
+            "  -h, --help                  Show this help.\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            for flag in ("-h", "--help"):
+                completed = subprocess.run(
+                    ["/bin/sh", str(INSTALLER), flag],
+                    cwd=root,
+                    env={"PATH": ""},
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                    text=True,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(completed.stdout, expected)
+                self.assertEqual(completed.stderr, "")
+                self.assertEqual(list(root.iterdir()), [])
+
     def bundle(self, root: pathlib.Path) -> pathlib.Path:
         bundle = root / "bundle"
         bundle.mkdir(mode=0o755, parents=True)

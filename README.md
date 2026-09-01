@@ -30,6 +30,46 @@ cargo build --locked --workspace
 cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
+### Install productive Flow Agent on Ubuntu 24.04 x64
+
+From the repository root, build and stage one administrator-owned bundle. The installer requires `install.sh`, `flow` and, for the standard path, the static `flow-executor` as regular executable siblings. It installs into an unused absolute prefix and does not perform upgrades.
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends \
+  bubblewrap build-essential musl-tools procps util-linux
+rustup target add x86_64-unknown-linux-musl
+cargo build --locked --release -p flow-agent-cli --bin flow
+cargo build --locked --release -p flow-agent-executor --bin flow-executor \
+  --target x86_64-unknown-linux-musl
+
+install_bundle=$(sudo mktemp -d /var/tmp/watershed-install.XXXXXX)
+sudo chmod 0755 "$install_bundle"
+sudo install -m 0755 install/install.sh "$install_bundle/install.sh"
+sudo install -m 0755 target/release/flow "$install_bundle/flow"
+sudo install -m 0755 \
+  target/x86_64-unknown-linux-musl/release/flow-executor \
+  "$install_bundle/flow-executor"
+```
+
+Choose one installation path. The standard path installs and checks the bundled Default Executor:
+
+```sh
+sudo /bin/sh "$install_bundle/install.sh" --prefix /opt/watershed
+/opt/watershed/bin/flow executor check
+```
+
+The custom path explicitly omits the Default Executor. After installation, the operating-system account that will run Flow Agent selects an administrator-reviewed absolute Custom Executor and checks it; do not use `sudo` for these two configuration commands unless that account is root.
+
+```sh
+sudo /bin/sh "$install_bundle/install.sh" \
+  --prefix /opt/watershed --no-default-executor
+/opt/watershed/bin/flow executor configure --path /absolute/path/to/custom-executor
+/opt/watershed/bin/flow executor check
+```
+
+`/bin/sh install/install.sh --help` is the canonical option summary. Custom Executor readiness validates the protocol boundary but is not a compatibility or security certification; see the [Executor architecture](docs/concept/flow-agent-executor-architecture.md).
+
 Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authoring or runtime state. Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in deterministic examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/) and make no provider, subprocess or isolation claim.
 
 For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. The standard Ubuntu installation resolves its sibling `flow-executor`; `flow executor check` reports readiness. Agentic Engineers define each Flow's Tools, exact mounts and runtime-read profile; other users may run those predefined Flows without gaining an escalation surface. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
