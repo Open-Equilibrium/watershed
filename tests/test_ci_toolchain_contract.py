@@ -336,7 +336,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("scripts/run-m12-installer-acceptance.sh", linux_coverage)
         self.assertNotIn("m12-install-acceptance", linux_coverage)
         privilege_drop = linux_coverage.index(
-            f"runuser --user {M12_COVERAGE_USER} --preserve-environment"
+            f"/usr/sbin/runuser --user {M12_COVERAGE_USER} --preserve-environment"
         )
         nextest = linux_coverage.index("cargo nextest run")
         report = linux_coverage.index("cargo llvm-cov report")
