@@ -300,6 +300,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("docker exec", linux_coverage)
         self.assertIn(M12_CONTAINER, linux_coverage)
         for required in (
+            "Signature: 8a477f597d28d172789f06886806bc55",
+            "target/CACHEDIR.TAG",
             'eval "$(cargo llvm-cov show-env --sh --target '
             f'{M12_TARGET})"',
             "cargo llvm-cov clean --workspace",
@@ -324,6 +326,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
         ordered = (
+            "target/CACHEDIR.TAG",
             "cargo llvm-cov show-env",
             "cargo llvm-cov clean",
             "cargo build",

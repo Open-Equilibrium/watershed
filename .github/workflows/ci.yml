@@ -327,6 +327,11 @@ jobs:
           /bin/sh -s <<'COVERAGE'
           set -eu
           install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /tmp/flow-executor-uninstrumented
+          printf '%s\n' \
+            'Signature: 8a477f597d28d172789f06886806bc55' \
+            '# This file is a cache directory tag created by cargo.' \
+            '# For information about cache directory tags see https://bford.info/cachedir/' \
+            > target/CACHEDIR.TAG
           eval "$(cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl)"
           cargo llvm-cov clean --workspace
           cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
