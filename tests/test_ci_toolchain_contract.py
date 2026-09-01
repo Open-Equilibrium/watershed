@@ -496,7 +496,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             'flow-agent/fixtures/smoke-flow/registry/. "$fixture_home/registry/"',
             'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow',
             'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl',
-            'cmp flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"',
+            'diff -u flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"',
             'FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow',
             'test "$productive_unavailable_status" -eq 65',
             'test ! -e "$productive_workspace/.flow"',

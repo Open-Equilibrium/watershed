@@ -42,7 +42,7 @@ printf '%s\n' \
   >> "$fixture_home/config.yaml"
 (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow)
 (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output")
-cmp flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"
+diff -u flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"
 install -d -m 0700 "$config/flow-agent"
 cp -R flow-agent/fixtures/smoke-flow/registry "$agent_home/registry"
 printf '%s\n' \
