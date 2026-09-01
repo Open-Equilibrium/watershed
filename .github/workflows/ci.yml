@@ -125,7 +125,7 @@ jobs:
           docker exec watershed-m12 /bin/sh -ec '
             apt-get update
             apt-get install --yes --no-install-recommends \
-              bubblewrap binutils build-essential musl-tools python3 procps util-linux
+              bubblewrap binutils build-essential ca-certificates musl-tools python3 procps util-linux
             rm -rf /var/lib/apt/lists/*
             mkdir -p /cargo
             ln -s /opt/cargo-registry /cargo/registry

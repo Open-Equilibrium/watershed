@@ -462,6 +462,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "bubblewrap",
             "binutils",
             "build-essential",
+            "ca-certificates",
             "musl-tools",
             "python3",
             "procps",
