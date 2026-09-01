@@ -160,7 +160,7 @@ fn links_cannot_widen_mount_access(executor: &Path, probe: &ExecutorProbeV0) {
         probe,
         &workspace,
         RuntimeReadProfileV0::HostSystemRead,
-        "(printf changed > /workspace/output/read-only-link) 2>/dev/null && exit 30; [ ! -r /workspace/output/traversal-link ] || exit 31; if /usr/bin/ln /workspace/input/value /workspace/output/hard-link 2>/dev/null; then (printf changed > /workspace/output/hard-link) 2>/dev/null && exit 32; fi",
+        "(printf changed > /workspace/output/read-only-link) 2>/dev/null && exit 30; [ ! -r /workspace/output/traversal-link ] || exit 31; if /usr/bin/ln /workspace/input/value /workspace/output/hard-link 2>/dev/null; then exit 32; fi",
         limits(4_096, 4_096, 2_000),
         &["workspace/input"],
         &["workspace/output"],
