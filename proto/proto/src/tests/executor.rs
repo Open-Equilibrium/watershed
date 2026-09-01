@@ -281,6 +281,20 @@ fn executor_request_round_trips_the_bound_policy_and_explicit_capabilities() {
 }
 
 #[test]
+fn executor_request_preserves_literal_argument_strings() {
+    let mut request = request();
+    request.argv = vec![
+        "-c".to_owned(),
+        "printf 'first\\nsecond\\n'\n".to_owned(),
+        String::new(),
+        "x".repeat(4_097),
+    ];
+
+    let bytes = canonical_executor_request_v0(&request).expect("literal arguments are valid");
+    assert_eq!(parse_executor_request_v0(&bytes).unwrap(), request);
+}
+
+#[test]
 fn executor_request_rejects_unbound_policy_fields() {
     let mut cases = Vec::new();
 
@@ -379,6 +393,11 @@ fn executor_request_rejects_invalid_limits_mounts_environment_and_ids() {
             "too many argv entries",
             |candidate| candidate.argv = vec![String::new(); 2_049],
             "Executor argv entry bound is invalid",
+        ),
+        (
+            "NUL in argv",
+            |candidate| candidate.argv = vec!["invalid\0argument".to_owned()],
+            "Executor argv is invalid",
         ),
         (
             "oversized exec vector",

@@ -625,7 +625,7 @@ fn validate_request(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolE
         .argv
         .iter()
         .try_fold(request.executable.len(), |total, value| {
-            validate_text(value, "argv", MAX_PATH_CHARS)?;
+            validate_argv_entry(value)?;
             total
                 .checked_add(value.len() + 1)
                 .ok_or_else(|| ExecutorProtocolError::new("Executor argv byte count overflow"))
@@ -985,6 +985,14 @@ fn validate_text(value: &str, name: &str, max_chars: usize) -> Result<(), Execut
         Err(ExecutorProtocolError::new(format!(
             "Executor {name} is invalid"
         )))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_argv_entry(value: &str) -> Result<(), ExecutorProtocolError> {
+    if value.contains('\0') {
+        Err(ExecutorProtocolError::new("Executor argv is invalid"))
     } else {
         Ok(())
     }
