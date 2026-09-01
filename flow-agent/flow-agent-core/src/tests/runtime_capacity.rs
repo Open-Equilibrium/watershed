@@ -322,7 +322,7 @@ impl ProductiveToolExecutor for LiveLimitToolExecutor {
     fn execute_prepared(
         &mut self,
         _prepared: Self::Prepared,
-    ) -> Result<crate::runtime::executor::ExecutorToolExecution, RuntimeError> {
+    ) -> Result<crate::runtime::executor::ExecutorDispatchOutcome, RuntimeError> {
         unreachable!()
     }
 }

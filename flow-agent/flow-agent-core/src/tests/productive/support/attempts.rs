@@ -9,6 +9,7 @@ pub(in super::super) struct MemoryAttempts {
     pub(in super::super) intents: Vec<(RunAttemptKind, String, Option<String>)>,
     pub(in super::super) objects: Vec<ContextObject>,
     pub(in super::super) results: Vec<(RunAttemptKind, String, String, Option<String>)>,
+    pub(in super::super) terminal_results: Vec<RunAttemptResult>,
     pub(in super::super) timestamps: Vec<String>,
 }
 
@@ -34,6 +35,7 @@ impl ProductiveAttemptLog for MemoryAttempts {
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError> {
         self.durable_outputs.push(result.durable_output.clone());
+        self.terminal_results.push(result.clone());
         self.results.push((
             result.attempt_kind,
             result.attempt_id.clone(),

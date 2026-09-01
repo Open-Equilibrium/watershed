@@ -28,7 +28,7 @@ pub(crate) fn ensure_productive_tool_execution_platform() -> Result<(), RuntimeE
     } else {
         Err(RuntimeError::executor(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
-            "productive Tool execution requires Ubuntu 24.04 x86_64",
+            "productive Tool execution requires Ubuntu 24.04 x64",
         ))
     }
 }

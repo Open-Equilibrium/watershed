@@ -4,7 +4,7 @@ use crate::runtime::run_attempts::RunAttemptKind;
 use crate::runtime::{
     context::ContextModelProfile,
     conversations::MAX_CONVERSATION_RECORD_BYTES,
-    executor::{ExecutorToolExecution, PreparedExecutor, PreparedExecutorTool},
+    executor::{ExecutorDispatchOutcome, PreparedExecutor, PreparedExecutorTool},
     fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
     openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_at},
@@ -58,6 +58,7 @@ pub(crate) use tool::{
 const PROVIDER_CANCELLED_SCHEMA_V0: &str = "flow-provider-cancelled-v0";
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
+const EXECUTOR_DISPATCH_ERROR_SCHEMA_V0: &str = "flow-executor-dispatch-error-v0";
 const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
 
 #[cfg(test)]
@@ -198,7 +199,7 @@ pub(crate) trait ProductiveToolExecutor {
     fn execute_prepared(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorToolExecution, RuntimeError>;
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError>;
 }
 
 impl ProductiveToolExecutor for Option<PreparedExecutor> {
@@ -236,7 +237,7 @@ impl ProductiveToolExecutor for Option<PreparedExecutor> {
     fn execute_prepared(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         self.as_ref()
             .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
             .execute_prepared(prepared)

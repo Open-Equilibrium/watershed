@@ -1,6 +1,19 @@
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+use crate::runtime::productive::ensure_productive_tool_execution_platform;
 use crate::runtime::productive::{
     productive_execution_supported_release, productive_tool_execution_supported_release,
 };
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+#[test]
+fn productive_tool_platform_error_uses_the_canonical_platform_name() {
+    assert_eq!(
+        ensure_productive_tool_execution_platform()
+            .expect_err("productive Tools must reject this platform")
+            .to_string(),
+        "executor_policy_unsupported: productive Tool execution requires Ubuntu 24.04 x64"
+    );
+}
 
 #[test]
 fn productive_execution_support_matrix_is_closed() {

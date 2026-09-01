@@ -1,5 +1,5 @@
 use crate::runtime::{
-    executor::ExecutorToolExecution,
+    executor::{ExecutorDispatchOutcome, ExecutorToolExecution},
     fs_guards::AnchoredWorkspace,
     productive::{ProductiveToolExecutor, test_enforcement_receipt},
     run_attempts::RunAttemptOutcome,
@@ -26,6 +26,7 @@ pub(in super::super) enum FakeToolExecutionFault {
     #[default]
     None,
     PrepareError,
+    DefinitiveExecutorError,
     ExecutorError,
     InvalidTerminal,
     RequestHashMismatch,
@@ -101,7 +102,7 @@ impl ProductiveToolExecutor for FakeToolExecutor {
     fn execute_prepared(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         self.invocations.push(prepared.invocation);
         if self.cancel_before_outcome {
             assert_eq!(
@@ -121,6 +122,11 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         if matches!(self.fault, FakeToolExecutionFault::ExecutorError) {
             return Err(RuntimeError::Protocol(
                 "fixture Executor failure".to_owned(),
+            ));
+        }
+        if matches!(self.fault, FakeToolExecutionFault::DefinitiveExecutorError) {
+            return Ok(ExecutorDispatchOutcome::PreToolFailure(
+                proto::ExecutorErrorCodeV0::SandboxSetupFailed,
             ));
         }
         let policy_digest = if matches!(self.fault, FakeToolExecutionFault::ReceiptMismatch) {
@@ -144,11 +150,13 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         } else {
             self.outcome.clone()
         };
-        Ok(ExecutorToolExecution {
-            enforcement: test_enforcement_receipt(policy_digest, prepared.runtime_profile),
-            outcome,
-            request_hash,
-        })
+        Ok(ExecutorDispatchOutcome::Completed(Box::new(
+            ExecutorToolExecution {
+                enforcement: test_enforcement_receipt(policy_digest, prepared.runtime_profile),
+                outcome,
+                request_hash,
+            },
+        )))
     }
 }
 
@@ -187,7 +195,7 @@ impl ProductiveToolExecutor for UnsupportedToolExecutor {
     fn execute_prepared(
         &mut self,
         _prepared: Self::Prepared,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         unreachable!()
     }
 }

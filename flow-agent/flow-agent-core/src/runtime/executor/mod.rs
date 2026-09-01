@@ -76,7 +76,9 @@ fn terminate_child_or_fail_stop(child: &mut std::process::Child) {
     }
 }
 
-pub(crate) use client::{ExecutorToolExecution, PreparedExecutor, PreparedExecutorTool};
+#[cfg(test)]
+pub(crate) use client::ExecutorToolExecution;
+pub(crate) use client::{ExecutorDispatchOutcome, PreparedExecutor, PreparedExecutorTool};
 #[cfg(test)]
 pub(crate) use config::{EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore};
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]

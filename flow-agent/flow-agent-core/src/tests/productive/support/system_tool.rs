@@ -1,6 +1,6 @@
 use super::canonical_request_hash;
 use crate::runtime::{
-    executor::ExecutorToolExecution,
+    executor::{ExecutorDispatchOutcome, ExecutorToolExecution},
     fs_guards::{AnchoredDir, AnchoredWorkspace},
     productive::ProductiveToolExecutor,
     tool_runner::{ToolExecutionOutcome, ToolInvocation},
@@ -12,8 +12,14 @@ use std::time::Instant;
 
 pub(crate) struct SystemProductiveToolExecutor;
 
+pub(crate) struct SystemPreparedTool {
+    enforcement: proto::EnforcementReceiptV0,
+    outcome: ToolExecutionOutcome,
+    request_hash: String,
+}
+
 impl ProductiveToolExecutor for SystemProductiveToolExecutor {
-    type Prepared = ExecutorToolExecution;
+    type Prepared = SystemPreparedTool;
 
     fn supports_productive_tools(&self) -> bool {
         cfg!(unix)
@@ -43,7 +49,7 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
             workspace.root(),
             Duration::from_millis(policy.runtime_limits.timeout_ms),
         )?;
-        Ok(ExecutorToolExecution {
+        Ok(SystemPreparedTool {
             enforcement: test_enforcement_receipt(policy_digest, command_policy.runtime_profile),
             outcome,
             request_hash,
@@ -65,8 +71,14 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
     fn execute_prepared(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
-        Ok(prepared)
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+        Ok(ExecutorDispatchOutcome::Completed(Box::new(
+            ExecutorToolExecution {
+                enforcement: prepared.enforcement,
+                outcome: prepared.outcome,
+                request_hash: prepared.request_hash,
+            },
+        )))
     }
 }
 

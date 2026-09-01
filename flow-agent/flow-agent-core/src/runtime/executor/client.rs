@@ -24,6 +24,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Definitive result of one bounded Executor dispatch.
+#[cfg_attr(
+    not(all(target_os = "linux", target_arch = "x86_64")),
+    allow(dead_code)
+)]
+pub(crate) enum ExecutorDispatchOutcome {
+    Completed(Box<ExecutorToolExecution>),
+    PreToolFailure(proto::ExecutorErrorCodeV0),
+}
+
 /// Validated result and enforcement evidence from one isolated Tool execution.
 pub(crate) struct ExecutorToolExecution {
     pub(crate) enforcement: proto::EnforcementReceiptV0,
@@ -107,7 +117,7 @@ impl PreparedExecutor {
         command_policy: &core_policy::CommandPolicy,
         invocation: &ToolInvocation,
         request_id: &str,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         let prepared =
             self.prepare_tool(workspace, policy, command_policy, invocation, request_id)?;
         self.execute_prepared(prepared)
@@ -140,7 +150,7 @@ impl PreparedExecutor {
     pub(crate) fn execute_prepared(
         &self,
         prepared: PreparedExecutorTool,
-    ) -> Result<ExecutorToolExecution, RuntimeError> {
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let response = execute_one_shot(
@@ -149,20 +159,25 @@ impl PreparedExecutor {
                 &prepared.request,
                 &prepared.request_bytes,
             )?;
-            let proto::ExecutorResponseV0::Completed {
-                enforcement,
-                tool_result,
-                ..
-            } = response
-            else {
-                unreachable!("pre-launch Executor errors are converted before this point")
-            };
-            self.validate_prepared_receipt(&prepared, &enforcement)?;
-            Ok(ExecutorToolExecution {
-                enforcement,
-                outcome: decode_tool_outcome(tool_result)?,
-                request_hash: prepared.request_hash,
-            })
+            match response {
+                proto::ExecutorResponseV0::Completed {
+                    enforcement,
+                    tool_result,
+                    ..
+                } => {
+                    self.validate_prepared_receipt(&prepared, &enforcement)?;
+                    Ok(ExecutorDispatchOutcome::Completed(Box::new(
+                        ExecutorToolExecution {
+                            enforcement,
+                            outcome: decode_tool_outcome(tool_result)?,
+                            request_hash: prepared.request_hash,
+                        },
+                    )))
+                }
+                proto::ExecutorResponseV0::Error { code, .. } => {
+                    Ok(ExecutorDispatchOutcome::PreToolFailure(code))
+                }
+            }
         }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
@@ -730,18 +745,8 @@ fn execute_one_shot(
         &request.policy_digest,
     )
     .map_err(|_| invalid_response("Executor terminal response is invalid"))?;
-    match response {
-        proto::ExecutorResponseV0::Completed { .. } => Ok(response),
-        proto::ExecutorResponseV0::Error { code, .. } => {
-            let _ = stderr_read;
-            Err(executor_prelaunch_error(code))
-        }
-    }
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn executor_prelaunch_error(code: proto::ExecutorErrorCodeV0) -> RuntimeError {
-    executor_error(code, "Executor rejected the request before Tool launch")
+    let _ = stderr_read;
+    Ok(response)
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -1036,8 +1041,8 @@ mod unsupported_platform_tests {
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        c_close, duplicate_executor_descriptor, execute_one_shot, executor_prelaunch_error,
-        executor_request_hash, validate_executor_executable, validate_receipt_identity,
+        c_close, duplicate_executor_descriptor, execute_one_shot, executor_request_hash,
+        validate_executor_executable, validate_receipt_identity,
     };
     use std::{
         collections::BTreeMap,
@@ -1097,13 +1102,15 @@ mod tests {
         let script = format!("printf '%s' '{response}'");
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
-        let error = execute_one_shot(&executor, &[], &request, script.as_bytes())
-            .expect_err("fake Executor returns its canonical unavailable response");
-        match error {
-            crate::runtime::types::RuntimeError::Executor(error) => {
-                assert_eq!(error.code(), proto::ExecutorErrorCodeV0::Unavailable);
+        let response = execute_one_shot(&executor, &[], &request, script.as_bytes())
+            .expect("fake Executor returns its canonical unavailable response");
+        match response {
+            proto::ExecutorResponseV0::Error { code, .. } => {
+                assert_eq!(code, proto::ExecutorErrorCodeV0::Unavailable);
             }
-            error => panic!("unexpected error: {error}"),
+            proto::ExecutorResponseV0::Completed { .. } => {
+                panic!("pre-Tool failure must remain a distinct response")
+            }
         }
     }
 
@@ -1253,14 +1260,6 @@ mod tests {
         assert!(validate_receipt_identity(&receipt, &probe).is_ok());
         receipt.backend_version = "different".to_owned();
         assert!(validate_receipt_identity(&receipt, &probe).is_err());
-    }
-
-    #[test]
-    fn executor_error_text_cannot_reflect_a_secret_shaped_message() {
-        let secret = "Bearer secret-token";
-        let error = executor_prelaunch_error(proto::ExecutorErrorCodeV0::SandboxSetupFailed);
-        assert!(!error.to_string().contains(secret));
-        assert!(error.to_string().contains("rejected the request"));
     }
 
     #[test]

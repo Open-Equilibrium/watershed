@@ -1,8 +1,9 @@
 use super::super::{support::write_registry_definition, test_support::workspace_copy};
 use super::support::{
-    FakeToolExecutionFault, FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider,
-    disabled_smoke_productive_execution_fixture, load_productive_execution_fixture,
-    single_tool_provider_turn, smoke_productive_execution_fixture,
+    FakeToolExecutionFault, FakeToolExecutor, InjectedAttemptRecovery, MemoryAttempts, MemorySink,
+    ScriptedProvider, disabled_smoke_productive_execution_fixture,
+    load_productive_execution_fixture, single_tool_provider_turn,
+    smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     context::ContextManifestCheckpoint,
@@ -10,6 +11,7 @@ use crate::runtime::{
     openai_codex::{ProviderToolCall, ProviderTurn},
     productive::{
         ProductiveExecution, execute_productive_flow, execute_productive_flow_with_tool_executor,
+        execute_productive_flow_with_tool_executor_and_recovery,
     },
     run_attempts::{RunAttemptKind, RunAttemptOutcome},
     session::run_flow,
@@ -200,6 +202,84 @@ fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_unc
             .expect("ToolStarted has a matching ToolFailed event");
         assert_eq!(tool_failed.payload["error"], "runtime_error", "{fault:?}");
     }
+}
+
+#[test]
+fn definitive_executor_error_is_terminal_and_replays_without_tool_redispatch() {
+    let (_workspace, fixture) = smoke_productive_execution_fixture();
+    let flow = fixture.smoke_flow();
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
+    };
+    let mut attempts = MemoryAttempts::default();
+    let mut sink = MemorySink::default();
+    let mut tools = FakeToolExecutor {
+        fault: FakeToolExecutionFault::DefinitiveExecutorError,
+        ..FakeToolExecutor::default()
+    };
+
+    let execution = execute_productive_flow_with_tool_executor(
+        fixture.execution(flow, "productive-definitive-executor-error"),
+        &mut provider,
+        &mut attempts,
+        &mut sink,
+        &mut tools,
+    )
+    .expect("definitive Executor error closes the failed session");
+
+    assert!(execution.failed);
+    let result = attempts
+        .terminal_results
+        .iter()
+        .find(|result| result.attempt_kind == RunAttemptKind::Tool)
+        .expect("definitive Executor error settles the Tool attempt")
+        .clone();
+    assert_eq!(result.outcome, RunAttemptOutcome::Failed);
+    assert_eq!(result.classification, None);
+    assert_eq!(result.exit_code, None);
+    assert_eq!(
+        result.durable_output,
+        Some(serde_json::json!({
+            "error": "sandbox_setup_failed",
+            "schema": "flow-executor-dispatch-error-v0",
+        }))
+    );
+    assert_eq!(tools.invocations.len(), 1);
+    let tool_failed = sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::ToolFailed)
+        .expect("ToolStarted has a stable ToolFailed event");
+    assert_eq!(tool_failed.payload["error"], "sandbox_setup_failed");
+
+    let mut provider = ScriptedProvider {
+        bodies: Vec::new(),
+        turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
+    };
+    let mut resumed_attempts = MemoryAttempts::default();
+    let mut resumed_sink = MemorySink::default();
+    let mut resumed_tools = FakeToolExecutor::default();
+    let mut recovery = InjectedAttemptRecovery::ToolResult(result);
+
+    let resumed = execute_productive_flow_with_tool_executor_and_recovery(
+        fixture.execution(flow, "productive-definitive-executor-error-resume"),
+        &mut provider,
+        &mut resumed_attempts,
+        &mut resumed_sink,
+        &mut resumed_tools,
+        &mut recovery,
+    )
+    .expect("Resume replays the definitive Executor error");
+
+    assert!(resumed.failed);
+    assert!(resumed_tools.invocations.is_empty());
+    let replayed_failure = resumed_sink
+        .0
+        .iter()
+        .find(|event| event.event_type == EventType::ToolFailed)
+        .expect("Resume republishes the stable ToolFailed event");
+    assert_eq!(replayed_failure.payload["error"], "sandbox_setup_failed");
 }
 
 #[test]

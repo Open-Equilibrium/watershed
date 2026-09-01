@@ -3,14 +3,15 @@ use super::observe_productive_result_persist;
 use super::provider_result::read_verified_session_object;
 use super::tool_result::{build_tool_result, parse_tool_result};
 use super::{
-    ProductiveContext, ProductiveToolExecutor, TOOL_ATTEMPT_OUTPUT_SCHEMA_V1, emit_and_commit,
-    mark_recovery_failure, tool_dispatch_reservation,
+    EXECUTOR_DISPATCH_ERROR_SCHEMA_V0, ProductiveContext, ProductiveToolExecutor,
+    TOOL_ATTEMPT_OUTPUT_SCHEMA_V1, emit_and_commit, mark_recovery_failure,
+    tool_dispatch_reservation,
 };
 use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
     event_construction::{RuntimeEventBuilder, tool_started_payload},
-    executor::ExecutorToolExecution,
+    executor::ExecutorDispatchOutcome,
     policy_resolution::command_policy_for_phase,
     run_attempts::{
         ProductiveAttemptLog, ProductiveRecovery, RunAttemptKind, RunAttemptOutcome,
@@ -109,6 +110,22 @@ where
                 &mut context.event_commit_failed,
             )?;
             return Err(RuntimeError::Cancelled);
+        }
+        let dispatch_error = mark_recovery_failure(
+            &mut context.recovery_failed,
+            recovered_executor_dispatch_error(result),
+        )?;
+        if let Some(code) = dispatch_error {
+            emit_executor_dispatch_failure(
+                builder,
+                invocation,
+                tool,
+                &attempt_id,
+                code,
+                context.sink,
+                &mut context.event_commit_failed,
+            )?;
+            return Err(RuntimeError::executor(code, ""));
         }
     }
     let (durable_value, result) = if let Some(result) = recovered {
@@ -219,11 +236,35 @@ where
                 return Err(error);
             }
         };
-        let ExecutorToolExecution {
-            enforcement,
-            mut outcome,
-            request_hash: executed_request_hash,
-        } = execution;
+        let (enforcement, mut outcome, executed_request_hash) = match execution {
+            ExecutorDispatchOutcome::Completed(execution) => (
+                execution.enforcement,
+                execution.outcome,
+                execution.request_hash,
+            ),
+            ExecutorDispatchOutcome::PreToolFailure(code) => {
+                persist_executor_dispatch_failure(
+                    context.attempts,
+                    context.recovery,
+                    &mut context.recovery_failed,
+                    tool,
+                    &attempt_id,
+                    &request_hash,
+                    &timestamp,
+                    code,
+                )?;
+                emit_executor_dispatch_failure(
+                    builder,
+                    invocation,
+                    tool,
+                    &attempt_id,
+                    code,
+                    context.sink,
+                    &mut context.event_commit_failed,
+                )?;
+                return Err(RuntimeError::executor(code, ""));
+            }
+        };
         let validate_execution = || -> Result<(), RuntimeError> {
             if executed_request_hash != request_hash {
                 return Err(RuntimeError::Protocol(
@@ -350,6 +391,53 @@ fn cancelled_tool_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult 
     }
 }
 
+fn executor_dispatch_failure_result(
+    attempt_id: &str,
+    timestamp: &str,
+    code: proto::ExecutorErrorCodeV0,
+) -> RunAttemptResult {
+    RunAttemptResult {
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Failed,
+        classification: None,
+        exit_code: None,
+        timestamp: timestamp.to_owned(),
+        durable_output: Some(serde_json::json!({
+            "error": code,
+            "schema": EXECUTOR_DISPATCH_ERROR_SCHEMA_V0,
+        })),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn persist_executor_dispatch_failure<A: ProductiveAttemptLog>(
+    attempts: &mut A,
+    recovery: &mut dyn ProductiveRecovery,
+    recovery_failed: &mut bool,
+    tool: &core_script::ToolBlock,
+    attempt_id: &str,
+    request_hash: &str,
+    timestamp: &str,
+    code: proto::ExecutorErrorCodeV0,
+) -> Result<(), RuntimeError> {
+    #[cfg(test)]
+    observe_productive_result_persist(RunAttemptKind::Tool);
+    let commit = match crate::runtime::cancellation::claim_productive_durable_commit() {
+        Ok(commit) => Some(commit),
+        Err(RuntimeError::Cancelled) => None,
+        Err(error) => return Err(error),
+    };
+    let result = executor_dispatch_failure_result(attempt_id, timestamp, code);
+    attempts.terminal(&result)?;
+    mark_recovery_failure(
+        recovery_failed,
+        recovery.record_attempt(Some(&tool.identity.id), request_hash, &result),
+    )?;
+    drop(commit);
+    Ok(())
+}
+
 fn persist_cancelled_tool_attempt<A: ProductiveAttemptLog>(
     attempts: &mut A,
     recovery: &mut dyn ProductiveRecovery,
@@ -382,6 +470,29 @@ fn emit_cancelled_tool<S: crate::runtime::event_writer::RuntimeEventSink>(
         serde_json::json!({
             "attempt_id": attempt_id,
             "error": crate::runtime::types::CANCELLED_REASON,
+            "tool_id": tool.identity.id,
+        }),
+        sink,
+        event_commit_failed,
+    )
+}
+
+fn emit_executor_dispatch_failure<S: crate::runtime::event_writer::RuntimeEventSink>(
+    builder: &mut RuntimeEventBuilder,
+    invocation: &FlowInvocation,
+    tool: &core_script::ToolBlock,
+    attempt_id: &str,
+    code: proto::ExecutorErrorCodeV0,
+    sink: &mut S,
+    event_commit_failed: &mut bool,
+) -> Result<(), RuntimeError> {
+    emit_and_commit(
+        builder,
+        Some(invocation),
+        EventType::ToolFailed,
+        serde_json::json!({
+            "attempt_id": attempt_id,
+            "error": code,
             "tool_id": tool.identity.id,
         }),
         sink,
@@ -425,6 +536,40 @@ pub(super) struct ToolAttemptOutput {
     #[serde(rename = "schema")]
     _schema: String,
     pub(super) tool_result: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutorDispatchError {
+    error: proto::ExecutorErrorCodeV0,
+    #[serde(rename = "schema")]
+    _schema: String,
+}
+
+fn recovered_executor_dispatch_error(
+    result: &RunAttemptResult,
+) -> Result<Option<proto::ExecutorErrorCodeV0>, RuntimeError> {
+    let Some(durable_output) = result.durable_output.as_ref() else {
+        return Ok(None);
+    };
+    if durable_output
+        .get("schema")
+        .and_then(serde_json::Value::as_str)
+        != Some(EXECUTOR_DISPATCH_ERROR_SCHEMA_V0)
+    {
+        return Ok(None);
+    }
+    if result.outcome != RunAttemptOutcome::Failed
+        || result.classification.is_some()
+        || result.exit_code.is_some()
+    {
+        return Err(RuntimeError::Protocol(
+            "recovered Executor dispatch error has an invalid terminal state".to_owned(),
+        ));
+    }
+    let output: ExecutorDispatchError =
+        serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
+    Ok(Some(output.error))
 }
 
 fn recovered_tool_receipt(
