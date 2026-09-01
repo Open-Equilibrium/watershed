@@ -274,7 +274,6 @@ fn sandbox_negative_attempts_tool_launch(path: &Path) -> bool {
             "sandbox-negative-environment"
             | "sandbox-negative-interpreter"
             | "sandbox-negative-network"
-            | "sandbox-negative-protected-path"
             | "sandbox-negative-symlink"
             | "sandbox-negative-write",
         ) => true,
