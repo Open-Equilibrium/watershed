@@ -246,9 +246,11 @@ jobs:
             --env M12_CONTRACT_IMAGE \
             --env PATH=/opt/rust/bin:/usr/bin:/bin \
             watershed-m12 \
-            /bin/sh -ec 'cargo run --locked -p flow-agent-core --release \
+            /bin/sh -ec 'install -d -m 0755 /usr/local/libexec/watershed
+            install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /usr/local/libexec/watershed/flow-executor
+            cargo run --locked -p flow-agent-core --release \
               --features m12-startup-evidence --example m12_executor_startup \
-              -- --executor "$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"' \
+              -- --executor /usr/local/libexec/watershed/flow-executor' \
             > target/m12-startup/m12-executor-startup.jsonl
 
       - name: Stop controlled M1.2 Ubuntu

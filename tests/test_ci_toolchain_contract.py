@@ -24,6 +24,7 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
 M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
+M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 
@@ -201,7 +202,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
             workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
             workflow.replace(
-                '-- --executor "$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"',
+                f'-- --executor {M12_INSTALLED_EXECUTOR}',
                 "--",
                 1,
             ),
@@ -331,7 +332,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("cargo run --locked -p flow-agent-core --release", run)
         self.assertIn(f"--features {feature} --example {example}", run)
         if milestone == "M1.2":
-            self.assertIn(f'-- --executor "$PWD/{M12_EXECUTOR}"', run)
+            self.assertIn(
+                "install -d -m 0755 /usr/local/libexec/watershed",
+                run,
+            )
+            self.assertIn(
+                f"install -m 0755 {M12_EXECUTOR} {M12_INSTALLED_EXECUTOR}",
+                run,
+            )
+            self.assertIn(f"-- --executor {M12_INSTALLED_EXECUTOR}", run)
         self.assertIn(f"> {output}", run)
 
         upload_name = f"Upload {milestone} " + (
