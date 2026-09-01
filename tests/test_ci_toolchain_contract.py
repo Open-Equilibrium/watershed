@@ -588,7 +588,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             '"$acceptance_prefix/bin/flow" run smoke-flow',
             '/usr/bin/python3 - "$agent_home"',
             'home / "workspaces"',
-            'workspace-v1-*/conversations/*/runs/*/run-log.jsonl',
+            'workspace-v1-*/sessions/*/runs/*/run-log.jsonl',
             'test ! -e "$config/flow-agent/executor.json"',
             '"attempt_kind") == "provider"',
             '"attempt_kind") == "tool"',
@@ -613,6 +613,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             '"$custom_prefix/bin/flow" executor check',
         ):
             self.assertIn(required, installer_contract)
+        self.assertNotIn("/conversations/", installer_contract)
         self.assertNotIn('executor="$PWD/target/', installer_contract)
 
         cleanup = assert_step_state(

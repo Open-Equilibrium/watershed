@@ -98,7 +98,7 @@ import sys
 home = pathlib.Path(sys.argv[1])
 logs = list(
     (home / "workspaces").glob(
-        "workspace-v1-*/conversations/*/runs/*/run-log.jsonl"
+        "workspace-v1-*/sessions/*/runs/*/run-log.jsonl"
     )
 )
 assert len(logs) == 1, logs
