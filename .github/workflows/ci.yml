@@ -170,26 +170,6 @@ jobs:
           watershed-m12
           cargo build --locked --release -p flow-agent-executor --bin flow-executor
 
-      - name: Build M1.2 installer CLI
-        if: matrix.os == 'ubuntu-24.04'
-        run: >-
-          docker exec
-          --env CARGO_HOME=/cargo
-          --env CARGO_NET_OFFLINE=true
-          --env PATH=/opt/rust/bin:/usr/bin:/bin
-          watershed-m12
-          cargo build --locked --release -p flow-agent-cli --bin flow
-
-      - name: Build M1.2 installer acceptance CLI
-        if: matrix.os == 'ubuntu-24.04'
-        run: >-
-          docker exec
-          --env CARGO_HOME=/cargo
-          --env CARGO_NET_OFFLINE=true
-          --env PATH=/opt/rust/bin:/usr/bin:/bin
-          watershed-m12
-          cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-install-acceptance
-
       - name: Check M1.2 executor is static
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
@@ -245,15 +225,6 @@ jobs:
       - name: Run M1.2 installer contract tests
         if: matrix.os == 'ubuntu-24.04'
         run: node scripts/run-python.mjs -m unittest install.tests.test_install
-
-      - name: Run M1.2 installer acceptance
-        if: matrix.os == 'ubuntu-24.04'
-        shell: bash
-        run: |
-          docker exec \
-            --env RUNNER_TEMP=/root/m12 \
-            watershed-m12 \
-            /bin/sh scripts/run-m12-installer-acceptance.sh
 
       - name: Check M1.2 unsupported platforms
         if: matrix.os != 'ubuntu-24.04'
@@ -332,6 +303,46 @@ jobs:
           --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))'
           --show-missing-lines
 
+      - name: Prepare instrumented M1.2 coverage artifacts
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec --interactive \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env PATH=/opt/rust/bin:/usr/local/bin:/usr/bin:/bin \
+            watershed-m12 \
+          /bin/sh -s <<'PREPARE'
+          set -eu
+          printf '%s\n' \
+            'Signature: 8a477f597d28d172789f06886806bc55' \
+            '# This file is a cache directory tag created by cargo.' \
+            '# For information about cache directory tags see https://bford.info/cachedir/' \
+            > target/CACHEDIR.TAG
+          cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl > /root/m12-coverage.env
+          . /root/m12-coverage.env
+          cargo llvm-cov clean --workspace
+          cargo clean --release --target x86_64-unknown-linux-musl -p flow-agent-executor
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor
+          cargo build --locked --release -p flow-agent-cli --bin flow
+          cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-install-acceptance
+          if readelf -l target/x86_64-unknown-linux-musl/release/flow-executor | grep -q "INTERP"; then
+            echo "instrumented flow-executor must not contain an ELF interpreter" >&2
+            exit 1
+          fi
+          PREPARE
+
+      - name: Run M1.2 installer acceptance
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec \
+            --env RUNNER_TEMP=/root/m12 \
+            watershed-m12 \
+            /bin/sh -ec '. /root/m12-coverage.env
+            exec /bin/sh scripts/run-m12-installer-acceptance.sh'
+
       - name: Check Linux line coverage
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
@@ -343,21 +354,7 @@ jobs:
             watershed-m12 \
           /bin/sh -s <<'COVERAGE'
           set -eu
-          printf '%s\n' \
-            'Signature: 8a477f597d28d172789f06886806bc55' \
-            '# This file is a cache directory tag created by cargo.' \
-            '# For information about cache directory tags see https://bford.info/cachedir/' \
-            > target/CACHEDIR.TAG
-          eval "$(cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl)"
-          cargo llvm-cov clean --workspace
-          cargo clean --release --target x86_64-unknown-linux-musl -p flow-agent-executor
-          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
-          cargo build --locked --release -p flow-agent-executor --bin flow-executor
-          cargo build --locked --release -p flow-agent-cli --bin flow
-          if readelf -l target/x86_64-unknown-linux-musl/release/flow-executor | grep -q "INTERP"; then
-            echo "instrumented flow-executor must not contain an ELF interpreter" >&2
-            exit 1
-          fi
+          . /root/m12-coverage.env
           export HOME=/home/watershed
           export USER=watershed
           export LOGNAME=watershed

@@ -28,6 +28,7 @@ M12_ACCEPTANCE_CLI = "target/m12-install-acceptance/release/flow"
 M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
+M12_COVERAGE_ENV = "/root/m12-coverage.env"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 
 
@@ -293,6 +294,43 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(coverage[coverage.index("--fail-under-lines") + 1], "90")
         self.assertEqual(coverage[coverage.index("--config") + 1], TEST_ISOLATION)
 
+        coverage_prepare_lines = assert_step_state(
+            self,
+            workflow,
+            "Prepare instrumented M1.2 coverage artifacts",
+            condition=UBUNTU,
+        )
+        coverage_prepare = step_run(
+            workflow, "Prepare instrumented M1.2 coverage artifacts"
+        )
+        for required in (
+            "Signature: 8a477f597d28d172789f06886806bc55",
+            "target/CACHEDIR.TAG",
+            f"cargo llvm-cov show-env --sh --target {M12_TARGET} > {M12_COVERAGE_ENV}",
+            f". {M12_COVERAGE_ENV}",
+            "cargo llvm-cov clean --workspace",
+            f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
+            "cargo build --locked --release -p flow-agent-executor "
+            f"--bin flow-executor --target {M12_TARGET}",
+            "cargo build --locked --release -p flow-agent-executor --bin flow-executor",
+            "cargo build --locked --release -p flow-agent-cli --bin flow",
+            "cargo build --locked --release -p flow-agent-cli --bin flow "
+            "--features m12-install-acceptance "
+            "--target-dir target/m12-install-acceptance",
+        ):
+            self.assertIn(required, coverage_prepare)
+        self.assertIn("        shell: bash", coverage_prepare_lines)
+        prepare_order = (
+            "target/CACHEDIR.TAG",
+            "cargo llvm-cov show-env",
+            f". {M12_COVERAGE_ENV}",
+            "cargo llvm-cov clean",
+            "cargo clean --release",
+            "cargo build",
+        )
+        positions = [coverage_prepare.index(command) for command in prepare_order]
+        self.assertEqual(positions, sorted(positions))
+
         linux_coverage_lines = assert_step_state(
             self, workflow, "Check Linux line coverage", condition=UBUNTU
         )
@@ -300,12 +338,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("docker exec", linux_coverage)
         self.assertIn(M12_CONTAINER, linux_coverage)
         for required in (
-            "Signature: 8a477f597d28d172789f06886806bc55",
-            "target/CACHEDIR.TAG",
-            'eval "$(cargo llvm-cov show-env --sh --target '
-            f'{M12_TARGET})"',
-            "cargo llvm-cov clean --workspace",
-            f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
+            f". {M12_COVERAGE_ENV}",
             'install -d -m 0700 "$RUNNER_TEMP"',
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
@@ -323,11 +356,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
         ordered = (
-            "target/CACHEDIR.TAG",
-            "cargo llvm-cov show-env",
-            "cargo llvm-cov clean",
-            f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
-            "cargo build",
+            f". {M12_COVERAGE_ENV}",
             "cargo nextest run",
             "cargo llvm-cov report",
         )
@@ -533,14 +562,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Build M1.2 dynamic rejection fixture": (
                 "cargo build --locked --release -p flow-agent-executor --bin flow-executor"
             ),
-            "Build M1.2 installer CLI": (
-                "cargo build --locked --release -p flow-agent-cli --bin flow"
-            ),
-            "Build M1.2 installer acceptance CLI": (
-                "cargo build --locked --release -p flow-agent-cli --bin flow "
-                "--features m12-install-acceptance "
-                "--target-dir target/m12-install-acceptance"
-            ),
         }.items():
             assert_step_state(self, workflow, name, condition=UBUNTU)
             build = step_run(workflow, name)
@@ -548,11 +569,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(M12_CONTAINER, build)
             self.assertIn(command, build)
             self.assertIn("CARGO_NET_OFFLINE=true", build)
-        self.assertNotIn(
-            "m12-install-acceptance",
-            step_run(workflow, "Build M1.2 installer CLI"),
-        )
-
         static = "\n".join(
             assert_step_state(
                 self, workflow, "Check M1.2 executor is static", condition=UBUNTU
@@ -611,6 +627,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn(M12_CONTAINER, installer)
         self.assertIn("--env RUNNER_TEMP=/root/m12", installer)
         self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
+        self.assertIn(f". {M12_COVERAGE_ENV}", installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
         installer_contract = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         for required in (
@@ -648,6 +665,8 @@ class CiWorkflowContractTest(unittest.TestCase):
             'executor="$bundle/flow-executor"',
             'executor configure --path "$executor"',
             '"$custom_prefix/bin/flow" executor check',
+            '"$standard_prefix/bin/flow" executor configure --default',
+            '"$standard_prefix/bin/flow" executor check',
         ):
             self.assertIn(required, installer_contract)
         self.assertNotIn("/conversations/", installer_contract)
