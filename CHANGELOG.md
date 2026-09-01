@@ -16,7 +16,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning: [S
 - Before the first release, Flow Agent removed `flow import` and compatibility for automatic flat-session migration, `flow-conversation-entry-v0`, `flow-run-log-record-v0`, `flow-provider-output-v1`, legacy Phase/Step events and Tool observations.
 - M1.2 uses a Flow-owned one-shot Executor and official Ubuntu Bubblewrap/seccomp backend with exact descriptor-backed mounts, named runtime-read profiles, readiness before Run reservation and a persisted canonical enforcement receipt. All productive Tool execution, including administrator-owned Custom Executors, is limited to Ubuntu 24.04 x64; other platforms fail closed (ADR-0146, ADR-0160, ADR-0161).
 - Controlled Run and Resume returns preserve operation, writer-finalization and ownership-cleanup failures; Drop remains only a best-effort fallback (ADR-0077).
-- Dev/CI uses exact Node 24.20.0 LTS and pnpm 11.24.0 pins without adding a product Node runtime (ADR-0080).
+- Dev/CI uses exact Node 24.20.0 LTS and pnpm 11.25.0 pins without adding a product Node runtime (ADR-0080).
 - Protocol v0 applies one exclusive JSON container-recursion limit of 128 across wire, constructed-event and canonical-JSON boundaries (ADR-0089).
 - The M1 runtime satisfies the architecture-hardening entry criteria in `PLAN.md`; M1.1 provider and general subprocess work must preserve those boundaries (ADR-0079).
 - M1 provider context fixed as deterministic, cache-stable `flow-context-v0`, with durable history retained outside the bounded provider projection and post-M1 compaction/retrieval preserved (ADR-0058).
