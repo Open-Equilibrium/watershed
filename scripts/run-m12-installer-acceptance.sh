@@ -10,6 +10,7 @@ config="$RUNNER_TEMP/m12-config"
 home="$RUNNER_TEMP/m12-home"
 agent_home="$RUNNER_TEMP/m12-agent-home"
 fixture_home="$RUNNER_TEMP/m12-fixture-home"
+fixture_error="$RUNNER_TEMP/m12-fixture-smoke.stderr"
 fixture_output="$RUNNER_TEMP/m12-fixture-smoke.jsonl"
 fixture_workspace="$RUNNER_TEMP/m12-fixture-workspace"
 productive_workspace="$RUNNER_TEMP/m12-productive-workspace"
@@ -41,7 +42,15 @@ printf '%s\n' \
   'stub_model: deterministic' \
   >> "$fixture_home/config.yaml"
 (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow)
-(cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output")
+set +e
+(cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output" 2> "$fixture_error")
+fixture_status=$?
+set -e
+if [ "$fixture_status" -ne 0 ]; then
+  printf 'fixture run failed with exit %s\n' "$fixture_status" >&2
+  cat "$fixture_error" >&2
+  exit 1
+fi
 diff -u flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"
 install -d -m 0700 "$config/flow-agent"
 cp -R flow-agent/fixtures/smoke-flow/registry "$agent_home/registry"
@@ -60,12 +69,23 @@ set +e
 productive_unavailable=$(cd "$productive_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow 2>&1)
 productive_unavailable_status=$?
 set -e
-test "$productive_unavailable_status" -eq 65
+if [ "$productive_unavailable_status" -ne 65 ]; then
+  printf 'productive run without an Executor returned exit %s, expected 65\n%s\n' \
+    "$productive_unavailable_status" "$productive_unavailable" >&2
+  exit 1
+fi
 case "$productive_unavailable" in
   "error: executor_unavailable:"*) ;;
-  *) exit 1 ;;
+  *)
+    printf 'productive run without an Executor returned an unexpected diagnostic\n%s\n' \
+      "$productive_unavailable" >&2
+    exit 1
+    ;;
 esac
-test ! -e "$productive_workspace/.flow"
+if [ -e "$productive_workspace/.flow" ]; then
+  printf 'productive Executor preflight mutated the workspace\n' >&2
+  exit 1
+fi
 executor="$PWD/target/x86_64-unknown-linux-musl/release/flow-executor"
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor configure --path "$executor")
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check </dev/null)
