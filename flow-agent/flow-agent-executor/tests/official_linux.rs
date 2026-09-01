@@ -520,6 +520,7 @@ fn completed(response: ExecutorResponseV0) -> (ExecutorToolResultV0, Enforcement
     }
 }
 
+#[track_caller]
 fn assert_terminal(
     result: &ExecutorToolResultV0,
     status: ExecutorToolStatusV0,
