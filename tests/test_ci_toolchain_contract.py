@@ -305,12 +305,8 @@ class CiWorkflowContractTest(unittest.TestCase):
             'eval "$(cargo llvm-cov show-env --sh --target '
             f'{M12_TARGET})"',
             "cargo llvm-cov clean --workspace",
-            "--features m12-install-acceptance --target-dir target/m12-install-acceptance",
-            f"install -m 0755 {M12_EXECUTOR} /tmp/flow-executor-uninstrumented",
-            f"install -m 0755 {M12_EXECUTOR} /tmp/flow-executor-instrumented",
-            f"install -m 0755 /tmp/flow-executor-uninstrumented {M12_EXECUTOR}",
-            f"install -m 0755 /tmp/flow-executor-instrumented {M12_EXECUTOR}",
-            "scripts/run-m12-installer-acceptance.sh",
+            f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
+            'install -d -m 0700 "$RUNNER_TEMP"',
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
             "cargo nextest run",
@@ -329,20 +325,16 @@ class CiWorkflowContractTest(unittest.TestCase):
             "target/CACHEDIR.TAG",
             "cargo llvm-cov show-env",
             "cargo llvm-cov clean",
+            f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
             "cargo build",
-            "scripts/run-m12-installer-acceptance.sh",
             "cargo nextest run",
             "cargo llvm-cov report",
         )
         positions = [linux_coverage.index(command) for command in ordered]
         self.assertEqual(positions, sorted(positions))
-        preserve = linux_coverage.index("/tmp/flow-executor-uninstrumented")
-        instrument = linux_coverage.index("/tmp/flow-executor-instrumented")
-        acceptance = linux_coverage.index("scripts/run-m12-installer-acceptance.sh")
-        restore = linux_coverage.rindex("/tmp/flow-executor-instrumented")
-        self.assertLess(preserve, linux_coverage.index("cargo llvm-cov show-env"))
-        self.assertLess(instrument, acceptance)
-        self.assertLess(acceptance, restore)
+        self.assertNotIn("/tmp/flow-executor-", linux_coverage)
+        self.assertNotIn("scripts/run-m12-installer-acceptance.sh", linux_coverage)
+        self.assertNotIn("m12-install-acceptance", linux_coverage)
         privilege_drop = linux_coverage.index(
             f"runuser --user {M12_COVERAGE_USER} --preserve-environment"
         )
