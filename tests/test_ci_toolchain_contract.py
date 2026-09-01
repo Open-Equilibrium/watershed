@@ -451,18 +451,31 @@ class CiWorkflowContractTest(unittest.TestCase):
             assert_step_state(
                 self,
                 workflow,
-                "Enable stock Bubblewrap user namespaces",
+                "Authorize Bubblewrap user namespaces",
                 condition=UBUNTU,
             )
         )
         for required in (
-            "apparmor apparmor-profiles",
-            "/usr/share/apparmor/extra-profiles/bwrap-userns-restrict",
-            "/etc/apparmor.d/bwrap-userns-restrict",
+            "--no-install-recommends apparmor",
+            "/etc/apparmor.d/watershed-bwrap-userns",
+            "/usr/bin/bwrap flags=(unconfined)",
+            "userns,",
             "apparmor_parser --replace",
             "kernel.apparmor_restrict_unprivileged_userns",
         ):
             self.assertIn(required, apparmor)
+        for forbidden in (
+            "apparmor-profiles",
+            "/usr/share/apparmor",
+            "sysctl --write",
+            "sysctl -w",
+            "CAP_NET_ADMIN",
+        ):
+            self.assertNotIn(forbidden, apparmor)
+        self.assertLess(
+            workflow.index("      - name: Authorize Bubblewrap user namespaces"),
+            workflow.index("      - name: Run M1.2 executor tests"),
+        )
 
         start = "\n".join(
             assert_step_state(
