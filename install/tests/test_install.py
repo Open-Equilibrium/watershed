@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shlex
 import shutil
 import signal
 import stat
@@ -101,6 +102,35 @@ class PrefixInstallerTest(unittest.TestCase):
             check=False,
         )
 
+    def pause_installer_after_validation(
+        self, bundle: pathlib.Path, marker: pathlib.Path, release: pathlib.Path
+    ):
+        installer = bundle / "install.sh"
+        source = installer.read_text(encoding="utf-8")
+        boundary = "trap 'signal_exit 143' TERM\n\n"
+        self.assertEqual(source.count(boundary), 1)
+        barrier = (
+            f": > {shlex.quote(str(marker))}\n"
+            f"while [ ! -e {shlex.quote(str(release))} ]; do /bin/sleep 0.01; done\n"
+        )
+        installer.write_text(
+            source.replace(boundary, boundary + barrier),
+            encoding="utf-8",
+        )
+        installer.chmod(0o755)
+
+    def wait_for_installer_marker(
+        self, process: subprocess.Popen, marker: pathlib.Path
+    ):
+        for _ in range(500):
+            if marker.exists():
+                return
+            if process.poll() is not None:
+                self.fail(process.stderr.read().decode("utf-8", errors="replace"))
+            time.sleep(0.01)
+        process.kill()
+        self.fail("installer did not reach the post-validation boundary")
+
     def test_standard_and_opt_out_install_from_any_cwd_with_empty_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -163,6 +193,7 @@ class PrefixInstallerTest(unittest.TestCase):
             (bundle / "flow").write_text(
                 "#!/bin/sh\n"
                 ": > \"$XDG_CONFIG_HOME/readiness-state\"\n"
+                "printf '%s\\n' 'executor_unavailable: Bubblewrap is unavailable' >&2\n"
                 "exit 65\n",
                 encoding="utf-8",
             )
@@ -172,7 +203,81 @@ class PrefixInstallerTest(unittest.TestCase):
             installed = self.install(bundle, prefix)
 
             self.assertNotEqual(installed.returncode, 0)
+            self.assertIn(b"Bubblewrap is unavailable", installed.stderr)
             self.assertIn(b"failed readiness", installed.stderr)
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_replacing_validated_bundle_fails_without_running_substituted_flow(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            validated = root / "validated"
+            release = root / "release"
+            executed = root / "substituted-flow-ran"
+            self.pause_installer_after_validation(bundle, validated, release)
+            prefix = root / "prefix"
+            unrelated_cwd = root / "unrelated-cwd"
+            unrelated_cwd.mkdir()
+            process = subprocess.Popen(
+                ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
+                cwd=unrelated_cwd,
+                env={"PATH": ""},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.wait_for_installer_marker(process, validated)
+            bundle.rename(root / "original-bundle")
+            replacement = self.bundle(root)
+            (replacement / "flow").write_text(
+                "#!/bin/sh\n"
+                f": > {shlex.quote(str(executed))}\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            (replacement / "flow").chmod(0o755)
+            release.touch()
+            _, stderr = process.communicate(timeout=5)
+
+            self.assertNotEqual(process.returncode, 0, stderr)
+            self.assertIn(b"installer bundle path changed during installation", stderr)
+            self.assertFalse(executed.exists())
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_replacing_validated_target_directory_fails_without_publication(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            validated = root / "validated"
+            release = root / "release"
+            self.pause_installer_after_validation(bundle, validated, release)
+            prefix = root / "prefix"
+            unrelated_cwd = root / "unrelated-cwd"
+            unrelated_cwd.mkdir()
+            process = subprocess.Popen(
+                [
+                    "/bin/sh",
+                    str(bundle / "install.sh"),
+                    "--prefix",
+                    str(prefix),
+                    "--no-default-executor",
+                ],
+                cwd=unrelated_cwd,
+                env={"PATH": ""},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            self.wait_for_installer_marker(process, validated)
+            original_bin = root / "original-bin"
+            (prefix / "bin").rename(original_bin)
+            (prefix / "bin").mkdir(mode=0o755)
+            release.touch()
+            _, stderr = process.communicate(timeout=5)
+
+            self.assertNotEqual(process.returncode, 0, stderr)
+            self.assertIn(b"installation bin path changed during installation", stderr)
+            self.assertEqual(list(original_bin.iterdir()), [])
             self.assertEqual(list((prefix / "bin").iterdir()), [])
 
     def test_signal_at_each_publication_boundary_rolls_back(self):
@@ -208,6 +313,64 @@ class PrefixInstallerTest(unittest.TestCase):
 
                 self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
                 self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+    def test_signal_at_commit_boundary_is_all_or_nothing(self):
+        commit = "installation_committed=1\n"
+        cases = (
+            ("before", f'/bin/kill -TERM "$$"\n{commit}', ()),
+            (
+                "after",
+                f'{commit}/bin/kill -TERM "$$"\n',
+                ("flow", "flow-executor"),
+            ),
+        )
+        for side, injected, expected in cases:
+            with self.subTest(side=side), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                installer = bundle / "install.sh"
+                source = installer.read_text(encoding="utf-8")
+                self.assertEqual(source.count(commit), 1)
+                installer.write_text(
+                    source.replace(commit, injected),
+                    encoding="utf-8",
+                )
+                installer.chmod(0o755)
+                prefix = root / "prefix"
+
+                installed = self.install(bundle, prefix)
+
+                self.assertEqual(installed.returncode, 128 + signal.SIGTERM, installed.stderr)
+                self.assertEqual(
+                    tuple(sorted(path.name for path in (prefix / "bin").iterdir())),
+                    expected,
+                )
+
+    def test_signal_during_failure_cleanup_does_not_interrupt_rollback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            installer = bundle / "install.sh"
+            source = installer.read_text(encoding="utf-8")
+            first_removal = '            /bin/rm -f -- "$executor_target" || :\n'
+            self.assertEqual(source.count(first_removal), 1)
+            installer.write_text(
+                source.replace(
+                    first_removal,
+                    first_removal + '            /bin/kill -TERM "$$"\n',
+                ),
+                encoding="utf-8",
+            )
+            installer.chmod(0o755)
+            (bundle / "flow").write_text("#!/bin/sh\nexit 65\n", encoding="utf-8")
+            (bundle / "flow").chmod(0o755)
+            prefix = root / "prefix"
+
+            installed = self.install(bundle, prefix)
+
+            self.assertEqual(installed.returncode, 1, installed.stderr)
+            self.assertIn(b"failed readiness", installed.stderr)
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
 
     def test_signal_during_readiness_terminates_descendants_and_rolls_back(self):
         with tempfile.TemporaryDirectory() as temporary:

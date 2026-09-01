@@ -163,6 +163,16 @@ jobs:
           watershed-m12
           cargo build --locked --release -p flow-agent-cli --bin flow
 
+      - name: Build M1.2 installer acceptance CLI
+        if: matrix.os == 'ubuntu-24.04'
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          watershed-m12
+          cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-install-acceptance
+
       - name: Check M1.2 executor is static
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
@@ -196,6 +206,20 @@ jobs:
           --env FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
           watershed-m12
           cargo test --locked -p flow-agent-executor --test official_linux
+
+      - name: Run public Custom Executor conformance
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          watershed-m12
+          cargo run --locked -p flow-agent-core
+          --features m12-startup-evidence
+          --example custom_executor_conformance --
+          --executor /work/target/x86_64-unknown-linux-musl/release/flow-executor
 
       - name: Run M1.2 installer contract tests
         if: matrix.os == 'ubuntu-24.04'
@@ -303,6 +327,7 @@ jobs:
           cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
           cargo build --locked --release -p flow-agent-executor --bin flow-executor
           cargo build --locked --release -p flow-agent-cli --bin flow
+          cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-install-acceptance
           if readelf -l target/x86_64-unknown-linux-musl/release/flow-executor | grep -q "INTERP"; then
             echo "instrumented flow-executor must not contain an ELF interpreter" >&2
             exit 1

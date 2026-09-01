@@ -54,32 +54,41 @@ esac
 [ ! -L "$installer" ] || fail 'installer must not be a symbolic link'
 bundle=${installer%/*}
 [ "$bundle" != "$installer" ] || fail 'installer bundle is unavailable'
-bundle_mode=$(/usr/bin/stat -c '%a' -- "$bundle") || fail 'cannot inspect installer bundle mode'
+exec 3<"$bundle" || fail 'cannot open installer bundle'
+bundle_fd=/proc/self/fd/3
+[ -d "$bundle_fd" ] || fail 'installer bundle is not a directory'
+bundle_mode=$(/usr/bin/stat -L -c '%a' -- "$bundle_fd") || fail 'cannot inspect installer bundle mode'
 [ $((0$bundle_mode & 0022)) -eq 0 ] || fail 'installer bundle is writable by other users'
-bundle_owner=$(/usr/bin/stat -c '%u' -- "$bundle") || fail 'cannot inspect installer bundle owner'
+bundle_owner=$(/usr/bin/stat -L -c '%u' -- "$bundle_fd") || fail 'cannot inspect installer bundle owner'
 current_owner=$(/usr/bin/id -u) || fail 'cannot inspect installer owner'
 [ "$bundle_owner" -eq 0 ] || [ "$bundle_owner" -eq "$current_owner" ] || fail 'untrusted installer bundle owner'
 
-flow_source=$bundle/flow
-executor_source=$bundle/flow-executor
-
 validate_source() {
     source_path=$1
-    [ -f "$source_path" ] || fail "missing regular bundle artifact: $source_path"
-    [ ! -L "$source_path" ] || fail "linked bundle artifact is unsafe: $source_path"
-    [ -x "$source_path" ] || fail "bundle artifact is not executable: $source_path"
-    source_links=$(/usr/bin/stat -c '%h' -- "$source_path") || fail 'cannot inspect bundle artifact'
-    [ "$source_links" -eq 1 ] || fail "hard-linked bundle artifact is unsafe: $source_path"
-    source_mode=$(/usr/bin/stat -c '%a' -- "$source_path") || fail 'cannot inspect bundle artifact mode'
-    [ $((0$source_mode & 0022)) -eq 0 ] || fail "writable bundle artifact is unsafe: $source_path"
-    source_owner=$(/usr/bin/stat -c '%u' -- "$source_path") || fail 'cannot inspect bundle artifact owner'
-    current_owner=$(/usr/bin/id -u) || fail 'cannot inspect installer owner'
-    [ "$source_owner" -eq 0 ] || [ "$source_owner" -eq "$current_owner" ] || fail "untrusted bundle artifact owner: $source_path"
+    source_name=$2
+    [ -f "$source_path" ] || fail "missing regular bundle artifact: $source_name"
+    [ -x "$source_path" ] || fail "bundle artifact is not executable: $source_name"
+    source_links=$(/usr/bin/stat -L -c '%h' -- "$source_path") || fail 'cannot inspect bundle artifact'
+    [ "$source_links" -eq 1 ] || fail "hard-linked bundle artifact is unsafe: $source_name"
+    source_mode=$(/usr/bin/stat -L -c '%a' -- "$source_path") || fail 'cannot inspect bundle artifact mode'
+    [ $((0$source_mode & 0022)) -eq 0 ] || fail "writable bundle artifact is unsafe: $source_name"
+    source_owner=$(/usr/bin/stat -L -c '%u' -- "$source_path") || fail 'cannot inspect bundle artifact owner'
+    [ "$source_owner" -eq 0 ] || [ "$source_owner" -eq "$current_owner" ] || fail "untrusted bundle artifact owner: $source_name"
 }
 
-validate_source "$flow_source"
+flow_source_name=$bundle/flow
+flow_source_entry=$bundle_fd/flow
+[ ! -L "$flow_source_entry" ] || fail "linked bundle artifact is unsafe: $flow_source_name"
+exec 4<"$flow_source_entry" || fail "missing regular bundle artifact: $flow_source_name"
+flow_source=/proc/self/fd/4
+validate_source "$flow_source" "$flow_source_name"
 if [ "$install_executor" -eq 1 ]; then
-    validate_source "$executor_source"
+    executor_source_name=$bundle/flow-executor
+    executor_source_entry=$bundle_fd/flow-executor
+    [ ! -L "$executor_source_entry" ] || fail "linked bundle artifact is unsafe: $executor_source_name"
+    exec 5<"$executor_source_entry" || fail "missing regular bundle artifact: $executor_source_name"
+    executor_source=/proc/self/fd/5
+    validate_source "$executor_source" "$executor_source_name"
 fi
 
 bin=$prefix/bin
@@ -92,23 +101,26 @@ else
     umask "$old_umask"
 fi
 
-bin_mode=$(/usr/bin/stat -c '%a' -- "$bin") || fail 'cannot inspect installation bin mode'
+exec 6<"$bin" || fail 'cannot open installation bin directory'
+bin_fd=/proc/self/fd/6
+[ -d "$bin_fd" ] || fail 'installation bin path is unsafe'
+bin_mode=$(/usr/bin/stat -L -c '%a' -- "$bin_fd") || fail 'cannot inspect installation bin mode'
 [ $((0$bin_mode & 0022)) -eq 0 ] || fail 'installation bin directory is writable by other users'
-bin_owner=$(/usr/bin/stat -c '%u' -- "$bin") || fail 'cannot inspect installation bin owner'
-current_owner=$(/usr/bin/id -u) || fail 'cannot inspect installer owner'
+bin_owner=$(/usr/bin/stat -L -c '%u' -- "$bin_fd") || fail 'cannot inspect installation bin owner'
 [ "$bin_owner" -eq "$current_owner" ] || fail 'installation bin directory is not owned by the installer administrator'
 
-flow_target=$bin/flow
-executor_target=$bin/flow-executor
+flow_target=$bin_fd/flow
+executor_target=$bin_fd/flow-executor
 [ ! -e "$flow_target" ] && [ ! -L "$flow_target" ] || fail 'existing installation is not upgraded'
 [ ! -e "$executor_target" ] && [ ! -L "$executor_target" ] || fail 'existing installation is not upgraded'
 
-flow_stage=$bin/.flow.install.$$
-executor_stage=$bin/.flow-executor.install.$$
-readiness_config=$bin/.flow-readiness-config.$$
+flow_stage=$bin_fd/.flow.install.$$
+executor_stage=$bin_fd/.flow-executor.install.$$
+readiness_config=$bin_fd/.flow-readiness-config.$$
 readiness_status_file=$readiness_config/status
 published_flow=0
 published_executor=0
+installation_committed=0
 readiness_config_created=0
 readiness_pid=
 readiness_pgid=
@@ -166,19 +178,22 @@ stop_readiness() {
     readiness_pgid=
 }
 cleanup() {
+    trap '' HUP INT TERM
     stop_readiness
     if [ "$readiness_config_created" -eq 1 ]; then
         /bin/rm -rf -- "$readiness_config" || :
     fi
-    if [ "$published_executor" -eq 1 ] || {
-        [ -e "$executor_stage" ] && [ "$executor_stage" -ef "$executor_target" ]
-    }; then
-        /bin/rm -f -- "$executor_target" || :
-    fi
-    if [ "$published_flow" -eq 1 ] || {
-        [ -e "$flow_stage" ] && [ "$flow_stage" -ef "$flow_target" ]
-    }; then
-        /bin/rm -f -- "$flow_target" || :
+    if [ "$installation_committed" -eq 0 ]; then
+        if [ "$published_executor" -eq 1 ] || {
+            [ -e "$executor_stage" ] && [ "$executor_stage" -ef "$executor_target" ]
+        }; then
+            /bin/rm -f -- "$executor_target" || :
+        fi
+        if [ "$published_flow" -eq 1 ] || {
+            [ -e "$flow_stage" ] && [ "$flow_stage" -ef "$flow_target" ]
+        }; then
+            /bin/rm -f -- "$flow_target" || :
+        fi
     fi
     /bin/rm -f -- "$flow_stage" "$executor_stage" || :
 }
@@ -192,6 +207,22 @@ trap 'signal_exit 129' HUP
 trap 'signal_exit 130' INT
 trap 'signal_exit 143' TERM
 
+verify_bundle_binding() {
+    [ "$bundle" -ef "$bundle_fd" ] || fail 'installer bundle path changed during installation'
+    [ "$flow_source_entry" -ef "$flow_source" ] || fail 'flow bundle artifact changed during installation'
+    if [ "$install_executor" -eq 1 ]; then
+        [ "$executor_source_entry" -ef "$executor_source" ] \
+            || fail 'flow-executor bundle artifact changed during installation'
+    fi
+}
+verify_bin_binding() {
+    [ ! -L "$bin" ] && [ "$bin" -ef "$bin_fd" ] \
+        || fail 'installation bin path changed during installation'
+}
+
+verify_bundle_binding
+verify_bin_binding
+
 /bin/cp --reflink=never --no-preserve=mode,ownership,timestamps -- "$flow_source" "$flow_stage" \
     || fail 'cannot stage flow'
 /bin/chmod 0755 -- "$flow_stage" || fail 'cannot protect staged flow'
@@ -199,6 +230,12 @@ if [ "$install_executor" -eq 1 ]; then
     /bin/cp --reflink=never --no-preserve=mode,ownership,timestamps -- "$executor_source" "$executor_stage" \
         || fail 'cannot stage flow-executor'
     /bin/chmod 0755 -- "$executor_stage" || fail 'cannot protect staged flow-executor'
+fi
+verify_bundle_binding
+exec 3<&-
+exec 4<&-
+if [ "$install_executor" -eq 1 ]; then
+    exec 5<&-
 fi
 
 /bin/ln -- "$flow_stage" "$flow_target" || fail 'cannot publish flow'
@@ -236,7 +273,8 @@ if [ "$install_executor" -eq 1 ]; then
     readiness_config_created=0
 fi
 
-published_flow=0
-published_executor=0
+verify_bin_binding
+installation_committed=1
 trap - EXIT HUP INT TERM
+exec 6<&-
 printf '%s\n' "installed flow in $bin"

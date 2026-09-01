@@ -24,6 +24,7 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
 M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
+M12_ACCEPTANCE_CLI = "target/m12-install-acceptance/release/flow"
 M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
@@ -302,6 +303,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             'eval "$(cargo llvm-cov show-env --sh --target '
             f'{M12_TARGET})"',
             "cargo llvm-cov clean --workspace",
+            "--features m12-install-acceptance --target-dir target/m12-install-acceptance",
             "scripts/run-m12-installer-acceptance.sh",
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
@@ -497,6 +499,11 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Build M1.2 installer CLI": (
                 "cargo build --locked --release -p flow-agent-cli --bin flow"
             ),
+            "Build M1.2 installer acceptance CLI": (
+                "cargo build --locked --release -p flow-agent-cli --bin flow "
+                "--features m12-install-acceptance "
+                "--target-dir target/m12-install-acceptance"
+            ),
         }.items():
             assert_step_state(self, workflow, name, condition=UBUNTU)
             build = step_run(workflow, name)
@@ -504,6 +511,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(M12_CONTAINER, build)
             self.assertIn(command, build)
             self.assertIn("CARGO_NET_OFFLINE=true", build)
+        self.assertNotIn(
+            "m12-install-acceptance",
+            step_run(workflow, "Build M1.2 installer CLI"),
+        )
 
         static = "\n".join(
             assert_step_state(
@@ -556,9 +567,18 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (
             "install/install.sh",
             "target/release/flow",
+            M12_ACCEPTANCE_CLI,
             M12_EXECUTOR,
             'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix"',
             '"$standard_prefix/bin/flow" executor check',
+            'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix"',
+            'FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1',
+            '"$acceptance_prefix/bin/flow" run smoke-flow',
+            'test ! -e "$config/flow-agent/executor.json"',
+            '"attempt_kind") == "provider"',
+            '"attempt_kind") == "tool"',
+            'durable["schema"] == "flow-tool-attempt-output-v1"',
+            'receipt["executor"] == "flow-executor"',
             'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor',
             'test ! -e "$custom_prefix/bin/flow-executor"',
             'test "$unavailable_status" -eq 65',
