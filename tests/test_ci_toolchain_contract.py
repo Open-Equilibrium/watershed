@@ -491,7 +491,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor',
             'test ! -e "$custom_prefix/bin/flow-executor"',
             'test "$unavailable_status" -eq 65',
-            "executor_unavailable:*",
+            '"error: executor_unavailable:"*',
             'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry',
             'flow-agent/fixtures/smoke-flow/registry/. "$fixture_home/registry/"',
             'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow',

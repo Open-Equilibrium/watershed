@@ -31,7 +31,7 @@ unavailable_status=$?
 set -e
 test "$unavailable_status" -eq 65
 case "$unavailable" in
-  executor_unavailable:*) ;;
+  "error: executor_unavailable:"*) ;;
   *) exit 1 ;;
 esac
 (cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry)
@@ -62,7 +62,7 @@ productive_unavailable_status=$?
 set -e
 test "$productive_unavailable_status" -eq 65
 case "$productive_unavailable" in
-  executor_unavailable:*) ;;
+  "error: executor_unavailable:"*) ;;
   *) exit 1 ;;
 esac
 test ! -e "$productive_workspace/.flow"
