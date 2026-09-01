@@ -7,8 +7,8 @@ use proto::{
 use proto::{ExecutorErrorCodeV0, ExecutorRequestV0, ExecutorResponseV0, RuntimeReadProfileV0};
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use proto::{
-    ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorObjectKindV0,
-    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, UnixObjectIdentityV0,
+    ExecutorMountAccessV0, ExecutorMountOriginV0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
+    UnixObjectIdentityV0,
 };
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use std::collections::{BTreeMap, BTreeSet};
@@ -273,36 +273,17 @@ impl BubblewrapCapabilities {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
-pub(crate) struct MountSource {
-    pub(crate) device: u64,
-    pub(crate) inode: u64,
-    pub(crate) kind: ExecutorObjectKindV0,
-}
-
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
-impl From<&UnixObjectIdentityV0> for MountSource {
-    fn from(identity: &UnixObjectIdentityV0) -> Self {
-        Self {
-            device: identity.device,
-            inode: identity.inode,
-            kind: identity.kind,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 pub(crate) struct MountBinding {
     pub(crate) access: ExecutorMountAccessV0,
     pub(crate) descriptor: u32,
-    pub(crate) source: MountSource,
+    pub(crate) source: UnixObjectIdentityV0,
     pub(crate) target: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 pub(crate) struct IdentityCheck {
-    pub(crate) source: MountSource,
+    pub(crate) source: UnixObjectIdentityV0,
     pub(crate) target: String,
 }
 

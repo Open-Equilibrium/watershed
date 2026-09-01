@@ -1,8 +1,8 @@
 mod seccomp;
 
 use super::{
-    BackendError, BubblewrapCapabilities, MountBinding, MountSource, POLICY_FEATURES, ProbeState,
-    SandboxPlan, selected_runtime_mounts, validate_mount_contract,
+    BackendError, BubblewrapCapabilities, MountBinding, POLICY_FEATURES, ProbeState, SandboxPlan,
+    selected_runtime_mounts, validate_mount_contract,
 };
 use proto::{
     EXECUTOR_BACKEND_V0, EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0, EXECUTOR_NAME_V0,
@@ -110,7 +110,7 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         .map(|mount| MountBinding {
             access: mount.access,
             descriptor: mount.descriptor,
-            source: MountSource::from(&mount.source_identity),
+            source: mount.source_identity.clone(),
             target: mount.target.clone(),
         })
         .collect();

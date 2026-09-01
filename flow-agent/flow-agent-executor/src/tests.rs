@@ -1,6 +1,6 @@
 use crate::{
     backend::{
-        BubblewrapCapabilities, MountBinding, MountSource, ProbeState, SandboxPlan, seccomp_policy,
+        BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, seccomp_policy,
         validate_mount_contract,
     },
     platform, protocol,
@@ -121,7 +121,7 @@ fn stock_bubblewrap_uses_descriptor_paths_and_a_trusted_inner_verifier() {
         vec![MountBinding {
             access: ExecutorMountAccessV0::ReadOnly,
             descriptor: 12,
-            source: MountSource {
+            source: UnixObjectIdentityV0 {
                 device: 7,
                 inode: 11,
                 kind: ExecutorObjectKindV0::File,
@@ -147,7 +147,7 @@ fn native_descriptor_mounts_still_require_post_mount_identity_verification() {
         vec![MountBinding {
             access: ExecutorMountAccessV0::ReadWrite,
             descriptor: 13,
-            source: MountSource {
+            source: UnixObjectIdentityV0 {
                 device: 17,
                 inode: 19,
                 kind: ExecutorObjectKindV0::Directory,
@@ -204,7 +204,7 @@ fn sandbox_rejects_mounts_that_overlap_executor_reserved_paths() {
             vec![MountBinding {
                 access: ExecutorMountAccessV0::ReadWrite,
                 descriptor: 12,
-                source: MountSource {
+                source: UnixObjectIdentityV0 {
                     device: 7,
                     inode: 11,
                     kind: ExecutorObjectKindV0::Directory,
