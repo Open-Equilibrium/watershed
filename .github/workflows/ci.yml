@@ -22,6 +22,8 @@ jobs:
   m1:
     name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
+    env:
+      M12_CONTRACT_IMAGE: ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     strategy:
       fail-fast: false
       matrix:
@@ -107,7 +109,7 @@ jobs:
             --mount "type=bind,src=$rust_root,dst=/opt/rust,readonly" \
             --mount "type=bind,src=$cargo_registry,dst=/opt/cargo-registry,readonly" \
             --mount "type=volume,dst=/work/target" \
-            ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 \
+            "$M12_CONTRACT_IMAGE" \
             sleep infinity
 
       - name: Provision M1.2 Ubuntu dependencies
@@ -202,7 +204,7 @@ jobs:
 
       - name: Check M1.2 unsupported platforms
         if: matrix.os != 'ubuntu-24.04'
-        run: cargo test --locked -p flow-agent-cli executor_check_fails_closed_on_unsupported_platform
+        run: cargo nextest run --locked -p flow-agent-cli --test cli -E 'test(=executor::executor_commands_fail_closed_on_unsupported_platform_without_config_mutation)'
 
       - name: Run M1.1 performance evidence
         id: m11_evidence
@@ -238,6 +240,10 @@ jobs:
           docker exec \
             --env CARGO_HOME=/cargo \
             --env CARGO_NET_OFFLINE=true \
+            --env GITHUB_SHA \
+            --env ImageOS \
+            --env ImageVersion \
+            --env M12_CONTRACT_IMAGE \
             --env PATH=/opt/rust/bin:/usr/bin:/bin \
             watershed-m12 \
             /bin/sh -ec 'cargo run --locked -p flow-agent-core --release \

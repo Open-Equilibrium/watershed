@@ -892,6 +892,10 @@ fn executor_error(code: proto::ExecutorErrorCodeV0, message: impl Into<String>) 
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 unsafe extern "C" {
+    #[cfg(test)]
+    #[link_name = "close"]
+    fn c_close(fd: i32) -> i32;
+
     #[link_name = "dup2"]
     fn c_dup2(old_fd: i32, new_fd: i32) -> i32;
 }
@@ -1060,7 +1064,7 @@ mod tests {
             unsafe {
                 command.pre_exec(|| {
                     for descriptor in 0..=2 {
-                        rustix::io::close(descriptor);
+                        let _ = c_close(descriptor);
                     }
                     Ok(())
                 });
@@ -1073,7 +1077,9 @@ mod tests {
             for descriptor in 0..=2 {
                 // SAFETY: nextest gives this test its own process, and the test deliberately
                 // invalidates only that process's inherited standard descriptors.
-                unsafe { rustix::io::close(descriptor) };
+                unsafe {
+                    let _ = c_close(descriptor);
+                }
             }
         }
 

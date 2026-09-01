@@ -314,6 +314,7 @@ mod tests {
             .collect::<Vec<_>>();
         let metadata = &records[0];
         assert_eq!(metadata["schema"], "flow-m12-executor-startup-v0");
+        assert!(metadata["environment"].get("contract_image").is_some());
         let sample = records
             .iter()
             .find(|record| record["kind"] == "sample")

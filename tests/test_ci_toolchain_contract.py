@@ -25,10 +25,6 @@ NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
 M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
 M12_CONTAINER = "watershed-m12"
-M12_IMAGE = (
-    "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba"
-    "065f7503eab3078a2d7a57a2ab987517"
-)
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 
 
@@ -360,6 +356,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(step_run(workflow, enforce_name), "exit 1")
 
     def assert_m12_release_boundary(self, workflow: str) -> None:
+        contract_images = re.findall(
+            r"^      M12_CONTRACT_IMAGE: (ubuntu:24\.04@sha256:[0-9a-f]{64})$",
+            workflow,
+            re.MULTILINE,
+        )
+        self.assertEqual(len(contract_images), 1)
+        contract_image = contract_images[0]
+        self.assertEqual(workflow.count(contract_image), 1)
+
         single_commands = {
             "Install M1.2 executor target": f"rustup target add {M12_TARGET}",
             "Run M1.2 installer contract tests": (
@@ -376,7 +381,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             )
         )
         for required in (
-            M12_IMAGE,
+            "$M12_CONTRACT_IMAGE",
             "--privileged",
             "--security-opt apparmor=unconfined",
             'src=$GITHUB_WORKSPACE,dst=/work,readonly',
@@ -385,6 +390,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "type=volume,dst=/work/target",
         ):
             self.assertIn(required, start)
+        self.assertNotIn(contract_image, start)
         for forbidden in (
             "/var/run/docker.sock",
             "sysctl",
@@ -515,9 +521,18 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         self.assertEqual(
             step_run(workflow, "Check M1.2 unsupported platforms"),
-            "cargo test --locked -p flow-agent-cli "
-            "executor_check_fails_closed_on_unsupported_platform",
+            "cargo nextest run --locked -p flow-agent-cli --test cli "
+            "-E 'test(=executor::executor_commands_fail_closed_on_unsupported_platform_without_config_mutation)'",
         )
+
+        evidence = folded_tokens(workflow, "Run M1.2 executor startup evidence")
+        for environment_name in (
+            "GITHUB_SHA",
+            "ImageOS",
+            "ImageVersion",
+            "M12_CONTRACT_IMAGE",
+        ):
+            self.assertIn(environment_name, evidence)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ use proto::{
     parse_executor_response_v0, resolved_policy_digest_v0,
 };
 use rustix::{
-    fd::{AsRawFd, BorrowedFd, IntoRawFd, OwnedFd},
+    fd::{AsRawFd, OwnedFd},
     fs::{FileType, Mode, OFlags},
 };
 use std::{
@@ -280,16 +280,9 @@ impl PreparedRequest {
         unsafe {
             command.pre_exec(move || {
                 for (source, target) in &inherited {
-                    rustix::io::close(*target);
-                    let source = BorrowedFd::borrow_raw(*source);
-                    let duplicated = rustix::io::fcntl_dupfd_cloexec(source, *target)?;
-                    if duplicated.as_raw_fd() != *target {
-                        return Err(std::io::Error::other(
-                            "failed to assign protocol descriptor",
-                        ));
+                    if c_dup2(*source, *target) < 0 {
+                        return Err(std::io::Error::last_os_error());
                     }
-                    rustix::io::fcntl_setfd(&duplicated, rustix::io::FdFlags::empty())?;
-                    let _ = duplicated.into_raw_fd();
                 }
                 Ok(())
             });
@@ -312,6 +305,11 @@ impl PreparedRequest {
             request_id,
         }
     }
+}
+
+unsafe extern "C" {
+    #[link_name = "dup2"]
+    fn c_dup2(old_fd: i32, new_fd: i32) -> i32;
 }
 
 pub(crate) fn finish(running: RunningRequest) -> ExecutorResponseV0 {

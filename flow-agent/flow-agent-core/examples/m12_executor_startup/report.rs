@@ -16,6 +16,7 @@ struct Environment {
     commit_sha: Option<String>,
     runner_image: Option<String>,
     runner_image_version: Option<String>,
+    contract_image: Option<String>,
     logical_cpus: usize,
     cpu_model: Option<String>,
     total_memory_bytes: Option<u64>,
@@ -153,6 +154,7 @@ fn current_environment() -> Environment {
         commit_sha: bounded_environment_value("GITHUB_SHA", 128),
         runner_image: bounded_environment_value("ImageOS", 128),
         runner_image_version: bounded_environment_value("ImageVersion", 128),
+        contract_image: bounded_environment_value("M12_CONTRACT_IMAGE", 256),
         logical_cpus: std::thread::available_parallelism()
             .map(usize::from)
             .unwrap_or(1),
