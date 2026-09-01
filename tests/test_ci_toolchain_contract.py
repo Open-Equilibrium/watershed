@@ -24,7 +24,8 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
 M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
-M12_ACCEPTANCE_CLI = "target/m12-install-acceptance/release/flow"
+M12_STANDARD_CLI = "target/m12-standard/release/flow"
+M12_ACCEPTANCE_CLI = "target/release/flow"
 M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
@@ -310,13 +311,15 @@ class CiWorkflowContractTest(unittest.TestCase):
             f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean --workspace",
             f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
+            "cargo clean --release -p flow-agent-cli "
+            "--target-dir target/m12-standard",
             "cargo build --locked --release -p flow-agent-executor "
             f"--bin flow-executor --target {M12_TARGET}",
             "cargo build --locked --release -p flow-agent-executor --bin flow-executor",
-            "cargo build --locked --release -p flow-agent-cli --bin flow",
             "cargo build --locked --release -p flow-agent-cli --bin flow "
-            "--features m12-install-acceptance "
-            "--target-dir target/m12-install-acceptance",
+            "--target-dir target/m12-standard",
+            "cargo build --locked --release -p flow-agent-cli --bin flow "
+            "--features m12-install-acceptance",
         ):
             self.assertIn(required, coverage_prepare)
         self.assertIn("        shell: bash", coverage_prepare_lines)
@@ -632,7 +635,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         installer_contract = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         for required in (
             "install/install.sh",
-            "target/release/flow",
+            M12_STANDARD_CLI,
             M12_ACCEPTANCE_CLI,
             M12_EXECUTOR,
             'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix"',
