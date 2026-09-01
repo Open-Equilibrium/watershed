@@ -480,6 +480,8 @@ class CiWorkflowContractTest(unittest.TestCase):
         installer = step_run(workflow, "Run M1.2 installer acceptance")
         self.assertIn("docker exec", installer)
         self.assertIn(M12_CONTAINER, installer)
+        self.assertIn("--env RUNNER_TEMP=/root/m12", installer)
+        self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
         installer_contract = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         for required in (

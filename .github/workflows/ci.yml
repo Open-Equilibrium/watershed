@@ -198,7 +198,7 @@ jobs:
         shell: bash
         run: |
           docker exec \
-            --env RUNNER_TEMP=/tmp/m12 \
+            --env RUNNER_TEMP=/root/m12 \
             watershed-m12 \
             /bin/sh scripts/run-m12-installer-acceptance.sh
 
