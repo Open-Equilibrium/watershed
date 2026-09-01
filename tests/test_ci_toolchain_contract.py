@@ -26,6 +26,7 @@ M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
 M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
+M12_COVERAGE_USER = "watershed"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 
 
@@ -306,6 +307,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
             "cargo nextest run",
             "cargo llvm-cov report",
+            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
             "--fail-under-lines 90",
             "--show-missing-lines",
         ):
@@ -325,6 +327,17 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         positions = [linux_coverage.index(command) for command in ordered]
         self.assertEqual(positions, sorted(positions))
+        privilege_drop = linux_coverage.index(
+            f"runuser --user {M12_COVERAGE_USER} --preserve-environment"
+        )
+        nextest = linux_coverage.index("cargo nextest run")
+        report = linux_coverage.index("cargo llvm-cov report")
+        self.assertLess(privilege_drop, nextest)
+        self.assertLess(privilege_drop, report)
+        self.assertNotIn("cargo nextest run", linux_coverage[:privilege_drop])
+        self.assertIn(
+            "chown -R watershed:watershed /cargo /work/target", linux_coverage
+        )
 
         self.assert_evidence_gate(
             workflow,
@@ -464,10 +477,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             "build-essential",
             "ca-certificates",
             "musl-tools",
+            "passwd",
             "python3",
             "procps",
             "util-linux",
             "/opt/cargo-registry",
+            "useradd --create-home --uid 10001 --shell /bin/sh watershed",
         ):
             self.assertIn(required, provision)
 

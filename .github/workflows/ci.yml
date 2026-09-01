@@ -125,10 +125,12 @@ jobs:
           docker exec watershed-m12 /bin/sh -ec '
             apt-get update
             apt-get install --yes --no-install-recommends \
-              bubblewrap binutils build-essential ca-certificates musl-tools python3 procps util-linux
+              bubblewrap binutils build-essential ca-certificates musl-tools passwd python3 procps util-linux
             rm -rf /var/lib/apt/lists/*
-            mkdir -p /cargo
+            useradd --create-home --uid 10001 --shell /bin/sh watershed
+            mkdir -p /cargo /home/watershed/m12-coverage
             ln -s /opt/cargo-registry /cargo/registry
+            chown -R watershed:watershed /cargo /home/watershed /work/target
           '
 
       - name: Build M1.2 executor
@@ -305,11 +307,17 @@ jobs:
             echo "instrumented flow-executor must not contain an ELF interpreter" >&2
             exit 1
           fi
-          export RUNNER_TEMP=/root/m12-coverage
+          export HOME=/home/watershed
+          export USER=watershed
+          export LOGNAME=watershed
+          export RUNNER_TEMP=/home/watershed/m12-coverage
           export BWRAP_UNDER_TEST=/usr/bin/bwrap
           export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
           export FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
           /bin/sh scripts/run-m12-installer-acceptance.sh
+          chown -R watershed:watershed /cargo /work/target "$RUNNER_TEMP"
+          runuser --user watershed --preserve-environment -- /bin/sh -s <<'UNPRIVILEGED'
+          set -eu
           cargo nextest run \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
             --locked \
@@ -323,6 +331,7 @@ jobs:
             --fail-under-lines 90 \
             --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))' \
             --show-missing-lines
+          UNPRIVILEGED
           COVERAGE
 
       - name: Stop controlled M1.2 Ubuntu
