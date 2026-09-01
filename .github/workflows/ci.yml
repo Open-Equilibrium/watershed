@@ -210,16 +210,20 @@ jobs:
       - name: Run public Custom Executor conformance
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
-        run: >-
-          docker exec
-          --env CARGO_HOME=/cargo
-          --env CARGO_NET_OFFLINE=true
-          --env PATH=/opt/rust/bin:/usr/bin:/bin
-          watershed-m12
-          cargo run --locked -p flow-agent-core
-          --features m12-startup-evidence
-          --example custom_executor_conformance --
-          --executor /work/target/x86_64-unknown-linux-musl/release/flow-executor
+        run: |
+          docker exec watershed-m12 /bin/sh -ec '
+            install -d -m 0755 /usr/local/libexec/watershed
+            install -m 0755 /work/target/x86_64-unknown-linux-musl/release/flow-executor /usr/local/libexec/watershed/flow-executor
+          '
+          docker exec \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env PATH=/opt/rust/bin:/usr/bin:/bin \
+            watershed-m12 \
+            cargo run --locked -p flow-agent-core \
+              --features m12-startup-evidence \
+              --example custom_executor_conformance -- \
+              --executor /usr/local/libexec/watershed/flow-executor
 
       - name: Run M1.2 installer contract tests
         if: matrix.os == 'ubuntu-24.04'

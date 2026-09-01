@@ -554,6 +554,18 @@ class CiWorkflowContractTest(unittest.TestCase):
             step_run(workflow, "Run M1.2 executor tests"),
         )
 
+        conformance = step_run(workflow, "Run public Custom Executor conformance")
+        self.assertIn(
+            "install -d -m 0755 /usr/local/libexec/watershed",
+            conformance,
+        )
+        self.assertIn(
+            f"install -m 0755 /work/{M12_EXECUTOR} {M12_INSTALLED_EXECUTOR}",
+            conformance,
+        )
+        self.assertIn(f"--executor {M12_INSTALLED_EXECUTOR}", conformance)
+        self.assertNotIn(f"--executor /work/{M12_EXECUTOR}", conformance)
+
         assert_step_state(
             self, workflow, "Run M1.2 installer acceptance", condition=UBUNTU
         )
