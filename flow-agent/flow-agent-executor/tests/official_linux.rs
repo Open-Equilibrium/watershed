@@ -526,7 +526,15 @@ fn assert_terminal(
     classification: Option<ExecutorToolClassificationV0>,
     exit_code: Option<i32>,
 ) {
-    assert_eq!(result.status, status);
+    let stdout = decode_executor_stream_v0(&result.stdout_base64).expect("stdout decodes");
+    let stderr = decode_executor_stream_v0(&result.stderr_base64).expect("stderr decodes");
+    assert_eq!(
+        result.status,
+        status,
+        "unexpected terminal result; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&stdout),
+        String::from_utf8_lossy(&stderr)
+    );
     assert_eq!(result.classification, classification);
     assert_eq!(result.exit_code, exit_code);
 }
