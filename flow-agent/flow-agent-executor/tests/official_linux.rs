@@ -211,17 +211,14 @@ fn interpreter_environment_and_credentials_cannot_escape(executor: &Path, probe:
     let cases = [
         (
             "environment",
-            "[ -z \"${HOME+x}\" ] && [ -z \"${PATH+x}\" ] && [ -z \"${FLOW_EXECUTOR_UNDER_TEST+x}\" ]".to_owned(),
+            "[ -z \"${HOME+x}\" ] && [ -z \"${FLOW_EXECUTOR_UNDER_TEST+x}\" ] && [ -z \"${FLOW_EXECUTOR_INNER+x}\" ]".to_owned(),
         ),
         (
             "interpreter",
             "[ ! -e /usr/bin/python3 ] && ! python3 -c 'raise SystemExit(0)' 2>/dev/null"
                 .to_owned(),
         ),
-        (
-            "credential",
-            format!("[ ! -r '{}' ]", credential.display()),
-        ),
+        ("credential", format!("[ ! -r '{}' ]", credential.display())),
     ];
 
     for (name, script) in cases {
