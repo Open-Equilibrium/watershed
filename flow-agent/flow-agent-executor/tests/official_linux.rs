@@ -211,7 +211,7 @@ fn interpreter_environment_and_credentials_cannot_escape(executor: &Path, probe:
     let cases = [
         (
             "environment",
-            "[ -z \"${HOME+x}\" ] && [ -z \"${FLOW_EXECUTOR_UNDER_TEST+x}\" ] && [ -z \"${FLOW_EXECUTOR_INNER+x}\" ]".to_owned(),
+            "[ -z \"${HOME+x}\" ] && [ -z \"${FLOW_EXECUTOR_UNDER_TEST+x}\" ] && [ -z \"${FLOW_EXECUTOR_INNER+x}\" ] && [ -z \"${LLVM_PROFILE_FILE+x}\" ]".to_owned(),
         ),
         (
             "interpreter",

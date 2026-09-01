@@ -207,6 +207,8 @@ class CiWorkflowContractTest(unittest.TestCase):
                 1,
             ),
             workflow.replace("cargo test --locked -p flow-agent-executor", "true", 1),
+            workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
+            workflow.replace("cargo llvm-cov report", "true", 1),
             workflow.replace('grep -q "INTERP"', 'grep -q "NOT_INTERP"', 1),
         )
         for mutated in mutations:
@@ -271,6 +273,9 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--doc",
             ],
         )
+        assert_step_state(
+            self, workflow, "Check line coverage", condition=NON_UBUNTU
+        )
         coverage = folded_tokens(workflow, "Check line coverage")
         for required in (
             "cargo",
@@ -285,6 +290,41 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(required, coverage)
         self.assertEqual(coverage[coverage.index("--fail-under-lines") + 1], "90")
         self.assertEqual(coverage[coverage.index("--config") + 1], TEST_ISOLATION)
+
+        linux_coverage_lines = assert_step_state(
+            self, workflow, "Check Linux line coverage", condition=UBUNTU
+        )
+        linux_coverage = step_run(workflow, "Check Linux line coverage")
+        self.assertIn("docker exec", linux_coverage)
+        self.assertIn(M12_CONTAINER, linux_coverage)
+        for required in (
+            'eval "$(cargo llvm-cov show-env --sh --target '
+            f'{M12_TARGET})"',
+            "cargo llvm-cov clean --workspace",
+            "scripts/run-m12-installer-acceptance.sh",
+            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
+            f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
+            "cargo nextest run",
+            "cargo llvm-cov report",
+            "--fail-under-lines 90",
+            "--show-missing-lines",
+        ):
+            self.assertIn(required, linux_coverage)
+        self.assertIn("        shell: bash", linux_coverage_lines)
+        self.assertIn(TEST_ISOLATION, linux_coverage)
+        report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
+        self.assertIn("--release", report)
+        self.assertIn(f"--target {M12_TARGET}", report)
+        ordered = (
+            "cargo llvm-cov show-env",
+            "cargo llvm-cov clean",
+            "cargo build",
+            "scripts/run-m12-installer-acceptance.sh",
+            "cargo nextest run",
+            "cargo llvm-cov report",
+        )
+        positions = [linux_coverage.index(command) for command in ordered]
+        self.assertEqual(positions, sorted(positions))
 
         self.assert_evidence_gate(
             workflow,
@@ -398,6 +438,9 @@ class CiWorkflowContractTest(unittest.TestCase):
             "dst=/opt/rust,readonly",
             "dst=/opt/cargo-registry,readonly",
             "type=volume,dst=/work/target",
+            "dst=/usr/local/bin/cargo-llvm-cov,readonly",
+            "dst=/usr/local/bin/cargo-nextest,readonly",
+            "dst=/usr/local/bin/node,readonly",
         ):
             self.assertIn(required, start)
         self.assertNotIn(contract_image, start)

@@ -270,8 +270,11 @@ impl PreparedRequest {
             std::fs::File::open("/dev/null").expect("standard descriptor reserve opens"),
         ];
         let mut command = Command::new(executor);
+        command.env_clear();
+        if let Some(profile_file) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", profile_file);
+        }
         command
-            .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

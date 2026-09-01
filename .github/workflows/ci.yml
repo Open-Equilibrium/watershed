@@ -100,6 +100,9 @@ jobs:
         run: |
           rust_root="$(dirname "$(dirname "$(rustup which rustc)")")"
           cargo_registry="${CARGO_HOME:-$HOME/.cargo}/registry"
+          cargo_llvm_cov="$(readlink -f "$(command -v cargo-llvm-cov)")"
+          cargo_nextest="$(readlink -f "$(command -v cargo-nextest)")"
+          node="$(readlink -f "$(command -v node)")"
           docker run --detach --rm --init \
             --name watershed-m12 \
             --privileged \
@@ -108,6 +111,9 @@ jobs:
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
             --mount "type=bind,src=$rust_root,dst=/opt/rust,readonly" \
             --mount "type=bind,src=$cargo_registry,dst=/opt/cargo-registry,readonly" \
+            --mount "type=bind,src=$cargo_llvm_cov,dst=/usr/local/bin/cargo-llvm-cov,readonly" \
+            --mount "type=bind,src=$cargo_nextest,dst=/usr/local/bin/cargo-nextest,readonly" \
+            --mount "type=bind,src=$node,dst=/usr/local/bin/node,readonly" \
             --mount "type=volume,dst=/work/target" \
             "$M12_CONTRACT_IMAGE" \
             sleep infinity
@@ -253,11 +259,6 @@ jobs:
               -- --executor /usr/local/libexec/watershed/flow-executor' \
             > target/m12-startup/m12-executor-startup.jsonl
 
-      - name: Stop controlled M1.2 Ubuntu
-        if: matrix.os == 'ubuntu-24.04' && always()
-        shell: bash
-        run: docker rm --force watershed-m12 2>/dev/null || true
-
       - name: Upload M1.2 executor startup evidence
         if: matrix.os == 'ubuntu-24.04' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -272,6 +273,7 @@ jobs:
         run: exit 1
 
       - name: Check line coverage
+        if: matrix.os != 'ubuntu-24.04'
         run: >-
           cargo llvm-cov nextest
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
@@ -282,6 +284,51 @@ jobs:
           --fail-under-lines 90
           --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))'
           --show-missing-lines
+
+      - name: Check Linux line coverage
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec --interactive \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env PATH=/opt/rust/bin:/usr/local/bin:/usr/bin:/bin \
+            watershed-m12 \
+            /bin/sh -s <<'COVERAGE'
+          set -eu
+          eval "$(cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl)"
+          cargo llvm-cov clean --workspace
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor
+          cargo build --locked --release -p flow-agent-cli --bin flow
+          if readelf -l target/x86_64-unknown-linux-musl/release/flow-executor | grep -q "INTERP"; then
+            echo "instrumented flow-executor must not contain an ELF interpreter" >&2
+            exit 1
+          fi
+          export RUNNER_TEMP=/root/m12-coverage
+          export BWRAP_UNDER_TEST=/usr/bin/bwrap
+          export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
+          export FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
+          /bin/sh scripts/run-m12-installer-acceptance.sh
+          cargo nextest run \
+            --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
+            --locked \
+            --release \
+            --workspace \
+            --all-targets \
+            --all-features
+          cargo llvm-cov report \
+            --release \
+            --target x86_64-unknown-linux-musl \
+            --fail-under-lines 90 \
+            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))' \
+            --show-missing-lines
+          COVERAGE
+
+      - name: Stop controlled M1.2 Ubuntu
+        if: matrix.os == 'ubuntu-24.04' && always()
+        shell: bash
+        run: docker rm --force watershed-m12 2>/dev/null || true
 
       - name: Check RustSec advisories
         run: cargo audit
