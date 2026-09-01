@@ -11,9 +11,10 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 ```
 core/         core-script (building-block model/parser) and core-policy
               (capability model + policy→sandbox compiler)
-proto/        proto: event schema and serialization (the integration seam)
-flow-agent/   flow-agent-core (engine/runtime/session) and flow-agent-cli
-              (human CLI, machine-readable run mode, tail/replay/resume)
+proto/        proto: event and Executor wire schemas/types (the integration seam)
+flow-agent/   flow-agent-core (engine/runtime/session), flow-agent-cli
+              (human CLI, machine-readable run mode, tail/replay/resume), and
+              flow-agent-executor (one-shot Ubuntu isolation companion)
 meta-harness/ host-scoped headless control plane for local CLI agents
 liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions

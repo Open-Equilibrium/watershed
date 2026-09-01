@@ -52,6 +52,14 @@ The standard installer includes the sibling unless the administrator chooses `--
 
 Flow Agent probes the selected object once before durable productive Run reservation. An absent, unsafe, replaced, incompatible or unready object fails with stable diagnostics and creates no Run. A passing probe is advisory, not certification; every Tool execution still validates its enforcement receipt.
 
+On Ubuntu 24.04 x64, implementers can run the public observable-protocol check without changing their current configuration:
+
+```bash
+cargo run --locked -p flow-agent-core --features m12-startup-evidence --example custom_executor_conformance -- --executor /absolute/path/to/flow-executor
+```
+
+The isolated check probes the Custom Executor and dispatches one fixed exact-profile `/bin/echo` request. Passing is advisory evidence only; it does not certify compatibility, policy equivalence, security or operations. [`TESTING.md`](../../TESTING.md) defines the canonical coverage boundary.
+
 ## One Tool invocation
 
 ```mermaid
@@ -94,7 +102,7 @@ Every Tool uses one runtime-read profile:
 
 Flow selects the configured profile, pre-opens every advertised source without following links and binds each identity and Sandbox target into the resolved policy digest. The Executor cannot add a runtime path after that digest is fixed. Flow users, providers and Tools cannot change or escalate the profile. The official Ubuntu Executor is statically linked, so its own bootstrap does not require broad runtime reads; a dynamic official artifact fails readiness.
 
-The backend uses stock Ubuntu Bubblewrap. Newer versions consume inherited descriptor mounts directly. For an older supported version, the outer Executor mounts `/proc/self/fd/<slot>` and starts a trusted inner `flow-executor` self-reexec. The inner process verifies mounted identities, supervises the Tool as Sandbox PID 1 and returns one protected exact terminal status. Missing or inconsistent evidence fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback.
+The backend uses stock Ubuntu Bubblewrap. Newer versions consume inherited descriptor mounts directly. For an older supported version, the outer Executor mounts declared sources from `/proc/self/fd/<slot>` and starts its trusted inner self-reexec directly from a retained self-image descriptor without mounting that image into the Tool filesystem. Inherited descriptors close on Tool exec, and the protected inner supervisor is inaccessible to the Tool. It verifies mounted identities, supervises the Tool as Sandbox PID 1 and returns one protected exact terminal status. Missing or inconsistent evidence fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback.
 
 ## Supported matrix
 
