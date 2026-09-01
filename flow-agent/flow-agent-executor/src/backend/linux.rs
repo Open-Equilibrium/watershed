@@ -12,6 +12,8 @@ use proto::{
     parse_executor_request_v0,
 };
 use rustix::fd::{AsRawFd, BorrowedFd, OwnedFd};
+#[cfg(coverage)]
+use std::{ffi::OsString, path::Path};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -103,6 +105,8 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         empty_status_document()?,
         internal.self_image.as_raw_fd() + 1,
     )?;
+    #[cfg(coverage)]
+    let coverage_profile = retain_coverage_profile(status_descriptor.as_raw_fd() + 1)?;
     let bindings = request
         .mounts
         .iter()
@@ -119,6 +123,13 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         internal.request.as_raw_fd(),
         internal.seccomp.as_raw_fd(),
     );
+    #[cfg(coverage)]
+    if let Some((_, inner_pattern)) = &coverage_profile {
+        command
+            .arg("--setenv")
+            .arg("LLVM_PROFILE_FILE")
+            .arg(inner_pattern);
+    }
     command
         .arg("--chdir")
         .arg(&request.working_directory)
@@ -136,6 +147,8 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         request.limits.max_stdout_bytes,
         request.limits.max_stderr_bytes,
     )?;
+    #[cfg(coverage)]
+    drop(coverage_profile);
     apply_inner_status(&mut outcome, &status_descriptor)?;
     let tool_result = tool_result(&outcome);
     Ok(ExecutorResponseV0::Completed {
@@ -410,6 +423,40 @@ fn sandbox_command(
 
 fn descriptor_path(descriptor: i32) -> String {
     format!("/proc/self/fd/{descriptor}")
+}
+
+#[cfg(coverage)]
+fn retain_coverage_profile(
+    minimum_descriptor: i32,
+) -> Result<Option<(OwnedFd, OsString)>, BackendError> {
+    let Some(pattern) = std::env::var_os("LLVM_PROFILE_FILE") else {
+        return Ok(None);
+    };
+    let path = Path::new(&pattern);
+    if !path.is_absolute() {
+        return Err(BackendError::setup(
+            "coverage profile path must be absolute",
+        ));
+    }
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| BackendError::setup("coverage profile path does not name a profile file"))?;
+    let parent = path.parent().expect("an absolute file path has a parent");
+    let directory = rustix::fs::open(
+        parent,
+        rustix::fs::OFlags::PATH | rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| {
+        BackendError::setup(format!(
+            "failed to retain coverage profile directory: {error}"
+        ))
+    })?;
+    let directory = relocate(directory, minimum_descriptor)?;
+    let mut inner_pattern = OsString::from(descriptor_path(directory.as_raw_fd()));
+    inner_pattern.push("/");
+    inner_pattern.push(file_name);
+    Ok(Some((directory, inner_pattern)))
 }
 
 struct InternalDescriptors {

@@ -1046,9 +1046,11 @@ mod tests {
         process_group_cleanup_calls_for_test, reset_process_group_cleanup_calls_for_test,
     };
     use super::{
-        c_close, duplicate_executor_descriptor, execute_one_shot, executor_request_hash,
-        validate_executor_executable, validate_receipt_identity,
+        c_close, decode_tool_outcome, duplicate_executor_descriptor, execute_one_shot,
+        executor_request_hash, runtime_profile, validate_executor_executable,
+        validate_receipt_identity,
     };
+    use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
     use std::{
         collections::BTreeMap,
         fs::File,
@@ -1057,6 +1059,91 @@ mod tests {
         process::Command,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn executor_wire_terminal_values_map_to_runtime_results() {
+        use proto::{
+            ExecutorToolClassificationV0 as WireClass, ExecutorToolStatusV0 as WireStatus,
+        };
+
+        let cases = [
+            (
+                WireStatus::Completed,
+                None,
+                RunAttemptOutcome::Completed,
+                None,
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::NonzeroExit),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::NonzeroExit),
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::SignalTermination),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::SignalTermination),
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::StderrCapExceeded),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::StderrCapExceeded),
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::StdoutCapExceeded),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::StdoutCapExceeded),
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::StdoutStderrCapExceeded),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::StdoutStderrCapExceeded),
+            ),
+            (
+                WireStatus::TimedOut,
+                Some(WireClass::ToolTimedOut),
+                RunAttemptOutcome::TimedOut,
+                Some(ToolTerminalClassification::ToolTimedOut),
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::OutputDrainTimeout),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::OutputDrainTimeout),
+            ),
+            (
+                WireStatus::Cancelled,
+                Some(WireClass::Cancelled),
+                RunAttemptOutcome::Cancelled,
+                Some(ToolTerminalClassification::Cancelled),
+            ),
+        ];
+
+        for (status, classification, expected_status, expected_classification) in cases {
+            let outcome = decode_tool_outcome(proto::ExecutorToolResultV0 {
+                classification,
+                exit_code: None,
+                status,
+                stderr_base64: proto::encode_executor_stream_v0(b""),
+                stdout_base64: proto::encode_executor_stream_v0(b""),
+            })
+            .expect("a reachable Executor terminal result decodes");
+            assert_eq!(outcome.status, expected_status);
+            assert_eq!(outcome.classification, expected_classification);
+        }
+    }
+
+    #[test]
+    fn host_system_read_profile_maps_to_the_wire_contract() {
+        assert_eq!(
+            runtime_profile(core_script::ToolRuntimeProfile::HostSystemRead),
+            proto::RuntimeReadProfileV0::HostSystemRead
+        );
+    }
 
     #[test]
     fn one_shot_executor_works_without_parent_standard_descriptors() {
