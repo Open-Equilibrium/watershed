@@ -1036,7 +1036,7 @@ mod unsupported_platform_tests {
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
     use super::{
-        duplicate_executor_descriptor, execute_one_shot, executor_prelaunch_error,
+        c_close, duplicate_executor_descriptor, execute_one_shot, executor_prelaunch_error,
         executor_request_hash, validate_executor_executable, validate_receipt_identity,
     };
     use std::{
