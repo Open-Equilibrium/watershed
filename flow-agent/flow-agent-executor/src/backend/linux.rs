@@ -433,25 +433,19 @@ fn retain_coverage_profile(
         return Ok(None);
     };
     let path = Path::new(&pattern);
-    if !path.is_absolute() {
-        return Err(BackendError::setup(
-            "coverage profile path must be absolute",
-        ));
-    }
-    let file_name = path
-        .file_name()
-        .ok_or_else(|| BackendError::setup("coverage profile path does not name a profile file"))?;
-    let parent = path.parent().expect("an absolute file path has a parent");
+    let Some((parent, file_name)) = path
+        .parent()
+        .zip(path.file_name())
+        .filter(|_| path.is_absolute())
+    else {
+        return Err(BackendError::setup("invalid coverage profile path"));
+    };
     let directory = rustix::fs::open(
         parent,
         rustix::fs::OFlags::PATH | rustix::fs::OFlags::DIRECTORY | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::empty(),
     )
-    .map_err(|error| {
-        BackendError::setup(format!(
-            "failed to retain coverage profile directory: {error}"
-        ))
-    })?;
+    .map_err(|error| BackendError::setup(format!("coverage directory unavailable: {error}")))?;
     let directory = relocate(directory, minimum_descriptor)?;
     let mut inner_pattern = OsString::from(descriptor_path(directory.as_raw_fd()));
     inner_pattern.push("/");
