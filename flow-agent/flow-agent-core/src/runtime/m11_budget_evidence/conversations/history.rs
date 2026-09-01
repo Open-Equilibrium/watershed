@@ -13,7 +13,7 @@ use std::{
     path::Path,
     time::Instant,
 };
-pub(in crate::runtime::m11_budget_evidence) const HISTORY_VALIDATION_RECORDS: usize = 38_481;
+pub(in crate::runtime::m11_budget_evidence) const HISTORY_VALIDATION_RECORDS: usize = 31_656;
 
 pub(in crate::runtime::m11_budget_evidence) fn conversation_history_validation_quantum(
     temp_root: &Path,

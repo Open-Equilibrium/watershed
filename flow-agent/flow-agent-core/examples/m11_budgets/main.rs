@@ -279,7 +279,7 @@ mod tests {
         }
         assert_eq!(
             workload_contract(M11BudgetWorkloadId::ConversationHistoryValidationQuantum).0["records"],
-            38_481
+            31_656
         );
     }
 
