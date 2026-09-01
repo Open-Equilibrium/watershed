@@ -304,6 +304,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             f'{M12_TARGET})"',
             "cargo llvm-cov clean --workspace",
             "--features m12-install-acceptance --target-dir target/m12-install-acceptance",
+            f"install -m 0755 {M12_EXECUTOR} /tmp/flow-executor-uninstrumented",
+            f"install -m 0755 {M12_EXECUTOR} /tmp/flow-executor-instrumented",
+            f"install -m 0755 /tmp/flow-executor-uninstrumented {M12_EXECUTOR}",
+            f"install -m 0755 /tmp/flow-executor-instrumented {M12_EXECUTOR}",
             "scripts/run-m12-installer-acceptance.sh",
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
@@ -329,6 +333,13 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         positions = [linux_coverage.index(command) for command in ordered]
         self.assertEqual(positions, sorted(positions))
+        preserve = linux_coverage.index("/tmp/flow-executor-uninstrumented")
+        instrument = linux_coverage.index("/tmp/flow-executor-instrumented")
+        acceptance = linux_coverage.index("scripts/run-m12-installer-acceptance.sh")
+        restore = linux_coverage.rindex("/tmp/flow-executor-instrumented")
+        self.assertLess(preserve, linux_coverage.index("cargo llvm-cov show-env"))
+        self.assertLess(instrument, acceptance)
+        self.assertLess(acceptance, restore)
         privilege_drop = linux_coverage.index(
             f"runuser --user {M12_COVERAGE_USER} --preserve-environment"
         )
