@@ -628,7 +628,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         installer = step_run(workflow, "Run M1.2 installer acceptance")
         self.assertIn("docker exec", installer)
         self.assertIn(M12_CONTAINER, installer)
-        self.assertIn("--env RUNNER_TEMP=/root/m12", installer)
+        self.assertIn("--env RUNNER_TEMP=/opt/watershed-m12", installer)
         self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
         self.assertIn(f". {M12_COVERAGE_ENV}", installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
@@ -638,9 +638,9 @@ class CiWorkflowContractTest(unittest.TestCase):
             M12_STANDARD_CLI,
             M12_ACCEPTANCE_CLI,
             M12_EXECUTOR,
-            'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix"',
+            'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix"',
             '"$standard_prefix/bin/flow" executor check',
-            'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix"',
+            'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix"',
             'FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1',
             '"$acceptance_prefix/bin/flow" run smoke-flow',
             '/usr/bin/python3 - "$agent_home"',

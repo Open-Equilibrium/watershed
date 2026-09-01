@@ -38,7 +38,7 @@ From the repository root, build and stage one administrator-owned bundle. The in
 ```sh
 sudo apt-get update
 sudo apt-get install --yes --no-install-recommends \
-  bubblewrap build-essential musl-tools procps util-linux
+  apparmor bubblewrap build-essential musl-tools procps util-linux
 rustup target add x86_64-unknown-linux-musl
 cargo build --locked --release -p flow-agent-cli --bin flow
 cargo build --locked --release -p flow-agent-executor --bin flow-executor \
@@ -53,12 +53,26 @@ sudo install -m 0755 \
   "$install_bundle/flow-executor"
 ```
 
-Choose one installation path. The standard path installs and checks the bundled Default Executor:
+Choose one installation path. The standard path installs and checks the bundled Default Executor. On Ubuntu 24.04, authorize its unprivileged Bubblewrap user namespace once:
+
+```sh
+sudo tee /etc/apparmor.d/watershed-bwrap-userns >/dev/null <<'APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+
+/usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+APPARMOR
+sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
+```
 
 ```sh
 sudo /bin/sh "$install_bundle/install.sh" --prefix /opt/watershed
 /opt/watershed/bin/flow executor check
 ```
+
+Run the command from the unprivileged operating-system account that will run Flow. The installer verifies the Default Executor as that account; if it fails, do not disable the kernel restriction.
 
 The custom path explicitly omits the Default Executor. After installation, the operating-system account that will run Flow Agent selects an administrator-reviewed absolute Custom Executor and checks it; do not use `sudo` for these two configuration commands unless that account is root.
 

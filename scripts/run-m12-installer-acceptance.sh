@@ -25,11 +25,11 @@ install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/
 install -m 0755 install/install.sh "$acceptance_bundle/install.sh"
 install -m 0755 target/release/flow "$acceptance_bundle/flow"
 install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$acceptance_bundle/flow-executor"
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
+(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$standard_prefix/bin/flow" executor check </dev/null)
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
+(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
 test -x "$acceptance_prefix/bin/flow"
 test -x "$acceptance_prefix/bin/flow-executor"
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor)

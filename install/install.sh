@@ -62,6 +62,14 @@ bundle_mode=$(/usr/bin/stat -L -c '%a' -- "$bundle_fd") || fail 'cannot inspect 
 bundle_owner=$(/usr/bin/stat -L -c '%u' -- "$bundle_fd") || fail 'cannot inspect installer bundle owner'
 current_owner=$(/usr/bin/id -u) || fail 'cannot inspect installer owner'
 [ "$bundle_owner" -eq 0 ] || [ "$bundle_owner" -eq "$current_owner" ] || fail 'untrusted installer bundle owner'
+readiness_owner=$current_owner
+if [ "$install_executor" -eq 1 ] && [ "$current_owner" -eq 0 ]; then
+    [ -n "${SUDO_USER-}" ] || fail 'root installation requires SUDO_USER for unprivileged readiness'
+    readiness_owner=$(/usr/bin/id -u -- "$SUDO_USER") || fail 'cannot inspect readiness user'
+    readiness_group=$(/usr/bin/id -g -- "$SUDO_USER") || fail 'cannot inspect readiness user group'
+    [ "$readiness_owner" -ne 0 ] || fail 'root is not a valid readiness user'
+    set -- /usr/sbin/runuser --user "$SUDO_USER" --
+fi
 
 validate_source() {
     source_path=$1
@@ -155,7 +163,7 @@ wait_for_readiness_status() {
     [ -f "$readiness_status_file" ] && [ ! -L "$readiness_status_file" ] || return 1
     readiness_status_metadata=$(/usr/bin/stat -c '%u:%h:%s' -- "$readiness_status_file") || return 1
     case "$readiness_status_metadata" in
-        "$current_owner:1:2"|"$current_owner:1:3"|"$current_owner:1:4") ;;
+        "$readiness_owner:1:2"|"$readiness_owner:1:3"|"$readiness_owner:1:4") ;;
         *) return 1 ;;
     esac
     readiness_status=$(/bin/cat -- "$readiness_status_file") || return 1
@@ -247,7 +255,11 @@ if [ "$install_executor" -eq 1 ]; then
     /bin/rm -- "$executor_stage" || fail 'cannot finalize flow-executor publication'
     /bin/mkdir -m 0700 -- "$readiness_config" || fail 'cannot isolate readiness configuration'
     readiness_config_created=1
-    /usr/bin/setsid /bin/sh -c '
+    if [ "$current_owner" -eq 0 ]; then
+        /bin/chown "$readiness_owner:$readiness_group" -- "$readiness_config" \
+            || fail 'cannot assign readiness configuration'
+    fi
+    /usr/bin/setsid "$@" /bin/sh -c '
         umask 077
         PATH=
         HOME=$1
