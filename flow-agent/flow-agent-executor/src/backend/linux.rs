@@ -15,10 +15,7 @@ use rustix::fd::{AsRawFd, BorrowedFd, OwnedFd};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::{
-        fs::MetadataExt,
-        process::{CommandExt, ExitStatusExt},
-    },
+    os::unix::{fs::MetadataExt, process::ExitStatusExt},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
         Arc,
@@ -103,6 +100,10 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         self_descriptor,
         &request.mounts,
     )?;
+    let status_descriptor = relocate(
+        empty_status_document()?,
+        internal.self_image.as_raw_fd() + 1,
+    )?;
     let bindings = request
         .mounts
         .iter()
@@ -127,15 +128,17 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         .arg(INNER_EXECUTABLE)
         .arg("--inner")
         .arg(internal.request.as_raw_fd().to_string())
+        .arg(status_descriptor.as_raw_fd().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let outcome = run_bounded(
+    let mut outcome = run_bounded(
         command,
         request.limits.timeout_ms,
         request.limits.max_stdout_bytes,
         request.limits.max_stderr_bytes,
     )?;
+    apply_inner_status(&mut outcome, &status_descriptor)?;
     let tool_result = tool_result(&outcome);
     Ok(ExecutorResponseV0::Completed {
         schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -154,14 +157,22 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
     })
 }
 
-pub(crate) fn run_inner(request_descriptor: &str) -> Result<(), String> {
+pub(crate) fn run_inner(request_descriptor: &str, status_descriptor: &str) -> Result<(), String> {
     let request_descriptor = request_descriptor
         .parse::<i32>()
         .map_err(|_| "invalid inner request descriptor".to_owned())?;
+    let status_descriptor = status_descriptor
+        .parse::<i32>()
+        .map_err(|_| "invalid inner status descriptor".to_owned())?;
     let borrowed = borrow_descriptor(request_descriptor)?;
     let mut request_file = File::from(
         rustix::io::fcntl_dupfd_cloexec(borrowed, 3)
             .map_err(|error| format!("failed to duplicate inner request: {error}"))?,
+    );
+    let borrowed_status = borrow_descriptor(status_descriptor)?;
+    let mut status_file = File::from(
+        rustix::io::fcntl_dupfd_cloexec(borrowed_status, 3)
+            .map_err(|error| format!("failed to duplicate inner status: {error}"))?,
     );
     request_file
         .seek(SeekFrom::Start(0))
@@ -175,14 +186,25 @@ pub(crate) fn run_inner(request_descriptor: &str) -> Result<(), String> {
         verify_destination_identity(mount)?;
     }
     mark_inherited_descriptors_close_on_exec()?;
+    rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
+        .map_err(|error| format!("failed to protect inner Executor state: {error}"))?;
     let mut command = Command::new(&request.executable);
     command
         .args(&request.argv)
         .env_clear()
         .envs(&request.environment)
         .current_dir(&request.working_directory);
-    let error = command.exec();
-    Err(format!("failed to execute Tool: {error}"))
+    let status = command
+        .status()
+        .map_err(|error| format!("failed to execute Tool: {error}"))?;
+    status_file
+        .write_all(&status.into_raw().to_ne_bytes())
+        .map_err(|error| format!("failed to record Tool status: {error}"))?;
+    status_file
+        .flush()
+        .map_err(|error| format!("failed to flush Tool status: {error}"))?;
+    rustix::fs::fcntl_add_seals(&status_file, final_status_seals())
+        .map_err(|error| format!("failed to seal Tool status: {error}"))
 }
 
 fn validate_request_mounts(request: &ExecutorRequestV0) -> Result<(), BackendError> {
@@ -505,6 +527,73 @@ fn sealed_document(name: &str, bytes: &[u8]) -> Result<OwnedFd, BackendError> {
     Ok(descriptor)
 }
 
+fn empty_status_document() -> Result<OwnedFd, BackendError> {
+    rustix::fs::memfd_create(
+        "flow-executor-status",
+        rustix::fs::MemfdFlags::CLOEXEC | rustix::fs::MemfdFlags::ALLOW_SEALING,
+    )
+    .map_err(|error| BackendError::setup(format!("failed to create Tool status: {error}")))
+}
+
+fn read_inner_status(descriptor: &OwnedFd) -> Result<Option<ExitStatus>, BackendError> {
+    let mut file = File::from(
+        rustix::io::fcntl_dupfd_cloexec(descriptor, 3).map_err(|error| {
+            BackendError::uncertain(format!("failed to read Tool status: {error}"))
+        })?,
+    );
+    file.seek(SeekFrom::Start(0)).map_err(|error| {
+        BackendError::uncertain(format!("failed to rewind Tool status: {error}"))
+    })?;
+    let mut bytes = Vec::new();
+    file.take(5)
+        .read_to_end(&mut bytes)
+        .map_err(|error| BackendError::uncertain(format!("failed to read Tool status: {error}")))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let seals = rustix::fs::fcntl_get_seals(descriptor).map_err(|error| {
+        BackendError::uncertain(format!("failed to verify Tool status: {error}"))
+    })?;
+    if seals != final_status_seals() {
+        return Err(BackendError::uncertain("Tool status record is not sealed"));
+    }
+    let bytes: [u8; 4] = bytes
+        .try_into()
+        .map_err(|_| BackendError::uncertain("Tool status record is invalid"))?;
+    Ok(Some(ExitStatus::from_raw(i32::from_ne_bytes(bytes))))
+}
+
+fn apply_inner_status(
+    outcome: &mut ProcessOutcome,
+    descriptor: &OwnedFd,
+) -> Result<(), BackendError> {
+    if !matches!(
+        outcome.classification,
+        None | Some(ExecutorToolClassificationV0::NonzeroExit)
+            | Some(ExecutorToolClassificationV0::SignalTermination)
+    ) {
+        return Ok(());
+    }
+    if !outcome.status.is_some_and(|status| status.success()) {
+        return Err(BackendError::uncertain(
+            "trusted inner Executor did not exit successfully",
+        ));
+    }
+    let status = read_inner_status(descriptor)?.ok_or_else(|| {
+        BackendError::uncertain("trusted inner Executor did not record a Tool status")
+    })?;
+    outcome.status = Some(status);
+    outcome.classification = classify_exit(Some(status));
+    Ok(())
+}
+
+fn final_status_seals() -> rustix::fs::SealFlags {
+    rustix::fs::SealFlags::SEAL
+        | rustix::fs::SealFlags::SHRINK
+        | rustix::fs::SealFlags::GROW
+        | rustix::fs::SealFlags::WRITE
+}
+
 fn verify_source_identity(mount: &ExecutorMountV0) -> Result<(), BackendError> {
     let descriptor =
         borrow_descriptor(mount.descriptor as i32).map_err(BackendError::unsupported)?;
@@ -800,18 +889,7 @@ fn run_bounded(
                 (false, false) => unreachable!("output trigger records its stream"),
             })
         }
-        PrimaryTrigger::Exit => status.map_or(
-            Some(ExecutorToolClassificationV0::SignalTermination),
-            |status| {
-                if status.success() {
-                    None
-                } else if status.code().is_some() {
-                    Some(ExecutorToolClassificationV0::NonzeroExit)
-                } else {
-                    Some(ExecutorToolClassificationV0::SignalTermination)
-                }
-            },
-        ),
+        PrimaryTrigger::Exit => classify_exit(status),
     };
     Ok(ProcessOutcome {
         status,
@@ -819,6 +897,21 @@ fn run_bounded(
         stdout: stdout.unwrap_or_default(),
         stderr: stderr.unwrap_or_default(),
     })
+}
+
+fn classify_exit(status: Option<ExitStatus>) -> Option<ExecutorToolClassificationV0> {
+    status.map_or(
+        Some(ExecutorToolClassificationV0::SignalTermination),
+        |status| {
+            if status.success() {
+                None
+            } else if status.code().is_some() {
+                Some(ExecutorToolClassificationV0::NonzeroExit)
+            } else {
+                Some(ExecutorToolClassificationV0::SignalTermination)
+            }
+        },
+    )
 }
 
 fn bounded_reader(
@@ -889,11 +982,76 @@ fn tool_result(outcome: &ProcessOutcome) -> ExecutorToolResultV0 {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_SELF_TEST_STDERR_BYTES, PrimaryTrigger, mark_undeclared_descriptors_close_on_exec,
-        run_self_test_command, select_primary, terminate_and_reap,
+        MAX_SELF_TEST_STDERR_BYTES, PrimaryTrigger, ProcessOutcome, apply_inner_status,
+        empty_status_document, final_status_seals, mark_undeclared_descriptors_close_on_exec,
+        read_inner_status, run_self_test_command, select_primary, terminate_and_reap,
     };
     use rustix::fd::AsRawFd;
-    use std::process::Command;
+    use std::{
+        fs::File,
+        io::Write,
+        os::unix::process::ExitStatusExt,
+        process::{Command, ExitStatus},
+    };
+
+    fn status_document(bytes: &[u8], seals: rustix::fs::SealFlags) -> rustix::fd::OwnedFd {
+        let descriptor = empty_status_document().expect("status memfd is created");
+        let duplicate =
+            rustix::io::fcntl_dupfd_cloexec(&descriptor, 3).expect("status memfd is duplicated");
+        File::from(duplicate)
+            .write_all(bytes)
+            .expect("status fixture is written");
+        if !seals.is_empty() {
+            rustix::fs::fcntl_add_seals(&descriptor, seals).expect("status fixture is sealed");
+        }
+        descriptor
+    }
+
+    fn natural_outcome(raw_status: i32) -> ProcessOutcome {
+        ProcessOutcome {
+            status: Some(ExitStatus::from_raw(raw_status)),
+            classification: if raw_status == 0 {
+                None
+            } else {
+                Some(proto::ExecutorToolClassificationV0::NonzeroExit)
+            },
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn inner_status_requires_one_exact_sealed_record() {
+        for bytes in [vec![1], vec![1, 2], vec![1, 2, 3], vec![1, 2, 3, 4, 5]] {
+            let descriptor = status_document(&bytes, final_status_seals());
+            assert!(read_inner_status(&descriptor).is_err());
+        }
+
+        let unsealed = status_document(&0_i32.to_ne_bytes(), rustix::fs::SealFlags::empty());
+        assert!(read_inner_status(&unsealed).is_err());
+        let wrongly_sealed = status_document(
+            &0_i32.to_ne_bytes(),
+            rustix::fs::SealFlags::SHRINK | rustix::fs::SealFlags::GROW,
+        );
+        assert!(read_inner_status(&wrongly_sealed).is_err());
+    }
+
+    #[test]
+    fn natural_inner_exit_requires_its_exact_tool_status() {
+        let empty = empty_status_document().expect("empty status memfd is created");
+        assert!(apply_inner_status(&mut natural_outcome(0), &empty).is_err());
+
+        let recorded = status_document(&(7_i32 << 8).to_ne_bytes(), final_status_seals());
+        assert!(apply_inner_status(&mut natural_outcome(65_i32 << 8), &recorded).is_err());
+
+        let mut outcome = natural_outcome(0);
+        apply_inner_status(&mut outcome, &recorded).expect("sealed Tool status is accepted");
+        assert_eq!(outcome.status.and_then(|status| status.code()), Some(7));
+        assert_eq!(
+            outcome.classification,
+            Some(proto::ExecutorToolClassificationV0::NonzeroExit)
+        );
+    }
 
     #[test]
     fn self_test_failure_captures_exit_code_and_bounded_stderr() {

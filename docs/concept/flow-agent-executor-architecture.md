@@ -94,7 +94,7 @@ Every Tool uses one runtime-read profile:
 
 Flow selects the configured profile, pre-opens every advertised source without following links and binds each identity and Sandbox target into the resolved policy digest. The Executor cannot add a runtime path after that digest is fixed. Flow users, providers and Tools cannot change or escalate the profile. The official Ubuntu Executor is statically linked, so its own bootstrap does not require broad runtime reads; a dynamic official artifact fails readiness.
 
-The backend uses stock Ubuntu Bubblewrap. Newer versions consume inherited descriptor mounts directly. For an older supported version, the outer Executor mounts `/proc/self/fd/<slot>` and starts a trusted inner `flow-executor` self-reexec that verifies the mounted device/inode identities before Tool execution. Missing support or mismatched identity fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback.
+The backend uses stock Ubuntu Bubblewrap. Newer versions consume inherited descriptor mounts directly. For an older supported version, the outer Executor mounts `/proc/self/fd/<slot>` and starts a trusted inner `flow-executor` self-reexec. The inner process verifies mounted identities, supervises the Tool as Sandbox PID 1 and returns one protected exact terminal status. Missing or inconsistent evidence fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback.
 
 ## Supported matrix
 

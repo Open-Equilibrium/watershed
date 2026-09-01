@@ -330,6 +330,7 @@ impl SandboxPlan {
             "--new-session",
             "--unshare-user",
             "--unshare-pid",
+            "--as-pid-1",
             "--unshare-net",
             "--unshare-ipc",
             "--unshare-uts",
@@ -430,6 +431,7 @@ pub(crate) fn seccomp_policy() -> SeccompPolicy {
 pub(crate) struct BackendError {
     pub(crate) code: ExecutorErrorCodeV0,
     pub(crate) message: String,
+    definitive: bool,
 }
 
 impl BackendError {
@@ -438,6 +440,7 @@ impl BackendError {
         Self {
             code: ExecutorErrorCodeV0::Unavailable,
             message: message.into(),
+            definitive: true,
         }
     }
 
@@ -445,6 +448,7 @@ impl BackendError {
         Self {
             code: ExecutorErrorCodeV0::PolicyUnsupported,
             message: message.into(),
+            definitive: true,
         }
     }
 
@@ -453,6 +457,16 @@ impl BackendError {
         Self {
             code: ExecutorErrorCodeV0::SandboxSetupFailed,
             message: message.into(),
+            definitive: true,
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    pub(crate) fn uncertain(message: impl Into<String>) -> Self {
+        Self {
+            code: ExecutorErrorCodeV0::InvalidResponse,
+            message: message.into(),
+            definitive: false,
         }
     }
 }
@@ -484,15 +498,19 @@ pub(crate) fn probe() -> ProbeState {
     }
 }
 
-pub(crate) fn execute(request: ExecutorRequestV0) -> ExecutorResponseV0 {
+pub(crate) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, String> {
     let request_id = request.request_id.clone();
     let result = execute_supported(request);
-    result.unwrap_or_else(|error| ExecutorResponseV0::Error {
-        schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
-        request_id,
-        code: error.code,
-        message: error.message,
-    })
+    match result {
+        Ok(response) => Ok(response),
+        Err(error) if error.definitive => Ok(ExecutorResponseV0::Error {
+            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+            request_id,
+            code: error.code,
+            message: error.message,
+        }),
+        Err(error) => Err(error.message),
+    }
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

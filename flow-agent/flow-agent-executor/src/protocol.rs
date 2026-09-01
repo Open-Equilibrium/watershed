@@ -34,7 +34,7 @@ pub(crate) fn run_with_diagnostics(
     match arguments {
         [mode] if mode == "--probe" => write_probe(crate::backend::probe(), output, diagnostics),
         [] => execute_request(input, output),
-        [mode, request_fd] if mode == "--inner" => run_inner(request_fd),
+        [mode, request_fd, status_fd] if mode == "--inner" => run_inner(request_fd, status_fd),
         [mode] if mode == "--inner-self-test" => Ok(()),
         _ => Err("usage: flow-executor [--probe]".to_owned()),
     }
@@ -105,7 +105,7 @@ fn write_readiness_diagnostic(mut output: impl Write, reason: &str) -> Result<()
 fn execute_request(input: impl Read, mut output: impl Write) -> Result<(), String> {
     let bytes = read_bounded(input, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
     let request = parse_executor_request_v0(&bytes).map_err(|error| error.to_string())?;
-    let response = crate::backend::execute(request);
+    let response = crate::backend::execute(request)?;
     let bytes = canonical_executor_response_v0(&response).map_err(|error| error.to_string())?;
     output
         .write_all(&bytes)
@@ -126,11 +126,11 @@ fn read_bounded(input: impl Read, limit: usize, kind: &str) -> Result<Vec<u8>, S
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn run_inner(request_fd: &str) -> Result<(), String> {
-    crate::backend::linux::run_inner(request_fd)
+fn run_inner(request_fd: &str, status_fd: &str) -> Result<(), String> {
+    crate::backend::linux::run_inner(request_fd, status_fd)
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn run_inner(_request_fd: &str) -> Result<(), String> {
+fn run_inner(_request_fd: &str, _status_fd: &str) -> Result<(), String> {
     Err("inner Executor mode is unavailable on this platform".to_owned())
 }

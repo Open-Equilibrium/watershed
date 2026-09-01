@@ -175,6 +175,7 @@ fn sandbox_plan_has_no_host_or_network_fallback() {
         "--new-session",
         "--unshare-user",
         "--unshare-pid",
+        "--as-pid-1",
         "--unshare-net",
         "--unshare-ipc",
         "--unshare-uts",
@@ -452,7 +453,8 @@ fn official_platform_support_is_exact_and_fail_closed() {
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 #[test]
 fn productive_execution_fails_closed_outside_the_official_linux_target() {
-    let response = crate::backend::execute(exact_request(&[], &[]));
+    let response = crate::backend::execute(exact_request(&[], &[]))
+        .expect("unsupported platform produces a definitive response");
 
     assert!(matches!(
         response,

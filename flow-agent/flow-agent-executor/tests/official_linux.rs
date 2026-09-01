@@ -396,11 +396,40 @@ fn terminal_results_retain_enforcement_evidence(executor: &Path, probe: &Executo
         assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
     }
 
+    for exit_code in [7, 143] {
+        let response = PreparedRequest::new(
+            probe,
+            &workspace,
+            RuntimeReadProfileV0::Exact,
+            &format!("exit {exit_code}"),
+            limits(4_096, 4_096, 2_000),
+        )
+        .run(executor);
+        let (result, receipt) = completed(response);
+        assert_terminal(
+            &result,
+            ExecutorToolStatusV0::Failed,
+            Some(ExecutorToolClassificationV0::NonzeroExit),
+            Some(exit_code),
+        );
+        assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
+    }
+
     let response = PreparedRequest::new(
         probe,
         &workspace,
-        RuntimeReadProfileV0::Exact,
-        "exit 7",
+        RuntimeReadProfileV0::HostSystemRead,
+        r#"status_fd=
+for fd in /proc/1/fd/*; do
+    target=$(/usr/bin/readlink "$fd" 2>/dev/null) || continue
+    case "$target" in
+        *flow-executor-status*) status_fd=$fd ;;
+    esac
+done
+if [ -n "$status_fd" ]; then
+    printf '\000\000\000\000' > "$status_fd" 2>/dev/null && exit 91
+fi
+exit 143"#,
         limits(4_096, 4_096, 2_000),
     )
     .run(executor);
@@ -409,9 +438,9 @@ fn terminal_results_retain_enforcement_evidence(executor: &Path, probe: &Executo
         &result,
         ExecutorToolStatusV0::Failed,
         Some(ExecutorToolClassificationV0::NonzeroExit),
-        Some(7),
+        Some(143),
     );
-    assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
+    assert_receipt(&receipt, RuntimeReadProfileV0::HostSystemRead);
 
     let response = PreparedRequest::new(
         probe,
