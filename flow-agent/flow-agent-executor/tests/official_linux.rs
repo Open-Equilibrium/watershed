@@ -432,21 +432,31 @@ fn host_profile_is_explicit_and_network_remains_denied(executor: &Path, probe: &
     assert_terminal(&result, ExecutorToolStatusV0::Completed, None, Some(0));
     assert_receipt(&receipt, RuntimeReadProfileV0::HostSystemRead);
 
-    for (name, script, errno_must_be_visible) in [
+    for (name, script, expected_diagnostic) in [
         (
             "direct socket",
             "/usr/bin/python3 -c 'import socket; socket.socket()'",
-            true,
+            "Operation not permitted",
         ),
         (
             "indirect HTTP",
             "/usr/bin/python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:9\", timeout=0.2)'",
-            true,
+            "Operation not permitted",
         ),
         (
             "DNS",
-            "/usr/bin/python3 -c 'import socket; socket.getaddrinfo(\"example.invalid\", 80)'",
-            false,
+            r#"/usr/bin/python3 - <<'PY'
+import socket
+
+try:
+    socket.getaddrinfo("example.invalid", 80)
+except socket.gaierror as error:
+    if error.errno == socket.EAI_AGAIN:
+        raise SystemExit("sandbox DNS denied before an answer (EAI_AGAIN)")
+    raise
+raise SystemExit("reserved DNS name unexpectedly resolved")
+PY"#,
+            "sandbox DNS denied before an answer (EAI_AGAIN)",
         ),
     ] {
         let response = PreparedRequest::new(
@@ -466,16 +476,10 @@ fn host_profile_is_explicit_and_network_remains_denied(executor: &Path, probe: &
         );
         let stderr = decode_executor_stream_v0(&result.stderr_base64).expect("stderr decodes");
         assert!(
-            !stderr.is_empty(),
-            "{name} denial must produce the attempted operation's diagnostic"
+            String::from_utf8_lossy(&stderr).contains(expected_diagnostic),
+            "{name} must reach the expected network denial: {}",
+            String::from_utf8_lossy(&stderr)
         );
-        if errno_must_be_visible {
-            assert!(
-                String::from_utf8_lossy(&stderr).contains("Operation not permitted"),
-                "{name} must reach seccomp denial: {}",
-                String::from_utf8_lossy(&stderr)
-            );
-        }
         assert_receipt(&receipt, RuntimeReadProfileV0::HostSystemRead);
     }
 }
