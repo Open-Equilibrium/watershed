@@ -11,6 +11,7 @@ use crate::runtime::{
     },
     run_attempts::{
         RunAttemptIntent, RunAttemptKind, RunAttemptLifecycle, RunAttemptOutcome, RunAttemptResult,
+        ToolEnforcementExpectation,
     },
 };
 use std::fs::{self};
@@ -19,6 +20,10 @@ fn tool_intent(attempt_id: &str) -> RunAttemptIntent {
     RunAttemptIntent {
         attempt_id: attempt_id.to_owned(),
         attempt_kind: RunAttemptKind::Tool,
+        expected_enforcement: Some(ToolEnforcementExpectation {
+            applied_policy_digest: "0".repeat(64),
+            runtime_profile: proto::RuntimeReadProfileV0::Exact,
+        }),
         request_hash: REQUEST_HASH.to_owned(),
         tool_id: Some("read-file".to_owned()),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -59,13 +64,7 @@ fn tool_result(status: &str, exit_code: Option<i32>) -> serde_json::Value {
 fn run_log_synchronizes_intent_before_result_and_surfaces_uncertain_attempts() {
     let workspace = empty_workspace("run-log");
     create_review_run(&workspace);
-    let first = RunAttemptIntent {
-        attempt_id: "tool-001".to_owned(),
-        attempt_kind: RunAttemptKind::Tool,
-        request_hash: REQUEST_HASH.to_owned(),
-        tool_id: Some("read-file".to_owned()),
-        timestamp: "2026-07-30T12:00:00Z".to_owned(),
-    };
+    let first = tool_intent("tool-001");
     append_run_attempt_intent(&workspace, "review", "review-1", &first)
         .expect("intent synchronizes");
     let states =
@@ -233,6 +232,16 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
     invalid_enforcement["enforcement"]["applied_policy_digest"] = "invalid".into();
     let invalid_enforcement =
         proto::canonical_json(&invalid_enforcement).expect("invalid enforcement canonicalizes");
+    let mut wrong_policy: serde_json::Value =
+        serde_json::from_str(&valid).expect("valid reconciliation parses");
+    wrong_policy["enforcement"]["applied_policy_digest"] = "1".repeat(64).into();
+    let wrong_policy =
+        proto::canonical_json(&wrong_policy).expect("wrong policy evidence canonicalizes");
+    let mut wrong_profile: serde_json::Value =
+        serde_json::from_str(&valid).expect("valid reconciliation parses");
+    wrong_profile["enforcement"]["runtime_profile"] = "host-system-read".into();
+    let wrong_profile =
+        proto::canonical_json(&wrong_profile).expect("wrong profile evidence canonicalizes");
 
     for (name, source, expected) in [
         (
@@ -261,7 +270,17 @@ fn tool_reconciliation_rejects_invalid_outer_evidence_without_mutation() {
         (
             "invalid-enforcement",
             invalid_enforcement,
-            "enforcement receipt is invalid",
+            "enforcement receipt does not match the uncertain attempt",
+        ),
+        (
+            "wrong-policy",
+            wrong_policy,
+            "enforcement receipt does not match the uncertain attempt",
+        ),
+        (
+            "wrong-profile",
+            wrong_profile,
+            "enforcement receipt does not match the uncertain attempt",
         ),
         (
             "invalid-flow-value",
@@ -360,13 +379,7 @@ fn reconciliation_file_accepts_a_durable_run_object_result() {
         &workspace,
         "review",
         "review-1",
-        &RunAttemptIntent {
-            attempt_id: "tool-object".to_owned(),
-            attempt_kind: RunAttemptKind::Tool,
-            request_hash: REQUEST_HASH.to_owned(),
-            tool_id: Some("read-file".to_owned()),
-            timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        },
+        &tool_intent("tool-object"),
     )
     .expect("uncertain Tool intent is durable");
     let object = ContextObject {

@@ -8,6 +8,7 @@ use crate::runtime::{
     },
     run_attempts::{
         ProductiveRecovery, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome, RunAttemptResult,
+        ToolEnforcementExpectation,
     },
 };
 use std::{
@@ -28,6 +29,7 @@ fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
         &RunAttemptIntent {
             attempt_id: "provider-000001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: request_hash.to_owned(),
             tool_id: None,
             timestamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -107,6 +109,7 @@ fn productive_recovery_rejects_cross_ledger_attempt_conflicts() {
         &RunAttemptIntent {
             attempt_id: recorded.attempt_id.clone(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -195,6 +198,7 @@ fn productive_recovery_round_trips_every_committed_boundary() {
     let intent = RunAttemptIntent {
         attempt_id: "provider-000001".to_owned(),
         attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
         request_hash: request_hash.to_owned(),
         tool_id: None,
         timestamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -326,6 +330,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
         &RunAttemptIntent {
             attempt_id: provider_result.attempt_id.clone(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: request_hash.clone(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -368,6 +373,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
             &RunAttemptIntent {
                 attempt_id: "provider-000002".to_owned(),
                 attempt_kind: RunAttemptKind::Provider,
+                expected_enforcement: None,
                 request_hash: extra_hash.to_owned(),
                 tool_id: None,
                 timestamp: "2026-07-30T12:00:02Z".to_owned(),
@@ -571,6 +577,10 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         &RunAttemptIntent {
             attempt_id: "tool-000001".to_owned(),
             attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: "0".repeat(64),
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -608,6 +618,10 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         &RunAttemptIntent {
             attempt_id: second_result.attempt_id.clone(),
             attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: "0".repeat(64),
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),
             timestamp: "2026-07-30T12:00:02Z".to_owned(),
@@ -751,6 +765,7 @@ fn header_only_recovery_with_completed_attempt(
         &RunAttemptIntent {
             attempt_id: "provider-000001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-08-16T12:00:00Z".to_owned(),

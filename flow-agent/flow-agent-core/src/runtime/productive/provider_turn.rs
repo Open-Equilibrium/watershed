@@ -20,8 +20,8 @@ use crate::runtime::{
         responses_request_input_bytes,
     },
     run_attempts::{
-        ProductiveAttemptLog, ProviderTerminalClassification, RunAttemptKind, RunAttemptOutcome,
-        RunAttemptResult,
+        ProductiveAttemptLog, ProviderTerminalClassification, RunAttemptIntent, RunAttemptKind,
+        RunAttemptOutcome, RunAttemptResult,
     },
     stream_signature::FlowInvocation,
     types::RuntimeError,
@@ -150,13 +150,14 @@ where
     context
         .sink
         .reserve_productive_dispatch(provider_dispatch_reservation(compiled))?;
-    context.attempts.intent(
-        RunAttemptKind::Provider,
-        attempt_id,
-        request_hash,
-        None,
-        timestamp,
-    )?;
+    context.attempts.intent(&RunAttemptIntent {
+        attempt_id: attempt_id.to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
+        request_hash: request_hash.to_owned(),
+        tool_id: None,
+        timestamp: timestamp.to_owned(),
+    })?;
     let provider_turn = match crate::runtime::cancellation::claim_productive_effect_dispatch() {
         Ok(_dispatch) => context.provider.turn(context.execution.credential, body),
         Err(error) => Err(error),

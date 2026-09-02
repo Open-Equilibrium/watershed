@@ -93,6 +93,7 @@ fn append_uncertain_provider_intent(workspace: &Path) {
         &RunAttemptIntent {
             attempt_id: "provider-001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),

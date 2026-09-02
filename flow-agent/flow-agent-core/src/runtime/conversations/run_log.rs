@@ -1,7 +1,7 @@
 use super::{
     contract::{
         MAX_CONVERSATION_STATUS_BYTES, MAX_CONVERSATION_STATUS_RECORDS, RUN_LOG_RECORD_SCHEMA_V1,
-        TOOL_RUN_LOG_PAGE_SCHEMA, protocol, validate_attempt_id, validate_hash,
+        TOOL_RUN_LOG_PAGE_SCHEMA, protocol, validate_attempt_id, validate_digest, validate_hash,
         validate_record_schema, validate_timestamp,
     },
     conversation_stream::{read_anchored_jsonl, read_anchored_jsonl_quantum},
@@ -15,7 +15,7 @@ use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredFile, DirectoryErrorMode},
     run_attempts::{
         RunAttemptIntent, RunAttemptKind, RunAttemptLifecycle, RunAttemptOutcome, RunAttemptResult,
-        RunAttemptState,
+        RunAttemptState, ToolEnforcementExpectation,
     },
     types::RuntimeError,
 };
@@ -53,6 +53,8 @@ pub(crate) enum RunLogRecord {
         schema: String,
         attempt_id: String,
         attempt_kind: RunAttemptKind,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_enforcement: Option<ToolEnforcementExpectation>,
         request_hash: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         tool_id: Option<String>,
@@ -128,6 +130,10 @@ impl RunAttemptLedger {
         validate_hash(&intent.request_hash, "run attempt request hash")?;
         validate_timestamp(&intent.timestamp)?;
         validate_attempt_tool_identity(intent.attempt_kind, intent.tool_id.as_deref())?;
+        validate_tool_enforcement_expectation(
+            intent.attempt_kind,
+            intent.expected_enforcement.as_ref(),
+        )?;
         if self.states.contains_key(&intent.attempt_id) {
             return Err(protocol("run attempt id is duplicated"));
         }
@@ -135,6 +141,7 @@ impl RunAttemptLedger {
             schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
             attempt_id: intent.attempt_id.clone(),
             attempt_kind: intent.attempt_kind,
+            expected_enforcement: intent.expected_enforcement.clone(),
             request_hash: intent.request_hash.clone(),
             tool_id: intent.tool_id.clone(),
             timestamp: intent.timestamp.clone(),
@@ -147,6 +154,7 @@ impl RunAttemptLedger {
                 attempt_kind: intent.attempt_kind,
                 lifecycle: RunAttemptLifecycle::Uncertain,
                 outcome: None,
+                expected_enforcement: intent.expected_enforcement.clone(),
                 request_hash: intent.request_hash.clone(),
                 timestamp: intent.timestamp.clone(),
                 tool_id: intent.tool_id.clone(),
@@ -434,6 +442,23 @@ fn validate_attempt_tool_identity(
     Ok(())
 }
 
+fn validate_tool_enforcement_expectation(
+    attempt_kind: RunAttemptKind,
+    expectation: Option<&ToolEnforcementExpectation>,
+) -> Result<(), RuntimeError> {
+    match (attempt_kind, expectation) {
+        (RunAttemptKind::Tool, Some(expectation)) => validate_digest(
+            &expectation.applied_policy_digest,
+            "Tool intent policy digest",
+        ),
+        (RunAttemptKind::Provider, None) => Ok(()),
+        (RunAttemptKind::Tool, None) => Err(protocol("Tool intent has no enforcement expectation")),
+        (RunAttemptKind::Provider, Some(_)) => Err(protocol(
+            "provider intent has an unexpected enforcement expectation",
+        )),
+    }
+}
+
 fn apply_run_attempt_record(
     record: &RunLogRecord,
     states: &mut BTreeMap<String, RunAttemptState>,
@@ -447,6 +472,7 @@ fn apply_run_attempt_record(
             schema,
             attempt_id,
             attempt_kind,
+            expected_enforcement,
             request_hash,
             tool_id,
             timestamp,
@@ -456,6 +482,7 @@ fn apply_run_attempt_record(
             validate_attempt_id(attempt_id)?;
             validate_timestamp(timestamp)?;
             validate_attempt_tool_identity(*attempt_kind, tool_id.as_deref())?;
+            validate_tool_enforcement_expectation(*attempt_kind, expected_enforcement.as_ref())?;
             if states.contains_key(attempt_id) {
                 return Err(protocol("run attempt id is duplicated"));
             }
@@ -469,6 +496,7 @@ fn apply_run_attempt_record(
                     attempt_kind: *attempt_kind,
                     lifecycle: RunAttemptLifecycle::Uncertain,
                     outcome: None,
+                    expected_enforcement: expected_enforcement.clone(),
                     request_hash: request_hash.clone(),
                     timestamp: timestamp.clone(),
                     tool_id: tool_id.clone(),

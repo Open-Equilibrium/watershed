@@ -183,6 +183,7 @@ fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
         &RunAttemptIntent {
             attempt_id: "provider-001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
                 .to_owned(),
             tool_id: None,

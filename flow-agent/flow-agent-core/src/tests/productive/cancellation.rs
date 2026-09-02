@@ -19,7 +19,9 @@ use crate::runtime::{
         execute_productive_flow_with_tool_executor, set_productive_completion_commit_observer,
         set_productive_result_persist_observer,
     },
-    run_attempts::{ProductiveAttemptLog, RunAttemptKind, RunAttemptOutcome, RunAttemptResult},
+    run_attempts::{
+        ProductiveAttemptLog, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome, RunAttemptResult,
+    },
     types::{CANCELLED_REASON, RUNTIME_ERROR_REASON, RuntimeError},
 };
 
@@ -34,16 +36,8 @@ impl ProductiveAttemptLog for InterruptingFailureAttempts {
         self.inner.persist_objects(objects)
     }
 
-    fn intent(
-        &mut self,
-        kind: RunAttemptKind,
-        attempt_id: &str,
-        request_hash: &str,
-        tool_id: Option<&str>,
-        timestamp: &str,
-    ) -> Result<(), RuntimeError> {
-        self.inner
-            .intent(kind, attempt_id, request_hash, tool_id, timestamp)
+    fn intent(&mut self, intent: &RunAttemptIntent) -> Result<(), RuntimeError> {
+        self.inner.intent(intent)
     }
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError> {

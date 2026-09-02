@@ -9,7 +9,10 @@ use crate::runtime::{
         RunLogProjectionPage, RunLogRecord, append_jsonl, canonical_json, inspect_run_attempts,
         project_tool_run_log, project_tool_run_log_page, read_jsonl,
     },
-    run_attempts::{ProductiveAttemptLog, RunAttemptKind, RunAttemptOutcome},
+    run_attempts::{
+        ProductiveAttemptLog, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome,
+        ToolEnforcementExpectation,
+    },
 };
 use std::fs;
 
@@ -32,9 +35,17 @@ fn intent_record(index: usize) -> RunLogRecord {
         schema: "flow-run-log-record-v1".to_owned(),
         attempt_id: format!("tool-{index:04}"),
         attempt_kind: RunAttemptKind::Tool,
+        expected_enforcement: Some(tool_enforcement_expectation()),
         request_hash: format!("sha256:{index:064x}"),
         tool_id: Some("inspect".to_owned()),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
+    }
+}
+
+fn tool_enforcement_expectation() -> ToolEnforcementExpectation {
+    ToolEnforcementExpectation {
+        applied_policy_digest: "0".repeat(64),
+        runtime_profile: proto::RuntimeReadProfileV0::Exact,
     }
 }
 
@@ -65,13 +76,14 @@ fn attempt_log_stays_bound_to_its_open_conversation() {
     create_directory_alias(&alias, &replacement);
 
     attempts
-        .intent(
-            RunAttemptKind::Provider,
-            "provider-001",
-            REQUEST_HASH,
-            None,
-            "2026-07-30T12:00:00Z",
-        )
+        .intent(&RunAttemptIntent {
+            attempt_id: "provider-001".to_owned(),
+            attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
+            request_hash: REQUEST_HASH.to_owned(),
+            tool_id: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        })
         .expect("attempt uses the conversation retained when the log opened");
     assert_ne!(
         super::file_tree_bytes(&original_conversation),
@@ -134,6 +146,7 @@ fn conversation_page_byte_budget() {
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "provider-sparse".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -209,6 +222,7 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "tool-001".to_owned(),
             attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(tool_enforcement_expectation()),
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: Some("inspect".to_owned()),
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -217,6 +231,7 @@ fn tool_run_log_projection_filters_every_record_kind_and_rejects_foreign_schema(
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "provider-001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
                 .to_owned(),
             tool_id: None,
@@ -273,6 +288,7 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
         schema: schema.to_owned(),
         attempt_id: attempt_id.to_owned(),
         attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
         request_hash: hash.to_owned(),
         tool_id: None,
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -313,6 +329,8 @@ fn run_attempt_inspection_rejects_every_ambiguous_record_sequence() {
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: attempt_id.to_owned(),
             attempt_kind,
+            expected_enforcement: (attempt_kind == RunAttemptKind::Tool)
+                .then(tool_enforcement_expectation),
             request_hash: request_hash.to_owned(),
             tool_id: tool_id.map(str::to_owned),
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -524,6 +542,7 @@ fn run_attempt_inspection_rejects_a_result_for_a_different_attempt() {
             schema: "flow-run-log-record-v1".to_owned(),
             attempt_id: "provider-001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),

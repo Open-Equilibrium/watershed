@@ -80,10 +80,18 @@ impl std::fmt::Display for RunAttemptOutcome {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ToolEnforcementExpectation {
+    pub(crate) applied_policy_digest: String,
+    pub(crate) runtime_profile: proto::RuntimeReadProfileV0,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RunAttemptIntent {
     pub(crate) attempt_id: String,
     pub(crate) attempt_kind: RunAttemptKind,
+    pub(crate) expected_enforcement: Option<ToolEnforcementExpectation>,
     pub(crate) request_hash: String,
     pub(crate) tool_id: Option<String>,
     pub(crate) timestamp: String,
@@ -236,6 +244,7 @@ pub(crate) struct RunAttemptState {
     pub(crate) attempt_kind: RunAttemptKind,
     pub(crate) lifecycle: RunAttemptLifecycle,
     pub(crate) outcome: Option<RunAttemptOutcome>,
+    pub(crate) expected_enforcement: Option<ToolEnforcementExpectation>,
     pub(crate) request_hash: String,
     pub(crate) timestamp: String,
     pub(crate) tool_id: Option<String>,
@@ -244,14 +253,7 @@ pub(crate) struct RunAttemptState {
 pub(crate) trait ProductiveAttemptLog {
     fn persist_objects(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError>;
 
-    fn intent(
-        &mut self,
-        kind: RunAttemptKind,
-        attempt_id: &str,
-        request_hash: &str,
-        tool_id: Option<&str>,
-        timestamp: &str,
-    ) -> Result<(), RuntimeError>;
+    fn intent(&mut self, intent: &RunAttemptIntent) -> Result<(), RuntimeError>;
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError>;
 }

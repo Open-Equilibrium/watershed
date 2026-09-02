@@ -42,16 +42,6 @@ pub fn reconcile_tool_attempt(
     with_conversation_run_ownership(workspace, conversation_id, run_session_id, || {
         let run_objects = RunObjectStore::open(workspace, conversation_id, run_session_id)?;
         let recovery = ReconciliationRecovery { run_objects };
-        proto::validate_enforcement_receipt_v0(
-            &reconciliation.enforcement,
-            &reconciliation.enforcement.applied_policy_digest,
-            reconciliation.enforcement.runtime_profile,
-        )
-        .map_err(|error| {
-            RuntimeError::Usage(format!(
-                "Tool reconciliation enforcement receipt is invalid: {error}"
-            ))
-        })?;
         let tool_result =
             core_script::parse_flow_value_v0(reconciliation.tool_result).map_err(|error| {
                 RuntimeError::Usage(format!("Tool reconciliation result is invalid: {error}"))
@@ -79,6 +69,21 @@ pub fn reconcile_tool_attempt(
                 "Tool reconciliation request hash does not match the uncertain attempt".to_owned(),
             ));
         }
+        let expected = attempt.expected_enforcement.as_ref().ok_or_else(|| {
+            RuntimeError::PersistedState(
+                "uncertain Tool attempt has no enforcement expectation".to_owned(),
+            )
+        })?;
+        proto::validate_enforcement_receipt_v0(
+            &reconciliation.enforcement,
+            &expected.applied_policy_digest,
+            expected.runtime_profile,
+        )
+        .map_err(|error| {
+            RuntimeError::Usage(format!(
+                "Tool reconciliation enforcement receipt does not match the uncertain attempt: {error}"
+            ))
+        })?;
         let durable_output = serde_json::json!({
             "enforcement": reconciliation.enforcement,
             "request_hash": reconciliation.request_hash,

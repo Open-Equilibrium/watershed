@@ -6,7 +6,7 @@ use crate::runtime::{
         RunLogProjectionPage, RunLogRecord, TOOL_RUN_LOG_PAGE_SCHEMA, append_jsonl, canonical_json,
         project_tool_run_log_page, read_jsonl,
     },
-    run_attempts::{RunAttemptKind, RunAttemptOutcome},
+    run_attempts::{RunAttemptKind, RunAttemptOutcome, ToolEnforcementExpectation},
 };
 use serde_json::json;
 use std::{
@@ -24,6 +24,10 @@ fn intent_record(index: usize) -> RunLogRecord {
         schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
         attempt_id: format!("tool-{index:04}"),
         attempt_kind: RunAttemptKind::Tool,
+        expected_enforcement: Some(ToolEnforcementExpectation {
+            applied_policy_digest: "0".repeat(64),
+            runtime_profile: proto::RuntimeReadProfileV0::Exact,
+        }),
         request_hash: format!("sha256:{index:064x}"),
         tool_id: Some("inspect".to_owned()),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),

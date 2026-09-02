@@ -14,8 +14,9 @@ use crate::runtime::{
     executor::ExecutorDispatchOutcome,
     policy_resolution::command_policy_for_phase,
     run_attempts::{
-        ProductiveAttemptLog, ProductiveRecovery, RunAttemptKind, RunAttemptOutcome,
-        RunAttemptResult, ToolTerminalClassification, resolve_tool_terminal,
+        ProductiveAttemptLog, ProductiveRecovery, RunAttemptIntent, RunAttemptKind,
+        RunAttemptOutcome, RunAttemptResult, ToolEnforcementExpectation,
+        ToolTerminalClassification, resolve_tool_terminal,
     },
     session_definition::sha256_hash_text,
     stream_signature::FlowInvocation,
@@ -155,13 +156,17 @@ where
         context
             .sink
             .reserve_productive_dispatch(tool_dispatch_reservation())?;
-        context.attempts.intent(
-            RunAttemptKind::Tool,
-            &attempt_id,
-            &request_hash,
-            Some(&tool.identity.id),
-            &timestamp,
-        )?;
+        context.attempts.intent(&RunAttemptIntent {
+            attempt_id: attempt_id.clone(),
+            attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: expected_policy_digest.clone(),
+                runtime_profile: expected_runtime_profile,
+            }),
+            request_hash: request_hash.clone(),
+            tool_id: Some(tool.identity.id.clone()),
+            timestamp: timestamp.clone(),
+        })?;
         if let Err(error) = emit_and_commit(
             builder,
             Some(invocation),
