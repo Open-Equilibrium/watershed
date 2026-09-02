@@ -2,7 +2,9 @@ use super::ExecutorSelection;
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use super::ExecutorSelectionSource;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use super::process::{child_exited_without_reaping, terminate_child_or_fail_stop};
+use super::process::{
+    child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
+};
 use crate::runtime::types::RuntimeError;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::fs::File;
@@ -66,12 +68,9 @@ fn probe_linux_executor(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let expected_parent = rustix::process::getpid();
     unsafe {
-        command.pre_exec(|| {
-            rustix::process::setsid()
-                .map(|_| ())
-                .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
-        });
+        command.pre_exec(move || configure_executor_child(expected_parent));
     }
     let mut child = command
         .spawn()

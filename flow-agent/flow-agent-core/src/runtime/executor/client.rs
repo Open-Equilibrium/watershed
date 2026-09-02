@@ -1,7 +1,9 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use super::ExecutorSelection;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use super::process::{child_exited_without_reaping, terminate_child_or_fail_stop};
+use super::process::{
+    child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
+};
 use super::resolve_executor;
 use crate::runtime::{
     fs_guards::AnchoredWorkspace,
@@ -610,10 +612,10 @@ fn execute_one_shot(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let expected_parent = rustix::process::getpid();
     unsafe {
         command.pre_exec(move || {
-            rustix::process::setsid()
-                .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+            configure_executor_child(expected_parent)?;
             for &(source, target) in &remaps {
                 if c_dup2(source, target) < 0 {
                     return Err(std::io::Error::last_os_error());

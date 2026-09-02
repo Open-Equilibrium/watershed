@@ -1,6 +1,20 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const EXECUTOR_REAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(super) fn configure_executor_child(
+    expected_parent: rustix::process::Pid,
+) -> std::io::Result<()> {
+    rustix::process::set_parent_process_death_signal(Some(rustix::process::Signal::KILL))
+        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+    if rustix::process::getppid() != Some(expected_parent) {
+        return Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe));
+    }
+    rustix::process::setsid()
+        .map(|_| ())
+        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
+}
+
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 thread_local! {
     static PROCESS_GROUP_CLEANUP_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -73,12 +87,70 @@ pub(super) fn terminate_child_or_fail_stop(child: &mut std::process::Child) {
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
-    use super::terminate_child_bounded;
+    use super::{configure_executor_child, terminate_child_bounded};
     use std::{
+        fs,
         os::unix::process::CommandExt as _,
+        path::PathBuf,
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
+
+    const PARENT_DEATH_HELPER_ENV: &str = "FLOW_AGENT_TEST_EXECUTOR_PARENT_DEATH_PATH";
+
+    #[test]
+    fn executor_parent_death_helper() {
+        let Ok(pid_path) = std::env::var(PARENT_DEATH_HELPER_ENV) else {
+            return;
+        };
+        let expected_parent = rustix::process::getpid();
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "trap '' HUP INT TERM; while :; do sleep 1; done"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        unsafe {
+            command.pre_exec(move || configure_executor_child(expected_parent));
+        }
+        let child = command.spawn().expect("detached executor child starts");
+        fs::write(pid_path, child.id().to_string()).expect("executor child PID recorded");
+    }
+
+    #[test]
+    fn detached_executor_child_dies_when_flow_parent_exits() {
+        let pid_path = PathBuf::from(format!(
+            "/tmp/flow-agent-parent-death-{}-{}.pid",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        let _ = fs::remove_file(&pid_path);
+        let status = Command::new(std::env::current_exe().expect("test executable is known"))
+            .args([
+                "--exact",
+                "runtime::executor::process::tests::executor_parent_death_helper",
+            ])
+            .env(PARENT_DEATH_HELPER_ENV, &pid_path)
+            .status()
+            .expect("parent helper runs");
+        assert!(status.success());
+        let raw_pid = fs::read_to_string(&pid_path)
+            .expect("executor child PID is readable")
+            .parse::<i32>()
+            .expect("executor child PID is valid");
+        let pid = rustix::process::Pid::from_raw(raw_pid).expect("executor child PID is positive");
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(2) {
+            if rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH) {
+                fs::remove_file(pid_path).expect("PID file removed");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+        let _ = fs::remove_file(pid_path);
+        panic!("detached executor child {raw_pid} survived its Flow parent");
+    }
 
     #[test]
     fn faulty_executor_cleanup_is_bounded_and_reaps_its_process_group() {
@@ -92,11 +164,8 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         unsafe {
-            command.pre_exec(|| {
-                rustix::process::setsid()
-                    .map(|_| ())
-                    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))
-            });
+            let expected_parent = rustix::process::getpid();
+            command.pre_exec(move || configure_executor_child(expected_parent));
         }
         let mut child = command.spawn().expect("stubborn process group starts");
         let process_group = rustix::process::Pid::from_raw(child.id() as i32)
