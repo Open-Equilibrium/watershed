@@ -12,11 +12,14 @@ publish.workspace = true
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 
 [dependencies]
-core-policy.workspace = true
 proto.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+core-policy.workspace = true
+
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+core-policy.workspace = true
 rustix.workspace = true
 signal-hook.workspace = true
 

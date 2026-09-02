@@ -23,8 +23,11 @@ pub const EXECUTOR_NAME_V0: &str = "flow-executor";
 pub const EXECUTOR_BACKEND_V0: &str = "bubblewrap-seccomp";
 /// Canonical official host platform identity.
 pub const EXECUTOR_PLATFORM_V0: &str = "ubuntu-24.04-x86_64";
+/// Productive executable used for POSIX own-script Tools.
+pub const EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0: &str = "/bin/sh";
 /// Closed Sandbox executable surface supported by the private v0 protocol.
-pub const EXECUTOR_EXACT_EXECUTABLES_V0: [&str; 3] = ["/bin/sh", "/bin/cat", "/bin/echo"];
+pub const EXECUTOR_EXACT_EXECUTABLES_V0: [&str; 3] =
+    [EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0, "/bin/cat", "/bin/echo"];
 /// Required official feature proving the static trusted inner-stage image.
 pub const EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0: &str = "static-self-reexec";
 /// Required official feature proving descriptor-backed mount sources.

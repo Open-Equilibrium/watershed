@@ -28,9 +28,9 @@ pub(crate) const HOST_SYSTEM_READ_MOUNTS: [(&str, &str); 6] = [
 
 const EXACT_RUNTIME_EXECUTABLES: [(&str, &str, &str); 3] = [
     (
-        core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE,
+        proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0,
         "/usr/bin/dash",
-        core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE,
+        proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0,
     ),
     ("/bin/cat", "/usr/bin/cat", "/bin/cat"),
     ("/bin/echo", "/usr/bin/echo", "/bin/echo"),

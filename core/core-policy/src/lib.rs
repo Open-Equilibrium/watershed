@@ -19,7 +19,7 @@ pub use core_script::{
 /// Policy artifact version string emitted by the v0 compiler.
 pub const POLICY_VERSION_V0: &str = "0";
 /// Productive executable used for POSIX own-script Tools.
-pub const OWN_SCRIPT_PRODUCTIVE_EXECUTABLE: &str = "/bin/sh";
+pub const OWN_SCRIPT_PRODUCTIVE_EXECUTABLE: &str = proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0;
 pub(crate) const OWN_SCRIPT_RUNNER_POSIX_SH: &str = "runner:posix-sh";
 
 /// A predefined command implemented and trusted by Flow Agent.
