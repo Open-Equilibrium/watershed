@@ -42,13 +42,9 @@ pub(crate) struct ExecutorToolExecution {
 
 /// Fully validated request with every filesystem capability retained before recovery or dispatch.
 pub(crate) struct PreparedExecutorTool {
-    max_concurrent_processes_and_threads: u32,
-    policy_digest: String,
     request_hash: String,
-    runtime_profile: proto::RuntimeReadProfileV0,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     mounts: Vec<preparation::PreparedMount>,
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     request: proto::ExecutorRequestV0,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     request_bytes: Vec<u8>,
@@ -60,15 +56,15 @@ impl PreparedExecutorTool {
     }
 
     pub(crate) fn policy_digest(&self) -> &str {
-        &self.policy_digest
+        &self.request.policy_digest
     }
 
     pub(crate) fn max_concurrent_processes_and_threads(&self) -> u32 {
-        self.max_concurrent_processes_and_threads
+        self.request.limits.max_concurrent_processes_and_threads
     }
 
     pub(crate) fn runtime_profile(&self) -> proto::RuntimeReadProfileV0 {
-        self.runtime_profile
+        self.request.runtime_profile
     }
 }
 
@@ -184,9 +180,9 @@ impl PreparedExecutor {
     ) -> Result<(), RuntimeError> {
         proto::validate_enforcement_receipt_v0(
             receipt,
-            &prepared.policy_digest,
-            prepared.runtime_profile,
-            prepared.max_concurrent_processes_and_threads,
+            prepared.policy_digest(),
+            prepared.runtime_profile(),
+            prepared.max_concurrent_processes_and_threads(),
         )
         .map_err(|_| {
             RuntimeError::executor(
@@ -279,10 +275,40 @@ mod unsupported_platform_tests {
 
     fn prepared_tool() -> PreparedExecutorTool {
         PreparedExecutorTool {
-            max_concurrent_processes_and_threads: 16,
-            policy_digest: "a".repeat(64),
             request_hash: "sha256:request".to_owned(),
-            runtime_profile: proto::RuntimeReadProfileV0::HostSystemRead,
+            request: proto::ExecutorRequestV0 {
+                argv: Vec::new(),
+                environment: std::collections::BTreeMap::new(),
+                executable: "/bin/echo".to_owned(),
+                limits: proto::ExecutorLimitsV0 {
+                    max_concurrent_processes_and_threads: 16,
+                    max_stderr_bytes: 0,
+                    max_stdout_bytes: 0,
+                    timeout_ms: 1_000,
+                },
+                mounts: Vec::new(),
+                policy_digest: "a".repeat(64),
+                request_id: "unsupported-platform-request".to_owned(),
+                resolved_policy: proto::ExecutorResolvedPolicyV0 {
+                    artifact: serde_json::json!({}),
+                    command: serde_json::json!({}),
+                    limits: proto::ExecutorLimitsV0 {
+                        max_concurrent_processes_and_threads: 16,
+                        max_stderr_bytes: 0,
+                        max_stdout_bytes: 0,
+                        timeout_ms: 1_000,
+                    },
+                    mounts: Vec::new(),
+                    runtime_profile: proto::RuntimeReadProfileV0::HostSystemRead,
+                    tool_id: "echo".to_owned(),
+                    tool_kind: "predefined-command".to_owned(),
+                },
+                runtime_profile: proto::RuntimeReadProfileV0::HostSystemRead,
+                schema: proto::EXECUTOR_REQUEST_SCHEMA_V0.to_owned(),
+                tool_id: "echo".to_owned(),
+                tool_kind: "predefined-command".to_owned(),
+                working_directory: "/workspace".to_owned(),
+            },
         }
     }
 

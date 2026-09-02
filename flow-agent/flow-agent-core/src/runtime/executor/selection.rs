@@ -8,7 +8,7 @@ use super::{
 use crate::runtime::types::RuntimeError;
 use std::path::{Path, PathBuf};
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use std::{env, fs::File, sync::Arc};
+use std::{env, fs::File};
 
 /// Authority that selected the effective productive Executor.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,10 +30,10 @@ impl ExecutorSelectionSource {
 }
 
 /// Absolute productive Executor selected by the administrator boundary.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ExecutorSelection {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    executable: Option<Arc<File>>,
+    executable: Option<File>,
     path: PathBuf,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     probe: Option<proto::ExecutorProbeV0>,
@@ -55,7 +55,7 @@ impl ExecutorSelection {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     fn with_probe(mut self, probed: ProbedExecutor) -> Self {
-        self.executable = Some(Arc::new(probed.executable));
+        self.executable = Some(probed.executable);
         self.probe = Some(probed.probe);
         self
     }
@@ -85,7 +85,7 @@ impl ExecutorSelection {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(crate) fn executable(&self) -> &File {
         self.executable
-            .as_deref()
+            .as_ref()
             .expect("resolved Executor selection carries its validated executable")
     }
 }

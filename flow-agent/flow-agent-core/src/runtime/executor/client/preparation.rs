@@ -98,7 +98,7 @@ impl PreparedExecutor {
             executable: invocation.executable.clone(),
             limits,
             mounts: request_mounts,
-            policy_digest: policy_digest.clone(),
+            policy_digest,
             request_id: request_id.to_owned(),
             resolved_policy,
             runtime_profile,
@@ -111,14 +111,10 @@ impl PreparedExecutor {
             proto::canonical_executor_request_v0(&request).map_err(invalid_request)?;
         let request_hash = executor_request_hash(&request_bytes);
         Ok(PreparedExecutorTool {
-            max_concurrent_processes_and_threads: command_policy
-                .max_concurrent_processes_and_threads,
             mounts,
-            policy_digest,
             request,
             request_bytes,
             request_hash,
-            runtime_profile,
         })
     }
 
