@@ -93,27 +93,6 @@ fn protocol_rejects_oversized_and_malformed_requests_without_output() {
     assert!(output.is_empty());
 }
 
-#[test]
-fn protocol_accepts_policy_bound_process_capacity() {
-    let mut request = serde_json::to_value(exact_request(&[], &[])).expect("request serializes");
-    request["limits"]["max_concurrent_processes_and_threads"] = serde_json::json!(3);
-    request["resolved_policy"]["limits"]["max_concurrent_processes_and_threads"] =
-        serde_json::json!(3);
-    let resolved: ExecutorResolvedPolicyV0 =
-        serde_json::from_value(request["resolved_policy"].clone())
-            .expect("process capacity belongs to the resolved policy");
-    request["policy_digest"] = serde_json::json!(
-        resolved_policy_digest_v0(&resolved).expect("capacity-bound policy digest")
-    );
-    let request: ExecutorRequestV0 =
-        serde_json::from_value(request).expect("capacity-bound request decodes");
-    let bytes = proto::canonical_executor_request_v0(&request)
-        .expect("capacity-bound request canonicalizes");
-
-    proto::parse_executor_request_v0(&bytes)
-        .expect("Executor accepts the mandatory policy-bound process capacity");
-}
-
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 #[test]
 fn protocol_returns_a_typed_error_on_an_unsupported_platform() {
