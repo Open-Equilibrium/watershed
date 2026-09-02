@@ -33,6 +33,14 @@ pub(super) fn wait_with_output_before(child: Child, timeout: Duration) -> Output
     wait_with_io_before(child, None, timeout)
 }
 
+pub(super) fn cli_child_watchdog() -> Duration {
+    if cfg!(windows) || std::env::var_os("CARGO_LLVM_COV").is_some() {
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(10)
+    }
+}
+
 fn wait_with_io_before(mut child: Child, input: Option<Vec<u8>>, timeout: Duration) -> Output {
     let started = Instant::now();
     let stdin_writer = input.map(|input| {

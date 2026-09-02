@@ -1,10 +1,10 @@
 use super::{
     flow_command,
-    process::{wait_with_input_and_output_before, wait_with_output_before},
+    process::{cli_child_watchdog, wait_with_input_and_output_before, wait_with_output_before},
     test_support::{empty_workspace, session_home_path},
 };
 use core_script::{RegistryBlock, ToolCommand, parse_registry_block};
-use std::{fs, path::Path, process::Stdio, time::Duration};
+use std::{fs, path::Path, process::Stdio};
 
 fn initialize_default_workspace(workspace: &Path) {
     let output = flow_command()
@@ -391,7 +391,7 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
     let instruction = wait_with_input_and_output_before(
         instruction,
         b"Review the selected project.",
-        Duration::from_secs(10),
+        cli_child_watchdog(),
     );
     assert!(
         instruction.status.success(),
@@ -421,11 +421,8 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("Tool create should start");
-    let tool = wait_with_input_and_output_before(
-        tool,
-        b"printf '%s' stdin-script",
-        Duration::from_secs(10),
-    );
+    let tool =
+        wait_with_input_and_output_before(tool, b"printf '%s' stdin-script", cli_child_watchdog());
     assert!(
         tool.status.success(),
         "{}",
@@ -512,7 +509,7 @@ fn duplicate_prompt_source_is_rejected_without_reading_stdin() {
         .spawn()
         .expect("instruction create should start");
 
-    let output = wait_with_output_before(child, Duration::from_millis(500));
+    let output = wait_with_output_before(child, cli_child_watchdog());
 
     assert!(!output.status.success());
     assert!(
@@ -572,7 +569,7 @@ fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
             .spawn()
             .expect("invalid authoring command should start");
 
-        let output = wait_with_output_before(child, Duration::from_millis(500));
+        let output = wait_with_output_before(child, cli_child_watchdog());
 
         assert!(!output.status.success());
         assert!(
@@ -629,7 +626,7 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
             .spawn()
             .expect("invalid authoring command should start");
 
-        let output = wait_with_output_before(child, Duration::from_millis(500));
+        let output = wait_with_output_before(child, cli_child_watchdog());
         let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
         assert_eq!(output.status.code(), Some(65), "{kind}: {stderr}");
         assert!(stderr.contains("invalid_definition"), "{kind}: {stderr}");
