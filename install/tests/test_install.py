@@ -29,17 +29,6 @@ PROBE_DOCUMENT = (
     "requires Linux /bin/sh and /usr/bin/setsid",
 )
 class PrefixInstallerTest(unittest.TestCase):
-    def test_root_readiness_uses_the_target_user_manager_without_enabling_linger(self):
-        installer = INSTALLER.read_text(encoding="utf-8")
-
-        self.assertIn('readiness_runtime_dir=/run/user/$readiness_owner', installer)
-        self.assertIn('XDG_RUNTIME_DIR=$readiness_runtime_dir', installer)
-        self.assertIn(
-            'DBUS_SESSION_BUS_ADDRESS=unix:path=$readiness_runtime_dir/bus',
-            installer,
-        )
-        self.assertNotIn("loginctl", installer)
-
     def test_help_succeeds_without_installing(self):
         expected = (
             "Usage: install.sh --prefix <absolute-prefix> [--no-default-executor]\n"

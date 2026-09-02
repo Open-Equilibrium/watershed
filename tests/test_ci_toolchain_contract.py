@@ -31,6 +31,7 @@ M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
 M12_COVERAGE_ENV = "/root/m12-coverage.env"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
+M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
 
 
 def workflow_text() -> str:
@@ -560,6 +561,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "passwd",
             "python3",
             "procps",
+            "strace",
             "util-linux",
             "/opt/cargo-registry",
             "useradd --create-home --uid 10001 --shell /bin/sh watershed",
@@ -640,7 +642,26 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
         self.assertIn(f". {M12_COVERAGE_ENV}", installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
-        installer_contract = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        readiness_negatives = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
+        installer_contract = installer_acceptance
+        self.assertIn(
+            "scripts/run-m12-readiness-negatives.sh", installer_acceptance
+        )
+        for required in (
+            "systemctl stop user@10001.service user-runtime-dir@10001.service",
+            "missing-cgroup-v2",
+            "missing-pids-controller",
+            "missing-delegation",
+            "missing-capacity-events",
+            "missing-cleanup-evidence",
+            "executor_unavailable:",
+            "unshare --mount",
+            'run_negative missing-delegation "failed to write cgroup.subtree_control" install',
+            'test ! -e "$M12_FAULT_PREFIX/bin/flow"',
+            'test "$(/usr/bin/wc -l < "$M12_FAULT_DIR/systemd-run.calls")" -eq 1',
+        ):
+            self.assertIn(required, readiness_negatives)
         for required in (
             "install/install.sh",
             M12_STANDARD_CLI,
@@ -651,6 +672,8 @@ class CiWorkflowContractTest(unittest.TestCase):
             'XDG_RUNTIME_DIR="$user_runtime"',
             'DBUS_SESSION_BUS_ADDRESS="$user_bus"',
             'run_as_watershed "$standard_prefix/bin/flow" executor check',
+            'loginctl show-user watershed --property=Linger --value',
+            '[ "$linger" != no ]',
             'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix"',
             'FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1',
             '"$acceptance_prefix/bin/flow" run smoke-flow',

@@ -31,6 +31,13 @@ run_in_workspace() {
   run_as_watershed /bin/sh -c 'cd "$1" && shift && exec "$@"' \
     watershed-workspace "$workspace" "$@"
 }
+assert_linger_disabled() {
+  linger=$(/usr/bin/loginctl show-user watershed --property=Linger --value)
+  if [ "$linger" != no ]; then
+    printf 'installer acceptance requires Linger=no, observed %s\n' "$linger" >&2
+    exit 1
+  fi
+}
 install -d -m 0755 "$bundle" "$acceptance_bundle"
 install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
 chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
@@ -40,10 +47,12 @@ install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/
 install -m 0755 install/install.sh "$acceptance_bundle/install.sh"
 install -m 0755 target/release/flow "$acceptance_bundle/flow"
 install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$acceptance_bundle/flow-executor"
+assert_linger_disabled
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
 run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+assert_linger_disabled
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
 test -x "$acceptance_prefix/bin/flow"
 test -x "$acceptance_prefix/bin/flow-executor"
@@ -179,3 +188,9 @@ run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$executor"
 run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
 run_as_watershed "$standard_prefix/bin/flow" executor configure --default
 run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+M12_INSTALL_BUNDLE="$bundle" \
+  M12_STANDARD_PREFIX="$standard_prefix" \
+  M12_CONFIG="$config" \
+  M12_HOME="$home" \
+  /bin/sh scripts/run-m12-readiness-negatives.sh
+assert_linger_disabled
