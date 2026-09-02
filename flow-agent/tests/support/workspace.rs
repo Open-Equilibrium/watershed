@@ -138,11 +138,6 @@ pub(crate) fn run_current_test_isolated_session_home() -> bool {
     run_current_test_isolated_session_home_with_args(&[])
 }
 
-#[allow(dead_code)]
-pub(crate) fn run_current_ignored_test_isolated_session_home() -> bool {
-    run_current_test_isolated_session_home_with_args(&["--ignored"])
-}
-
 fn run_current_test_isolated_session_home_with_args(extra_args: &[&str]) -> bool {
     const CHILD_ENV: &str = "WATERSHED_ISOLATED_SESSION_HOME_CHILD";
 

@@ -327,11 +327,8 @@ impl SessionEventReader {
         })
     }
 
-    /// Reads only the newly appended complete suffix after an initial verified read.
-    ///
-    /// This materializing compatibility path is bounded to complete canonical bytes. Streaming
-    /// receivers should use [`Self::visit_incremental_after`].
-    pub fn read_incremental_after(
+    #[cfg(test)]
+    pub(crate) fn read_incremental_after(
         &mut self,
         cursor: u64,
     ) -> Result<Vec<EventEnvelope>, RuntimeError> {
@@ -352,6 +349,7 @@ impl SessionEventReader {
         self.visit_incremental_after_with(cursor, through_sequence, &mut || {}, visit)
     }
 
+    #[cfg(test)]
     pub(crate) fn read_incremental_after_with(
         &mut self,
         cursor: u64,
