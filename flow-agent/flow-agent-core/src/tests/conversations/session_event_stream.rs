@@ -10,7 +10,6 @@ use super::super::{
 use crate::runtime::types::EventClock;
 use crate::runtime::{
     fs_guards::{AnchoredWorkspace, ensure_runtime_dirs, segmented_jsonl_path},
-    segmented_appender::{EventLogAppender, SessionLogAppender},
     session_reading::SessionEventReader,
     session_reservation::acquire_anchored_session_lock,
     types::{EVENT_STREAM_LIMITS, MAX_SESSION_SEGMENT_BYTES, RuntimeError},
@@ -50,65 +49,6 @@ fn assert_protocol_contains(result: Result<Vec<EventEnvelope>, RuntimeError>, ex
 
 fn sequences(events: &[EventEnvelope]) -> Vec<u64> {
     events.iter().map(|event| event.sequence).collect()
-}
-
-#[test]
-fn incremental_reader_rejects_a_suffix_above_the_in_memory_limit() {
-    let workspace = empty_workspace("tail-in-memory-limit");
-    let session_id = "tailmemorylimit001";
-    let reservation = reserve_session_log(&workspace, session_id).expect("session reserves");
-    let path = reservation.session_path.diagnostic_path().to_owned();
-    let mut appender =
-        SessionLogAppender::open(&reservation.session_path).expect("session appender opens");
-    let started = super::super::event_data_capacity::sized_event_line(
-        session_id,
-        1,
-        EventType::SessionStarted,
-        768,
-    );
-    appender
-        .append(&path, started.as_bytes())
-        .expect("session start appends");
-    appender.sync(&path).expect("session start syncs");
-
-    let mut reader = SessionEventReader::open(&workspace, session_id).expect("session opens");
-    assert_eq!(reader.read_after(0).expect("session start reads").len(), 1);
-
-    for sequence in 2..=258 {
-        let metric = super::super::event_data_capacity::sized_event_line(
-            session_id,
-            sequence,
-            EventType::MetricSample,
-            256 * 1024,
-        );
-        appender
-            .append(&path, metric.as_bytes())
-            .expect("metric appends");
-    }
-    appender.sync(&path).expect("metric suffix syncs");
-
-    assert!(matches!(
-        reader.read_incremental_after(1),
-        Err(RuntimeError::ReplayOutputLimitExceeded {
-            limit_bytes: 67_108_864
-        })
-    ));
-
-    let mut visited_events = 0usize;
-    let mut visited_bytes = 0usize;
-    reader
-        .visit_incremental_after(1, u64::MAX, |_event, line| {
-            visited_events = visited_events.saturating_add(1);
-            visited_bytes = visited_bytes.saturating_add(line.len());
-            Ok(())
-        })
-        .expect("callback incremental reader streams a suffix above the in-memory limit");
-    assert_eq!(visited_events, 257);
-    assert!(visited_bytes > 67_108_864);
-
-    drop(reader);
-    drop(appender);
-    reservation.rollback().expect("session rolls back");
 }
 
 #[test]

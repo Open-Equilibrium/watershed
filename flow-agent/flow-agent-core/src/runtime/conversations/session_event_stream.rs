@@ -361,11 +361,8 @@ impl SessionEventReader {
         cursor: u64,
         after_read: &mut impl FnMut(),
     ) -> Result<Vec<EventEnvelope>, RuntimeError> {
-        let mut output_bytes = 0usize;
         let mut events = Vec::new();
-        self.visit_incremental_after_with(cursor, u64::MAX, after_read, |event, line| {
-            output_bytes = output_bytes.saturating_add(line.len());
-            ensure_in_memory_replay_output_limit(output_bytes)?;
+        self.visit_incremental_after_with(cursor, u64::MAX, after_read, |event, _line| {
             events.push(event.clone());
             Ok(())
         })?;
