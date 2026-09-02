@@ -131,21 +131,28 @@ impl ToolCgroup {
     }
 
     pub(crate) fn finish(mut self, grace: Duration) -> Result<bool, String> {
-        let max_events = read_event(&self.path.join("pids.events"), "max")?;
-        let exceeded = max_events > self.initial_max_events;
-        write_control(&self.path.join("cgroup.kill"), "1")?;
-        let deadline = Instant::now() + grace;
-        while read_event(&self.path.join("cgroup.events"), "populated")? != 0 {
-            if Instant::now() >= deadline {
-                return Err("Tool cgroup remained populated after cleanup".to_owned());
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
+        let exceeded = drain_and_observe_capacity(&self.path, self.initial_max_events, grace)?;
         std::fs::remove_dir(&self.path)
             .map_err(|error| format!("failed to remove Tool cgroup: {error}"))?;
         self.removed = true;
         Ok(exceeded)
     }
+}
+
+fn drain_and_observe_capacity(
+    path: &Path,
+    initial_max_events: u64,
+    grace: Duration,
+) -> Result<bool, String> {
+    write_control(&path.join("cgroup.kill"), "1")?;
+    let deadline = Instant::now() + grace;
+    while read_event(&path.join("cgroup.events"), "populated")? != 0 {
+        if Instant::now() >= deadline {
+            return Err("Tool cgroup remained populated after cleanup".to_owned());
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    Ok(read_event(&path.join("pids.events"), "max")? > initial_max_events)
 }
 
 impl Drop for ToolCgroup {
@@ -272,4 +279,59 @@ pub(crate) fn move_current_process(descriptor: i32) -> std::io::Result<()> {
 unsafe extern "C" {
     #[link_name = "write"]
     unsafe fn c_write(descriptor: i32, buffer: *const u8, count: usize) -> isize;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::drain_and_observe_capacity;
+    use std::{
+        fs,
+        path::Path,
+        sync::atomic::{AtomicU64, Ordering},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn cleanup_observes_capacity_events_triggered_before_descendants_exit() {
+        let path = std::env::temp_dir().join(format!(
+            "watershed-cgroup-cleanup-{}-{}",
+            std::process::id(),
+            NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).expect("fake cgroup is created");
+        fs::write(path.join("pids.events"), "max 0\n").expect("capacity events are initialized");
+        fs::write(path.join("cgroup.events"), "populated 1\n")
+            .expect("fake cgroup starts populated");
+        fs::write(path.join("cgroup.kill"), "").expect("kill control is initialized");
+
+        let descendant_path = path.clone();
+        let descendant = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while fs::read_to_string(descendant_path.join("cgroup.kill"))
+                .expect("kill control remains readable")
+                .trim()
+                != "1"
+            {
+                assert!(Instant::now() < deadline, "cleanup must issue cgroup.kill");
+                thread::yield_now();
+            }
+            fs::write(descendant_path.join("pids.events"), "max 1\n")
+                .expect("capacity event is recorded");
+            fs::write(descendant_path.join("cgroup.events"), "populated 0\n")
+                .expect("descendant exit is recorded");
+        });
+
+        let observed = drain_and_observe_capacity(&path, 0, Duration::from_secs(2));
+        descendant.join().expect("fake descendant exits");
+        remove_fake_cgroup(&path);
+
+        assert_eq!(observed, Ok(true));
+    }
+
+    fn remove_fake_cgroup(path: &Path) {
+        fs::remove_dir_all(path).expect("fake cgroup is removed");
+    }
 }
