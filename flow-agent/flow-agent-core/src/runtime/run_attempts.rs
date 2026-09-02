@@ -84,6 +84,7 @@ impl std::fmt::Display for RunAttemptOutcome {
 #[serde(deny_unknown_fields)]
 pub(crate) struct ToolEnforcementExpectation {
     pub(crate) applied_policy_digest: String,
+    pub(crate) max_concurrent_processes_and_threads: u32,
     pub(crate) runtime_profile: proto::RuntimeReadProfileV0,
 }
 
@@ -137,6 +138,7 @@ pub(crate) enum ToolTerminalClassification {
     NonzeroExit,
     OutputCollectorFailed,
     OutputDrainTimeout,
+    ProcessCapacityExceeded,
     ProcessReapFailed,
     ProcessSetupFailed,
     ProcessSignalFailed,
@@ -149,11 +151,12 @@ pub(crate) enum ToolTerminalClassification {
 }
 
 impl ToolTerminalClassification {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::Cancelled,
         Self::NonzeroExit,
         Self::OutputCollectorFailed,
         Self::OutputDrainTimeout,
+        Self::ProcessCapacityExceeded,
         Self::ProcessReapFailed,
         Self::ProcessSetupFailed,
         Self::ProcessSignalFailed,
@@ -171,6 +174,7 @@ impl ToolTerminalClassification {
             Self::NonzeroExit => "nonzero_exit",
             Self::OutputCollectorFailed => "output_collector_failed",
             Self::OutputDrainTimeout => "output_drain_timeout",
+            Self::ProcessCapacityExceeded => "process_capacity_exceeded",
             Self::ProcessReapFailed => "process_reap_failed",
             Self::ProcessSetupFailed => "process_setup_failed",
             Self::ProcessSignalFailed => "process_signal_failed",
@@ -207,6 +211,7 @@ impl ToolTerminalClassification {
                 RunAttemptOutcome::Failed,
                 Self::OutputCollectorFailed
                 | Self::OutputDrainTimeout
+                | Self::ProcessCapacityExceeded
                 | Self::ProcessReapFailed
                 | Self::ProcessSignalFailed
                 | Self::ReconciledFailure

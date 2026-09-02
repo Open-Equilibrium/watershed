@@ -73,7 +73,7 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
         ),
         (
             "tool.yaml",
-            "tool:\n  id: endpoint-tool\n  name: EndpointTool\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  read_only_mounts: []\n  writable_mounts: []\n  network: deny\n",
+            "tool:\n  id: endpoint-tool\n  name: EndpointTool\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 32\n  read_only_mounts: []\n  writable_mounts: []\n  network: deny\n",
         ),
         (
             "unused.yaml",
@@ -151,7 +151,7 @@ fn parser_rejects_oversized_names_and_definition_text() {
         (
             "long-script.yaml",
             format!(
-                "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n  read_only_mounts: []\n  writable_mounts: []\n  network: deny\n"
+                "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 32\n  read_only_mounts: []\n  writable_mounts: []\n  network: deny\n"
             ),
         ),
     ] {

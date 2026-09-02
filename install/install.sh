@@ -68,7 +68,18 @@ if [ "$install_executor" -eq 1 ] && [ "$current_owner" -eq 0 ]; then
     readiness_owner=$(/usr/bin/id -u -- "$SUDO_USER") || fail 'cannot inspect readiness user'
     readiness_group=$(/usr/bin/id -g -- "$SUDO_USER") || fail 'cannot inspect readiness user group'
     [ "$readiness_owner" -ne 0 ] || fail 'root is not a valid readiness user'
-    set -- /usr/sbin/runuser --user "$SUDO_USER" --
+    readiness_runtime_dir=/run/user/$readiness_owner
+    [ -d "$readiness_runtime_dir" ] && [ ! -L "$readiness_runtime_dir" ] \
+        || fail 'readiness user has no active systemd user manager'
+    readiness_runtime_owner=$(/usr/bin/stat -L -c '%u' -- "$readiness_runtime_dir") \
+        || fail 'cannot inspect readiness user runtime'
+    [ "$readiness_runtime_owner" -eq "$readiness_owner" ] \
+        || fail 'readiness user runtime has an unexpected owner'
+    [ -S "$readiness_runtime_dir/bus" ] \
+        || fail 'readiness user has no active systemd user manager'
+    set -- /usr/sbin/runuser --user "$SUDO_USER" -- /usr/bin/env \
+        XDG_RUNTIME_DIR=$readiness_runtime_dir \
+        DBUS_SESSION_BUS_ADDRESS=unix:path=$readiness_runtime_dir/bus
 fi
 
 validate_source() {

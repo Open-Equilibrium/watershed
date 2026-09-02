@@ -47,7 +47,7 @@ The [M1.1 limits matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) owns every fixed
 
 ### M1.2 Executor evidence
 
-The one-shot Executor and Sandbox architecture is canonical in `PROTOCOL.md`. The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) records one fixed productive Tool invocation per fresh child as one unadjusted `executor_elapsed_ns` distribution across preparation, readiness, the one-shot lifecycle and result/receipt validation. Review the design for avoidable probe, policy, descriptor and process-start work without weakening readiness or isolation; Custom Executor performance is administrator-owned.
+The one-shot Executor and Sandbox architecture is canonical in `PROTOCOL.md`. The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) records one fixed productive Tool invocation per fresh child as one unadjusted `executor_elapsed_ns` distribution across preparation, readiness, transient scope/cgroup creation, the one-shot Sandbox lifecycle, complete cleanup and result/receipt validation. Review the design for avoidable probe, policy, descriptor and process-start work without weakening readiness or isolation; Custom Executor performance is administrator-owned. The configured process/thread capacity is a hard security capability, never a performance threshold.
 
 ## Meta-Harness
 

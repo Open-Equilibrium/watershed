@@ -26,6 +26,7 @@ fn reject_tool_fields(source_name: &str, value: &noyalib::Value) -> Result<(), R
             "script_runtime",
             "script_body",
             "allowed_parameters",
+            "max_concurrent_processes_and_threads",
             "runtime_profile",
             "read_only_mounts",
             "writable_mounts",

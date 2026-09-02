@@ -447,10 +447,16 @@ fn validate_tool_enforcement_expectation(
     expectation: Option<&ToolEnforcementExpectation>,
 ) -> Result<(), RuntimeError> {
     match (attempt_kind, expectation) {
-        (RunAttemptKind::Tool, Some(expectation)) => validate_digest(
-            &expectation.applied_policy_digest,
-            "Tool intent policy digest",
-        ),
+        (RunAttemptKind::Tool, Some(expectation)) => {
+            validate_digest(
+                &expectation.applied_policy_digest,
+                "Tool intent policy digest",
+            )?;
+            if expectation.max_concurrent_processes_and_threads == 0 {
+                return Err(protocol("Tool intent process capacity must be positive"));
+            }
+            Ok(())
+        }
         (RunAttemptKind::Provider, None) => Ok(()),
         (RunAttemptKind::Tool, None) => Err(protocol("Tool intent has no enforcement expectation")),
         (RunAttemptKind::Provider, Some(_)) => Err(protocol(

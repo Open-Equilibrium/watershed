@@ -72,6 +72,9 @@ where
     let request_hash = context.tool_executor.request_hash(&prepared).to_owned();
     let expected_policy_digest = context.tool_executor.policy_digest(&prepared).to_owned();
     let expected_runtime_profile = context.tool_executor.runtime_profile(&prepared);
+    let expected_process_capacity = context
+        .tool_executor
+        .max_concurrent_processes_and_threads(&prepared);
     let recovered = mark_recovery_failure(
         &mut context.recovery_failed,
         context.recovery.recover_attempt(
@@ -148,6 +151,7 @@ where
                 &request_hash,
                 &expected_policy_digest,
                 expected_runtime_profile,
+                expected_process_capacity,
             ),
         )?;
         (value, result)
@@ -161,6 +165,7 @@ where
             attempt_kind: RunAttemptKind::Tool,
             expected_enforcement: Some(ToolEnforcementExpectation {
                 applied_policy_digest: expected_policy_digest.clone(),
+                max_concurrent_processes_and_threads: expected_process_capacity,
                 runtime_profile: expected_runtime_profile,
             }),
             request_hash: request_hash.clone(),
@@ -280,6 +285,7 @@ where
                 &enforcement,
                 &expected_policy_digest,
                 expected_runtime_profile,
+                expected_process_capacity,
             )
             .map_err(|_| {
                 RuntimeError::Protocol(
@@ -604,6 +610,7 @@ fn recovered_tool_value_bound(
     expected_request_hash: &str,
     expected_policy_digest: &str,
     expected_runtime_profile: proto::RuntimeReadProfileV0,
+    expected_process_capacity: u32,
 ) -> Result<core_script::FlowValue, RuntimeError> {
     recovered_tool_terminal(result)?;
     let durable_output = result.durable_output.clone().ok_or_else(|| {
@@ -629,6 +636,7 @@ fn recovered_tool_value_bound(
         &output.enforcement,
         expected_policy_digest,
         expected_runtime_profile,
+        expected_process_capacity,
     )
     .map_err(|_| {
         RuntimeError::Protocol(
@@ -684,6 +692,7 @@ pub(crate) fn recovered_tool_value(
         request_hash,
         &receipt.applied_policy_digest,
         receipt.runtime_profile,
+        receipt.max_concurrent_processes_and_threads,
     )
 }
 

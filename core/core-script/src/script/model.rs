@@ -148,6 +148,8 @@ pub struct ToolBlock {
     pub script_body: Option<String>,
     /// Parameters accepted by the tool.
     pub allowed_parameters: Vec<AllowedParameter>,
+    /// Maximum concurrent Tool processes and threads, including descendants.
+    pub max_concurrent_processes_and_threads: u32,
     /// Runtime objects made readable in addition to exact filesystem mounts.
     #[serde(default)]
     pub runtime_profile: ToolRuntimeProfile,

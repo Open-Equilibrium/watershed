@@ -29,6 +29,8 @@ pub const EXECUTOR_FEATURE_MOUNT_IDENTITY_V0: &str = "mount-identity-verificatio
 pub const EXECUTOR_FEATURE_DENY_NETWORK_V0: &str = "deny-all-network";
 /// Required official feature proving descendant process containment.
 pub const EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0: &str = "pid-descendant-containment";
+/// Required official feature proving an enforced Tool process-and-thread capacity.
+pub const EXECUTOR_FEATURE_PROCESS_CAPACITY_V0: &str = "process-capacity";
 /// Maximum canonical request document bytes, including its final line feed.
 pub const MAX_EXECUTOR_REQUEST_BYTES_V0: usize = 1024 * 1024;
 /// Maximum raw bytes in either terminal Tool stream.
@@ -162,10 +164,12 @@ pub struct ExecutorResolvedMountV0 {
     pub target: String,
 }
 
-/// Existing fixed process and output limits for one Tool execution.
+/// Fixed capacity, output, and deadline limits for one Tool execution.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutorLimitsV0 {
+    /// Maximum concurrent Tool processes and threads, including descendants.
+    pub max_concurrent_processes_and_threads: u32,
     /// Maximum stderr bytes returned by the Executor.
     pub max_stderr_bytes: u64,
     /// Maximum stdout bytes returned by the Executor.
@@ -242,6 +246,8 @@ pub struct EnforcementReceiptV0 {
     pub executor_version: String,
     /// Whether the isolation boundary was active for the Tool lifecycle.
     pub isolation_active: bool,
+    /// Enforced maximum concurrent Tool processes and threads.
+    pub max_concurrent_processes_and_threads: u32,
     /// Exact supported platform tuple.
     pub platform: String,
     /// Runtime-read profile applied by the Sandbox.
@@ -290,6 +296,8 @@ pub enum ExecutorToolClassificationV0 {
     NonzeroExit,
     /// Tool process terminated from a signal.
     SignalTermination,
+    /// Tool process tree exhausted its configured process-and-thread capacity.
+    ProcessCapacityExceeded,
     /// Stderr exceeded its declared bound.
     StderrCapExceeded,
     /// Stdout exceeded its declared bound.
@@ -405,16 +413,19 @@ pub fn resolved_policy_digest_v0(
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-/// Validates one receipt against the resolved policy and runtime profile Flow requested.
+/// Validates one receipt against the policy, runtime profile, and capacity Flow requested.
 pub fn validate_enforcement_receipt_v0(
     receipt: &EnforcementReceiptV0,
     expected_policy_digest: &str,
     expected_runtime_profile: RuntimeReadProfileV0,
+    expected_max_concurrent_processes_and_threads: u32,
 ) -> Result<(), ExecutorProtocolError> {
     validate_receipt(receipt)?;
     if !receipt.isolation_active
         || receipt.applied_policy_digest != expected_policy_digest
         || receipt.runtime_profile != expected_runtime_profile
+        || receipt.max_concurrent_processes_and_threads
+            != expected_max_concurrent_processes_and_threads
     {
         return Err(ExecutorProtocolError::new(
             "Executor enforcement receipt does not match the requested isolation policy",
@@ -708,6 +719,7 @@ fn validate_request(request: &ExecutorRequestV0) -> Result<(), ExecutorProtocolE
     if request.limits.timeout_ms == 0
         || request.limits.max_stdout_bytes == 0
         || request.limits.max_stderr_bytes == 0
+        || request.limits.max_concurrent_processes_and_threads == 0
     {
         return Err(ExecutorProtocolError::new(
             "Executor limits must be nonzero",
@@ -780,6 +792,11 @@ fn validate_receipt(receipt: &EnforcementReceiptV0) -> Result<(), ExecutorProtoc
     ] {
         validate_text(value, name, MAX_NAME_CHARS)?;
     }
+    if receipt.max_concurrent_processes_and_threads == 0 {
+        return Err(ExecutorProtocolError::new(
+            "Executor receipt process capacity must be nonzero",
+        ));
+    }
     Ok(())
 }
 
@@ -791,6 +808,7 @@ fn validate_tool_result(result: &ExecutorToolResultV0) -> Result<(), ExecutorPro
         (Status::Completed, None, Some(0)) => true,
         (Status::Failed, Some(Classification::NonzeroExit), Some(code)) => code != 0,
         (Status::Failed, Some(Classification::SignalTermination), None) => true,
+        (Status::Failed, Some(Classification::ProcessCapacityExceeded), _) => true,
         (
             Status::Failed,
             Some(

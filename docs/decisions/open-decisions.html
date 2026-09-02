@@ -15,30 +15,12 @@
     <p class="muted">Live maintainer decisions only. Accepted decisions live in <a href="../adr/ADR-LOG.md">ADR-LOG.md</a>; implementation detail belongs in the canonical docs listed in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <p><span class="tag">Rule</span> Hygiene limits and canonical-home rules live in <a href="../../AGENTS.md">AGENTS.md</a>.</p>
     <nav aria-label="Decision links">
-      <a href="#m1-2">M1.2</a>
       <a href="#post-m1-2">Post-M1.2</a>
       <a href="#m2">M2</a>
       <a href="#m3">M3</a>
       <a href="#post-m1">Post-M1</a>
     </nav>
   </header>
-
-  <section id="m1-2">
-    <h2>M1.2 - Tool Process Capacity</h2>
-    <div class="grid">
-      <article id="d-072" class="decision">
-        <h3>D-072 - Per-Tool Process Limit</h3>
-        <p><strong>Status:</strong> Open M1.2 release blocker for the official Ubuntu Executor.</p>
-        <p><strong>Responsibility:</strong> This is not protection from an already compromised computer. Watershed starts the untrusted Tool and claims that the official Executor contains its complete process tree. Without a limit, that Tool can exhaust the host's process slots before timeout cleanup begins.</p>
-        <p><strong>Existing-agent evidence:</strong> Codex CLI uses <a href="https://github.com/openai/codex/blob/ddf8a67ab09cd76b8adc0969f11ee1271179aba7/codex-rs/linux-sandbox/src/bwrap.rs#L269-L285">a PID namespace and parent-death handling</a> plus a PID-1 wrapper and process-group cleanup, but its <a href="https://github.com/openai/codex/blob/ddf8a67ab09cd76b8adc0969f11ee1271179aba7/codex-rs/core/src/unified_exec/mod.rs#L82">64-process cap</a> counts registered top-level command sessions rather than descendants and it applies no per-command descendant limit. Pi deliberately has <a href="https://github.com/badlogic/pi-mono/blob/b8b873b9872db04a938fb4357b5e8e824ddc051c/packages/coding-agent/docs/security.md#no-built-in-sandbox">no built-in Sandbox</a>; it recommends putting the whole agent or its Tools in an external container, VM or policy Sandbox. Neither project therefore supplies the finite per-Tool guarantee Watershed claims.</p>
-        <p><strong>Question:</strong> Which finite boundary should the official Ubuntu Executor enforce?</p>
-        <ul><li><strong>A:</strong> Put each Tool tree in its own delegated cgroup-v2 process controller with a fixed maintainer-selected cap, and fail readiness when that controller is unavailable. Pro: limits processes and threads for exactly one Tool tree while keeping normal subprocesses. Con: the standard installer and supported runner must provision, delegate and clean up cgroups.</li><li><strong>B:</strong> Deny every Tool attempt to create another process or thread. Pro: the smallest boundary. Con: breaks ordinary shells, pipelines, compilers and the accepted descendant-process contract.</li><li><strong>C:</strong> Keep productive Tool execution unavailable until a supported external container, VM or service provides the limit. Pro: a strong honest boundary without a partial fallback. Con: M1.2 cannot ship productive Tool execution through the current official Executor.</li></ul>
-        <p><strong>Rejected shortcut:</strong> A per-user process limit is not sufficient: it combines unrelated processes under the same host identity and privileged identities can bypass it.</p>
-        <p><strong>Recommendation:</strong> A. Select the exact safety cap from supported Tool-workload evidence, not an estimated performance target; this is a hard host-capacity boundary. If the supported installation cannot provide a delegated controller, choose C rather than silently weakening the claim.</p>
-        <p><strong>Acceptance criterion:</strong> Record the exact cap and provisioning contract. Readiness must prove the boundary before execution; one Tool may create up to the cap across processes and threads, the next creation must fail without exhausting the host, and timeout, cancellation, crash and normal exit must remove every descendant and the Tool's controller. No weaker fallback is allowed.</p>
-      </article>
-    </div>
-  </section>
 
   <section id="post-m1-2">
     <h2>Post-M1.2 - Flow Agent Platform Expansion</h2>

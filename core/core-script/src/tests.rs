@@ -73,6 +73,7 @@ mod values;
 fn own_script_tool(id: &str, command: &str) -> ToolBlock {
     ToolBlock {
         allowed_parameters: Vec::new(),
+        max_concurrent_processes_and_threads: 32,
         command: ToolCommand::OwnScript(command.to_owned()),
         identity: BlockIdentity {
             id: id.to_owned(),

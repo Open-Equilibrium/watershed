@@ -193,6 +193,15 @@ fn validate_probe(
             "Executor readiness requirements are not satisfied",
         ));
     }
+    if !probe
+        .supported_policy_features
+        .iter()
+        .any(|feature| feature == proto::EXECUTOR_FEATURE_PROCESS_CAPACITY_V0)
+    {
+        return Err(executor_unavailable(
+            "Executor does not support the required process-capacity boundary",
+        ));
+    }
     if selection.source() == ExecutorSelectionSource::Default
         && (probe.executor != proto::EXECUTOR_NAME_V0
             || probe.executor_version != env!("CARGO_PKG_VERSION")
@@ -344,13 +353,23 @@ mod diagnostic_tests {
         );
         let probe = proto::parse_executor_probe_v0(
             concat!(
-                r#"{"backend":"custom","backend_version":"1","executor":"custom","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":[]}"#,
+                r#"{"backend":"custom","backend_version":"1","executor":"custom","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity"]}"#,
                 "\n"
             )
             .as_bytes(),
         )
         .expect("custom probe is valid wire data");
         validate_probe(&selection, &probe, None).expect("supported custom probe is ready");
+
+        let mut missing_capacity = probe.clone();
+        missing_capacity.supported_policy_features.clear();
+        let error = validate_probe(&selection, &missing_capacity, None)
+            .expect_err("Custom Executors must advertise process-capacity enforcement");
+        assert!(matches!(
+            error,
+            RuntimeError::Executor(ref failure)
+                if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
+        ));
 
         let mut unknown_version = probe.clone();
         unknown_version.protocol_versions = vec!["1".to_owned()];
@@ -459,7 +478,7 @@ mod tests {
         );
         let mut probe = proto::parse_executor_probe_v0(
             concat!(
-                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["static-self-reexec"]}"#,
+                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity","static-self-reexec"]}"#,
                 "\n"
             )
             .as_bytes(),

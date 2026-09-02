@@ -33,6 +33,7 @@ fn identity(device: u64, inode: u64, kind: ExecutorObjectKindV0) -> UnixObjectId
 
 fn request() -> ExecutorRequestV0 {
     let limits = ExecutorLimitsV0 {
+        max_concurrent_processes_and_threads: 32,
         max_stderr_bytes: 2,
         max_stdout_bytes: 3,
         timeout_ms: 1_000,
@@ -125,7 +126,7 @@ fn probe() -> ExecutorProbeV0 {
             },
         ],
         schema: EXECUTOR_PROBE_SCHEMA_V0.to_owned(),
-        supported_policy_features: vec!["deny-all-network".to_owned()],
+        supported_policy_features: vec![crate::EXECUTOR_FEATURE_PROCESS_CAPACITY_V0.to_owned()],
     }
 }
 
@@ -137,6 +138,7 @@ fn receipt() -> EnforcementReceiptV0 {
         executor: "flow-executor".to_owned(),
         executor_version: "0.1.0".to_owned(),
         isolation_active: true,
+        max_concurrent_processes_and_threads: 32,
         platform: "linux-x86_64".to_owned(),
         runtime_profile: crate::RuntimeReadProfileV0::Exact,
     }
@@ -361,6 +363,15 @@ fn executor_request_rejects_invalid_limits_mounts_environment_and_ids() {
             "Executor limits must be nonzero",
         ),
         (
+            "zero process capacity",
+            |candidate| {
+                candidate.limits.max_concurrent_processes_and_threads = 0;
+                candidate.resolved_policy.limits = candidate.limits.clone();
+                refresh_policy_digest(candidate);
+            },
+            "Executor limits must be nonzero",
+        ),
+        (
             "oversized output limit",
             |candidate| {
                 candidate.limits.max_stderr_bytes = MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64 + 1;
@@ -543,6 +554,21 @@ fn executor_terminal_evidence_accepts_only_coherent_states() {
         ),
         (
             Status::Failed,
+            Some(Classification::ProcessCapacityExceeded),
+            None,
+        ),
+        (
+            Status::Failed,
+            Some(Classification::ProcessCapacityExceeded),
+            Some(0),
+        ),
+        (
+            Status::Failed,
+            Some(Classification::ProcessCapacityExceeded),
+            Some(1),
+        ),
+        (
+            Status::Failed,
             Some(Classification::StdoutCapExceeded),
             None,
         ),
@@ -613,9 +639,48 @@ fn executor_terminal_evidence_accepts_only_coherent_states() {
 }
 
 #[test]
-fn executor_receipt_proves_the_requested_policy_and_profile() {
+fn executor_contract_names_process_capacity_explicitly() {
+    assert_eq!(
+        crate::EXECUTOR_FEATURE_PROCESS_CAPACITY_V0,
+        "process-capacity"
+    );
+    let mut request_value = serde_json::to_value(request()).expect("request serializes");
+    request_value["limits"]["max_concurrent_processes_and_threads"] = serde_json::json!(32);
+    request_value["resolved_policy"]["limits"]["max_concurrent_processes_and_threads"] =
+        serde_json::json!(32);
+    assert!(serde_json::from_value::<ExecutorRequestV0>(request_value).is_ok());
+
+    let mut missing_request = serde_json::to_value(request()).expect("request serializes");
+    missing_request["limits"]
+        .as_object_mut()
+        .expect("limits is an object")
+        .remove("max_concurrent_processes_and_threads");
+    assert!(serde_json::from_value::<ExecutorRequestV0>(missing_request).is_err());
+
+    let mut receipt_value = serde_json::to_value(receipt()).expect("receipt serializes");
+    receipt_value["max_concurrent_processes_and_threads"] = serde_json::json!(32);
+    assert!(serde_json::from_value::<EnforcementReceiptV0>(receipt_value).is_ok());
+
+    let mut missing_receipt = serde_json::to_value(receipt()).expect("receipt serializes");
+    missing_receipt
+        .as_object_mut()
+        .expect("receipt is an object")
+        .remove("max_concurrent_processes_and_threads");
+    assert!(serde_json::from_value::<EnforcementReceiptV0>(missing_receipt).is_err());
+
+    let classification: ExecutorToolClassificationV0 =
+        serde_json::from_str("\"process_capacity_exceeded\"")
+            .expect("process capacity has a stable classification");
+    assert_eq!(
+        serde_json::to_string(&classification).expect("classification serializes"),
+        "\"process_capacity_exceeded\""
+    );
+}
+
+#[test]
+fn executor_receipt_proves_requested_policy_profile_and_process_capacity() {
     let valid = receipt();
-    validate_enforcement_receipt_v0(&valid, &"a".repeat(64), RuntimeReadProfileV0::Exact)
+    validate_enforcement_receipt_v0(&valid, &"a".repeat(64), RuntimeReadProfileV0::Exact, 32)
         .expect("matching active receipt");
 
     let mut cases = Vec::new();
@@ -625,9 +690,12 @@ fn executor_receipt_proves_the_requested_policy_and_profile() {
     let mut candidate = valid.clone();
     candidate.applied_policy_digest = "b".repeat(64);
     cases.push(("wrong policy", candidate));
-    let mut candidate = valid;
+    let mut candidate = valid.clone();
     candidate.runtime_profile = RuntimeReadProfileV0::HostSystemRead;
     cases.push(("wrong runtime profile", candidate));
+    let mut candidate = valid;
+    candidate.max_concurrent_processes_and_threads = 31;
+    cases.push(("wrong process capacity", candidate));
 
     for (name, candidate) in cases {
         assert!(
@@ -635,6 +703,7 @@ fn executor_receipt_proves_the_requested_policy_and_profile() {
                 &candidate,
                 &"a".repeat(64),
                 RuntimeReadProfileV0::Exact,
+                32,
             )
             .is_err(),
             "accepted receipt with {name}"

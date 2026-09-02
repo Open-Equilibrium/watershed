@@ -17,7 +17,10 @@ use std::{ffi::OsString, path::Path};
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::{fs::MetadataExt, process::ExitStatusExt},
+    os::unix::{
+        fs::MetadataExt,
+        process::{CommandExt, ExitStatusExt},
+    },
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
         Arc,
@@ -69,6 +72,10 @@ pub(super) fn probe() -> ProbeState {
         state.readiness_error = Some(error.message);
         return state;
     }
+    if let Err(error) = crate::cgroup::probe() {
+        state.readiness_error = Some(error);
+        return state;
+    }
     state.ready = true;
     state.features = POLICY_FEATURES.map(str::to_owned).to_vec();
     state
@@ -94,16 +101,23 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
     let self_descriptor = File::open("/proc/self/exe")
         .map(OwnedFd::from)
         .map_err(|error| BackendError::setup(format!("failed to open Executor image: {error}")))?;
+    let tool_cgroup =
+        crate::cgroup::ToolCgroup::create(request.limits.max_concurrent_processes_and_threads)
+            .map_err(BackendError::setup)?;
+    let tool_cgroup_descriptor = tool_cgroup
+        .process_descriptor()
+        .map_err(BackendError::setup)?;
 
     let internal = InternalDescriptors::install(
         request_descriptor,
         seccomp_descriptor,
         self_descriptor,
+        tool_cgroup_descriptor,
         &request.mounts,
     )?;
     let status_descriptor = relocate(
         empty_status_document()?,
-        internal.self_image.as_raw_fd() + 1,
+        internal.tool_cgroup.as_raw_fd() + 1,
     )?;
     #[cfg(coverage)]
     let coverage_profile = retain_coverage_profile(status_descriptor.as_raw_fd() + 1)?;
@@ -138,6 +152,7 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         .arg("--inner")
         .arg(internal.request.as_raw_fd().to_string())
         .arg(status_descriptor.as_raw_fd().to_string())
+        .arg(internal.tool_cgroup.as_raw_fd().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -149,7 +164,23 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
     )?;
     #[cfg(coverage)]
     drop(coverage_profile);
-    apply_inner_status(&mut outcome, &status_descriptor)?;
+    let capacity_exceeded = tool_cgroup
+        .finish(CLEANUP_GRACE)
+        .map_err(BackendError::uncertain)?;
+    if capacity_exceeded
+        && !matches!(
+            outcome.classification,
+            Some(
+                ExecutorToolClassificationV0::Cancelled
+                    | ExecutorToolClassificationV0::ToolTimedOut
+            )
+        )
+    {
+        outcome.status = read_inner_status(&status_descriptor)?;
+        outcome.classification = Some(ExecutorToolClassificationV0::ProcessCapacityExceeded);
+    } else {
+        apply_inner_status(&mut outcome, &status_descriptor)?;
+    }
     let tool_result = tool_result(&outcome);
     Ok(ExecutorResponseV0::Completed {
         schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -162,19 +193,29 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
             executor: EXECUTOR_NAME_V0.to_owned(),
             executor_version: env!("CARGO_PKG_VERSION").to_owned(),
             isolation_active: true,
+            max_concurrent_processes_and_threads: request
+                .limits
+                .max_concurrent_processes_and_threads,
             platform: proto::EXECUTOR_PLATFORM_V0.to_owned(),
             runtime_profile: request.runtime_profile,
         },
     })
 }
 
-pub(crate) fn run_inner(request_descriptor: &str, status_descriptor: &str) -> Result<(), String> {
+pub(crate) fn run_inner(
+    request_descriptor: &str,
+    status_descriptor: &str,
+    tool_cgroup_descriptor: &str,
+) -> Result<(), String> {
     let request_descriptor = request_descriptor
         .parse::<i32>()
         .map_err(|_| "invalid inner request descriptor".to_owned())?;
     let status_descriptor = status_descriptor
         .parse::<i32>()
         .map_err(|_| "invalid inner status descriptor".to_owned())?;
+    let tool_cgroup_descriptor = tool_cgroup_descriptor
+        .parse::<i32>()
+        .map_err(|_| "invalid Tool cgroup descriptor".to_owned())?;
     let borrowed = borrow_descriptor(request_descriptor)?;
     let mut request_file = File::from(
         rustix::io::fcntl_dupfd_cloexec(borrowed, 3)
@@ -205,6 +246,11 @@ pub(crate) fn run_inner(request_descriptor: &str, status_descriptor: &str) -> Re
         .env_clear()
         .envs(&request.environment)
         .current_dir(&request.working_directory);
+    // SAFETY: the child is single-threaded after fork and performs one
+    // async-signal-safe write to its pre-opened cgroup.procs before exec.
+    unsafe {
+        command.pre_exec(move || crate::cgroup::move_current_process(tool_cgroup_descriptor));
+    }
     let status = command
         .status()
         .map_err(|error| format!("failed to execute Tool: {error}"))?;
@@ -457,6 +503,7 @@ struct InternalDescriptors {
     request: OwnedFd,
     seccomp: OwnedFd,
     self_image: OwnedFd,
+    tool_cgroup: OwnedFd,
 }
 
 impl InternalDescriptors {
@@ -464,6 +511,7 @@ impl InternalDescriptors {
         request: OwnedFd,
         seccomp: OwnedFd,
         self_image: OwnedFd,
+        tool_cgroup: OwnedFd,
         mounts: &[ExecutorMountV0],
     ) -> Result<Self, BackendError> {
         let declared = mounts
@@ -477,10 +525,12 @@ impl InternalDescriptors {
         let request = relocate(request, INTERNAL_DESCRIPTOR_BASE)?;
         let seccomp = relocate(seccomp, request.as_raw_fd() + 1)?;
         let self_image = relocate(self_image, seccomp.as_raw_fd() + 1)?;
+        let tool_cgroup = relocate(tool_cgroup, self_image.as_raw_fd() + 1)?;
         Ok(Self {
             request,
             seccomp,
             self_image,
+            tool_cgroup,
         })
     }
 
@@ -490,7 +540,12 @@ impl InternalDescriptors {
                 .map_err(|error| {
                     BackendError::setup(format!("failed to allocate self-test fd: {error}"))
                 })?;
-        Self::install(request, seccomp, self_image, &[])
+        let tool_cgroup = File::open("/dev/null")
+            .map(OwnedFd::from)
+            .map_err(|error| {
+                BackendError::setup(format!("failed to open self-test fd: {error}"))
+            })?;
+        Self::install(request, seccomp, self_image, tool_cgroup, &[])
     }
 }
 
@@ -992,7 +1047,8 @@ fn tool_result(outcome: &ProcessOutcome) -> ExecutorToolResultV0 {
             | ExecutorToolClassificationV0::StderrCapExceeded
             | ExecutorToolClassificationV0::StdoutStderrCapExceeded
             | ExecutorToolClassificationV0::OutputCollectorFailed
-            | ExecutorToolClassificationV0::OutputDrainTimeout,
+            | ExecutorToolClassificationV0::OutputDrainTimeout
+            | ExecutorToolClassificationV0::ProcessCapacityExceeded,
         ) => outcome.status.and_then(|status| status.code()),
         Some(
             ExecutorToolClassificationV0::Cancelled

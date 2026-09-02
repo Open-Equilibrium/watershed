@@ -385,6 +385,11 @@ fn assert_smoke_flow_payload_dimensions(stream: &[EventEnvelope]) {
         serde_json::json!("predefined-command"),
     );
     assert_payload_eq(tool_started, "allowed_parameters", serde_json::json!([]));
+    assert_payload_eq(
+        tool_started,
+        "max_concurrent_processes_and_threads",
+        serde_json::json!(16),
+    );
     assert_payload_eq(tool_started, "network_access", serde_json::json!("deny"));
     assert_payload_eq(
         tool_started,

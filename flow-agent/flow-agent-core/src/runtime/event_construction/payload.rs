@@ -99,6 +99,7 @@ pub(crate) fn tool_started_payload(
             .iter()
             .map(|parameter| parameter.name.as_str())
             .collect::<Vec<_>>(),
+        "max_concurrent_processes_and_threads": command_policy.max_concurrent_processes_and_threads,
         "network_access": tool_network_access(&tool.network),
         "read_only_mounts": command_policy.filesystem.read_only_mounts,
         "runtime_profile": command_policy.runtime_profile.as_str(),

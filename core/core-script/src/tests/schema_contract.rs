@@ -110,6 +110,20 @@ fn registry_schema_exposes_only_the_bounded_mount_profile_grammar() {
 }
 
 #[test]
+fn registry_schema_requires_positive_tool_process_capacity() {
+    let schema = registry_schema();
+    let tool = &schema["$defs"]["tool"];
+    let capacity = &tool["properties"]["max_concurrent_processes_and_threads"];
+
+    assert_eq!(capacity["type"], "integer");
+    assert_eq!(capacity["minimum"], 1);
+    assert_eq!(capacity["maximum"], u32::MAX);
+    assert!(tool["required"].as_array().is_some_and(|required| {
+        required.contains(&serde_json::json!("max_concurrent_processes_and_threads"))
+    }));
+}
+
+#[test]
 fn registry_schema_bounds_string_and_enum_parameters() {
     let parsed = registry_schema();
     let parameter_rules = parsed["$defs"]["allowed_parameter"]["allOf"]

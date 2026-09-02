@@ -4,11 +4,11 @@ This document explains the accepted M1.2 design. Normative milestone scope lives
 
 ## Decision in one minute
 
-Flow Agent validates a Tool request and compiles its policy. One short-lived Executor translates that policy and manages one Tool process tree. The Sandbox backend constructs the operating-system boundary. Provider traffic remains in Flow Agent, outside the Tool Sandbox.
+Flow Agent validates a Tool request and compiles its policy. One short-lived Executor translates that policy and manages one Tool process tree in a fresh Sandbox. The Sandbox backend constructs the operating-system boundary. Provider traffic remains in Flow Agent, outside the Tool Sandbox.
 
 The standard installation supplies an official, statically linked `flow-executor` sibling. An administrator may explicitly omit it or select an absolute Custom Executor override. Building Blocks, Flow users, providers, Tools, Workspaces and environment variables cannot select or replace the Executor. Failure never chooses a weaker path.
 
-The official productive M1.2 backend is stock Bubblewrap plus seccomp on Ubuntu 24.04 x64. All productive Tool execution, including an administrator-owned Custom Executor, is limited to that platform. macOS, Windows and other targets fail before Executor selection or Tool spawn; provider-only Flows do not use this boundary. A Custom Executor receives no Flow Agent compatibility or security guarantee.
+The official productive M1.2 backend is stock Bubblewrap plus seccomp inside a transient systemd user scope with a delegated cgroup-v2 PIDs controller on Ubuntu 24.04 x64. The required host interfaces are probed directly; no kernel-version guess or weaker fallback is used. All productive Tool execution, including an administrator-owned Custom Executor, is limited to that platform. macOS, Windows and other targets fail before Executor selection or Tool spawn; provider-only Flows do not use this boundary. A Custom Executor receives no Flow Agent compatibility or security guarantee.
 
 ## Responsibility split
 
@@ -27,7 +27,7 @@ flowchart TD
 
 | Owner | Responsibility |
 |---|---|
-| Agentic Engineer | Select the Tool identity, parameters, exact mounts, runtime-read profile and deny-all network policy. |
+| Agentic Engineer | Select the Tool identity, parameters, exact mounts, runtime-read profile, positive process/thread capacity and deny-all network policy. |
 | Flow Agent | Validate authority, derive the selected Executor, prove readiness, compile canonical policy, persist attempt state, validate the response and fail closed. |
 | Executor | Validate one request, translate its exact capabilities, manage one Tool process tree and return a bounded Tool result or typed error. |
 | Sandbox backend | Construct and enforce filesystem, process and deny-all network isolation. |
@@ -50,7 +50,7 @@ flowchart TD
 
 The standard installer includes the sibling unless the administrator chooses `--no-default-executor`. `flow executor configure --path <absolute-path>` selects a protected Custom Executor override; `flow executor configure --default` removes it. Resolution never uses the Workspace, `PATH`, a shell, the working directory or provider output.
 
-Flow Agent probes the selected object once before durable productive Run reservation. An absent, unsafe, replaced, incompatible or unready object fails with stable diagnostics and creates no Run. A passing probe is advisory, not certification; every Tool execution still validates its enforcement receipt.
+Flow Agent probes the selected object once before durable productive Run reservation. An absent, unsafe, replaced, incompatible or unready object fails with stable diagnostics and creates no Run. Official readiness includes an active systemd user manager plus delegated cgroup-v2 capacity and cleanup evidence; installation neither enables lingering nor adds a Watershed service. A passing probe is advisory, not certification; every Tool execution still validates its enforcement receipt.
 
 On Ubuntu 24.04 x64, implementers can run the public observable-protocol check without changing their current configuration:
 
@@ -67,6 +67,7 @@ sequenceDiagram
   participant F as Flow Agent
   participant S as Run store
   participant E as Executor
+  participant C as cgroup v2
   participant B as Bubblewrap/seccomp
   participant T as Tool
   F->>F: Validate Tool call and compile canonical policy
@@ -77,17 +78,19 @@ sequenceDiagram
     E-->>F: Stable typed pre-Tool error
     F->>S: Persist terminal failure
   else Boundary ready
+    E->>C: Create fresh limited Tool leaf
     E->>B: Construct exact mounts and isolation
-    B->>T: Start Tool and descendants
+    B->>T: Start Tool root in leaf
     T-->>E: Bounded output and exit
     E->>B: Terminate descendants and tear down
+    E->>C: Prove empty and remove leaf
     E-->>F: Tool result and enforcement receipt
     F->>F: Validate receipt and exact policy digest
     F->>S: Persist terminal result and receipt
   end
 ```
 
-One Executor process handles one invocation. Standard input carries one closed request; standard output carries one tagged canonical response plus final LF; standard error is bounded redacted diagnostics. There is no daemon, socket, pooled guest or remote transport.
+One Executor process, transient systemd scope, cgroup leaf and Bubblewrap boundary handle one invocation. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Standard input carries one closed request; standard output carries one tagged canonical response plus final LF; standard error is bounded redacted diagnostics. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport.
 
 The success receipt identifies the Executor/backend versions and exact platform, proves an active boundary and binds SHA-256 over the exact canonical policy bytes including their final LF. Flow Agent persists the canonical receipt with the terminal Tool attempt before publishing success. Custom Executors can lie, so schema validation is not third-party certification.
 
@@ -108,7 +111,7 @@ The backend uses stock Ubuntu Bubblewrap. Newer versions consume inherited descr
 
 | Target | Official behavior |
 |---|---|
-| Ubuntu 24.04 x64 | Stock Bubblewrap namespaces and exact mounts plus seccomp; isolated Tool network namespace; deny all. |
+| Ubuntu 24.04 x64 | Stock Bubblewrap namespaces and exact mounts plus seccomp; transient systemd user scope; delegated cgroup-v2 PIDs leaf with reliable capacity and cleanup evidence; isolated Tool network namespace; deny all. |
 | macOS | Productive Tool execution fails closed. Reconsider only after a post-M1.2 review proves supported controls that prevent or contain process creation and guarantee descendant teardown without private-API debt. |
 | Windows and other targets | Productive Tool execution fails closed before Executor selection or Tool spawn. Custom Executors are not enabled. |
 
@@ -130,7 +133,7 @@ This reduction keeps the product boundary auditable. The security-critical work 
 
 ## Evidence and quality goals
 
-The canonical test matrix is in [`TESTING.md`](../../TESTING.md). It covers protocol framing, selection/readiness, exact mounts and replacement races, both runtime profiles, stock Bubblewrap compatibility, process descendants, deny-all networking, receipts, persistence/recovery, installation opt-out and fail-closed targets. Performance observations follow [`PERFORMANCE.md`](../../PERFORMANCE.md); no estimated timing, throughput or RSS value is a release gate.
+The canonical test matrix is in [`TESTING.md`](../../TESTING.md). It covers protocol framing, selection/readiness, exact mounts and replacement races, both runtime profiles, stock Bubblewrap compatibility, exact process/thread capacity, independent concurrent leaves, cleanup and crash collection, deny-all networking, receipts, persistence/recovery, installation opt-out and fail-closed targets. Performance observations include the complete fresh scope/cgroup/Sandbox lifecycle and follow [`PERFORMANCE.md`](../../PERFORMANCE.md); no estimated timing, throughput or RSS value is a release gate.
 
 ## Pinned reference sources
 

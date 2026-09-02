@@ -93,6 +93,27 @@ fn protocol_rejects_oversized_and_malformed_requests_without_output() {
     assert!(output.is_empty());
 }
 
+#[test]
+fn protocol_accepts_policy_bound_process_capacity() {
+    let mut request = serde_json::to_value(exact_request(&[], &[])).expect("request serializes");
+    request["limits"]["max_concurrent_processes_and_threads"] = serde_json::json!(3);
+    request["resolved_policy"]["limits"]["max_concurrent_processes_and_threads"] =
+        serde_json::json!(3);
+    let resolved: ExecutorResolvedPolicyV0 =
+        serde_json::from_value(request["resolved_policy"].clone())
+            .expect("process capacity belongs to the resolved policy");
+    request["policy_digest"] = serde_json::json!(
+        resolved_policy_digest_v0(&resolved).expect("capacity-bound policy digest")
+    );
+    let request: ExecutorRequestV0 =
+        serde_json::from_value(request).expect("capacity-bound request decodes");
+    let bytes = proto::canonical_executor_request_v0(&request)
+        .expect("capacity-bound request canonicalizes");
+
+    proto::parse_executor_request_v0(&bytes)
+        .expect("Executor accepts the mandatory policy-bound process capacity");
+}
+
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 #[test]
 fn protocol_returns_a_typed_error_on_an_unsupported_platform() {
@@ -330,7 +351,7 @@ fn policy_translation_rejects_reachable_policy_command_and_manifest_conflicts() 
 #[test]
 fn execution_fields_cannot_escalate_the_selected_tool_policy() {
     type Mutate = fn(&mut ExecutorRequestV0);
-    let cases: [(&str, Mutate); 6] = [
+    let cases: [(&str, Mutate); 7] = [
         ("Tool kind", |request| {
             request.tool_kind = "own-script".to_owned();
             request.resolved_policy.tool_kind = request.tool_kind.clone();
@@ -344,6 +365,10 @@ fn execution_fields_cannot_escalate_the_selected_tool_policy() {
         }),
         ("timeout", |request| {
             request.limits.timeout_ms += 1;
+            request.resolved_policy.limits = request.limits.clone();
+        }),
+        ("process capacity", |request| {
+            request.limits.max_concurrent_processes_and_threads += 1;
             request.resolved_policy.limits = request.limits.clone();
         }),
         ("working directory", |request| {
@@ -537,6 +562,7 @@ fn exact_request_owned(read_only: Vec<String>, writable: Vec<String>) -> Executo
         .map(|(mount, source)| resolved_mount(mount, source))
         .collect();
     let limits = ExecutorLimitsV0 {
+        max_concurrent_processes_and_threads: 64,
         max_stderr_bytes: 1_024,
         max_stdout_bytes: 1_024,
         timeout_ms: 1_000,
@@ -616,6 +642,7 @@ fn policy_artifact(read_only: Vec<String>, writable: Vec<String>) -> PolicyArtif
                 read_only_mounts: read_only,
                 writable_mounts: writable,
             },
+            max_concurrent_processes_and_threads: 64,
             network: NetworkPolicy {
                 allow: Vec::new(),
                 default: NetworkDefault::Deny,

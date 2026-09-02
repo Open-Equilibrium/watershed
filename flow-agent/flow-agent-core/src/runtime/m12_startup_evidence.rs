@@ -14,6 +14,9 @@ use crate::runtime::{
     tool_runner::ToolInvocation,
 };
 
+/// Fixed process-and-thread capacity used by the M1.2 startup evidence Tool.
+pub const M12_EXECUTOR_STARTUP_PROCESS_CAPACITY: u32 = 8;
+
 fn fixed_executor_policy() -> core_policy::PolicyArtifact {
     core_policy::PolicyArtifact {
         commands: vec![core_policy::CommandPolicy {
@@ -29,6 +32,7 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
                 read_only_mounts: vec!["workspace".to_owned()],
                 writable_mounts: Vec::new(),
             },
+            max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
             network: core_policy::NetworkPolicy {
                 allow: Vec::new(),
                 default: core_policy::NetworkDefault::Deny,
@@ -57,6 +61,8 @@ fn fixed_executor_policy() -> core_policy::PolicyArtifact {
 pub struct M12ExecutorStartupMeasurement {
     /// Preparation and readiness through validated Tool result and enforcement receipt.
     pub executor_elapsed: Duration,
+    /// Exact process-and-thread capacity confirmed by the Executor receipt.
+    pub max_concurrent_processes_and_threads: u32,
 }
 
 fn is_prefixed_lower_sha256(value: &str) -> bool {
@@ -113,6 +119,8 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
     }
     if !execution.enforcement.isolation_active
         || execution.enforcement.runtime_profile != proto::RuntimeReadProfileV0::Exact
+        || execution.enforcement.max_concurrent_processes_and_threads
+            != M12_EXECUTOR_STARTUP_PROCESS_CAPACITY
         || !is_lowercase_sha256_hex(&execution.enforcement.applied_policy_digest)
         || !is_prefixed_lower_sha256(&execution.request_hash)
     {
@@ -120,12 +128,19 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
     }
     let executor_elapsed = started.elapsed();
 
-    Ok(M12ExecutorStartupMeasurement { executor_elapsed })
+    Ok(M12ExecutorStartupMeasurement {
+        executor_elapsed,
+        max_concurrent_processes_and_threads: execution
+            .enforcement
+            .max_concurrent_processes_and_threads,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{fixed_executor_policy, is_prefixed_lower_sha256};
+    use super::{
+        M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, fixed_executor_policy, is_prefixed_lower_sha256,
+    };
 
     #[test]
     fn fixed_evidence_policy_is_an_exact_empty_echo() {
@@ -141,6 +156,10 @@ mod tests {
             core_policy::ToolRuntimeProfile::Exact
         );
         assert_eq!(command.filesystem.read_only_mounts, ["workspace"]);
+        assert_eq!(
+            command.max_concurrent_processes_and_threads,
+            M12_EXECUTOR_STARTUP_PROCESS_CAPACITY
+        );
     }
 
     #[test]

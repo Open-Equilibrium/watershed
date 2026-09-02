@@ -68,6 +68,12 @@ impl RunningRequest {
     pub(crate) fn child(&self) -> &Child {
         &self.child
     }
+
+    pub(crate) fn wait_without_response(self) -> std::process::Output {
+        self.child
+            .wait_with_output()
+            .expect("Executor is reaped without a protocol response")
+    }
 }
 
 impl PreparedRequest {
@@ -121,6 +127,7 @@ impl PreparedRequest {
                     .map(|mount| (*mount).to_owned())
                     .collect(),
             },
+            max_concurrent_processes_and_threads: limits.max_concurrent_processes_and_threads,
             network: NetworkPolicy {
                 allow: Vec::new(),
                 default: NetworkDefault::Deny,

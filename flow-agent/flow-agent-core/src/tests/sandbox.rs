@@ -421,7 +421,7 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_flows_by_phase_id() {
     let workspace = workspace_copy("smoke-flow");
     fs::write(
         session_home_path().join("registry/tools/unrelated-negative.yaml"),
-        "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: []\n  network: deny\n",
+        "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: []\n  network: deny\n",
     )
     .expect("unrelated sentinel tool written");
     replace_registry_text(

@@ -1,4 +1,7 @@
-use super::{ChildMeasurement, Config, DynError, fresh_child_measurement};
+use super::{
+    ChildMeasurement, Config, DynError, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
+    fresh_child_measurement,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{env, error::Error, io::Write, process::Command};
@@ -20,6 +23,16 @@ struct Environment {
     logical_cpus: usize,
     cpu_model: Option<String>,
     total_memory_bytes: Option<u64>,
+    host_isolation: HostIsolation,
+}
+
+#[derive(Serialize)]
+struct HostIsolation {
+    systemd_version: Option<String>,
+    cgroup_version: Option<u8>,
+    cgroup_path: Option<String>,
+    pids_controller_available: bool,
+    pids_events_available: bool,
 }
 
 #[derive(Serialize)]
@@ -30,6 +43,7 @@ struct Metadata {
     warmup_samples: usize,
     measured_samples: usize,
     tool_executions_per_fresh_child: usize,
+    max_concurrent_processes_and_threads: u32,
     environment: Environment,
 }
 
@@ -80,6 +94,7 @@ fn inputs() -> Value {
         "tool_arguments": [],
         "tool_environment": "empty",
         "runtime_profile": "exact",
+        "max_concurrent_processes_and_threads": M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
         "executor_interval": [
             "selected Executor preparation and readiness",
             "canonical request and capability preparation",
@@ -132,6 +147,58 @@ fn hardware_metadata() -> (Option<String>, Option<u64>) {
     (cpu_model, memory)
 }
 
+#[cfg(target_os = "linux")]
+fn host_isolation_metadata() -> HostIsolation {
+    let cgroup_root = std::path::Path::new("/sys/fs/cgroup");
+    let cgroup_v2 = cgroup_root.join("cgroup.controllers");
+    let cgroup_path = std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|source| {
+            source
+                .lines()
+                .find_map(|line| line.strip_prefix("0::"))
+                .map(str::to_owned)
+        });
+    let pids_controller_available = std::fs::read_to_string(&cgroup_v2)
+        .ok()
+        .is_some_and(|controllers| controllers.split_whitespace().any(|name| name == "pids"));
+    let pids_events_available = cgroup_path.as_deref().is_some_and(|path| {
+        cgroup_root
+            .join(path.trim_start_matches('/'))
+            .join("pids.events")
+            .is_file()
+    });
+    let systemd_version = Command::new("systemd")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .map(|line| line.chars().take(256).collect())
+        });
+    HostIsolation {
+        systemd_version,
+        cgroup_version: cgroup_v2.is_file().then_some(2),
+        cgroup_path,
+        pids_controller_available,
+        pids_events_available,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn host_isolation_metadata() -> HostIsolation {
+    HostIsolation {
+        systemd_version: None,
+        cgroup_version: None,
+        cgroup_path: None,
+        pids_controller_available: false,
+        pids_events_available: false,
+    }
+}
+
 #[cfg(not(target_os = "linux"))]
 fn hardware_metadata() -> (Option<String>, Option<u64>) {
     (None, None)
@@ -160,6 +227,7 @@ fn current_environment() -> Environment {
             .unwrap_or(1),
         cpu_model,
         total_memory_bytes,
+        host_isolation: host_isolation_metadata(),
     }
 }
 
@@ -196,6 +264,7 @@ pub(super) fn write_report_with_measurement(
             warmup_samples: config.warmups,
             measured_samples: config.samples,
             tool_executions_per_fresh_child: 1,
+            max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
             environment: current_environment(),
         },
     )?;

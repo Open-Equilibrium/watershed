@@ -1,8 +1,8 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use proto::{
     EXECUTOR_FEATURE_DENY_NETWORK_V0, EXECUTOR_FEATURE_DESCRIPTOR_MOUNTS_V0,
-    EXECUTOR_FEATURE_MOUNT_IDENTITY_V0, EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0,
-    EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0,
+    EXECUTOR_FEATURE_MOUNT_IDENTITY_V0, EXECUTOR_FEATURE_PROCESS_CAPACITY_V0,
+    EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0, EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0,
 };
 use proto::{ExecutorErrorCodeV0, ExecutorRequestV0, ExecutorResponseV0, RuntimeReadProfileV0};
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
@@ -27,12 +27,13 @@ pub(crate) const HOST_SYSTEM_READ_MOUNTS: [(&str, &str); 6] = [
 ];
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub(crate) const POLICY_FEATURES: [&str; 5] = [
+pub(crate) const POLICY_FEATURES: [&str; 6] = [
     EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0,
     EXECUTOR_FEATURE_DESCRIPTOR_MOUNTS_V0,
     EXECUTOR_FEATURE_MOUNT_IDENTITY_V0,
     EXECUTOR_FEATURE_DENY_NETWORK_V0,
     EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0,
+    EXECUTOR_FEATURE_PROCESS_CAPACITY_V0,
 ];
 
 pub(crate) fn runtime_mount_manifest() -> Vec<proto::ExecutorRuntimeMountV0> {
@@ -210,6 +211,8 @@ fn validate_command_contract(
         || request.runtime_profile != expected_profile
         || request.executable != expected_executable
         || request.limits.timeout_ms != policy.runtime_limits.timeout_ms
+        || request.limits.max_concurrent_processes_and_threads
+            != command.max_concurrent_processes_and_threads
         || request.working_directory != "/workspace"
         || request
             .environment

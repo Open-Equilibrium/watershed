@@ -36,6 +36,7 @@ pub(super) fn fake_tool_attempt_output(tool_result: serde_json::Value) -> serde_
     serde_json::json!({
         "enforcement": crate::runtime::productive::test_enforcement_receipt(
             "0".repeat(64),
+            16,
             core_script::ToolRuntimeProfile::Exact,
         ),
         "request_hash": fake_tool_request_hash(),

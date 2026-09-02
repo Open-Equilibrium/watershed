@@ -136,7 +136,7 @@ mod tests {
             let block = parse_registry_block(
                 "network-order.yaml",
                 &format!(
-                    "tool:\n  id: network-order\n  name: NetworkOrder\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  read_only_mounts: []\n  writable_mounts: []\n  network:\n    default: deny\n    allow:\n{allow}"
+                    "tool:\n  id: network-order\n  name: NetworkOrder\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 32\n  read_only_mounts: []\n  writable_mounts: []\n  network:\n    default: deny\n    allow:\n{allow}"
                 ),
             )
             .expect("network allowlist parses");

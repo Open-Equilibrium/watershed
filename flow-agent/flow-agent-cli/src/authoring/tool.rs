@@ -12,9 +12,11 @@ use std::path::Path;
 pub(super) const USAGE: &str = concat!(
     "Usage:\n",
     "  flow create tool --id ID --name NAME --tool-kind predefined-command ",
-    "--command-id ID [--argv TOKEN]... [TOOL_OPTIONS]\n",
+    "--command-id ID [--argv TOKEN]... --max-concurrent-processes-and-threads N ",
+    "[TOOL_OPTIONS]\n",
     "  flow create tool --id ID --name NAME --tool-kind own-script ",
-    "<--script-body-file PATH|--script-body-stdin> [TOOL_OPTIONS]\n",
+    "<--script-body-file PATH|--script-body-stdin> ",
+    "--max-concurrent-processes-and-threads N [TOOL_OPTIONS]\n",
     "\n",
     "TOOL_OPTIONS:\n",
     "  [--parameter --parameter-name NAME ",
@@ -37,6 +39,7 @@ struct Fields {
     argv: Vec<String>,
     script_body: Option<ContentSource>,
     parameters: Vec<AllowedParameter>,
+    max_concurrent_processes_and_threads: Option<u32>,
     runtime_profile: Option<ToolRuntimeProfile>,
     read_only_mounts: Vec<String>,
     writable_mounts: Vec<String>,
@@ -67,6 +70,22 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
                 set_once_with(&mut fields.script_body, flag, || Ok(ContentSource::Stdin))?
             }
             "--parameter" => fields.parameters.push(parse_parameter(&mut cursor)?),
+            "--max-concurrent-processes-and-threads" => {
+                let value = parse_number(
+                    cursor.value(flag)?,
+                    "--max-concurrent-processes-and-threads",
+                )?;
+                if value == 0 {
+                    return Err(RuntimeError::Usage(
+                        "--max-concurrent-processes-and-threads must be positive".to_owned(),
+                    ));
+                }
+                set_once(
+                    &mut fields.max_concurrent_processes_and_threads,
+                    value,
+                    flag,
+                )?;
+            }
             "--runtime-profile" => {
                 let value = cursor.value(flag)?;
                 let profile = ToolRuntimeProfile::parse(value).ok_or_else(|| {
@@ -163,6 +182,11 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
         script_runtime,
         script_body,
         allowed_parameters: fields.parameters,
+        max_concurrent_processes_and_threads: fields
+            .max_concurrent_processes_and_threads
+            .ok_or_else(|| {
+                RuntimeError::Usage("missing --max-concurrent-processes-and-threads".to_owned())
+            })?,
         runtime_profile: fields.runtime_profile.unwrap_or_default(),
         read_only_mounts: fields.read_only_mounts,
         writable_mounts: fields.writable_mounts,
@@ -273,7 +297,7 @@ mod tests {
     };
     use std::{fs, path::Path};
 
-    fn minimal_predefined_tool() -> Vec<String> {
+    fn minimal_predefined_tool_without_capacity() -> Vec<String> {
         args(&[
             "--id",
             "inspect",
@@ -286,6 +310,39 @@ mod tests {
             "--network",
             "deny",
         ])
+    }
+
+    fn minimal_predefined_tool() -> Vec<String> {
+        let mut arguments = minimal_predefined_tool_without_capacity();
+        arguments.extend([
+            "--max-concurrent-processes-and-threads".to_owned(),
+            "16".to_owned(),
+        ]);
+        arguments
+    }
+
+    #[test]
+    fn process_capacity_is_explicit_and_positive() {
+        assert_usage(
+            parse(Path::new("."), &minimal_predefined_tool_without_capacity()),
+            "missing --max-concurrent-processes-and-threads",
+        );
+
+        for value in ["0", "not-a-number"] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend([
+                "--max-concurrent-processes-and-threads".to_owned(),
+                value.to_owned(),
+            ]);
+            assert_usage(
+                parse(Path::new("."), &arguments),
+                "--max-concurrent-processes-and-threads",
+            );
+        }
+
+        let tool = parse(Path::new("."), &minimal_predefined_tool())
+            .expect("positive process capacity is accepted");
+        assert_eq!(tool.max_concurrent_processes_and_threads, 16);
     }
 
     #[test]
@@ -332,6 +389,8 @@ mod tests {
                 "predefined-command",
                 "--command-id",
                 "agent-report",
+                "--max-concurrent-processes-and-threads",
+                "16",
                 "--network-allow",
                 "--network-kind",
                 "cidr",

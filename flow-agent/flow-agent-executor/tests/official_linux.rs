@@ -48,6 +48,7 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
         EXECUTOR_FEATURE_MOUNT_IDENTITY_V0,
         EXECUTOR_FEATURE_DENY_NETWORK_V0,
         proto::EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0,
+        proto::EXECUTOR_FEATURE_PROCESS_CAPACITY_V0,
     ] {
         assert!(
             static_probe
@@ -77,9 +78,181 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
     host_profile_is_explicit_and_network_remains_denied(&executor, &static_probe);
     inherited_keyrings_remain_inaccessible(&executor, &static_probe);
     process_and_session_escape_remain_contained(&executor, &static_probe);
+    process_capacity_is_exact_and_local(&executor, &static_probe);
+    concurrent_process_capacity_is_per_invocation(&executor, &static_probe);
     terminal_results_retain_enforcement_evidence(&executor, &static_probe);
     timeout_cleans_the_full_process_tree(&executor, &static_probe);
     cancellation_cleans_the_full_process_tree(&executor, &static_probe);
+    executor_crash_leaves_no_tool_or_cgroup(&executor, &static_probe);
+}
+
+fn process_capacity_is_exact_and_local(executor: &Path, probe: &ExecutorProbeV0) {
+    let workspace = Workspace::new();
+    let result = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        r#"/usr/bin/python3 - <<'PY'
+import os
+import subprocess
+
+with open("/workspace/cgroup", "w") as output:
+    output.write(open("/proc/self/cgroup").read().split("::", 1)[1].strip())
+children = [subprocess.Popen(["/bin/sleep", "60"]) for _ in range(2)]
+for child in children:
+    child.terminate()
+for child in children:
+    child.wait()
+PY"#,
+        limits_with_capacity(4_096, 4_096, 2_000, 3),
+    )
+    .run(executor);
+    let (result, receipt) = completed(result);
+    assert_terminal(&result, ExecutorToolStatusV0::Completed, None, Some(0));
+    assert_eq!(receipt.max_concurrent_processes_and_threads, 3);
+    assert_cgroup_removed(&workspace);
+
+    let workspace = Workspace::new();
+    let result = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        r#"/usr/bin/python3 - <<'PY'
+import subprocess
+
+children = [subprocess.Popen(["/bin/sleep", "60"]) for _ in range(2)]
+try:
+    subprocess.Popen(["/bin/true"])
+except OSError:
+    pass
+for child in children:
+    child.terminate()
+for child in children:
+    child.wait()
+PY"#,
+        limits_with_capacity(4_096, 4_096, 2_000, 3),
+    )
+    .run(executor);
+    let (result, _) = completed(result);
+    assert_terminal(
+        &result,
+        ExecutorToolStatusV0::Failed,
+        Some(ExecutorToolClassificationV0::ProcessCapacityExceeded),
+        Some(0),
+    );
+
+    let workspace = Workspace::new();
+    let result = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        r#"/usr/bin/python3 - <<'PY'
+import threading
+
+release = threading.Event()
+threads = [threading.Thread(target=release.wait) for _ in range(2)]
+for thread in threads:
+    thread.start()
+try:
+    threading.Thread(target=release.wait).start()
+except RuntimeError:
+    pass
+release.set()
+for thread in threads:
+    thread.join()
+PY"#,
+        limits_with_capacity(4_096, 4_096, 2_000, 3),
+    )
+    .run(executor);
+    let (result, _) = completed(result);
+    assert_terminal(
+        &result,
+        ExecutorToolStatusV0::Failed,
+        Some(ExecutorToolClassificationV0::ProcessCapacityExceeded),
+        Some(0),
+    );
+
+    let workspace = Workspace::new();
+    let running = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        "printf ready > /workspace/ready; while [ ! -e /workspace/release ]; do :; done",
+        limits_with_capacity(4_096, 4_096, 2_000, 1),
+    )
+    .spawn(executor);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !workspace.join("ready").is_file() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(workspace.join("ready").is_file(), "bounded Tool did start");
+    assert!(
+        Command::new("/bin/true")
+            .status()
+            .expect("unrelated host process launches")
+            .success(),
+        "Tool-local capacity must not consume unrelated host capacity"
+    );
+    std::fs::write(workspace.join("release"), []).expect("bounded Tool is released");
+    let (result, _) = completed(finish(running));
+    assert_terminal(&result, ExecutorToolStatusV0::Completed, None, Some(0));
+}
+
+fn concurrent_process_capacity_is_per_invocation(executor: &Path, probe: &ExecutorProbeV0) {
+    let first_workspace = Workspace::new();
+    let second_workspace = Workspace::new();
+    let script = "IFS=: read -r _ _ cgroup < /proc/self/cgroup; printf %s \"$cgroup\" > /workspace/cgroup; (while [ ! -e /workspace/release ]; do :; done) & child=$!; printf ready > /workspace/ready; wait \"$child\"";
+    let first = PreparedRequest::new(
+        probe,
+        &first_workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        script,
+        limits_with_capacity(4_096, 4_096, 5_000, 2),
+    )
+    .spawn(executor);
+    let second = PreparedRequest::new(
+        probe,
+        &second_workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        script,
+        limits_with_capacity(4_096, 4_096, 5_000, 2),
+    )
+    .spawn(executor);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while (!first_workspace.join("ready").is_file() || !second_workspace.join("ready").is_file())
+        && Instant::now() < deadline
+    {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        first_workspace.join("ready").is_file() && second_workspace.join("ready").is_file(),
+        "both independently bounded Tools must run concurrently"
+    );
+    assert_ne!(
+        recorded_cgroup(&first_workspace),
+        recorded_cgroup(&second_workspace),
+        "concurrent invocations must have independent Tool leaves"
+    );
+
+    std::fs::write(first_workspace.join("release"), []).expect("first Tool is released");
+    std::fs::write(second_workspace.join("release"), []).expect("second Tool is released");
+    let (first_result, _) = completed(finish(first));
+    let (second_result, _) = completed(finish(second));
+    assert_terminal(
+        &first_result,
+        ExecutorToolStatusV0::Completed,
+        None,
+        Some(0),
+    );
+    assert_terminal(
+        &second_result,
+        ExecutorToolStatusV0::Completed,
+        None,
+        Some(0),
+    );
+    assert_cgroup_removed(&first_workspace);
+    assert_cgroup_removed(&second_workspace);
 }
 
 fn exact_profile_hides_host_and_executor_bootstrap_files(executor: &Path, probe: &ExecutorProbeV0) {
@@ -476,7 +649,9 @@ fn terminal_results_retain_enforcement_evidence(executor: &Path, probe: &Executo
             probe,
             &workspace,
             RuntimeReadProfileV0::Exact,
-            &format!("exit {exit_code}"),
+            &format!(
+                "IFS=: read -r _ _ cgroup < /proc/self/cgroup; printf %s \"$cgroup\" > /workspace/cgroup; exit {exit_code}"
+            ),
             limits(4_096, 4_096, 2_000),
         )
         .run(executor);
@@ -487,6 +662,7 @@ fn terminal_results_retain_enforcement_evidence(executor: &Path, probe: &Executo
             Some(ExecutorToolClassificationV0::NonzeroExit),
             Some(exit_code),
         );
+        assert_cgroup_removed(&workspace);
         assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
     }
 
@@ -554,6 +730,7 @@ fn timeout_cleans_the_full_process_tree(executor: &Path, probe: &ExecutorProbeV0
     );
     assert!(workspace.join("ready").is_file(), "descendant did start");
     assert_tree_stopped(&workspace);
+    assert_cgroup_removed(&workspace);
     assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
 }
 
@@ -581,11 +758,40 @@ fn cancellation_cleans_the_full_process_tree(executor: &Path, probe: &ExecutorPr
         None,
     );
     assert_tree_stopped(&workspace);
+    assert_cgroup_removed(&workspace);
     assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
 }
 
+fn executor_crash_leaves_no_tool_or_cgroup(executor: &Path, probe: &ExecutorProbeV0) {
+    let workspace = Workspace::new();
+    let running = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::Exact,
+        descendant_script(),
+        limits(4_096, 4_096, 10_000),
+    )
+    .spawn(executor);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !workspace.join("ready").is_file() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(workspace.join("ready").is_file(), "descendant did start");
+    kill_process(Pid::from_child(running.child()), Signal::KILL).expect("Executor is killed");
+    assert!(
+        !running.wait_without_response().status.success(),
+        "killed Executor must not claim completion"
+    );
+    assert_tree_stopped(&workspace);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while recorded_cgroup(&workspace).exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_cgroup_removed(&workspace);
+}
+
 fn descendant_script() -> &'static str {
-    "(printf ready > /workspace/ready; i=0; while :; do i=$((i + 1)); if [ \"$i\" -eq 1000 ]; then printf x >> /workspace/heartbeat; i=0; fi; done) & while :; do :; done"
+    "IFS=: read -r _ _ cgroup < /proc/self/cgroup; printf %s \"$cgroup\" > /workspace/cgroup; (printf ready > /workspace/ready; i=0; while :; do i=$((i + 1)); if [ \"$i\" -eq 1000 ]; then printf x >> /workspace/heartbeat; i=0; fi; done) & while :; do :; done"
 }
 
 fn assert_tree_stopped(workspace: &Workspace) {
@@ -601,11 +807,37 @@ fn assert_tree_stopped(workspace: &Workspace) {
 }
 
 fn limits(stdout: u64, stderr: u64, timeout_ms: u64) -> ExecutorLimitsV0 {
+    limits_with_capacity(stdout, stderr, timeout_ms, 64)
+}
+
+fn limits_with_capacity(
+    stdout: u64,
+    stderr: u64,
+    timeout_ms: u64,
+    max_concurrent_processes_and_threads: u32,
+) -> ExecutorLimitsV0 {
     ExecutorLimitsV0 {
+        max_concurrent_processes_and_threads,
         max_stderr_bytes: stderr,
         max_stdout_bytes: stdout,
         timeout_ms,
     }
+}
+
+fn assert_cgroup_removed(workspace: &Workspace) {
+    assert!(
+        !recorded_cgroup(workspace).exists(),
+        "transient Tool cgroup survived Executor completion"
+    );
+}
+
+fn recorded_cgroup(workspace: &Workspace) -> PathBuf {
+    let relative = std::fs::read_to_string(workspace.join("cgroup"))
+        .expect("Tool records its cgroup")
+        .trim()
+        .trim_start_matches('/')
+        .to_owned();
+    Path::new("/sys/fs/cgroup").join(relative)
 }
 
 fn completed(response: ExecutorResponseV0) -> (ExecutorToolResultV0, EnforcementReceiptV0) {

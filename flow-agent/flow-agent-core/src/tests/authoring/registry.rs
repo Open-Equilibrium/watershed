@@ -125,7 +125,7 @@ fn authoring_publishes_each_approved_block_kind_and_validates_a_selected_flow() 
     let definitions = [
         (
             "tool.yaml",
-            "tool:\n  id: inspect\n  name: Inspect\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: [inspect]\n  allowed_parameters: []\n  runtime_profile: exact\n  read_only_mounts: [workspace]\n  writable_mounts: []\n  network: deny\n",
+            "tool:\n  id: inspect\n  name: Inspect\n  tool_kind: predefined-command\n  command:\n    command_id: agent-echo\n    argv: [inspect]\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [workspace]\n  writable_mounts: []\n  network: deny\n",
         ),
         (
             "instruction.yaml",

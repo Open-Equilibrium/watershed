@@ -10,6 +10,13 @@ const READINESS_DIAGNOSTIC_PREFIX: &str = "flow-executor readiness: ";
 
 pub(crate) fn run() -> Result<(), String> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    if arguments.is_empty()
+        && crate::platform::official_host()
+        && crate::platform::statically_linked_self()
+    {
+        return crate::cgroup::enter_transient_scope();
+    }
     let stdin = io::stdin();
     let stdout = io::stdout();
     let stderr = io::stderr();
@@ -34,7 +41,13 @@ pub(crate) fn run_with_diagnostics(
     match arguments {
         [mode] if mode == "--probe" => write_probe(crate::backend::probe(), output, diagnostics),
         [] => execute_request(input, output),
-        [mode, request_fd, status_fd] if mode == "--inner" => run_inner(request_fd, status_fd),
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        [mode] if mode == crate::cgroup::SCOPED_ARGUMENT => execute_request(input, output),
+        [mode, request_fd, status_fd, tool_cgroup_fd] if mode == "--inner" => {
+            run_inner(request_fd, status_fd, tool_cgroup_fd)
+        }
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        [mode] if mode == crate::cgroup::SELF_TEST_ARGUMENT => crate::cgroup::scope_self_test(),
         [mode] if mode == "--inner-self-test" => Ok(()),
         _ => Err("usage: flow-executor [--probe]".to_owned()),
     }
@@ -126,11 +139,11 @@ fn read_bounded(input: impl Read, limit: usize, kind: &str) -> Result<Vec<u8>, S
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn run_inner(request_fd: &str, status_fd: &str) -> Result<(), String> {
-    crate::backend::linux::run_inner(request_fd, status_fd)
+fn run_inner(request_fd: &str, status_fd: &str, tool_cgroup_fd: &str) -> Result<(), String> {
+    crate::backend::linux::run_inner(request_fd, status_fd, tool_cgroup_fd)
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn run_inner(_request_fd: &str, _status_fd: &str) -> Result<(), String> {
+fn run_inner(_request_fd: &str, _status_fd: &str, _tool_cgroup_fd: &str) -> Result<(), String> {
     Err("inner Executor mode is unavailable on this platform".to_owned())
 }

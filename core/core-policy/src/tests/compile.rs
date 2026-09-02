@@ -111,6 +111,18 @@ fn policy_compiler_preserves_the_selected_runtime_profile() {
 }
 
 #[test]
+fn policy_compiler_preserves_process_capacity() {
+    let registry = smoke_registry_with_tool(|tool| {
+        tool.max_concurrent_processes_and_threads = 7;
+    });
+
+    let artifact = compile_policy_artifact(&registry, "smoke-flow")
+        .expect("the configured process capacity compiles");
+
+    assert_eq!(artifact.commands[0].max_concurrent_processes_and_threads, 7);
+}
+
+#[test]
 fn policy_compiler_rejects_unknown_predefined_commands() {
     let registry = smoke_registry_with_tool(|tool| {
         tool.command = core_script::ToolCommand::Predefined {

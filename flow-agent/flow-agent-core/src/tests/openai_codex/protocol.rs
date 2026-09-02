@@ -38,6 +38,7 @@ fn test_tool() -> core_script::ToolBlock {
                 max: Some(10),
             },
         ],
+        max_concurrent_processes_and_threads: 16,
         runtime_profile: core_script::ToolRuntimeProfile::Exact,
         read_only_mounts: vec!["workspace".to_owned()],
         writable_mounts: Vec::new(),

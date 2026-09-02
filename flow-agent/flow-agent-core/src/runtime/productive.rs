@@ -181,6 +181,8 @@ pub(crate) trait ProductiveToolExecutor {
 
     fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str;
 
+    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32;
+
     fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0;
 
     fn validate_enforcement_receipt(
@@ -192,6 +194,7 @@ pub(crate) trait ProductiveToolExecutor {
             receipt,
             self.policy_digest(prepared),
             self.runtime_profile(prepared),
+            self.max_concurrent_processes_and_threads(prepared),
         )
         .map_err(|_| {
             RuntimeError::Protocol(
@@ -232,6 +235,10 @@ impl ProductiveToolExecutor for Option<PreparedExecutor> {
 
     fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
         prepared.policy_digest()
+    }
+
+    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32 {
+        prepared.max_concurrent_processes_and_threads()
     }
 
     fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {

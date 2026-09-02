@@ -91,6 +91,7 @@ fn parser_accepts_exact_mount_policy_and_rejects_legacy_scope_grammar() {
     command_id: agent-echo
     argv: []
   allowed_parameters: []
+  max_concurrent_processes_and_threads: 32
   runtime_profile: host-system-read
   read_only_mounts: ["workspace"]
   writable_mounts: ["workspace/out"]
@@ -281,6 +282,7 @@ fn parser_decodes_yaml_double_quoted_escapes() {
   script_runtime: posix-sh
   script_body: "printf '%s\n' \"$SUMMARY\" > out/summary.txt"
   allowed_parameters: []
+  max_concurrent_processes_and_threads: 32
   read_only_mounts: ["workspace"]
   writable_mounts: ["workspace/out"]
   network: deny

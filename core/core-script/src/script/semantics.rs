@@ -231,6 +231,12 @@ fn invalid_phase(phase: &PhaseBlock, message: &str) -> SemanticValidationError {
 }
 
 pub(super) fn validate_tool_semantics(tool: &ToolBlock) -> Result<(), SemanticValidationError> {
+    if tool.max_concurrent_processes_and_threads == 0 {
+        return Err(invalid_tool(
+            tool,
+            "max_concurrent_processes_and_threads must be positive",
+        ));
+    }
     match (&tool.tool_kind, &tool.command) {
         (ToolKind::OwnScript, ToolCommand::OwnScript(command)) => {
             let expected = crate::script::model::own_script_command_id(&tool.identity.id);

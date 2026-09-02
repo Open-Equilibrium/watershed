@@ -7,7 +7,7 @@ use std::{
 };
 
 const PROBE: &str = concat!(
-    r#"{"backend":"fake-backend","backend_version":"1","executor":"fake-executor","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[{"executable":"/bin/echo","runtime_profile":"exact","source":"/usr/bin/echo","target":"/bin/echo"}],"schema":"flow-executor-probe-v0","supported_policy_features":[]}"#,
+    r#"{"backend":"fake-backend","backend_version":"1","executor":"fake-executor","executor_version":"1","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[{"executable":"/bin/echo","runtime_profile":"exact","source":"/usr/bin/echo","target":"/bin/echo"}],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity"]}"#,
     "\n"
 );
 
@@ -28,6 +28,19 @@ fn field<'a>(request: &'a str, name: &str) -> &'a str {
     value.split_once('"').expect("field is closed").0
 }
 
+fn number_field(request: &str, name: &str) -> u32 {
+    let needle = format!("\"{name}\":");
+    request
+        .split_once(&needle)
+        .expect("canonical request contains the field")
+        .1
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .expect("numeric request field is a u32")
+}
+
 fn completed(request: &str, mode: &str) -> String {
     let request_id = field(request, "request_id");
     let policy_digest = field(request, "policy_digest");
@@ -37,13 +50,19 @@ fn completed(request: &str, mode: &str) -> String {
         policy_digest
     };
     let isolation_active = mode != "inactive-evidence";
+    let requested_capacity = number_field(request, "max_concurrent_processes_and_threads");
+    let enforced_capacity = if mode == "mismatched-capacity" {
+        requested_capacity + 1
+    } else {
+        requested_capacity
+    };
     let backend = if mode == "mismatched-identity" {
         "different-backend"
     } else {
         "fake-backend"
     };
     let enforcement = format!(
-        "\"enforcement\":{{\"applied_policy_digest\":\"{policy_digest}\",\"backend\":\"{backend}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",\"isolation_active\":{isolation_active},\"platform\":\"ubuntu-24.04-x86_64\",\"runtime_profile\":\"exact\"}},"
+        "\"enforcement\":{{\"applied_policy_digest\":\"{policy_digest}\",\"backend\":\"{backend}\",\"backend_version\":\"1\",\"executor\":\"fake-executor\",\"executor_version\":\"1\",\"isolation_active\":{isolation_active},\"max_concurrent_processes_and_threads\":{enforced_capacity},\"platform\":\"ubuntu-24.04-x86_64\",\"runtime_profile\":\"exact\"}},"
     );
     let enforcement = if mode == "missing-evidence" {
         ""

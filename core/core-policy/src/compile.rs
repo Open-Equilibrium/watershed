@@ -236,6 +236,7 @@ pub(crate) fn command_policy_from_tool(
             read_only_mounts: tool.read_only_mounts.clone(),
             writable_mounts: tool.writable_mounts.clone(),
         },
+        max_concurrent_processes_and_threads: tool.max_concurrent_processes_and_threads,
         network,
         runtime_profile: tool.runtime_profile,
         script_runtime,

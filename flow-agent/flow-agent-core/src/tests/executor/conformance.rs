@@ -98,6 +98,7 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         "oversized-output",
         "missing-evidence",
         "inactive-evidence",
+        "mismatched-capacity",
         "mismatched-evidence",
         "mismatched-identity",
         "stderr-output",
@@ -189,6 +190,7 @@ fn policy(timeout_ms: u64) -> core_policy::PolicyArtifact {
                 read_only_mounts: vec!["workspace".to_owned()],
                 writable_mounts: Vec::new(),
             },
+            max_concurrent_processes_and_threads: 16,
             network: core_policy::NetworkPolicy {
                 allow: Vec::new(),
                 default: core_policy::NetworkDefault::Deny,

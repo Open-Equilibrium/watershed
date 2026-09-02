@@ -1,7 +1,8 @@
 mod report;
 
 use flow_agent_core::{
-    M12ExecutorStartupMeasurement, configure_executor_path, run_m12_executor_startup,
+    M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, M12ExecutorStartupMeasurement, configure_executor_path,
+    run_m12_executor_startup,
 };
 use report::{write_jsonl, write_report};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,7 @@ struct Config {
 struct ChildMeasurement {
     schema: String,
     executor_elapsed_ns: u64,
+    max_concurrent_processes_and_threads: u32,
 }
 
 struct TempRoot(PathBuf);
@@ -69,11 +71,14 @@ fn duration_ns(duration: Duration) -> u64 {
 
 fn measure_once() -> Result<ChildMeasurement, DynError> {
     let workspace = TempRoot::create()?;
-    let M12ExecutorStartupMeasurement { executor_elapsed } =
-        run_m12_executor_startup(workspace.path()).map_err(io::Error::other)?;
+    let M12ExecutorStartupMeasurement {
+        executor_elapsed,
+        max_concurrent_processes_and_threads,
+    } = run_m12_executor_startup(workspace.path()).map_err(io::Error::other)?;
     Ok(ChildMeasurement {
         schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
         executor_elapsed_ns: duration_ns(executor_elapsed),
+        max_concurrent_processes_and_threads,
     })
 }
 
@@ -110,6 +115,12 @@ fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError
     let measurement: ChildMeasurement = serde_json::from_slice(&output.stdout)?;
     if measurement.schema != MEASUREMENT_CHILD_SCHEMA {
         return Err(io::Error::other("fresh measurement child schema did not match").into());
+    }
+    if measurement.max_concurrent_processes_and_threads != M12_EXECUTOR_STARTUP_PROCESS_CAPACITY {
+        return Err(io::Error::other(
+            "fresh measurement child did not retain the configured process capacity",
+        )
+        .into());
     }
     Ok(measurement)
 }
@@ -189,7 +200,10 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ChildMeasurement, Config, DynError, MEASUREMENT_CHILD_SCHEMA, parse_args};
+    use super::{
+        ChildMeasurement, Config, DynError, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
+        MEASUREMENT_CHILD_SCHEMA, parse_args,
+    };
     use crate::report::{percentile, write_report_with_measurement};
     use serde_json::Value;
     use std::{
@@ -269,6 +283,7 @@ mod tests {
             Ok(ChildMeasurement {
                 schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
                 executor_elapsed_ns: observation * 10,
+                max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
             })
         };
         let mut writer = Vec::new();
@@ -301,6 +316,7 @@ mod tests {
             Ok(ChildMeasurement {
                 schema: MEASUREMENT_CHILD_SCHEMA.to_owned(),
                 executor_elapsed_ns: 1,
+                max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
             })
         };
         let mut writer = Vec::new();

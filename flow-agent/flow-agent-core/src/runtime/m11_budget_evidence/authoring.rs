@@ -25,6 +25,7 @@ pub(crate) fn maximum_tool() -> RegistryBlock {
         script_runtime: None,
         script_body: None,
         allowed_parameters: Vec::new(),
+        max_concurrent_processes_and_threads: 16,
         runtime_profile: ToolRuntimeProfile::Exact,
         read_only_mounts: Vec::new(),
         writable_mounts: Vec::new(),

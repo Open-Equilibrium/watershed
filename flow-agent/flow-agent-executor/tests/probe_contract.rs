@@ -43,7 +43,7 @@ fn sibling_self_test_succeeds_without_output() {
 #[test]
 fn sibling_inner_mode_fails_closed_on_unsupported_platform() {
     let output = Command::new(env!("CARGO_BIN_EXE_flow-executor"))
-        .args(["--inner", "3", "4"])
+        .args(["--inner", "3", "4", "5"])
         .output()
         .expect("sibling Executor inner mode launches");
 

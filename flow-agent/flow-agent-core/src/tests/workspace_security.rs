@@ -37,7 +37,7 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
 
     for index in 0..10 {
         let tool = format!(
-            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: [\"workspace/out\"]\n  network: deny\n"
+            "tool:\n  id: write-summary-{index}\n  name: WriteSummary{index}\n  tool_kind: own-script\n  command: script:write-summary-{index}\n  script_runtime: posix-sh\n  script_body: |\n    printf 'hello {index}\\n' > out/summary-{index}.txt\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: [\"workspace/out\"]\n  network: deny\n"
         );
         let phase = format!(
             "phase:\n  id: summarize-{index}\n  name: Summarize{index}\n  instruction_refs: [write-output]\n  tool_refs: [write-summary-{index}]\n  output:\n    type: string\n"
@@ -208,6 +208,7 @@ fn run_flow_rejects_multi_write_own_script_before_side_effects() {
     printf 'partial\n' > out/partial.txt
     printf '%s\n' "$SUMMARY" > out/summary.txt
   allowed_parameters: []
+  max_concurrent_processes_and_threads: 16
   runtime_profile: exact
   read_only_mounts: ["workspace"]
   writable_mounts: ["workspace/out"]

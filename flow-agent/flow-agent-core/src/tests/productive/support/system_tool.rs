@@ -50,7 +50,11 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
             Duration::from_millis(policy.runtime_limits.timeout_ms),
         )?;
         Ok(SystemPreparedTool {
-            enforcement: test_enforcement_receipt(policy_digest, command_policy.runtime_profile),
+            enforcement: test_enforcement_receipt(
+                policy_digest,
+                command_policy.max_concurrent_processes_and_threads,
+                command_policy.runtime_profile,
+            ),
             outcome,
             request_hash,
         })
@@ -62,6 +66,10 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
 
     fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
         &prepared.enforcement.applied_policy_digest
+    }
+
+    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32 {
+        prepared.enforcement.max_concurrent_processes_and_threads
     }
 
     fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
@@ -115,6 +123,7 @@ impl SystemProductiveToolExecutor {
 
 pub(crate) fn test_enforcement_receipt(
     applied_policy_digest: String,
+    max_concurrent_processes_and_threads: u32,
     profile: core_script::ToolRuntimeProfile,
 ) -> proto::EnforcementReceiptV0 {
     proto::EnforcementReceiptV0 {
@@ -124,6 +133,7 @@ pub(crate) fn test_enforcement_receipt(
         executor: proto::EXECUTOR_NAME_V0.to_owned(),
         executor_version: "test".to_owned(),
         isolation_active: true,
+        max_concurrent_processes_and_threads,
         platform: proto::EXECUTOR_PLATFORM_V0.to_owned(),
         runtime_profile: match profile {
             core_script::ToolRuntimeProfile::Exact => proto::RuntimeReadProfileV0::Exact,

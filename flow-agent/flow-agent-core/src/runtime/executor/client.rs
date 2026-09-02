@@ -47,6 +47,7 @@ pub(crate) struct ExecutorToolExecution {
 
 /// Fully validated request with every filesystem capability retained before recovery or dispatch.
 pub(crate) struct PreparedExecutorTool {
+    max_concurrent_processes_and_threads: u32,
     policy_digest: String,
     request_hash: String,
     runtime_profile: proto::RuntimeReadProfileV0,
@@ -65,6 +66,10 @@ impl PreparedExecutorTool {
 
     pub(crate) fn policy_digest(&self) -> &str {
         &self.policy_digest
+    }
+
+    pub(crate) fn max_concurrent_processes_and_threads(&self) -> u32 {
+        self.max_concurrent_processes_and_threads
     }
 
     pub(crate) fn runtime_profile(&self) -> proto::RuntimeReadProfileV0 {
@@ -202,6 +207,7 @@ impl PreparedExecutor {
             receipt,
             &prepared.policy_digest,
             prepared.runtime_profile,
+            prepared.max_concurrent_processes_and_threads,
         )
         .map_err(|_| {
             RuntimeError::executor(
@@ -235,6 +241,8 @@ impl PreparedExecutor {
         });
         validate_mount_union(&mounts)?;
         let limits = proto::ExecutorLimitsV0 {
+            max_concurrent_processes_and_threads: command_policy
+                .max_concurrent_processes_and_threads,
             max_stderr_bytes: crate::runtime::tool_runner::MAX_TOOL_STREAM_BYTES as u64,
             max_stdout_bytes: crate::runtime::tool_runner::MAX_TOOL_STREAM_BYTES as u64,
             timeout_ms: policy.runtime_limits.timeout_ms,
@@ -299,6 +307,8 @@ impl PreparedExecutor {
             proto::canonical_executor_request_v0(&request).map_err(invalid_request)?;
         let request_hash = executor_request_hash(&request_bytes);
         Ok(PreparedExecutorTool {
+            max_concurrent_processes_and_threads: command_policy
+                .max_concurrent_processes_and_threads,
             mounts,
             policy_digest,
             request,
@@ -831,6 +841,9 @@ fn decode_tool_outcome(
             proto::ExecutorToolClassificationV0::NonzeroExit => {
                 ToolTerminalClassification::NonzeroExit
             }
+            proto::ExecutorToolClassificationV0::ProcessCapacityExceeded => {
+                ToolTerminalClassification::ProcessCapacityExceeded
+            }
             proto::ExecutorToolClassificationV0::SignalTermination => {
                 ToolTerminalClassification::SignalTermination
             }
@@ -939,6 +952,10 @@ mod unsupported_platform_tests {
         let mut inactive = receipt(&prepared, false);
         inactive.applied_policy_digest = "b".repeat(64);
         assert_invalid_response(executor.validate_prepared_receipt(&prepared, &inactive));
+
+        let mut widened = receipt(&prepared, true);
+        widened.max_concurrent_processes_and_threads += 1;
+        assert_invalid_response(executor.validate_prepared_receipt(&prepared, &widened));
     }
 
     #[test]
@@ -963,6 +980,7 @@ mod unsupported_platform_tests {
 
     fn prepared_tool() -> PreparedExecutorTool {
         PreparedExecutorTool {
+            max_concurrent_processes_and_threads: 16,
             policy_digest: "a".repeat(64),
             request_hash: "sha256:request".to_owned(),
             runtime_profile: proto::RuntimeReadProfileV0::HostSystemRead,
@@ -980,6 +998,7 @@ mod unsupported_platform_tests {
             executor: "executor".to_owned(),
             executor_version: "1".to_owned(),
             isolation_active,
+            max_concurrent_processes_and_threads: prepared.max_concurrent_processes_and_threads(),
             platform: "unsupported".to_owned(),
             runtime_profile: prepared.runtime_profile(),
         }
@@ -1000,6 +1019,7 @@ mod unsupported_platform_tests {
                     read_only_mounts: vec!["workspace".to_owned()],
                     writable_mounts: Vec::new(),
                 },
+                max_concurrent_processes_and_threads: 16,
                 network: core_policy::NetworkPolicy {
                     allow: Vec::new(),
                     default: core_policy::NetworkDefault::Deny,
@@ -1230,6 +1250,9 @@ mod tests {
                 executor: proto::EXECUTOR_NAME_V0.to_owned(),
                 executor_version: "test".to_owned(),
                 isolation_active: true,
+                max_concurrent_processes_and_threads: request
+                    .limits
+                    .max_concurrent_processes_and_threads,
                 platform: proto::EXECUTOR_PLATFORM_V0.to_owned(),
                 runtime_profile: proto::RuntimeReadProfileV0::Exact,
             },
@@ -1350,6 +1373,7 @@ mod tests {
             executor: probe.executor.clone(),
             executor_version: probe.executor_version.clone(),
             isolation_active: true,
+            max_concurrent_processes_and_threads: 16,
             platform: probe.platform.clone(),
             runtime_profile: proto::RuntimeReadProfileV0::Exact,
         };
@@ -1422,6 +1446,7 @@ mod tests {
             environment: BTreeMap::new(),
             executable: "/bin/sh".to_owned(),
             limits: proto::ExecutorLimitsV0 {
+                max_concurrent_processes_and_threads: 16,
                 max_stderr_bytes: 0,
                 max_stdout_bytes: 0,
                 timeout_ms: 100,
@@ -1431,6 +1456,7 @@ mod tests {
                 artifact: serde_json::json!({}),
                 command: serde_json::json!({}),
                 limits: proto::ExecutorLimitsV0 {
+                    max_concurrent_processes_and_threads: 16,
                     max_stderr_bytes: 0,
                     max_stdout_bytes: 0,
                     timeout_ms: 100,

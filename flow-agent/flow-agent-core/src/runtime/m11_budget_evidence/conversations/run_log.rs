@@ -26,6 +26,7 @@ fn intent_record(index: usize) -> RunLogRecord {
         attempt_kind: RunAttemptKind::Tool,
         expected_enforcement: Some(ToolEnforcementExpectation {
             applied_policy_digest: "0".repeat(64),
+            max_concurrent_processes_and_threads: 16,
             runtime_profile: proto::RuntimeReadProfileV0::Exact,
         }),
         request_hash: format!("sha256:{index:064x}"),

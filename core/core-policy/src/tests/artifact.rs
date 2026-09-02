@@ -316,6 +316,7 @@ fn command_policy(
                 .collect(),
             writable_mounts: vec!["workspace/z-out".to_owned(), "workspace/a-out".to_owned()],
         },
+        max_concurrent_processes_and_threads: 32,
         network: NetworkPolicy {
             allow: vec![
                 NetworkAllowEntry {

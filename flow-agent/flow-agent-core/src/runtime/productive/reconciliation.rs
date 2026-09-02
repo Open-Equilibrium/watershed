@@ -78,6 +78,7 @@ pub fn reconcile_tool_attempt(
             &reconciliation.enforcement,
             &expected.applied_policy_digest,
             expected.runtime_profile,
+            expected.max_concurrent_processes_and_threads,
         )
         .map_err(|error| {
             RuntimeError::Usage(format!(

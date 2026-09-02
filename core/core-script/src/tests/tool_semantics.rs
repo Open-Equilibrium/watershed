@@ -43,6 +43,7 @@ fn semantic_validation_enforces_tool_kind_specific_script_fields() {
 
     let mut predefined = ToolBlock {
         allowed_parameters: Vec::new(),
+        max_concurrent_processes_and_threads: 32,
         command: ToolCommand::Predefined {
             command_id: "agent-echo".to_owned(),
             argv: Vec::new(),
@@ -83,6 +84,7 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
 
     let predefined = ToolBlock {
         allowed_parameters: Vec::new(),
+        max_concurrent_processes_and_threads: 32,
         command: ToolCommand::Predefined {
             command_id: "agent-echo".to_owned(),
             argv: vec!["unsafe\0argument".to_owned()],
@@ -116,6 +118,21 @@ fn semantic_validation_rejects_nul_bearing_tool_execution_fields() {
     let error = validate_tool_semantics(&parameterized)
         .expect_err("NUL enum parameter values are rejected");
     assert!(error.to_string().contains("NUL"));
+}
+
+#[test]
+fn semantic_validation_rejects_zero_process_capacity() {
+    let mut tool = own_script_tool("write-summary", "script:write-summary");
+    tool.max_concurrent_processes_and_threads = 0;
+
+    let error = validate_tool_semantics(&tool).expect_err("zero capacity is rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains("max_concurrent_processes_and_threads must be positive"),
+        "{error}"
+    );
 }
 
 #[test]

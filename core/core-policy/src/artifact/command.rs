@@ -25,6 +25,8 @@ pub struct CommandPolicy {
     pub filesystem: FilesystemPolicy,
     /// Network access policy.
     pub network: NetworkPolicy,
+    /// Maximum concurrent Tool processes and threads, including descendants.
+    pub max_concurrent_processes_and_threads: u32,
     /// Reviewed runtime filesystem profile.
     pub runtime_profile: ToolRuntimeProfile,
     /// Script runtime for own-script tools.
@@ -39,6 +41,12 @@ pub struct CommandPolicy {
 impl CommandPolicy {
     pub(super) fn validate(&self) -> Result<(), PolicyArtifactValidationError> {
         self.validate_command_shape()?;
+        if self.max_concurrent_processes_and_threads == 0 {
+            return Err(policy_artifact_error(format!(
+                "tool {} max_concurrent_processes_and_threads must be positive",
+                self.tool_id
+            )));
+        }
         let mut parameter_names = BTreeSet::new();
         for parameter in &self.allowed_parameters {
             parameter.validate(&self.tool_id)?;

@@ -62,7 +62,7 @@ jobs:
           }
 
       - name: Install gate tools
-        uses: taiki-e/install-action@1ed6d7be6168f6c9046541087ff549b6bc581fdf # v2.87.2
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
           tool: cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
@@ -120,11 +120,26 @@ jobs:
           cargo_llvm_cov="$(readlink -f "$(command -v cargo-llvm-cov)")"
           cargo_nextest="$(readlink -f "$(command -v cargo-nextest)")"
           node="$(readlink -f "$(command -v node)")"
-          docker run --detach --rm --init \
+          docker build \
+            --build-arg "BASE_IMAGE=$M12_CONTRACT_IMAGE" \
+            --tag watershed-m12-systemd \
+            - <<'DOCKERFILE'
+          ARG BASE_IMAGE
+          FROM ${BASE_IMAGE}
+          RUN apt-get update \
+              && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends systemd dbus-user-session systemd-sysv \
+              && rm -rf /var/lib/apt/lists/*
+          STOPSIGNAL SIGRTMIN+3
+          CMD ["/sbin/init"]
+          DOCKERFILE
+          docker run --detach --rm \
             --name watershed-m12 \
             --privileged \
+            --cgroupns=private \
             --security-opt apparmor=unconfined \
             --workdir /work \
+            --tmpfs /run \
+            --tmpfs /run/lock \
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
             --mount "type=bind,src=$rust_root,dst=/opt/rust,readonly" \
             --mount "type=bind,src=$cargo_registry,dst=/opt/cargo-registry,readonly" \
@@ -132,13 +147,24 @@ jobs:
             --mount "type=bind,src=$cargo_nextest,dst=/usr/local/bin/cargo-nextest,readonly" \
             --mount "type=bind,src=$node,dst=/usr/local/bin/node,readonly" \
             --mount "type=volume,dst=/work/target" \
-            "$M12_CONTRACT_IMAGE" \
-            sleep infinity
+            watershed-m12-systemd \
+            /sbin/init
 
       - name: Provision M1.2 Ubuntu dependencies
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
+          for attempt in {1..30}; do
+            state="$(docker exec watershed-m12 systemctl is-system-running 2>/dev/null || true)"
+            if [[ "$state" == running || "$state" == degraded ]]; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              echo "controlled M1.2 systemd did not become ready: $state" >&2
+              exit 1
+            fi
+            sleep 1
+          done
           docker exec watershed-m12 /bin/sh -ec '
             apt-get update
             apt-get install --yes --no-install-recommends \
@@ -148,7 +174,25 @@ jobs:
             mkdir -p /cargo /home/watershed/m12-coverage
             ln -s /opt/cargo-registry /cargo/registry
             chown -R watershed:watershed /cargo /home/watershed /work/target
+            set -- $(systemd --version | head -n 1)
+            test "$1" = systemd
+            test "$2" = 255
+            test "$(stat -f -c %T /sys/fs/cgroup)" = cgroup2fs
+            grep -qw pids /sys/fs/cgroup/cgroup.controllers
+            test -e /sys/fs/cgroup/cgroup.kill
+            test -e /sys/fs/cgroup/cgroup.events
+            systemctl start user-runtime-dir@10001.service user@10001.service
+            systemctl is-active --quiet user@10001.service
+            test -S /run/user/10001/bus
           '
+          docker exec \
+            --env XDG_RUNTIME_DIR=/run/user/10001 \
+            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
+            watershed-m12 \
+            /usr/sbin/runuser --user watershed --preserve-environment -- \
+            /usr/bin/systemd-run --user --scope --quiet --collect \
+              --property=Delegate=pids --property=DelegateSubgroup=supervisor \
+              /bin/true
 
       - name: Build M1.2 executor
         if: matrix.os == 'ubuntu-24.04'
@@ -201,7 +245,13 @@ jobs:
           --env BWRAP_UNDER_TEST=/usr/bin/bwrap
           --env FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
           --env FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
+          --env HOME=/home/watershed
+          --env USER=watershed
+          --env LOGNAME=watershed
+          --env XDG_RUNTIME_DIR=/run/user/10001
+          --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus
           watershed-m12
+          /usr/sbin/runuser --user watershed --preserve-environment --
           cargo test --locked -p flow-agent-executor --test official_linux
 
       - name: Run public Custom Executor conformance
@@ -216,7 +266,13 @@ jobs:
             --env CARGO_HOME=/cargo \
             --env CARGO_NET_OFFLINE=true \
             --env PATH=/opt/rust/bin:/usr/bin:/bin \
+            --env HOME=/home/watershed \
+            --env USER=watershed \
+            --env LOGNAME=watershed \
+            --env XDG_RUNTIME_DIR=/run/user/10001 \
+            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
             watershed-m12 \
+            /usr/sbin/runuser --user watershed --preserve-environment -- \
             cargo run --locked -p flow-agent-core \
               --features m12-startup-evidence \
               --example custom_executor_conformance -- \
@@ -269,9 +325,15 @@ jobs:
             --env ImageVersion \
             --env M12_CONTRACT_IMAGE \
             --env PATH=/opt/rust/bin:/usr/bin:/bin \
+            --env HOME=/home/watershed \
+            --env USER=watershed \
+            --env LOGNAME=watershed \
+            --env XDG_RUNTIME_DIR=/run/user/10001 \
+            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
             watershed-m12 \
             /bin/sh -ec 'install -d -m 0755 /usr/local/libexec/watershed
             install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /usr/local/libexec/watershed/flow-executor
+            exec /usr/sbin/runuser --user watershed --preserve-environment -- \
             cargo run --locked -p flow-agent-core --release \
               --features m12-startup-evidence --example m12_executor_startup \
               -- --executor /usr/local/libexec/watershed/flow-executor' \
@@ -360,6 +422,8 @@ jobs:
           export USER=watershed
           export LOGNAME=watershed
           export RUNNER_TEMP=/home/watershed/m12-coverage
+          export XDG_RUNTIME_DIR=/run/user/10001
+          export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus
           export BWRAP_UNDER_TEST=/usr/bin/bwrap
           export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
           export FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor

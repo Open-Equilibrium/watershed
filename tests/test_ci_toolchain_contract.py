@@ -17,7 +17,7 @@ ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "taiki-e/install-action": "1ed6d7be6168f6c9046541087ff549b6bc581fdf",
+    "taiki-e/install-action": "e67fa11c4b9316fa714ddf0abed07a0c3143b95b",
 }
 TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
@@ -516,8 +516,13 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         for required in (
             "$M12_CONTRACT_IMAGE",
+            "docker build",
+            "systemd dbus-user-session",
             "--privileged",
+            "--cgroupns=private",
             "--security-opt apparmor=unconfined",
+            "--tmpfs /run",
+            "/sbin/init",
             'src=$GITHUB_WORKSPACE,dst=/work,readonly',
             "dst=/opt/rust,readonly",
             "dst=/opt/cargo-registry,readonly",
@@ -529,6 +534,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(required, start)
         self.assertNotIn(contract_image, start)
         for forbidden in (
+            "--init",
+            "--cgroupns=host",
+            "src=/sys/fs/cgroup",
+            "sleep infinity",
             "/var/run/docker.sock",
             "sysctl",
             "apparmor_parser",
@@ -554,8 +563,15 @@ class CiWorkflowContractTest(unittest.TestCase):
             "util-linux",
             "/opt/cargo-registry",
             "useradd --create-home --uid 10001 --shell /bin/sh watershed",
+            "systemd --version",
+            'test "$2" = 255',
+            "systemctl start user-runtime-dir@10001.service user@10001.service",
+            "systemctl is-active --quiet user@10001.service",
+            "test -S /run/user/10001/bus",
         ):
             self.assertIn(required, provision)
+        self.assertNotIn("loginctl enable-linger", workflow)
+        self.assertNotIn("uname -r", provision)
 
         for name, command in {
             "Build M1.2 executor": (
@@ -605,6 +621,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             executor_tests,
         )
         self.assertIn(f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}", executor_tests)
+        for required in (
+            "XDG_RUNTIME_DIR=/run/user/10001",
+            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus",
+            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
+        ):
+            self.assertIn(required, executor_tests)
         self.assertIn(
             "cargo test --locked -p flow-agent-executor --test official_linux",
             step_run(workflow, "Run M1.2 executor tests"),
@@ -639,7 +661,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             M12_ACCEPTANCE_CLI,
             M12_EXECUTOR,
             'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix"',
-            '"$standard_prefix/bin/flow" executor check',
+            '/usr/sbin/runuser --user watershed --preserve-environment',
+            'XDG_RUNTIME_DIR="$user_runtime"',
+            'DBUS_SESSION_BUS_ADDRESS="$user_bus"',
+            'run_as_watershed "$standard_prefix/bin/flow" executor check',
             'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix"',
             'FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1',
             '"$acceptance_prefix/bin/flow" run smoke-flow',
@@ -655,21 +680,21 @@ class CiWorkflowContractTest(unittest.TestCase):
             'test ! -e "$custom_prefix/bin/flow-executor"',
             'test "$unavailable_status" -eq 65',
             '"error: executor_unavailable:"*',
-            'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry',
+            'run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry',
             'flow-agent/fixtures/smoke-flow/registry/. "$fixture_home/registry/"',
-            'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow',
-            'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl',
+            'run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow',
+            'run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl',
             'fixture run failed with exit',
             'diff -u flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"',
-            'FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow',
+            'run_in_workspace "$unavailable_workspace" /usr/bin/env FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow',
             'productive run without an Executor returned exit',
             'productive run without an Executor returned an unexpected diagnostic',
             'productive Executor preflight mutated the workspace',
             'executor="$bundle/flow-executor"',
-            'executor configure --path "$executor"',
-            '"$custom_prefix/bin/flow" executor check',
-            '"$standard_prefix/bin/flow" executor configure --default',
-            '"$standard_prefix/bin/flow" executor check',
+            'run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$executor"',
+            'run_as_watershed "$custom_prefix/bin/flow" executor check',
+            'run_as_watershed "$standard_prefix/bin/flow" executor configure --default',
+            'run_as_watershed "$standard_prefix/bin/flow" executor check',
         ):
             self.assertIn(required, installer_contract)
         self.assertNotIn("/conversations/", installer_contract)

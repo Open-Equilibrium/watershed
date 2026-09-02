@@ -6,6 +6,7 @@ tool:
     command_id: agent-negative
     argv: ["write"]
   allowed_parameters: []
+  max_concurrent_processes_and_threads: 16
   runtime_profile: exact
   read_only_mounts: ["workspace"]
   writable_mounts: []

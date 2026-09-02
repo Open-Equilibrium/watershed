@@ -17,8 +17,23 @@ fixture_output="$RUNNER_TEMP/m12-fixture-smoke.jsonl"
 fixture_workspace="$RUNNER_TEMP/m12-fixture-workspace"
 productive_workspace="$RUNNER_TEMP/m12-productive-workspace"
 unavailable_workspace="$RUNNER_TEMP/m12-unavailable-workspace"
+user_runtime=/run/user/10001
+user_bus=unix:path=$user_runtime/bus
+run_as_watershed() {
+  /usr/sbin/runuser --user watershed --preserve-environment -- /usr/bin/env \
+    PATH= HOME="$home" XDG_CONFIG_HOME="$config" \
+    XDG_RUNTIME_DIR="$user_runtime" DBUS_SESSION_BUS_ADDRESS="$user_bus" \
+    "$@"
+}
+run_in_workspace() {
+  workspace=$1
+  shift
+  run_as_watershed /bin/sh -c 'cd "$1" && shift && exec "$@"' \
+    watershed-workspace "$workspace" "$@"
+}
 install -d -m 0755 "$bundle" "$acceptance_bundle"
 install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
+chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
 install -m 0755 install/install.sh "$bundle/install.sh"
 install -m 0755 target/m12-standard/release/flow "$bundle/flow"
 install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/flow-executor"
@@ -28,7 +43,7 @@ install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$accepta
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"
 test -x "$standard_prefix/bin/flow-executor"
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$standard_prefix/bin/flow" executor check </dev/null)
+run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix")
 test -x "$acceptance_prefix/bin/flow"
 test -x "$acceptance_prefix/bin/flow-executor"
@@ -44,15 +59,16 @@ case "$unavailable" in
   "error: executor_unavailable:"*) ;;
   *) exit 1 ;;
 esac
-(cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry)
+run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry
 cp -R flow-agent/fixtures/smoke-flow/registry/. "$fixture_home/registry/"
 printf '%s\n' \
   'fixture_profile: stub-model' \
   'stub_model: deterministic' \
   >> "$fixture_home/config.yaml"
-(cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow)
+chown -R watershed:watershed "$fixture_home"
+run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow
 set +e
-(cd "$fixture_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output" 2> "$fixture_error")
+run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl > "$fixture_output" 2> "$fixture_error"
 fixture_status=$?
 set -e
 if [ "$fixture_status" -ne 0 ]; then
@@ -74,12 +90,12 @@ printf '%s\n' \
   '{"openai-codex":{"type":"oauth","access":"ci-inert-access","refresh":"ci-inert-refresh","expires":18446744073709551615,"accountId":"ci-inert-account","isFedramp":false}}' \
   > "$config/flow-agent/credentials.json"
 chmod 0600 "$agent_home/config.yaml" "$config/flow-agent/credentials.json"
+chown -R watershed:watershed "$agent_home" "$config"
 test ! -e "$config/flow-agent/executor.json"
 productive_output=$(
-  cd "$productive_workspace" &&
-    PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$agent_home" \
-      FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1 \
-      "$acceptance_prefix/bin/flow" run smoke-flow
+  run_in_workspace "$productive_workspace" /usr/bin/env \
+    FLOW_AGENT_HOME="$agent_home" FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1 \
+    "$acceptance_prefix/bin/flow" run smoke-flow
 )
 case "$productive_output" in
   "flow smoke-flow (conversation "*", run "*") completed") ;;
@@ -138,7 +154,7 @@ assert receipt["platform"] == "ubuntu-24.04-x86_64", receipt
 assert receipt["runtime_profile"] == "exact", receipt
 PY
 set +e
-productive_unavailable=$(cd "$unavailable_workspace" && PATH= HOME="$home" XDG_CONFIG_HOME="$config" FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow 2>&1)
+productive_unavailable=$(run_in_workspace "$unavailable_workspace" /usr/bin/env FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow 2>&1)
 productive_unavailable_status=$?
 set -e
 if [ "$productive_unavailable_status" -ne 65 ]; then
@@ -159,7 +175,7 @@ if [ -e "$unavailable_workspace/.flow" ]; then
   exit 1
 fi
 executor="$bundle/flow-executor"
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor configure --path "$executor")
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$custom_prefix/bin/flow" executor check </dev/null)
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$standard_prefix/bin/flow" executor configure --default)
-(cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" "$standard_prefix/bin/flow" executor check </dev/null)
+run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$executor"
+run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
+run_as_watershed "$standard_prefix/bin/flow" executor configure --default
+run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null

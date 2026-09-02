@@ -1,4 +1,6 @@
 mod backend;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod cgroup;
 mod platform;
 mod protocol;
 

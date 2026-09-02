@@ -15,6 +15,7 @@ fn reconciliation_output() -> String {
             "executor": proto::EXECUTOR_NAME_V0,
             "executor_version": "test",
             "isolation_active": true,
+            "max_concurrent_processes_and_threads": 16,
             "platform": proto::EXECUTOR_PLATFORM_V0,
             "runtime_profile": "exact",
         },

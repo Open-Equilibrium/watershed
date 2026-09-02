@@ -181,7 +181,7 @@ fn run_flow_preflights_outputs_even_when_later_phase_has_sandbox_denial() {
     .expect("negative instruction written");
     fs::write(
         crate::tests::test_support::session_home_path().join("registry/tools/negative-tool.yaml"),
-        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: []\n  network: deny\n",
+        "tool:\n  id: negative-tool\n  name: NegativeTool\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: []\n  network: deny\n",
     )
     .expect("negative sentinel tool written");
     fs::write(

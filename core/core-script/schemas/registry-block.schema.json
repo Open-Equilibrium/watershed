@@ -447,6 +447,7 @@
           ]
         },
         "id": { "$ref": "#/$defs/block_id" },
+        "max_concurrent_processes_and_threads": { "maximum": 4294967295, "minimum": 1, "type": "integer" },
         "name": { "$ref": "#/$defs/block_name" },
         "network": { "$ref": "#/$defs/network" },
         "read_only_mounts": { "items": { "type": "string" }, "maxItems": 64, "type": "array" },
@@ -456,7 +457,7 @@
         "tool_kind": { "enum": ["predefined-command", "own-script"] },
         "writable_mounts": { "items": { "type": "string" }, "maxItems": 64, "type": "array" }
       },
-      "required": ["id", "name", "tool_kind", "command", "allowed_parameters", "read_only_mounts", "writable_mounts", "network"],
+      "required": ["id", "name", "tool_kind", "command", "allowed_parameters", "max_concurrent_processes_and_threads", "read_only_mounts", "writable_mounts", "network"],
       "type": "object"
     }
   },
