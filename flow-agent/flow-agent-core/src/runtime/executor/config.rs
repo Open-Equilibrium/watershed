@@ -1,9 +1,12 @@
-use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError, sync_directory};
+use crate::runtime::fs_guards::{
+    ProtectedStateLock, ProtectedStateLockError, canonical_decimal, sync_directory,
+};
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use crate::runtime::fs_guards::{unix_access_is_private, validate_unix_private_directory_metadata};
 use crate::runtime::types::RuntimeError;
 use serde::{Deserialize, Serialize};
 use std::{
+    ffi::OsStr,
     fs,
     fs::{File, OpenOptions},
     io::{self, Read as _, Write as _},
@@ -125,6 +128,7 @@ impl ExecutorConfigStore {
         }
         let parent = self.ensure_parent()?;
         let _lock = acquire_config_lock(&parent.join(".executor.lock"), self.protect)?;
+        recover_abandoned_stages(&parent)?;
         let document = ExecutorConfigDocument {
             path: path.to_owned(),
             schema: EXECUTOR_CONFIG_SCHEMA.to_owned(),
@@ -143,6 +147,7 @@ impl ExecutorConfigStore {
     pub(crate) fn configure_default(&self) -> Result<bool, RuntimeError> {
         let parent = self.ensure_parent()?;
         let _lock = acquire_config_lock(&parent.join(".executor.lock"), self.protect)?;
+        recover_abandoned_stages(&parent)?;
         let metadata = match fs::symlink_metadata(&self.path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -227,6 +232,37 @@ impl ExecutorConfigStore {
         }
         operation
     }
+}
+
+fn recover_abandoned_stages(parent: &Path) -> Result<(), RuntimeError> {
+    let mut removed = false;
+    for entry in fs::read_dir(parent).map_err(|error| config_io(parent, error))? {
+        let entry = entry.map_err(|error| config_io(parent, error))?;
+        if !is_executor_staging_leaf(&entry.file_name()) {
+            continue;
+        }
+        let path = entry.path();
+        fs::remove_file(&path).map_err(|error| config_io(&path, error))?;
+        removed = true;
+    }
+    if removed {
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+fn is_executor_staging_leaf(leaf: &OsStr) -> bool {
+    let Some(value) = leaf
+        .to_str()
+        .and_then(|value| value.strip_prefix(".executor."))
+        .and_then(|value| value.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let Some((pid, counter)) = value.split_once('.') else {
+        return false;
+    };
+    canonical_decimal(pid, u32::MAX as u64) && canonical_decimal(counter, u64::MAX)
 }
 
 fn acquire_config_lock(path: &Path, protect: bool) -> Result<ProtectedStateLock, RuntimeError> {

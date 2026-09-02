@@ -9,7 +9,7 @@ use super::{
 };
 #[cfg(any(unix, windows))]
 use crate::runtime::fs_guards::{AnchoredFile, sync_anchored_directory};
-use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError};
+use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use std::{
     ffi::OsStr,
@@ -187,13 +187,6 @@ pub(crate) fn credential_staging_path_for_test(
             process_id,
             counter,
         ))
-}
-
-fn canonical_decimal(value: &str, max: u64) -> bool {
-    !value.is_empty()
-        && value.bytes().all(|byte| byte.is_ascii_digit())
-        && (value == "0" || !value.starts_with('0'))
-        && value.parse::<u64>().is_ok_and(|value| value <= max)
 }
 
 pub(super) fn replace_atomically(path: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {

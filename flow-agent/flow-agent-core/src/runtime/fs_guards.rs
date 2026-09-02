@@ -27,7 +27,7 @@ mod local_state;
 pub(crate) use local_state::PROTECTED_STATE_LOCK_DEADLINE;
 #[cfg(any(unix, test))]
 pub(crate) use local_state::unix_access_is_private;
-pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError};
+pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
 
 mod anchored_file;
 #[cfg(windows)]

@@ -77,6 +77,24 @@ fn protected_override_round_trips_and_default_removes_only_the_override() {
 }
 
 #[test]
+fn executor_override_recovers_an_abandoned_publication_stage() {
+    let root = crate::tests::helpers::empty_workspace("executor-config-stage-recovery");
+    let config = root.join("executor.json");
+    let abandoned = root.join(format!(".executor.{}.{}.tmp", u32::MAX, u64::MAX));
+    fs::write(&abandoned, b"incomplete").expect("abandoned stage is reachable after a crash");
+    let executable = env::current_exe().expect("test executable has an absolute path");
+
+    ExecutorConfigStore::at(config)
+        .configure(&executable)
+        .expect("a later publication succeeds");
+
+    assert!(
+        !abandoned.exists(),
+        "a completed mutation must recover abandoned Executor stages"
+    );
+}
+
+#[test]
 fn executor_override_rejects_relative_paths_without_publishing() {
     let root = crate::tests::helpers::empty_workspace("executor-config-relative");
     let config = root.join("executor.json");
