@@ -75,6 +75,7 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
     filesystem_capabilities_are_exact_and_race_safe(&executor, &static_probe);
     interpreter_environment_and_credentials_cannot_escape(&executor, &static_probe);
     host_profile_is_explicit_and_network_remains_denied(&executor, &static_probe);
+    inherited_keyrings_remain_inaccessible(&executor, &static_probe);
     process_and_session_escape_remain_contained(&executor, &static_probe);
     terminal_results_retain_enforcement_evidence(&executor, &static_probe);
     timeout_cleans_the_full_process_tree(&executor, &static_probe);
@@ -368,6 +369,80 @@ time.sleep(60)
     assert_receipt(&receipt, RuntimeReadProfileV0::HostSystemRead);
 }
 
+fn inherited_keyrings_remain_inaccessible(executor: &Path, probe: &ExecutorProbeV0) {
+    const KEYCTL_JOIN_SESSION_KEYRING: std::ffi::c_long = 1;
+    const KEY_SPEC_SESSION_KEYRING: std::ffi::c_long = -3;
+    const SYS_ADD_KEY: std::ffi::c_long = 248;
+    const SYS_KEYCTL: std::ffi::c_long = 250;
+
+    let key_type = c"user";
+    let description = c"watershed-official-hostile-key";
+    let payload = b"host secret";
+    // SAFETY: this integration test is one sequential process. Both direct
+    // syscalls use valid pointers for their complete duration and leave the
+    // temporary session keyring to process teardown.
+    unsafe {
+        assert_ne!(
+            c_syscall(
+                SYS_KEYCTL,
+                KEYCTL_JOIN_SESSION_KEYRING,
+                std::ptr::null::<std::ffi::c_char>()
+            ),
+            -1,
+            "hostile test session keyring is available: {}",
+            std::io::Error::last_os_error()
+        );
+        assert_ne!(
+            c_syscall(
+                SYS_ADD_KEY,
+                key_type.as_ptr(),
+                description.as_ptr(),
+                payload.as_ptr(),
+                payload.len(),
+                KEY_SPEC_SESSION_KEYRING
+            ),
+            -1,
+            "hostile test key is seeded: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    let workspace = Workspace::new();
+    let response = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        r#"/usr/bin/python3 -c '
+import ctypes
+import errno
+import sys
+
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+
+def denied(number, *arguments):
+    ctypes.set_errno(0)
+    result = libc.syscall(number, *arguments)
+    return result == -1 and ctypes.get_errno() == errno.EPERM
+
+key_type = b"user"
+description = b"watershed-official-hostile-key"
+payload = b"sandbox secret"
+checks = [
+    denied(248, key_type, description, payload, ctypes.c_size_t(len(payload)), ctypes.c_long(-3)),
+    denied(249, key_type, description, None, ctypes.c_long(-3)),
+    denied(250, ctypes.c_long(10), ctypes.c_long(-3), key_type, description, ctypes.c_long(0)),
+]
+sys.exit(0 if all(checks) else 32)
+'"#,
+        limits(4_096, 4_096, 2_000),
+    )
+    .run(executor);
+    let (result, receipt) = completed(response);
+    assert_terminal(&result, ExecutorToolStatusV0::Completed, None, Some(0));
+    assert_receipt(&receipt, RuntimeReadProfileV0::HostSystemRead);
+}
+
 fn terminal_results_retain_enforcement_evidence(executor: &Path, probe: &ExecutorProbeV0) {
     let workspace = Workspace::new();
     for (script, expected, limit) in [
@@ -600,4 +675,9 @@ fn configured_artifacts() -> Option<(PathBuf, PathBuf)> {
         (Some(executor), Some(dynamic)) => Some((executor, dynamic)),
         _ => panic!("both static and dynamic Executor test artifacts must be configured"),
     }
+}
+
+unsafe extern "C" {
+    #[link_name = "syscall"]
+    unsafe fn c_syscall(number: std::ffi::c_long, ...) -> std::ffi::c_long;
 }

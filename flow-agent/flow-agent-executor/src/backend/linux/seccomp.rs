@@ -88,7 +88,7 @@ fn filter_bytes() -> Vec<u8> {
         Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM),
     ];
     for syscall in [
-        41_u32, 101, 155, 165, 166, 272, 308, 425, 428, 429, 430, 431, 432, 433, 442,
+        41_u32, 101, 155, 165, 166, 248, 249, 250, 272, 308, 425, 428, 429, 430, 431, 432, 433, 442,
     ] {
         program.push(Instruction::jump(BPF_JMP_JEQ_K, syscall, 0, 1));
         program.push(Instruction::statement(BPF_RET_K, SECCOMP_RET_ERRNO | EPERM));
