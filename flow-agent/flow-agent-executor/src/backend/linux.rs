@@ -25,8 +25,8 @@ use std::{
     process::{Command, Stdio},
 };
 use supervision::{
-    CLEANUP_GRACE, apply_inner_status, empty_status_document, final_status_seals,
-    read_inner_status, run_bounded, tool_result,
+    apply_inner_status, empty_status_document, final_status_seals, read_inner_status, run_bounded,
+    tool_result,
 };
 
 pub(super) fn probe() -> ProbeState {
@@ -113,12 +113,11 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
         request.limits.timeout_ms,
         request.limits.max_stdout_bytes,
         request.limits.max_stderr_bytes,
+        &tool_cgroup,
     )?;
     #[cfg(coverage)]
     drop(coverage_profile);
-    let capacity_exceeded = tool_cgroup
-        .finish(CLEANUP_GRACE)
-        .map_err(BackendError::uncertain)?;
+    let capacity_exceeded = tool_cgroup.finish().map_err(BackendError::uncertain)?;
     if capacity_exceeded
         && !matches!(
             outcome.classification,
@@ -222,7 +221,8 @@ mod tests {
     use super::sandbox::mark_undeclared_descriptors_close_on_exec;
     use super::supervision::{
         PrimaryTrigger, ProcessOutcome, apply_inner_status, empty_status_document,
-        final_status_seals, read_inner_status, select_primary, terminate_and_reap,
+        final_status_seals, read_inner_status, reportable_status, select_primary,
+        terminate_and_reap,
     };
     use rustix::fd::AsRawFd;
     use std::{
@@ -292,6 +292,51 @@ mod tests {
     }
 
     #[test]
+    fn bounded_failures_retain_only_a_prior_sealed_tool_code() {
+        use proto::ExecutorToolClassificationV0 as Classification;
+
+        for classification in [
+            Classification::StdoutCapExceeded,
+            Classification::StderrCapExceeded,
+            Classification::StdoutStderrCapExceeded,
+            Classification::OutputCollectorFailed,
+            Classification::OutputDrainTimeout,
+        ] {
+            let recorded = status_document(&(7_i32 << 8).to_ne_bytes(), final_status_seals());
+            let mut outcome = ProcessOutcome {
+                status: Some(ExitStatus::from_raw(0)),
+                classification: Some(classification),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            };
+
+            apply_inner_status(&mut outcome, &recorded).expect("sealed Tool status is accepted");
+
+            assert_eq!(outcome.status.and_then(|status| status.code()), Some(7));
+            assert_eq!(outcome.classification, Some(classification));
+        }
+
+        let empty = empty_status_document().expect("empty status memfd is created");
+        let mut claimed = ProcessOutcome {
+            status: Some(ExitStatus::from_raw(0)),
+            classification: Some(Classification::OutputCollectorFailed),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        assert!(apply_inner_status(&mut claimed, &empty).is_err());
+
+        let mut cleanup_induced = ProcessOutcome {
+            status: None,
+            classification: Some(Classification::OutputCollectorFailed),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        apply_inner_status(&mut cleanup_induced, &empty)
+            .expect("cleanup-induced exit does not claim Tool status");
+        assert!(cleanup_induced.status.is_none());
+    }
+
+    #[test]
     fn self_test_failure_captures_exit_code_and_bounded_stderr() {
         let mut command = Command::new("/bin/sh");
         command.args([
@@ -318,6 +363,7 @@ mod tests {
             PrimaryTrigger::TimedOut,
             PrimaryTrigger::StdoutCap,
             PrimaryTrigger::StderrCap,
+            PrimaryTrigger::Exit,
         ] {
             let mut primary = Some(established);
 
@@ -327,6 +373,18 @@ mod tests {
             ));
             assert_eq!(primary, Some(PrimaryTrigger::CollectorFailed));
         }
+    }
+
+    #[test]
+    fn only_an_exit_observed_before_cleanup_is_reportable() {
+        let natural = ExitStatus::from_raw(7_i32 << 8);
+        let cleanup_induced = ExitStatus::from_raw(15);
+
+        assert_eq!(
+            reportable_status(natural, false).and_then(|status| status.code()),
+            Some(7)
+        );
+        assert!(reportable_status(cleanup_induced, true).is_none());
     }
 
     #[test]

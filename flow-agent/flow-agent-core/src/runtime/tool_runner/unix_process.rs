@@ -2,6 +2,9 @@ use super::{
     MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome, ToolInvocation, ToolTerminalClassification,
 };
 use crate::runtime::{fs_guards::AnchoredDir, run_attempts::RunAttemptOutcome};
+use proto::{
+    TOOL_FORCED_REAP_DEADLINE_V0, TOOL_OUTPUT_DRAIN_DEADLINE_V0, TOOL_TERMINATION_GRACE_V0,
+};
 #[cfg(test)]
 use std::cell::Cell;
 use std::time::{Duration, Instant};
@@ -25,9 +28,6 @@ pub(crate) use measurements::{
     measure_ready_process_group_cleanup, measure_ready_tool_cancellation,
 };
 
-const TERMINATION_GRACE: Duration = Duration::from_secs(1);
-const FORCED_REAP_DEADLINE: Duration = Duration::from_secs(1);
-const OUTPUT_DRAIN_DEADLINE: Duration = Duration::from_secs(1);
 const CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const PROCESS_GROUP_SETTLE_DEADLINE: Duration = Duration::from_millis(100);
 const CAP_EXIT_OBSERVATION_DEADLINE: Duration = Duration::from_millis(100);
@@ -41,9 +41,9 @@ enum CleanupDeadlineKind {
 impl CleanupDeadlineKind {
     fn duration(self) -> Duration {
         match self {
-            Self::TerminationGrace => TERMINATION_GRACE,
-            Self::ForcedReap => FORCED_REAP_DEADLINE,
-            Self::OutputDrain => OUTPUT_DRAIN_DEADLINE,
+            Self::TerminationGrace => TOOL_TERMINATION_GRACE_V0,
+            Self::ForcedReap => TOOL_FORCED_REAP_DEADLINE_V0,
+            Self::OutputDrain => TOOL_OUTPUT_DRAIN_DEADLINE_V0,
         }
     }
 }

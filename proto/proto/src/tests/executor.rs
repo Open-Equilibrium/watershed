@@ -6,14 +6,22 @@ use crate::{
     ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
     ExecutorToolStatusV0, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
     MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
-    MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0, UnixObjectIdentityV0,
+    MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0, TOOL_FORCED_REAP_DEADLINE_V0,
+    TOOL_OUTPUT_DRAIN_DEADLINE_V0, TOOL_TERMINATION_GRACE_V0, UnixObjectIdentityV0,
     canonical_executor_probe_v0, canonical_executor_request_v0, canonical_executor_response_v0,
     decode_executor_stream_v0, encode_executor_stream_v0, parse_executor_probe_v0,
     parse_executor_request_v0, parse_executor_response_v0, resolved_policy_digest_v0,
     validate_enforcement_receipt_v0,
 };
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
+
+#[test]
+fn tool_cleanup_uses_the_canonical_ordered_deadlines() {
+    assert_eq!(TOOL_TERMINATION_GRACE_V0, Duration::from_secs(1));
+    assert_eq!(TOOL_FORCED_REAP_DEADLINE_V0, Duration::from_secs(1));
+    assert_eq!(TOOL_OUTPUT_DRAIN_DEADLINE_V0, Duration::from_secs(1));
+}
 
 fn canonical_wire(document: &impl Serialize) -> Vec<u8> {
     let mut wire = crate::canonical_json(&serde_json::to_value(document).unwrap())

@@ -1,12 +1,13 @@
-use rustix::fd::{AsRawFd, OwnedFd};
+use rustix::{
+    fd::{AsRawFd, OwnedFd},
+    process::{Pid, PidfdFlags, Signal, pidfd_open, pidfd_send_signal},
+};
 use std::{
     fs::{File, OpenOptions},
     io::Read,
     os::unix::process::CommandExt,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
-    thread,
-    time::{Duration, Instant},
 };
 
 pub(crate) const SCOPED_ARGUMENT: &str = "--capacity-scoped";
@@ -46,7 +47,7 @@ pub(crate) fn probe() -> Result<(), String> {
 }
 
 pub(crate) fn scope_self_test() -> Result<(), String> {
-    ToolCgroup::create(1)?.finish(Duration::from_millis(250))?;
+    ToolCgroup::create(1)?.finish()?;
     Ok(())
 }
 
@@ -116,7 +117,7 @@ impl ToolCgroup {
             Ok(())
         })();
         if let Err(error) = configured {
-            let _ = cgroup.finish(Duration::from_millis(250));
+            let _ = cgroup.finish();
             return Err(error);
         }
         Ok(cgroup)
@@ -130,8 +131,20 @@ impl ToolCgroup {
             .map_err(|error| format!("failed to open Tool cgroup membership: {error}"))
     }
 
-    pub(crate) fn finish(mut self, grace: Duration) -> Result<bool, String> {
-        let exceeded = drain_and_observe_capacity(&self.path, self.initial_max_events, grace)?;
+    pub(crate) fn signal_termination(&self) -> Result<(), String> {
+        signal_processes(&self.path)
+    }
+
+    pub(crate) fn force_kill(&self) -> Result<(), String> {
+        write_control(&self.path.join("cgroup.kill"), "1")
+    }
+
+    pub(crate) fn is_empty(&self) -> Result<bool, String> {
+        Ok(read_event(&self.path.join("cgroup.events"), "populated")? == 0)
+    }
+
+    pub(crate) fn finish(mut self) -> Result<bool, String> {
+        let exceeded = observe_finished_capacity(&self.path, self.initial_max_events)?;
         std::fs::remove_dir(&self.path)
             .map_err(|error| format!("failed to remove Tool cgroup: {error}"))?;
         self.removed = true;
@@ -139,18 +152,59 @@ impl ToolCgroup {
     }
 }
 
-fn drain_and_observe_capacity(
-    path: &Path,
-    initial_max_events: u64,
-    grace: Duration,
-) -> Result<bool, String> {
-    write_control(&path.join("cgroup.kill"), "1")?;
-    let deadline = Instant::now() + grace;
-    while read_event(&path.join("cgroup.events"), "populated")? != 0 {
-        if Instant::now() >= deadline {
-            return Err("Tool cgroup remained populated after cleanup".to_owned());
+fn signal_processes(path: &Path) -> Result<(), String> {
+    // This snapshot cannot include later forks. PID descriptors bind TERM to
+    // the captured process identities; pids.max bounds later forks and the
+    // forced cgroup.kill fallback covers the complete live leaf atomically.
+    let targets = read_process_ids(path)?
+        .into_iter()
+        .filter_map(|raw| {
+            let pid = Pid::from_raw(raw).expect("cgroup process IDs are positive");
+            loop {
+                match pidfd_open(pid, PidfdFlags::empty()) {
+                    Ok(descriptor) => return Some(Ok((raw, descriptor))),
+                    Err(rustix::io::Errno::INTR) => {}
+                    Err(rustix::io::Errno::SRCH) => return None,
+                    Err(error) => {
+                        return Some(Err(format!(
+                            "failed to retain Tool process for termination: {error}"
+                        )));
+                    }
+                }
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    for (_, descriptor) in targets {
+        loop {
+            match pidfd_send_signal(&descriptor, Signal::TERM) {
+                Ok(()) | Err(rustix::io::Errno::SRCH) => break,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(error) => {
+                    return Err(format!("failed to terminate Tool process: {error}"));
+                }
+            }
         }
-        thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
+}
+
+fn read_process_ids(path: &Path) -> Result<Vec<i32>, String> {
+    read_trimmed(&path.join("cgroup.procs"))?
+        .lines()
+        .map(|line| {
+            let raw = line
+                .parse::<i32>()
+                .map_err(|_| "cgroup.procs contained an invalid process ID".to_owned())?;
+            Pid::from_raw(raw)
+                .map(|_| raw)
+                .ok_or_else(|| "cgroup.procs contained an invalid process ID".to_owned())
+        })
+        .collect()
+}
+
+fn observe_finished_capacity(path: &Path, initial_max_events: u64) -> Result<bool, String> {
+    if read_event(&path.join("cgroup.events"), "populated")? != 0 {
+        return Err("Tool cgroup remained populated after cleanup".to_owned());
     }
     Ok(read_event(&path.join("pids.events"), "max")? > initial_max_events)
 }
@@ -283,51 +337,36 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::drain_and_observe_capacity;
+    use super::observe_finished_capacity;
     use std::{
         fs,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
-        thread,
-        time::{Duration, Instant},
     };
 
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
 
     #[test]
-    fn cleanup_observes_capacity_events_triggered_before_descendants_exit() {
+    fn cleanup_observes_capacity_events_after_the_tool_tree_is_empty() {
         let path = std::env::temp_dir().join(format!(
             "watershed-cgroup-cleanup-{}-{}",
             std::process::id(),
             NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&path).expect("fake cgroup is created");
-        fs::write(path.join("pids.events"), "max 0\n").expect("capacity events are initialized");
-        fs::write(path.join("cgroup.events"), "populated 1\n")
-            .expect("fake cgroup starts populated");
-        fs::write(path.join("cgroup.kill"), "").expect("kill control is initialized");
+        fs::write(path.join("pids.events"), "max 1\n").expect("capacity event is recorded");
+        fs::write(path.join("cgroup.events"), "populated 1\n").expect("fake cgroup is populated");
 
-        let descendant_path = path.clone();
-        let descendant = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while fs::read_to_string(descendant_path.join("cgroup.kill"))
-                .expect("kill control remains readable")
-                .trim()
-                != "1"
-            {
-                assert!(Instant::now() < deadline, "cleanup must issue cgroup.kill");
-                thread::yield_now();
-            }
-            fs::write(descendant_path.join("pids.events"), "max 1\n")
-                .expect("capacity event is recorded");
-            fs::write(descendant_path.join("cgroup.events"), "populated 0\n")
-                .expect("descendant exit is recorded");
-        });
+        let premature = observe_finished_capacity(&path, 0);
+        fs::write(path.join("cgroup.events"), "populated 0\n").expect("fake cgroup is empty");
 
-        let observed = drain_and_observe_capacity(&path, 0, Duration::from_secs(2));
-        descendant.join().expect("fake descendant exits");
+        let observed = observe_finished_capacity(&path, 0);
         remove_fake_cgroup(&path);
 
+        assert_eq!(
+            premature,
+            Err("Tool cgroup remained populated after cleanup".to_owned())
+        );
         assert_eq!(observed, Ok(true));
     }
 

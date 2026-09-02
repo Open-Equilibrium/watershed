@@ -1,4 +1,8 @@
-use crate::backend::BackendError;
+use crate::{
+    backend::BackendError,
+    cgroup::ToolCgroup,
+    lifecycle::{CleanupAction, CleanupController, InnerStatusPolicy, inner_status_policy},
+};
 use proto::{
     ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
     encode_executor_stream_v0,
@@ -8,7 +12,7 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     os::unix::process::ExitStatusExt,
-    process::{Child, Command, ExitStatus},
+    process::{Command, ExitStatus},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -18,7 +22,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) const CLEANUP_GRACE: Duration = Duration::from_millis(250);
+#[cfg(test)]
+use std::process::Child;
 
 pub(super) fn empty_status_document() -> Result<OwnedFd, BackendError> {
     rustix::fs::memfd_create(
@@ -60,12 +65,11 @@ pub(super) fn apply_inner_status(
     outcome: &mut ProcessOutcome,
     descriptor: &OwnedFd,
 ) -> Result<(), BackendError> {
-    if !matches!(
-        outcome.classification,
-        None | Some(ExecutorToolClassificationV0::NonzeroExit)
-            | Some(ExecutorToolClassificationV0::SignalTermination)
-    ) {
-        return Ok(());
+    let policy = inner_status_policy(outcome.classification);
+    match policy {
+        InnerStatusPolicy::Ignore => return Ok(()),
+        InnerStatusPolicy::IfReportable if outcome.status.is_none() => return Ok(()),
+        InnerStatusPolicy::IfReportable | InnerStatusPolicy::RequiredAndClassify => {}
     }
     if !outcome.status.is_some_and(|status| status.success()) {
         return Err(BackendError::uncertain(
@@ -76,7 +80,9 @@ pub(super) fn apply_inner_status(
         BackendError::uncertain("trusted inner Executor did not record a Tool status")
     })?;
     outcome.status = Some(status);
-    outcome.classification = classify_exit(Some(status));
+    if policy == InnerStatusPolicy::RequiredAndClassify {
+        outcome.classification = classify_exit(Some(status));
+    }
     Ok(())
 }
 
@@ -132,21 +138,14 @@ pub(super) fn select_primary(
     }
 }
 
-fn start_cleanup(
-    primary: &mut Option<PrimaryTrigger>,
-    cleanup_deadline: &mut Option<Instant>,
-    candidate: PrimaryTrigger,
-    child: &mut Child,
-) {
-    if select_primary(primary, candidate) {
-        *cleanup_deadline = Some(Instant::now() + CLEANUP_GRACE);
-        let _ = child.kill();
-    }
+pub(super) fn reportable_status(observed: ExitStatus, cleanup_started: bool) -> Option<ExitStatus> {
+    (!cleanup_started).then_some(observed)
 }
 
+#[cfg(test)]
 pub(super) fn terminate_and_reap(child: &mut Child) -> ExitStatus {
     let _ = child.kill();
-    let deadline = Instant::now() + CLEANUP_GRACE;
+    let deadline = Instant::now() + proto::TOOL_FORCED_REAP_DEADLINE_V0;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return status,
@@ -167,6 +166,7 @@ pub(super) fn run_bounded(
     timeout_ms: u64,
     stdout_limit: u64,
     stderr_limit: u64,
+    tool_cgroup: &ToolCgroup,
 ) -> Result<ProcessOutcome, BackendError> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(timeout_ms))
@@ -192,107 +192,94 @@ pub(super) fn run_bounded(
 
     let mut primary = None;
     let mut status = None;
+    let mut status_before_cleanup = None;
     let mut stdout = None;
     let mut stderr = None;
     let mut stdout_overflow = false;
     let mut stderr_overflow = false;
-    let mut cleanup_deadline = None;
+    let mut cleanup = None;
     loop {
         for event in receiver.try_iter() {
             match event {
                 StreamEvent::Overflow(StreamKind::Stdout) => {
                     stdout_overflow = true;
-                    start_cleanup(
-                        &mut primary,
-                        &mut cleanup_deadline,
-                        PrimaryTrigger::StdoutCap,
-                        &mut child,
-                    );
+                    select_primary(&mut primary, PrimaryTrigger::StdoutCap);
                 }
                 StreamEvent::Overflow(StreamKind::Stderr) => {
                     stderr_overflow = true;
-                    start_cleanup(
-                        &mut primary,
-                        &mut cleanup_deadline,
-                        PrimaryTrigger::StderrCap,
-                        &mut child,
-                    );
+                    select_primary(&mut primary, PrimaryTrigger::StderrCap);
                 }
                 StreamEvent::Done(StreamKind::Stdout, result) => match result {
                     Ok(output) => stdout = Some(output),
                     Err(output) => {
                         stdout = Some(output);
-                        start_cleanup(
-                            &mut primary,
-                            &mut cleanup_deadline,
-                            PrimaryTrigger::CollectorFailed,
-                            &mut child,
-                        );
+                        select_primary(&mut primary, PrimaryTrigger::CollectorFailed);
                     }
                 },
                 StreamEvent::Done(StreamKind::Stderr, result) => match result {
                     Ok(output) => stderr = Some(output),
                     Err(output) => {
                         stderr = Some(output);
-                        start_cleanup(
-                            &mut primary,
-                            &mut cleanup_deadline,
-                            PrimaryTrigger::CollectorFailed,
-                            &mut child,
-                        );
+                        select_primary(&mut primary, PrimaryTrigger::CollectorFailed);
                     }
                 },
             }
         }
         if primary.is_none() && cancelled.load(Ordering::Acquire) {
-            start_cleanup(
-                &mut primary,
-                &mut cleanup_deadline,
-                PrimaryTrigger::Cancelled,
-                &mut child,
-            );
+            select_primary(&mut primary, PrimaryTrigger::Cancelled);
         }
         if primary.is_none() && Instant::now() >= deadline {
-            start_cleanup(
-                &mut primary,
-                &mut cleanup_deadline,
-                PrimaryTrigger::TimedOut,
-                &mut child,
-            );
+            select_primary(&mut primary, PrimaryTrigger::TimedOut);
         }
         if status.is_none() {
             match child.try_wait() {
                 Ok(Some(observed)) => {
+                    status_before_cleanup = reportable_status(observed, cleanup.is_some());
                     status = Some(observed);
-                    if primary.is_none() {
-                        primary = Some(PrimaryTrigger::Exit);
-                    }
-                    cleanup_deadline.get_or_insert(Instant::now() + CLEANUP_GRACE);
+                    select_primary(&mut primary, PrimaryTrigger::Exit);
                 }
                 Ok(None) => {}
                 Err(_) => {
-                    start_cleanup(
-                        &mut primary,
-                        &mut cleanup_deadline,
-                        PrimaryTrigger::CollectorFailed,
-                        &mut child,
-                    );
+                    select_primary(&mut primary, PrimaryTrigger::CollectorFailed);
                 }
             }
         }
-        if status.is_some() && stdout.is_some() && stderr.is_some() {
-            break;
+        if cleanup.is_none() && primary.is_some() {
+            tool_cgroup
+                .signal_termination()
+                .unwrap_or_else(|_| fail_closed_unreaped_child());
+            cleanup = Some(CleanupController::new(Instant::now()));
         }
-        if cleanup_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-            if status.is_none() {
-                status = Some(terminate_and_reap(&mut child));
+        if let Some(controller) = cleanup.as_mut() {
+            let cgroup_empty = tool_cgroup
+                .is_empty()
+                .unwrap_or_else(|_| fail_closed_unreaped_child());
+            let output_drained = stdout.is_some() && stderr.is_some();
+            match controller.advance(
+                Instant::now(),
+                cgroup_empty && status.is_some(),
+                output_drained,
+            ) {
+                CleanupAction::Wait => {}
+                CleanupAction::ForceKill => {
+                    tool_cgroup
+                        .force_kill()
+                        .unwrap_or_else(|_| fail_closed_unreaped_child());
+                    if status.is_none() {
+                        let _ = child.kill();
+                    }
+                }
+                CleanupAction::FailClosed => fail_closed_unreaped_child(),
+                CleanupAction::Complete => break,
+                CleanupAction::OutputDrainTimeout => {
+                    return Ok(ProcessOutcome {
+                        status: status_before_cleanup,
+                        classification: Some(ExecutorToolClassificationV0::OutputDrainTimeout),
+                        stdout: stdout.unwrap_or_default(),
+                        stderr: stderr.unwrap_or_default(),
+                    });
+                }
             }
-            return Ok(ProcessOutcome {
-                status,
-                classification: Some(ExecutorToolClassificationV0::OutputDrainTimeout),
-                stdout: stdout.unwrap_or_default(),
-                stderr: stderr.unwrap_or_default(),
-            });
         }
         thread::sleep(Duration::from_millis(5));
     }
@@ -310,10 +297,10 @@ pub(super) fn run_bounded(
                 (false, false) => unreachable!("output trigger records its stream"),
             })
         }
-        PrimaryTrigger::Exit => classify_exit(status),
+        PrimaryTrigger::Exit => classify_exit(status_before_cleanup),
     };
     Ok(ProcessOutcome {
-        status,
+        status: status_before_cleanup,
         classification,
         stdout: stdout.unwrap_or_default(),
         stderr: stderr.unwrap_or_default(),

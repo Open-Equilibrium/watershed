@@ -82,7 +82,7 @@ fn official_artifact_enforces_the_linux_sandbox_contract() {
     concurrent_process_capacity_is_per_invocation(&executor, &static_probe);
     terminal_results_retain_enforcement_evidence(&executor, &static_probe);
     timeout_cleans_the_full_process_tree(&executor, &static_probe);
-    cancellation_cleans_the_full_process_tree(&executor, &static_probe);
+    cancellation_gives_the_tool_its_term_grace(&executor, &static_probe);
     executor_crash_leaves_no_tool_or_cgroup(&executor, &static_probe);
 }
 
@@ -738,13 +738,13 @@ fn timeout_cleans_the_full_process_tree(executor: &Path, probe: &ExecutorProbeV0
     assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
 }
 
-fn cancellation_cleans_the_full_process_tree(executor: &Path, probe: &ExecutorProbeV0) {
+fn cancellation_gives_the_tool_its_term_grace(executor: &Path, probe: &ExecutorProbeV0) {
     let workspace = Workspace::new();
     let running = PreparedRequest::new(
         probe,
         &workspace,
         RuntimeReadProfileV0::Exact,
-        descendant_script(),
+        "IFS=: read -r _ _ cgroup < /proc/self/cgroup; printf %s \"$cgroup\" > /workspace/cgroup; trap 'printf handled > /workspace/term; printf final; exit 0' TERM; printf ready > /workspace/ready; while :; do :; done",
         limits(4_096, 4_096, 10_000),
     )
     .spawn(executor);
@@ -761,7 +761,17 @@ fn cancellation_cleans_the_full_process_tree(executor: &Path, probe: &ExecutorPr
         Some(ExecutorToolClassificationV0::Cancelled),
         None,
     );
-    assert_tree_stopped(&workspace);
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("term"))
+            .expect("the Tool TERM trap records completion"),
+        "handled",
+        "the Tool must observe TERM before forced cgroup cleanup"
+    );
+    assert_eq!(
+        decode_executor_stream_v0(&result.stdout_base64).expect("stdout decodes"),
+        b"final",
+        "output written by the TERM trap must drain after cleanup"
+    );
     assert_cgroup_removed(&workspace);
     assert_receipt(&receipt, RuntimeReadProfileV0::Exact);
 }
@@ -795,7 +805,7 @@ fn executor_crash_leaves_no_tool_or_cgroup(executor: &Path, probe: &ExecutorProb
 }
 
 fn descendant_script() -> &'static str {
-    "IFS=: read -r _ _ cgroup < /proc/self/cgroup; printf %s \"$cgroup\" > /workspace/cgroup; (printf ready > /workspace/ready; i=0; while :; do i=$((i + 1)); if [ \"$i\" -eq 1000 ]; then printf x >> /workspace/heartbeat; i=0; fi; done) & while :; do :; done"
+    "IFS=: read -r _ _ cgroup < /proc/self/cgroup; printf %s \"$cgroup\" > /workspace/cgroup; trap '' TERM; (trap '' TERM; printf ready > /workspace/ready; i=0; while :; do i=$((i + 1)); if [ \"$i\" -eq 1000 ]; then printf x >> /workspace/heartbeat; i=0; fi; done) & while :; do :; done"
 }
 
 fn assert_tree_stopped(workspace: &Workspace) {

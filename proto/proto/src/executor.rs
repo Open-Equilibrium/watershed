@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, time::Duration};
 
 mod codec;
 mod stream;
@@ -56,6 +56,12 @@ pub const MAX_EXECUTOR_WORKSPACE_MOUNTS_V0: usize = 64;
 pub const MAX_EXECUTOR_RUNTIME_MOUNTS_V0: usize = 64;
 /// First inherited descriptor reserved for pre-opened filesystem objects.
 pub const EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0: u32 = 32;
+/// Grace after TERM reaches a live Tool tree before forced cleanup.
+pub const TOOL_TERMINATION_GRACE_V0: Duration = Duration::from_secs(1);
+/// Deadline for forced Tool-tree cleanup and supervisor reaping.
+pub const TOOL_FORCED_REAP_DEADLINE_V0: Duration = Duration::from_secs(1);
+/// Deadline for bounded output EOF after Tool-tree cleanup.
+pub const TOOL_OUTPUT_DRAIN_DEADLINE_V0: Duration = Duration::from_secs(1);
 
 const MAX_ID_CHARS: usize = 256;
 const MAX_NAME_CHARS: usize = 256;

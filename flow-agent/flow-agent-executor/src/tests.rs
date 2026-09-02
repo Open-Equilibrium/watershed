@@ -3,6 +3,7 @@ use crate::{
         BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, seccomp_policy,
         validate_mount_contract,
     },
+    lifecycle::{CleanupAction, CleanupController, InnerStatusPolicy, inner_status_policy},
     platform, protocol,
 };
 use core_policy::{
@@ -13,11 +14,95 @@ use core_policy::{
 use proto::{
     EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, ExecutorLimitsV0,
     ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0,
-    ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0, RuntimeReadProfileV0,
-    UnixObjectIdentityV0, resolved_policy_digest_v0,
+    ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
+    ExecutorToolClassificationV0, RuntimeReadProfileV0, UnixObjectIdentityV0,
+    resolved_policy_digest_v0,
 };
-use std::collections::BTreeMap;
 use std::io::Cursor;
+use std::{collections::BTreeMap, time::Instant};
+
+#[test]
+fn cleanup_controller_orders_term_kill_reap_and_output_drain() {
+    let started = Instant::now();
+    let term_deadline = started + proto::TOOL_TERMINATION_GRACE_V0;
+    let forced_deadline = term_deadline + proto::TOOL_FORCED_REAP_DEADLINE_V0;
+    let mut forced = CleanupController::new(started);
+
+    assert_eq!(
+        forced.advance(
+            term_deadline - std::time::Duration::from_nanos(1),
+            false,
+            false
+        ),
+        CleanupAction::Wait
+    );
+    assert_eq!(
+        forced.advance(term_deadline, false, false),
+        CleanupAction::ForceKill
+    );
+    assert_eq!(
+        forced.advance(
+            forced_deadline - std::time::Duration::from_nanos(1),
+            false,
+            false
+        ),
+        CleanupAction::Wait
+    );
+    assert_eq!(
+        forced.advance(forced_deadline, false, false),
+        CleanupAction::FailClosed
+    );
+
+    let cleanup_finished = started + std::time::Duration::from_millis(500);
+    let drain_deadline = cleanup_finished + proto::TOOL_OUTPUT_DRAIN_DEADLINE_V0;
+    let mut drained = CleanupController::new(started);
+    assert_eq!(
+        drained.advance(cleanup_finished, true, false),
+        CleanupAction::Wait
+    );
+    assert_eq!(
+        drained.advance(
+            drain_deadline - std::time::Duration::from_nanos(1),
+            true,
+            false
+        ),
+        CleanupAction::Wait
+    );
+    assert_eq!(
+        drained.advance(drain_deadline, true, false),
+        CleanupAction::OutputDrainTimeout
+    );
+
+    let mut complete = CleanupController::new(started);
+    assert_eq!(
+        complete.advance(cleanup_finished, true, true),
+        CleanupAction::Complete
+    );
+}
+
+#[test]
+fn bounded_failures_substitute_only_prior_inner_tool_status() {
+    for classification in [
+        ExecutorToolClassificationV0::StdoutCapExceeded,
+        ExecutorToolClassificationV0::StderrCapExceeded,
+        ExecutorToolClassificationV0::StdoutStderrCapExceeded,
+        ExecutorToolClassificationV0::OutputCollectorFailed,
+        ExecutorToolClassificationV0::OutputDrainTimeout,
+    ] {
+        assert_eq!(
+            inner_status_policy(Some(classification)),
+            InnerStatusPolicy::IfReportable
+        );
+    }
+    assert_eq!(
+        inner_status_policy(None),
+        InnerStatusPolicy::RequiredAndClassify
+    );
+    assert_eq!(
+        inner_status_policy(Some(ExecutorToolClassificationV0::ToolTimedOut)),
+        InnerStatusPolicy::Ignore
+    );
+}
 
 #[test]
 fn protocol_probe_is_one_canonical_document() {
