@@ -3,7 +3,7 @@ use crate::{
         BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, validate_mount_contract,
     },
     lifecycle::{CleanupAction, CleanupController, InnerStatusPolicy, inner_status_policy},
-    platform, protocol,
+    protocol,
 };
 use core_policy::{
     CommandPolicy, EnvironmentDefault, EnvironmentPolicy, FilesystemPolicy, NetworkDefault,
@@ -540,14 +540,6 @@ fn response_stream_limits_cannot_exceed_the_protocol_capacity() {
         .expect_err("an unrepresentable response limit must fail before launch");
 
     assert!(error.to_string().contains("exceed protocol capacity"));
-}
-
-#[test]
-fn official_platform_support_is_exact_and_fail_closed() {
-    assert!(platform::is_official_target("linux", "x86_64", "24.04"));
-    assert!(!platform::is_official_target("linux", "aarch64", "24.04"));
-    assert!(!platform::is_official_target("macos", "aarch64", "26"));
-    assert!(!platform::is_official_target("windows", "x86_64", "11"));
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]

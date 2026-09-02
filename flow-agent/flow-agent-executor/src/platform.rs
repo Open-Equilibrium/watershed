@@ -1,8 +1,3 @@
-#[cfg(test)]
-pub(crate) fn is_official_target(os: &str, architecture: &str, version: &str) -> bool {
-    os == "linux" && architecture == "x86_64" && version == "24.04"
-}
-
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) fn official_host() -> bool {
     let Ok(release) = std::fs::read_to_string("/etc/os-release") else {
