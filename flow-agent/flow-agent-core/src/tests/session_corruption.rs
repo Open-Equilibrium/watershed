@@ -201,6 +201,7 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
+                "max_concurrent_processes_and_threads": 1,
                 "network_access": "deny",
                 "read_only_mounts": [],
                 "tool_id": "echo",
@@ -256,6 +257,7 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
+                "max_concurrent_processes_and_threads": 1,
                 "network_access": "deny",
                 "read_only_mounts": [],
                 "tool_id": "echo",

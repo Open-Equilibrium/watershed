@@ -223,6 +223,7 @@ fn distinct_attempts_may_invoke_the_same_tool_in_one_phase() {
             serde_json::json!({
                 "allowed_parameters": [],
                 "attempt_id": attempt_id,
+                "max_concurrent_processes_and_threads": 1,
                 "network_access": "deny",
                 "read_only_mounts": ["workspace"],
                 "tool_id": "tool",
