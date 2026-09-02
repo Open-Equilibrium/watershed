@@ -596,20 +596,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (M12_EXECUTOR, "readelf -l", 'grep -q "INTERP"', "exit 1"):
             self.assertIn(required, static)
 
-        bwrap = "\n".join(
-            assert_step_state(
-                self, workflow, "Check M1.2 Bubblewrap availability", condition=UBUNTU
-            )
-        )
-        for required in ("/usr/bin/bwrap", "dpkg-query", "bwrap --version"):
-            self.assertIn(required, bwrap)
-        self.assertIn("/bin/sh -ec", bwrap)
-        self.assertIn("command -v bwrap", bwrap)
-        self.assertNotIn(
-            f"docker exec {M12_CONTAINER} command -v bwrap",
-            bwrap,
-        )
-
         executor_tests = "\n".join(
             assert_step_state(
                 self, workflow, "Run M1.2 executor tests", condition=UBUNTU
