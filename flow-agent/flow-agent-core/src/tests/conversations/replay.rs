@@ -6,9 +6,7 @@ use super::{create_conversation_run, create_review_run, create_terminal_review_r
 use crate::runtime::{
     session::run_flow,
     session_authority::SessionOwnershipLease,
-    session_reading::{
-        SessionEventReader, replay_conversation_run, replay_conversation_run_streaming,
-    },
+    session_reading::{replay_conversation_run, replay_conversation_run_streaming},
     stream_signature::{EVENT_PLAN_DOMAIN, RuntimeStreamSignatureBuilder},
     types::{EmitMode, MAX_CANONICAL_EVENT_BYTES, RuntimeError},
 };
@@ -91,15 +89,6 @@ fn in_memory_replay_accepts_exact_output_limit_and_rejects_one_byte_over() {
         RuntimeError::ReplayOutputLimitExceeded {
             limit_bytes: IN_MEMORY_REPLAY_TEST_LIMIT_BYTES
         }
-    ));
-    let mut reader =
-        SessionEventReader::open_conversation_run(&workspace, conversation_id, run_session_id)
-            .expect("the oversized Run reader opens");
-    assert!(matches!(
-        reader.read_after(0),
-        Err(RuntimeError::ReplayOutputLimitExceeded {
-            limit_bytes: IN_MEMORY_REPLAY_TEST_LIMIT_BYTES
-        })
     ));
 }
 

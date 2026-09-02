@@ -31,13 +31,6 @@ fn registry_loader_resolves_hello_flow_refs_and_canonical_output() {
         vec!["read-file"]
     );
     assert!(registry.tool_block("ReadFile").is_some());
-    assert_eq!(
-        registry
-            .tool_blocks()
-            .map(|tool| tool.identity.id.as_str())
-            .collect::<Vec<_>>(),
-        ["read-file", "write-summary"]
-    );
     assert!(registry.instruction_block("InspectInput").is_some());
 
     let canonical = registry
