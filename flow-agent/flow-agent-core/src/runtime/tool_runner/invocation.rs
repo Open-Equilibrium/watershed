@@ -1,4 +1,4 @@
-use super::{OWN_SCRIPT_EXECUTABLE, ToolInvocation, ToolRunnerError};
+use super::{ToolInvocation, ToolRunnerError};
 use std::collections::BTreeMap;
 
 pub(crate) fn build_tool_invocation(
@@ -38,7 +38,7 @@ pub(crate) fn build_tool_invocation(
             ];
             argv.extend(parameter_tokens);
             ToolInvocation {
-                executable: OWN_SCRIPT_EXECUTABLE.to_owned(),
+                executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
                 argv,
             }
         }

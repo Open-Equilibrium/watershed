@@ -4,7 +4,7 @@ use super::{
 };
 use crate::runtime::{
     fs_guards::AnchoredWorkspace,
-    tool_runner::{OWN_SCRIPT_EXECUTABLE, ToolExecutionOutcome, ToolInvocation},
+    tool_runner::{ToolExecutionOutcome, ToolInvocation},
 };
 use std::{
     io,
@@ -30,7 +30,7 @@ pub(crate) fn measure_ready_process_group_cleanup() -> Result<Duration, &'static
         OutputCollector::new(stderr_reader).map_err(|_| "could not open stderr collector")?;
     let stdout_writer: OwnedFd = stdout_writer.into();
     let stderr_writer: OwnedFd = stderr_writer.into();
-    let mut command = Command::new(OWN_SCRIPT_EXECUTABLE);
+    let mut command = Command::new(core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE);
     command
         .args([
             "-c",
@@ -89,7 +89,7 @@ pub(crate) fn measure_ready_tool_cancellation(
         AnchoredWorkspace::open(workspace).map_err(|_| "runner workspace did not open")?;
     let cancelled = AtomicBool::new(false);
     let invocation = ToolInvocation {
-        executable: OWN_SCRIPT_EXECUTABLE.to_owned(),
+        executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
         argv: vec![
             "-c".to_owned(),
             format!(

@@ -15,7 +15,7 @@ use std::{
 #[cfg(unix)]
 fn shell_invocation(body: &str) -> ToolInvocation {
     ToolInvocation {
-        executable: "/bin/sh".to_owned(),
+        executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
         argv: vec![
             "-c".to_owned(),
             body.to_owned(),

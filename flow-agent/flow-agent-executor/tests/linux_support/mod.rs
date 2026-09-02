@@ -179,10 +179,9 @@ impl PreparedRequest {
             .iter()
             .filter(|mount| {
                 mount.runtime_profile == profile
-                    && mount
-                        .executable
-                        .as_deref()
-                        .is_none_or(|executable| executable == "/bin/sh")
+                    && mount.executable.as_deref().is_none_or(|executable| {
+                        executable == core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE
+                    })
             })
             .map(|mount| {
                 (
@@ -236,7 +235,7 @@ impl PreparedRequest {
         let request = ExecutorRequestV0 {
             argv: vec!["-c".to_owned(), script.to_owned()],
             environment: BTreeMap::new(),
-            executable: "/bin/sh".to_owned(),
+            executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
             limits,
             mounts,
             policy_digest: resolved_policy_digest_v0(&resolved_policy)

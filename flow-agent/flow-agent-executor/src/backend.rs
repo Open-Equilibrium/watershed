@@ -27,7 +27,11 @@ pub(crate) const HOST_SYSTEM_READ_MOUNTS: [(&str, &str); 6] = [
 ];
 
 const EXACT_RUNTIME_EXECUTABLES: [(&str, &str, &str); 3] = [
-    ("/bin/sh", "/usr/bin/dash", "/bin/sh"),
+    (
+        core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE,
+        "/usr/bin/dash",
+        core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE,
+    ),
     ("/bin/cat", "/usr/bin/cat", "/bin/cat"),
     ("/bin/echo", "/usr/bin/echo", "/bin/echo"),
 ];
@@ -192,7 +196,7 @@ fn validate_command_contract(
         core_policy::ToolRuntimeProfile::HostSystemRead => RuntimeReadProfileV0::HostSystemRead,
     };
     let expected_executable = match command.tool_kind {
-        core_policy::ToolKind::OwnScript => Some("/bin/sh"),
+        core_policy::ToolKind::OwnScript => Some(core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE),
         core_policy::ToolKind::PredefinedCommand => {
             core_policy::TrustedPredefinedCommand::parse(&command.command_id)
                 .and_then(core_policy::TrustedPredefinedCommand::productive_executable)

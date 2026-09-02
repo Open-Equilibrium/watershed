@@ -24,7 +24,6 @@ pub(crate) use proto::{
 };
 #[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) const MAX_TOOL_STREAM_BYTES: usize = proto::MAX_EXECUTOR_TOOL_STREAM_BYTES_V0;
-pub(crate) const OWN_SCRIPT_EXECUTABLE: &str = "/bin/sh";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ToolInvocation {

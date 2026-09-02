@@ -661,7 +661,9 @@ mod tests {
 
     #[test]
     fn own_script_uses_the_closed_shell_executable() {
-        assert!(validate_executor_executable("/bin/sh").is_ok());
+        assert!(
+            validate_executor_executable(core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE).is_ok()
+        );
     }
 
     #[test]

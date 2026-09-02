@@ -223,7 +223,10 @@ fn own_script_uses_the_fixed_runner_and_no_implicit_interpreter() {
 
     let invocation = build_tool_invocation(&tool, &core_script::FlowValue::Map(BTreeMap::new()))
         .expect("own script invocation builds");
-    assert_eq!(invocation.executable, "/bin/sh");
+    assert_eq!(
+        invocation.executable,
+        core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE
+    );
     assert_eq!(
         invocation.argv,
         ["-c", "printf '%s\\n' ok", "flow-tool:custom-script"]

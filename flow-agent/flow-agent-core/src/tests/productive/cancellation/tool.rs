@@ -250,7 +250,7 @@ fn system_productive_tool_executor_observes_process_cancellation() {
     let outcome = executor
         .execute(
             &ToolInvocation {
-                executable: "/bin/sh".to_owned(),
+                executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
                 argv: vec![
                     "-c".to_owned(),
                     "/bin/sleep 5".to_owned(),
