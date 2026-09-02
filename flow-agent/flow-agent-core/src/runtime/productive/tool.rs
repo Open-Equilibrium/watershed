@@ -1,30 +1,28 @@
+use super::attempt_codec::{
+    executor_dispatch_failure_output, recovered_executor_dispatch_error, recovered_tool_output,
+    recovered_tool_terminal, recovered_tool_value_bound, tool_attempt_output,
+};
 #[cfg(test)]
 use super::observe_productive_result_persist;
-use super::provider_result::read_verified_session_object;
-use super::tool_result::{build_tool_result, parse_tool_result};
+use super::tool_result::{tool_result_value, tool_terminal};
 use super::{
-    EXECUTOR_DISPATCH_ERROR_SCHEMA_V0, ProductiveContext, ProductiveToolExecutor,
-    TOOL_ATTEMPT_OUTPUT_SCHEMA_V1, emit_and_commit, mark_recovery_failure,
+    ProductiveContext, ProductiveToolExecutor, emit_and_commit, mark_recovery_failure,
     tool_dispatch_reservation,
 };
 use crate::runtime::{
-    context::ContextObject,
-    digest::sha256_hex,
     event_construction::{RuntimeEventBuilder, tool_started_payload},
     executor::ExecutorDispatchOutcome,
     policy_resolution::command_policy_for_phase,
     run_attempts::{
         ProductiveAttemptLog, ProductiveRecovery, RunAttemptIntent, RunAttemptKind,
         RunAttemptOutcome, RunAttemptResult, ToolEnforcementExpectation,
-        ToolTerminalClassification, resolve_tool_terminal,
+        ToolTerminalClassification,
     },
-    session_definition::sha256_hash_text,
     stream_signature::FlowInvocation,
-    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome, build_tool_invocation},
+    tool_runner::build_tool_invocation,
     types::{RUNTIME_ERROR_REASON, RuntimeError},
 };
 use proto::EventType;
-use serde::Deserialize;
 
 #[cfg(test)]
 #[path = "../../tests/productive/support/system_tool.rs"]
@@ -326,12 +324,7 @@ where
             classification: classification.map(str::to_owned),
             exit_code: outcome.exit_code,
             timestamp: timestamp.clone(),
-            durable_output: Some(serde_json::json!({
-                "enforcement": enforcement,
-                "request_hash": request_hash,
-                "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V1,
-                "tool_result": canonical,
-            })),
+            durable_output: Some(tool_attempt_output(&enforcement, &request_hash, canonical)),
         };
         context.attempts.terminal(&result)?;
         mark_recovery_failure(
@@ -405,10 +398,7 @@ fn executor_dispatch_failure_result(
         classification: None,
         exit_code: None,
         timestamp: timestamp.to_owned(),
-        durable_output: Some(serde_json::json!({
-            "error": code,
-            "schema": EXECUTOR_DISPATCH_ERROR_SCHEMA_V0,
-        })),
+        durable_output: Some(executor_dispatch_failure_output(code)),
     }
 }
 
@@ -522,247 +512,4 @@ fn emit_uncertain_tool_failure<S: crate::runtime::event_writer::RuntimeEventSink
         sink,
         event_commit_failed,
     )
-}
-
-pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String, RuntimeError> {
-    let bytes = proto::canonical_json(value)
-        .map_err(|error| RuntimeError::Protocol(format!("request hashing failed: {error}")))?;
-    Ok(sha256_hash_text(bytes.as_bytes()))
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct ToolAttemptOutput {
-    pub(super) enforcement: proto::EnforcementReceiptV0,
-    pub(super) request_hash: String,
-    #[serde(rename = "schema")]
-    _schema: String,
-    pub(super) tool_result: serde_json::Value,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ExecutorDispatchError {
-    error: proto::ExecutorErrorCodeV0,
-    #[serde(rename = "schema")]
-    _schema: String,
-}
-
-fn recovered_executor_dispatch_error(
-    result: &RunAttemptResult,
-) -> Result<Option<proto::ExecutorErrorCodeV0>, RuntimeError> {
-    let Some(durable_output) = result.durable_output.as_ref() else {
-        return Ok(None);
-    };
-    if durable_output
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
-        != Some(EXECUTOR_DISPATCH_ERROR_SCHEMA_V0)
-    {
-        return Ok(None);
-    }
-    if result.outcome != RunAttemptOutcome::Failed
-        || result.classification.is_some()
-        || result.exit_code.is_some()
-    {
-        return Err(RuntimeError::Protocol(
-            "recovered Executor dispatch error has an invalid terminal state".to_owned(),
-        ));
-    }
-    let output: ExecutorDispatchError =
-        serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
-    Ok(Some(output.error))
-}
-
-fn recovered_tool_output(result: &RunAttemptResult) -> Result<ToolAttemptOutput, RuntimeError> {
-    let durable_output = result.durable_output.as_ref().ok_or_else(|| {
-        RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
-    })?;
-    if durable_output
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
-        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
-    {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool output has an unsupported schema".to_owned(),
-        ));
-    }
-    if durable_output.get("enforcement").is_none() {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool output has no enforcement receipt".to_owned(),
-        ));
-    }
-    serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)
-}
-
-fn recovered_tool_value_bound(
-    result: &RunAttemptResult,
-    recovery: &dyn ProductiveRecovery,
-    output: ToolAttemptOutput,
-    expected_request_hash: &str,
-) -> Result<core_script::FlowValue, RuntimeError> {
-    recovered_tool_terminal(result)?;
-    if output.request_hash != expected_request_hash {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool output does not match the prepared request hash".to_owned(),
-        ));
-    }
-    let tool_result = core_script::parse_flow_value_v0(output.tool_result).map_err(|error| {
-        RuntimeError::Protocol(format!("recovered Tool result is invalid: {error}"))
-    })?;
-    let fields = parse_tool_result(&tool_result)
-        .map_err(|error| RuntimeError::Protocol(format!("recovered Tool result {error}")))?;
-    if fields.outcome != result.outcome {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool result status does not match its attempt".to_owned(),
-        ));
-    }
-    validate_tool_result_streams(&fields, recovery)?;
-    if fields.exit_code != result.exit_code {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool result exit code does not match its attempt".to_owned(),
-        ));
-    }
-    Ok(tool_result)
-}
-
-#[cfg(test)]
-pub(crate) fn recovered_tool_value(
-    result: &RunAttemptResult,
-    recovery: &dyn ProductiveRecovery,
-) -> Result<core_script::FlowValue, RuntimeError> {
-    let output = recovered_tool_output(result)?;
-    proto::validate_enforcement_receipt_v0(
-        &output.enforcement,
-        &output.enforcement.applied_policy_digest,
-        output.enforcement.runtime_profile,
-        output.enforcement.max_concurrent_processes_and_threads,
-    )
-    .map_err(|_| {
-        RuntimeError::Protocol(
-            "recovered Tool enforcement receipt does not match the prepared request".to_owned(),
-        )
-    })?;
-    let request_hash = output.request_hash.clone();
-    recovered_tool_value_bound(result, recovery, output, &request_hash)
-}
-
-pub(super) fn validate_tool_result_streams(
-    fields: &super::tool_result::ToolResultFields<'_>,
-    recovery: &dyn ProductiveRecovery,
-) -> Result<(), RuntimeError> {
-    for (name, value) in [("stdout", fields.stdout), ("stderr", fields.stderr)] {
-        match value {
-            core_script::FlowValue::String(_) => {}
-            core_script::FlowValue::SessionObject(uri) => {
-                let bytes = read_verified_session_object(
-                    recovery,
-                    uri,
-                    &format!("recovered Tool result {name} object"),
-                )?;
-                if bytes.len() > MAX_TOOL_STREAM_BYTES {
-                    return Err(RuntimeError::Protocol(format!(
-                        "recovered Tool result {name} exceeds the per-stream byte limit"
-                    )));
-                }
-            }
-            _ => unreachable!("Tool result codec validates stream values"),
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn recovered_tool_terminal(
-    result: &RunAttemptResult,
-) -> Result<(EventType, Option<&str>), RuntimeError> {
-    let classification = match result.classification.as_deref() {
-        Some(value) => Some(ToolTerminalClassification::parse(value).ok_or_else(|| {
-            RuntimeError::Protocol(
-                "recovered Tool attempt has an invalid terminal state".to_owned(),
-            )
-        })?),
-        None => None,
-    };
-    let (event_type, classification) = resolve_tool_terminal(
-        result.outcome,
-        classification,
-        result.exit_code,
-    )
-    .ok_or_else(|| {
-        RuntimeError::Protocol("recovered Tool attempt has an invalid terminal state".to_owned())
-    })?;
-    Ok((
-        event_type,
-        classification.map(ToolTerminalClassification::as_str),
-    ))
-}
-
-pub(crate) struct DurableToolResult {
-    pub(crate) objects: Vec<ContextObject>,
-    pub(crate) value: core_script::FlowValue,
-}
-
-pub(crate) fn tool_result_value(
-    outcome: &ToolExecutionOutcome,
-) -> Result<DurableToolResult, RuntimeError> {
-    let inline = build_tool_result(
-        outcome.status,
-        outcome.exit_code,
-        stream_inline_value(&outcome.stdout),
-        stream_inline_value(&outcome.stderr),
-    );
-    if core_script::validate_flow_value(&inline).is_ok()
-        && std::str::from_utf8(&outcome.stdout).is_ok()
-        && std::str::from_utf8(&outcome.stderr).is_ok()
-    {
-        return Ok(DurableToolResult {
-            objects: Vec::new(),
-            value: inline,
-        });
-    }
-    let mut objects = Vec::new();
-    let mut object_value = |bytes: &[u8]| -> Result<core_script::FlowValue, RuntimeError> {
-        if bytes.is_empty() {
-            return Ok(core_script::FlowValue::String(String::new()));
-        }
-        let digest = sha256_hex(bytes);
-        let uri = core_script::build_session_object_uri(&digest).map_err(|error| {
-            RuntimeError::Protocol(format!("Tool result object URI is invalid: {error}"))
-        })?;
-        objects.push(ContextObject {
-            bytes: bytes.to_vec(),
-            digest,
-        });
-        Ok(core_script::FlowValue::SessionObject(uri))
-    };
-    let stdout = object_value(&outcome.stdout)?;
-    let stderr = object_value(&outcome.stderr)?;
-    let value = build_tool_result(outcome.status, outcome.exit_code, stdout, stderr);
-    core_script::validate_flow_value(&value).map_err(|error| {
-        RuntimeError::Protocol(format!("canonical Tool result is invalid: {error}"))
-    })?;
-    Ok(DurableToolResult { objects, value })
-}
-
-fn stream_inline_value(bytes: &[u8]) -> core_script::FlowValue {
-    core_script::FlowValue::String(std::str::from_utf8(bytes).unwrap_or_default().to_owned())
-}
-
-pub(crate) fn tool_terminal(
-    outcome: &ToolExecutionOutcome,
-) -> Result<(RunAttemptOutcome, EventType, Option<&'static str>), RuntimeError> {
-    let outcome_name = outcome.status;
-    let (event_type, classification) = resolve_tool_terminal(
-        outcome_name,
-        outcome.classification,
-        outcome.exit_code,
-    )
-    .ok_or_else(|| {
-        RuntimeError::Protocol("Tool execution produced an invalid terminal state".to_owned())
-    })?;
-    Ok((
-        outcome_name,
-        event_type,
-        classification.map(ToolTerminalClassification::as_str),
-    ))
 }

@@ -16,6 +16,7 @@ use crate::runtime::{
     },
 };
 
+mod attempt_codec;
 mod execution;
 mod platform;
 mod provider_result;
@@ -23,6 +24,8 @@ mod provider_turn;
 mod reconciliation;
 mod tool;
 mod tool_result;
+#[cfg(test)]
+pub(crate) use attempt_codec::{recovered_tool_terminal, recovered_tool_value};
 pub(crate) use execution::execute_productive_flow_with_tool_executor_and_recovery;
 #[cfg(test)]
 pub(crate) use execution::{
@@ -49,17 +52,13 @@ pub use reconciliation::{
 #[cfg(all(test, unix))]
 pub(crate) use tool::SystemProductiveToolExecutor;
 #[cfg(test)]
-pub(crate) use tool::recovered_tool_value;
+pub(crate) use tool::test_enforcement_receipt;
 #[cfg(test)]
-pub(crate) use tool::{
-    recovered_tool_terminal, test_enforcement_receipt, tool_result_value, tool_terminal,
-};
+pub(crate) use tool_result::{tool_result_value, tool_terminal};
 
 const PROVIDER_CANCELLED_SCHEMA_V0: &str = "flow-provider-cancelled-v0";
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
-const EXECUTOR_DISPATCH_ERROR_SCHEMA_V0: &str = "flow-executor-dispatch-error-v0";
-const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
 
 #[cfg(test)]
 type ProductiveResultPersistObserver = (RunAttemptKind, Box<dyn FnOnce()>);

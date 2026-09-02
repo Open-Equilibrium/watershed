@@ -1,3 +1,4 @@
+use super::attempt_codec::canonical_request_hash;
 #[cfg(test)]
 use super::observe_productive_result_persist;
 use super::provider_result::{
@@ -5,7 +6,7 @@ use super::provider_result::{
     provider_error_from_durable_output, provider_turn_from_durable_output,
     verify_provider_result_session_objects,
 };
-use super::tool::{canonical_request_hash, execute_productive_tool};
+use super::tool::execute_productive_tool;
 use super::{
     PROVIDER_CANCELLED_SCHEMA_V0, ProductiveContext, ProductiveProvider, ProductiveToolExecutor,
     emit_and_commit, mark_recovery_failure, message_delta_chunks, provider_dispatch_reservation,

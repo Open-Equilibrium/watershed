@@ -1,4 +1,4 @@
-use super::canonical_request_hash;
+use super::super::attempt_codec::canonical_request_hash;
 use crate::runtime::{
     executor::{ExecutorDispatchOutcome, ExecutorToolExecution},
     fs_guards::{AnchoredDir, AnchoredWorkspace},
