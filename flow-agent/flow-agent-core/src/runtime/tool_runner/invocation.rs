@@ -189,17 +189,20 @@ pub(crate) fn validate_tool_invocation(invocation: &ToolInvocation) -> Result<()
 pub(crate) fn encoded_exec_vector_bytes(
     invocation: &ToolInvocation,
 ) -> Result<usize, ToolRunnerError> {
-    proto::validate_executor_exec_vector_v0(&invocation.executable, &invocation.argv).map_err(
-        |error| match error {
-            proto::ExecutorExecVectorErrorV0::NulByte => ToolRunnerError::NulByte,
-            proto::ExecutorExecVectorErrorV0::EntryBudget { actual } => {
-                ToolRunnerError::ExecEntryBudget { actual }
-            }
-            proto::ExecutorExecVectorErrorV0::ByteBudget { actual } => {
-                ToolRunnerError::ExecByteBudget { actual }
-            }
-        },
+    proto::validate_executor_exec_vector_v0(
+        &invocation.executable,
+        &invocation.argv,
+        &BTreeMap::new(),
     )
+    .map_err(|error| match error {
+        proto::ExecutorExecVectorErrorV0::NulByte => ToolRunnerError::NulByte,
+        proto::ExecutorExecVectorErrorV0::EntryBudget { actual } => {
+            ToolRunnerError::ExecEntryBudget { actual }
+        }
+        proto::ExecutorExecVectorErrorV0::ByteBudget { actual } => {
+            ToolRunnerError::ExecByteBudget { actual }
+        }
+    })
 }
 
 fn invalid_parameter(message: impl Into<String>) -> ToolRunnerError {

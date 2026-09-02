@@ -23,16 +23,6 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
         MAX_PATH_CHARS,
     )?;
     validate_absolute_path(&request.working_directory, "working_directory")?;
-    if let Err(error) = validate_executor_exec_vector_v0(&request.executable, &request.argv) {
-        return Err(ExecutorProtocolError::new(match error {
-            ExecutorExecVectorErrorV0::NulByte => "Executor argv is invalid",
-            ExecutorExecVectorErrorV0::EntryBudget { .. } => "Executor argv entry bound is invalid",
-            ExecutorExecVectorErrorV0::ByteBudget { actual: usize::MAX } => {
-                "Executor argv byte count overflow"
-            }
-            ExecutorExecVectorErrorV0::ByteBudget { .. } => "Executor argv exceeds its byte limit",
-        }));
-    }
     if request.environment.len() > MAX_ENVIRONMENT_ENTRIES {
         return Err(ExecutorProtocolError::new(
             "Executor environment has too many entries",
@@ -41,6 +31,18 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
     for (name, value) in &request.environment {
         validate_text(name, "environment name", MAX_NAME_CHARS)?;
         validate_text(value, "environment value", MAX_PATH_CHARS)?;
+    }
+    if let Err(error) =
+        validate_executor_exec_vector_v0(&request.executable, &request.argv, &request.environment)
+    {
+        return Err(ExecutorProtocolError::new(match error {
+            ExecutorExecVectorErrorV0::NulByte => "Executor argv is invalid",
+            ExecutorExecVectorErrorV0::EntryBudget { .. } => "Executor argv entry bound is invalid",
+            ExecutorExecVectorErrorV0::ByteBudget { actual: usize::MAX } => {
+                "Executor argv byte count overflow"
+            }
+            ExecutorExecVectorErrorV0::ByteBudget { .. } => "Executor argv exceeds its byte limit",
+        }));
     }
     if request.mounts.len() > MAX_EXECUTOR_MOUNTS_V0 {
         return Err(ExecutorProtocolError::new(

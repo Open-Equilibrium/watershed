@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::{collections::BTreeMap, fmt, time::Duration};
 
 mod codec;
 mod stream;
@@ -74,10 +74,10 @@ const MAX_ENVIRONMENT_ENTRIES: usize = 256;
 const MAX_FEATURES: usize = 256;
 const MAX_ERROR_MESSAGE_CHARS: usize = 4_000;
 
-/// Reason an executable-plus-argument vector violates its v0 protocol bound.
+/// Reason a process execution vector violates its v0 protocol bound.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExecutorExecVectorErrorV0 {
-    /// An executable or argument contains a NUL byte.
+    /// An executable, argument, environment name or environment value contains a NUL byte.
     NulByte,
     /// The complete vector contains too many entries.
     EntryBudget {
@@ -93,14 +93,21 @@ pub enum ExecutorExecVectorErrorV0 {
 
 /// Validates and accounts for one complete v0 Tool exec vector.
 ///
-/// The returned size includes every executable/argument byte, one NUL terminator
-/// per string, the complete null-terminated argument pointer array, and the
-/// empty environment's terminating null pointer on the current pointer width.
+/// The returned size includes every executable, argument and `name=value`
+/// environment byte, one NUL terminator per string, and the complete
+/// null-terminated argument and environment pointer arrays on the current
+/// pointer width.
 pub fn validate_executor_exec_vector_v0(
     executable: &str,
     argv: &[String],
+    environment: &BTreeMap<String, String>,
 ) -> Result<usize, ExecutorExecVectorErrorV0> {
-    if executable.contains('\0') || argv.iter().any(|value| value.contains('\0')) {
+    if executable.contains('\0')
+        || argv.iter().any(|value| value.contains('\0'))
+        || environment
+            .iter()
+            .any(|(name, value)| name.contains('\0') || value.contains('\0'))
+    {
         return Err(ExecutorExecVectorErrorV0::NulByte);
     }
     let entries = argv
@@ -116,8 +123,19 @@ pub fn validate_executor_exec_vector_v0(
             total.checked_add(value.len().checked_add(1)?)
         })
         .ok_or(ExecutorExecVectorErrorV0::ByteBudget { actual: usize::MAX })?;
+    let string_bytes = environment
+        .iter()
+        .try_fold(string_bytes, |total, (name, value)| {
+            total
+                .checked_add(name.len())?
+                .checked_add(1)?
+                .checked_add(value.len())?
+                .checked_add(1)
+        })
+        .ok_or(ExecutorExecVectorErrorV0::ByteBudget { actual: usize::MAX })?;
     let pointer_bytes = entries
-        .checked_add(2)
+        .checked_add(environment.len())
+        .and_then(|count| count.checked_add(2))
         .and_then(|count| count.checked_mul(std::mem::size_of::<usize>()))
         .ok_or(ExecutorExecVectorErrorV0::ByteBudget { actual: usize::MAX })?;
     let encoded_bytes = string_bytes

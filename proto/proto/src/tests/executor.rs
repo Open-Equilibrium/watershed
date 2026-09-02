@@ -336,11 +336,18 @@ fn executor_request_enforces_complete_exec_vector_entry_boundary() {
 #[test]
 fn executor_request_enforces_complete_exec_vector_byte_boundary() {
     let mut exact = request();
-    exact.environment.clear();
     let entries = exact.argv.len() + 1;
-    let pointer_bytes = (entries + 2) * std::mem::size_of::<usize>();
-    let exact_argument_bytes =
-        MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0 - pointer_bytes - (exact.executable.len() + 1) - 1;
+    let pointer_bytes = (entries + 1 + exact.environment.len() + 1) * std::mem::size_of::<usize>();
+    let environment_bytes = exact
+        .environment
+        .iter()
+        .map(|(name, value)| name.len() + 1 + value.len() + 1)
+        .sum::<usize>();
+    let exact_argument_bytes = MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0
+        - pointer_bytes
+        - (exact.executable.len() + 1)
+        - environment_bytes
+        - 1;
     exact.argv = vec!["x".repeat(exact_argument_bytes)];
     canonical_executor_request_v0(&exact).expect("131,072 encoded exec-vector bytes are valid");
 
