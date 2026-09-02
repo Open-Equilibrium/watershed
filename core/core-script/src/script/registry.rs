@@ -136,7 +136,8 @@ impl ResolvedRegistry {
     }
 
     /// Returns tool blocks in canonical id order.
-    pub fn tool_blocks(&self) -> impl Iterator<Item = &ToolBlock> {
+    #[cfg(test)]
+    pub(crate) fn tool_blocks(&self) -> impl Iterator<Item = &ToolBlock> {
         self.tools.values()
     }
 

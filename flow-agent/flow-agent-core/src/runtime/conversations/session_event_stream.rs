@@ -168,7 +168,8 @@ impl SessionEventReader {
     /// event. Repeating this call is safe after a processing failure. The returned canonical
     /// records are bounded in memory; use [`Self::visit_verified_after`] for larger
     /// callback-streamed reads.
-    pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
+    #[cfg(test)]
+    pub(crate) fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
         let mut output_bytes = 0usize;
         let mut events = Vec::new();
         self.visit_verified_after_with(cursor, u64::MAX, true, |event, line| {
