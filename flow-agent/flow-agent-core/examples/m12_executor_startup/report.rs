@@ -1,10 +1,13 @@
 use super::{
-    ChildMeasurement, Config, DynError, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
-    fresh_child_measurement,
+    ChildMeasurement, Config, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, fresh_child_measurement,
+};
+use crate::evidence_support::{
+    DynError, Environment as CommonEnvironment, bounded_environment_value,
+    current_environment as common_environment, percentile, write_jsonl,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{env, error::Error, io::Write, process::Command};
+use std::{error::Error, io::Write};
 
 const REPORT_SCHEMA: &str = "flow-m12-executor-startup-v0";
 const REPORT_SUITE: &str = "Flow Agent M1.2 Executor startup evidence";
@@ -105,48 +108,6 @@ fn inputs() -> Value {
     })
 }
 
-pub(super) fn percentile(sorted: &[u64], numerator: usize, denominator: usize) -> u64 {
-    let rank = sorted
-        .len()
-        .saturating_mul(numerator)
-        .div_ceil(denominator)
-        .saturating_sub(1);
-    sorted[rank.min(sorted.len().saturating_sub(1))]
-}
-
-pub(super) fn write_jsonl(writer: &mut impl Write, value: &impl Serialize) -> Result<(), DynError> {
-    serde_json::to_writer(&mut *writer, value)?;
-    writer.write_all(b"\n")?;
-    Ok(())
-}
-
-fn bounded_environment_value(name: &str, maximum_bytes: usize) -> Option<String> {
-    let value = env::var(name).ok()?;
-    (value.len() <= maximum_bytes).then_some(value)
-}
-
-#[cfg(target_os = "linux")]
-fn hardware_metadata() -> (Option<String>, Option<u64>) {
-    let cpu_model = std::fs::read_to_string("/proc/cpuinfo")
-        .ok()
-        .and_then(|source| {
-            source.lines().find_map(|line| {
-                line.strip_prefix("model name")
-                    .and_then(|line| line.split_once(':'))
-                    .map(|(_, value)| value.trim().chars().take(256).collect())
-            })
-        });
-    let memory = std::fs::read_to_string("/proc/meminfo")
-        .ok()
-        .and_then(|source| {
-            source.lines().find_map(|line| {
-                let value = line.strip_prefix("MemTotal:")?.split_whitespace().next()?;
-                value.parse::<u64>().ok()?.checked_mul(1024)
-            })
-        });
-    (cpu_model, memory)
-}
-
 #[cfg(target_os = "linux")]
 fn host_isolation_metadata() -> HostIsolation {
     let cgroup_root = std::path::Path::new("/sys/fs/cgroup");
@@ -168,7 +129,7 @@ fn host_isolation_metadata() -> HostIsolation {
             .join("pids.events")
             .is_file()
     });
-    let systemd_version = Command::new("systemd")
+    let systemd_version = std::process::Command::new("systemd")
         .arg("--version")
         .output()
         .ok()
@@ -199,32 +160,29 @@ fn host_isolation_metadata() -> HostIsolation {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-fn hardware_metadata() -> (Option<String>, Option<u64>) {
-    (None, None)
-}
-
 fn current_environment() -> Environment {
-    let rustc = Command::new("rustc")
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        .unwrap_or_else(|| "unavailable".to_owned());
-    let (cpu_model, total_memory_bytes) = hardware_metadata();
-    Environment {
-        os: env::consts::OS,
-        arch: env::consts::ARCH,
+    let CommonEnvironment {
+        os,
+        arch,
         rustc,
-        reference_platform: cfg!(all(target_os = "linux", target_arch = "x86_64")),
-        commit_sha: bounded_environment_value("GITHUB_SHA", 128),
-        runner_image: bounded_environment_value("ImageOS", 128),
-        runner_image_version: bounded_environment_value("ImageVersion", 128),
+        reference_platform,
+        commit_sha,
+        runner_image,
+        runner_image_version,
+        logical_cpus,
+        cpu_model,
+        total_memory_bytes,
+    } = common_environment();
+    Environment {
+        os,
+        arch,
+        rustc,
+        reference_platform,
+        commit_sha,
+        runner_image,
+        runner_image_version,
         contract_image: bounded_environment_value("M12_CONTRACT_IMAGE", 256),
-        logical_cpus: std::thread::available_parallelism()
-            .map(usize::from)
-            .unwrap_or(1),
+        logical_cpus,
         cpu_model,
         total_memory_bytes,
         host_isolation: host_isolation_metadata(),

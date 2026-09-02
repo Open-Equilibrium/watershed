@@ -1,27 +1,21 @@
 mod contract;
+#[path = "../evidence_support/mod.rs"]
+mod evidence_support;
 mod report;
 
+use evidence_support::{
+    DynError, FLOW_AGENT_HOME, TempRoot, duration_ns, launch_measurement_child, parse_positive,
+    write_jsonl,
+};
 use flow_agent_core::{
     M11_BUDGET_WORKLOADS, M11BudgetOutcome, M11BudgetWorkload, run_m11_budget_workload,
 };
-use report::{write_jsonl, write_report};
+use report::write_report;
 use serde::{Deserialize, Serialize};
-use std::{
-    env,
-    error::Error,
-    fs,
-    io::{self},
-    path::{Path, PathBuf},
-    process::Command,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{env, io};
 
 const DEFAULT_WARMUPS: usize = 5;
 const DEFAULT_SAMPLES: usize = 30;
-const MAX_SAMPLE_COUNT: usize = 1_000;
-const FLOW_AGENT_HOME_ENV: &str = "FLOW_AGENT_HOME";
-const FLOW_AGENT_HOME_LEAF: &str = ".flow";
-type DynError = Box<dyn Error + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Config {
@@ -46,31 +40,6 @@ struct ChildMeasurement {
     rss: RssMeasurement,
 }
 
-struct TempRoot(PathBuf);
-
-impl TempRoot {
-    fn create() -> Result<Self, DynError> {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = env::temp_dir().join(format!("flow-m11-budget-{}-{nonce}", std::process::id()));
-        fs::create_dir(&path)?;
-        Ok(Self(path))
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn duration_ns(duration: Duration) -> u64 {
-    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
-}
-
 fn unsupported_rss() -> RssMeasurement {
     RssMeasurement {
         supported: false,
@@ -81,7 +50,7 @@ fn unsupported_rss() -> RssMeasurement {
 
 #[cfg(target_os = "linux")]
 fn current_rss_observation() -> (Option<u64>, Option<u64>) {
-    let Ok(status) = fs::read_to_string("/proc/self/status") else {
+    let Ok(status) = std::fs::read_to_string("/proc/self/status") else {
         return (None, None);
     };
     let field_bytes = |field| {
@@ -102,7 +71,7 @@ fn measure_workload(
     workload: &M11BudgetWorkload,
     iteration: usize,
 ) -> Result<ChildMeasurement, DynError> {
-    let temp = TempRoot::create()?;
+    let temp = TempRoot::create("flow-m11-budget")?;
     let (_, baseline_retained) = current_rss_observation();
     let outcome =
         run_m11_budget_workload(workload.id, temp.path(), iteration).map_err(io::Error::other)?;
@@ -133,14 +102,13 @@ fn fresh_child_measurement(
     workload: &M11BudgetWorkload,
     iteration: usize,
 ) -> Result<ChildMeasurement, DynError> {
-    let session_root = TempRoot::create()?;
-    let output = Command::new(env::current_exe()?)
-        .args(["--measure-child", workload.name(), &iteration.to_string()])
-        .env(
-            FLOW_AGENT_HOME_ENV,
-            session_root.path().join(FLOW_AGENT_HOME_LEAF),
-        )
-        .output()?;
+    let session_root = TempRoot::create("flow-m11-budget")?;
+    let iteration = iteration.to_string();
+    let output = launch_measurement_child(
+        &session_root,
+        ["--measure-child", workload.name(), &iteration],
+        &[FLOW_AGENT_HOME],
+    )?;
     if !output.status.success() {
         return Err(io::Error::other(format!(
             "fresh child for {} failed: {}",
@@ -150,18 +118,6 @@ fn fresh_child_measurement(
         .into());
     }
     serde_json::from_slice(&output.stdout).map_err(Into::into)
-}
-
-fn parse_positive(value: &str, flag: &str) -> Result<usize, DynError> {
-    let parsed = value
-        .parse::<usize>()
-        .map_err(|_| io::Error::other(format!("{flag} must be an integer")))?;
-    if parsed == 0 || parsed > MAX_SAMPLE_COUNT {
-        return Err(
-            io::Error::other(format!("{flag} must be between 1 and {MAX_SAMPLE_COUNT}")).into(),
-        );
-    }
-    Ok(parsed)
 }
 
 fn parse_args<I, S>(args: I) -> Result<Config, DynError>
@@ -227,32 +183,13 @@ fn main() {
 mod tests {
     use super::{
         ChildMeasurement, Config, DynError, M11_BUDGET_WORKLOADS, M11BudgetWorkload,
-        RssMeasurement,
-        contract::workload_contract,
-        parse_args,
-        report::{percentile, write_report_with_measurement},
+        RssMeasurement, contract::workload_contract, parse_args,
+        report::write_report_with_measurement,
     };
+    use crate::evidence_support::test::FlushTrackingWriter;
     use flow_agent_core::M11BudgetWorkloadId;
     use serde_json::{Value, json};
-    use std::io::{self, Write};
-
-    #[derive(Default)]
-    struct FlushTrackingWriter {
-        bytes: Vec<u8>,
-        flushed: bool,
-    }
-
-    impl Write for FlushTrackingWriter {
-        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-            self.bytes.extend_from_slice(buffer);
-            Ok(buffer.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            self.flushed = true;
-            Ok(())
-        }
-    }
+    use std::io;
 
     #[test]
     fn defaults_match_the_approved_sampling_contract() {
@@ -263,13 +200,6 @@ mod tests {
                 samples: 30
             }
         );
-    }
-
-    #[test]
-    fn nearest_rank_percentile_is_deterministic() {
-        let samples = (1..=30).collect::<Vec<_>>();
-        assert_eq!(percentile(&samples, 50, 100), 15);
-        assert_eq!(percentile(&samples, 95, 100), 29);
     }
 
     #[test]

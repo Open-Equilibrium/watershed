@@ -1,33 +1,31 @@
+#[path = "../evidence_support/mod.rs"]
+mod evidence_support;
 mod report;
 
+use evidence_support::{
+    DynError, FLOW_AGENT_HOME, TempRoot, duration_ns, launch_measurement_child, parse_positive,
+    write_jsonl,
+};
 use flow_agent_core::{
     M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, M12ExecutorStartupMeasurement, configure_executor_path,
     run_m12_executor_startup,
 };
-use report::{write_jsonl, write_report};
+use report::write_report;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    error::Error,
-    fs,
+    ffi::OsStr,
     io::{self},
     path::{Path, PathBuf},
-    process::Command,
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const DEFAULT_WARMUPS: usize = 5;
 const DEFAULT_SAMPLES: usize = 30;
-const MAX_SAMPLE_COUNT: usize = 1_000;
 const MAX_MEASUREMENT_CHILD_BYTES: usize = 256;
 const MAX_CHILD_DIAGNOSTIC_BYTES: usize = 1_024;
 const MEASUREMENT_CHILD_ARG: &str = "--measure-child";
 const MEASUREMENT_CHILD_SCHEMA: &str = "flow-m12-executor-startup-sample-v0";
-const FLOW_AGENT_HOME_ENV: &str = "FLOW_AGENT_HOME";
-const FLOW_AGENT_HOME_LEAF: &str = ".flow";
-const XDG_CONFIG_HOME_ENV: &str = "XDG_CONFIG_HOME";
-const XDG_CONFIG_HOME_LEAF: &str = ".config";
-type DynError = Box<dyn Error + Send + Sync>;
+const XDG_CONFIG_HOME: (&str, &str) = ("XDG_CONFIG_HOME", ".config");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Config {
@@ -44,33 +42,8 @@ struct ChildMeasurement {
     max_concurrent_processes_and_threads: u32,
 }
 
-struct TempRoot(PathBuf);
-
-impl TempRoot {
-    fn create() -> Result<Self, DynError> {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-        let path = env::temp_dir().join(format!("flow-m12-startup-{}-{nonce}", std::process::id()));
-        fs::create_dir(&path)?;
-        Ok(Self(path))
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempRoot {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn duration_ns(duration: Duration) -> u64 {
-    u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
-}
-
 fn measure_once() -> Result<ChildMeasurement, DynError> {
-    let workspace = TempRoot::create()?;
+    let workspace = TempRoot::create("flow-m12-startup")?;
     let M12ExecutorStartupMeasurement {
         executor_elapsed,
         max_concurrent_processes_and_threads,
@@ -89,19 +62,12 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
 }
 
 fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError> {
-    let session_root = TempRoot::create()?;
-    let output = Command::new(env::current_exe()?)
-        .arg(MEASUREMENT_CHILD_ARG)
-        .arg(executor)
-        .env(
-            FLOW_AGENT_HOME_ENV,
-            session_root.path().join(FLOW_AGENT_HOME_LEAF),
-        )
-        .env(
-            XDG_CONFIG_HOME_ENV,
-            session_root.path().join(XDG_CONFIG_HOME_LEAF),
-        )
-        .output()?;
+    let session_root = TempRoot::create("flow-m12-startup")?;
+    let output = launch_measurement_child(
+        &session_root,
+        [OsStr::new(MEASUREMENT_CHILD_ARG), executor.as_os_str()],
+        &[FLOW_AGENT_HOME, XDG_CONFIG_HOME],
+    )?;
     if !output.status.success() {
         return Err(io::Error::other(format!(
             "fresh measurement child failed: {}",
@@ -123,18 +89,6 @@ fn fresh_child_measurement(executor: &Path) -> Result<ChildMeasurement, DynError
         .into());
     }
     Ok(measurement)
-}
-
-fn parse_positive(value: &str, flag: &str) -> Result<usize, DynError> {
-    let parsed = value
-        .parse::<usize>()
-        .map_err(|_| io::Error::other(format!("{flag} must be an integer")))?;
-    if parsed == 0 || parsed > MAX_SAMPLE_COUNT {
-        return Err(
-            io::Error::other(format!("{flag} must be between 1 and {MAX_SAMPLE_COUNT}")).into(),
-        );
-    }
-    Ok(parsed)
 }
 
 fn parse_args<I, S>(args: I) -> Result<Config, DynError>
@@ -204,12 +158,11 @@ mod tests {
         ChildMeasurement, Config, DynError, M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
         MEASUREMENT_CHILD_SCHEMA, parse_args,
     };
-    use crate::report::{percentile, write_report_with_measurement};
-    use serde_json::Value;
-    use std::{
-        io::{self, Write},
-        path::PathBuf,
+    use crate::{
+        evidence_support::test::FlushTrackingWriter, report::write_report_with_measurement,
     };
+    use serde_json::Value;
+    use std::{io, path::PathBuf};
 
     fn executor_path() -> PathBuf {
         PathBuf::from(if cfg!(windows) {
@@ -224,24 +177,6 @@ mod tests {
             executor: executor_path(),
             warmups,
             samples,
-        }
-    }
-
-    #[derive(Default)]
-    struct FlushTrackingWriter {
-        bytes: Vec<u8>,
-        flushed: bool,
-    }
-
-    impl Write for FlushTrackingWriter {
-        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-            self.bytes.extend_from_slice(buffer);
-            Ok(buffer.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            self.flushed = true;
-            Ok(())
         }
     }
 
@@ -266,13 +201,6 @@ mod tests {
             ])
             .is_err()
         );
-    }
-
-    #[test]
-    fn nearest_rank_percentile_is_deterministic() {
-        let samples = (1..=30).collect::<Vec<_>>();
-        assert_eq!(percentile(&samples, 50, 100), 15);
-        assert_eq!(percentile(&samples, 95, 100), 29);
     }
 
     #[test]
