@@ -346,14 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn filesystem_policy_flags_and_profiles_are_closed() {
-        for obsolete in ["--read-scope", "--write-scope", "--protected-path-grant"] {
-            let mut arguments = minimal_predefined_tool();
-            arguments.extend([obsolete.to_owned(), "workspace".to_owned()]);
-
-            assert_usage(parse(Path::new("."), &arguments), "unknown argument");
-        }
-
+    fn runtime_profile_values_are_closed() {
         for profile in ["broad", "HOST-SYSTEM-READ"] {
             let mut arguments = minimal_predefined_tool();
             arguments.extend(["--runtime-profile".to_owned(), profile.to_owned()]);

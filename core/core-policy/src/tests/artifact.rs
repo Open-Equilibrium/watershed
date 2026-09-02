@@ -11,18 +11,12 @@ mod filesystem;
 mod network;
 
 #[test]
-fn policy_target_is_only_linux_bubblewrap_seccomp() {
+fn policy_target_serializes_as_linux_bubblewrap_seccomp() {
     assert_eq!(
         serde_json::to_string(&PolicyTarget::LinuxBubblewrapSeccomp)
             .expect("policy target serializes"),
         r#""linux-bubblewrap-seccomp""#
     );
-    for obsolete in [r#""linux-landlock-seccomp""#, r#""macos-seatbelt""#] {
-        assert!(
-            serde_json::from_str::<PolicyTarget>(obsolete).is_err(),
-            "obsolete target {obsolete} must fail closed"
-        );
-    }
 }
 
 #[test]

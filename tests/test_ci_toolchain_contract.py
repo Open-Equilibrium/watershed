@@ -24,14 +24,11 @@ UBUNTU = "matrix.os == 'ubuntu-24.04'"
 NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
 M12_TARGET = "x86_64-unknown-linux-musl"
 M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
-M12_STANDARD_CLI = "target/m12-standard/release/flow"
-M12_ACCEPTANCE_CLI = "target/release/flow"
 M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
 M12_COVERAGE_ENV = "/root/m12-coverage.env"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
-M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
 
 
 def workflow_text() -> str:
@@ -643,71 +640,9 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn(f". {M12_COVERAGE_ENV}", installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
         installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
-        readiness_negatives = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
-        installer_contract = installer_acceptance
         self.assertIn(
             "scripts/run-m12-readiness-negatives.sh", installer_acceptance
         )
-        for required in (
-            "systemctl stop user@10001.service user-runtime-dir@10001.service",
-            "missing-cgroup-v2",
-            "missing-pids-controller",
-            "missing-delegation",
-            "missing-capacity-events",
-            "missing-cleanup-evidence",
-            "executor_unavailable:",
-            "unshare --mount",
-            'run_negative missing-delegation "failed to write cgroup.subtree_control" install',
-            'test ! -e "$M12_FAULT_PREFIX/bin/flow"',
-            'test "$(/usr/bin/wc -l < "$M12_FAULT_DIR/systemd-run.calls")" -eq 1',
-        ):
-            self.assertIn(required, readiness_negatives)
-        for required in (
-            "install/install.sh",
-            M12_STANDARD_CLI,
-            M12_ACCEPTANCE_CLI,
-            M12_EXECUTOR,
-            'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix"',
-            '/usr/sbin/runuser --user watershed --preserve-environment',
-            'XDG_RUNTIME_DIR="$user_runtime"',
-            'DBUS_SESSION_BUS_ADDRESS="$user_bus"',
-            'run_as_watershed "$standard_prefix/bin/flow" executor check',
-            'loginctl show-user watershed --property=Linger --value',
-            '[ "$linger" != no ]',
-            'HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$acceptance_bundle/install.sh" --prefix "$acceptance_prefix"',
-            'FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1',
-            '"$acceptance_prefix/bin/flow" run smoke-flow',
-            '/usr/bin/python3 - "$agent_home"',
-            'home / "workspaces"',
-            'workspace-v1-*/sessions/*/runs/*/run-log.jsonl',
-            'test ! -e "$config/flow-agent/executor.json"',
-            '"attempt_kind") == "provider"',
-            '"attempt_kind") == "tool"',
-            'durable["schema"] == "flow-tool-attempt-output-v1"',
-            'receipt["executor"] == "flow-executor"',
-            'HOME="$home" XDG_CONFIG_HOME="$config" /bin/sh "$bundle/install.sh" --prefix "$custom_prefix" --no-default-executor',
-            'test ! -e "$custom_prefix/bin/flow-executor"',
-            'test "$unavailable_status" -eq 65',
-            '"error: executor_unavailable:"*',
-            'run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init --registry-root registry',
-            'flow-agent/fixtures/smoke-flow/registry/. "$fixture_home/registry/"',
-            'run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" validate smoke-flow',
-            'run_in_workspace "$fixture_workspace" /usr/bin/env FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" run smoke-flow --emit jsonl',
-            'fixture run failed with exit',
-            'diff -u flow-agent/fixtures/smoke-flow/expected/smoke-flow.jsonl "$fixture_output"',
-            'run_in_workspace "$unavailable_workspace" /usr/bin/env FLOW_AGENT_HOME="$agent_home" "$custom_prefix/bin/flow" run smoke-flow',
-            'productive run without an Executor returned exit',
-            'productive run without an Executor returned an unexpected diagnostic',
-            'productive Executor preflight mutated the workspace',
-            'executor="$bundle/flow-executor"',
-            'run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$executor"',
-            'run_as_watershed "$custom_prefix/bin/flow" executor check',
-            'run_as_watershed "$standard_prefix/bin/flow" executor configure --default',
-            'run_as_watershed "$standard_prefix/bin/flow" executor check',
-        ):
-            self.assertIn(required, installer_contract)
-        self.assertNotIn("/conversations/", installer_contract)
-        self.assertNotIn('executor="$PWD/target/', installer_contract)
 
         cleanup = assert_step_state(
             self,

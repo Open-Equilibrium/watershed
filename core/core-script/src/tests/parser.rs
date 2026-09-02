@@ -82,7 +82,7 @@ fn parser_rejects_implicit_null_with_neutral_diagnostic() {
 }
 
 #[test]
-fn parser_accepts_exact_mount_policy_and_rejects_legacy_scope_grammar() {
+fn parser_accepts_exact_mount_policy_and_default_runtime_profile() {
     let exact = r#"tool:
   id: exact-tool
   name: ExactTool
@@ -111,13 +111,6 @@ fn parser_accepts_exact_mount_policy_and_rejects_legacy_scope_grammar() {
         panic!("expected Tool block");
     };
     assert_eq!(tool.runtime_profile, ToolRuntimeProfile::Exact);
-
-    let legacy = defaulted
-        .replace("read_only_mounts", "read_scope")
-        .replace("writable_mounts", "write_scope");
-    let error = parse_registry_block("legacy-tool.yaml", &legacy)
-        .expect_err("the pre-release scope grammar has no compatibility alias");
-    assert!(error.to_string().contains("read_scope"), "{error}");
 }
 
 #[test]

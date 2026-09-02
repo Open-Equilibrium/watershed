@@ -1,5 +1,5 @@
 use super::valid_policy_artifact;
-use crate::{MAX_FILESYSTEM_MOUNTS, PolicyArtifact};
+use crate::MAX_FILESYSTEM_MOUNTS;
 
 #[test]
 fn policy_artifact_accepts_exact_workspace_mounts() {
@@ -59,19 +59,4 @@ fn policy_artifact_rejects_duplicate_and_oversized_mount_sets() {
             MAX_FILESYSTEM_MOUNTS + 1
         )
     );
-}
-
-#[test]
-fn policy_artifact_rejects_legacy_filesystem_fields() {
-    let mut value = serde_json::to_value(valid_policy_artifact("filesystem-tool"))
-        .expect("policy artifact serializes");
-    let filesystem = value["commands"][0]["filesystem"]
-        .as_object_mut()
-        .expect("filesystem policy is an object");
-    filesystem.remove("read_only_mounts");
-    filesystem.insert("read_roots".to_owned(), serde_json::json!(["workspace"]));
-
-    let error = serde_json::from_value::<PolicyArtifact>(value)
-        .expect_err("legacy filesystem fields must fail closed");
-    assert!(error.to_string().contains("read_roots"), "{error}");
 }

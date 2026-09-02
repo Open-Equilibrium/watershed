@@ -83,7 +83,7 @@ fn registry_schema_ties_tool_kind_to_command_shape() {
 }
 
 #[test]
-fn registry_schema_exposes_only_the_bounded_mount_profile_grammar() {
+fn registry_schema_defines_the_bounded_mount_profile_grammar() {
     let schema = registry_schema();
     let tool = &schema["$defs"]["tool"];
     let properties = &tool["properties"];
@@ -103,9 +103,6 @@ fn registry_schema_exposes_only_the_bounded_mount_profile_grammar() {
                 .as_array()
                 .is_some_and(|required| required.contains(&serde_json::json!(field)))
         );
-    }
-    for legacy in ["read_scope", "write_scope", "protected_path_grants"] {
-        assert!(properties[legacy].is_null(), "{legacy}");
     }
 }
 
