@@ -256,10 +256,12 @@ fn cumulative_invocation_boundary_accepts_512_and_rejects_513() {
     );
     root_refs.push("smoke-flow");
     write_flow("budget-root", &root_refs);
-    assert!(matches!(
-        run_flow(&workspace, "budget-root", EmitMode::Jsonl),
-        Err(RuntimeError::Protocol(message)) if message.contains("flow invocation budget")
-    ));
+    let error = run_flow(&workspace, "budget-root", EmitMode::Jsonl)
+        .expect_err("513 cumulative invocations are rejected during preflight");
+    assert!(
+        matches!(&error, RuntimeError::Protocol(message) if message.contains("flow invocation budget")),
+        "unexpected 513-invocation error: {error:?}"
+    );
     assert!(
         !crate::tests::helpers::workspace_session_dir(&workspace)
             .join("budget-root-2.jsonl")
