@@ -26,7 +26,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
 
-The M1.2 Flow Agent implementation builds on the deterministic M1 foundation and practical M1.1 provider/process execution with the Flow-owned Executor and OS-isolation boundary described in the [executor architecture concept](docs/concept/flow-agent-executor-architecture.md); status, scope and evidence are canonical in `PLAN.md` and `SECURITY.md`.
+The M1.2 Flow Agent implementation builds on the deterministic M1 foundation and practical M1.1 provider/process execution with the Flow-owned Executor and OS-isolation boundary described in the [executor architecture concept](docs/concept/flow-agent-executor-architecture.md), which lists canonical ownership for status, scope and evidence.
 
 Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model (ADR-0019).
 
