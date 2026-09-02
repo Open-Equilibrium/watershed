@@ -199,20 +199,20 @@ M1.1 deliberately has no value projection/mapping language, backward edge, gener
 
 `flow-tool-result-v0` is one outer `flow-value-v0` map. Its exact canonical zero-exit, empty-stream bytes are `{"type":"map","value":{"exit_code":{"type":"integer","value":"0"},"schema":{"type":"string","value":"flow-tool-result-v0"},"status":{"type":"string","value":"completed"},"stderr":{"type":"string","value":""},"stdout":{"type":"string","value":""}}}`. `schema`, `status` and `exit_code` are therefore tagged values, not raw JSON scalars; `status` is `completed`, `failed`, `timed-out` or `cancelled`. The map has exactly `schema`, `status`, `stdout` and `stderr`, plus `exit_code` only when a numeric normal exit was observed before the final classification; omission is the sole no-exit representation. The outer map and each child count under the ordinary node/depth rules: the complete value has five nodes without `exit_code`, six with it, and depth two. Stdout and stderr are string or session-object flow values: binary bytes or valid UTF-8 that cannot fit inline become one verified session object per stream. Valid UTF-8 streams remain strings only when the complete tagged Tool-result value fits the ordinary value limit; otherwise every non-empty inline stream becomes an object and an empty stream remains an empty string. The complete value is validated against all ordinary value limits before publication. The [TR-01/TR-02](flow-agent/benchmarks/M1_1_BUDGETS.md#tool-runner) per-stream collector caps remain below the existing immutable-object limit; their boundary evidence must pass before productive behavior is enabled.
 
-Preflight and policy rejection occurs before `tool.started`, creates no Tool result and retains the existing preflight-failure lifecycle. Process setup begins only after `tool.started`; a validated execution produces exactly one terminal Tool event and one synchronized terminal Run Log record. A dispatched intent without validated terminal evidence remains `uncertain` under the durable-attempt rule below. A terminal record's `classification` and failure event `error` use the exact value below.
+Preflight and policy rejection occurs before `tool.started`, creates no Tool result and retains the existing preflight-failure lifecycle. Process setup begins only after `tool.started`; a validated productive Executor response produces exactly one terminal Tool event and one synchronized terminal Run Log record. A dispatched intent without validated terminal Executor evidence remains `uncertain` under the durable-attempt rule below. A terminal record's `classification` and failure event `error` use the exact value below. The three rows marked evidence-only belong solely to the gated direct-process M1.1 evidence runner; the productive M1.2 Executor cannot emit them.
 
 | Final condition | Terminal event | Result status | Classification / `error` | `exit_code` |
 |---|---|---|---|---|
 | normal exit 0 | `tool.completed` | `completed` | omitted | `0` |
 | normal nonzero exit | `tool.failed` | `failed` | `nonzero_exit` | observed signed code |
 | signal termination | `tool.failed` | `failed` | `signal_termination` | omitted |
-| setup failure | `tool.failed` | `failed` | `process_setup_failed` | omitted |
+| setup failure (evidence-only) | `tool.failed` | `failed` | `process_setup_failed` | omitted |
 | cancellation | `tool.failed` | `cancelled` | `cancelled` | omitted |
 | policy runtime deadline | `tool.timed_out` | `timed-out` | `tool_timed_out` | omitted |
 | process/thread capacity exhausted | `tool.failed` | `failed` | `process_capacity_exceeded` | observed signed code when available |
 | stdout, stderr or simultaneous cap breach | `tool.failed` | `failed` | `stdout_cap_exceeded`, `stderr_cap_exceeded` or `stdout_stderr_cap_exceeded` | prior observed normal code only |
-| group signaling failure | `tool.failed` | `failed` | `process_signal_failed` | prior observed normal code only |
-| reap failure | `tool.failed` | `failed` | `process_reap_failed` | prior observed normal code only |
+| group signaling failure (evidence-only) | `tool.failed` | `failed` | `process_signal_failed` | prior observed normal code only |
+| reap failure (evidence-only) | `tool.failed` | `failed` | `process_reap_failed` | prior observed normal code only |
 | collector read or join failure | `tool.failed` | `failed` | `output_collector_failed` | prior observed normal code only |
 | drain deadline without EOF | `tool.failed` | `failed` | `output_drain_timeout` | prior observed normal code only |
 
