@@ -132,6 +132,7 @@ pub(crate) fn read_loopback_callback_until(
     deadline: Instant,
     connection_deadline: Duration,
 ) -> Result<String, RuntimeError> {
+    stream.set_nonblocking(false).map_err(|_| auth_protocol())?;
     let deadline = deadline.min(
         Instant::now()
             .checked_add(connection_deadline)
