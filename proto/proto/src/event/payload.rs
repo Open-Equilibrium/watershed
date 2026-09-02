@@ -243,6 +243,7 @@ impl<'a> PayloadValidator<'a> {
                     }
                 }
                 self.require_string_array("allowed_parameters")?;
+                self.require_positive_integer("max_concurrent_processes_and_threads")?;
                 if ToolNetworkAccess::try_from(self.require_string("network_access")?).is_err() {
                     return Err(self.error("network_access", "must be deny or declared"));
                 }

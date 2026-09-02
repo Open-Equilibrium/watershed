@@ -125,7 +125,8 @@ pub(super) fn payload_cases() -> Vec<PayloadCase> {
                 "runtime_profile": "exact",
                 "writable_mounts": [],
                 "allowed_parameters": [],
-                "network_access": "deny"
+                "network_access": "deny",
+                "max_concurrent_processes_and_threads": 32
             }),
             required_field: Some("tool_id"),
             typed_field: "tool_id",
@@ -429,6 +430,16 @@ fn event_specific_payload_invariants_are_bounded() {
         (EventType::PhaseEntered, "iteration", Some(json!(0))),
         (EventType::MessageDelta, "role", Some(json!("critic"))),
         (EventType::ToolStarted, "read_only_mounts", None),
+        (
+            EventType::ToolStarted,
+            "max_concurrent_processes_and_threads",
+            None,
+        ),
+        (
+            EventType::ToolStarted,
+            "max_concurrent_processes_and_threads",
+            Some(json!(0)),
+        ),
         (EventType::ToolStarted, "tool_kind", Some(json!("shell"))),
         (
             EventType::ToolStarted,
