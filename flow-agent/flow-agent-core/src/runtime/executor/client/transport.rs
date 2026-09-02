@@ -1,0 +1,292 @@
+use super::super::process::{
+    child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
+};
+use super::preparation::PreparedMount;
+use super::{invalid_response, runtime_open_error};
+use crate::runtime::types::RuntimeError;
+use std::{
+    fs::File,
+    io::{Read, Write as _},
+    os::{
+        fd::{AsRawFd as _, OwnedFd},
+        unix::process::CommandExt as _,
+    },
+    process::{Child, Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+pub(super) fn duplicate_executor_descriptor(executable: &File) -> Result<OwnedFd, RuntimeError> {
+    let minimum = i32::try_from(
+        proto::EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 as usize + proto::MAX_EXECUTOR_MOUNTS_V0 + 64,
+    )
+    .expect("protocol descriptor bounds fit i32");
+    rustix::io::fcntl_dupfd_cloexec(executable, minimum).map_err(|_| {
+        super::executor_error(
+            proto::ExecutorErrorCodeV0::Unavailable,
+            "validated Executor descriptor could not be moved outside the mount range",
+        )
+    })
+}
+
+fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> Result<(), RuntimeError> {
+    let flags = rustix::fs::fcntl_getfl(descriptor).map_err(runtime_open_error)?;
+    rustix::fs::fcntl_setfl(descriptor, flags | rustix::fs::OFlags::NONBLOCK)
+        .map_err(runtime_open_error)
+}
+
+struct ChildGuard {
+    child: Option<Child>,
+}
+
+impl ChildGuard {
+    fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.child.as_mut().expect("child guard remains armed")
+    }
+
+    fn take(&mut self) -> Child {
+        self.child.take().expect("child guard remains armed")
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
+        terminate_child_or_fail_stop(child);
+    }
+}
+
+pub(super) fn execute_one_shot(
+    executable: &File,
+    mounts: &[PreparedMount],
+    request: &proto::ExecutorRequestV0,
+    request_bytes: &[u8],
+) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+    let executor = duplicate_executor_descriptor(executable)?;
+    let inherited_path = format!("/proc/self/fd/{}", executor.as_raw_fd());
+    let high_base = executor
+        .as_raw_fd()
+        .checked_add(1)
+        .ok_or_else(|| invalid_response("Executor descriptor range overflowed"))?;
+    let inherited = mounts
+        .iter()
+        .map(|mount| rustix::io::fcntl_dupfd_cloexec(&mount.descriptor, high_base))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(runtime_open_error)?;
+    let remaps = inherited
+        .iter()
+        .zip(&request.mounts)
+        .map(|(source, mount)| (source.as_raw_fd(), mount.descriptor as i32))
+        .collect::<Vec<_>>();
+    let reserve_standard_descriptor = || {
+        File::open("/dev/null").map_err(|_| {
+            super::executor_error(
+                proto::ExecutorErrorCodeV0::Unavailable,
+                "one-shot Executor process could not reserve standard descriptors",
+            )
+        })
+    };
+    let _standard_descriptor_reservations = [
+        reserve_standard_descriptor()?,
+        reserve_standard_descriptor()?,
+        reserve_standard_descriptor()?,
+    ];
+    let mut command = Command::new(inherited_path);
+    command
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let expected_parent = rustix::process::getpid();
+    unsafe {
+        command.pre_exec(move || {
+            configure_executor_child(expected_parent)?;
+            for &(source, target) in &remaps {
+                if c_dup2(source, target) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            Ok(())
+        });
+    }
+    let child = command.spawn().map_err(|_| {
+        super::executor_error(
+            proto::ExecutorErrorCodeV0::Unavailable,
+            "one-shot Executor process could not start",
+        )
+    })?;
+    let mut child = ChildGuard::new(child);
+    let stdin = child
+        .child_mut()
+        .stdin
+        .take()
+        .ok_or_else(|| invalid_response("Executor stdin is unavailable"))?;
+    let mut stdout = child
+        .child_mut()
+        .stdout
+        .take()
+        .ok_or_else(|| invalid_response("Executor stdout is unavailable"))?;
+    let mut stderr = child
+        .child_mut()
+        .stderr
+        .take()
+        .ok_or_else(|| invalid_response("Executor stderr is unavailable"))?;
+    set_nonblocking(&stdin)?;
+    set_nonblocking(&stdout)?;
+    set_nonblocking(&stderr)?;
+    let started = Instant::now();
+    let hard_deadline = Duration::from_millis(request.limits.timeout_ms)
+        .checked_add(Duration::from_secs(5))
+        .and_then(|limit| started.checked_add(limit))
+        .ok_or_else(|| invalid_response("Executor client deadline overflowed"))?;
+    let mut cancellation_sent = false;
+    let mut cancellation_deadline = None;
+    let mut process_status = None;
+    let mut drain_deadline = None;
+    let mut request_offset = 0_usize;
+    let mut stdin = Some(stdin);
+    let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_RESPONSE_BYTES_V0);
+    let mut stderr_read = BoundedRead::new(4 * 1024);
+    let mut stdout_eof = false;
+    let mut stderr_eof = false;
+    loop {
+        if let Some(writer) = stdin.as_mut() {
+            match writer.write(&request_bytes[request_offset..]) {
+                Ok(0) => return Err(invalid_response("Executor request writer made no progress")),
+                Ok(written) => {
+                    request_offset += written;
+                    if request_offset == request_bytes.len() {
+                        stdin.take();
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err(invalid_response("Executor request could not be written")),
+            }
+        }
+        if !stdout_eof {
+            stdout_eof = read_available(&mut stdout, &mut stdout_read)
+                .map_err(|_| invalid_response("Executor stdout read failed"))?;
+        }
+        if !stderr_eof {
+            stderr_eof = read_available(&mut stderr, &mut stderr_read)
+                .map_err(|_| invalid_response("Executor stderr read failed"))?;
+        }
+        if stdout_read.overflowed {
+            return Err(invalid_response("Executor response exceeds its byte limit"));
+        }
+        if stderr_read.overflowed {
+            return Err(invalid_response("Executor stderr exceeds its byte limit"));
+        }
+        if process_status.is_none() {
+            match child_exited_without_reaping(child.child_mut()) {
+                Ok(true) => {
+                    let mut completed_child = child.take();
+                    terminate_child_or_fail_stop(&mut completed_child);
+                    let status = completed_child
+                        .try_wait()
+                        .map_err(|_| invalid_response("Executor process could not be reaped"))?
+                        .ok_or_else(|| {
+                            invalid_response("Executor process exit status is unavailable")
+                        })?;
+                    process_status = Some(status);
+                    drain_deadline = Instant::now().checked_add(Duration::from_secs(1));
+                }
+                Ok(false) => {}
+                Err(_) => return Err(invalid_response("Executor process could not be observed")),
+            }
+        }
+        if process_status.is_some() && stdout_eof && stderr_eof {
+            break;
+        }
+        let now = Instant::now();
+        if crate::runtime::cancellation::productive_cancellation()
+            .load(std::sync::atomic::Ordering::Acquire)
+            && !cancellation_sent
+            && process_status.is_none()
+        {
+            let pid = rustix::process::Pid::from_raw(child.child_mut().id() as i32)
+                .ok_or_else(|| invalid_response("Executor process id is invalid"))?;
+            rustix::process::kill_process(pid, rustix::process::Signal::TERM)
+                .map_err(|_| invalid_response("Executor cancellation signal failed"))?;
+            cancellation_sent = true;
+            cancellation_deadline = now.checked_add(Duration::from_secs(5));
+        }
+        if now >= hard_deadline
+            || cancellation_deadline.is_some_and(|deadline| now >= deadline)
+            || drain_deadline.is_some_and(|deadline| now >= deadline)
+        {
+            return Err(invalid_response(
+                "Executor did not return terminal enforcement evidence before cleanup deadline",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let status = process_status.expect("terminal process status was observed before drain");
+    if !status.success() {
+        return Err(invalid_response(
+            "Executor exited unsuccessfully instead of returning a terminal protocol response",
+        ));
+    }
+    let response = proto::parse_executor_response_v0(
+        &stdout_read.bytes,
+        &request.request_id,
+        &request.policy_digest,
+    )
+    .map_err(|_| invalid_response("Executor terminal response is invalid"))?;
+    let _ = stderr_read;
+    Ok(response)
+}
+
+struct BoundedRead {
+    bytes: Vec<u8>,
+    limit: usize,
+    overflowed: bool,
+}
+
+impl BoundedRead {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(limit.min(8 * 1024)),
+            limit,
+            overflowed: false,
+        }
+    }
+}
+
+fn read_available(reader: &mut impl Read, output: &mut BoundedRead) -> std::io::Result<bool> {
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => return Ok(true),
+            Ok(read) => {
+                let remaining = output.limit.saturating_sub(output.bytes.len());
+                output
+                    .bytes
+                    .extend_from_slice(&buffer[..read.min(remaining)]);
+                output.overflowed |= read > remaining;
+                if output.overflowed {
+                    return Ok(false);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+unsafe extern "C" {
+    #[cfg(test)]
+    #[link_name = "close"]
+    pub(super) fn c_close(fd: i32) -> i32;
+
+    #[link_name = "dup2"]
+    fn c_dup2(old_fd: i32, new_fd: i32) -> i32;
+}
