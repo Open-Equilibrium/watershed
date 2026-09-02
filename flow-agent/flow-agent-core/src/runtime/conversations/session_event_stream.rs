@@ -86,11 +86,6 @@ impl SessionEventReader {
         sessions: &AnchoredDir,
         session_id: &str,
     ) -> Result<Self, RuntimeError> {
-        if !proto::is_valid_session_id(session_id) {
-            return Err(RuntimeError::Usage(format!(
-                "invalid session_id {session_id:?}"
-            )));
-        }
         let path = SessionBundlePaths::events_in(sessions, session_id);
         ensure_anchored_real_file(&path)?;
         Ok(Self {
