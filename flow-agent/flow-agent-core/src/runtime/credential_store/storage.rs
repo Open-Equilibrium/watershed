@@ -4,14 +4,12 @@ use super::platform::{
 };
 use super::{
     auth_store_failure,
-    platform::{
-        acquire_file_lock, create_new_file, file_lock_is_contended, open_lock_file,
-        release_file_lock, sync_credential_directory,
-    },
+    platform::{create_new_file, open_lock_file, sync_credential_directory},
     store_io,
 };
 #[cfg(any(unix, windows))]
 use crate::runtime::fs_guards::{AnchoredFile, sync_anchored_directory};
+use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError};
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use std::{
     ffi::OsStr,
@@ -27,8 +25,9 @@ use std::cell::Cell;
 #[cfg(test)]
 use std::io;
 
-pub(crate) const CREDENTIAL_LOCK_DEADLINE: Duration = Duration::from_secs(5);
-const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(10);
+#[cfg(test)]
+pub(crate) const CREDENTIAL_LOCK_DEADLINE: Duration =
+    crate::runtime::fs_guards::PROTECTED_STATE_LOCK_DEADLINE;
 static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
@@ -42,7 +41,7 @@ pub(crate) fn set_credential_protection_error_for_test(kind: io::ErrorKind) {
 }
 
 pub(crate) struct StoreLock {
-    file: File,
+    _lock: ProtectedStateLock,
 }
 
 impl StoreLock {
@@ -68,30 +67,16 @@ impl StoreLock {
     fn acquire_opened(
         file: File,
         path: &Path,
-        mut now: impl FnMut() -> Duration,
-        mut wait: impl FnMut(Duration),
+        now: impl FnMut() -> Duration,
+        wait: impl FnMut(Duration),
     ) -> Result<Self, RuntimeError> {
-        let started = now();
-        loop {
-            match acquire_file_lock(&file) {
-                Ok(()) => return Ok(Self { file }),
-                Err(error) if file_lock_is_contended(&error) => {
-                    if now().saturating_sub(started) >= CREDENTIAL_LOCK_DEADLINE {
-                        return Err(RuntimeError::Protocol(
-                            "authentication credential store is busy".to_owned(),
-                        ));
-                    }
-                    wait(LOCK_RETRY_INTERVAL);
-                }
-                Err(error) => return Err(store_io(path, error)),
+        let lock = ProtectedStateLock::acquire(file, now, wait).map_err(|error| match error {
+            ProtectedStateLockError::Busy => {
+                RuntimeError::Protocol("authentication credential store is busy".to_owned())
             }
-        }
-    }
-}
-
-impl Drop for StoreLock {
-    fn drop(&mut self) {
-        let _ = release_file_lock(&self.file);
+            ProtectedStateLockError::Io(error) => store_io(path, error),
+        })?;
+        Ok(Self { _lock: lock })
     }
 }
 

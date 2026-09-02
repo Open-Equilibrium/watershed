@@ -1,3 +1,6 @@
+use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError, sync_directory};
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use crate::runtime::fs_guards::{unix_access_is_private, validate_unix_private_directory_metadata};
 use crate::runtime::types::RuntimeError;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,15 +10,13 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use super::{ExecutorSelection, ExecutorSelectionSource};
 
 const EXECUTOR_CONFIG_SCHEMA: &str = "flow-executor-selection-v0";
 pub(crate) const EXECUTOR_CONFIG_MAX_BYTES: u64 = 16 * 1024;
-const EXECUTOR_CONFIG_LOCK_DEADLINE: Duration = Duration::from_secs(5);
-const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 static STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
@@ -123,7 +124,7 @@ impl ExecutorConfigStore {
             ));
         }
         let parent = self.ensure_parent()?;
-        let _lock = ConfigLock::acquire(&parent.join(".executor.lock"), self.protect)?;
+        let _lock = acquire_config_lock(&parent.join(".executor.lock"), self.protect)?;
         let document = ExecutorConfigDocument {
             path: path.to_owned(),
             schema: EXECUTOR_CONFIG_SCHEMA.to_owned(),
@@ -141,7 +142,7 @@ impl ExecutorConfigStore {
 
     pub(crate) fn configure_default(&self) -> Result<bool, RuntimeError> {
         let parent = self.ensure_parent()?;
-        let _lock = ConfigLock::acquire(&parent.join(".executor.lock"), self.protect)?;
+        let _lock = acquire_config_lock(&parent.join(".executor.lock"), self.protect)?;
         let metadata = match fs::symlink_metadata(&self.path) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -228,57 +229,45 @@ impl ExecutorConfigStore {
     }
 }
 
-struct ConfigLock {
-    _file: File,
-}
-
-impl ConfigLock {
-    fn acquire(path: &Path, protect: bool) -> Result<Self, RuntimeError> {
-        match fs::symlink_metadata(path) {
-            Ok(metadata) => {
-                verify_regular_unlinked(&metadata)?;
-                if protect {
-                    verify_private_file(path, &metadata)?;
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(config_io(path, error)),
-        }
-        let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt as _;
-            options.mode(if protect { 0o600 } else { 0o666 });
-        }
-        let file = options.open(path).map_err(|error| config_io(path, error))?;
-        #[cfg(unix)]
-        if protect {
-            use std::os::unix::fs::PermissionsExt as _;
-            file.set_permissions(fs::Permissions::from_mode(0o600))
-                .map_err(|error| config_io(path, error))?;
-        }
-        let metadata = file.metadata().map_err(|error| config_io(path, error))?;
-        verify_regular_unlinked(&metadata)?;
-        if protect {
-            verify_private_file(path, &metadata)?;
-        }
-        let started = Instant::now();
-        loop {
-            match file.try_lock() {
-                Ok(()) => return Ok(Self { _file: file }),
-                Err(fs::TryLockError::WouldBlock)
-                    if started.elapsed() < EXECUTOR_CONFIG_LOCK_DEADLINE =>
-                {
-                    thread::sleep(LOCK_RETRY_INTERVAL);
-                }
-                Err(fs::TryLockError::WouldBlock) => {
-                    return Err(config_failure("protected Executor configuration is busy"));
-                }
-                Err(fs::TryLockError::Error(error)) => return Err(config_io(path, error)),
+fn acquire_config_lock(path: &Path, protect: bool) -> Result<ProtectedStateLock, RuntimeError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            verify_regular_unlinked(&metadata)?;
+            if protect {
+                verify_private_file(path, &metadata)?;
             }
         }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(config_io(path, error)),
     }
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(if protect { 0o600 } else { 0o666 });
+    }
+    let file = options.open(path).map_err(|error| config_io(path, error))?;
+    #[cfg(unix)]
+    if protect {
+        use std::os::unix::fs::PermissionsExt as _;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|error| config_io(path, error))?;
+    }
+    let metadata = file.metadata().map_err(|error| config_io(path, error))?;
+    verify_regular_unlinked(&metadata)?;
+    if protect {
+        verify_private_file(path, &metadata)?;
+    }
+    let started = Instant::now();
+    ProtectedStateLock::acquire(file, || started.elapsed(), thread::sleep).map_err(|error| {
+        match error {
+            ProtectedStateLockError::Busy => {
+                config_failure("protected Executor configuration is busy")
+            }
+            ProtectedStateLockError::Io(error) => config_io(path, error),
+        }
+    })
 }
 
 fn config_failure(message: &str) -> RuntimeError {
@@ -357,14 +346,16 @@ fn create_private_file(path: &Path, protect: bool) -> Result<File, RuntimeError>
 fn verify_private_parent(path: &Path) -> Result<(), RuntimeError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
     let metadata = fs::symlink_metadata(path).map_err(|error| config_io(path, error))?;
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.permissions().mode() & 0o077 != 0
-    {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(config_failure("Executor configuration parent is unsafe"));
     }
-    Ok(())
+    validate_unix_private_directory_metadata(
+        path,
+        metadata.uid(),
+        metadata.permissions().mode(),
+        rustix::process::geteuid().as_raw(),
+    )
+    .map_err(|_| config_failure("Executor configuration parent is unsafe"))
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
@@ -377,9 +368,11 @@ fn verify_private_parent(_path: &Path) -> Result<(), RuntimeError> {
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn verify_private_file(_path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-    if metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.permissions().mode() & 0o077 != 0
-        || metadata.nlink() != 1
+    if !unix_access_is_private(
+        metadata.uid(),
+        metadata.permissions().mode(),
+        rustix::process::geteuid().as_raw(),
+    ) || metadata.nlink() != 1
     {
         return Err(config_failure("protected Executor configuration is unsafe"));
     }
@@ -391,18 +384,6 @@ fn verify_private_file(_path: &Path, _metadata: &fs::Metadata) -> Result<(), Run
     Err(config_failure(
         "platform configuration protection is unsupported",
     ))
-}
-
-#[cfg(unix)]
-fn sync_directory(path: &Path) -> Result<(), RuntimeError> {
-    File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| config_io(path, error))
-}
-
-#[cfg(not(unix))]
-fn sync_directory(_path: &Path) -> Result<(), RuntimeError> {
-    Ok(())
 }
 
 #[cfg(test)]

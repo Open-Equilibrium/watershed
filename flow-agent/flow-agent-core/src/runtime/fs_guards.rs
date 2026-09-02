@@ -22,6 +22,13 @@ mod bounded_read;
 pub use bounded_read::for_each_reader_line_with_limit;
 pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
 
+mod local_state;
+#[cfg(test)]
+pub(crate) use local_state::PROTECTED_STATE_LOCK_DEADLINE;
+#[cfg(any(unix, test))]
+pub(crate) use local_state::unix_access_is_private;
+pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError};
+
 mod anchored_file;
 #[cfg(windows)]
 pub(crate) use anchored_file::open_files_share_identity;
@@ -692,7 +699,7 @@ pub(crate) fn validate_unix_private_directory_metadata(
             path.display()
         )));
     }
-    if mode & 0o077 != 0 {
+    if !unix_access_is_private(owner_uid, mode, effective_uid) {
         return Err(RuntimeError::Protocol(format!(
             "{} must not grant group or other access",
             path.display()

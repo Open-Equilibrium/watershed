@@ -1,4 +1,6 @@
 use super::{auth_store_failure, store_io};
+#[cfg(unix)]
+use crate::runtime::fs_guards::unix_access_is_private;
 #[cfg(any(unix, windows))]
 use crate::runtime::fs_guards::{AnchoredFile, open_anchored_file_for_read, path_io_error};
 use crate::runtime::types::RuntimeError;
@@ -15,8 +17,6 @@ use std::fs;
 use std::os::unix::fs::MetadataExt as _;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-#[cfg(windows)]
-use std::os::windows::io::AsRawHandle as _;
 
 #[cfg(unix)]
 fn clear_inherited_file_acl_entries(file: &File) -> io::Result<()> {
@@ -129,67 +129,6 @@ pub(super) fn open_lock_file(_path: &Path) -> Result<File, RuntimeError> {
 }
 
 #[cfg(unix)]
-pub(super) fn acquire_file_lock(file: &File) -> io::Result<()> {
-    Ok(rustix::fs::flock(
-        file,
-        rustix::fs::FlockOperation::NonBlockingLockExclusive,
-    )?)
-}
-
-#[cfg(windows)]
-pub(super) fn acquire_file_lock(file: &File) -> io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::LockFile;
-
-    if unsafe { LockFile(file.as_raw_handle() as _, 0, 0, 1, 0) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn acquire_file_lock(_file: &File) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "credential protection is unsupported",
-    ))
-}
-
-#[cfg(unix)]
-pub(super) fn release_file_lock(file: &File) -> io::Result<()> {
-    Ok(rustix::fs::flock(file, rustix::fs::FlockOperation::Unlock)?)
-}
-
-#[cfg(windows)]
-pub(super) fn release_file_lock(file: &File) -> io::Result<()> {
-    use windows_sys::Win32::Storage::FileSystem::UnlockFile;
-
-    if unsafe { UnlockFile(file.as_raw_handle() as _, 0, 0, 1, 0) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn release_file_lock(_file: &File) -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-pub(super) fn file_lock_is_contended(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::WouldBlock
-}
-
-#[cfg(windows)]
-pub(super) fn file_lock_is_contended(error: &io::Error) -> bool {
-    error.raw_os_error() == Some(windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION as i32)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn file_lock_is_contended(_error: &io::Error) -> bool {
-    false
-}
-
-#[cfg(unix)]
 pub(super) fn create_new_file(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .write(true)
@@ -255,9 +194,10 @@ pub(super) fn verify_private_anchored_file(path: &AnchoredFile) -> Result<(), Ru
 #[cfg(unix)]
 pub(super) fn verify_private_open_file(path: &Path, file: &File) -> Result<(), RuntimeError> {
     let metadata = file.metadata().map_err(|error| store_io(path, error))?;
+    let mode = metadata.permissions().mode();
     if !metadata.file_type().is_file()
-        || metadata.uid() != rustix::process::geteuid().as_raw()
-        || metadata.permissions().mode() & 0o777 != 0o600
+        || !unix_access_is_private(metadata.uid(), mode, rustix::process::geteuid().as_raw())
+        || mode & 0o700 != 0o600
         || file_has_extended_acl_entries(file).map_err(|error| store_io(path, error))?
     {
         return Err(auth_store_failure());
