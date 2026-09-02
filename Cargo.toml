@@ -23,7 +23,7 @@ cap-std = { version = "=4.0.3", default-features = false }
 core-policy = { path = "core/core-policy", version = "0.0.0" }
 core-script = { path = "core/core-script", version = "0.0.0" }
 flow-agent-core = { path = "flow-agent/flow-agent-core", version = "0.0.0" }
-noyalib = { version = "=0.0.29", default-features = false, features = ["std"] }
+noyalib = { version = "=0.0.30", default-features = false, features = ["std"] }
 proto = { path = "proto/proto", version = "0.0.0" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_ignored = "=0.1.14"
