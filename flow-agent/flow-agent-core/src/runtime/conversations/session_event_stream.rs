@@ -584,7 +584,7 @@ impl SessionEventReader {
         Ok(consumed)
     }
 
-    pub(crate) fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
+    fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
         let observed = u64::try_from(self.observed_segment_count).unwrap_or(u64::MAX);
         let mut segments = Vec::new();
         for ordinal in 1..=observed {
@@ -608,7 +608,7 @@ impl SessionEventReader {
         Ok(segments)
     }
 
-    pub(crate) fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
+    fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
         if !self.workspace_identity_is_current()? || !self.ownership.is_active()? {
             return Ok(false);
         }
@@ -626,25 +626,21 @@ impl SessionEventReader {
         Ok(current.identity() == self.workspace_identity)
     }
 
-    pub(crate) fn inactive_partial(&self) -> RuntimeError {
+    fn inactive_partial(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} contains an incomplete final JSONL line without active session ownership",
             self.path.diagnostic_path().display()
         ))
     }
 
-    pub(crate) fn inactive_empty(&self) -> RuntimeError {
+    fn inactive_empty(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} is empty without active session ownership",
             self.path.diagnostic_path().display()
         ))
     }
 
-    pub(crate) fn ensure_cursor(
-        &self,
-        cursor: u64,
-        latest_sequence: u64,
-    ) -> Result<(), RuntimeError> {
+    fn ensure_cursor(&self, cursor: u64, latest_sequence: u64) -> Result<(), RuntimeError> {
         if cursor <= latest_sequence {
             return Ok(());
         }
@@ -654,7 +650,7 @@ impl SessionEventReader {
         )))
     }
 
-    pub(crate) fn changed_outside_append_only(&self) -> RuntimeError {
+    fn changed_outside_append_only(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} changed outside append-only session semantics",
             self.path.diagnostic_path().display()
@@ -662,7 +658,7 @@ impl SessionEventReader {
     }
 }
 
-pub fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
+fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
     bytes
         .iter()
         .rposition(|byte| *byte == b'\n')
