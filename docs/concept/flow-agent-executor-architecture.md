@@ -73,7 +73,7 @@ sequenceDiagram
   F->>F: Validate Tool call and compile canonical policy
   F->>S: Synchronize Tool intent
   F->>E: One bounded request
-  E->>E: Validate framing, descriptors and policy
+  E->>E: Validate request and policy
   alt Setup fails
     E-->>F: Stable typed pre-Tool error
     F->>S: Persist terminal failure
@@ -85,27 +85,25 @@ sequenceDiagram
     E->>B: Terminate descendants and tear down
     E->>C: Prove empty and remove leaf
     E-->>F: Tool result and enforcement receipt
-    F->>F: Validate receipt and exact policy digest
+    F->>F: Validate receipt against the policy
     F->>S: Persist terminal result and receipt
   end
 ```
 
-One Executor process, transient systemd scope, cgroup leaf and Bubblewrap boundary handle one invocation. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Standard input carries one closed request; standard output carries one tagged canonical response plus final LF; standard error is bounded redacted diagnostics. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport.
-
-The success receipt identifies the Executor/backend versions and exact platform, proves an active boundary and binds SHA-256 over the exact canonical policy bytes including their final LF. Flow Agent persists the canonical receipt with the terminal Tool attempt before publishing success. Custom Executors can lie, so schema validation is not third-party certification.
+One Executor process, transient systemd scope, cgroup leaf and Bubblewrap boundary handle one invocation. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport. Exact request, framing, descriptor, digest and receipt rules live in the canonical [`PROTOCOL.md` process and framing contract](../../PROTOCOL.md#process-and-framing-contract).
 
 ## Filesystem and runtime reads
 
-Each `read_only_mounts` entry becomes an exact read-only mount and each `writable_mounts` entry an exact writable mount. Flow Agent opens each source without following links, verifies its identity and assigns a fixed inherited-descriptor slot. The request declares each slot and identity; all undeclared inherited descriptors are closed. Path replacement after validation therefore cannot redirect the mount.
+Each `read_only_mounts` entry becomes an exact read-only mount and each `writable_mounts` entry an exact writable mount. Flow Agent resolves and verifies sources before dispatch so later path replacement cannot redirect a mount.
 
 Every Tool uses one runtime-read profile:
 
 - `exact` is the default. It exposes only the bounded executable/interpreter/library objects advertised by the administrator-owned Executor readiness response.
 - `host-system-read` is an explicit Agentic Engineer choice. It adds only the official Executor's fixed reviewed read-only Ubuntu system roots.
 
-Flow selects the configured profile, pre-opens every advertised source without following links and binds each identity and Sandbox target into the resolved policy digest. The Executor cannot add a runtime path after that digest is fixed. Flow users, providers and Tools cannot change or escalate the profile. The official Ubuntu Executor is statically linked, so its own bootstrap does not require broad runtime reads; a dynamic official artifact fails readiness.
+Flow selects the configured profile before compiling the policy. The Executor cannot add a runtime path afterward, and Flow users, providers and Tools cannot change or escalate the profile. The official Ubuntu Executor is statically linked, so its own bootstrap does not require broad runtime reads; a dynamic official artifact fails readiness.
 
-The backend uses stock Ubuntu Bubblewrap. Newer versions consume inherited descriptor mounts directly. For an older supported version, the outer Executor mounts declared sources from `/proc/self/fd/<slot>` and starts its trusted inner self-reexec directly from a retained self-image descriptor without mounting that image into the Tool filesystem. Inherited descriptors close on Tool exec, and the protected inner supervisor is inaccessible to the Tool. It verifies mounted identities, supervises the Tool as Sandbox PID 1 and returns one protected exact terminal status. Missing or inconsistent evidence fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback.
+The backend uses stock Ubuntu Bubblewrap and preserves the verified mount identities while constructing the Tool boundary. A protected inner supervisor validates the boundary, supervises the Tool as Sandbox PID 1 and returns its terminal status. Missing or inconsistent evidence fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback. The canonical protocol contract linked above owns inherited-descriptor and older-Bubblewrap self-reexec mechanics.
 
 ## Supported matrix
 

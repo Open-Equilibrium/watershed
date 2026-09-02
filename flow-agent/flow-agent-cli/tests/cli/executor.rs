@@ -31,7 +31,7 @@ fn executor_help_is_specific_successful_and_human_readable() {
                 "\n",
                 "Options:\n",
                 "  --path <absolute-path>  Select an administrator-supplied Executor.\n",
-                "  --default               Select the bundled Executor.\n",
+                "  --default               Remove the Custom override and use the installed sibling Executor.\n",
             ),
         ),
     ] {

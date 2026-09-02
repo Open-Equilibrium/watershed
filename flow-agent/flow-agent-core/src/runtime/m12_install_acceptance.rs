@@ -1,3 +1,9 @@
+//! Synthetic provider behavior for the CI installer acceptance flow.
+//!
+//! The Cargo feature exposes the hook. It deliberately bypasses provider networking only when
+//! `FLOW_AGENT_M12_INSTALL_ACCEPTANCE=1` and the exact dedicated model and `echo` fixture request
+//! pass the validation below.
+
 use crate::runtime::{
     openai_codex::{ProviderToolCall, ProviderTurn},
     types::RuntimeError,

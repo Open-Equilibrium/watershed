@@ -25,7 +25,7 @@ const EXECUTOR_CONFIGURE_HELP: &str = concat!(
     "\n",
     "Options:\n",
     "  --path <absolute-path>  Select an administrator-supplied Executor.\n",
-    "  --default               Select the bundled Executor.\n",
+    "  --default               Remove the Custom override and use the installed sibling Executor.\n",
 );
 
 #[derive(Debug, Eq, PartialEq)]

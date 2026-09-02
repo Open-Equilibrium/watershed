@@ -156,6 +156,7 @@ impl ProductiveProvider for OpenAiCodexProvider {
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
         #[cfg(feature = "m12-install-acceptance")]
+        // This feature-gated CI fixture is the only provider hook before network dispatch.
         if let Some(turn) = crate::runtime::m12_install_acceptance::maybe_provider_turn(body)? {
             return Ok(turn);
         }

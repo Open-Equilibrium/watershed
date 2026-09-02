@@ -16,7 +16,7 @@ pub(super) fn executor_command(command: ExecutorCommand) -> Result<(), RuntimeEr
         }
         ExecutorCommand::ConfigureDefault => {
             flow_agent_core::configure_default_executor()?;
-            write_stdout("Default Executor selected\n")
+            write_stdout("Custom Executor override removed; using installed sibling Executor\n")
         }
     }
 }
