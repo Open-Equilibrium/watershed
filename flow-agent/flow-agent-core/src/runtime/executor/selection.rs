@@ -40,23 +40,6 @@ pub struct ExecutorSelection {
     source: ExecutorSelectionSource,
 }
 
-impl PartialEq for ExecutorSelection {
-    fn eq(&self, other: &Self) -> bool {
-        self.path == other.path && self.source == other.source && {
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            {
-                self.probe == other.probe
-            }
-            #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-            {
-                true
-            }
-        }
-    }
-}
-
-impl Eq for ExecutorSelection {}
-
 impl ExecutorSelection {
     #[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
     pub(super) fn new(path: PathBuf, source: ExecutorSelectionSource) -> Self {
@@ -249,7 +232,5 @@ mod unsupported_platform_tests {
         assert_eq!(selection.source(), ExecutorSelectionSource::Custom);
         assert_eq!(selection.source().as_str(), "custom");
         assert_eq!(default_selection.source().as_str(), "default");
-        assert_eq!(selection, same_selection);
-        assert_ne!(selection, default_selection);
     }
 }
