@@ -61,12 +61,14 @@ impl SessionEventReader {
         self.path.diagnostic_path()
     }
 
-    pub(crate) fn open_flat(workspace: &Path, session_id: &str) -> Result<Self, RuntimeError> {
+    /// Opens a session's validated log boundary without reading event payloads yet.
+    pub fn open(workspace: impl AsRef<Path>, session_id: &str) -> Result<Self, RuntimeError> {
         if !proto::is_valid_session_id(session_id) {
             return Err(RuntimeError::Usage(format!(
                 "invalid session_id {session_id:?}"
             )));
         }
+        let workspace = workspace.as_ref();
         let workspace_path =
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
         let workspace = AnchoredWorkspace::open_read_only(&workspace_path)?;
@@ -79,7 +81,7 @@ impl SessionEventReader {
         Self::open_flat_anchored(&workspace, &sessions, session_id)
     }
 
-    pub(super) fn open_flat_anchored(
+    fn open_flat_anchored(
         workspace: &AnchoredWorkspace,
         sessions: &AnchoredDir,
         session_id: &str,
@@ -103,11 +105,20 @@ impl SessionEventReader {
         })
     }
 
-    pub(super) fn open_conversation_run_raw(
-        workspace: &Path,
+    /// Opens one validated run log owned by the addressed conversation.
+    pub fn open_conversation_run(
+        workspace: impl AsRef<Path>,
         conversation_id: &str,
         run_session_id: &str,
     ) -> Result<Self, RuntimeError> {
+        if !proto::is_valid_session_id(conversation_id)
+            || !proto::is_valid_session_id(run_session_id)
+        {
+            return Err(RuntimeError::Usage(
+                "invalid conversation or run session id".to_owned(),
+            ));
+        }
+        let workspace = workspace.as_ref();
         let workspace_path =
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
         let workspace = AnchoredWorkspace::open_read_only(&workspace_path)?;

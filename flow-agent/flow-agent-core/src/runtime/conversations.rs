@@ -12,11 +12,8 @@ pub(crate) use contract::{
 };
 pub(crate) use contract::{MAX_CONVERSATION_RECORD_BYTES, RUN_EVENTS_LEAF};
 
-mod event_reader;
 mod history_index;
 mod session_event_stream;
-pub use event_reader::SessionEventReader;
-pub(crate) use event_reader::ensure_in_memory_replay_output_limit;
 #[cfg(test)]
 pub(crate) use history_index::append_conversation_entry;
 pub(crate) use history_index::append_productive_run_checkpoint;
@@ -41,6 +38,8 @@ pub(crate) use history_index::{
 pub(crate) use history_index::{
     MAX_HISTORY_INDEX_ID_BYTES, validate_conversation_history_for_budget,
 };
+pub use session_event_stream::SessionEventReader;
+pub(crate) use session_event_stream::ensure_in_memory_replay_output_limit;
 
 mod event_persistence;
 
