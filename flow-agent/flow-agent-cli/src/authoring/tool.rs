@@ -265,9 +265,7 @@ pub(super) fn parse_parameter(cursor: &mut Cursor<'_>) -> Result<AllowedParamete
     Ok(parameter)
 }
 
-pub(super) fn parse_network_allow(
-    cursor: &mut Cursor<'_>,
-) -> Result<NetworkAllowEntry, RuntimeError> {
+fn parse_network_allow(cursor: &mut Cursor<'_>) -> Result<NetworkAllowEntry, RuntimeError> {
     cursor.expect("--network-kind")?;
     let kind = NetworkAllowKind::parse(cursor.value("--network-kind")?)
         .ok_or_else(|| RuntimeError::Usage("--network-kind accepts only cidr".to_owned()))?;

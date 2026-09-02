@@ -150,7 +150,7 @@ pub(super) fn existing_anchored_conversation(
         .map(|(_, conversation)| conversation)
 }
 
-pub(super) fn existing_anchored_conversation_with_parent(
+fn existing_anchored_conversation_with_parent(
     workspace: &Path,
     conversation_id: &str,
 ) -> Result<(AnchoredDir, AnchoredDir), RuntimeError> {
@@ -162,7 +162,7 @@ pub(super) fn existing_anchored_conversation_with_parent(
     Ok((sessions, conversation))
 }
 
-pub(super) fn existing_anchored_run_with_parent(
+fn existing_anchored_run_with_parent(
     workspace: &Path,
     conversation_id: &str,
     run_session_id: &str,

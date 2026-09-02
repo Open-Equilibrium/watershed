@@ -269,7 +269,7 @@ impl PendingEventBatch {
         })
     }
 
-    pub(crate) fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.events.len() == EVENT_WRITER_BATCH_CAPACITY
     }
 

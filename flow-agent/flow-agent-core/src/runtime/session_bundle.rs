@@ -77,7 +77,7 @@ impl SessionBundlePaths {
         format!("{session_id}{METADATA_SUFFIX}")
     }
 
-    pub(crate) fn object_prefix(session_id: &str) -> String {
+    fn object_prefix(session_id: &str) -> String {
         format!("{session_id}{OBJECT_DIGEST_SEPARATOR}")
     }
 

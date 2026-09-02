@@ -68,7 +68,7 @@ pub struct SessionAppendValidationState {
 }
 
 impl SessionAppendValidationState {
-    pub(crate) fn unscoped() -> Self {
+    fn unscoped() -> Self {
         Self::new(None)
     }
 
@@ -190,7 +190,7 @@ impl SessionAppendValidationState {
         Ok(())
     }
 
-    pub(crate) fn validate_budget(
+    fn validate_budget(
         &self,
         path: &Path,
         line_number: usize,

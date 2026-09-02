@@ -143,7 +143,7 @@ where
     result
 }
 
-pub(crate) fn write_new_events(
+fn write_new_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     first_committed_sequence: &mut Option<u64>,
@@ -167,7 +167,7 @@ pub(crate) fn write_new_events(
     Ok(output_open)
 }
 
-pub(crate) fn write_verified_events(
+fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     through_sequence: u64,

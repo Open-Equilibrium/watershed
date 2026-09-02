@@ -111,7 +111,7 @@ pub(crate) fn open_flow_agent_home_at(
     Ok(home)
 }
 
-pub(crate) fn open_flow_agent_home_parent_at(
+fn open_flow_agent_home_parent_at(
     path: &Path,
     read_only: bool,
 ) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {

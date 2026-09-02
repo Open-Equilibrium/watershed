@@ -121,7 +121,7 @@ impl FlowExecutionPlan {
         }
     }
 
-    pub(crate) fn signature_for(execution: &RuntimeExecution) -> RuntimeStreamSignature {
+    fn signature_for(execution: &RuntimeExecution) -> RuntimeStreamSignature {
         let mut signature = RuntimeStreamSignatureBuilder::new(FLOW_EXECUTION_PLAN_DOMAIN);
         signature.push(&execution.events.digest);
         signature.push(&execution.context_manifests.digest);

@@ -120,7 +120,7 @@ impl HistoryScratch {
         Self::create_in_root(root, conversation_id, limit)
     }
 
-    pub(super) fn create_in_root(
+    fn create_in_root(
         root: AnchoredDir,
         conversation_id: &str,
         limit: u64,
@@ -299,7 +299,7 @@ pub(super) fn write_sorted_scratch_run<T: AsRef<[u8]>>(
     Ok(())
 }
 
-pub(super) fn cleanup_stale_scratch(root: &AnchoredDir) -> Result<(), RuntimeError> {
+fn cleanup_stale_scratch(root: &AnchoredDir) -> Result<(), RuntimeError> {
     for_each_scratch_leaf(root, |leaf| {
         let _ = validate_inactive_scratch(root, leaf)?;
         Ok(())

@@ -194,11 +194,7 @@ impl ToolTerminalClassification {
             .find(|classification| classification.as_str() == value)
     }
 
-    pub(crate) fn matches_terminal(
-        self,
-        outcome: RunAttemptOutcome,
-        exit_code: Option<i32>,
-    ) -> bool {
+    fn matches_terminal(self, outcome: RunAttemptOutcome, exit_code: Option<i32>) -> bool {
         match (outcome, self) {
             (RunAttemptOutcome::TimedOut, Self::ToolTimedOut)
             | (RunAttemptOutcome::Cancelled, Self::Cancelled) => exit_code.is_none(),

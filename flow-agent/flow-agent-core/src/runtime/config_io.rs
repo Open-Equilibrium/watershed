@@ -55,7 +55,7 @@ pub fn load_global_config() -> Result<GlobalConfig, RuntimeError> {
     load_global_config_authority().map(|authority| authority.config)
 }
 
-pub(crate) fn load_global_config_from(home: &AnchoredDir) -> Result<GlobalConfig, RuntimeError> {
+fn load_global_config_from(home: &AnchoredDir) -> Result<GlobalConfig, RuntimeError> {
     let text = read_global_config_to_string_from(home)?;
     parse_global_config_from_text(&text)
 }

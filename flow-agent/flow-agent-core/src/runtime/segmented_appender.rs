@@ -614,7 +614,7 @@ impl SessionLogAppender {
     }
 }
 
-pub(crate) fn append_native_event_batch_with<F, C>(
+fn append_native_event_batch_with<F, C>(
     file: &mut fs::File,
     path: &Path,
     original_len: u64,

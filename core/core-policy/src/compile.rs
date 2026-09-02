@@ -168,7 +168,7 @@ fn collect_phase_policy_scope(
     }
 }
 
-pub(crate) fn command_policy_from_tool(
+fn command_policy_from_tool(
     tool: &core_script::ToolBlock,
 ) -> Result<CommandPolicy, PolicyCompileError> {
     let (command_id, argv, executable, script_runtime) = match (&tool.tool_kind, &tool.command) {

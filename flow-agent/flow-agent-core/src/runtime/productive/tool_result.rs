@@ -73,7 +73,7 @@ pub(super) fn parse_tool_result(
     })
 }
 
-pub(super) fn build_tool_result(
+fn build_tool_result(
     outcome: RunAttemptOutcome,
     exit_code: Option<i32>,
     stdout: core_script::FlowValue,
