@@ -388,6 +388,8 @@ fn workspace_mounts(
     workspace: &AnchoredWorkspace,
     policy: &core_policy::CommandPolicy,
 ) -> Result<Vec<PreparedMount>, RuntimeError> {
+    // A writable mount grants every object already reachable from that exact source;
+    // only creation of new aliases across separately mounted capabilities is denied.
     policy
         .filesystem
         .read_only_mounts
