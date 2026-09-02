@@ -26,6 +26,22 @@ pub(crate) const HOST_SYSTEM_READ_MOUNTS: [(&str, &str); 6] = [
     ("/usr", "/usr"),
 ];
 
+const EXACT_RUNTIME_EXECUTABLES: [(&str, &str, &str); 3] = [
+    ("/bin/sh", "/usr/bin/dash", "/bin/sh"),
+    ("/bin/cat", "/usr/bin/cat", "/bin/cat"),
+    ("/bin/echo", "/usr/bin/echo", "/bin/echo"),
+];
+const EXACT_RUNTIME_OBJECTS: [(&str, &str); 2] = [
+    (
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/lib/x86_64-linux-gnu/libc.so.6",
+    ),
+    (
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/lib64/ld-linux-x86-64.so.2",
+    ),
+];
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) const POLICY_FEATURES: [&str; 6] = [
     EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0,
@@ -37,37 +53,22 @@ pub(crate) const POLICY_FEATURES: [&str; 6] = [
 ];
 
 pub(crate) fn runtime_mount_manifest() -> Vec<proto::ExecutorRuntimeMountV0> {
-    let exact_objects = [
-        ("/usr/bin/dash", "/bin/sh"),
-        (
-            "/usr/lib/x86_64-linux-gnu/libc.so.6",
-            "/lib/x86_64-linux-gnu/libc.so.6",
-        ),
-        (
-            "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
-            "/lib64/ld-linux-x86-64.so.2",
-        ),
-    ];
     let mut mounts = Vec::with_capacity(15);
-    for executable in proto::EXECUTOR_EXACT_EXECUTABLES_V0 {
-        for (source, target) in exact_objects {
-            let source = match executable {
-                "/bin/cat" if target == "/bin/sh" => "/usr/bin/cat",
-                "/bin/echo" if target == "/bin/sh" => "/usr/bin/echo",
-                _ => source,
-            };
-            let target = match executable {
-                "/bin/cat" if target == "/bin/sh" => "/bin/cat",
-                "/bin/echo" if target == "/bin/sh" => "/bin/echo",
-                _ => target,
-            };
-            mounts.push(proto::ExecutorRuntimeMountV0 {
+    for (executable, source, target) in EXACT_RUNTIME_EXECUTABLES {
+        mounts.push(proto::ExecutorRuntimeMountV0 {
+            executable: Some(executable.to_owned()),
+            runtime_profile: RuntimeReadProfileV0::Exact,
+            source: source.to_owned(),
+            target: target.to_owned(),
+        });
+        mounts.extend(EXACT_RUNTIME_OBJECTS.map(|(source, target)| {
+            proto::ExecutorRuntimeMountV0 {
                 executable: Some(executable.to_owned()),
                 runtime_profile: RuntimeReadProfileV0::Exact,
                 source: source.to_owned(),
                 target: target.to_owned(),
-            });
-        }
+            }
+        }));
     }
     mounts.extend(
         HOST_SYSTEM_READ_MOUNTS.map(|(source, target)| proto::ExecutorRuntimeMountV0 {
@@ -190,16 +191,16 @@ fn validate_command_contract(
         core_policy::ToolRuntimeProfile::Exact => RuntimeReadProfileV0::Exact,
         core_policy::ToolRuntimeProfile::HostSystemRead => RuntimeReadProfileV0::HostSystemRead,
     };
-    let expected_executable = match (&command.tool_kind, command.command_id.as_str()) {
-        (core_policy::ToolKind::OwnScript, _) => "/bin/sh",
-        (core_policy::ToolKind::PredefinedCommand, "agent-echo") => "/bin/echo",
-        (core_policy::ToolKind::PredefinedCommand, "agent-read") => "/bin/cat",
-        _ => {
-            return Err(BackendError::unsupported(
-                "request command is absent from the official executable manifest",
-            ));
+    let expected_executable = match command.tool_kind {
+        core_policy::ToolKind::OwnScript => Some("/bin/sh"),
+        core_policy::ToolKind::PredefinedCommand => {
+            core_policy::TrustedPredefinedCommand::parse(&command.command_id)
+                .and_then(core_policy::TrustedPredefinedCommand::productive_executable)
         }
-    };
+    }
+    .ok_or_else(|| {
+        BackendError::unsupported("request command is absent from the official executable manifest")
+    })?;
     if request.limits.max_stdout_bytes > MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64
         || request.limits.max_stderr_bytes > MAX_EXECUTOR_TOOL_STREAM_BYTES_V0 as u64
     {
@@ -354,60 +355,6 @@ impl SandboxPlan {
             arguments,
             inner_identity_checks: checks,
         })
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg(test)]
-pub(crate) struct SeccompPolicy {
-    denied: BTreeSet<&'static str>,
-}
-
-#[cfg(test)]
-impl SeccompPolicy {
-    pub(crate) fn denies(&self, syscall: &str) -> bool {
-        self.denied.contains(syscall)
-    }
-
-    pub(crate) fn allows(&self, syscall: &str) -> bool {
-        !self.denies(syscall) && syscall != "clone3"
-    }
-
-    pub(crate) fn returns_enosys(&self, syscall: &str) -> bool {
-        syscall == "clone3"
-    }
-
-    pub(crate) const fn allows_clone_without_namespace_flags(&self) -> bool {
-        true
-    }
-
-    pub(crate) const fn denies_clone_with_namespace_flags(&self) -> bool {
-        true
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn seccomp_policy() -> SeccompPolicy {
-    SeccompPolicy {
-        denied: [
-            "socket",
-            "io_uring_setup",
-            "unshare",
-            "setns",
-            "mount",
-            "umount2",
-            "pivot_root",
-            "open_tree",
-            "move_mount",
-            "fsopen",
-            "fsconfig",
-            "fsmount",
-            "fspick",
-            "mount_setattr",
-            "ptrace",
-        ]
-        .into_iter()
-        .collect(),
     }
 }
 

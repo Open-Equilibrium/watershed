@@ -15,7 +15,9 @@ pub(crate) fn build_tool_invocation(
         ) => {
             let command = core_policy::TrustedPredefinedCommand::parse(command_id)
                 .ok_or(ToolRunnerError::UnsupportedCommand)?;
-            let executable = resolve_predefined_executable(command)?;
+            let executable = command
+                .productive_executable()
+                .ok_or(ToolRunnerError::UnsupportedCommand)?;
             let mut rendered = argv.clone();
             let parameter_alias = (command == core_policy::TrustedPredefinedCommand::Read)
                 .then_some(("--file", "--"));
@@ -47,16 +49,6 @@ pub(crate) fn build_tool_invocation(
     };
     validate_tool_invocation(&invocation)?;
     Ok(invocation)
-}
-
-fn resolve_predefined_executable(
-    command: core_policy::TrustedPredefinedCommand,
-) -> Result<&'static str, ToolRunnerError> {
-    match command {
-        core_policy::TrustedPredefinedCommand::Echo => Ok("/bin/echo"),
-        core_policy::TrustedPredefinedCommand::Read => Ok("/bin/cat"),
-        core_policy::TrustedPredefinedCommand::Negative => Err(ToolRunnerError::UnsupportedCommand),
-    }
 }
 
 fn render_tool_parameters(

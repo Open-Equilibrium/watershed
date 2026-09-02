@@ -1,7 +1,6 @@
 use crate::{
     backend::{
-        BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, seccomp_policy,
-        validate_mount_contract,
+        BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, validate_mount_contract,
     },
     lifecycle::{CleanupAction, CleanupController, InnerStatusPolicy, inner_status_policy},
     platform, protocol,
@@ -308,23 +307,6 @@ fn sandbox_rejects_mounts_that_overlap_executor_reserved_paths() {
 }
 
 #[test]
-fn seccomp_blocks_boundary_escape_but_allows_normal_children() {
-    let policy = seccomp_policy();
-
-    assert!(policy.denies("socket"));
-    assert!(policy.denies("io_uring_setup"));
-    assert!(policy.denies("unshare"));
-    assert!(policy.denies("setns"));
-    assert!(policy.denies("mount"));
-    assert!(policy.denies("ptrace"));
-    assert!(policy.returns_enosys("clone3"));
-    assert!(policy.allows("fork"));
-    assert!(policy.allows("vfork"));
-    assert!(policy.allows_clone_without_namespace_flags());
-    assert!(policy.denies_clone_with_namespace_flags());
-}
-
-#[test]
 fn host_system_read_is_a_fixed_reviewed_ubuntu_set() {
     assert_eq!(
         crate::backend::HOST_SYSTEM_READ_MOUNTS,
@@ -337,6 +319,35 @@ fn host_system_read_is_a_fixed_reviewed_ubuntu_set() {
             ("/usr", "/usr"),
         ]
     );
+}
+
+#[test]
+fn runtime_manifest_matches_the_closed_productive_executable_set() {
+    let mut manifest = crate::backend::runtime_mount_manifest()
+        .into_iter()
+        .filter_map(|mount| mount.executable)
+        .collect::<Vec<_>>();
+    manifest.sort_unstable();
+    manifest.dedup();
+
+    let mut policy = std::iter::once("/bin/sh".to_owned())
+        .chain(
+            core_policy::TrustedPredefinedCommand::ALL
+                .into_iter()
+                .filter_map(core_policy::TrustedPredefinedCommand::productive_executable)
+                .map(str::to_owned),
+        )
+        .collect::<Vec<_>>();
+    policy.sort_unstable();
+
+    let mut protocol = proto::EXECUTOR_EXACT_EXECUTABLES_V0
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    protocol.sort_unstable();
+
+    assert_eq!(manifest, policy);
+    assert_eq!(manifest, protocol);
 }
 
 #[test]

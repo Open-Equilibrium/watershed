@@ -51,6 +51,15 @@ impl TrustedPredefinedCommand {
         }
     }
 
+    /// Returns the executable used by productive runtime commands.
+    pub const fn productive_executable(self) -> Option<&'static str> {
+        match self {
+            Self::Echo => Some("/bin/echo"),
+            Self::Negative => None,
+            Self::Read => Some("/bin/cat"),
+        }
+    }
+
     /// Returns the executable identity used by runtime policy.
     pub fn executable(self) -> String {
         format!("registry:{}", self.as_str())
