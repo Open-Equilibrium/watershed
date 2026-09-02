@@ -11,6 +11,7 @@ flowchart TD
   C[flow-agent-cli] --> F[flow-agent-core]
   C --> S[core-script]
   C --> R[proto]
+  E[flow-agent-executor] --> P[core-policy]
   E[flow-agent-executor] --> R
   F --> P[core-policy]
   F --> S
