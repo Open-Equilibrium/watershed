@@ -11,6 +11,7 @@ use crate::runtime::{
     live_events::LiveEventNotifier,
     openai_codex::OPENAI_CODEX_PROVIDER_ID,
     productive::{OpenAiCodexProvider, ProductiveProvider, ensure_productive_execution_platform},
+    resume::resume_fixture_session_internal,
     stage_results::reconcile_controlled_stages,
     types::{EmitMode, RunOutput, RuntimeError},
 };
@@ -116,6 +117,14 @@ where
     let config = &authority.config;
     let backend = reconcile_productive_preflight(require_execution_backend(config))?;
     let _activation = activate(matches!(&backend, ExecutionBackend::OpenAiCodex { .. }))?;
+    if matches!(backend, ExecutionBackend::Fixture) {
+        if conversation_id != run_session_id {
+            return Err(RuntimeError::Usage(
+                "Fixture resume requires identical conversation and run ids".to_owned(),
+            ));
+        }
+        return resume_fixture_session_internal(workspace, run_session_id, notifier, capture_jsonl);
+    }
     let ExecutionBackend::OpenAiCodex {
         model,
         model_profile,

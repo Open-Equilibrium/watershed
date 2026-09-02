@@ -1,4 +1,3 @@
-#[cfg(test)]
 use crate::runtime::session_lock::{SessionLockGuard, open_or_create_anchored_session_marker};
 use crate::runtime::{
     fs_guards::{
@@ -344,7 +343,6 @@ pub fn reserve_anchored_session_lock_file(
     open_or_create_anchored_session_marker(path)
 }
 
-#[cfg(test)]
 pub fn acquire_anchored_session_lock(
     workspace: &AnchoredWorkspace,
     sessions: &AnchoredDir,

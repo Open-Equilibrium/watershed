@@ -35,6 +35,8 @@ pub(crate) mod policy_resolution;
 pub(crate) mod productive;
 pub(crate) mod productive_capacity;
 pub(crate) mod responses;
+pub(crate) mod resume;
+pub(crate) mod resume_inspection;
 pub(crate) mod run_attempts;
 pub(crate) mod run_input;
 pub(crate) mod segmented_appender;

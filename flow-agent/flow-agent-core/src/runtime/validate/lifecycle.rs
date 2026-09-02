@@ -491,6 +491,13 @@ impl SessionLifecycleState {
         Ok(())
     }
 
+    pub(crate) fn tool_without_progress(&self) -> Option<&str> {
+        self.tools_without_progress
+            .iter()
+            .next()
+            .map(|tool| tool.tool_id.as_str())
+    }
+
     #[cfg(test)]
     pub(crate) fn retained_identifier_payload_bytes(&self) -> u64 {
         self.flow_definition_ids

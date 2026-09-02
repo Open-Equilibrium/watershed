@@ -25,6 +25,7 @@ pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
 mod anchored_file;
 #[cfg(windows)]
 pub(crate) use anchored_file::open_files_share_identity;
+pub use anchored_file::validate_real_file;
 pub use anchored_file::{
     AnchoredFile, AnchoredFileIdentity, anchored_file_identity, create_anchored_file,
     create_anchored_file_for_update, ensure_anchored_new_leaf_available,
@@ -37,9 +38,7 @@ pub use anchored_file::{
     verify_owned_anchored_marker, with_anchored_replacement_temp,
 };
 #[cfg(test)]
-pub use anchored_file::{
-    replacement_temp_path, set_owned_file_remove_observer, validate_real_file,
-};
+pub use anchored_file::{replacement_temp_path, set_owned_file_remove_observer};
 pub(crate) use anchored_file::{reserve_new_anchored_file, with_anchored_replacement_temp_checked};
 
 mod durability;

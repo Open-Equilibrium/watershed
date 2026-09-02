@@ -2,13 +2,16 @@ use crate::runtime::{
     digest::is_lowercase_sha256_hex,
     fs_guards::{
         AnchoredDir, AnchoredFile, RuntimeDirs, open_anchored_file_for_read, path_io_error,
-        segmented_jsonl_leaf, segmented_jsonl_leaf_stem,
+        segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem,
     },
     types::{
-        MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECT_TOTAL_BYTES, MAX_SESSION_OBJECTS, RuntimeError,
+        CONTEXT_MANIFEST_STREAM_LIMITS, EVENT_STREAM_LIMITS, MAX_SESSION_BUNDLE_BYTES,
+        MAX_SESSION_CONTEXT_MANIFEST_BYTES, MAX_SESSION_EVENT_BYTES, MAX_SESSION_METADATA_BYTES,
+        MAX_SESSION_OBJECT_BYTES, MAX_SESSION_OBJECT_TOTAL_BYTES, MAX_SESSION_OBJECTS,
+        MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits,
     },
 };
-use std::{collections::BTreeMap, ffi::OsStr};
+use std::{collections::BTreeMap, ffi::OsStr, io, path::Path};
 
 const CONTEXT_STREAM_STEM_SUFFIX: &str = ".contexts";
 const LOCK_SUFFIX: &str = ".lock";
@@ -21,6 +24,8 @@ pub struct SessionBundlePaths {
     pub(crate) events: AnchoredFile,
     pub(crate) lock: AnchoredFile,
     pub(crate) metadata: AnchoredFile,
+    pub(crate) session_id: String,
+    pub(crate) sessions: AnchoredDir,
 }
 
 impl SessionBundlePaths {
@@ -30,6 +35,8 @@ impl SessionBundlePaths {
             events: Self::events_in(&sessions, session_id),
             lock: Self::lock_in(&sessions, session_id),
             metadata: Self::metadata_in(&logs, session_id),
+            session_id: session_id.to_owned(),
+            sessions,
         }
     }
 
@@ -121,6 +128,117 @@ impl SessionBundlePaths {
     pub(crate) fn split_object_leaf(name: &str) -> Option<(&str, &str)> {
         name.split_once(OBJECT_DIGEST_SEPARATOR)
     }
+}
+
+#[derive(Debug)]
+pub struct SessionBundleInventory {
+    pub(crate) context_bytes: u64,
+    pub(crate) context_segments: Vec<AnchoredFile>,
+    pub(crate) event_bytes: u64,
+    pub(crate) event_segments: Vec<AnchoredFile>,
+    pub(crate) metadata_bytes: u64,
+    pub(crate) object_bytes: u64,
+    pub(crate) objects: BTreeMap<String, AnchoredFile>,
+    paths: SessionBundlePaths,
+}
+
+impl SessionBundleInventory {
+    pub(crate) fn inspect(paths: SessionBundlePaths) -> Result<Self, RuntimeError> {
+        let event_segments =
+            required_segmented_jsonl_files(&paths.events, EVENT_STREAM_LIMITS, "event stream")?;
+        let event_bytes = segment_bytes(&event_segments, MAX_SESSION_EVENT_BYTES)?;
+        let context_segments = required_segmented_jsonl_files(
+            &paths.contexts,
+            CONTEXT_MANIFEST_STREAM_LIMITS,
+            "context manifest stream",
+        )?;
+        let context_bytes = segment_bytes(&context_segments, MAX_SESSION_CONTEXT_MANIFEST_BYTES)?;
+        let metadata_bytes = anchored_file_bytes(&paths.metadata, MAX_SESSION_METADATA_BYTES)?;
+        let (objects, object_bytes) = session_objects(&paths.sessions, &paths.session_id)?;
+        let inventory = Self {
+            context_bytes,
+            context_segments,
+            event_bytes,
+            event_segments,
+            metadata_bytes,
+            object_bytes,
+            objects,
+            paths,
+        };
+        if inventory.total_bytes() > MAX_SESSION_BUNDLE_BYTES {
+            return Err(RuntimeError::Protocol(format!(
+                "Run bundle size {} bytes exceeds max {MAX_SESSION_BUNDLE_BYTES}",
+                inventory.total_bytes()
+            )));
+        }
+        Ok(inventory)
+    }
+
+    pub(crate) fn total_bytes(&self) -> u64 {
+        self.event_bytes
+            .saturating_add(self.context_bytes)
+            .saturating_add(self.metadata_bytes)
+            .saturating_add(self.object_bytes)
+    }
+
+    pub(crate) fn validate_resumable_bundle(&self) -> Result<(), RuntimeError> {
+        if self.event_segments.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} event stream is missing",
+                self.paths.events.diagnostic_path().display()
+            )));
+        }
+        if self.context_segments.is_empty() {
+            return Err(RuntimeError::Protocol(format!(
+                "{} context manifest stream is missing",
+                self.paths.contexts.diagnostic_path().display()
+            )));
+        }
+        for (digest, path) in &self.objects {
+            let expected = SessionBundlePaths::object_leaf(self.paths_session_id(), digest);
+            if path.leaf != Path::new(&expected) {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} does not match its session object inventory key",
+                    path.diagnostic_path().display()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn paths_session_id(&self) -> &str {
+        &self.paths.session_id
+    }
+}
+
+fn required_segmented_jsonl_files(
+    base: &AnchoredFile,
+    limits: SessionStreamLimits,
+    stream_name: &str,
+) -> Result<Vec<AnchoredFile>, RuntimeError> {
+    match segmented_jsonl_files(base, limits) {
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            Err(RuntimeError::Protocol(format!(
+                "{} {stream_name} is missing",
+                base.diagnostic_path().display()
+            )))
+        }
+        result => result,
+    }
+}
+
+fn segment_bytes(files: &[AnchoredFile], maximum: u64) -> Result<u64, RuntimeError> {
+    let mut total = 0u64;
+    for file in files {
+        total = total.saturating_add(anchored_file_bytes(file, MAX_SESSION_SEGMENT_BYTES)?);
+        if total > maximum {
+            return Err(RuntimeError::Protocol(format!(
+                "{} segmented JSONL size {total} bytes exceeds max {maximum}",
+                files[0].diagnostic_path().display()
+            )));
+        }
+    }
+    Ok(total)
 }
 
 fn anchored_file_bytes(file: &AnchoredFile, maximum: u64) -> Result<u64, RuntimeError> {

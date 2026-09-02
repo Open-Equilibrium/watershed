@@ -85,6 +85,14 @@ impl EventClock {
         Self { base_unix_seconds }
     }
 
+    pub(crate) fn from_first_event(event: &EventEnvelope) -> Option<Self> {
+        proto::parse_rfc3339_utc_timestamp(&event.timestamp).map(|base_unix_seconds| Self {
+            base_unix_seconds: base_unix_seconds.saturating_sub(
+                i64::try_from(event.sequence.saturating_sub(1)).unwrap_or(i64::MAX),
+            ),
+        })
+    }
+
     pub(crate) fn timestamp(self, sequence: u64) -> Result<String, RuntimeError> {
         let offset = i64::try_from(sequence.saturating_sub(1)).unwrap_or(i64::MAX);
         proto::format_rfc3339_utc_timestamp(self.base_unix_seconds.saturating_add(offset))

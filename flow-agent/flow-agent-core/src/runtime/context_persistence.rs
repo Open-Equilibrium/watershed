@@ -1,13 +1,13 @@
-#[cfg(test)]
 mod inspection;
+pub(crate) use inspection::read_anchored_context_manifest_signature;
 #[cfg(test)]
 pub(crate) use inspection::verify_context_manifest_objects;
 
 mod manifest;
 pub use manifest::ContextManifestWriter;
+pub(crate) use manifest::{context_manifest_inventory, validate_context_manifest_checkpoint};
 
 mod objects;
-#[cfg(test)]
 pub use objects::SessionObjectWriter;
 #[cfg(test)]
 pub use objects::ensure_session_object_size;

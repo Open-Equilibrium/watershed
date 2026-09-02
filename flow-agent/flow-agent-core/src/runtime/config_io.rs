@@ -204,6 +204,13 @@ pub fn require_execution_backend(config: &GlobalConfig) -> Result<ExecutionBacke
     })
 }
 
+pub fn require_fixture_execution_backend(config: &GlobalConfig) -> Result<(), RuntimeError> {
+    match require_execution_backend(config)? {
+        ExecutionBackend::Fixture => Ok(()),
+        ExecutionBackend::OpenAiCodex { .. } => Err(RuntimeError::ExecutionBackendUnavailable),
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GlobalConfigSource {
@@ -246,6 +253,16 @@ pub fn global_stub_model_fixture_profile(
         )),
         _ => Ok(false),
     }
+}
+
+pub fn resume_event_clock(
+    config: &GlobalConfig,
+    recorded_clock: EventClock,
+) -> Result<EventClock, RuntimeError> {
+    if config.event_clock == EventClock::fixed_fixture() {
+        return Ok(config.event_clock);
+    }
+    Ok(recorded_clock)
 }
 
 fn read_global_config_to_string_from(home: &AnchoredDir) -> Result<String, RuntimeError> {

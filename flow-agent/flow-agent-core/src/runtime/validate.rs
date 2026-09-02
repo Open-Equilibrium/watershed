@@ -1,6 +1,7 @@
 mod lifecycle;
 
 use lifecycle::SessionLifecycleState;
+pub(crate) use lifecycle::lifecycle_payload_string;
 
 use crate::runtime::types::{
     MAX_CANONICAL_EVENT_BYTES, MAX_FLOW_EVENTS, MAX_FLOW_INVOCATIONS, MAX_SESSION_EVENT_BYTES,
@@ -69,6 +70,10 @@ pub struct SessionAppendValidationState {
 impl SessionAppendValidationState {
     pub(crate) fn unscoped() -> Self {
         Self::new(None)
+    }
+
+    pub(crate) fn tool_without_progress(&self) -> Option<&str> {
+        self.lifecycle.tool_without_progress()
     }
 
     pub(crate) fn empty(expected_session_id: &str) -> Self {

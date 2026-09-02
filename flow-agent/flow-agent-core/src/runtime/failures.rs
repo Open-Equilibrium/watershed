@@ -4,7 +4,6 @@ use crate::runtime::{
     stream_signature::FlowInvocation,
     types::{RUNTIME_ERROR_REASON, RuntimeError},
 };
-#[cfg(test)]
 use proto::EventEnvelope;
 use proto::EventType;
 use std::{io, path::PathBuf};
@@ -377,7 +376,6 @@ pub fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
     }
 }
 
-#[cfg(test)]
 pub fn canonical_event_stream(events: &[EventEnvelope]) -> Result<String, RuntimeError> {
     let mut stream = String::new();
     for event in events {

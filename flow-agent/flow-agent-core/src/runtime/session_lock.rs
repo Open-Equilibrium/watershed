@@ -1,23 +1,17 @@
 use crate::runtime::{
     fs_guards::{
-        AnchoredFile, AnchoredFileIdentity, create_anchored_file, remove_owned_anchored_file,
-        verify_owned_anchored_marker,
+        AnchoredFile, AnchoredFileIdentity, create_anchored_file, open_anchored_file_for_read,
+        remove_owned_anchored_file, validate_real_file, verify_owned_anchored_marker,
     },
     session_authority::SessionOwnershipLease,
-    stage_results::reconcile_cleanup_failures,
+    stage_results::{reconcile_cleanup_failures, reconcile_controlled_stages},
     types::RuntimeError,
-};
-#[cfg(test)]
-use crate::runtime::{
-    fs_guards::{open_anchored_file_for_read, validate_real_file},
-    stage_results::reconcile_controlled_stages,
 };
 use std::{
     cell::{Cell, RefCell},
     fs, io,
 };
 
-#[cfg(test)]
 pub(crate) fn open_or_create_anchored_session_marker(
     path: &AnchoredFile,
 ) -> Result<fs::File, RuntimeError> {
@@ -272,14 +266,12 @@ impl Drop for SessionReservation {
     }
 }
 
-#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LockState {
     Active,
     Released,
 }
 
-#[cfg(test)]
 pub struct SessionLockGuard {
     pub(crate) file: fs::File,
     ownership: SessionOwnershipLease,
@@ -287,7 +279,6 @@ pub struct SessionLockGuard {
     state: Cell<LockState>,
 }
 
-#[cfg(test)]
 impl SessionLockGuard {
     pub(crate) fn new(
         path: AnchoredFile,
@@ -315,7 +306,6 @@ impl SessionLockGuard {
     }
 }
 
-#[cfg(test)]
 impl Drop for SessionLockGuard {
     fn drop(&mut self) {
         if self.state.replace(LockState::Released) == LockState::Active {
