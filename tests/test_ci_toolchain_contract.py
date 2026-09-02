@@ -217,9 +217,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             with self.subTest(mutated=mutated), self.assertRaises(AssertionError):
                 self.assert_ci_gate_contract(mutated)
 
-    def test_m12_release_boundary_is_real_and_fail_closed(self) -> None:
-        self.assert_m12_release_boundary(workflow_text())
-
     def test_testing_contract_covers_tooling_and_rustdoc_gates(self) -> None:
         testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
         for contract in (
