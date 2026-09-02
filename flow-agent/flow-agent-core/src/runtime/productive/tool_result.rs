@@ -1,9 +1,9 @@
-use super::provider_result::read_verified_session_object;
 use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
     run_attempts::{
-        ProductiveRecovery, RunAttemptOutcome, ToolTerminalClassification, resolve_tool_terminal,
+        ProductiveRecovery, RunAttemptOutcome, ToolTerminalClassification,
+        read_verified_session_object, resolve_tool_terminal,
     },
     tool_runner::{MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome},
     types::RuntimeError,

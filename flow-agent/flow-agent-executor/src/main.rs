@@ -1,3 +1,17 @@
+mod backend;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod cgroup;
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+mod lifecycle;
+mod platform;
+mod protocol;
+
 fn main() {
-    flow_agent_executor::run();
+    if let Err(error) = protocol::run() {
+        eprintln!("{error}");
+        std::process::exit(65);
+    }
 }
+
+#[cfg(test)]
+mod tests;

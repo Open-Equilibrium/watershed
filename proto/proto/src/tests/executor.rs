@@ -4,14 +4,14 @@ use crate::{
     ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0,
     ExecutorProbeV0, ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
     ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
-    ExecutorToolStatusV0, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0,
-    MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
-    MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0, TOOL_FORCED_REAP_DEADLINE_V0,
-    TOOL_OUTPUT_DRAIN_DEADLINE_V0, TOOL_TERMINATION_GRACE_V0, UnixObjectIdentityV0,
-    canonical_executor_probe_v0, canonical_executor_request_v0, canonical_executor_response_v0,
-    decode_executor_stream_v0, encode_executor_stream_v0, parse_executor_probe_v0,
-    parse_executor_request_v0, parse_executor_response_v0, resolved_policy_digest_v0,
-    validate_enforcement_receipt_v0,
+    ExecutorToolStatusV0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0,
+    MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
+    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0,
+    TOOL_FORCED_REAP_DEADLINE_V0, TOOL_OUTPUT_DRAIN_DEADLINE_V0, TOOL_TERMINATION_GRACE_V0,
+    UnixObjectIdentityV0, canonical_executor_probe_v0, canonical_executor_request_v0,
+    canonical_executor_response_v0, decode_executor_stream_v0, encode_executor_stream_v0,
+    parse_executor_probe_v0, parse_executor_request_v0, parse_executor_response_v0,
+    resolved_policy_digest_v0, validate_enforcement_receipt_v0,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, time::Duration};
@@ -321,6 +321,37 @@ fn executor_request_preserves_literal_argument_strings() {
 }
 
 #[test]
+fn executor_request_enforces_complete_exec_vector_entry_boundary() {
+    let mut exact = request();
+    exact.argv = vec![String::new(); MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0 - 1];
+    canonical_executor_request_v0(&exact).expect("2,048 complete exec-vector entries are valid");
+
+    let mut over = request();
+    over.argv = vec![String::new(); MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0];
+    let error = canonical_executor_request_v0(&over)
+        .expect_err("2,049 complete exec-vector entries must be rejected");
+    assert_eq!(error.to_string(), "Executor argv entry bound is invalid");
+}
+
+#[test]
+fn executor_request_enforces_complete_exec_vector_byte_boundary() {
+    let mut exact = request();
+    exact.environment.clear();
+    let entries = exact.argv.len() + 1;
+    let pointer_bytes = (entries + 2) * std::mem::size_of::<usize>();
+    let exact_argument_bytes =
+        MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0 - pointer_bytes - (exact.executable.len() + 1) - 1;
+    exact.argv = vec!["x".repeat(exact_argument_bytes)];
+    canonical_executor_request_v0(&exact).expect("131,072 encoded exec-vector bytes are valid");
+
+    let mut over = exact;
+    over.argv[0].push('x');
+    let error = canonical_executor_request_v0(&over)
+        .expect_err("131,073 encoded exec-vector bytes must be rejected");
+    assert_eq!(error.to_string(), "Executor argv exceeds its byte limit");
+}
+
+#[test]
 fn executor_request_rejects_unbound_policy_fields() {
     let mut cases = Vec::new();
 
@@ -426,7 +457,7 @@ fn executor_request_rejects_invalid_limits_mounts_environment_and_ids() {
         ),
         (
             "too many argv entries",
-            |candidate| candidate.argv = vec![String::new(); 2_049],
+            |candidate| candidate.argv = vec![String::new(); MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0],
             "Executor argv entry bound is invalid",
         ),
         (

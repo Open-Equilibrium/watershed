@@ -1,5 +1,6 @@
 use crate::runtime::{
     context::{ContextHistory, ContextObject},
+    digest::sha256_hex,
     error::PROVIDER_ERROR_REASON,
     types::{CANCELLED_REASON, RuntimeError},
 };
@@ -330,4 +331,22 @@ pub(crate) trait ProductiveRecovery {
     fn terminal_snapshot_hash(&self) -> Option<&str> {
         None
     }
+}
+
+pub(crate) fn read_verified_session_object(
+    recovery: &dyn ProductiveRecovery,
+    uri: &str,
+    description: &str,
+) -> Result<Vec<u8>, RuntimeError> {
+    let bytes = recovery.read_object(uri)?;
+    let expected_uri =
+        core_script::build_session_object_uri(&sha256_hex(&bytes)).map_err(|error| {
+            RuntimeError::Protocol(format!("{description} URI is invalid: {error}"))
+        })?;
+    if expected_uri != uri {
+        return Err(RuntimeError::Protocol(format!(
+            "{description} does not match its URI digest"
+        )));
+    }
+    Ok(bytes)
 }

@@ -2,11 +2,11 @@ use super::codec::resolved_policy_digest_v0;
 use super::stream::decode_executor_stream_v0;
 use super::{
     EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EnforcementReceiptV0,
-    ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorProtocolError, ExecutorRequestV0,
-    ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0, MAX_ARGV_ENTRIES,
-    MAX_ENVIRONMENT_ENTRIES, MAX_EXEC_VECTOR_BYTES, MAX_EXECUTOR_MOUNTS_V0,
-    MAX_EXECUTOR_RUNTIME_MOUNTS_V0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
-    MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, MAX_ID_CHARS, MAX_NAME_CHARS, MAX_PATH_CHARS,
+    ExecutorExecVectorErrorV0, ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorProtocolError,
+    ExecutorRequestV0, ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
+    MAX_ENVIRONMENT_ENTRIES, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_RUNTIME_MOUNTS_V0,
+    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, MAX_ID_CHARS,
+    MAX_NAME_CHARS, MAX_PATH_CHARS, validate_executor_exec_vector_v0,
 };
 use crate::session_object::decode_lowercase_sha256_hex;
 
@@ -23,24 +23,15 @@ pub(super) fn validate_request(request: &ExecutorRequestV0) -> Result<(), Execut
         MAX_PATH_CHARS,
     )?;
     validate_absolute_path(&request.working_directory, "working_directory")?;
-    if request.argv.len() > MAX_ARGV_ENTRIES {
-        return Err(ExecutorProtocolError::new(
-            "Executor argv entry bound is invalid",
-        ));
-    }
-    let exec_bytes = request
-        .argv
-        .iter()
-        .try_fold(request.executable.len(), |total, value| {
-            validate_argv_entry(value)?;
-            total
-                .checked_add(value.len() + 1)
-                .ok_or_else(|| ExecutorProtocolError::new("Executor argv byte count overflow"))
-        })?;
-    if exec_bytes > MAX_EXEC_VECTOR_BYTES {
-        return Err(ExecutorProtocolError::new(
-            "Executor argv exceeds its byte limit",
-        ));
+    if let Err(error) = validate_executor_exec_vector_v0(&request.executable, &request.argv) {
+        return Err(ExecutorProtocolError::new(match error {
+            ExecutorExecVectorErrorV0::NulByte => "Executor argv is invalid",
+            ExecutorExecVectorErrorV0::EntryBudget { .. } => "Executor argv entry bound is invalid",
+            ExecutorExecVectorErrorV0::ByteBudget { actual: usize::MAX } => {
+                "Executor argv byte count overflow"
+            }
+            ExecutorExecVectorErrorV0::ByteBudget { .. } => "Executor argv exceeds its byte limit",
+        }));
     }
     if request.environment.len() > MAX_ENVIRONMENT_ENTRIES {
         return Err(ExecutorProtocolError::new(
@@ -277,14 +268,6 @@ pub(super) fn validate_text(
         Err(ExecutorProtocolError::new(format!(
             "Executor {name} is invalid"
         )))
-    } else {
-        Ok(())
-    }
-}
-
-fn validate_argv_entry(value: &str) -> Result<(), ExecutorProtocolError> {
-    if value.contains('\0') {
-        Err(ExecutorProtocolError::new("Executor argv is invalid"))
     } else {
         Ok(())
     }

@@ -3,7 +3,7 @@ use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
     openai_codex::{ProviderTokenUsage, ProviderToolCall, ProviderTurn},
-    run_attempts::ProductiveRecovery,
+    run_attempts::{ProductiveRecovery, read_verified_session_object},
     types::{MAX_PROVIDER_ERROR_MESSAGE_CHARS, RuntimeError},
 };
 use proto::parse_unique_json;
@@ -270,24 +270,6 @@ fn verify_provider_result_session_objects_at(
             Ok(())
         }
     }
-}
-
-pub(super) fn read_verified_session_object(
-    recovery: &dyn ProductiveRecovery,
-    uri: &str,
-    description: &str,
-) -> Result<Vec<u8>, RuntimeError> {
-    let bytes = recovery.read_object(uri)?;
-    let expected_uri =
-        core_script::build_session_object_uri(&sha256_hex(&bytes)).map_err(|error| {
-            RuntimeError::Protocol(format!("{description} URI is invalid: {error}"))
-        })?;
-    if expected_uri != uri {
-        return Err(RuntimeError::Protocol(format!(
-            "{description} does not match its URI digest"
-        )));
-    }
-    Ok(bytes)
 }
 
 pub(super) fn durable_provider_error(
