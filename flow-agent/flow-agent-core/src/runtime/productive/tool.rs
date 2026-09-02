@@ -133,26 +133,17 @@ where
         }
     }
     let (durable_value, result) = if let Some(result) = recovered {
-        let receipt = mark_recovery_failure(
-            &mut context.recovery_failed,
-            recovered_tool_receipt(&result),
-        )?;
+        let output =
+            mark_recovery_failure(&mut context.recovery_failed, recovered_tool_output(&result))?;
         mark_recovery_failure(
             &mut context.recovery_failed,
             context
                 .tool_executor
-                .validate_enforcement_receipt(&prepared, &receipt),
+                .validate_enforcement_receipt(&prepared, &output.enforcement),
         )?;
         let value = mark_recovery_failure(
             &mut context.recovery_failed,
-            recovered_tool_value_bound(
-                &result,
-                context.recovery,
-                &request_hash,
-                &expected_policy_digest,
-                expected_runtime_profile,
-                expected_process_capacity,
-            ),
+            recovered_tool_value_bound(&result, context.recovery, output, &request_hash),
         )?;
         (value, result)
     } else {
@@ -583,9 +574,7 @@ fn recovered_executor_dispatch_error(
     Ok(Some(output.error))
 }
 
-fn recovered_tool_receipt(
-    result: &RunAttemptResult,
-) -> Result<proto::EnforcementReceiptV0, RuntimeError> {
+fn recovered_tool_output(result: &RunAttemptResult) -> Result<ToolAttemptOutput, RuntimeError> {
     let durable_output = result.durable_output.as_ref().ok_or_else(|| {
         RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
     })?;
@@ -598,51 +587,26 @@ fn recovered_tool_receipt(
             "recovered Tool output has an unsupported schema".to_owned(),
         ));
     }
-    serde_json::from_value(durable_output.get("enforcement").cloned().ok_or_else(|| {
-        RuntimeError::Protocol("recovered Tool output has no enforcement receipt".to_owned())
-    })?)
-    .map_err(RuntimeError::Json)
+    if durable_output.get("enforcement").is_none() {
+        return Err(RuntimeError::Protocol(
+            "recovered Tool output has no enforcement receipt".to_owned(),
+        ));
+    }
+    serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)
 }
 
 fn recovered_tool_value_bound(
     result: &RunAttemptResult,
     recovery: &dyn ProductiveRecovery,
+    output: ToolAttemptOutput,
     expected_request_hash: &str,
-    expected_policy_digest: &str,
-    expected_runtime_profile: proto::RuntimeReadProfileV0,
-    expected_process_capacity: u32,
 ) -> Result<core_script::FlowValue, RuntimeError> {
     recovered_tool_terminal(result)?;
-    let durable_output = result.durable_output.clone().ok_or_else(|| {
-        RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
-    })?;
-    if durable_output
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
-        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
-    {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool output has an unsupported schema".to_owned(),
-        ));
-    }
-    let output: ToolAttemptOutput =
-        serde_json::from_value(durable_output).map_err(RuntimeError::Json)?;
     if output.request_hash != expected_request_hash {
         return Err(RuntimeError::Protocol(
             "recovered Tool output does not match the prepared request hash".to_owned(),
         ));
     }
-    proto::validate_enforcement_receipt_v0(
-        &output.enforcement,
-        expected_policy_digest,
-        expected_runtime_profile,
-        expected_process_capacity,
-    )
-    .map_err(|_| {
-        RuntimeError::Protocol(
-            "recovered Tool enforcement receipt does not match the prepared request".to_owned(),
-        )
-    })?;
     let tool_result = core_script::parse_flow_value_v0(output.tool_result).map_err(|error| {
         RuntimeError::Protocol(format!("recovered Tool result is invalid: {error}"))
     })?;
@@ -667,33 +631,20 @@ pub(crate) fn recovered_tool_value(
     result: &RunAttemptResult,
     recovery: &dyn ProductiveRecovery,
 ) -> Result<core_script::FlowValue, RuntimeError> {
-    let durable_output = result.durable_output.as_ref().ok_or_else(|| {
-        RuntimeError::Protocol("recovered Tool attempt has no durable output".to_owned())
-    })?;
-    if durable_output
-        .get("schema")
-        .and_then(serde_json::Value::as_str)
-        != Some(TOOL_ATTEMPT_OUTPUT_SCHEMA_V1)
-    {
-        return Err(RuntimeError::Protocol(
-            "recovered Tool output has an unsupported schema".to_owned(),
-        ));
-    }
-    let receipt = recovered_tool_receipt(result)?;
-    let request_hash = durable_output
-        .get("request_hash")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| {
-            RuntimeError::Protocol("recovered Tool output has no request hash".to_owned())
-        })?;
-    recovered_tool_value_bound(
-        result,
-        recovery,
-        request_hash,
-        &receipt.applied_policy_digest,
-        receipt.runtime_profile,
-        receipt.max_concurrent_processes_and_threads,
+    let output = recovered_tool_output(result)?;
+    proto::validate_enforcement_receipt_v0(
+        &output.enforcement,
+        &output.enforcement.applied_policy_digest,
+        output.enforcement.runtime_profile,
+        output.enforcement.max_concurrent_processes_and_threads,
     )
+    .map_err(|_| {
+        RuntimeError::Protocol(
+            "recovered Tool enforcement receipt does not match the prepared request".to_owned(),
+        )
+    })?;
+    let request_hash = output.request_hash.clone();
+    recovered_tool_value_bound(result, recovery, output, &request_hash)
 }
 
 pub(super) fn validate_tool_result_streams(
