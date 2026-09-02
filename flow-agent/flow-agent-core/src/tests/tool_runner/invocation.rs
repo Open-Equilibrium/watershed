@@ -225,7 +225,7 @@ fn own_script_uses_the_fixed_runner_and_no_implicit_interpreter() {
         .expect("own script invocation builds");
     assert_eq!(
         invocation.executable,
-        core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE
+        proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0
     );
     assert_eq!(
         invocation.argv,

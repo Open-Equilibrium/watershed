@@ -330,7 +330,7 @@ fn runtime_manifest_matches_the_closed_productive_executable_set() {
     manifest.sort_unstable();
     manifest.dedup();
 
-    let mut policy = std::iter::once(core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned())
+    let mut policy = std::iter::once(proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned())
         .chain(
             core_policy::TrustedPredefinedCommand::ALL
                 .into_iter()

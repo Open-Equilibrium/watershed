@@ -196,7 +196,7 @@ fn validate_command_contract(
         core_policy::ToolRuntimeProfile::HostSystemRead => RuntimeReadProfileV0::HostSystemRead,
     };
     let expected_executable = match command.tool_kind {
-        core_policy::ToolKind::OwnScript => Some(core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE),
+        core_policy::ToolKind::OwnScript => Some(proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0),
         core_policy::ToolKind::PredefinedCommand => {
             core_policy::TrustedPredefinedCommand::parse(&command.command_id)
                 .and_then(core_policy::TrustedPredefinedCommand::productive_executable)

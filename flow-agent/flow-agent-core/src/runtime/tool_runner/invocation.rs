@@ -38,7 +38,7 @@ pub(crate) fn build_tool_invocation(
             ];
             argv.extend(parameter_tokens);
             ToolInvocation {
-                executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
+                executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
                 argv,
             }
         }

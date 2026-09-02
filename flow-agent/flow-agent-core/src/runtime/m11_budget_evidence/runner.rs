@@ -117,7 +117,7 @@ pub(super) fn runner_dual_stream_caps(temp_root: &Path) -> Result<M11BudgetOutco
     let workspace = AnchoredWorkspace::open(temp_root)
         .map_err(|_| "runner workspace did not open".to_owned())?;
     let invocation = ToolInvocation {
-        executable: core_policy::OWN_SCRIPT_PRODUCTIVE_EXECUTABLE.to_owned(),
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
         argv: vec![
             "-c".to_owned(),
             format!(
