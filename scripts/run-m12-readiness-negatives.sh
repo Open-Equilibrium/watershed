@@ -36,7 +36,8 @@ printf 'scope\n' >> "$fault_dir/systemd-run.calls"
 exec "$fault_root/systemd-run-real" \
   --user --scope --quiet --collect \
   --property=Delegate=pids -- \
-  "$fault_root/barrier" "$fault_dir/scoped-executor" "$8"
+  "$fault_root/barrier" "$fault_dir/scoped-executor" "$8" \
+  2> "$fault_dir/executor.stderr"
 WRAPPER
   /bin/cat > "$negative_root/barrier" <<'BARRIER'
 #!/bin/sh
@@ -180,7 +181,10 @@ run_negative() {
       fi
       test ! -s "$M12_FAULT_DIR/stdout"
       /bin/grep -Fq "executor_unavailable:" "$M12_FAULT_DIR/stderr"
-      /bin/grep -Fq "$M12_FAULT_EXPECTED" "$M12_FAULT_DIR/stderr"
+      if ! /bin/grep -Fq "$M12_FAULT_EXPECTED" "$M12_FAULT_DIR/executor.stderr"; then
+        /bin/cat "$M12_FAULT_DIR/executor.stderr" >&2
+        exit 1
+      fi
       test "$(/usr/bin/wc -l < "$M12_FAULT_DIR/systemd-run.calls")" -eq 1
       scoped_pid=
       trap - EXIT
