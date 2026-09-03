@@ -47,7 +47,7 @@ IFS=: read -r _ _ cgroup < /proc/self/cgroup
 printf '%s %s %s\n' "$$" "$PPID" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
 IFS= read -r _ < "$fault_dir/release"
-LLVM_PROFILE_FILE="$fault_dir/scoped-%p-%m.profraw" \
+LLVM_PROFILE_FILE=/work/target/m12-scoped-%p-%m.profraw \
   exec "$@" 2> "$fault_dir/executor.stderr"
 BARRIER
   chmod 0755 "$negative_root/systemd-run-real" "$negative_root/systemd-run" "$negative_root/barrier"
