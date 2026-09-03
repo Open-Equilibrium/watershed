@@ -10,13 +10,17 @@ pub(super) fn executor_command(command: ExecutorCommand) -> Result<(), RuntimeEr
         ExecutorCommand::ConfigurePath(path) => {
             let selection = flow_agent_core::configure_executor_path(&path)?;
             write_stdout(&format!(
-                "custom Executor configured: {:?}\n",
+                "Custom Executor configured: {:?}\n",
                 selection.path()
             ))
         }
         ExecutorCommand::ConfigureDefault => {
-            flow_agent_core::configure_default_executor()?;
-            write_stdout("Custom Executor override removed; default sibling resolution restored\n")
+            let message = if flow_agent_core::configure_default_executor()? {
+                "Custom Executor override removed; default sibling resolution restored\n"
+            } else {
+                "Default sibling resolution already active\n"
+            };
+            write_stdout(message)
         }
     }
 }

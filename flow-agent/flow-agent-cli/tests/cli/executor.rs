@@ -97,7 +97,7 @@ fn executor_default_reports_when_no_custom_override_existed() {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(
         std::str::from_utf8(&output.stdout).expect("stdout is UTF-8"),
-        "Default Executor already selected; no Custom override was configured\n"
+        "Default sibling resolution already active\n"
     );
     assert!(output.stderr.is_empty(), "{output:?}");
 }
