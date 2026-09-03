@@ -61,15 +61,24 @@ fn inherited_self_image() -> Result<File, String> {
 }
 
 fn scope_command(image: &File, argument: &str) -> Command {
+    let uid = rustix::process::geteuid().as_raw();
+    let runtime = format!("/run/user/{uid}");
     let mut command = Command::new(SYSTEMD_RUN);
-    command.args([
-        "--user",
-        "--scope",
-        "--quiet",
-        "--collect",
-        "--property=Delegate=pids",
-        "--",
-    ]);
+    command
+        .env_clear()
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={runtime}/bus"),
+        )
+        .args([
+            "--user",
+            "--scope",
+            "--quiet",
+            "--collect",
+            "--property=Delegate=pids",
+            "--",
+        ]);
     command
         .arg(format!("/proc/self/fd/{}", image.as_raw_fd()))
         .arg(argument);
@@ -249,6 +258,7 @@ fn current_delegated_scope() -> Result<PathBuf, String> {
 }
 
 pub(crate) fn enter_supervisor_subgroup() -> Result<(), String> {
+    clear_process_environment()?;
     let relative = current_cgroup_relative()?;
     if !relative
         .file_name()
@@ -267,6 +277,18 @@ pub(crate) fn enter_supervisor_subgroup() -> Result<(), String> {
         return Err("Executor supervisor cgroup changed transient scope".to_owned());
     }
     Ok(())
+}
+
+fn clear_process_environment() -> Result<(), String> {
+    // SAFETY: scoped modes call this before starting threads or reading a request.
+    if unsafe { c_clearenv() } == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "failed to clear Executor bootstrap environment: {}",
+            std::io::Error::last_os_error()
+        ))
+    }
 }
 
 fn current_cgroup_relative() -> Result<PathBuf, String> {
@@ -354,20 +376,50 @@ pub(crate) fn move_current_process(descriptor: i32) -> std::io::Result<()> {
 }
 
 unsafe extern "C" {
+    #[link_name = "clearenv"]
+    unsafe fn c_clearenv() -> i32;
+
     #[link_name = "write"]
     unsafe fn c_write(descriptor: i32, buffer: *const u8, count: usize) -> isize;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::observe_finished_capacity;
+    use super::{SCOPED_ARGUMENT, observe_finished_capacity, scope_command};
     use std::{
+        ffi::OsString,
         fs,
+        fs::File,
         path::Path,
         sync::atomic::{AtomicU64, Ordering},
     };
 
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn transient_scope_bootstrap_uses_only_the_effective_users_bus() {
+        let image = File::open("/proc/self/exe").expect("current executable opens");
+        let command = scope_command(&image, SCOPED_ARGUMENT);
+        let uid = rustix::process::geteuid().as_raw();
+        let environment = command
+            .get_envs()
+            .map(|(name, value)| (name.to_owned(), value.map(OsString::from)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            environment,
+            [
+                (
+                    OsString::from("DBUS_SESSION_BUS_ADDRESS"),
+                    Some(OsString::from(format!("unix:path=/run/user/{uid}/bus"))),
+                ),
+                (
+                    OsString::from("XDG_RUNTIME_DIR"),
+                    Some(OsString::from(format!("/run/user/{uid}"))),
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn cleanup_observes_capacity_events_after_the_tool_tree_is_empty() {

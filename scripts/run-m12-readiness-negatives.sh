@@ -10,7 +10,6 @@ set -eu
 negative_prefix="$RUNNER_TEMP/m12-negative-prefix"
 negative_root="$RUNNER_TEMP/m12-readiness-negatives"
 user_runtime=/run/user/10001
-user_bus=unix:path=$user_runtime/bus
 
 prepare_fault_harness() {
   install -d -m 0755 "$negative_root" /opt/watershed-m12-fault
@@ -99,8 +98,6 @@ run_negative() {
         /usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups \
           /usr/bin/env PATH= HOME="$M12_FAULT_HOME" \
             XDG_CONFIG_HOME="$M12_FAULT_CONFIG" \
-            XDG_RUNTIME_DIR=/run/user/10001 \
-            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
             "$M12_FAULT_FLOW" executor check \
             > "$M12_FAULT_DIR/stdout" 2> "$M12_FAULT_DIR/stderr" &
       fi
@@ -209,7 +206,6 @@ set +e
 missing_manager=$(
   /usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups \
     /usr/bin/env PATH= HOME="$M12_HOME" XDG_CONFIG_HOME="$M12_CONFIG" \
-      XDG_RUNTIME_DIR="$user_runtime" DBUS_SESSION_BUS_ADDRESS="$user_bus" \
       "$M12_STANDARD_PREFIX/bin/flow" executor check 2>&1
 )
 missing_manager_status=$?

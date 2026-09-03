@@ -230,16 +230,9 @@ jobs:
         if: matrix.os == 'ubuntu-24.04'
         shell: bash
         run: |
-          docker exec \
-            --env HOME=/home/watershed \
-            --env USER=watershed \
-            --env LOGNAME=watershed \
-            --env XDG_RUNTIME_DIR=/run/user/10001 \
-            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
-            watershed-m12 \
-            /usr/sbin/runuser --user watershed --preserve-environment -- \
-            /bin/sh -ec \
-              '/work/target/x86_64-unknown-linux-musl/release/flow-executor --probe |
+          docker exec watershed-m12 /bin/sh -ec \
+            '/usr/sbin/runuser --user watershed -- /usr/bin/env -i \
+              /work/target/x86_64-unknown-linux-musl/release/flow-executor --probe |
                 /usr/bin/python3 -c '\''import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'\'''
 
       - name: Run M1.2 executor tests
@@ -256,8 +249,6 @@ jobs:
           --env HOME=/home/watershed
           --env USER=watershed
           --env LOGNAME=watershed
-          --env XDG_RUNTIME_DIR=/run/user/10001
-          --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus
           watershed-m12
           /usr/sbin/runuser --user watershed --preserve-environment --
           cargo test --locked -p flow-agent-executor --test official_linux
@@ -277,8 +268,6 @@ jobs:
             --env HOME=/home/watershed \
             --env USER=watershed \
             --env LOGNAME=watershed \
-            --env XDG_RUNTIME_DIR=/run/user/10001 \
-            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
             watershed-m12 \
             /usr/sbin/runuser --user watershed --preserve-environment -- \
             cargo run --locked -p flow-agent-core \
@@ -336,8 +325,6 @@ jobs:
             --env HOME=/home/watershed \
             --env USER=watershed \
             --env LOGNAME=watershed \
-            --env XDG_RUNTIME_DIR=/run/user/10001 \
-            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
             watershed-m12 \
             /bin/sh -ec 'install -d -m 0755 /usr/local/libexec/watershed
             install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /usr/local/libexec/watershed/flow-executor
@@ -430,8 +417,6 @@ jobs:
           export USER=watershed
           export LOGNAME=watershed
           export RUNNER_TEMP=/home/watershed/m12-coverage
-          export XDG_RUNTIME_DIR=/run/user/10001
-          export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus
           export BWRAP_UNDER_TEST=/usr/bin/bwrap
           export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
           export FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor

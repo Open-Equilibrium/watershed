@@ -212,6 +212,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
             workflow.replace("cargo llvm-cov report", "true", 1),
             workflow.replace('grep -q "INTERP"', 'grep -q "NOT_INTERP"', 1),
+            workflow.replace("/usr/bin/env -i", "/usr/bin/env", 1),
         )
         for mutated in mutations:
             with self.subTest(mutated=mutated), self.assertRaises(AssertionError):
@@ -603,12 +604,13 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         for required in (
             f"/work/{M12_EXECUTOR} --probe",
-            "XDG_RUNTIME_DIR=/run/user/10001",
-            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus",
-            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
+            "/usr/bin/env -i",
+            f"runuser --user {M12_COVERAGE_USER} --",
             'assert probe["ready"] is True, probe',
         ):
             self.assertIn(required, readiness)
+        self.assertNotIn("XDG_RUNTIME_DIR", readiness)
+        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", readiness)
 
         executor_tests = "\n".join(
             assert_step_state(
@@ -621,12 +623,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             executor_tests,
         )
         self.assertIn(f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}", executor_tests)
-        for required in (
-            "XDG_RUNTIME_DIR=/run/user/10001",
-            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus",
+        self.assertNotIn("XDG_RUNTIME_DIR", executor_tests)
+        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", executor_tests)
+        self.assertIn(
             f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
-        ):
-            self.assertIn(required, executor_tests)
+            executor_tests,
+        )
         self.assertIn(
             "cargo test --locked -p flow-agent-executor --test official_linux",
             step_run(workflow, "Run M1.2 executor tests"),

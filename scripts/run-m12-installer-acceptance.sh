@@ -17,12 +17,9 @@ fixture_output="$RUNNER_TEMP/m12-fixture-smoke.jsonl"
 fixture_workspace="$RUNNER_TEMP/m12-fixture-workspace"
 productive_workspace="$RUNNER_TEMP/m12-productive-workspace"
 unavailable_workspace="$RUNNER_TEMP/m12-unavailable-workspace"
-user_runtime=/run/user/10001
-user_bus=unix:path=$user_runtime/bus
 run_as_watershed() {
   /usr/sbin/runuser --user watershed --preserve-environment -- /usr/bin/env \
     PATH= HOME="$home" XDG_CONFIG_HOME="$config" \
-    XDG_RUNTIME_DIR="$user_runtime" DBUS_SESSION_BUS_ADDRESS="$user_bus" \
     "$@"
 }
 run_in_workspace() {
