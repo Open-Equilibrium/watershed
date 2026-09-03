@@ -13,22 +13,17 @@ use preparation::{RetainedSource, retain_runtime_sources};
 use response::{decode_tool_outcome, validate_receipt_identity};
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::collections::BTreeMap;
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
-use std::time::Instant;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use transport::{ExecutorPreflightProcess, preflight_one_shot, start_one_shot};
 
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+mod deadline_tests;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod preparation;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod response;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod transport;
-
-#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
-fn before_executor_deadline<T>(deadline: Instant, operation: impl FnOnce() -> T) -> Option<T> {
-    (Instant::now() < deadline).then(operation)
-}
 
 /// Definitive result of one bounded Executor dispatch.
 #[cfg_attr(
@@ -294,32 +289,10 @@ fn executor_error(code: proto::ExecutorErrorCodeV0, message: impl Into<String>) 
 
 #[cfg(all(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
 mod unsupported_platform_tests {
-    use super::{PreparedExecutor, PreparedExecutorTool, before_executor_deadline};
+    use super::{PreparedExecutor, PreparedExecutorTool};
     use crate::runtime::{
         fs_guards::AnchoredWorkspace, tool_runner::ToolInvocation, types::RuntimeError,
     };
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn expired_executor_deadline_precedes_stage_progress() {
-        let mut progressed = false;
-        let result = before_executor_deadline(Instant::now(), || {
-            progressed = true;
-            "late progress"
-        });
-
-        assert_eq!(result, None);
-        assert!(
-            !progressed,
-            "an expired stage must perform no further effect"
-        );
-
-        assert_eq!(
-            before_executor_deadline(Instant::now() + Duration::from_secs(1), || "on time"),
-            Some("on time")
-        );
-    }
-
     #[test]
     fn prepared_tool_metadata_and_receipt_validation_remain_bound_on_unsupported_platforms() {
         let prepared = prepared_tool();

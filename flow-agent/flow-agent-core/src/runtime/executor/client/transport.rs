@@ -2,7 +2,7 @@ use super::super::process::{
     child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
 };
 use super::preparation::PreparedMount;
-use super::{before_executor_deadline, invalid_response, runtime_open_error};
+use super::{invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
 use std::{
     fs::File,
@@ -84,6 +84,27 @@ pub(super) fn preflight_one_shot(
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
+    let now = Instant::now;
+    preflight_one_shot_with_deadline(
+        executable,
+        mounts,
+        request,
+        request_bytes,
+        || executor_deadline_at(request.limits.timeout_ms, now()),
+        |_| Ok(()),
+        &now,
+    )
+}
+
+fn preflight_one_shot_with_deadline(
+    executable: &File,
+    mounts: &[PreparedMount],
+    request: &proto::ExecutorRequestV0,
+    request_bytes: &[u8],
+    deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
+    mut after_request: impl FnMut(&mut Child) -> Result<(), RuntimeError>,
+    now: &impl Fn() -> Instant,
+) -> Result<ExecutorPreflightProcess, RuntimeError> {
     let executor = duplicate_executor_descriptor(executable)?;
     let inherited_path = format!("/proc/self/fd/{}", executor.as_raw_fd());
     let high_base = executor
@@ -131,7 +152,7 @@ pub(super) fn preflight_one_shot(
             Ok(())
         });
     }
-    let hard_deadline = executor_deadline(request.limits.timeout_ms)?;
+    let hard_deadline = deadline()?;
     let child = command.spawn().map_err(|_| {
         super::executor_error(
             proto::ExecutorErrorCodeV0::Unavailable,
@@ -158,6 +179,7 @@ pub(super) fn preflight_one_shot(
     set_nonblocking(&stdout)?;
     set_nonblocking(&stderr)?;
     let mut request_offset = 0_usize;
+    let mut request_published = false;
     let mut stdin = Some(stdin);
     let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_CONTROL_BYTES_V0);
     let mut stderr_read = BoundedRead::new(4 * 1024);
@@ -166,7 +188,7 @@ pub(super) fn preflight_one_shot(
     let mut rejected_code = None;
     let mut process_status = None;
     loop {
-        if before_executor_deadline(hard_deadline, || ()).is_none() {
+        if before_executor_deadline(hard_deadline, now, || ()).is_none() {
             return Err(invalid_response("Executor preflight timed out"));
         }
         if rejected_code.is_none()
@@ -188,6 +210,10 @@ pub(super) fn preflight_one_shot(
                 Err(_) => return Err(invalid_response("Executor request could not be written")),
             }
         }
+        if request_offset == request_bytes.len() && !request_published {
+            after_request(child.child_mut())?;
+            request_published = true;
+        }
         if !stdout_eof {
             stdout_eof = read_available(&mut stdout, &mut stdout_read)
                 .map_err(|_| invalid_response("Executor stdout read failed"))?;
@@ -208,7 +234,7 @@ pub(super) fn preflight_one_shot(
             let preflight =
                 proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
                     .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
-            if before_executor_deadline(hard_deadline, || ()).is_none() {
+            if before_executor_deadline(hard_deadline, now, || ()).is_none() {
                 return Err(invalid_response("Executor preflight timed out"));
             }
             match preflight {
@@ -230,7 +256,7 @@ pub(super) fn preflight_one_shot(
                         policy_digest: request.policy_digest.clone(),
                         timeout_ms: request.limits.timeout_ms,
                     };
-                    return before_executor_deadline(hard_deadline, || {
+                    return before_executor_deadline(hard_deadline, now, || {
                         ExecutorPreflightProcess::Ready(waiting)
                     })
                     .ok_or_else(|| invalid_response("Executor preflight timed out"));
@@ -276,7 +302,7 @@ pub(super) fn preflight_one_shot(
                         ));
                     }
                 };
-                return before_executor_deadline(hard_deadline, || outcome)
+                return before_executor_deadline(hard_deadline, now, || outcome)
                     .ok_or_else(|| invalid_response("Executor preflight timed out"));
             }
         }
@@ -290,7 +316,23 @@ pub(super) fn preflight_one_shot(
 }
 
 pub(super) fn start_one_shot(
+    waiting: WaitingExecutor,
+) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+    let timeout_ms = waiting.timeout_ms;
+    let now = Instant::now;
+    start_one_shot_with_deadlines(
+        waiting,
+        || executor_deadline_at(timeout_ms, now()),
+        |_| executor_deadline_at(timeout_ms, now()),
+        &now,
+    )
+}
+
+fn start_one_shot_with_deadlines(
     mut waiting: WaitingExecutor,
+    start_deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
+    mut terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
+    now: &impl Fn() -> Instant,
 ) -> Result<proto::ExecutorResponseV0, RuntimeError> {
     if crate::runtime::cancellation::productive_cancellation()
         .load(std::sync::atomic::Ordering::Acquire)
@@ -302,7 +344,7 @@ pub(super) fn start_one_shot(
         schema: proto::EXECUTOR_START_SCHEMA_V0.to_owned(),
     })
     .map_err(|_| invalid_response("Flow constructed an invalid Executor start record"))?;
-    let start_delivery_deadline = executor_deadline(waiting.timeout_ms)?;
+    let start_delivery_deadline = start_deadline()?;
     let mut terminal_deadline = None;
     let mut start_offset = 0_usize;
     let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_RESPONSE_BYTES_V0);
@@ -315,7 +357,7 @@ pub(super) fn start_one_shot(
     let mut drain_deadline = None;
     loop {
         if let Some(writer) = waiting.stdin.as_mut() {
-            let write = before_executor_deadline(start_delivery_deadline, || {
+            let write = before_executor_deadline(start_delivery_deadline, now, || {
                 writer.write(&start_bytes[start_offset..])
             })
             .ok_or_else(|| {
@@ -327,7 +369,8 @@ pub(super) fn start_one_shot(
                     start_offset += written;
                     if start_offset == start_bytes.len() {
                         waiting.stdin.take();
-                        terminal_deadline = Some(executor_deadline(waiting.timeout_ms)?);
+                        terminal_deadline =
+                            Some(terminal_deadline_after_start(waiting.child.child_mut())?);
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -367,7 +410,7 @@ pub(super) fn start_one_shot(
                 Err(_) => return Err(invalid_response("Executor process could not be observed")),
             }
         }
-        let now = Instant::now();
+        let current = now();
         if crate::runtime::cancellation::productive_cancellation()
             .load(std::sync::atomic::Ordering::Acquire)
             && !cancellation_sent
@@ -378,16 +421,16 @@ pub(super) fn start_one_shot(
             rustix::process::kill_process(pid, rustix::process::Signal::TERM)
                 .map_err(|_| invalid_response("Executor cancellation signal failed"))?;
             cancellation_sent = true;
-            cancellation_deadline = now.checked_add(Duration::from_secs(5));
+            cancellation_deadline = current.checked_add(Duration::from_secs(5));
         }
-        if terminal_deadline.is_none() && now >= start_delivery_deadline {
+        if terminal_deadline.is_none() && current >= start_delivery_deadline {
             return Err(invalid_response(
                 "Executor start could not be delivered before its deadline",
             ));
         }
-        if terminal_deadline.is_some_and(|deadline| now >= deadline)
-            || cancellation_deadline.is_some_and(|deadline| now >= deadline)
-            || drain_deadline.is_some_and(|deadline| now >= deadline)
+        if terminal_deadline.is_some_and(|deadline| current >= deadline)
+            || cancellation_deadline.is_some_and(|deadline| current >= deadline)
+            || drain_deadline.is_some_and(|deadline| current >= deadline)
         {
             return Err(invalid_response(
                 "Executor did not return terminal enforcement evidence before cleanup deadline",
@@ -418,6 +461,7 @@ pub(super) fn start_one_shot(
     let _ = stderr_read;
     before_executor_deadline(
         terminal_deadline.expect("terminal deadline follows complete start delivery"),
+        now,
         || response,
     )
     .ok_or_else(|| {
@@ -426,10 +470,58 @@ pub(super) fn start_one_shot(
 }
 
 fn executor_deadline(timeout_ms: u64) -> Result<Instant, RuntimeError> {
+    executor_deadline_at(timeout_ms, Instant::now())
+}
+
+fn executor_deadline_at(timeout_ms: u64, now: Instant) -> Result<Instant, RuntimeError> {
     Duration::from_millis(timeout_ms)
         .checked_add(Duration::from_secs(5))
-        .and_then(|limit| Instant::now().checked_add(limit))
+        .and_then(|limit| now.checked_add(limit))
         .ok_or_else(|| invalid_response("Executor client deadline overflowed"))
+}
+
+fn before_executor_deadline<T>(
+    deadline: Instant,
+    now: &impl Fn() -> Instant,
+    operation: impl FnOnce() -> T,
+) -> Option<T> {
+    (now() < deadline).then(operation)
+}
+
+#[cfg(test)]
+pub(super) fn preflight_one_shot_at_deadline(
+    executable: &File,
+    mounts: &[PreparedMount],
+    request: &proto::ExecutorRequestV0,
+    request_bytes: &[u8],
+    deadline: Instant,
+    after_request: impl FnMut(&mut Child) -> Result<(), RuntimeError>,
+    now: impl Fn() -> Instant,
+) -> Result<ExecutorPreflightProcess, RuntimeError> {
+    preflight_one_shot_with_deadline(
+        executable,
+        mounts,
+        request,
+        request_bytes,
+        || Ok(deadline),
+        after_request,
+        &now,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn start_one_shot_at_deadlines(
+    waiting: WaitingExecutor,
+    start_deadline: Instant,
+    terminal_deadline_after_start: impl FnMut(&mut Child) -> Result<Instant, RuntimeError>,
+    now: impl Fn() -> Instant,
+) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+    start_one_shot_with_deadlines(
+        waiting,
+        || Ok(start_deadline),
+        terminal_deadline_after_start,
+        &now,
+    )
 }
 
 struct BoundedRead {

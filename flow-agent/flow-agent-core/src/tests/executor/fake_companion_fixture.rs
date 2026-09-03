@@ -112,13 +112,7 @@ fn main() {
         thread::sleep(Duration::from_secs(10));
         return;
     }
-    if matches!(mode, "late-ready" | "late-preflight-error") {
-        thread::sleep(Duration::from_millis(5_200));
-    }
-    if matches!(
-        mode,
-        "unsupported-policy" | "preflight-trailing-output" | "late-preflight-error"
-    ) {
+    if matches!(mode, "unsupported-policy" | "preflight-trailing-output") {
         println!(
             "{{\"code\":\"executor_policy_unsupported\",\"message\":\"unsupported fake policy\",\"outcome\":\"error\",\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-preflight-v0\"}}"
         );
@@ -155,10 +149,6 @@ fn main() {
         ),
         "premature-exit" => {}
         "timeout" => thread::sleep(Duration::from_secs(10)),
-        "late-terminal" => {
-            thread::sleep(Duration::from_millis(5_200));
-            print!("{valid}");
-        }
         "oversized-output" => io::stdout()
             .write_all(&vec![b'x'; 12 * 1024 * 1024])
             .expect("oversized result is written"),
