@@ -1,7 +1,7 @@
 use super::attempt_codec::{
-    ExecutorAttemptStage, executor_dispatch_failure_output, recovered_executor_dispatch_error,
-    recovered_tool_output, recovered_tool_terminal, recovered_tool_value_bound,
-    tool_attempt_output,
+    ExecutorAttemptStage, cancelled_attempt_output, executor_dispatch_failure_output,
+    recovered_executor_dispatch_error, recovered_tool_output, recovered_tool_terminal,
+    recovered_tool_value_bound, tool_attempt_output,
 };
 #[cfg(test)]
 use super::observe_productive_result_persist;
@@ -427,7 +427,7 @@ fn cancelled_tool_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult 
         classification: Some(ToolTerminalClassification::Cancelled.as_str().to_owned()),
         exit_code: None,
         timestamp: timestamp.to_owned(),
-        durable_output: None,
+        durable_output: Some(cancelled_attempt_output()),
     }
 }
 

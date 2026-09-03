@@ -146,6 +146,20 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         started.elapsed() < Duration::from_secs(7),
         "fake companion timeout must include bounded cleanup"
     );
+
+    let started = Instant::now();
+    let timeout = dispatch_error(&fixture, &root, "preflight-timeout", 1);
+    assert_executor_code(&timeout, proto::ExecutorErrorCodeV0::InvalidResponse);
+    assert!(
+        started.elapsed() < Duration::from_secs(7),
+        "preflight timeout must begin at companion spawn and include cleanup"
+    );
+    assert!(
+        !root
+            .join("fake-executor-preflight-timeout.tool-spawned")
+            .exists(),
+        "preflight timeout must not dispatch a Tool"
+    );
 }
 
 fn compile_fake_executor(root: &Path) -> PathBuf {

@@ -1,4 +1,4 @@
-use super::attempt_codec::canonical_request_hash;
+use super::attempt_codec::{cancelled_attempt_output, canonical_request_hash};
 #[cfg(test)]
 use super::observe_productive_result_persist;
 use super::provider_result::{
@@ -8,8 +8,8 @@ use super::provider_result::{
 };
 use super::tool::execute_productive_tool;
 use super::{
-    PROVIDER_CANCELLED_SCHEMA_V0, ProductiveContext, ProductiveProvider, ProductiveToolExecutor,
-    emit_and_commit, mark_recovery_failure, message_delta_chunks, provider_dispatch_reservation,
+    ProductiveContext, ProductiveProvider, ProductiveToolExecutor, emit_and_commit,
+    mark_recovery_failure, message_delta_chunks, provider_dispatch_reservation,
 };
 use crate::runtime::{
     context::{CompiledContext, compile_provider_turn_context_with_agent_instructions},
@@ -85,9 +85,7 @@ fn cancelled_provider_result(attempt_id: &str, timestamp: &str) -> RunAttemptRes
         ),
         exit_code: None,
         timestamp: timestamp.to_owned(),
-        durable_output: Some(serde_json::json!({
-            "schema": PROVIDER_CANCELLED_SCHEMA_V0,
-        })),
+        durable_output: Some(cancelled_attempt_output()),
     }
 }
 

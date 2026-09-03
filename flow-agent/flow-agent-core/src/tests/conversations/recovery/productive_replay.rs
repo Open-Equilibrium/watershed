@@ -633,6 +633,37 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
     .expect("second Tool intent commits");
     append_run_attempt_result(&workspace, "review", "review-1", &second_result)
         .expect("second Tool result commits");
+    let cancelled_result = RunAttemptResult {
+        attempt_id: "tool-000003".to_owned(),
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some("cancelled".to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:04Z".to_owned(),
+        durable_output: Some(serde_json::json!({
+            "schema": "flow-attempt-cancelled-v0",
+        })),
+        ..result.clone()
+    };
+    append_run_attempt_intent(
+        &workspace,
+        "review",
+        "review-1",
+        &RunAttemptIntent {
+            attempt_id: cancelled_result.attempt_id.clone(),
+            attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: "0".repeat(64),
+                max_concurrent_processes_and_threads: 16,
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            }),
+            request_hash: request_hash.to_owned(),
+            tool_id: Some("inspect".to_owned()),
+            timestamp: "2026-07-30T12:00:03Z".to_owned(),
+        },
+    )
+    .expect("cancelled Tool intent commits");
+    append_run_attempt_result(&workspace, "review", "review-1", &cancelled_result)
+        .expect("cancelled Tool result commits without its recovery record");
     recovery
         .record_attempt(Some("inspect"), request_hash, &result)
         .expect("Tool recovery record commits");
@@ -664,6 +695,17 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
             )
             .expect("second Tool attempt replays"),
         Some(second_result.clone())
+    );
+    assert_eq!(
+        resumed
+            .recover_attempt(
+                RunAttemptKind::Tool,
+                "tool-000003",
+                request_hash,
+                Some("inspect"),
+            )
+            .expect("cancelled Tool result reconstructs its missing recovery record"),
+        Some(cancelled_result)
     );
 
     let error = resumed

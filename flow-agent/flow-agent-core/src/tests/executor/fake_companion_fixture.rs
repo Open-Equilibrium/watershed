@@ -108,6 +108,10 @@ fn main() {
     let mut request = String::new();
     input.read_line(&mut request).expect("request is read");
     let request_id = field(&request, "request_id");
+    if mode == "preflight-timeout" {
+        thread::sleep(Duration::from_secs(10));
+        return;
+    }
     if matches!(mode, "unsupported-policy" | "preflight-trailing-output") {
         println!(
             "{{\"code\":\"executor_policy_unsupported\",\"message\":\"unsupported fake policy\",\"outcome\":\"error\",\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-preflight-v0\"}}"

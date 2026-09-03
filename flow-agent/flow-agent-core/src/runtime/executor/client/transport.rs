@@ -131,6 +131,7 @@ pub(super) fn preflight_one_shot(
             Ok(())
         });
     }
+    let hard_deadline = executor_deadline(request.limits.timeout_ms)?;
     let child = command.spawn().map_err(|_| {
         super::executor_error(
             proto::ExecutorErrorCodeV0::Unavailable,
@@ -156,7 +157,6 @@ pub(super) fn preflight_one_shot(
     set_nonblocking(&stdin)?;
     set_nonblocking(&stdout)?;
     set_nonblocking(&stderr)?;
-    let hard_deadline = executor_deadline(request.limits.timeout_ms)?;
     let mut request_offset = 0_usize;
     let mut stdin = Some(stdin);
     let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_CONTROL_BYTES_V0);
@@ -291,7 +291,8 @@ pub(super) fn start_one_shot(
         schema: proto::EXECUTOR_START_SCHEMA_V0.to_owned(),
     })
     .map_err(|_| invalid_response("Flow constructed an invalid Executor start record"))?;
-    let hard_deadline = executor_deadline(waiting.timeout_ms)?;
+    let start_delivery_deadline = executor_deadline(waiting.timeout_ms)?;
+    let mut terminal_deadline = None;
     let mut start_offset = 0_usize;
     let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_RESPONSE_BYTES_V0);
     let mut stderr_read = waiting.stderr_read;
@@ -309,6 +310,7 @@ pub(super) fn start_one_shot(
                     start_offset += written;
                     if start_offset == start_bytes.len() {
                         waiting.stdin.take();
+                        terminal_deadline = Some(executor_deadline(waiting.timeout_ms)?);
                     }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -364,7 +366,12 @@ pub(super) fn start_one_shot(
             cancellation_sent = true;
             cancellation_deadline = now.checked_add(Duration::from_secs(5));
         }
-        if now >= hard_deadline
+        if terminal_deadline.is_none() && now >= start_delivery_deadline {
+            return Err(invalid_response(
+                "Executor start could not be delivered before its deadline",
+            ));
+        }
+        if terminal_deadline.is_some_and(|deadline| now >= deadline)
             || cancellation_deadline.is_some_and(|deadline| now >= deadline)
             || drain_deadline.is_some_and(|deadline| now >= deadline)
         {

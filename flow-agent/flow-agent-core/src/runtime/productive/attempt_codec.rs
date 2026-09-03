@@ -11,6 +11,7 @@ use proto::EventType;
 use serde::Deserialize;
 
 const EXECUTOR_STAGE_ERROR_SCHEMA_V0: &str = "flow-executor-stage-error-v0";
+const ATTEMPT_CANCELLED_SCHEMA_V0: &str = "flow-attempt-cancelled-v0";
 const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, serde::Serialize)]
@@ -24,6 +25,12 @@ pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String
     let bytes = proto::canonical_json(value)
         .map_err(|error| RuntimeError::Protocol(format!("request hashing failed: {error}")))?;
     Ok(sha256_hash_text(bytes.as_bytes()))
+}
+
+pub(super) fn cancelled_attempt_output() -> serde_json::Value {
+    serde_json::json!({
+        "schema": ATTEMPT_CANCELLED_SCHEMA_V0,
+    })
 }
 
 pub(super) fn tool_attempt_output(
