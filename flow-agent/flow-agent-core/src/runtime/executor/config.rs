@@ -40,7 +40,7 @@ fn parent_missing_observer() {
     }
 }
 
-#[cfg(not(all(test, target_os = "linux", target_arch = "x86_64")))]
+#[cfg(not(test))]
 fn parent_missing_observer() {}
 
 #[derive(Deserialize, Serialize)]
@@ -340,13 +340,6 @@ fn create_private_directory(path: &Path) -> Result<(), RuntimeError> {
         .map_err(|error| config_io(path, error))
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn create_private_directory(_path: &Path) -> Result<(), RuntimeError> {
-    Err(config_failure(
-        "platform configuration protection is unsupported",
-    ))
-}
-
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn create_private_file(path: &Path, protect: bool) -> Result<File, RuntimeError> {
     use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
@@ -360,21 +353,6 @@ fn create_private_file(path: &Path, protect: bool) -> Result<File, RuntimeError>
         file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(|error| config_io(path, error))?;
     }
-    Ok(file)
-}
-
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn create_private_file(path: &Path, protect: bool) -> Result<File, RuntimeError> {
-    if protect {
-        return Err(config_failure(
-            "platform configuration protection is unsupported",
-        ));
-    }
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| config_io(path, error))?;
     Ok(file)
 }
 
@@ -394,13 +372,6 @@ fn verify_private_parent(path: &Path) -> Result<(), RuntimeError> {
     .map_err(|_| config_failure("Executor configuration parent is unsafe"))
 }
 
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn verify_private_parent(_path: &Path) -> Result<(), RuntimeError> {
-    Err(config_failure(
-        "platform configuration protection is unsupported",
-    ))
-}
-
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn verify_private_file(_path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
@@ -413,13 +384,6 @@ fn verify_private_file(_path: &Path, metadata: &fs::Metadata) -> Result<(), Runt
         return Err(config_failure("protected Executor configuration is unsafe"));
     }
     Ok(())
-}
-
-#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn verify_private_file(_path: &Path, _metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    Err(config_failure(
-        "platform configuration protection is unsupported",
-    ))
 }
 
 #[cfg(test)]

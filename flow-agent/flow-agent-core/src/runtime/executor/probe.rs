@@ -391,6 +391,45 @@ mod diagnostic_tests {
                 if failure.code() == proto::ExecutorErrorCodeV0::Unavailable
         ));
     }
+
+    #[test]
+    fn default_probe_identity_is_exact_on_every_platform() {
+        let selection = ExecutorSelection::new(
+            "/trusted/flow-executor".into(),
+            ExecutorSelectionSource::Default,
+        );
+        let probe = proto::parse_executor_probe_v0(
+            concat!(
+                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity","static-self-reexec"]}"#,
+                "\n"
+            )
+            .as_bytes(),
+        )
+        .expect("test probe is valid");
+        validate_probe(&selection, &probe, None).expect("official identity is compatible");
+
+        let mut wrong_executor = probe.clone();
+        wrong_executor.executor = "other".to_owned();
+        let mut wrong_version = probe.clone();
+        wrong_version.executor_version = "mismatch".to_owned();
+        let mut wrong_backend = probe.clone();
+        wrong_backend.backend = "other".to_owned();
+        let mut missing_static_reexec = probe;
+        missing_static_reexec
+            .supported_policy_features
+            .retain(|feature| feature != proto::EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0);
+
+        for incompatible in [
+            wrong_executor,
+            wrong_version,
+            wrong_backend,
+            missing_static_reexec,
+        ] {
+            let error = validate_probe(&selection, &incompatible, None)
+                .expect_err("altered official identity is rejected");
+            assert!(error.to_string().contains("incompatible"), "{error}");
+        }
+    }
 }
 
 fn protocol_failure(code: proto::ExecutorErrorCodeV0, message: &str) -> RuntimeError {
@@ -468,27 +507,5 @@ mod tests {
             open_validated_executable(&selection, None).is_err(),
             "hard-linked executable must be rejected"
         );
-    }
-
-    #[test]
-    fn default_executor_version_mismatch_fails_closed() {
-        let selection = ExecutorSelection::new(
-            "/trusted/flow-executor".into(),
-            ExecutorSelectionSource::Default,
-        );
-        let mut probe = proto::parse_executor_probe_v0(
-            concat!(
-                r#"{"backend":"bubblewrap-seccomp","backend_version":"test","executor":"flow-executor","executor_version":"0.0.0","platform":"ubuntu-24.04-x86_64","protocol_versions":["0"],"ready":true,"runtime_mounts":[],"schema":"flow-executor-probe-v0","supported_policy_features":["process-capacity","static-self-reexec"]}"#,
-                "\n"
-            )
-            .as_bytes(),
-        )
-        .expect("test probe is valid");
-        probe.executor_version = "mismatch".to_owned();
-
-        let error = validate_probe(&selection, &probe, None)
-            .expect_err("official Executor version mismatch is rejected");
-
-        assert!(error.to_string().contains("incompatible"), "{error}");
     }
 }

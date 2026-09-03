@@ -1,6 +1,5 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use super::ExecutorSelection;
-use super::resolve_executor;
+use super::{ExecutorSelection, resolve_executor};
 use crate::runtime::{
     fs_guards::AnchoredWorkspace,
     tool_runner::{ToolExecutionOutcome, ToolInvocation},
@@ -102,17 +101,22 @@ pub(crate) struct PreparedExecutor {
 impl PreparedExecutor {
     /// Resolves and probes the selected Executor and retains every advertised runtime object.
     pub(crate) fn prepare_selected() -> Result<Self, RuntimeError> {
-        let selection = resolve_executor()?;
-        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-        let _ = &selection;
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        let runtime_sources = retain_runtime_sources(selection.probe())?;
-        Ok(Self {
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            selection,
-            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-            runtime_sources,
-        })
+        {
+            let selection = resolve_executor()?;
+            let runtime_sources = retain_runtime_sources(selection.probe())?;
+            Ok(Self {
+                selection,
+                runtime_sources,
+            })
+        }
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            Err(RuntimeError::executor(
+                proto::ExecutorErrorCodeV0::PolicyUnsupported,
+                "productive Executor support requires Ubuntu 24.04 x64",
+            ))
+        }
     }
 
     /// Executes one policy-bound Tool through a fresh one-shot Executor process.
