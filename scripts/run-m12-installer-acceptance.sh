@@ -38,8 +38,8 @@ systemctl start user-runtime-dir@10001.service user@10001.service
 systemctl is-active --quiet user@10001.service
 test -S /run/user/10001/bus
 install -d -m 0755 "$bundle" "$acceptance_bundle"
-install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
-chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
+install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
+chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
 install -m 0755 install/install.sh "$bundle/install.sh"
 install -m 0755 target/m12-standard/release/flow "$bundle/flow"
 install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/flow-executor"

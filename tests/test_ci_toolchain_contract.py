@@ -699,6 +699,27 @@ class CiWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(environment_name, evidence)
 
+    def test_m12_installer_acceptance_prepares_fixture_home_before_init(self):
+        installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        fixture_home_setup = (
+            'install -d -m 0700 "$config" "$home" "$agent_home" '
+            '"$fixture_home" "$fixture_workspace"'
+        )
+        fixture_home_ownership = (
+            'chown -R watershed:watershed "$config" "$home" "$agent_home" '
+            '"$fixture_home" "$fixture_workspace"'
+        )
+        fixture_init = (
+            'run_in_workspace "$fixture_workspace" /usr/bin/env '
+            'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init'
+        )
+
+        setup = installer_acceptance.index(fixture_home_setup)
+        ownership = installer_acceptance.index(fixture_home_ownership)
+        initialization = installer_acceptance.index(fixture_init)
+        self.assertLess(setup, ownership)
+        self.assertLess(ownership, initialization)
+
 
 if __name__ == "__main__":
     unittest.main()
