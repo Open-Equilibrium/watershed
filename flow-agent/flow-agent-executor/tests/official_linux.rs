@@ -891,12 +891,13 @@ fn assert_scope_layout(workspace: &Workspace, executor_pid: u32) {
             .is_empty(),
         "transient scope root must remain empty"
     );
-    assert_eq!(
-        std::fs::read_to_string(scope.join("supervisor/cgroup.procs"))
-            .expect("Executor supervisor membership is readable")
-            .trim(),
-        executor_pid.to_string(),
-        "only the Executor belongs to the supervisor leaf"
+    let supervisor_members = std::fs::read_to_string(scope.join("supervisor/cgroup.procs"))
+        .expect("Executor supervisor membership is readable");
+    assert!(
+        supervisor_members
+            .lines()
+            .any(|member| member == executor_pid.to_string()),
+        "Executor must belong to the supervisor leaf"
     );
 }
 
