@@ -378,6 +378,7 @@ jobs:
             '# This file is a cache directory tag created by cargo.' \
             '# For information about cache directory tags see https://bford.info/cachedir/' \
             > target/CACHEDIR.TAG
+          install -D -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /root/m12-production/flow-executor
           cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl --coverage-target-only > /root/m12-coverage.env
           cargo llvm-cov clean --workspace
           cargo clean --release --target x86_64-unknown-linux-musl --workspace
@@ -387,7 +388,6 @@ jobs:
           cargo build --locked --release -p flow-agent-cli --bin flow --target-dir target/m12-standard
           cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-acceptance
           . /root/m12-coverage.env
-          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
           cargo nextest run \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
             --locked \
@@ -397,10 +397,6 @@ jobs:
             --all-targets \
             --all-features \
             --no-run
-          if readelf -l target/x86_64-unknown-linux-musl/release/flow-executor | grep -q "INTERP"; then
-            echo "instrumented flow-executor must not contain an ELF interpreter" >&2
-            exit 1
-          fi
           PREPARE
 
       - name: Run M1.2 installer acceptance
@@ -410,8 +406,7 @@ jobs:
           docker exec \
             --env RUNNER_TEMP=/opt/watershed-m12 \
             watershed-m12 \
-            /bin/sh -ec '. /root/m12-coverage.env
-            exec /usr/bin/timeout --signal=TERM --kill-after=10s 15m \
+            /bin/sh -ec 'exec /usr/bin/timeout --signal=TERM --kill-after=10s 15m \
               /bin/sh scripts/run-m12-installer-acceptance.sh'
 
       - name: Check Linux line coverage
@@ -432,7 +427,6 @@ jobs:
           export RUNNER_TEMP=/home/watershed/m12-coverage
           export BWRAP_UNDER_TEST=/usr/bin/bwrap
           export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor
-          export FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
           install -d -m 0700 "$RUNNER_TEMP"
           chown -R watershed:watershed /cargo /work/target "$RUNNER_TEMP"
           /usr/sbin/runuser --user watershed --preserve-environment -- /bin/sh -s <<'UNPRIVILEGED'

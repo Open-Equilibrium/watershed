@@ -28,8 +28,12 @@ M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
 M12_COVERAGE_ENV = "/root/m12-coverage.env"
+M12_PRODUCTION_EXECUTOR = "/root/m12-production/flow-executor"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
+M12_OFFICIAL_LINUX = (
+    ROOT / "flow-agent" / "flow-agent-executor" / "tests" / "official_linux.rs"
+)
 
 
 def workflow_text() -> str:
@@ -230,6 +234,12 @@ class CiWorkflowContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, testing)
 
+    def test_official_linux_can_use_the_cargo_built_executor(self) -> None:
+        self.assertIn(
+            'env!("CARGO_BIN_EXE_flow-executor")',
+            M12_OFFICIAL_LINUX.read_text(encoding="utf-8"),
+        )
+
     def assert_ci_gate_contract(self, workflow: str) -> None:
         self.assertFalse(any(line.startswith("    if:") for line in workflow.splitlines()))
         self.assertFalse(
@@ -306,6 +316,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "target/CACHEDIR.TAG",
             f"cargo llvm-cov show-env --sh --target {M12_TARGET} "
             f"--coverage-target-only > {M12_COVERAGE_ENV}",
+            f"install -D -m 0755 {M12_EXECUTOR} {M12_PRODUCTION_EXECUTOR}",
             f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean --workspace",
             f"cargo clean --release --target {M12_TARGET} --workspace",
@@ -319,8 +330,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             "--target-dir target/m12-standard",
             "cargo build --locked --release -p flow-agent-cli --bin flow "
             "--features m12-install-acceptance --target-dir target/m12-acceptance",
-            "cargo build --locked --release -p flow-agent-executor "
-            f"--bin flow-executor --target {M12_TARGET}",
             "cargo nextest run",
             "--no-run",
             f"--target {M12_TARGET}",
@@ -332,6 +341,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("        shell: bash", coverage_prepare_lines)
         prepare_order = (
             "target/CACHEDIR.TAG",
+            f"install -D -m 0755 {M12_EXECUTOR} {M12_PRODUCTION_EXECUTOR}",
             "cargo llvm-cov show-env",
             "cargo llvm-cov clean",
             "cargo clean --release",
@@ -342,6 +352,9 @@ class CiWorkflowContractTest(unittest.TestCase):
         positions = [coverage_prepare.index(command) for command in prepare_order]
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
+        instrumented = coverage_prepare[coverage_prepare.index(f". {M12_COVERAGE_ENV}") :]
+        self.assertNotIn("cargo build", instrumented)
+        self.assertNotIn("readelf -l", coverage_prepare)
         self.assertNotIn("metadata=coverage-", coverage_prepare)
         self.assertNotIn("target/m12-dynamic", coverage_prepare)
 
@@ -355,7 +368,6 @@ class CiWorkflowContractTest(unittest.TestCase):
             f". {M12_COVERAGE_ENV}",
             'install -d -m 0700 "$RUNNER_TEMP"',
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor",
-            f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
             "cargo nextest run",
             f"--target {M12_TARGET}",
             "--workspace",
@@ -379,6 +391,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("-p flow-agent-executor", linux_coverage)
         self.assertNotIn("--bin flow-executor", linux_coverage)
         self.assertNotIn("binary(flow-executor)", linux_coverage)
+        self.assertNotIn("FLOW_EXECUTOR_UNDER_TEST=", linux_coverage)
         ordered = (
             f". {M12_COVERAGE_ENV}",
             "cargo nextest run",
@@ -679,7 +692,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn(M12_CONTAINER, installer)
         self.assertIn("--env RUNNER_TEMP=/opt/watershed-m12", installer)
         self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
-        self.assertIn(f". {M12_COVERAGE_ENV}", installer)
+        self.assertNotIn(M12_COVERAGE_ENV, installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
         installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         for required in (
@@ -695,6 +708,8 @@ class CiWorkflowContractTest(unittest.TestCase):
             'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
             installer_acceptance,
         )
+        self.assertEqual(installer_acceptance.count(M12_PRODUCTION_EXECUTOR), 2)
+        self.assertNotIn(M12_EXECUTOR, installer_acceptance)
         self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertNotIn("loginctl show-user", installer_acceptance)
@@ -741,6 +756,8 @@ class CiWorkflowContractTest(unittest.TestCase):
     def test_m12_installer_acceptance_has_finite_liveness_bounds(self) -> None:
         workflow = workflow_text()
         readiness = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
+
+        self.assertNotIn("LLVM_PROFILE_FILE", readiness)
 
         self.assertRegex(
             step_run(workflow, "Run M1.2 installer acceptance"),

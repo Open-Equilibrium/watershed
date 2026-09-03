@@ -48,10 +48,10 @@ install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_home" "$fixture_wor
 chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
 install -m 0755 install/install.sh "$bundle/install.sh"
 install -m 0755 target/m12-standard/release/flow "$bundle/flow"
-install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/flow-executor"
+install -m 0755 /root/m12-production/flow-executor "$bundle/flow-executor"
 install -m 0755 install/install.sh "$acceptance_bundle/install.sh"
 install -m 0755 target/m12-acceptance/release/flow "$acceptance_bundle/flow"
-install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$acceptance_bundle/flow-executor"
+install -m 0755 /root/m12-production/flow-executor "$acceptance_bundle/flow-executor"
 assert_linger_disabled
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
 test -x "$standard_prefix/bin/flow"

@@ -987,6 +987,9 @@ fn configured_artifacts() -> Option<(PathBuf, PathBuf)> {
     let dynamic = std::env::var_os("FLOW_EXECUTOR_DYNAMIC_UNDER_TEST").map(PathBuf::from);
     match (executor, dynamic) {
         (None, None) => None,
+        (None, Some(dynamic)) => {
+            Some((PathBuf::from(env!("CARGO_BIN_EXE_flow-executor")), dynamic))
+        }
         (Some(executor), Some(dynamic)) => Some((executor, dynamic)),
         _ => panic!("both static and dynamic Executor test artifacts must be configured"),
     }
