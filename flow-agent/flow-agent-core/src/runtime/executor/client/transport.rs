@@ -102,7 +102,7 @@ fn preflight_one_shot_with_deadline(
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
     deadline: impl FnOnce() -> Result<Instant, RuntimeError>,
-    mut after_request: impl FnMut(&mut Child) -> Result<(), RuntimeError>,
+    after_request: impl FnOnce(&mut Child) -> Result<(), RuntimeError>,
     now: &impl Fn() -> Instant,
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
     let executor = duplicate_executor_descriptor(executable)?;
@@ -179,7 +179,7 @@ fn preflight_one_shot_with_deadline(
     set_nonblocking(&stdout)?;
     set_nonblocking(&stderr)?;
     let mut request_offset = 0_usize;
-    let mut request_published = false;
+    let mut after_request = Some(after_request);
     let mut stdin = Some(stdin);
     let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_CONTROL_BYTES_V0);
     let mut stderr_read = BoundedRead::new(4 * 1024);
@@ -210,9 +210,10 @@ fn preflight_one_shot_with_deadline(
                 Err(_) => return Err(invalid_response("Executor request could not be written")),
             }
         }
-        if request_offset == request_bytes.len() && !request_published {
+        if request_offset == request_bytes.len()
+            && let Some(after_request) = after_request.take()
+        {
             after_request(child.child_mut())?;
-            request_published = true;
         }
         if !stdout_eof {
             stdout_eof = read_available(&mut stdout, &mut stdout_read)
@@ -404,7 +405,7 @@ fn start_one_shot_with_deadlines(
                             invalid_response("Executor process exit status is unavailable")
                         })?;
                     process_status = Some(status);
-                    drain_deadline = Instant::now().checked_add(Duration::from_secs(1));
+                    drain_deadline = now().checked_add(Duration::from_secs(1));
                 }
                 Ok(false) => {}
                 Err(_) => return Err(invalid_response("Executor process could not be observed")),
@@ -469,10 +470,6 @@ fn start_one_shot_with_deadlines(
     })
 }
 
-fn executor_deadline(timeout_ms: u64) -> Result<Instant, RuntimeError> {
-    executor_deadline_at(timeout_ms, Instant::now())
-}
-
 fn executor_deadline_at(timeout_ms: u64, now: Instant) -> Result<Instant, RuntimeError> {
     Duration::from_millis(timeout_ms)
         .checked_add(Duration::from_secs(5))
@@ -495,7 +492,7 @@ pub(super) fn preflight_one_shot_at_deadline(
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
     deadline: Instant,
-    after_request: impl FnMut(&mut Child) -> Result<(), RuntimeError>,
+    after_request: impl FnOnce(&mut Child) -> Result<(), RuntimeError>,
     now: impl Fn() -> Instant,
 ) -> Result<ExecutorPreflightProcess, RuntimeError> {
     preflight_one_shot_with_deadline(
