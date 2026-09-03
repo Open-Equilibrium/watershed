@@ -381,10 +381,9 @@ jobs:
           cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl --coverage-target-only > /root/m12-coverage.env
           cargo llvm-cov clean --workspace
           cargo clean --release --target x86_64-unknown-linux-musl --workspace
-          cargo clean --release -p flow-agent-executor --target-dir target/m12-dynamic
           cargo clean --release -p flow-agent-cli --target-dir target/m12-standard
           cargo clean --release -p flow-agent-cli --target-dir target/m12-acceptance
-          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target-dir target/m12-dynamic
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target-dir target/m12-standard
           cargo build --locked --release -p flow-agent-cli --bin flow --target-dir target/m12-standard
           cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-acceptance
           . /root/m12-coverage.env
@@ -432,7 +431,7 @@ jobs:
           export LOGNAME=watershed
           export RUNNER_TEMP=/home/watershed/m12-coverage
           export BWRAP_UNDER_TEST=/usr/bin/bwrap
-          export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-dynamic/release/flow-executor
+          export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor
           export FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
           install -d -m 0700 "$RUNNER_TEMP"
           chown -R watershed:watershed /cargo /work/target "$RUNNER_TEMP"

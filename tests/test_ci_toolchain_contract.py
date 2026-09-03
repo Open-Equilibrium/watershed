@@ -309,14 +309,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean --workspace",
             f"cargo clean --release --target {M12_TARGET} --workspace",
-            "cargo clean --release -p flow-agent-executor "
-            "--target-dir target/m12-dynamic",
             "cargo clean --release -p flow-agent-cli "
             "--target-dir target/m12-standard",
             "cargo clean --release -p flow-agent-cli "
             "--target-dir target/m12-acceptance",
             "cargo build --locked --release -p flow-agent-executor --bin flow-executor "
-            "--target-dir target/m12-dynamic",
+            "--target-dir target/m12-standard",
             "cargo build --locked --release -p flow-agent-cli --bin flow "
             "--target-dir target/m12-standard",
             "cargo build --locked --release -p flow-agent-cli --bin flow "
@@ -345,6 +343,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
         self.assertNotIn("metadata=coverage-", coverage_prepare)
+        self.assertNotIn("target/m12-dynamic", coverage_prepare)
 
         linux_coverage_lines = assert_step_state(
             self, workflow, "Check Linux line coverage", condition=UBUNTU
@@ -355,7 +354,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (
             f". {M12_COVERAGE_ENV}",
             'install -d -m 0700 "$RUNNER_TEMP"',
-            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-dynamic/release/flow-executor",
+            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
             "cargo nextest run",
             f"--target {M12_TARGET}",
