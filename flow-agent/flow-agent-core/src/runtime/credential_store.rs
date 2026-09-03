@@ -6,7 +6,7 @@ use crate::runtime::types::RuntimeError;
 use std::{io, path::Path};
 
 pub(crate) use lifecycle::CredentialStore;
-#[cfg(any(all(target_os = "linux", target_arch = "x86_64"), test))]
+#[cfg(any(all(target_os = "linux", target_arch = "x86_64"), all(test, windows)))]
 pub(crate) use platform::default_credential_store_path;
 
 #[cfg(test)]

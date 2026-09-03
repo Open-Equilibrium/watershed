@@ -470,7 +470,7 @@ mod unsupported_platform_tests {
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod tests {
-    use super::{open_validated_executable, owner_is_trusted, validate_probe};
+    use super::{open_validated_executable, owner_is_trusted};
     use crate::runtime::executor::{ExecutorSelection, ExecutorSelectionSource};
     use std::{
         fs,
