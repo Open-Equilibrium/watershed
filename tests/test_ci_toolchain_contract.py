@@ -304,40 +304,47 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (
             "Signature: 8a477f597d28d172789f06886806bc55",
             "target/CACHEDIR.TAG",
-            f"cargo llvm-cov show-env --sh --target {M12_TARGET} > {M12_COVERAGE_ENV}",
+            f"cargo llvm-cov show-env --sh --target {M12_TARGET} "
+            f"--coverage-target-only > {M12_COVERAGE_ENV}",
             f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean --workspace",
             f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
+            "cargo clean --release -p flow-agent-executor "
+            "--target-dir target/m12-dynamic",
             "cargo clean --release -p flow-agent-cli "
             "--target-dir target/m12-standard",
-            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
-            'metadata=coverage-executor-musl-prod"',
-            "cargo build --locked --release -p flow-agent-executor "
-            f"--bin flow-executor --target {M12_TARGET}",
-            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
-            'metadata=coverage-executor-gnu-prod"',
-            "cargo build --locked --release -p flow-agent-executor --bin flow-executor",
-            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
-            'metadata=coverage-flow-standard-prod"',
+            "cargo clean --release -p flow-agent-cli "
+            "--target-dir target/m12-acceptance",
+            "cargo build --locked --release -p flow-agent-executor --bin flow-executor "
+            "--target-dir target/m12-dynamic",
             "cargo build --locked --release -p flow-agent-cli --bin flow "
             "--target-dir target/m12-standard",
-            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
-            'metadata=coverage-flow-acceptance-prod"',
             "cargo build --locked --release -p flow-agent-cli --bin flow "
-            "--features m12-install-acceptance",
+            "--features m12-install-acceptance --target-dir target/m12-acceptance",
+            "cargo build --locked --release -p flow-agent-executor "
+            f"--bin flow-executor --target {M12_TARGET}",
+            "cargo nextest run",
+            "--no-run",
+            f"--target {M12_TARGET}",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
         ):
             self.assertIn(required, coverage_prepare)
         self.assertIn("        shell: bash", coverage_prepare_lines)
         prepare_order = (
             "target/CACHEDIR.TAG",
             "cargo llvm-cov show-env",
-            f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean",
             "cargo clean --release",
             "cargo build",
+            f". {M12_COVERAGE_ENV}",
+            "cargo nextest run",
         )
         positions = [coverage_prepare.index(command) for command in prepare_order]
         self.assertEqual(positions, sorted(positions))
+        self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
+        self.assertNotIn("metadata=coverage-", coverage_prepare)
 
         linux_coverage_lines = assert_step_state(
             self, workflow, "Check Linux line coverage", condition=UBUNTU
@@ -348,10 +355,10 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (
             f". {M12_COVERAGE_ENV}",
             'install -d -m 0700 "$RUNNER_TEMP"',
-            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
+            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-dynamic/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
-            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-tests"',
             "cargo nextest run",
+            f"--target {M12_TARGET}",
             "--workspace",
             "--all-targets",
             "--all-features",
@@ -367,14 +374,14 @@ class CiWorkflowContractTest(unittest.TestCase):
         report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
         self.assertIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
-        self.assertNotIn("--coverage-target-only", coverage_prepare + linux_coverage)
+        self.assertIn("--coverage-target-only", report)
         self.assertEqual(linux_coverage.count("cargo nextest run"), 1)
+        self.assertNotIn("metadata=coverage-", linux_coverage)
         self.assertNotIn("-p flow-agent-executor", linux_coverage)
         self.assertNotIn("--bin flow-executor", linux_coverage)
         self.assertNotIn("binary(flow-executor)", linux_coverage)
         ordered = (
             f". {M12_COVERAGE_ENV}",
-            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-tests"',
             "cargo nextest run",
             "cargo llvm-cov report",
         )
@@ -684,6 +691,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(required, installer_acceptance)
         self.assertIn(
             "scripts/run-m12-readiness-negatives.sh", installer_acceptance
+        )
+        self.assertIn(
+            'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
+            installer_acceptance,
         )
         self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)

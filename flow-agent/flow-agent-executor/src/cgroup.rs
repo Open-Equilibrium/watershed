@@ -79,6 +79,10 @@ fn scope_command(image: &File, argument: &str) -> Command {
             "--property=Delegate=pids",
             "--",
         ]);
+    #[cfg(coverage)]
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
     command
         .arg(format!("/proc/self/fd/{}", image.as_raw_fd()))
         .arg(argument);
@@ -280,15 +284,21 @@ pub(crate) fn enter_supervisor_subgroup() -> Result<(), String> {
 }
 
 fn clear_process_environment() -> Result<(), String> {
+    #[cfg(coverage)]
+    let coverage_profile = std::env::var_os("LLVM_PROFILE_FILE");
     // SAFETY: scoped modes call this before starting threads or reading a request.
-    if unsafe { c_clearenv() } == 0 {
-        Ok(())
-    } else {
-        Err(format!(
+    if unsafe { c_clearenv() } != 0 {
+        return Err(format!(
             "failed to clear Executor bootstrap environment: {}",
             std::io::Error::last_os_error()
-        ))
+        ));
     }
+    #[cfg(coverage)]
+    if let Some(profile) = coverage_profile {
+        // SAFETY: scoped modes remain single-threaded until bootstrap completes.
+        unsafe { std::env::set_var("LLVM_PROFILE_FILE", profile) };
+    }
+    Ok(())
 }
 
 fn current_cgroup_relative() -> Result<PathBuf, String> {
@@ -397,7 +407,7 @@ mod tests {
     static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
 
     #[test]
-    fn transient_scope_bootstrap_uses_only_the_effective_users_bus() {
+    fn transient_scope_bootstrap_uses_only_required_environment() {
         let image = File::open("/proc/self/exe").expect("current executable opens");
         let command = scope_command(&image, SCOPED_ARGUMENT);
         let uid = rustix::process::geteuid().as_raw();
@@ -406,19 +416,23 @@ mod tests {
             .map(|(name, value)| (name.to_owned(), value.map(OsString::from)))
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            environment,
-            [
-                (
-                    OsString::from("DBUS_SESSION_BUS_ADDRESS"),
-                    Some(OsString::from(format!("unix:path=/run/user/{uid}/bus"))),
-                ),
-                (
-                    OsString::from("XDG_RUNTIME_DIR"),
-                    Some(OsString::from(format!("/run/user/{uid}"))),
-                ),
-            ]
-        );
+        let mut expected = vec![
+            (
+                OsString::from("DBUS_SESSION_BUS_ADDRESS"),
+                Some(OsString::from(format!("unix:path=/run/user/{uid}/bus"))),
+            ),
+            (
+                OsString::from("XDG_RUNTIME_DIR"),
+                Some(OsString::from(format!("/run/user/{uid}"))),
+            ),
+        ];
+        #[cfg(coverage)]
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            expected.push((OsString::from("LLVM_PROFILE_FILE"), Some(profile)));
+            expected.sort_unstable();
+        }
+
+        assert_eq!(environment, expected);
     }
 
     #[test]

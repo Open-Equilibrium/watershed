@@ -50,7 +50,7 @@ install -m 0755 install/install.sh "$bundle/install.sh"
 install -m 0755 target/m12-standard/release/flow "$bundle/flow"
 install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$bundle/flow-executor"
 install -m 0755 install/install.sh "$acceptance_bundle/install.sh"
-install -m 0755 target/release/flow "$acceptance_bundle/flow"
+install -m 0755 target/m12-acceptance/release/flow "$acceptance_bundle/flow"
 install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor "$acceptance_bundle/flow-executor"
 assert_linger_disabled
 (cd / && PATH= HOME="$home" XDG_CONFIG_HOME="$config" SUDO_USER=watershed /bin/sh "$bundle/install.sh" --prefix "$standard_prefix")
