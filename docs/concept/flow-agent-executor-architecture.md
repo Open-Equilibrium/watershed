@@ -79,21 +79,26 @@ sequenceDiagram
     F->>S: Persist terminal failure
   else Ready
     E-->>F: Ready (same process waits)
-    F->>S: Commit tool.started
-    F->>E: Matching Start
-    E->>C: Create fresh limited Tool leaf
-    E->>B: Construct exact mounts and isolation
-    B->>T: Start Tool root in leaf
-    T-->>E: Bounded output and exit
-    E->>B: Terminate descendants and tear down
-    E->>C: Prove empty and remove leaf
-    E-->>F: Tool result and enforcement receipt
-    F->>F: Validate receipt against the policy
-    F->>S: Persist terminal result and receipt
+    alt Commit fails or cancellation wins before Start
+      F--xE: Close without Start
+      F->>S: Persist required recovery state
+    else tool.started is committed and Start remains authorized
+      F->>S: Commit tool.started
+      F->>E: Matching Start
+      E->>C: Create fresh limited Tool leaf
+      E->>B: Construct exact mounts and isolation
+      B->>T: Start Tool root in leaf
+      T-->>E: Bounded output and exit
+      E->>B: Terminate descendants and tear down
+      E->>C: Prove empty and remove leaf
+      E-->>F: Tool result and enforcement receipt
+      F->>F: Validate receipt against the policy
+      F->>S: Persist terminal result and receipt
+    end
   end
 ```
 
-One Executor process spans the bounded handshake for one invocation. It first enters one empty transient systemd scope so the PIDs controller is delegated for that invocation; this envelope contains no Tool. Only after matching `Start` does the Executor create the limited Tool cgroup leaf and Bubblewrap boundary. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport. Exact request, framing, descriptor, digest and receipt rules live in the canonical [`PROTOCOL.md` process and framing contract](../../PROTOCOL.md#process-and-framing-contract).
+One Executor process spans the bounded handshake for one invocation. It first enters one empty transient systemd scope so the PIDs controller is delegated for that invocation; this envelope contains no Tool. A failed `tool.started` commit or cancellation before `Start` closes the waiting process without creating a Tool boundary; the canonical [durable-attempt contract](../../PROTOCOL.md#m11-codex-subscription-provider) owns the distinct recovery outcomes. Only after matching `Start` does the Executor create the limited Tool cgroup leaf and Bubblewrap boundary. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport. Exact request, framing, descriptor, digest and receipt rules live in the canonical [`PROTOCOL.md` process and framing contract](../../PROTOCOL.md#process-and-framing-contract).
 
 ## Filesystem and runtime reads
 
