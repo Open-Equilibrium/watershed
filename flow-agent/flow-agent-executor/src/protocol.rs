@@ -125,7 +125,7 @@ fn execute_request(input: impl Read, mut output: impl Write) -> Result<(), Strin
     match crate::backend::preflight(request)? {
         crate::backend::Preflight::Ready(prepared) => {
             complete_preflight_buffered(&mut input, output, &request_id, || {
-                crate::backend::execute(prepared)
+                crate::backend::execute(*prepared)
             })
         }
         crate::backend::Preflight::Error(preflight) => write_preflight(&preflight, &mut output),

@@ -445,14 +445,14 @@ pub(crate) fn probe() -> ProbeState {
 }
 
 pub(crate) enum Preflight {
-    Ready(PreparedExecution),
+    Ready(Box<PreparedExecution>),
     Error(ExecutorPreflightV0),
 }
 
 pub(crate) fn preflight(request: ExecutorRequestV0) -> Result<Preflight, String> {
     let request_id = request.request_id.clone();
     match preflight_supported(request) {
-        Ok(prepared) => Ok(Preflight::Ready(prepared)),
+        Ok(prepared) => Ok(Preflight::Ready(Box::new(prepared))),
         Err(error) if error.definitive => Ok(Preflight::Error(ExecutorPreflightV0::Error {
             schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
             request_id,
