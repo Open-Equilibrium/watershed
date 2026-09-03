@@ -383,10 +383,14 @@ jobs:
           cargo llvm-cov clean --workspace
           cargo clean --release --target x86_64-unknown-linux-musl -p flow-agent-executor
           cargo clean --release -p flow-agent-cli --target-dir target/m12-standard
-          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
-          cargo build --locked --release -p flow-agent-executor --bin flow-executor
-          cargo build --locked --release -p flow-agent-cli --bin flow --target-dir target/m12-standard
-          cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance
+          RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-executor-musl-prod" \
+            cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
+          RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-executor-gnu-prod" \
+            cargo build --locked --release -p flow-agent-executor --bin flow-executor
+          RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-flow-standard-prod" \
+            cargo build --locked --release -p flow-agent-cli --bin flow --target-dir target/m12-standard
+          RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-flow-acceptance-prod" \
+            cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance
           if readelf -l target/x86_64-unknown-linux-musl/release/flow-executor | grep -q "INTERP"; then
             echo "instrumented flow-executor must not contain an ELF interpreter" >&2
             exit 1

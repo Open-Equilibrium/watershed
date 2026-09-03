@@ -310,11 +310,19 @@ class CiWorkflowContractTest(unittest.TestCase):
             f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
             "cargo clean --release -p flow-agent-cli "
             "--target-dir target/m12-standard",
+            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
+            'metadata=coverage-executor-musl-prod"',
             "cargo build --locked --release -p flow-agent-executor "
             f"--bin flow-executor --target {M12_TARGET}",
+            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
+            'metadata=coverage-executor-gnu-prod"',
             "cargo build --locked --release -p flow-agent-executor --bin flow-executor",
+            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
+            'metadata=coverage-flow-standard-prod"',
             "cargo build --locked --release -p flow-agent-cli --bin flow "
             "--target-dir target/m12-standard",
+            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C '
+            'metadata=coverage-flow-acceptance-prod"',
             "cargo build --locked --release -p flow-agent-cli --bin flow "
             "--features m12-install-acceptance",
         ):
