@@ -92,7 +92,8 @@ run_negative() {
           for evidence in state stderr executor.stderr strace.stderr; do
             if [ -e "$M12_FAULT_DIR/$evidence" ]; then
               printf "%s:\n" "$evidence" >&2
-              /bin/sed -n "1,80p" "$M12_FAULT_DIR/$evidence" >&2
+              /usr/bin/head -c 4096 "$M12_FAULT_DIR/$evidence" >&2
+              printf '\n' >&2
             fi
           done
         fi
@@ -207,10 +208,7 @@ run_negative() {
       phase=assert-public-diagnostic
       /bin/grep -Fq "executor_unavailable:" "$M12_FAULT_DIR/stderr"
       phase=assert-private-diagnostic
-      if ! /bin/grep -Fq "$M12_FAULT_EXPECTED" "$M12_FAULT_DIR/executor.stderr"; then
-        /bin/cat "$M12_FAULT_DIR/executor.stderr" >&2
-        exit 1
-      fi
+      /bin/grep -Fq "$M12_FAULT_EXPECTED" "$M12_FAULT_DIR/executor.stderr"
       phase=assert-call-count
       call_count=$(/usr/bin/wc -l < "$M12_FAULT_DIR/systemd-run.calls")
       test "$call_count" -eq 1
