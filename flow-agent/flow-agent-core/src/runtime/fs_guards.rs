@@ -1,7 +1,7 @@
 use crate::runtime::types::{MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits};
 use cap_fs_ext::{DirExt, MetadataExt as _};
 use cap_std::{ambient_authority, fs::Dir};
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 use std::cell::RefCell;
 use std::{
     ffi::OsStr,
@@ -316,6 +316,8 @@ impl AnchoredDir {
                     }
                     #[cfg(not(unix))]
                     {
+                        #[cfg(all(test, windows))]
+                        observe_private_directory_missing();
                         create_private_anchored_directory(&self.dir, leaf)
                     }
                 } else {
@@ -746,15 +748,34 @@ pub(crate) fn windows_directory_is_current_user_only_for_test(
         .map_err(|source| path_io_error(path, source))
 }
 
-#[cfg(all(test, unix))]
-type PrivateDirectoryOpenObserver = Box<dyn FnOnce()>;
+#[cfg(all(test, any(unix, windows)))]
+type PrivateDirectoryObserver = Box<dyn FnOnce()>;
 
 #[cfg(all(test, unix))]
 std::thread_local! {
-    static PRIVATE_DIRECTORY_CREATE_OBSERVER: RefCell<Option<PrivateDirectoryOpenObserver>> =
+    static PRIVATE_DIRECTORY_CREATE_OBSERVER: RefCell<Option<PrivateDirectoryObserver>> =
         RefCell::new(None);
-    static PRIVATE_DIRECTORY_OPEN_OBSERVER: RefCell<Option<PrivateDirectoryOpenObserver>> =
+    static PRIVATE_DIRECTORY_OPEN_OBSERVER: RefCell<Option<PrivateDirectoryObserver>> =
         RefCell::new(None);
+}
+
+#[cfg(all(test, windows))]
+std::thread_local! {
+    static PRIVATE_DIRECTORY_MISSING_OBSERVER: RefCell<Option<PrivateDirectoryObserver>> =
+        RefCell::new(None);
+}
+
+#[cfg(all(test, windows))]
+pub fn set_private_directory_missing_observer(observer: impl FnOnce() + 'static) {
+    PRIVATE_DIRECTORY_MISSING_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(all(test, windows))]
+fn observe_private_directory_missing() {
+    let observer = PRIVATE_DIRECTORY_MISSING_OBSERVER.with_borrow_mut(Option::take);
+    if let Some(observer) = observer {
+        observer();
+    }
 }
 
 #[cfg(all(test, unix))]
