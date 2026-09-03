@@ -304,8 +304,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         for required in (
             "Signature: 8a477f597d28d172789f06886806bc55",
             "target/CACHEDIR.TAG",
-            f"cargo llvm-cov show-env --sh --target {M12_TARGET} "
-            f"--coverage-target-only > {M12_COVERAGE_ENV}",
+            f"cargo llvm-cov show-env --sh --target {M12_TARGET} > {M12_COVERAGE_ENV}",
             f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean --workspace",
             f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
@@ -343,7 +342,12 @@ class CiWorkflowContractTest(unittest.TestCase):
             'install -d -m 0700 "$RUNNER_TEMP"',
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
+            "RUSTFLAGS='-C metadata=flow-executor-coverage-tests'",
             "cargo nextest run",
+            "-p flow-agent-executor",
+            "--bin flow-executor",
+            "-E 'not (package(flow-agent-executor) & kind(bin) & "
+            "binary(flow-executor))'",
             "cargo llvm-cov report",
             f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
             "^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$",
@@ -354,13 +358,21 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("        shell: bash", linux_coverage_lines)
         self.assertIn(TEST_ISOLATION, linux_coverage)
         report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
-        tests = linux_coverage[: linux_coverage.index("cargo llvm-cov report")]
-        self.assertIn(f"--target {M12_TARGET}", tests)
         self.assertIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
-        self.assertIn("--coverage-target-only", report)
+        self.assertNotIn("--coverage-target-only", coverage_prepare + linux_coverage)
+        first_run = linux_coverage.index("cargo nextest run")
+        second_run = linux_coverage.index("cargo nextest run", first_run + 1)
+        excluded_bin = linux_coverage.index(
+            "-E 'not (package(flow-agent-executor) & kind(bin) & "
+            "binary(flow-executor))'"
+        )
+        self.assertLess(first_run, second_run)
+        self.assertLess(second_run, excluded_bin)
+        self.assertLess(excluded_bin, linux_coverage.index("cargo llvm-cov report"))
         ordered = (
             f". {M12_COVERAGE_ENV}",
+            "RUSTFLAGS='-C metadata=flow-executor-coverage-tests'",
             "cargo nextest run",
             "cargo llvm-cov report",
         )

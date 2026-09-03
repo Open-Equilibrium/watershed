@@ -378,7 +378,7 @@ jobs:
             '# This file is a cache directory tag created by cargo.' \
             '# For information about cache directory tags see https://bford.info/cachedir/' \
             > target/CACHEDIR.TAG
-          cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl --coverage-target-only > /root/m12-coverage.env
+          cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl > /root/m12-coverage.env
           . /root/m12-coverage.env
           cargo llvm-cov clean --workspace
           cargo clean --release --target x86_64-unknown-linux-musl -p flow-agent-executor
@@ -428,18 +428,25 @@ jobs:
           /usr/sbin/runuser --user watershed --preserve-environment -- /bin/sh -s <<'UNPRIVILEGED'
           set -eu
           test "$(grep -Ec '^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$' /proc/self/status)" = 4
+          RUSTFLAGS='-C metadata=flow-executor-coverage-tests' \
           cargo nextest run \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
             --locked \
             --release \
-            --target x86_64-unknown-linux-musl \
+            --all-features \
+            -p flow-agent-executor \
+            --bin flow-executor
+          cargo nextest run \
+            --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
+            --locked \
+            --release \
             --workspace \
             --all-targets \
-            --all-features
+            --all-features \
+            -E 'not (package(flow-agent-executor) & kind(bin) & binary(flow-executor))'
           cargo llvm-cov report \
             --release \
             --target x86_64-unknown-linux-musl \
-            --coverage-target-only \
             --fail-under-lines 90 \
             --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/]))' \
             --show-missing-lines
