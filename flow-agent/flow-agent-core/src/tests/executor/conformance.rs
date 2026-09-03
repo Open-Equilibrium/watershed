@@ -160,6 +160,25 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
             .exists(),
         "preflight timeout must not dispatch a Tool"
     );
+
+    for mode in ["late-ready", "late-preflight-error"] {
+        let timeout = dispatch_error(&fixture, &root, mode, 1);
+        assert_executor_code(&timeout, proto::ExecutorErrorCodeV0::InvalidResponse);
+        assert!(
+            !root
+                .join(format!("fake-executor-{mode}.tool-spawned"))
+                .exists(),
+            "late preflight progress must not dispatch a Tool"
+        );
+    }
+
+    let timeout = dispatch_error(&fixture, &root, "late-terminal", 1);
+    assert_executor_code(&timeout, proto::ExecutorErrorCodeV0::InvalidResponse);
+    assert!(
+        root.join("fake-executor-late-terminal.tool-spawned")
+            .exists(),
+        "late terminal evidence is tested only after Tool dispatch"
+    );
 }
 
 fn compile_fake_executor(root: &Path) -> PathBuf {

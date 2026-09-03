@@ -2,7 +2,7 @@ use super::super::process::{
     child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
 };
 use super::preparation::PreparedMount;
-use super::{invalid_response, runtime_open_error};
+use super::{before_executor_deadline, invalid_response, runtime_open_error};
 use crate::runtime::types::RuntimeError;
 use std::{
     fs::File,
@@ -166,6 +166,9 @@ pub(super) fn preflight_one_shot(
     let mut rejected_code = None;
     let mut process_status = None;
     loop {
+        if before_executor_deadline(hard_deadline, || ()).is_none() {
+            return Err(invalid_response("Executor preflight timed out"));
+        }
         if rejected_code.is_none()
             && crate::runtime::cancellation::productive_cancellation()
                 .load(std::sync::atomic::Ordering::Acquire)
@@ -205,6 +208,9 @@ pub(super) fn preflight_one_shot(
             let preflight =
                 proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
                     .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
+            if before_executor_deadline(hard_deadline, || ()).is_none() {
+                return Err(invalid_response("Executor preflight timed out"));
+            }
             match preflight {
                 proto::ExecutorPreflightV0::Ready { .. } => {
                     if child_exited_without_reaping(child.child_mut())
@@ -214,7 +220,7 @@ pub(super) fn preflight_one_shot(
                             "Executor exited after declaring preflight readiness",
                         ));
                     }
-                    return Ok(ExecutorPreflightProcess::Ready(WaitingExecutor {
+                    let waiting = WaitingExecutor {
                         child,
                         stdin,
                         stdout,
@@ -223,7 +229,11 @@ pub(super) fn preflight_one_shot(
                         request_id: request.request_id.clone(),
                         policy_digest: request.policy_digest.clone(),
                         timeout_ms: request.limits.timeout_ms,
-                    }));
+                    };
+                    return before_executor_deadline(hard_deadline, || {
+                        ExecutorPreflightProcess::Ready(waiting)
+                    })
+                    .ok_or_else(|| invalid_response("Executor preflight timed out"));
                 }
                 proto::ExecutorPreflightV0::Error { code, .. } => {
                     rejected_code = Some(code);
@@ -256,23 +266,24 @@ pub(super) fn preflight_one_shot(
                 let preflight =
                     proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
                         .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
-                return match preflight {
+                let outcome = match preflight {
                     proto::ExecutorPreflightV0::Error {
                         code: drained_code, ..
-                    } if drained_code == code => Ok(ExecutorPreflightProcess::Rejected(code)),
-                    _ => Err(invalid_response(
-                        "Executor preflight response changed while draining",
-                    )),
+                    } if drained_code == code => ExecutorPreflightProcess::Rejected(code),
+                    _ => {
+                        return Err(invalid_response(
+                            "Executor preflight response changed while draining",
+                        ));
+                    }
                 };
+                return before_executor_deadline(hard_deadline, || outcome)
+                    .ok_or_else(|| invalid_response("Executor preflight timed out"));
             }
         }
         if rejected_code.is_none() && (stdout_eof || process_status.is_some()) {
             return Err(invalid_response(
                 "Executor exited without a complete preflight response",
             ));
-        }
-        if Instant::now() >= hard_deadline {
-            return Err(invalid_response("Executor preflight timed out"));
         }
         thread::sleep(Duration::from_millis(10));
     }
@@ -304,7 +315,13 @@ pub(super) fn start_one_shot(
     let mut drain_deadline = None;
     loop {
         if let Some(writer) = waiting.stdin.as_mut() {
-            match writer.write(&start_bytes[start_offset..]) {
+            let write = before_executor_deadline(start_delivery_deadline, || {
+                writer.write(&start_bytes[start_offset..])
+            })
+            .ok_or_else(|| {
+                invalid_response("Executor start could not be delivered before its deadline")
+            })?;
+            match write {
                 Ok(0) => return Err(invalid_response("Executor start writer made no progress")),
                 Ok(written) => {
                     start_offset += written;
@@ -350,9 +367,6 @@ pub(super) fn start_one_shot(
                 Err(_) => return Err(invalid_response("Executor process could not be observed")),
             }
         }
-        if process_status.is_some() && stdout_eof && stderr_eof {
-            break;
-        }
         let now = Instant::now();
         if crate::runtime::cancellation::productive_cancellation()
             .load(std::sync::atomic::Ordering::Acquire)
@@ -379,6 +393,14 @@ pub(super) fn start_one_shot(
                 "Executor did not return terminal enforcement evidence before cleanup deadline",
             ));
         }
+        if process_status.is_some() && stdout_eof && stderr_eof {
+            if terminal_deadline.is_none() {
+                return Err(invalid_response(
+                    "Executor exited before the complete start record was delivered",
+                ));
+            }
+            break;
+        }
         thread::sleep(Duration::from_millis(10));
     }
     let status = process_status.expect("terminal process status was observed before drain");
@@ -394,7 +416,13 @@ pub(super) fn start_one_shot(
     )
     .map_err(|_| invalid_response("Executor terminal response is invalid"))?;
     let _ = stderr_read;
-    Ok(response)
+    before_executor_deadline(
+        terminal_deadline.expect("terminal deadline follows complete start delivery"),
+        || response,
+    )
+    .ok_or_else(|| {
+        invalid_response("Executor did not return terminal enforcement evidence before deadline")
+    })
 }
 
 fn executor_deadline(timeout_ms: u64) -> Result<Instant, RuntimeError> {
