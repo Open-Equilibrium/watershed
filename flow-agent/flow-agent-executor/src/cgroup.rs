@@ -416,7 +416,7 @@ mod tests {
             .map(|(name, value)| (name.to_owned(), value.map(OsString::from)))
             .collect::<Vec<_>>();
 
-        let mut expected = vec![
+        let expected = vec![
             (
                 OsString::from("DBUS_SESSION_BUS_ADDRESS"),
                 Some(OsString::from(format!("unix:path=/run/user/{uid}/bus"))),
@@ -427,10 +427,14 @@ mod tests {
             ),
         ];
         #[cfg(coverage)]
-        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
-            expected.push((OsString::from("LLVM_PROFILE_FILE"), Some(profile)));
-            expected.sort_unstable();
-        }
+        let expected = {
+            let mut expected = expected;
+            if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+                expected.push((OsString::from("LLVM_PROFILE_FILE"), Some(profile)));
+                expected.sort_unstable();
+            }
+            expected
+        };
 
         assert_eq!(environment, expected);
     }
