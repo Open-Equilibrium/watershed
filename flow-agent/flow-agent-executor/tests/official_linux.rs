@@ -828,12 +828,8 @@ fn executor_crash_leaves_no_tool_or_cgroup(executor: &Path, probe: &ExecutorProb
         !running.wait_without_response().status.success(),
         "killed Executor must not claim completion"
     );
-    assert_tree_stopped(&workspace);
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while recorded_cgroup(&workspace).exists() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(5));
-    }
     assert_cgroup_removed(&workspace);
+    assert_tree_stopped(&workspace);
 }
 
 fn descendant_script() -> &'static str {
