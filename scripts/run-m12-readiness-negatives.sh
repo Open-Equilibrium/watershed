@@ -189,7 +189,7 @@ run_negative() {
 }
 
 prepare_fault_harness
-run_negative missing-cgroup-v2 "failed to open cgroup.controllers"
+run_negative missing-cgroup-v2 "failed to create Executor supervisor cgroup"
 run_negative missing-pids-controller "lacks the pids controller"
 run_negative missing-delegation "failed to write cgroup.subtree_control"
 run_negative missing-capacity-events "pids.events omits max"
