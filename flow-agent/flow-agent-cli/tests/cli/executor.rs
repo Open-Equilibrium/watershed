@@ -83,6 +83,25 @@ fn executor_commands_have_closed_grammar() {
     }
 }
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn executor_default_reports_when_no_custom_override_existed() {
+    let config_root = empty_workspace_under(Path::new(env!("CARGO_TARGET_TMPDIR")));
+    let output = flow_command()
+        .env("HOME", config_root.as_os_str())
+        .env("XDG_CONFIG_HOME", config_root.as_os_str())
+        .args(["executor", "configure", "--default"])
+        .output()
+        .expect("flow executor configuration runs");
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        "Default Executor already selected; no Custom override was configured\n"
+    );
+    assert!(output.stderr.is_empty(), "{output:?}");
+}
+
 #[test]
 fn executor_commands_fail_closed_on_unsupported_platform_without_config_mutation() {
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
