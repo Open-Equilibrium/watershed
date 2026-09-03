@@ -137,7 +137,8 @@ pub struct ExecutorRequestV0 {
     pub mounts: Vec<ExecutorMountV0>,
     /// Fully resolved target policy represented by the digest and receipt.
     pub resolved_policy: ExecutorResolvedPolicyV0,
-    /// Lowercase SHA-256 of the exact canonical resolved-policy bytes plus LF.
+    /// Digest of the canonical resolved policy applied by the Sandbox; must equal the request's
+    /// `policy_digest`.
     pub policy_digest: String,
     /// Opaque per-attempt identifier.
     pub request_id: String,
@@ -191,7 +192,7 @@ pub struct ExecutorStartV0 {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnforcementReceiptV0 {
-    /// Lowercase SHA-256 of the exact policy artifact applied by the Sandbox.
+    /// Lowercase SHA-256 of the exact canonical resolved-policy bytes plus LF.
     pub applied_policy_digest: String,
     /// Sandbox backend identity.
     pub backend: String,
