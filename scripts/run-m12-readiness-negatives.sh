@@ -43,9 +43,8 @@ WRAPPER
 #!/bin/sh
 set -eu
 fault_dir=/opt/watershed-m12-fault/current
-/bin/mount --make-rprivate /
 IFS=: read -r _ _ cgroup < /proc/self/cgroup
-printf '%s %s\n' "$$" "$cgroup" > "$fault_dir/state.pending"
+printf '%s %s %s\n' "$$" "$PPID" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
 IFS= read -r _ < "$fault_dir/release"
 LLVM_PROFILE_FILE="$fault_dir/scoped-%p-%m.profraw" \
@@ -74,6 +73,7 @@ run_negative() {
     /usr/bin/unshare --mount /bin/sh -ec '
       command_pid=
       scoped_pid=
+      monitor_pid=
       tracer_pid=
       command_status=not-observed
       call_count=not-observed
@@ -137,11 +137,21 @@ run_negative() {
       done
       set -- $(/bin/cat "$M12_FAULT_DIR/state")
       scoped_pid=$1
-      cgroup=$2
+      monitor_pid=$2
+      cgroup=$3
       scope=${cgroup%/supervisor}
       phase=assert-private-mount-namespace
       test "$(/usr/bin/readlink /proc/self/ns/mnt)" != \
         "$(/usr/bin/readlink "/proc/$scoped_pid/ns/mnt")"
+      phase=isolate-bubblewrap-monitor
+      IFS=: read -r _ _ monitor_cgroup < "/proc/$monitor_pid/cgroup"
+      test "$monitor_cgroup" = "$cgroup"
+      /bin/mkdir "/sys/fs/cgroup$scope/harness"
+      printf '%s\n' "$monitor_pid" > "/sys/fs/cgroup$scope/harness/cgroup.procs"
+      IFS=: read -r _ _ monitor_cgroup < "/proc/$monitor_pid/cgroup"
+      test "$monitor_cgroup" = "$scope/harness"
+      IFS=: read -r _ _ child_cgroup < "/proc/$scoped_pid/cgroup"
+      test "$child_cgroup" = "$scope"
       phase=inject-fault
       case "$M12_FAULT_KIND" in
         missing-cgroup-v2)
