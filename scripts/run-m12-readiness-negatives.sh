@@ -21,16 +21,15 @@ run_with_deadline() (
 cleanup_delegated_scope() {
   fault_dir=$1
   harness_status=$2
+  scope=$3
+  [ -s "$fault_dir/scope" ] || return 1
+  [ "$(/bin/cat "$fault_dir/scope")" = "$scope" ] || return 1
   if [ -s "$fault_dir/state" ]; then
     set -- $(/bin/cat "$fault_dir/state")
     case "${2-}" in
-      /*/supervisor) scope=${2%/supervisor} ;;
+      "$scope"|"$scope/supervisor") ;;
       *) return 1 ;;
     esac
-  elif [ -s "$fault_dir/scope" ]; then
-    scope=$(/bin/cat "$fault_dir/scope")
-  else
-    return 0
   fi
   scope_root="/sys/fs/cgroup$scope"
   [ -e "$scope_root" ] || return 0
@@ -65,7 +64,8 @@ prepare_fault_harness() {
 set -eu
 fault_root=/opt/watershed-m12-fault
 fault_dir=$fault_root/current
-scope_unit=watershed-m12-readiness-negative.scope
+scope=$(/bin/cat "$fault_dir/scope")
+scope_unit=${scope##*/}
 test "$#" -eq 8
 test "$1" = --user
 test "$2" = --scope
@@ -75,8 +75,6 @@ test "$5" = --property=Delegate=pids
 test "$6" = --
 test "$8" = --capacity-self-test
 printf 'scope\n' >> "$fault_dir/systemd-run.calls"
-printf '/user.slice/user-10001.slice/user@10001.service/app.slice/%s\n' \
-  "$scope_unit" > "$fault_dir/scope"
 # Preserve the exact production image while the mount namespace alters its host interface.
 /bin/cp -- "$7" "$fault_dir/scoped-executor"
 /bin/chmod 0755 "$fault_dir/scoped-executor"
@@ -98,7 +96,9 @@ fault_dir=/opt/watershed-m12-fault/current
 IFS=: read -r _ _ cgroup < /proc/self/cgroup
 printf '%s %s\n' "$$" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
-/bin/cat "$fault_dir/release" >/dev/null
+release=
+IFS= read -r release < "$fault_dir/release"
+[ "$release" = release ]
 LLVM_PROFILE_FILE=/work/target/m12-scoped-%p-%m.profraw \
   exec "$@" 2> "$fault_dir/executor.stderr"
 BARRIER
@@ -110,7 +110,9 @@ run_negative() {
   expected=$2
   mode=${3-check}
   fault_dir="$negative_root/$fault-$mode"
+  scope="/user.slice/user-10001.slice/user@10001.service/app.slice/watershed-m12-readiness-negative-$fault-$mode.scope"
   install -d -m 0700 -o watershed -g watershed "$fault_dir"
+  printf '%s\n' "$scope" > "$fault_dir/scope"
   /usr/bin/mkfifo "$fault_dir/release"
   chown watershed:watershed "$fault_dir/release"
   if [ "$fault" = missing-cgroup-v2 ]; then
@@ -311,7 +313,7 @@ run_negative() {
       trap - EXIT TERM INT HUP
     '
   negative_status=$?
-  cleanup_delegated_scope "$fault_dir" "$negative_status"
+  cleanup_delegated_scope "$fault_dir" "$negative_status" "$scope"
   cleanup_status=$?
   set -e
   if [ "$negative_status" -eq 124 ] || [ "$negative_status" -eq 137 ]; then
