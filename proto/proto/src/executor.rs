@@ -11,6 +11,10 @@ pub use types::*;
 
 /// Closed schema name for one M1.2 Executor request.
 pub const EXECUTOR_REQUEST_SCHEMA_V0: &str = "flow-executor-request-v0";
+/// Closed schema name for one M1.2 Executor preflight response.
+pub const EXECUTOR_PREFLIGHT_SCHEMA_V0: &str = "flow-executor-preflight-v0";
+/// Closed schema name for one M1.2 Executor start record.
+pub const EXECUTOR_START_SCHEMA_V0: &str = "flow-executor-start-v0";
 /// Closed schema name for one M1.2 Executor terminal response.
 pub const EXECUTOR_RESPONSE_SCHEMA_V0: &str = "flow-executor-result-v0";
 /// Closed schema name for one M1.2 Executor readiness response.
@@ -42,6 +46,8 @@ pub const EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0: &str = "pid-descendant-contai
 pub const EXECUTOR_FEATURE_PROCESS_CAPACITY_V0: &str = "process-capacity";
 /// Maximum canonical request document bytes, including its final line feed.
 pub const MAX_EXECUTOR_REQUEST_BYTES_V0: usize = 1024 * 1024;
+/// Maximum canonical bytes in either preflight or start control record.
+pub const MAX_EXECUTOR_CONTROL_BYTES_V0: usize = 8 * 1024;
 /// Maximum raw bytes in either terminal Tool stream.
 pub const MAX_EXECUTOR_TOOL_STREAM_BYTES_V0: usize = 4 * 1024 * 1024;
 /// Maximum executable-plus-argument entries in one Tool exec vector.

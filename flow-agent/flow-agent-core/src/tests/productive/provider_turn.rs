@@ -752,6 +752,7 @@ fn productive_failed_tool_closes_the_active_execution_without_another_provider_t
         error_after_interrupt: false,
         fault: Default::default(),
         invocations: Vec::new(),
+        preflights: 0,
         outcome: ToolExecutionOutcome {
             status: RunAttemptOutcome::Failed,
             classification: Some(ToolTerminalClassification::NonzeroExit),

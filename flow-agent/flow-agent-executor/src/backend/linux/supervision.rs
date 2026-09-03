@@ -170,7 +170,7 @@ pub(super) fn run_bounded(
 ) -> Result<ProcessOutcome, BackendError> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(timeout_ms))
-        .ok_or_else(|| BackendError::unsupported("Tool timeout overflows the host clock"))?;
+        .ok_or_else(|| BackendError::setup("Tool timeout overflows the host clock"))?;
     let cancelled = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&cancelled)).map_err(
         |error| BackendError::setup(format!("failed to install cancel handler: {error}")),

@@ -6,11 +6,13 @@ use core_policy::{
     ToolKind, ToolRuntimeProfile,
 };
 use proto::{
-    EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, ExecutorLimitsV0,
-    ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0,
-    ExecutorProbeV0, ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
-    ExecutorResponseV0, RuntimeReadProfileV0, UnixObjectIdentityV0, canonical_executor_request_v0,
-    parse_executor_response_v0, resolved_policy_digest_v0,
+    EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_REQUEST_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0,
+    ExecutorLimitsV0, ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0,
+    ExecutorObjectKindV0, ExecutorPreflightV0, ExecutorProbeV0, ExecutorRequestV0,
+    ExecutorResolvedMountV0, ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorStartV0,
+    RuntimeReadProfileV0, UnixObjectIdentityV0, canonical_executor_request_v0,
+    canonical_executor_start_v0, parse_executor_preflight_v0, parse_executor_response_v0,
+    resolved_policy_digest_v0,
 };
 use rustix::{
     fd::{AsRawFd, OwnedFd},
@@ -18,7 +20,7 @@ use rustix::{
 };
 use std::{
     collections::BTreeMap,
-    io::Write,
+    io::{Read, Write},
     os::unix::process::CommandExt,
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -307,6 +309,29 @@ impl PreparedRequest {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+        stdin.flush().expect("Executor request is flushed");
+        let preflight = read_preflight(&mut child);
+        match parse_executor_preflight_v0(&preflight, &request_id)
+            .expect("Executor preflight is canonical")
+        {
+            ExecutorPreflightV0::Ready { .. } => {}
+            ExecutorPreflightV0::Error { code, message, .. } => {
+                drop(stdin);
+                let output = child.wait_with_output().expect("Executor is reaped");
+                panic!(
+                    "Executor rejected request during preflight: {code:?}: {message}; status: {}; stderr: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+        }
+        let start = canonical_executor_start_v0(&ExecutorStartV0 {
+            request_id: request_id.clone(),
+            schema: EXECUTOR_START_SCHEMA_V0.to_owned(),
+        })
+        .expect("Executor start is canonical");
+        stdin.write_all(&start).expect("Executor start is written");
+        stdin.flush().expect("Executor start is flushed");
         drop(stdin);
         RunningRequest {
             child,
@@ -314,6 +339,22 @@ impl PreparedRequest {
             request_id,
         }
     }
+}
+
+fn read_preflight(child: &mut Child) -> Vec<u8> {
+    let stdout = child.stdout.as_mut().expect("Executor stdout is piped");
+    let mut bytes = Vec::new();
+    for _ in 0..=proto::MAX_EXECUTOR_CONTROL_BYTES_V0 {
+        let mut byte = [0_u8; 1];
+        stdout
+            .read_exact(&mut byte)
+            .expect("Executor preflight is complete");
+        bytes.push(byte[0]);
+        if byte[0] == b'\n' {
+            return bytes;
+        }
+    }
+    panic!("Executor preflight exceeds its byte limit")
 }
 
 unsafe extern "C" {

@@ -20,7 +20,7 @@ use proto::{
     ExecutorToolClassificationV0, RuntimeReadProfileV0, UnixObjectIdentityV0,
     resolved_policy_digest_v0,
 };
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::{collections::BTreeMap, time::Instant};
 
 #[test]
@@ -203,6 +203,55 @@ fn protocol_rejects_oversized_and_malformed_requests_without_output() {
     assert!(output.is_empty());
 }
 
+#[derive(Default)]
+struct FlushTrackingOutput {
+    bytes: Vec<u8>,
+    flushes: usize,
+}
+
+impl Write for FlushTrackingOutput {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.flushes += 1;
+        Ok(())
+    }
+}
+
+#[test]
+fn absent_or_invalid_start_never_dispatches_after_a_flushed_ready() {
+    let cases = [
+        Vec::new(),
+        b"{\"request_id\":\"other\",\"schema\":\"flow-executor-start-v0\"}\n".to_vec(),
+        b"{\"request_id\":\"request-1\",\"schema\":\"flow-executor-start-v0\",\"start\":true}\n"
+            .to_vec(),
+        b"{\"request_id\":\"request-1\",\"schema\":\"flow-executor-start-v0\"}\n{\"request_id\":\"request-1\",\"schema\":\"flow-executor-start-v0\"}\n"
+            .to_vec(),
+    ];
+
+    for start in cases {
+        let mut output = FlushTrackingOutput::default();
+        let mut dispatched = false;
+        let error =
+            protocol::complete_preflight(Cursor::new(start), &mut output, "request-1", || {
+                dispatched = true;
+                unreachable!("invalid start must not dispatch")
+            })
+            .expect_err("missing or invalid start aborts");
+
+        assert!(!error.is_empty());
+        assert!(!dispatched);
+        assert_eq!(output.flushes, 1, "Ready must be flushed before waiting");
+        assert!(matches!(
+            proto::parse_executor_preflight_v0(&output.bytes, "request-1").unwrap(),
+            proto::ExecutorPreflightV0::Ready { .. }
+        ));
+    }
+}
+
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 #[test]
 fn protocol_returns_a_typed_error_on_an_unsupported_platform() {
@@ -214,9 +263,9 @@ fn protocol_returns_a_typed_error_on_an_unsupported_platform() {
         .expect("unsupported platform is a typed response");
 
     assert!(matches!(
-        proto::parse_executor_response_v0(&output, &request.request_id, &request.policy_digest)
-            .expect("response is exact protocol JSON"),
-        proto::ExecutorResponseV0::Error {
+        proto::parse_executor_preflight_v0(&output, &request.request_id)
+            .expect("preflight is exact protocol JSON"),
+        proto::ExecutorPreflightV0::Error {
             request_id,
             code: proto::ExecutorErrorCodeV0::PolicyUnsupported,
             ..
@@ -571,15 +620,15 @@ fn response_stream_limits_cannot_exceed_the_protocol_capacity() {
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
 #[test]
 fn productive_execution_fails_closed_outside_the_official_linux_target() {
-    let response = crate::backend::execute(exact_request(&[], &[]))
-        .expect("unsupported platform produces a definitive response");
+    let response = crate::backend::preflight(exact_request(&[], &[]))
+        .expect("unsupported platform produces a definitive preflight");
 
     assert!(matches!(
         response,
-        proto::ExecutorResponseV0::Error {
+        crate::backend::Preflight::Error(proto::ExecutorPreflightV0::Error {
             code: proto::ExecutorErrorCodeV0::PolicyUnsupported,
             ..
-        }
+        })
     ));
 }
 

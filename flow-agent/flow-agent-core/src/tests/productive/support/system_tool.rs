@@ -2,7 +2,7 @@ use super::super::attempt_codec::canonical_request_hash;
 use crate::runtime::{
     executor::{ExecutorDispatchOutcome, ExecutorToolExecution},
     fs_guards::{AnchoredDir, AnchoredWorkspace},
-    productive::ProductiveToolExecutor,
+    productive::{ProductiveToolExecutor, ProductiveToolPreflight},
     tool_runner::{ToolExecutionOutcome, ToolInvocation},
     types::RuntimeError,
 };
@@ -20,6 +20,7 @@ pub(crate) struct SystemPreparedTool {
 
 impl ProductiveToolExecutor for SystemProductiveToolExecutor {
     type Prepared = SystemPreparedTool;
+    type Waiting = SystemPreparedTool;
 
     fn supports_productive_tools(&self) -> bool {
         cfg!(unix)
@@ -76,10 +77,14 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
         prepared.enforcement.runtime_profile
     }
 
-    fn execute_prepared(
+    fn preflight(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        Ok(ProductiveToolPreflight::Ready(prepared))
+    }
+
+    fn start(&mut self, prepared: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         Ok(ExecutorDispatchOutcome::Completed(Box::new(
             ExecutorToolExecution {
                 enforcement: prepared.enforcement,

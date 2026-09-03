@@ -14,7 +14,7 @@ use response::{decode_tool_outcome, validate_receipt_identity};
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::collections::BTreeMap;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use transport::execute_one_shot;
+use transport::{ExecutorPreflightProcess, preflight_one_shot, start_one_shot};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod preparation;
@@ -30,7 +30,17 @@ mod transport;
 )]
 pub(crate) enum ExecutorDispatchOutcome {
     Completed(Box<ExecutorToolExecution>),
-    PreToolFailure(proto::ExecutorErrorCodeV0),
+    Error(proto::ExecutorErrorCodeV0),
+}
+
+/// Result of validating one exact Tool request in its retained one-shot Executor.
+#[cfg_attr(
+    not(all(target_os = "linux", target_arch = "x86_64")),
+    allow(dead_code)
+)]
+pub(crate) enum ExecutorPreflightOutcome {
+    Ready(Box<PreparedExecutorWaiting>),
+    Rejected(proto::ExecutorErrorCodeV0),
 }
 
 /// Validated result and enforcement evidence from one isolated Tool execution.
@@ -48,6 +58,17 @@ pub(crate) struct PreparedExecutorTool {
     request: proto::ExecutorRequestV0,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     request_bytes: Vec<u8>,
+}
+
+/// One validated Tool request waiting for explicit start in its retained Executor process.
+#[cfg_attr(
+    not(all(target_os = "linux", target_arch = "x86_64")),
+    allow(dead_code)
+)]
+pub(crate) struct PreparedExecutorWaiting {
+    prepared: PreparedExecutorTool,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    process: transport::WaitingExecutor,
 }
 
 impl PreparedExecutorTool {
@@ -130,20 +151,50 @@ impl PreparedExecutor {
         }
     }
 
-    /// Launches exactly one Executor from an already retained and hashed request.
-    pub(crate) fn execute_prepared(
+    /// Launches exactly one Executor and validates the prepared request without starting its Tool.
+    pub(crate) fn preflight_prepared(
         &self,
         prepared: PreparedExecutorTool,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+    ) -> Result<ExecutorPreflightOutcome, RuntimeError> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let response = execute_one_shot(
+            let process = preflight_one_shot(
                 self.selection.executable(),
                 &prepared.mounts,
                 &prepared.request,
                 &prepared.request_bytes,
             )?;
-            match response {
+            Ok(match process {
+                ExecutorPreflightProcess::Ready(process) => {
+                    ExecutorPreflightOutcome::Ready(Box::new(PreparedExecutorWaiting {
+                        prepared,
+                        process,
+                    }))
+                }
+                ExecutorPreflightProcess::Rejected(code) => {
+                    ExecutorPreflightOutcome::Rejected(code)
+                }
+            })
+        }
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            let _ = prepared;
+            Err(RuntimeError::executor(
+                proto::ExecutorErrorCodeV0::PolicyUnsupported,
+                "productive Executor support requires Ubuntu 24.04 x64",
+            ))
+        }
+    }
+
+    /// Explicitly starts a Tool in its already validated one-shot Executor.
+    pub(crate) fn start_prepared(
+        &self,
+        waiting: PreparedExecutorWaiting,
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            let PreparedExecutorWaiting { prepared, process } = waiting;
+            match start_one_shot(process)? {
                 proto::ExecutorResponseV0::Completed {
                     enforcement,
                     tool_result,
@@ -159,17 +210,32 @@ impl PreparedExecutor {
                     )))
                 }
                 proto::ExecutorResponseV0::Error { code, .. } => {
-                    Ok(ExecutorDispatchOutcome::PreToolFailure(code))
+                    Ok(ExecutorDispatchOutcome::Error(code))
                 }
             }
         }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let _ = prepared;
+            let _ = waiting;
             Err(RuntimeError::executor(
                 proto::ExecutorErrorCodeV0::PolicyUnsupported,
                 "productive Executor support requires Ubuntu 24.04 x64",
             ))
+        }
+    }
+
+    /// Runs both stages immediately for non-productive conformance and startup evidence.
+    #[cfg_attr(
+        not(all(target_os = "linux", target_arch = "x86_64")),
+        allow(dead_code)
+    )]
+    pub(crate) fn execute_prepared(
+        &self,
+        prepared: PreparedExecutorTool,
+    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+        match self.preflight_prepared(prepared)? {
+            ExecutorPreflightOutcome::Ready(waiting) => self.start_prepared(*waiting),
+            ExecutorPreflightOutcome::Rejected(code) => Ok(ExecutorDispatchOutcome::Error(code)),
         }
     }
 
@@ -398,7 +464,10 @@ mod tests {
         executor_request_hash, runtime_profile, validate_executor_executable,
     };
     use super::response::{decode_tool_outcome, validate_receipt_identity};
-    use super::transport::{c_close, duplicate_executor_descriptor, execute_one_shot};
+    use super::transport::{
+        ExecutorPreflightProcess, c_close, duplicate_executor_descriptor, preflight_one_shot,
+        start_one_shot,
+    };
     use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
     use std::{
         collections::BTreeMap,
@@ -530,29 +599,25 @@ mod tests {
         }
 
         let request = one_shot_request();
-        let response = proto::ExecutorResponseV0::Error {
+        let response = proto::ExecutorPreflightV0::Error {
             code: proto::ExecutorErrorCodeV0::Unavailable,
             message: "unavailable".to_owned(),
             request_id: request.request_id.clone(),
-            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+            schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
         };
         let response = String::from_utf8(
-            proto::canonical_executor_response_v0(&response).expect("response is canonical"),
+            proto::canonical_executor_preflight_v0(&response).expect("response is canonical"),
         )
         .expect("response is UTF-8");
         let script = format!("printf '%s' '{response}'");
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
-        let response = execute_one_shot(&executor, &[], &request, script.as_bytes())
+        let response = preflight_one_shot(&executor, &[], &request, script.as_bytes())
             .expect("fake Executor returns its canonical unavailable response");
-        match response {
-            proto::ExecutorResponseV0::Error { code, .. } => {
-                assert_eq!(code, proto::ExecutorErrorCodeV0::Unavailable);
-            }
-            proto::ExecutorResponseV0::Completed { .. } => {
-                panic!("pre-Tool failure must remain a distinct response")
-            }
-        }
+        assert!(matches!(
+            response,
+            ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
+        ));
     }
 
     #[test]
@@ -596,12 +661,23 @@ mod tests {
             proto::canonical_executor_response_v0(&response).expect("response is canonical"),
         )
         .expect("response fixture is written");
+        let preflight = String::from_utf8(
+            proto::canonical_executor_preflight_v0(&proto::ExecutorPreflightV0::Ready {
+                request_id: request.request_id.clone(),
+                schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+            })
+            .expect("preflight is canonical"),
+        )
+        .expect("preflight is UTF-8");
         let script = format!(
-            "trap \"/bin/sleep 0.1; /bin/cat -- '{response}'; exit 0\" TERM\n\
+            "printf '%s' '{preflight}'\n\
+             IFS= read -r _start\n\
+             trap \"/bin/sleep 0.1; /bin/cat -- '{response}'; exit 0\" TERM\n\
              (trap \"printf signalled > '{child_signalled}'; exit 0\" TERM; while :; do /bin/sleep 1; done) &\n\
              printf ready > '{ready}'\n\
              while :; do /bin/sleep 1; done\n",
             response = response_path.display(),
+            preflight = preflight,
             child_signalled = child_signalled.display(),
             ready = ready.display(),
         );
@@ -623,8 +699,13 @@ mod tests {
         });
 
         let executor = File::open("/bin/sh").expect("shell executor opens");
-        let terminal = execute_one_shot(&executor, &[], &request, script.as_bytes())
-            .expect("Executor returns canonical cancellation evidence");
+        let preflight = preflight_one_shot(&executor, &[], &request, script.as_bytes())
+            .expect("Executor reaches preflight readiness");
+        let ExecutorPreflightProcess::Ready(waiting) = preflight else {
+            panic!("cancellation fixture must reach readiness")
+        };
+        let terminal =
+            start_one_shot(waiting).expect("Executor returns canonical cancellation evidence");
         interrupter.join().expect("interrupt thread joins");
         crate::settle_productive_operation();
 
@@ -711,24 +792,24 @@ mod tests {
     fn one_shot_completion_cleans_its_process_group_once() {
         reset_process_group_cleanup_calls_for_test();
         let request = one_shot_request();
-        let expected_response = proto::ExecutorResponseV0::Error {
+        let expected_response = proto::ExecutorPreflightV0::Error {
             code: proto::ExecutorErrorCodeV0::Unavailable,
             message: "unavailable".to_owned(),
             request_id: request.request_id.clone(),
-            schema: proto::EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
+            schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
         };
         let response = String::from_utf8(
-            proto::canonical_executor_response_v0(&expected_response).expect("canonical response"),
+            proto::canonical_executor_preflight_v0(&expected_response).expect("canonical response"),
         )
         .expect("response is UTF-8");
         let request_bytes = format!("printf '%s' '{response}'").into_bytes();
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
-        assert_eq!(
-            execute_one_shot(&executor, &[], &request, &request_bytes)
+        assert!(matches!(
+            preflight_one_shot(&executor, &[], &request, &request_bytes)
                 .expect("canonical Executor response is accepted"),
-            expected_response
-        );
+            ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
+        ));
         assert_eq!(
             process_group_cleanup_calls_for_test(),
             1,
@@ -748,7 +829,7 @@ mod tests {
             let request_bytes = writer.as_bytes();
             let started = Instant::now();
 
-            let error = match execute_one_shot(&executor, &[], &request, request_bytes) {
+            let error = match preflight_one_shot(&executor, &[], &request, request_bytes) {
                 Err(error) => error,
                 Ok(_) => panic!("a capped Executor stream is rejected"),
             };

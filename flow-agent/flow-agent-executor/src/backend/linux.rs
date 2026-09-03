@@ -23,6 +23,7 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     os::unix::process::{CommandExt, ExitStatusExt},
     process::{Command, Stdio},
+    time::{Duration, Instant},
 };
 use supervision::{
     apply_inner_status, empty_status_document, final_status_seals, read_inner_status, run_bounded,
@@ -33,7 +34,20 @@ pub(super) fn probe() -> ProbeState {
     readiness::probe()
 }
 
-pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, BackendError> {
+pub(crate) struct PreparedExecution {
+    backend_version: String,
+    plan: SandboxPlan,
+    request: ExecutorRequestV0,
+    request_bytes: Vec<u8>,
+}
+
+impl PreparedExecution {
+    pub(crate) fn request_id(&self) -> &str {
+        &self.request.request_id
+    }
+}
+
+pub(super) fn preflight(request: ExecutorRequestV0) -> Result<PreparedExecution, BackendError> {
     if !crate::platform::official_host() {
         return Err(BackendError::unsupported(
             "productive Executor support requires Ubuntu 24.04 x64",
@@ -48,6 +62,35 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
     let (backend_version, capabilities) = bubblewrap_capabilities()?;
     let request_bytes = canonical_executor_request_v0(&request)
         .map_err(|error| BackendError::unsupported(error.to_string()))?;
+    Instant::now()
+        .checked_add(Duration::from_millis(request.limits.timeout_ms))
+        .ok_or_else(|| BackendError::unsupported("Tool timeout overflows the host clock"))?;
+    let bindings = request
+        .mounts
+        .iter()
+        .map(|mount| MountBinding {
+            access: mount.access,
+            descriptor: mount.descriptor,
+            source: mount.source_identity.clone(),
+            target: mount.target.clone(),
+        })
+        .collect();
+    let plan = SandboxPlan::new(capabilities, bindings)?;
+    Ok(PreparedExecution {
+        backend_version,
+        plan,
+        request,
+        request_bytes,
+    })
+}
+
+pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0, BackendError> {
+    let PreparedExecution {
+        backend_version,
+        plan,
+        request,
+        request_bytes,
+    } = prepared;
     let request_descriptor = sealed_document("flow-executor-request", &request_bytes)?;
     let seccomp_descriptor = seccomp::sealed_filter().map_err(BackendError::setup)?;
     let self_descriptor = File::open("/proc/self/exe")
@@ -73,17 +116,6 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
     )?;
     #[cfg(coverage)]
     let coverage_profile = retain_coverage_profile(status_descriptor.as_raw_fd() + 1)?;
-    let bindings = request
-        .mounts
-        .iter()
-        .map(|mount| MountBinding {
-            access: mount.access,
-            descriptor: mount.descriptor,
-            source: mount.source_identity.clone(),
-            target: mount.target.clone(),
-        })
-        .collect();
-    let plan = SandboxPlan::new(capabilities, bindings)?;
     let mut command = sandbox_command(
         &plan,
         internal.request.as_raw_fd(),

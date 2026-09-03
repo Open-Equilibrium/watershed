@@ -8,7 +8,10 @@ mod selection;
 
 #[cfg(test)]
 pub(crate) use client::ExecutorToolExecution;
-pub(crate) use client::{ExecutorDispatchOutcome, PreparedExecutor, PreparedExecutorTool};
+pub(crate) use client::{
+    ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
+    PreparedExecutorWaiting,
+};
 #[cfg(test)]
 pub(crate) use config::{EXECUTOR_CONFIG_MAX_BYTES, ExecutorConfigStore};
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]

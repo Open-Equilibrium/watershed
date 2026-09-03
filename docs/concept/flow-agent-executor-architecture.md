@@ -17,7 +17,7 @@ flowchart TD
   AE[Agentic Engineer] -->|authors Tool capabilities| FA[Flow Agent]
   U[Flow user] -->|runs predefined Flow| FA
   FA <--> P[Provider]
-  FA -->|one bounded request| E[Executor]
+  FA -->|one bounded handshake| E[Executor]
   A[Administrator] -->|installs or selects| E
   E --> B[Sandbox backend]
   B --> T[Tool process and descendants]
@@ -28,8 +28,8 @@ flowchart TD
 | Owner | Responsibility |
 |---|---|
 | Agentic Engineer | Select the Tool identity, parameters, exact mounts, runtime-read profile, positive process/thread capacity and deny-all network policy. |
-| Flow Agent | Validate authority, derive the selected Executor, prove readiness, compile canonical policy, persist attempt state, validate the response and fail closed. |
-| Executor | Validate one request, translate its exact capabilities, manage one Tool process tree and return a bounded Tool result or typed error. |
+| Flow Agent | Validate authority, derive the selected Executor, prove readiness, compile canonical policy, persist attempt state, validate both handshake stages and fail closed. |
+| Executor | Preflight one request, wait for explicit `Start`, translate its exact capabilities, manage one Tool process tree and return a bounded Tool result or typed error. |
 | Sandbox backend | Construct and enforce filesystem, process and deny-all network isolation. |
 | Administrator | Own the installed sibling or protected Custom Executor override and assess any third-party implementation. |
 
@@ -74,10 +74,13 @@ sequenceDiagram
   F->>S: Synchronize Tool intent
   F->>E: One bounded request
   E->>E: Validate request and policy
-  alt Setup fails
-    E-->>F: Stable typed pre-Tool error
+  alt Preflight rejects
+    E-->>F: Stable typed preflight Error
     F->>S: Persist terminal failure
-  else Boundary ready
+  else Ready
+    E-->>F: Ready (same process waits)
+    F->>S: Commit tool.started
+    F->>E: Matching Start
     E->>C: Create fresh limited Tool leaf
     E->>B: Construct exact mounts and isolation
     B->>T: Start Tool root in leaf
@@ -90,7 +93,7 @@ sequenceDiagram
   end
 ```
 
-One Executor process, transient systemd scope, cgroup leaf and Bubblewrap boundary handle one invocation. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport. Exact request, framing, descriptor, digest and receipt rules live in the canonical [`PROTOCOL.md` process and framing contract](../../PROTOCOL.md#process-and-framing-contract).
+One Executor process spans the bounded handshake for one invocation. It first enters one empty transient systemd scope so the PIDs controller is delegated for that invocation; this envelope contains no Tool. Only after matching `Start` does the Executor create the limited Tool cgroup leaf and Bubblewrap boundary. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport. Exact request, framing, descriptor, digest and receipt rules live in the canonical [`PROTOCOL.md` process and framing contract](../../PROTOCOL.md#process-and-framing-contract).
 
 ## Filesystem and runtime reads
 

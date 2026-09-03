@@ -10,8 +10,15 @@ use crate::runtime::{
 use proto::EventType;
 use serde::Deserialize;
 
-const EXECUTOR_DISPATCH_ERROR_SCHEMA_V0: &str = "flow-executor-dispatch-error-v0";
+const EXECUTOR_STAGE_ERROR_SCHEMA_V0: &str = "flow-executor-stage-error-v0";
 const TOOL_ATTEMPT_OUTPUT_SCHEMA_V1: &str = "flow-tool-attempt-output-v1";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ExecutorAttemptStage {
+    Preflight,
+    Started,
+}
 
 pub(super) fn canonical_request_hash(value: &serde_json::Value) -> Result<String, RuntimeError> {
     let bytes = proto::canonical_json(value)
@@ -33,11 +40,13 @@ pub(super) fn tool_attempt_output(
 }
 
 pub(super) fn executor_dispatch_failure_output(
+    stage: ExecutorAttemptStage,
     code: proto::ExecutorErrorCodeV0,
 ) -> serde_json::Value {
     serde_json::json!({
         "error": code,
-        "schema": EXECUTOR_DISPATCH_ERROR_SCHEMA_V0,
+        "schema": EXECUTOR_STAGE_ERROR_SCHEMA_V0,
+        "stage": stage,
     })
 }
 
@@ -57,6 +66,7 @@ struct ExecutorDispatchError {
     error: proto::ExecutorErrorCodeV0,
     #[serde(rename = "schema")]
     _schema: String,
+    stage: ExecutorAttemptStage,
 }
 
 pub(super) fn parse_tool_reconciliation(
@@ -97,14 +107,14 @@ pub(super) fn parse_tool_reconciliation(
 
 pub(super) fn recovered_executor_dispatch_error(
     result: &RunAttemptResult,
-) -> Result<Option<proto::ExecutorErrorCodeV0>, RuntimeError> {
+) -> Result<Option<(ExecutorAttemptStage, proto::ExecutorErrorCodeV0)>, RuntimeError> {
     let Some(durable_output) = result.durable_output.as_ref() else {
         return Ok(None);
     };
     if durable_output
         .get("schema")
         .and_then(serde_json::Value::as_str)
-        != Some(EXECUTOR_DISPATCH_ERROR_SCHEMA_V0)
+        != Some(EXECUTOR_STAGE_ERROR_SCHEMA_V0)
     {
         return Ok(None);
     }
@@ -118,7 +128,7 @@ pub(super) fn recovered_executor_dispatch_error(
     }
     let output: ExecutorDispatchError =
         serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
-    Ok(Some(output.error))
+    Ok(Some((output.stage, output.error)))
 }
 
 pub(super) fn recovered_tool_output(

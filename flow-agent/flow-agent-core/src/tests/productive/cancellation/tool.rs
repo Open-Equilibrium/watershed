@@ -63,6 +63,7 @@ fn cancellation_after_tool_started_settles_without_dispatch() {
         execution.terminal_error,
         Some(RuntimeError::Cancelled)
     ));
+    assert_eq!(tools.preflights, 1);
     assert!(tools.invocations.is_empty());
     assert_eq!(attempts.results.len(), 2);
     assert_eq!(attempts.results[1].0, RunAttemptKind::Tool);

@@ -1,13 +1,14 @@
 use super::attempt_codec::{
-    executor_dispatch_failure_output, recovered_executor_dispatch_error, recovered_tool_output,
-    recovered_tool_terminal, recovered_tool_value_bound, tool_attempt_output,
+    ExecutorAttemptStage, executor_dispatch_failure_output, recovered_executor_dispatch_error,
+    recovered_tool_output, recovered_tool_terminal, recovered_tool_value_bound,
+    tool_attempt_output,
 };
 #[cfg(test)]
 use super::observe_productive_result_persist;
 use super::tool_result::{tool_result_value, tool_terminal};
 use super::{
-    ProductiveContext, ProductiveToolExecutor, emit_and_commit, mark_recovery_failure,
-    tool_dispatch_reservation,
+    ProductiveContext, ProductiveToolExecutor, ProductiveToolPreflight, emit_and_commit,
+    mark_recovery_failure, tool_dispatch_reservation,
 };
 use crate::runtime::{
     event_construction::{RuntimeEventBuilder, tool_started_payload},
@@ -84,6 +85,38 @@ where
     )?;
     let recovered_attempt = recovered.is_some();
     if let Some(result) = recovered.as_ref() {
+        if result.attempt_kind != RunAttemptKind::Tool {
+            context.recovery_failed = true;
+            return Err(RuntimeError::Protocol(
+                "recovered Tool attempt has the wrong kind".to_owned(),
+            ));
+        }
+        let dispatch_error = mark_recovery_failure(
+            &mut context.recovery_failed,
+            recovered_executor_dispatch_error(result),
+        )?;
+        if let Some((stage, code)) = dispatch_error {
+            if stage == ExecutorAttemptStage::Started {
+                emit_and_commit(
+                    builder,
+                    Some(invocation),
+                    EventType::ToolStarted,
+                    tool_started_payload(tool, command_policy, Some(&attempt_id)),
+                    context.sink,
+                    &mut context.event_commit_failed,
+                )?;
+                emit_executor_dispatch_failure(
+                    builder,
+                    invocation,
+                    tool,
+                    &attempt_id,
+                    code,
+                    context.sink,
+                    &mut context.event_commit_failed,
+                )?;
+            }
+            return Err(RuntimeError::executor(code, ""));
+        }
         emit_and_commit(
             builder,
             Some(invocation),
@@ -92,12 +125,6 @@ where
             context.sink,
             &mut context.event_commit_failed,
         )?;
-        if result.attempt_kind != RunAttemptKind::Tool {
-            context.recovery_failed = true;
-            return Err(RuntimeError::Protocol(
-                "recovered Tool attempt has the wrong kind".to_owned(),
-            ));
-        }
         if result.outcome == RunAttemptOutcome::Cancelled {
             mark_recovery_failure(
                 &mut context.recovery_failed,
@@ -112,22 +139,6 @@ where
                 &mut context.event_commit_failed,
             )?;
             return Err(RuntimeError::Cancelled);
-        }
-        let dispatch_error = mark_recovery_failure(
-            &mut context.recovery_failed,
-            recovered_executor_dispatch_error(result),
-        )?;
-        if let Some(code) = dispatch_error {
-            emit_executor_dispatch_failure(
-                builder,
-                invocation,
-                tool,
-                &attempt_id,
-                code,
-                context.sink,
-                &mut context.event_commit_failed,
-            )?;
-            return Err(RuntimeError::executor(code, ""));
         }
     }
     let (durable_value, result) = if let Some(result) = recovered {
@@ -161,6 +172,27 @@ where
             tool_id: Some(tool.identity.id.clone()),
             timestamp: timestamp.clone(),
         })?;
+        let dispatch = crate::runtime::cancellation::claim_productive_effect_dispatch()?;
+        let preflight = context.tool_executor.preflight(prepared);
+        drop(dispatch);
+        let waiting = match preflight? {
+            ProductiveToolPreflight::Ready(waiting) => waiting,
+            ProductiveToolPreflight::Rejected(code) => {
+                persist_executor_dispatch_failure(
+                    context.attempts,
+                    context.recovery,
+                    &mut context.recovery_failed,
+                    tool,
+                    &attempt_id,
+                    &request_hash,
+                    &timestamp,
+                    ExecutorAttemptStage::Preflight,
+                    code,
+                )?;
+                return Err(RuntimeError::executor(code, ""));
+            }
+        };
+        crate::runtime::cancellation::ensure_productive_dispatch_allowed()?;
         if let Err(error) = emit_and_commit(
             builder,
             Some(invocation),
@@ -169,23 +201,35 @@ where
             context.sink,
             &mut context.event_commit_failed,
         ) {
-            persist_cancelled_tool_attempt(
-                context.attempts,
-                context.recovery,
-                &mut context.recovery_failed,
-                tool,
-                &attempt_id,
-                &request_hash,
-                &timestamp,
-            )?;
+            drop(waiting);
             return Err(error);
         }
         let execution = match crate::runtime::cancellation::claim_productive_effect_dispatch() {
             Ok(dispatch) => {
-                let execution = context.tool_executor.execute_prepared(prepared);
+                let execution = context.tool_executor.start(waiting);
                 drop(dispatch);
                 match execution {
                     Ok(execution) => execution,
+                    Err(RuntimeError::Cancelled) => {
+                        persist_cancelled_tool_attempt(
+                            context.attempts,
+                            context.recovery,
+                            &mut context.recovery_failed,
+                            tool,
+                            &attempt_id,
+                            &request_hash,
+                            &timestamp,
+                        )?;
+                        emit_cancelled_tool(
+                            builder,
+                            invocation,
+                            tool,
+                            &attempt_id,
+                            context.sink,
+                            &mut context.event_commit_failed,
+                        )?;
+                        return Err(RuntimeError::Cancelled);
+                    }
                     Err(error) => {
                         emit_uncertain_tool_failure(
                             builder,
@@ -241,7 +285,7 @@ where
                 execution.outcome,
                 execution.request_hash,
             ),
-            ExecutorDispatchOutcome::PreToolFailure(code) => {
+            ExecutorDispatchOutcome::Error(code) => {
                 persist_executor_dispatch_failure(
                     context.attempts,
                     context.recovery,
@@ -250,6 +294,7 @@ where
                     &attempt_id,
                     &request_hash,
                     &timestamp,
+                    ExecutorAttemptStage::Started,
                     code,
                 )?;
                 emit_executor_dispatch_failure(
@@ -389,6 +434,7 @@ fn cancelled_tool_result(attempt_id: &str, timestamp: &str) -> RunAttemptResult 
 fn executor_dispatch_failure_result(
     attempt_id: &str,
     timestamp: &str,
+    stage: ExecutorAttemptStage,
     code: proto::ExecutorErrorCodeV0,
 ) -> RunAttemptResult {
     RunAttemptResult {
@@ -398,7 +444,7 @@ fn executor_dispatch_failure_result(
         classification: None,
         exit_code: None,
         timestamp: timestamp.to_owned(),
-        durable_output: Some(executor_dispatch_failure_output(code)),
+        durable_output: Some(executor_dispatch_failure_output(stage, code)),
     }
 }
 
@@ -411,6 +457,7 @@ fn persist_executor_dispatch_failure<A: ProductiveAttemptLog>(
     attempt_id: &str,
     request_hash: &str,
     timestamp: &str,
+    stage: ExecutorAttemptStage,
     code: proto::ExecutorErrorCodeV0,
 ) -> Result<(), RuntimeError> {
     #[cfg(test)]
@@ -420,7 +467,7 @@ fn persist_executor_dispatch_failure<A: ProductiveAttemptLog>(
         Err(RuntimeError::Cancelled) => None,
         Err(error) => return Err(error),
     };
-    let result = executor_dispatch_failure_result(attempt_id, timestamp, code);
+    let result = executor_dispatch_failure_result(attempt_id, timestamp, stage, code);
     attempts.terminal(&result)?;
     mark_recovery_failure(
         recovery_failed,

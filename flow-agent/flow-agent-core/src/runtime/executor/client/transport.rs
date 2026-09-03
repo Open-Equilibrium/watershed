@@ -16,6 +16,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) enum ExecutorPreflightProcess {
+    Ready(WaitingExecutor),
+    Rejected(proto::ExecutorErrorCodeV0),
+}
+
 pub(super) fn duplicate_executor_descriptor(executable: &File) -> Result<OwnedFd, RuntimeError> {
     let minimum = i32::try_from(
         proto::EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0 as usize + proto::MAX_EXECUTOR_MOUNTS_V0 + 64,
@@ -37,6 +42,17 @@ fn set_nonblocking(descriptor: &impl std::os::fd::AsFd) -> Result<(), RuntimeErr
 
 struct ChildGuard {
     child: Option<Child>,
+}
+
+pub(super) struct WaitingExecutor {
+    child: ChildGuard,
+    stdin: Option<std::process::ChildStdin>,
+    stdout: std::process::ChildStdout,
+    stderr: std::process::ChildStderr,
+    stderr_read: BoundedRead,
+    request_id: String,
+    policy_digest: String,
+    timeout_ms: u64,
 }
 
 impl ChildGuard {
@@ -62,12 +78,12 @@ impl Drop for ChildGuard {
     }
 }
 
-pub(super) fn execute_one_shot(
+pub(super) fn preflight_one_shot(
     executable: &File,
     mounts: &[PreparedMount],
     request: &proto::ExecutorRequestV0,
     request_bytes: &[u8],
-) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+) -> Result<ExecutorPreflightProcess, RuntimeError> {
     let executor = duplicate_executor_descriptor(executable)?;
     let inherited_path = format!("/proc/self/fd/{}", executor.as_raw_fd());
     let high_base = executor
@@ -140,30 +156,29 @@ pub(super) fn execute_one_shot(
     set_nonblocking(&stdin)?;
     set_nonblocking(&stdout)?;
     set_nonblocking(&stderr)?;
-    let started = Instant::now();
-    let hard_deadline = Duration::from_millis(request.limits.timeout_ms)
-        .checked_add(Duration::from_secs(5))
-        .and_then(|limit| started.checked_add(limit))
-        .ok_or_else(|| invalid_response("Executor client deadline overflowed"))?;
-    let mut cancellation_sent = false;
-    let mut cancellation_deadline = None;
-    let mut process_status = None;
-    let mut drain_deadline = None;
+    let hard_deadline = executor_deadline(request.limits.timeout_ms)?;
     let mut request_offset = 0_usize;
     let mut stdin = Some(stdin);
-    let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_RESPONSE_BYTES_V0);
+    let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_CONTROL_BYTES_V0);
     let mut stderr_read = BoundedRead::new(4 * 1024);
     let mut stdout_eof = false;
     let mut stderr_eof = false;
+    let mut rejected_code = None;
+    let mut process_status = None;
     loop {
-        if let Some(writer) = stdin.as_mut() {
+        if rejected_code.is_none()
+            && crate::runtime::cancellation::productive_cancellation()
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(RuntimeError::Cancelled);
+        }
+        if request_offset < request_bytes.len()
+            && let Some(writer) = stdin.as_mut()
+        {
             match writer.write(&request_bytes[request_offset..]) {
                 Ok(0) => return Err(invalid_response("Executor request writer made no progress")),
                 Ok(written) => {
                     request_offset += written;
-                    if request_offset == request_bytes.len() {
-                        stdin.take();
-                    }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -179,15 +194,146 @@ pub(super) fn execute_one_shot(
                 .map_err(|_| invalid_response("Executor stderr read failed"))?;
         }
         if stdout_read.overflowed {
+            return Err(invalid_response(
+                "Executor preflight exceeds its byte limit",
+            ));
+        }
+        if stderr_read.overflowed {
+            return Err(invalid_response("Executor stderr exceeds its byte limit"));
+        }
+        if rejected_code.is_none() && stdout_read.bytes.contains(&b'\n') {
+            let preflight =
+                proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
+                    .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
+            match preflight {
+                proto::ExecutorPreflightV0::Ready { .. } => {
+                    if child_exited_without_reaping(child.child_mut())
+                        .map_err(|_| invalid_response("Executor process could not be observed"))?
+                    {
+                        return Err(invalid_response(
+                            "Executor exited after declaring preflight readiness",
+                        ));
+                    }
+                    return Ok(ExecutorPreflightProcess::Ready(WaitingExecutor {
+                        child,
+                        stdin,
+                        stdout,
+                        stderr,
+                        stderr_read,
+                        request_id: request.request_id.clone(),
+                        policy_digest: request.policy_digest.clone(),
+                        timeout_ms: request.limits.timeout_ms,
+                    }));
+                }
+                proto::ExecutorPreflightV0::Error { code, .. } => {
+                    rejected_code = Some(code);
+                    stdin.take();
+                }
+            }
+        }
+        if process_status.is_none()
+            && child_exited_without_reaping(child.child_mut())
+                .map_err(|_| invalid_response("Executor process could not be observed"))?
+        {
+            let mut completed_child = child.take();
+            terminate_child_or_fail_stop(&mut completed_child);
+            process_status = Some(
+                completed_child
+                    .try_wait()
+                    .map_err(|_| invalid_response("Executor process could not be reaped"))?
+                    .ok_or_else(|| {
+                        invalid_response("Executor process exit status is unavailable")
+                    })?,
+            );
+        }
+        if let (Some(code), Some(status)) = (rejected_code, process_status) {
+            if stdout_eof && stderr_eof {
+                if !status.success() {
+                    return Err(invalid_response(
+                        "Executor preflight rejection exited unsuccessfully",
+                    ));
+                }
+                let preflight =
+                    proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
+                        .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
+                return match preflight {
+                    proto::ExecutorPreflightV0::Error {
+                        code: drained_code, ..
+                    } if drained_code == code => Ok(ExecutorPreflightProcess::Rejected(code)),
+                    _ => Err(invalid_response(
+                        "Executor preflight response changed while draining",
+                    )),
+                };
+            }
+        }
+        if rejected_code.is_none() && (stdout_eof || process_status.is_some()) {
+            return Err(invalid_response(
+                "Executor exited without a complete preflight response",
+            ));
+        }
+        if Instant::now() >= hard_deadline {
+            return Err(invalid_response("Executor preflight timed out"));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+pub(super) fn start_one_shot(
+    mut waiting: WaitingExecutor,
+) -> Result<proto::ExecutorResponseV0, RuntimeError> {
+    if crate::runtime::cancellation::productive_cancellation()
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(RuntimeError::Cancelled);
+    }
+    let start_bytes = proto::canonical_executor_start_v0(&proto::ExecutorStartV0 {
+        request_id: waiting.request_id.clone(),
+        schema: proto::EXECUTOR_START_SCHEMA_V0.to_owned(),
+    })
+    .map_err(|_| invalid_response("Flow constructed an invalid Executor start record"))?;
+    let hard_deadline = executor_deadline(waiting.timeout_ms)?;
+    let mut start_offset = 0_usize;
+    let mut stdout_read = BoundedRead::new(proto::MAX_EXECUTOR_RESPONSE_BYTES_V0);
+    let mut stderr_read = waiting.stderr_read;
+    let mut stdout_eof = false;
+    let mut stderr_eof = false;
+    let mut cancellation_sent = false;
+    let mut cancellation_deadline = None;
+    let mut process_status = None;
+    let mut drain_deadline = None;
+    loop {
+        if let Some(writer) = waiting.stdin.as_mut() {
+            match writer.write(&start_bytes[start_offset..]) {
+                Ok(0) => return Err(invalid_response("Executor start writer made no progress")),
+                Ok(written) => {
+                    start_offset += written;
+                    if start_offset == start_bytes.len() {
+                        waiting.stdin.take();
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err(invalid_response("Executor start could not be written")),
+            }
+        }
+        if !stdout_eof {
+            stdout_eof = read_available(&mut waiting.stdout, &mut stdout_read)
+                .map_err(|_| invalid_response("Executor stdout read failed"))?;
+        }
+        if !stderr_eof {
+            stderr_eof = read_available(&mut waiting.stderr, &mut stderr_read)
+                .map_err(|_| invalid_response("Executor stderr read failed"))?;
+        }
+        if stdout_read.overflowed {
             return Err(invalid_response("Executor response exceeds its byte limit"));
         }
         if stderr_read.overflowed {
             return Err(invalid_response("Executor stderr exceeds its byte limit"));
         }
         if process_status.is_none() {
-            match child_exited_without_reaping(child.child_mut()) {
+            match child_exited_without_reaping(waiting.child.child_mut()) {
                 Ok(true) => {
-                    let mut completed_child = child.take();
+                    let mut completed_child = waiting.child.take();
                     terminate_child_or_fail_stop(&mut completed_child);
                     let status = completed_child
                         .try_wait()
@@ -211,7 +357,7 @@ pub(super) fn execute_one_shot(
             && !cancellation_sent
             && process_status.is_none()
         {
-            let pid = rustix::process::Pid::from_raw(child.child_mut().id() as i32)
+            let pid = rustix::process::Pid::from_raw(waiting.child.child_mut().id() as i32)
                 .ok_or_else(|| invalid_response("Executor process id is invalid"))?;
             rustix::process::kill_process(pid, rustix::process::Signal::TERM)
                 .map_err(|_| invalid_response("Executor cancellation signal failed"))?;
@@ -236,12 +382,19 @@ pub(super) fn execute_one_shot(
     }
     let response = proto::parse_executor_response_v0(
         &stdout_read.bytes,
-        &request.request_id,
-        &request.policy_digest,
+        &waiting.request_id,
+        &waiting.policy_digest,
     )
     .map_err(|_| invalid_response("Executor terminal response is invalid"))?;
     let _ = stderr_read;
     Ok(response)
+}
+
+fn executor_deadline(timeout_ms: u64) -> Result<Instant, RuntimeError> {
+    Duration::from_millis(timeout_ms)
+        .checked_add(Duration::from_secs(5))
+        .and_then(|limit| Instant::now().checked_add(limit))
+        .ok_or_else(|| invalid_response("Executor client deadline overflowed"))
 }
 
 struct BoundedRead {

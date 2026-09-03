@@ -1,9 +1,11 @@
 use proto::{
-    EXECUTOR_BACKEND_V0, EXECUTOR_NAME_V0, EXECUTOR_PLATFORM_V0, EXECUTOR_PROBE_SCHEMA_V0,
-    EXECUTOR_PROTOCOL_VERSION_V0, ExecutorProbeV0, MAX_EXECUTOR_REQUEST_BYTES_V0,
+    EXECUTOR_BACKEND_V0, EXECUTOR_NAME_V0, EXECUTOR_PLATFORM_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0,
+    EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_PROTOCOL_VERSION_V0, ExecutorPreflightV0, ExecutorProbeV0,
+    MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, canonical_executor_preflight_v0,
     canonical_executor_probe_v0, canonical_executor_response_v0, parse_executor_request_v0,
+    parse_executor_start_v0,
 };
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 
 pub(crate) const MAX_READINESS_DIAGNOSTIC_BYTES: usize = 1024;
 const READINESS_DIAGNOSTIC_PREFIX: &str = "flow-executor readiness: ";
@@ -116,19 +118,87 @@ fn write_readiness_diagnostic(mut output: impl Write, reason: &str) -> Result<()
 }
 
 fn execute_request(input: impl Read, mut output: impl Write) -> Result<(), String> {
-    let bytes = read_bounded(input, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
+    let mut input = BufReader::new(input);
+    let bytes = read_bounded_document(&mut input, MAX_EXECUTOR_REQUEST_BYTES_V0, "request")?;
     let request = parse_executor_request_v0(&bytes).map_err(|error| error.to_string())?;
-    let response = crate::backend::execute(request)?;
+    let request_id = request.request_id.clone();
+    match crate::backend::preflight(request)? {
+        crate::backend::Preflight::Ready(prepared) => {
+            complete_preflight_buffered(&mut input, output, &request_id, || {
+                crate::backend::execute(prepared)
+            })
+        }
+        crate::backend::Preflight::Error(preflight) => write_preflight(&preflight, &mut output),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn complete_preflight(
+    input: impl Read,
+    output: impl Write,
+    request_id: &str,
+    execute: impl FnOnce() -> Result<proto::ExecutorResponseV0, String>,
+) -> Result<(), String> {
+    complete_preflight_buffered(BufReader::new(input), output, request_id, execute)
+}
+
+fn complete_preflight_buffered(
+    mut input: impl BufRead,
+    mut output: impl Write,
+    request_id: &str,
+    execute: impl FnOnce() -> Result<proto::ExecutorResponseV0, String>,
+) -> Result<(), String> {
+    write_preflight(
+        &ExecutorPreflightV0::Ready {
+            request_id: request_id.to_owned(),
+            schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+        },
+        &mut output,
+    )?;
+    let bytes = read_bounded(&mut input, MAX_EXECUTOR_CONTROL_BYTES_V0, "start")?;
+    parse_executor_start_v0(&bytes, request_id).map_err(|error| error.to_string())?;
+    let response = execute()?;
     let bytes = canonical_executor_response_v0(&response).map_err(|error| error.to_string())?;
     output
         .write_all(&bytes)
-        .map_err(|error| format!("failed to write Executor response: {error}"))
+        .map_err(|error| format!("failed to write Executor response: {error}"))?;
+    output
+        .flush()
+        .map_err(|error| format!("failed to flush Executor response: {error}"))
 }
 
-fn read_bounded(input: impl Read, limit: usize, kind: &str) -> Result<Vec<u8>, String> {
+fn write_preflight(preflight: &ExecutorPreflightV0, mut output: impl Write) -> Result<(), String> {
+    let bytes = canonical_executor_preflight_v0(preflight).map_err(|error| error.to_string())?;
+    output
+        .write_all(&bytes)
+        .map_err(|error| format!("failed to write Executor preflight: {error}"))?;
+    output
+        .flush()
+        .map_err(|error| format!("failed to flush Executor preflight: {error}"))
+}
+
+fn read_bounded_document(
+    input: &mut impl BufRead,
+    limit: usize,
+    kind: &str,
+) -> Result<Vec<u8>, String> {
     let take_limit = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
     let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
     input
+        .take(take_limit)
+        .read_until(b'\n', &mut bytes)
+        .map_err(|error| format!("failed to read Executor {kind}: {error}"))?;
+    if bytes.len() > limit {
+        return Err(format!("Executor {kind} exceeds its byte limit"));
+    }
+    Ok(bytes)
+}
+
+fn read_bounded(mut input: impl Read, limit: usize, kind: &str) -> Result<Vec<u8>, String> {
+    let take_limit = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
+    let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
+    input
+        .by_ref()
         .take(take_limit)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("failed to read Executor {kind}: {error}"))?;

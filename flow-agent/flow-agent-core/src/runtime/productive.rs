@@ -4,7 +4,10 @@ use crate::runtime::run_attempts::RunAttemptKind;
 use crate::runtime::{
     context::ContextModelProfile,
     conversations::MAX_CONVERSATION_RECORD_BYTES,
-    executor::{ExecutorDispatchOutcome, PreparedExecutor, PreparedExecutorTool},
+    executor::{
+        ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
+        PreparedExecutorWaiting,
+    },
     fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
     openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_at},
@@ -165,6 +168,7 @@ impl ProductiveProvider for OpenAiCodexProvider {
 
 pub(crate) trait ProductiveToolExecutor {
     type Prepared;
+    type Waiting;
 
     fn supports_productive_tools(&self) -> bool;
 
@@ -203,14 +207,22 @@ pub(crate) trait ProductiveToolExecutor {
         })
     }
 
-    fn execute_prepared(
+    fn preflight(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError>;
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError>;
+
+    fn start(&mut self, waiting: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError>;
+}
+
+pub(crate) enum ProductiveToolPreflight<T> {
+    Ready(T),
+    Rejected(proto::ExecutorErrorCodeV0),
 }
 
 impl ProductiveToolExecutor for Option<PreparedExecutor> {
     type Prepared = PreparedExecutorTool;
+    type Waiting = PreparedExecutorWaiting;
 
     fn supports_productive_tools(&self) -> bool {
         self.is_some()
@@ -245,13 +257,26 @@ impl ProductiveToolExecutor for Option<PreparedExecutor> {
         prepared.runtime_profile()
     }
 
-    fn execute_prepared(
+    fn preflight(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        match self
+            .as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .preflight_prepared(prepared)?
+        {
+            ExecutorPreflightOutcome::Ready(waiting) => {
+                Ok(ProductiveToolPreflight::Ready(*waiting))
+            }
+            ExecutorPreflightOutcome::Rejected(code) => Ok(ProductiveToolPreflight::Rejected(code)),
+        }
+    }
+
+    fn start(&mut self, waiting: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         self.as_ref()
             .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
-            .execute_prepared(prepared)
+            .start_prepared(waiting)
     }
 
     fn validate_enforcement_receipt(

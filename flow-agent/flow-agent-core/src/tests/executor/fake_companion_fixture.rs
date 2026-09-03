@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    io::{self, Read as _, Write as _},
+    io::{self, BufRead as _, BufReader, Write as _},
     path::Path,
     process, thread,
     time::Duration,
@@ -104,14 +104,37 @@ fn main() {
         return;
     }
 
+    let mut input = BufReader::new(io::stdin());
     let mut request = String::new();
-    io::stdin()
-        .read_to_string(&mut request)
-        .expect("request is read");
-    if mode != "unsupported-policy" {
-        fs::write(executable.with_extension("tool-spawned"), b"spawned")
-            .expect("dispatch marker is written");
+    input.read_line(&mut request).expect("request is read");
+    let request_id = field(&request, "request_id");
+    if matches!(mode, "unsupported-policy" | "preflight-trailing-output") {
+        println!(
+            "{{\"code\":\"executor_policy_unsupported\",\"message\":\"unsupported fake policy\",\"outcome\":\"error\",\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-preflight-v0\"}}"
+        );
+        if mode == "preflight-trailing-output" {
+            io::stdout().flush().expect("preflight error is flushed");
+            thread::sleep(Duration::from_millis(100));
+            println!("{{}}");
+        }
+        return;
     }
+    println!(
+        "{{\"outcome\":\"ready\",\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-preflight-v0\"}}"
+    );
+    io::stdout().flush().expect("preflight is flushed");
+    let mut start = String::new();
+    if input.read_line(&mut start).expect("start is read") == 0 {
+        return;
+    }
+    let expected_start = format!(
+        "{{\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-start-v0\"}}\n"
+    );
+    if start != expected_start {
+        return;
+    }
+    fs::write(executable.with_extension("tool-spawned"), b"spawned")
+        .expect("dispatch marker is written");
     let valid = completed(&request, mode);
     match mode {
         "malformed-output" => println!("not-json"),
@@ -122,10 +145,6 @@ fn main() {
         ),
         "premature-exit" => {}
         "timeout" => thread::sleep(Duration::from_secs(10)),
-        "unsupported-policy" => println!(
-            "{{\"code\":\"executor_policy_unsupported\",\"message\":\"unsupported fake policy\",\"outcome\":\"error\",\"request_id\":\"{}\",\"schema\":\"flow-executor-result-v0\"}}",
-            field(&request, "request_id")
-        ),
         "oversized-output" => io::stdout()
             .write_all(&vec![b'x'; 12 * 1024 * 1024])
             .expect("oversized result is written"),

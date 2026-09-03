@@ -166,9 +166,9 @@ pub(super) fn relocate(descriptor: OwnedFd, minimum: i32) -> Result<OwnedFd, Bac
 }
 
 fn clear_close_on_exec(descriptor: i32) -> Result<(), BackendError> {
-    let descriptor = borrow_descriptor(descriptor).map_err(BackendError::unsupported)?;
+    let descriptor = borrow_descriptor(descriptor).map_err(BackendError::setup)?;
     rustix::io::fcntl_setfd(descriptor, rustix::io::FdFlags::empty()).map_err(|error| {
-        BackendError::unsupported(format!(
+        BackendError::setup(format!(
             "failed to inherit declared mount descriptor: {error}"
         ))
     })

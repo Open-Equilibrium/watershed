@@ -1,17 +1,20 @@
 use crate::{
-    EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_REQUEST_SCHEMA_V0,
-    EXECUTOR_RESPONSE_SCHEMA_V0, EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorLimitsV0,
-    ExecutorMountAccessV0, ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0,
+    EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0, EXECUTOR_PROBE_SCHEMA_V0,
+    EXECUTOR_REQUEST_SCHEMA_V0, EXECUTOR_RESPONSE_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0,
+    EnforcementReceiptV0, ExecutorErrorCodeV0, ExecutorLimitsV0, ExecutorMountAccessV0,
+    ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0, ExecutorPreflightV0,
     ExecutorProbeV0, ExecutorRequestV0, ExecutorResolvedMountV0, ExecutorResolvedPolicyV0,
-    ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorToolClassificationV0, ExecutorToolResultV0,
-    ExecutorToolStatusV0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0,
-    MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
+    ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorStartV0, ExecutorToolClassificationV0,
+    ExecutorToolResultV0, ExecutorToolStatusV0, MAX_EXECUTOR_CONTROL_BYTES_V0,
+    MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0, MAX_EXECUTOR_MOUNTS_V0,
+    MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0,
     MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0,
     TOOL_FORCED_REAP_DEADLINE_V0, TOOL_OUTPUT_DRAIN_DEADLINE_V0, TOOL_TERMINATION_GRACE_V0,
-    UnixObjectIdentityV0, canonical_executor_probe_v0, canonical_executor_request_v0,
-    canonical_executor_response_v0, decode_executor_stream_v0, encode_executor_stream_v0,
+    UnixObjectIdentityV0, canonical_executor_preflight_v0, canonical_executor_probe_v0,
+    canonical_executor_request_v0, canonical_executor_response_v0, canonical_executor_start_v0,
+    decode_executor_stream_v0, encode_executor_stream_v0, parse_executor_preflight_v0,
     parse_executor_probe_v0, parse_executor_request_v0, parse_executor_response_v0,
-    resolved_policy_digest_v0, validate_enforcement_receipt_v0,
+    parse_executor_start_v0, resolved_policy_digest_v0, validate_enforcement_receipt_v0,
 };
 use serde::Serialize;
 use std::{collections::BTreeMap, time::Duration};
@@ -153,6 +156,58 @@ fn receipt() -> EnforcementReceiptV0 {
 }
 
 #[test]
+fn executor_preflight_is_closed_bounded_and_bound_to_the_request() {
+    for preflight in [
+        ExecutorPreflightV0::Ready {
+            request_id: "request-1".to_owned(),
+            schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+        },
+        ExecutorPreflightV0::Error {
+            code: ExecutorErrorCodeV0::PolicyUnsupported,
+            message: "policy cannot be enforced".to_owned(),
+            request_id: "request-1".to_owned(),
+            schema: EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+        },
+    ] {
+        let wire = canonical_executor_preflight_v0(&preflight).expect("preflight is canonical");
+        assert!(wire.len() <= MAX_EXECUTOR_CONTROL_BYTES_V0);
+        assert_eq!(
+            parse_executor_preflight_v0(&wire, "request-1").expect("preflight matches"),
+            preflight
+        );
+        assert!(parse_executor_preflight_v0(&wire, "other-request").is_err());
+
+        let mut open = serde_json::to_value(&preflight).unwrap();
+        open.as_object_mut()
+            .unwrap()
+            .insert("extra".to_owned(), serde_json::Value::Null);
+        assert!(parse_executor_preflight_v0(&canonical_wire(&open), "request-1").is_err());
+    }
+}
+
+#[test]
+fn executor_start_is_one_closed_bounded_record_bound_to_the_request() {
+    let start = ExecutorStartV0 {
+        request_id: "request-1".to_owned(),
+        schema: EXECUTOR_START_SCHEMA_V0.to_owned(),
+    };
+    let wire = canonical_executor_start_v0(&start).expect("start is canonical");
+    assert!(wire.len() <= MAX_EXECUTOR_CONTROL_BYTES_V0);
+    assert_eq!(
+        parse_executor_start_v0(&wire, "request-1").expect("start matches"),
+        start
+    );
+    assert!(parse_executor_start_v0(&wire, "other-request").is_err());
+    assert!(
+        parse_executor_start_v0(
+            br#"{"request_id":"request-1","schema":"flow-executor-start-v0","start":true}\n"#,
+            "request-1"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn executor_response_is_closed_and_bound_to_request_and_policy() {
     let response = ExecutorResponseV0::Completed {
         schema: EXECUTOR_RESPONSE_SCHEMA_V0.to_owned(),
@@ -233,7 +288,7 @@ fn executor_wire_framing_matrix_is_platform_neutral() {
         "outcome": "error",
         "schema": EXECUTOR_RESPONSE_SCHEMA_V0,
         "request_id": "request-1",
-        "code": ExecutorErrorCodeV0::PolicyUnsupported,
+        "code": ExecutorErrorCodeV0::SandboxSetupFailed,
         "message": "unsupported capability"
     });
     let canonical = crate::canonical_json(&response).unwrap();
@@ -277,6 +332,8 @@ fn executor_wire_framing_matrix_is_platform_neutral() {
 #[test]
 fn executor_protocol_schema_names_are_private_v0_contracts() {
     assert_eq!(EXECUTOR_REQUEST_SCHEMA_V0, "flow-executor-request-v0");
+    assert_eq!(EXECUTOR_PREFLIGHT_SCHEMA_V0, "flow-executor-preflight-v0");
+    assert_eq!(EXECUTOR_START_SCHEMA_V0, "flow-executor-start-v0");
     assert_eq!(EXECUTOR_RESPONSE_SCHEMA_V0, "flow-executor-result-v0");
 }
 
@@ -770,6 +827,13 @@ fn executor_setup_error_is_terminal_without_a_policy_receipt() {
         parse_executor_response_v0(&bytes, "request-1", &"b".repeat(64)).unwrap(),
         response
     );
+
+    let mut invalid = response.clone();
+    let ExecutorResponseV0::Error { code, .. } = &mut invalid else {
+        unreachable!();
+    };
+    *code = ExecutorErrorCodeV0::PolicyUnsupported;
+    assert!(canonical_executor_response_v0(&invalid).is_err());
 }
 
 #[test]

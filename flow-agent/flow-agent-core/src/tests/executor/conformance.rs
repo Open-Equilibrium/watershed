@@ -1,5 +1,8 @@
 use crate::runtime::{
-    executor::{ExecutorDispatchOutcome, PreparedExecutor, configure_executor_path},
+    executor::{
+        ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
+        configure_executor_path,
+    },
     fs_guards::AnchoredWorkspace,
     run_attempts::RunAttemptOutcome,
     tool_runner::ToolInvocation,
@@ -63,6 +66,22 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         );
     }
 
+    let (executor, prepared) = prepare_case(&fixture, &root, "ready-without-start", 1_000)
+        .expect("waiting fake companion preflights");
+    let waiting = executor
+        .preflight_prepared(prepared)
+        .expect("waiting fake companion becomes ready");
+    let ExecutorPreflightOutcome::Ready(waiting) = waiting else {
+        panic!("waiting fake companion must not reject its request")
+    };
+    drop(waiting);
+    assert!(
+        !root
+            .join("fake-executor-ready-without-start.tool-spawned")
+            .exists(),
+        "dropping a ready Executor must not dispatch its fake Tool"
+    );
+
     let valid =
         dispatch_case(&fixture, &root, "valid", 1_000).expect("valid fake companion completes");
     let ExecutorDispatchOutcome::Completed(execution) = valid else {
@@ -81,13 +100,22 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
         .expect("typed unsupported policy remains a response");
     assert!(matches!(
         unsupported,
-        ExecutorDispatchOutcome::PreToolFailure(proto::ExecutorErrorCodeV0::PolicyUnsupported)
+        ExecutorDispatchOutcome::Error(proto::ExecutorErrorCodeV0::PolicyUnsupported)
     ));
     assert!(
         !root
             .join("fake-executor-unsupported-policy.tool-spawned")
             .exists(),
         "unsupported policy must fail before fake Tool dispatch"
+    );
+
+    let error = dispatch_error(&fixture, &root, "preflight-trailing-output", 1_000);
+    assert_executor_code(&error, proto::ExecutorErrorCodeV0::InvalidResponse);
+    assert!(
+        !root
+            .join("fake-executor-preflight-trailing-output.tool-spawned")
+            .exists(),
+        "a malformed preflight error must not dispatch a Tool"
     );
 
     for mode in [
@@ -149,6 +177,16 @@ fn dispatch_case(
     mode: &str,
     timeout_ms: u64,
 ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+    let (executor, prepared) = prepare_case(fixture, root, mode, timeout_ms)?;
+    executor.execute_prepared(prepared)
+}
+
+fn prepare_case(
+    fixture: &Path,
+    root: &Path,
+    mode: &str,
+    timeout_ms: u64,
+) -> Result<(PreparedExecutor, PreparedExecutorTool), RuntimeError> {
     let executor_path = stage_case(fixture, root, mode);
     configure_executor_path(&executor_path)?;
     let executor = PreparedExecutor::prepare_selected()?;
@@ -165,7 +203,7 @@ fn dispatch_case(
         argv: Vec::new(),
     };
     let prepared = executor.prepare_tool(&workspace, &policy, command, &invocation, REQUEST_ID)?;
-    executor.execute_prepared(prepared)
+    Ok((executor, prepared))
 }
 
 fn dispatch_error(fixture: &Path, root: &Path, mode: &str, timeout_ms: u64) -> RuntimeError {

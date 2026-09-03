@@ -17,7 +17,7 @@ use crate::runtime::{
     planning::{emit_planned_tool, plan_flow},
     policy_resolution::command_policy_for_phase,
     productive::{
-        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor,
+        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor, ProductiveToolPreflight,
         execute_productive_flow_with_tool_executor,
     },
     stream_signature::FlowInvocation,
@@ -291,6 +291,7 @@ struct LiveLimitToolExecutor;
 
 impl ProductiveToolExecutor for LiveLimitToolExecutor {
     type Prepared = ();
+    type Waiting = ();
 
     fn supports_productive_tools(&self) -> bool {
         true
@@ -323,9 +324,16 @@ impl ProductiveToolExecutor for LiveLimitToolExecutor {
         unreachable!()
     }
 
-    fn execute_prepared(
+    fn preflight(
         &mut self,
         _prepared: Self::Prepared,
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        unreachable!()
+    }
+
+    fn start(
+        &mut self,
+        _waiting: Self::Waiting,
     ) -> Result<crate::runtime::executor::ExecutorDispatchOutcome, RuntimeError> {
         unreachable!()
     }

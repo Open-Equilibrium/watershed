@@ -153,6 +153,40 @@ pub struct ExecutorRequestV0 {
     pub working_directory: String,
 }
 
+/// Result of validating and preflighting one request before any Sandbox or Tool launch.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ExecutorPreflightV0 {
+    /// The request is fully supported and may be started.
+    Ready {
+        /// Matching opaque request identifier.
+        request_id: String,
+        /// Fixed schema name.
+        schema: String,
+    },
+    /// A definitive failure rejected the request before launch.
+    Error {
+        /// Stable bounded failure code.
+        code: ExecutorErrorCodeV0,
+        /// Bounded redacted diagnostic.
+        message: String,
+        /// Matching opaque request identifier.
+        request_id: String,
+        /// Fixed schema name.
+        schema: String,
+    },
+}
+
+/// Exact command authorizing one successfully preflighted request to start.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutorStartV0 {
+    /// Matching opaque request identifier.
+    pub request_id: String,
+    /// Fixed schema name.
+    pub schema: String,
+}
+
 /// Minimal terminal evidence that the requested isolation policy was active.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]

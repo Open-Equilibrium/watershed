@@ -4,7 +4,10 @@ use proto::{
     EXECUTOR_FEATURE_MOUNT_IDENTITY_V0, EXECUTOR_FEATURE_PROCESS_CAPACITY_V0,
     EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0, EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0,
 };
-use proto::{ExecutorErrorCodeV0, ExecutorRequestV0, ExecutorResponseV0, RuntimeReadProfileV0};
+use proto::{
+    ExecutorErrorCodeV0, ExecutorPreflightV0, ExecutorRequestV0, ExecutorResponseV0,
+    RuntimeReadProfileV0,
+};
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use proto::{
     ExecutorMountAccessV0, ExecutorMountOriginV0, MAX_EXECUTOR_TOOL_STREAM_BYTES_V0,
@@ -16,6 +19,14 @@ use std::fmt;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub(crate) mod linux;
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub(crate) use linux::PreparedExecution;
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+pub(crate) struct PreparedExecution {
+    request_id: String,
+}
 
 pub(crate) const HOST_SYSTEM_READ_MOUNTS: [(&str, &str); 6] = [
     ("/usr/bin", "/bin"),
@@ -433,9 +444,28 @@ pub(crate) fn probe() -> ProbeState {
     }
 }
 
-pub(crate) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, String> {
+pub(crate) enum Preflight {
+    Ready(PreparedExecution),
+    Error(ExecutorPreflightV0),
+}
+
+pub(crate) fn preflight(request: ExecutorRequestV0) -> Result<Preflight, String> {
     let request_id = request.request_id.clone();
-    let result = execute_supported(request);
+    match preflight_supported(request) {
+        Ok(prepared) => Ok(Preflight::Ready(prepared)),
+        Err(error) if error.definitive => Ok(Preflight::Error(ExecutorPreflightV0::Error {
+            schema: proto::EXECUTOR_PREFLIGHT_SCHEMA_V0.to_owned(),
+            request_id,
+            code: error.code,
+            message: error.message,
+        })),
+        Err(error) => Err(error.message),
+    }
+}
+
+pub(crate) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0, String> {
+    let request_id = prepared.request_id().to_owned();
+    let result = execute_supported(prepared);
     match result {
         Ok(response) => Ok(response),
         Err(error) if error.definitive => Ok(ExecutorResponseV0::Error {
@@ -449,15 +479,32 @@ pub(crate) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn execute_supported(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, BackendError> {
-    linux::execute(request)
+fn preflight_supported(request: ExecutorRequestV0) -> Result<PreparedExecution, BackendError> {
+    linux::preflight(request)
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
-fn execute_supported(_request: ExecutorRequestV0) -> Result<ExecutorResponseV0, BackendError> {
+fn preflight_supported(_request: ExecutorRequestV0) -> Result<PreparedExecution, BackendError> {
     Err(BackendError::unsupported(
         "productive Executor support requires Ubuntu 24.04 x64",
     ))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn execute_supported(prepared: PreparedExecution) -> Result<ExecutorResponseV0, BackendError> {
+    linux::execute(prepared)
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+fn execute_supported(_prepared: PreparedExecution) -> Result<ExecutorResponseV0, BackendError> {
+    unreachable!("unsupported hosts cannot produce a ready preflight")
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+impl PreparedExecution {
+    fn request_id(&self) -> &str {
+        &self.request_id
+    }
 }
 
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]

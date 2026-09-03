@@ -1,7 +1,7 @@
 use crate::runtime::{
     executor::{ExecutorDispatchOutcome, ExecutorToolExecution},
     fs_guards::AnchoredWorkspace,
-    productive::{ProductiveToolExecutor, test_enforcement_receipt},
+    productive::{ProductiveToolExecutor, ProductiveToolPreflight, test_enforcement_receipt},
     run_attempts::RunAttemptOutcome,
     tool_runner::{ToolExecutionOutcome, ToolInvocation},
     types::RuntimeError,
@@ -20,6 +20,7 @@ pub(in super::super) struct FakeToolExecutor {
     pub(in super::super) fault: FakeToolExecutionFault,
     pub(in super::super) invocations: Vec<ToolInvocation>,
     pub(in super::super) outcome: ToolExecutionOutcome,
+    pub(in super::super) preflights: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -27,7 +28,8 @@ pub(in super::super) enum FakeToolExecutionFault {
     #[default]
     None,
     PrepareError,
-    DefinitiveExecutorError,
+    PolicyRejected,
+    StartedExecutorError,
     ExecutorError,
     InvalidTerminal,
     RequestHashMismatch,
@@ -48,12 +50,14 @@ impl Default for FakeToolExecutor {
                 stdout: b"tool-output\n".to_vec(),
                 stderr: Vec::new(),
             },
+            preflights: 0,
         }
     }
 }
 
 impl ProductiveToolExecutor for FakeToolExecutor {
     type Prepared = FakePreparedTool;
+    type Waiting = FakePreparedTool;
 
     fn supports_productive_tools(&self) -> bool {
         true
@@ -106,10 +110,20 @@ impl ProductiveToolExecutor for FakeToolExecutor {
         }
     }
 
-    fn execute_prepared(
+    fn preflight(
         &mut self,
         prepared: Self::Prepared,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        self.preflights += 1;
+        if matches!(self.fault, FakeToolExecutionFault::PolicyRejected) {
+            return Ok(ProductiveToolPreflight::Rejected(
+                proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            ));
+        }
+        Ok(ProductiveToolPreflight::Ready(prepared))
+    }
+
+    fn start(&mut self, prepared: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         self.invocations.push(prepared.invocation);
         if self.cancel_before_outcome {
             assert_eq!(
@@ -131,8 +145,8 @@ impl ProductiveToolExecutor for FakeToolExecutor {
                 "fixture Executor failure".to_owned(),
             ));
         }
-        if matches!(self.fault, FakeToolExecutionFault::DefinitiveExecutorError) {
-            return Ok(ExecutorDispatchOutcome::PreToolFailure(
+        if matches!(self.fault, FakeToolExecutionFault::StartedExecutorError) {
+            return Ok(ExecutorDispatchOutcome::Error(
                 proto::ExecutorErrorCodeV0::SandboxSetupFailed,
             ));
         }
@@ -175,6 +189,7 @@ pub(in super::super) struct UnsupportedToolExecutor;
 
 impl ProductiveToolExecutor for UnsupportedToolExecutor {
     type Prepared = ();
+    type Waiting = ();
 
     fn supports_productive_tools(&self) -> bool {
         false
@@ -207,10 +222,14 @@ impl ProductiveToolExecutor for UnsupportedToolExecutor {
         unreachable!()
     }
 
-    fn execute_prepared(
+    fn preflight(
         &mut self,
         _prepared: Self::Prepared,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        unreachable!()
+    }
+
+    fn start(&mut self, _waiting: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError> {
         unreachable!()
     }
 }
