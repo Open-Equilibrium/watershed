@@ -6,10 +6,13 @@ mod lifecycle;
 mod platform;
 mod protocol;
 
-fn main() {
-    if let Err(error) = protocol::run() {
-        eprintln!("{error}");
-        std::process::exit(65);
+fn main() -> std::process::ExitCode {
+    match protocol::run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::ExitCode::from(65)
+        }
     }
 }
 

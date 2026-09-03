@@ -28,7 +28,7 @@ use windows_sys::Win32::{
             GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
         },
         CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
-        GetSecurityDescriptorControl, GetTokenInformation, INHERITED_ACE, OBJECT_INHERIT_ACE,
+        GetSecurityDescriptorControl, GetTokenInformation, OBJECT_INHERIT_ACE,
         OWNER_SECURITY_INFORMATION, PSID, SE_DACL_PRESENT, SE_DACL_PROTECTED, TOKEN_QUERY,
         TOKEN_USER, TokenUser,
     },
@@ -187,14 +187,6 @@ pub(super) fn opened_is_current_user_only(dir: &Dir) -> io::Result<bool> {
 }
 
 fn opened_handle_is_current_user_only(handle: HANDLE, expected_ace_flags: u8) -> io::Result<bool> {
-    opened_handle_has_current_user_only_access(handle, expected_ace_flags, true)
-}
-
-fn opened_handle_has_current_user_only_access(
-    handle: HANDLE,
-    expected_ace_flags: u8,
-    require_protected_dacl: bool,
-) -> io::Result<bool> {
     let mut owner = ptr::null_mut();
     let mut dacl = ptr::null_mut();
     let mut descriptor = ptr::null_mut();
@@ -221,7 +213,7 @@ fn opened_handle_has_current_user_only_access(
         return Err(io::Error::last_os_error());
     }
     if control & SE_DACL_PRESENT == 0
-        || (require_protected_dacl && control & SE_DACL_PROTECTED == 0)
+        || control & SE_DACL_PROTECTED == 0
         || owner.is_null()
         || dacl.is_null()
     {
@@ -258,13 +250,8 @@ fn opened_handle_has_current_user_only_access(
         return Err(io::Error::last_os_error());
     }
     let ace = unsafe { &*raw_ace.cast::<ACCESS_ALLOWED_ACE>() };
-    let flags_match = if require_protected_dacl {
-        ace.Header.AceFlags == expected_ace_flags
-    } else {
-        ace.Header.AceFlags == 0 || u32::from(ace.Header.AceFlags) == INHERITED_ACE
-    };
     if ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE as u8
-        || !flags_match
+        || ace.Header.AceFlags != expected_ace_flags
         || ace.Mask != FILE_ALL_ACCESS
     {
         return Ok(false);

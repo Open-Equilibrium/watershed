@@ -33,6 +33,29 @@ fn add_macos_acl(path: &Path, entry: &str) {
 #[cfg(windows)]
 #[test]
 fn default_windows_credential_path_uses_the_absolute_user_configuration_root() {
+    const CHILD_ENV: &str = "FLOW_AGENT_TEST_WINDOWS_DEFAULT_CREDENTIAL_PATH";
+    if run_isolated_test(CHILD_ENV) {
+        return;
+    }
+
+    unsafe { std::env::remove_var("APPDATA") };
+    let unavailable = default_credential_store_path()
+        .expect_err("missing Windows configuration root must be rejected");
+    assert!(
+        unavailable.to_string().contains("unavailable"),
+        "{unavailable}"
+    );
+
+    unsafe { std::env::set_var("APPDATA", "relative") };
+    let relative = default_credential_store_path()
+        .expect_err("relative Windows configuration root must be rejected");
+    assert!(
+        relative.to_string().contains("must be absolute"),
+        "{relative}"
+    );
+
+    let configuration = empty_workspace("default-windows-credential-path");
+    unsafe { std::env::set_var("APPDATA", &*configuration) };
     let path = default_credential_store_path().expect("Windows credential path resolves");
 
     assert!(path.is_absolute());

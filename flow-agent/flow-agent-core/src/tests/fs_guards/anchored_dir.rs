@@ -17,6 +17,30 @@ use std::fs;
 
 #[cfg(windows)]
 #[test]
+fn anchored_directory_rejects_a_non_unicode_leaf_before_access() {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt as _};
+
+    let workspace = empty_workspace("anchored-directory-non-unicode");
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+    let leaf = OsString::from_wide(&[0xD800]);
+
+    let error = parent
+        .private_child(&leaf, true, DirectoryErrorMode::Protocol)
+        .expect_err("non-Unicode directory leaf must be rejected");
+
+    assert!(
+        matches!(
+            &error,
+            RuntimeError::Io { source, .. }
+                if source.kind() == std::io::ErrorKind::InvalidInput
+        ),
+        "{error}"
+    );
+    assert!(!workspace.join(leaf).exists(), "no directory was created");
+}
+
+#[cfg(windows)]
+#[test]
 fn anchored_directory_rejects_non_leaf_paths_before_access() {
     let workspace = empty_workspace("anchored-directory-non-leaf");
     let outside = empty_workspace("anchored-directory-non-leaf-outside");

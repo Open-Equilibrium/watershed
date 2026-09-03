@@ -271,23 +271,22 @@ pub(super) fn sync_credential_directory(_path: &Path) -> Result<(), RuntimeError
 }
 
 pub(crate) fn default_credential_store_path() -> Result<PathBuf, RuntimeError> {
-    let base = if cfg!(windows) {
-        env::var_os("APPDATA").map(PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join("Library").join("Application Support"))
-    } else {
-        env::var_os("XDG_CONFIG_HOME")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| {
-                env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .map(|home| home.join(".config"))
-            })
-    }
-    .ok_or_else(|| {
+    #[cfg(windows)]
+    let base = env::var_os("APPDATA").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    let base = env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join("Library").join("Application Support"));
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let base = env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|home| home.join(".config"))
+        });
+    let base = base.ok_or_else(|| {
         RuntimeError::Usage("platform user configuration directory is unavailable".to_owned())
     })?;
     if !base.is_absolute() {

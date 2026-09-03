@@ -7,10 +7,25 @@ use crate::runtime::{
     },
     types::RuntimeError,
 };
+
+#[cfg(windows)]
+use crate::runtime::fs_guards::validate_real_file;
 use std::{
     fs,
     io::{Read, Seek, Write},
 };
+
+#[cfg(windows)]
+#[test]
+fn real_file_validation_rejects_a_directory() {
+    let workspace = empty_workspace("real-file-directory");
+    let metadata = fs::metadata(&*workspace).expect("directory metadata reads");
+
+    let error = validate_real_file(&workspace, &metadata)
+        .expect_err("a directory must not pass file validation");
+
+    assert!(matches!(error, RuntimeError::Protocol(message) if message.contains("must be a file")));
+}
 
 #[test]
 fn create_for_update_opens_one_new_validated_file_for_read_and_write() {
