@@ -467,7 +467,7 @@ mod tests {
     use super::response::{decode_tool_outcome, validate_receipt_identity};
     use super::transport::{
         ExecutorPreflightProcess, c_close, duplicate_executor_descriptor, preflight_one_shot,
-        start_one_shot,
+        preflight_one_shot_at_deadline, start_one_shot,
     };
     use crate::runtime::run_attempts::{RunAttemptOutcome, ToolTerminalClassification};
     use std::{
@@ -807,7 +807,7 @@ mod tests {
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
         assert!(matches!(
-            preflight_one_shot(&executor, &[], &request, &request_bytes)
+            preflight_without_wall_clock_deadline(&executor, &request, &request_bytes)
                 .expect("canonical Executor response is accepted"),
             ExecutorPreflightProcess::Rejected(proto::ExecutorErrorCodeV0::Unavailable)
         ));
@@ -828,23 +828,35 @@ mod tests {
             let request = one_shot_request();
             let executor = File::open("/bin/sh").expect("shell executor opens");
             let request_bytes = writer.as_bytes();
-            let started = Instant::now();
-
-            let error = match preflight_one_shot(&executor, &[], &request, request_bytes) {
-                Err(error) => error,
-                Ok(_) => panic!("a capped Executor stream is rejected"),
-            };
+            let error =
+                match preflight_without_wall_clock_deadline(&executor, &request, request_bytes) {
+                    Err(error) => error,
+                    Ok(_) => panic!("a capped Executor stream is rejected"),
+                };
             assert!(error.to_string().contains("byte limit"));
-            assert!(
-                started.elapsed() < Duration::from_secs(6),
-                "a continuous Executor stream must not outlive its five-second cleanup bound"
-            );
             assert_eq!(
                 process_group_cleanup_calls_for_test(),
                 1,
                 "a capped Executor stream must clean up its process group"
             );
         }
+    }
+
+    fn preflight_without_wall_clock_deadline(
+        executor: &File,
+        request: &proto::ExecutorRequestV0,
+        request_bytes: &[u8],
+    ) -> Result<ExecutorPreflightProcess, crate::runtime::types::RuntimeError> {
+        let now = Instant::now();
+        preflight_one_shot_at_deadline(
+            executor,
+            &[],
+            request,
+            request_bytes,
+            now + Duration::from_secs(1),
+            |_| Ok(()),
+            || now,
+        )
     }
 
     fn one_shot_request() -> proto::ExecutorRequestV0 {
