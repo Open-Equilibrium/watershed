@@ -2,7 +2,10 @@ use crate::{
     backend::{
         BubblewrapCapabilities, MountBinding, ProbeState, SandboxPlan, validate_mount_contract,
     },
-    lifecycle::{CleanupAction, CleanupController, InnerStatusPolicy, inner_status_policy},
+    lifecycle::{
+        CleanupAction, CleanupController, InnerStatusPolicy, capacity_can_classify,
+        inner_status_policy,
+    },
     protocol,
 };
 use core_policy::{
@@ -101,6 +104,29 @@ fn bounded_failures_substitute_only_prior_inner_tool_status() {
         inner_status_policy(Some(ExecutorToolClassificationV0::ToolTimedOut)),
         InnerStatusPolicy::Ignore
     );
+}
+
+#[test]
+fn process_capacity_classifies_only_before_bounded_lifecycle_failures() {
+    assert!(capacity_can_classify(None));
+    for classification in [
+        ExecutorToolClassificationV0::NonzeroExit,
+        ExecutorToolClassificationV0::SignalTermination,
+    ] {
+        assert!(capacity_can_classify(Some(classification)));
+    }
+    for classification in [
+        ExecutorToolClassificationV0::Cancelled,
+        ExecutorToolClassificationV0::StdoutCapExceeded,
+        ExecutorToolClassificationV0::StderrCapExceeded,
+        ExecutorToolClassificationV0::StdoutStderrCapExceeded,
+        ExecutorToolClassificationV0::OutputCollectorFailed,
+        ExecutorToolClassificationV0::OutputDrainTimeout,
+        ExecutorToolClassificationV0::ProcessCapacityExceeded,
+        ExecutorToolClassificationV0::ToolTimedOut,
+    ] {
+        assert!(!capacity_can_classify(Some(classification)));
+    }
 }
 
 #[test]

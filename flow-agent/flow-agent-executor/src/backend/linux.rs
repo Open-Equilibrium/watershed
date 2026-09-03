@@ -118,15 +118,7 @@ pub(super) fn execute(request: ExecutorRequestV0) -> Result<ExecutorResponseV0, 
     #[cfg(coverage)]
     drop(coverage_profile);
     let capacity_exceeded = tool_cgroup.finish().map_err(BackendError::uncertain)?;
-    if capacity_exceeded
-        && !matches!(
-            outcome.classification,
-            Some(
-                ExecutorToolClassificationV0::Cancelled
-                    | ExecutorToolClassificationV0::ToolTimedOut
-            )
-        )
-    {
+    if capacity_exceeded && crate::lifecycle::capacity_can_classify(outcome.classification) {
         outcome.status = read_inner_status(&status_descriptor)?;
         outcome.classification = Some(ExecutorToolClassificationV0::ProcessCapacityExceeded);
     } else {

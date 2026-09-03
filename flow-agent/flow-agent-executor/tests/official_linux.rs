@@ -147,6 +147,36 @@ PY"#,
         &workspace,
         RuntimeReadProfileV0::HostSystemRead,
         r#"/usr/bin/python3 - <<'PY'
+import subprocess
+
+children = [subprocess.Popen(["/bin/sleep", "60"]) for _ in range(2)]
+try:
+    subprocess.Popen(["/bin/true"])
+except OSError:
+    pass
+print("output-cap-wins-over-process-capacity")
+for child in children:
+    child.terminate()
+for child in children:
+    child.wait()
+PY"#,
+        limits_with_capacity(16, 4_096, 2_000, 3),
+    )
+    .run(executor);
+    let (result, _) = completed(result);
+    assert_terminal(
+        &result,
+        ExecutorToolStatusV0::Failed,
+        Some(ExecutorToolClassificationV0::StdoutCapExceeded),
+        None,
+    );
+
+    let workspace = Workspace::new();
+    let result = PreparedRequest::new(
+        probe,
+        &workspace,
+        RuntimeReadProfileV0::HostSystemRead,
+        r#"/usr/bin/python3 - <<'PY'
 import threading
 
 release = threading.Event()

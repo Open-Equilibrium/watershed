@@ -31,6 +31,17 @@ pub(crate) fn inner_status_policy(
     }
 }
 
+pub(crate) fn capacity_can_classify(
+    classification: Option<proto::ExecutorToolClassificationV0>,
+) -> bool {
+    use proto::ExecutorToolClassificationV0 as Classification;
+
+    matches!(
+        classification,
+        None | Some(Classification::NonzeroExit | Classification::SignalTermination)
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CleanupAction {
     Wait,
