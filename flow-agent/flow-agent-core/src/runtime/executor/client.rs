@@ -610,7 +610,7 @@ mod tests {
             proto::canonical_executor_preflight_v0(&response).expect("response is canonical"),
         )
         .expect("response is UTF-8");
-        let script = format!("printf '%s' '{response}'");
+        let script = format!("printf '%s' '{response}'\n");
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
         let response = preflight_one_shot(&executor, &[], &request, script.as_bytes())
