@@ -79,21 +79,26 @@ sequenceDiagram
     F->>S: Persist terminal failure
   else Ready
     E-->>F: Ready (same process waits)
-    alt Commit fails or cancellation wins before Start
+    F->>S: Attempt tool.started commit
+    alt Commit fails
       F--xE: Close without Start
-      F->>S: Persist required recovery state
-    else tool.started is committed and Start remains authorized
-      F->>S: Commit tool.started
-      F->>E: Matching Start
-      E->>C: Create fresh limited Tool leaf
-      E->>B: Construct exact mounts and isolation
-      B->>T: Start Tool root in leaf
-      T-->>E: Bounded output and exit
-      E->>B: Terminate descendants and tear down
-      E->>C: Prove empty and remove leaf
-      E-->>F: Tool result and enforcement receipt
-      F->>F: Validate receipt against the policy
-      F->>S: Persist terminal result and receipt
+      F->>S: Intent remains uncertain
+    else Commit succeeds
+      alt Cancellation wins before Start
+        F--xE: Close without Start
+        F->>S: Persist terminal cancellation and recovery
+      else Start remains authorized
+        F->>E: Matching Start
+        E->>C: Create fresh limited Tool leaf
+        E->>B: Construct exact mounts and isolation
+        B->>T: Start Tool root in leaf
+        T-->>E: Bounded output and exit
+        E->>B: Terminate descendants and tear down
+        E->>C: Prove empty and remove leaf
+        E-->>F: Tool result and enforcement receipt
+        F->>F: Validate receipt against the policy
+        F->>S: Persist terminal result and receipt
+      end
     end
   end
 ```
