@@ -380,7 +380,7 @@ jobs:
             > target/CACHEDIR.TAG
           cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl --coverage-target-only > /root/m12-coverage.env
           cargo llvm-cov clean --workspace
-          cargo clean --release --target x86_64-unknown-linux-musl -p flow-agent-executor
+          cargo clean --release --target x86_64-unknown-linux-musl --workspace
           cargo clean --release -p flow-agent-executor --target-dir target/m12-dynamic
           cargo clean --release -p flow-agent-cli --target-dir target/m12-standard
           cargo clean --release -p flow-agent-cli --target-dir target/m12-acceptance

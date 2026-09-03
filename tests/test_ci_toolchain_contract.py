@@ -308,7 +308,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             f"--coverage-target-only > {M12_COVERAGE_ENV}",
             f". {M12_COVERAGE_ENV}",
             "cargo llvm-cov clean --workspace",
-            f"cargo clean --release --target {M12_TARGET} -p flow-agent-executor",
+            f"cargo clean --release --target {M12_TARGET} --workspace",
             "cargo clean --release -p flow-agent-executor "
             "--target-dir target/m12-dynamic",
             "cargo clean --release -p flow-agent-cli "
