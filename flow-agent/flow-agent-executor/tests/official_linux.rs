@@ -92,7 +92,7 @@ fn process_capacity_is_exact_and_local(executor: &Path, probe: &ExecutorProbeV0)
         probe,
         &workspace,
         RuntimeReadProfileV0::HostSystemRead,
-        r#"/usr/bin/python3 - <<'PY'
+        r#"exec /usr/bin/python3 - <<'PY'
 import os
 import subprocess
 
@@ -117,7 +117,7 @@ PY"#,
         probe,
         &workspace,
         RuntimeReadProfileV0::HostSystemRead,
-        r#"/usr/bin/python3 - <<'PY'
+        r#"exec /usr/bin/python3 - <<'PY'
 import subprocess
 
 children = [subprocess.Popen(["/bin/sleep", "60"]) for _ in range(2)]
@@ -146,7 +146,7 @@ PY"#,
         probe,
         &workspace,
         RuntimeReadProfileV0::HostSystemRead,
-        r#"/usr/bin/python3 - <<'PY'
+        r#"exec /usr/bin/python3 - <<'PY'
 import subprocess
 
 children = [subprocess.Popen(["/bin/sleep", "60"]) for _ in range(2)]
@@ -176,7 +176,7 @@ PY"#,
         probe,
         &workspace,
         RuntimeReadProfileV0::HostSystemRead,
-        r#"/usr/bin/python3 - <<'PY'
+        r#"exec /usr/bin/python3 - <<'PY'
 import threading
 
 release = threading.Event()

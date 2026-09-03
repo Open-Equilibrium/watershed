@@ -25,7 +25,7 @@ The dedicated artifact is uploaded even when collection fails. A child or lifecy
 
 ## Evidence and enforcement
 
-The first fixed-platform artifact is retained by [CI run 33471048936](https://github.com/Open-Equilibrium/watershed/actions/runs/33471048936) as `m12-executor-startup-evidence` for commit `68394a703caeb9aa57a0ab518d4dd962d243fb64`. Its 30 observations used Rust 1.98.0 on the `ubuntu24` runner image `20260823.283.1` with four logical AMD EPYC 9V74 CPUs and 16,766,414,848 bytes of memory, inside the pinned Ubuntu 24.04 contract image. The Executor distribution recorded p50 `31,955,080 ns`, p95 `32,070,585 ns` and maximum `32,117,125 ns`, followed by `complete: true`.
+The retained `m12-executor-startup-evidence` artifact from [CI run 33712944225](https://github.com/Open-Equilibrium/watershed/actions/runs/33712944225) covers commit `b54e4e8ddedb79b20efd13b0d069959b7b5891d4`. Its 30 observations used Rust 1.98.0 on the `ubuntu24` runner image `20260831.293.1` with four logical Intel Xeon Platinum 8573C CPUs and 16,765,370,368 bytes of memory, inside the pinned Ubuntu 24.04 contract image. The Executor distribution recorded p50 `51,980,881 ns`, p95 `72,140,948 ns` and maximum `72,296,758 ns`, followed by `complete: true`.
 
 CI enforces the deterministic workload, bounded child report, exact successful terminal result, valid isolation receipt, complete report and artifact retention. Timing remains observable regression evidence and a performance KPI; no timing, throughput or memory observation alone fails the build.
 
