@@ -359,7 +359,7 @@ mod tests {
                     "the installed handler processed the first active CTRL_C_EVENT"
                 );
                 drop(operation);
-                std::process::exit(65);
+                return;
             }
             std::thread::sleep(Duration::from_millis(250));
             send_ctrl_c();
@@ -369,7 +369,10 @@ mod tests {
         }
 
         let controlled = run_windows_signal_child("controlled");
-        assert_eq!(controlled.code(), Some(65));
+        assert!(
+            controlled.success(),
+            "controlled child failed: {controlled}"
+        );
 
         let repeated = run_windows_signal_child("repeated");
         assert_eq!(repeated.code(), Some(HARD_INTERRUPT_EXIT_CODE));
