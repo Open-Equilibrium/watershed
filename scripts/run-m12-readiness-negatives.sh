@@ -35,7 +35,7 @@ printf 'scope\n' >> "$fault_dir/systemd-run.calls"
 /bin/chmod 0755 "$fault_dir/scoped-executor"
 self_test_argument=$8
 if [ -e "$fault_dir/private-mount-namespace" ]; then
-  set -- /usr/bin/bwrap --bind / / -- \
+  set -- /usr/bin/bwrap --bind / / --tmpfs /sys/fs/cgroup -- \
     "$fault_root/barrier" "$fault_dir/scoped-executor" "$self_test_argument"
 else
   set -- "$fault_root/barrier" "$fault_dir/scoped-executor" "$self_test_argument"
@@ -51,7 +51,7 @@ fault_dir=/opt/watershed-m12-fault/current
 IFS=: read -r _ _ cgroup < /proc/self/cgroup
 printf '%s %s\n' "$$" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
-IFS= read -r _ < "$fault_dir/release"
+/bin/cat "$fault_dir/release" >/dev/null
 LLVM_PROFILE_FILE=/work/target/m12-scoped-%p-%m.profraw \
   exec "$@" 2> "$fault_dir/executor.stderr"
 BARRIER
@@ -123,11 +123,13 @@ run_negative() {
             /bin/sh "$M12_FAULT_INSTALLER" --prefix "$M12_FAULT_PREFIX"
         ) > "$M12_FAULT_DIR/stdout" 2> "$M12_FAULT_DIR/stderr" &
       else
-        /usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups \
-          /usr/bin/env PATH= HOME="$M12_FAULT_HOME" \
-            XDG_CONFIG_HOME="$M12_FAULT_CONFIG" \
-            "$M12_FAULT_FLOW" executor check \
-            > "$M12_FAULT_DIR/stdout" 2> "$M12_FAULT_DIR/stderr" &
+        (
+          cd /work/target
+          exec /usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups \
+            /usr/bin/env PATH= HOME="$M12_FAULT_HOME" \
+              XDG_CONFIG_HOME="$M12_FAULT_CONFIG" \
+              "$M12_FAULT_FLOW" executor check
+        ) > "$M12_FAULT_DIR/stdout" 2> "$M12_FAULT_DIR/stderr" &
       fi
       command_pid=$!
       phase=await-supervisor
@@ -156,10 +158,7 @@ run_negative() {
       fi
       phase=inject-fault
       case "$M12_FAULT_KIND" in
-        missing-cgroup-v2)
-          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
-            /bin/mount -t tmpfs -o mode=0755 none /sys/fs/cgroup
-          ;;
+        missing-cgroup-v2) ;;
         missing-pids-controller)
           /bin/mount --bind "$M12_FAULT_DIR/no-pids" \
             "/sys/fs/cgroup$scope/cgroup.controllers"
