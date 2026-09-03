@@ -36,8 +36,7 @@ printf 'scope\n' >> "$fault_dir/systemd-run.calls"
 exec "$fault_root/systemd-run-real" \
   --user --scope --quiet --collect \
   --property=Delegate=pids -- \
-  "$fault_root/barrier" "$fault_dir/scoped-executor" "$8" \
-  2> "$fault_dir/executor.stderr"
+  "$fault_root/barrier" "$fault_dir/scoped-executor" "$8"
 WRAPPER
   /bin/cat > "$negative_root/barrier" <<'BARRIER'
 #!/bin/sh
@@ -47,7 +46,8 @@ IFS=: read -r _ _ cgroup < /proc/self/cgroup
 printf '%s %s\n' "$$" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
 IFS= read -r _ < "$fault_dir/release"
-exec "$@"
+LLVM_PROFILE_FILE="$fault_dir/scoped-%p-%m.profraw" \
+  exec "$@" 2> "$fault_dir/executor.stderr"
 BARRIER
   chmod 0755 "$negative_root/systemd-run-real" "$negative_root/systemd-run" "$negative_root/barrier"
 }
