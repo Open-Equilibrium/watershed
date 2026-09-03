@@ -657,9 +657,18 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn(f". {M12_COVERAGE_ENV}", installer)
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
         installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        for required in (
+            "systemctl start user-runtime-dir@10001.service user@10001.service",
+            "systemctl is-active --quiet user@10001.service",
+            "test -S /run/user/10001/bus",
+        ):
+            self.assertIn(required, installer_acceptance)
         self.assertIn(
             "scripts/run-m12-readiness-negatives.sh", installer_acceptance
         )
+        self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
+        self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
+        self.assertNotIn("loginctl show-user", installer_acceptance)
 
         cleanup = assert_step_state(
             self,

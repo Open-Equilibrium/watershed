@@ -29,12 +29,14 @@ run_in_workspace() {
     watershed-workspace "$workspace" "$@"
 }
 assert_linger_disabled() {
-  linger=$(/usr/bin/loginctl show-user watershed --property=Linger --value)
-  if [ "$linger" != no ]; then
-    printf 'installer acceptance requires Linger=no, observed %s\n' "$linger" >&2
+  if [ -e /var/lib/systemd/linger/watershed ] || [ -L /var/lib/systemd/linger/watershed ]; then
+    printf 'installer acceptance requires Linger=no\n' >&2
     exit 1
   fi
 }
+systemctl start user-runtime-dir@10001.service user@10001.service
+systemctl is-active --quiet user@10001.service
+test -S /run/user/10001/bus
 install -d -m 0755 "$bundle" "$acceptance_bundle"
 install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
 chown -R watershed:watershed "$config" "$home" "$agent_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
