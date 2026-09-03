@@ -428,22 +428,14 @@ jobs:
           /usr/sbin/runuser --user watershed --preserve-environment -- /bin/sh -s <<'UNPRIVILEGED'
           set -eu
           test "$(grep -Ec '^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$' /proc/self/status)" = 4
-          RUSTFLAGS='-C metadata=flow-executor-coverage-tests' \
-          cargo nextest run \
-            --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
-            --locked \
-            --release \
-            --all-features \
-            -p flow-agent-executor \
-            --bin flow-executor
+          export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-tests"
           cargo nextest run \
             --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
             --locked \
             --release \
             --workspace \
             --all-targets \
-            --all-features \
-            -E 'not (package(flow-agent-executor) & kind(bin) & binary(flow-executor))'
+            --all-features
           cargo llvm-cov report \
             --release \
             --target x86_64-unknown-linux-musl \

@@ -342,12 +342,11 @@ class CiWorkflowContractTest(unittest.TestCase):
             'install -d -m 0700 "$RUNNER_TEMP"',
             "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
             f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}",
-            "RUSTFLAGS='-C metadata=flow-executor-coverage-tests'",
+            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-tests"',
             "cargo nextest run",
-            "-p flow-agent-executor",
-            "--bin flow-executor",
-            "-E 'not (package(flow-agent-executor) & kind(bin) & "
-            "binary(flow-executor))'",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
             "cargo llvm-cov report",
             f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
             "^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$",
@@ -361,18 +360,13 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
         self.assertNotIn("--coverage-target-only", coverage_prepare + linux_coverage)
-        first_run = linux_coverage.index("cargo nextest run")
-        second_run = linux_coverage.index("cargo nextest run", first_run + 1)
-        excluded_bin = linux_coverage.index(
-            "-E 'not (package(flow-agent-executor) & kind(bin) & "
-            "binary(flow-executor))'"
-        )
-        self.assertLess(first_run, second_run)
-        self.assertLess(second_run, excluded_bin)
-        self.assertLess(excluded_bin, linux_coverage.index("cargo llvm-cov report"))
+        self.assertEqual(linux_coverage.count("cargo nextest run"), 1)
+        self.assertNotIn("-p flow-agent-executor", linux_coverage)
+        self.assertNotIn("--bin flow-executor", linux_coverage)
+        self.assertNotIn("binary(flow-executor)", linux_coverage)
         ordered = (
             f". {M12_COVERAGE_ENV}",
-            "RUSTFLAGS='-C metadata=flow-executor-coverage-tests'",
+            'RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C metadata=coverage-tests"',
             "cargo nextest run",
             "cargo llvm-cov report",
         )
