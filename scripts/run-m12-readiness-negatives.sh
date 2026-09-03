@@ -73,14 +73,30 @@ run_negative() {
       command_pid=
       scoped_pid=
       tracer_pid=
+      command_status=not-observed
+      call_count=not-observed
+      phase=mount-harness
       cleanup_fault() {
+        cleanup_status=$?
         trap - EXIT
+        set +e
         if [ -s "$M12_FAULT_DIR/state" ]; then
           set -- $(/bin/cat "$M12_FAULT_DIR/state")
           /bin/kill -TERM "$1" 2>/dev/null || :
         fi
         [ -z "$tracer_pid" ] || /bin/kill -TERM "$tracer_pid" 2>/dev/null || :
         [ -z "$command_pid" ] || /bin/kill -TERM "$command_pid" 2>/dev/null || :
+        if [ "$cleanup_status" -ne 0 ]; then
+          printf "readiness negative %s (%s) failed during %s; command status=%s; calls=%s\n" \
+            "$M12_FAULT_KIND" "$M12_FAULT_MODE" "$phase" "$command_status" "$call_count" >&2
+          for evidence in state stderr executor.stderr strace.stderr; do
+            if [ -e "$M12_FAULT_DIR/$evidence" ]; then
+              printf "%s:\n" "$evidence" >&2
+              /bin/sed -n "1,80p" "$M12_FAULT_DIR/$evidence" >&2
+            fi
+          done
+        fi
+        exit "$cleanup_status"
       }
       trap cleanup_fault EXIT
       /bin/mount --make-rprivate /
@@ -88,6 +104,7 @@ run_negative() {
       /bin/mount --bind "$M12_FAULT_DIR" /opt/watershed-m12-fault/current
       /bin/mount --bind /usr/bin/systemd-run /opt/watershed-m12-fault/systemd-run-real
       /bin/mount --bind /opt/watershed-m12-fault/systemd-run /usr/bin/systemd-run
+      phase=launch-command
       if [ "$M12_FAULT_MODE" = install ]; then
         (
           cd /
@@ -103,6 +120,7 @@ run_negative() {
             > "$M12_FAULT_DIR/stdout" 2> "$M12_FAULT_DIR/stderr" &
       fi
       command_pid=$!
+      phase=await-supervisor
       attempts=200
       while [ ! -s "$M12_FAULT_DIR/state" ]; do
         if ! /bin/kill -0 "$command_pid" 2>/dev/null; then
@@ -118,6 +136,7 @@ run_negative() {
       scoped_pid=$1
       cgroup=$2
       scope=${cgroup%/supervisor}
+      phase=inject-fault
       case "$M12_FAULT_KIND" in
         missing-cgroup-v2)
           /bin/mount -t tmpfs -o mode=0755 none /sys/fs/cgroup
@@ -163,29 +182,38 @@ run_negative() {
         missing-capacity-events|missing-cleanup-evidence) ;;
         *) printf 'release\n' > "$M12_FAULT_DIR/release" ;;
       esac
+      phase=await-command
       set +e
       wait "$command_pid"
       status=$?
+      command_status=$status
       set -e
       command_pid=
       if [ -n "$tracer_pid" ]; then
         wait "$tracer_pid" || :
         tracer_pid=
       fi
+      phase=assert-status
       if [ "$M12_FAULT_MODE" = check ]; then
         test "$status" -eq 65
       else
         test "$status" -ne 0
+        phase=assert-rollback
         test ! -e "$M12_FAULT_PREFIX/bin/flow"
         test ! -e "$M12_FAULT_PREFIX/bin/flow-executor"
       fi
+      phase=assert-empty-stdout
       test ! -s "$M12_FAULT_DIR/stdout"
+      phase=assert-public-diagnostic
       /bin/grep -Fq "executor_unavailable:" "$M12_FAULT_DIR/stderr"
+      phase=assert-private-diagnostic
       if ! /bin/grep -Fq "$M12_FAULT_EXPECTED" "$M12_FAULT_DIR/executor.stderr"; then
         /bin/cat "$M12_FAULT_DIR/executor.stderr" >&2
         exit 1
       fi
-      test "$(/usr/bin/wc -l < "$M12_FAULT_DIR/systemd-run.calls")" -eq 1
+      phase=assert-call-count
+      call_count=$(/usr/bin/wc -l < "$M12_FAULT_DIR/systemd-run.calls")
+      test "$call_count" -eq 1
       scoped_pid=
       trap - EXIT
     '
