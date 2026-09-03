@@ -36,12 +36,14 @@ printf 'scope\n' >> "$fault_dir/systemd-run.calls"
 exec "$fault_root/systemd-run-real" \
   --user --scope --quiet --collect \
   --property=Delegate=pids -- \
+  /usr/bin/bwrap --bind / / -- \
   "$fault_root/barrier" "$fault_dir/scoped-executor" "$8"
 WRAPPER
   /bin/cat > "$negative_root/barrier" <<'BARRIER'
 #!/bin/sh
 set -eu
 fault_dir=/opt/watershed-m12-fault/current
+/bin/mount --make-rprivate /
 IFS=: read -r _ _ cgroup < /proc/self/cgroup
 printf '%s %s\n' "$$" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
@@ -137,16 +139,24 @@ run_negative() {
       scoped_pid=$1
       cgroup=$2
       scope=${cgroup%/supervisor}
+      phase=assert-private-mount-namespace
+      test "$(/usr/bin/readlink /proc/self/ns/mnt)" != \
+        "$(/usr/bin/readlink "/proc/$scoped_pid/ns/mnt")"
       phase=inject-fault
       case "$M12_FAULT_KIND" in
         missing-cgroup-v2)
-          /bin/mount -t tmpfs -o mode=0755 none /sys/fs/cgroup
+          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
+            /bin/mount -t tmpfs -o mode=0755 none /sys/fs/cgroup
           ;;
         missing-pids-controller)
-          /bin/mount --bind "$M12_FAULT_DIR/no-pids" "/sys/fs/cgroup$scope/cgroup.controllers"
+          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
+            /bin/mount --bind "$M12_FAULT_DIR/no-pids" \
+            "/sys/fs/cgroup$scope/cgroup.controllers"
           ;;
         missing-delegation)
-          /bin/mount --bind "$M12_FAULT_DIR/empty" "/sys/fs/cgroup$scope/cgroup.subtree_control"
+          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
+            /bin/mount --bind "$M12_FAULT_DIR/empty" \
+            "/sys/fs/cgroup$scope/cgroup.subtree_control"
           ;;
         missing-capacity-events|missing-cleanup-evidence)
           # Pause after the Tool cgroup is created and before its controls are read.
@@ -175,7 +185,9 @@ run_negative() {
           else
             control=cgroup.events
           fi
-          /bin/mount --bind "$M12_FAULT_DIR/empty" "/sys/fs/cgroup$scope/tool/$control"
+          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
+            /bin/mount --bind "$M12_FAULT_DIR/empty" \
+            "/sys/fs/cgroup$scope/tool/$control"
           ;;
         *) exit 1 ;;
       esac
