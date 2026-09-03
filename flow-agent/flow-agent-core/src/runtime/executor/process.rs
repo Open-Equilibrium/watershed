@@ -99,6 +99,10 @@ mod tests {
     const PARENT_DEATH_HELPER_ENV: &str = "FLOW_AGENT_TEST_EXECUTOR_PARENT_DEATH_PATH";
 
     #[test]
+    #[allow(
+        clippy::zombie_processes,
+        reason = "the helper must exit without waiting to prove parent-death cleanup"
+    )]
     fn executor_parent_death_helper() {
         let Ok(pid_path) = std::env::var(PARENT_DEATH_HELPER_ENV) else {
             return;

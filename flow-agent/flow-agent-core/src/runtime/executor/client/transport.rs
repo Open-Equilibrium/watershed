@@ -283,29 +283,30 @@ fn preflight_one_shot_with_deadline(
                     })?,
             );
         }
-        if let (Some(code), Some(status)) = (rejected_code, process_status) {
-            if stdout_eof && stderr_eof {
-                if !status.success() {
+        if let (Some(code), Some(status)) = (rejected_code, process_status)
+            && stdout_eof
+            && stderr_eof
+        {
+            if !status.success() {
+                return Err(invalid_response(
+                    "Executor preflight rejection exited unsuccessfully",
+                ));
+            }
+            let preflight =
+                proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
+                    .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
+            let outcome = match preflight {
+                proto::ExecutorPreflightV0::Error {
+                    code: drained_code, ..
+                } if drained_code == code => ExecutorPreflightProcess::Rejected(code),
+                _ => {
                     return Err(invalid_response(
-                        "Executor preflight rejection exited unsuccessfully",
+                        "Executor preflight response changed while draining",
                     ));
                 }
-                let preflight =
-                    proto::parse_executor_preflight_v0(&stdout_read.bytes, &request.request_id)
-                        .map_err(|_| invalid_response("Executor preflight response is invalid"))?;
-                let outcome = match preflight {
-                    proto::ExecutorPreflightV0::Error {
-                        code: drained_code, ..
-                    } if drained_code == code => ExecutorPreflightProcess::Rejected(code),
-                    _ => {
-                        return Err(invalid_response(
-                            "Executor preflight response changed while draining",
-                        ));
-                    }
-                };
-                return before_executor_deadline(hard_deadline, now, || outcome)
-                    .ok_or_else(|| invalid_response("Executor preflight timed out"));
-            }
+            };
+            return before_executor_deadline(hard_deadline, now, || outcome)
+                .ok_or_else(|| invalid_response("Executor preflight timed out"));
         }
         if rejected_code.is_none() && (stdout_eof || process_status.is_some()) {
             return Err(invalid_response(
