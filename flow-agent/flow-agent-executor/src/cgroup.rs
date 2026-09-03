@@ -47,6 +47,7 @@ pub(crate) fn probe() -> Result<(), String> {
 }
 
 pub(crate) fn scope_self_test() -> Result<(), String> {
+    enter_supervisor_subgroup()?;
     ToolCgroup::create(1)?.finish()?;
     Ok(())
 }
@@ -67,7 +68,6 @@ fn scope_command(image: &File, argument: &str) -> Command {
         "--quiet",
         "--collect",
         "--property=Delegate=pids",
-        "--property=DelegateSubgroup=supervisor",
         "--",
     ]);
     command
@@ -220,38 +220,20 @@ impl Drop for ToolCgroup {
 }
 
 fn current_delegated_scope() -> Result<PathBuf, String> {
-    let membership = read_trimmed(Path::new("/proc/self/cgroup"))?;
-    let mut lines = membership.lines();
-    let line = lines
-        .next()
-        .filter(|_| lines.next().is_none())
-        .ok_or_else(|| "Executor requires one unified cgroup-v2 membership".to_owned())?;
-    let relative = line
-        .strip_prefix("0::/")
-        .ok_or_else(|| "Executor requires unified cgroup-v2 membership".to_owned())?;
-    let components = Path::new(relative).components().collect::<Vec<_>>();
-    if components.len() < 2
-        || components
-            .iter()
-            .any(|component| !matches!(component, Component::Normal(_)))
-        || components
-            .last()
-            .and_then(|component| component.as_os_str().to_str())
-            != Some("supervisor")
-        || !components[components.len() - 2]
-            .as_os_str()
-            .to_string_lossy()
-            .ends_with(".scope")
+    let relative = current_cgroup_relative()?;
+    let Some(scope_relative) = relative
+        .parent()
+        .filter(|_| relative.file_name().and_then(|name| name.to_str()) == Some("supervisor"))
+    else {
+        return Err("Executor is not in a delegated transient scope supervisor".to_owned());
+    };
+    if !scope_relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".scope"))
     {
         return Err("Executor is not in a delegated transient scope supervisor".to_owned());
     }
-    let scope_relative =
-        components[..components.len() - 1]
-            .iter()
-            .fold(PathBuf::new(), |mut path, component| {
-                path.push(component.as_os_str());
-                path
-            });
     let scope = Path::new(CGROUP_ROOT).join(scope_relative);
     let controllers = read_trimmed(&scope.join("cgroup.controllers"))?;
     if !controllers
@@ -264,6 +246,47 @@ fn current_delegated_scope() -> Result<PathBuf, String> {
         return Err("delegated transient scope root is not empty".to_owned());
     }
     Ok(scope)
+}
+
+pub(crate) fn enter_supervisor_subgroup() -> Result<(), String> {
+    let relative = current_cgroup_relative()?;
+    if !relative
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".scope"))
+    {
+        return Err("Executor is not in a delegated transient scope".to_owned());
+    }
+    let scope = Path::new(CGROUP_ROOT).join(relative);
+    let supervisor = scope.join("supervisor");
+    std::fs::create_dir(&supervisor)
+        .map_err(|error| format!("failed to create Executor supervisor cgroup: {error}"))?;
+    write_control(&supervisor.join("cgroup.procs"), "0")?;
+    let observed = current_delegated_scope()?;
+    if observed != scope {
+        return Err("Executor supervisor cgroup changed transient scope".to_owned());
+    }
+    Ok(())
+}
+
+fn current_cgroup_relative() -> Result<PathBuf, String> {
+    let membership = read_trimmed(Path::new("/proc/self/cgroup"))?;
+    let mut lines = membership.lines();
+    let line = lines
+        .next()
+        .filter(|_| lines.next().is_none())
+        .ok_or_else(|| "Executor requires one unified cgroup-v2 membership".to_owned())?;
+    let relative = line
+        .strip_prefix("0::/")
+        .ok_or_else(|| "Executor requires unified cgroup-v2 membership".to_owned())?;
+    let relative = PathBuf::from(relative);
+    if relative
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("Executor requires a normal unified cgroup-v2 path".to_owned());
+    }
+    Ok(relative)
 }
 
 fn write_control(path: &Path, value: &str) -> Result<(), String> {

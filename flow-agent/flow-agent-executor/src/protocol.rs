@@ -44,7 +44,10 @@ pub(crate) fn run_with_diagnostics(
         [mode] if mode == "--probe" => write_probe(crate::backend::probe(), output, diagnostics),
         [] => execute_request(input, output),
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        [mode] if mode == crate::cgroup::SCOPED_ARGUMENT => execute_request(input, output),
+        [mode] if mode == crate::cgroup::SCOPED_ARGUMENT => {
+            crate::cgroup::enter_supervisor_subgroup()?;
+            execute_request(input, output)
+        }
         [mode, request_fd, status_fd, tool_cgroup_fd] if mode == "--inner" => {
             run_inner(request_fd, status_fd, tool_cgroup_fd)
         }

@@ -22,23 +22,22 @@ prepare_fault_harness() {
 set -eu
 fault_root=/opt/watershed-m12-fault
 fault_dir=$fault_root/current
-test "$#" -eq 9
+test "$#" -eq 8
 test "$1" = --user
 test "$2" = --scope
 test "$3" = --quiet
 test "$4" = --collect
 test "$5" = --property=Delegate=pids
-test "$6" = --property=DelegateSubgroup=supervisor
-test "$7" = --
-test "$9" = --capacity-self-test
+test "$6" = --
+test "$8" = --capacity-self-test
 printf 'scope\n' >> "$fault_dir/systemd-run.calls"
 # Preserve the exact production image while the mount namespace alters its host interface.
-/bin/cp -- "$8" "$fault_dir/scoped-executor"
+/bin/cp -- "$7" "$fault_dir/scoped-executor"
 /bin/chmod 0755 "$fault_dir/scoped-executor"
 exec "$fault_root/systemd-run-real" \
   --user --scope --quiet --collect \
-  --property=Delegate=pids --property=DelegateSubgroup=supervisor -- \
-  "$fault_root/barrier" "$fault_dir/scoped-executor" "$9"
+  --property=Delegate=pids -- \
+  "$fault_root/barrier" "$fault_dir/scoped-executor" "$8"
 WRAPPER
   /bin/cat > "$negative_root/barrier" <<'BARRIER'
 #!/bin/sh

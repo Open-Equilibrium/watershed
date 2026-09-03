@@ -264,6 +264,8 @@ fn concurrent_process_capacity_is_per_invocation(executor: &Path, probe: &Execut
         recorded_cgroup(&second_workspace),
         "concurrent invocations must have independent Tool leaves"
     );
+    assert_scope_layout(&first_workspace, first.child().id());
+    assert_scope_layout(&second_workspace, second.child().id());
 
     std::fs::write(first_workspace.join("release"), []).expect("first Tool is released");
     std::fs::write(second_workspace.join("release"), []).expect("second Tool is released");
@@ -869,10 +871,50 @@ fn limits_with_capacity(
 }
 
 fn assert_cgroup_removed(workspace: &Workspace) {
+    let scope = recorded_scope(workspace);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while scope.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
     assert!(
-        !recorded_cgroup(workspace).exists(),
-        "transient Tool cgroup survived Executor completion"
+        !scope.exists(),
+        "transient Executor scope survived completion"
     );
+}
+
+fn assert_scope_layout(workspace: &Workspace, executor_pid: u32) {
+    let scope = recorded_scope(workspace);
+    assert!(
+        std::fs::read_to_string(scope.join("cgroup.procs"))
+            .expect("scope membership is readable")
+            .trim()
+            .is_empty(),
+        "transient scope root must remain empty"
+    );
+    assert_eq!(
+        std::fs::read_to_string(scope.join("supervisor/cgroup.procs"))
+            .expect("Executor supervisor membership is readable")
+            .trim(),
+        executor_pid.to_string(),
+        "only the Executor belongs to the supervisor leaf"
+    );
+}
+
+fn recorded_scope(workspace: &Workspace) -> PathBuf {
+    let tool = recorded_cgroup(workspace);
+    assert_eq!(
+        tool.file_name().and_then(|name| name.to_str()),
+        Some("tool")
+    );
+    let scope = tool.parent().expect("Tool cgroup has a scope parent");
+    assert!(
+        scope
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".scope")),
+        "Tool cgroup must belong to a transient scope"
+    );
+    scope.to_owned()
 }
 
 fn recorded_cgroup(workspace: &Workspace) -> PathBuf {

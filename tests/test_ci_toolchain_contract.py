@@ -450,7 +450,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             self,
             workflow,
             enforce_name,
-            condition=f"{UBUNTU} && steps.{run_id}.outcome != 'success'",
+            condition=f"{UBUNTU} && always() && steps.{run_id}.outcome != 'success'",
         )
         self.assertEqual(step_run(workflow, enforce_name), "exit 1")
 
@@ -584,6 +584,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(M12_CONTAINER, build)
             self.assertIn(command, build)
             self.assertIn("CARGO_NET_OFFLINE=true", build)
+            self.assertIn("HOME=/home/watershed", build)
+            self.assertIn(
+                f"runuser --user {M12_COVERAGE_USER} --preserve-environment", build
+            )
         static = "\n".join(
             assert_step_state(
                 self, workflow, "Check M1.2 executor is static", condition=UBUNTU
@@ -591,6 +595,20 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         for required in (M12_EXECUTOR, "readelf -l", 'grep -q "INTERP"', "exit 1"):
             self.assertIn(required, static)
+
+        readiness = "\n".join(
+            assert_step_state(
+                self, workflow, "Check M1.2 executor readiness", condition=UBUNTU
+            )
+        )
+        for required in (
+            f"/work/{M12_EXECUTOR} --probe",
+            "XDG_RUNTIME_DIR=/run/user/10001",
+            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus",
+            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
+            'assert probe["ready"] is True, probe',
+        ):
+            self.assertIn(required, readiness)
 
         executor_tests = "\n".join(
             assert_step_state(

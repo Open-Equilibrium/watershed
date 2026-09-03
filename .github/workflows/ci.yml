@@ -185,14 +185,6 @@ jobs:
             systemctl is-active --quiet user@10001.service
             test -S /run/user/10001/bus
           '
-          docker exec \
-            --env XDG_RUNTIME_DIR=/run/user/10001 \
-            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
-            watershed-m12 \
-            /usr/sbin/runuser --user watershed --preserve-environment -- \
-            /usr/bin/systemd-run --user --scope --quiet --collect \
-              --property=Delegate=pids --property=DelegateSubgroup=supervisor \
-              /bin/true
 
       - name: Build M1.2 executor
         if: matrix.os == 'ubuntu-24.04'
@@ -201,7 +193,11 @@ jobs:
           --env CARGO_HOME=/cargo
           --env CARGO_NET_OFFLINE=true
           --env PATH=/opt/rust/bin:/usr/bin:/bin
+          --env HOME=/home/watershed
+          --env USER=watershed
+          --env LOGNAME=watershed
           watershed-m12
+          /usr/sbin/runuser --user watershed --preserve-environment --
           cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
 
       - name: Build M1.2 dynamic rejection fixture
@@ -211,7 +207,11 @@ jobs:
           --env CARGO_HOME=/cargo
           --env CARGO_NET_OFFLINE=true
           --env PATH=/opt/rust/bin:/usr/bin:/bin
+          --env HOME=/home/watershed
+          --env USER=watershed
+          --env LOGNAME=watershed
           watershed-m12
+          /usr/sbin/runuser --user watershed --preserve-environment --
           cargo build --locked --release -p flow-agent-executor --bin flow-executor
 
       - name: Check M1.2 executor is static
@@ -225,6 +225,22 @@ jobs:
               exit 1
             fi
           '
+
+      - name: Check M1.2 executor readiness
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec \
+            --env HOME=/home/watershed \
+            --env USER=watershed \
+            --env LOGNAME=watershed \
+            --env XDG_RUNTIME_DIR=/run/user/10001 \
+            --env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/10001/bus \
+            watershed-m12 \
+            /usr/sbin/runuser --user watershed --preserve-environment -- \
+            /bin/sh -ec \
+              '/work/target/x86_64-unknown-linux-musl/release/flow-executor --probe |
+                /usr/bin/python3 -c '\''import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'\'''
 
       - name: Run M1.2 executor tests
         if: matrix.os == 'ubuntu-24.04'
@@ -298,7 +314,7 @@ jobs:
           if-no-files-found: error
 
       - name: Enforce M1.1 evidence integrity
-        if: matrix.os == 'ubuntu-24.04' && steps.m11_evidence.outcome != 'success'
+        if: matrix.os == 'ubuntu-24.04' && always() && steps.m11_evidence.outcome != 'success'
         shell: bash
         run: exit 1
 
@@ -340,7 +356,7 @@ jobs:
           if-no-files-found: error
 
       - name: Enforce M1.2 executor startup evidence
-        if: matrix.os == 'ubuntu-24.04' && steps.m12_startup_evidence.outcome != 'success'
+        if: matrix.os == 'ubuntu-24.04' && always() && steps.m12_startup_evidence.outcome != 'success'
         shell: bash
         run: exit 1
 
