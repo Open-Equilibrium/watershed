@@ -29,6 +29,7 @@ M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
 M12_COVERAGE_ENV = "/root/m12-coverage.env"
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
+M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
 
 
 def workflow_text() -> str:
@@ -670,17 +671,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertNotIn("loginctl show-user", installer_acceptance)
 
-        cleanup = assert_step_state(
-            self,
-            workflow,
-            "Stop controlled M1.2 Ubuntu",
-            condition=f"{UBUNTU} && always()",
-        )
-        self.assertIn(
-            f"docker rm --force {M12_CONTAINER}",
-            "\n".join(cleanup),
-        )
-
         assert_step_state(
             self, workflow, "Check M1.2 unsupported platforms", condition=NON_UBUNTU
         )
@@ -719,6 +709,29 @@ class CiWorkflowContractTest(unittest.TestCase):
         initialization = installer_acceptance.index(fixture_init)
         self.assertLess(setup, ownership)
         self.assertLess(ownership, initialization)
+
+    def test_m12_installer_acceptance_has_finite_liveness_bounds(self) -> None:
+        workflow = workflow_text()
+        readiness = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
+
+        self.assertRegex(
+            step_run(workflow, "Run M1.2 installer acceptance"),
+            r"exec /usr/bin/timeout\b[\s\S]*?"
+            r"/bin/sh scripts/run-m12-installer-acceptance\.sh",
+        )
+        cleanup = assert_step_state(
+            self,
+            workflow,
+            "Stop controlled M1.2 Ubuntu",
+            condition=f"{UBUNTU} && always()",
+        )
+        self.assertIn(f"docker rm --force {M12_CONTAINER}", "\n".join(cleanup))
+        self.assertRegex(
+            readiness,
+            r"run_with_deadline\s+/usr/bin/unshare\s+--mount\b[\s\S]*?"
+            r"negative_status=\$\?[\s\S]*?"
+            r"cleanup_delegated_scope\s+\"\$fault_dir\"",
+        )
 
 
 if __name__ == "__main__":

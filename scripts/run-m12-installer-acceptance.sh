@@ -17,6 +17,12 @@ fixture_output="$RUNNER_TEMP/m12-fixture-smoke.jsonl"
 fixture_workspace="$RUNNER_TEMP/m12-fixture-workspace"
 productive_workspace="$RUNNER_TEMP/m12-productive-workspace"
 unavailable_workspace="$RUNNER_TEMP/m12-unavailable-workspace"
+systemd_liveness_timeout=1m
+termination_grace=10s
+run_with_deadline() (
+  exec /usr/bin/timeout --signal=TERM --kill-after="$termination_grace" \
+    "$systemd_liveness_timeout" "$@"
+)
 run_as_watershed() {
   /usr/sbin/runuser --user watershed --preserve-environment -- /usr/bin/env \
     PATH= HOME="$home" XDG_CONFIG_HOME="$config" \
@@ -34,8 +40,8 @@ assert_linger_disabled() {
     exit 1
   fi
 }
-systemctl start user-runtime-dir@10001.service user@10001.service
-systemctl is-active --quiet user@10001.service
+run_with_deadline systemctl start user-runtime-dir@10001.service user@10001.service
+run_with_deadline systemctl is-active --quiet user@10001.service
 test -S /run/user/10001/bus
 install -d -m 0755 "$bundle" "$acceptance_bundle"
 install -d -m 0700 "$config" "$home" "$agent_home" "$fixture_home" "$fixture_workspace" "$productive_workspace" "$unavailable_workspace"
