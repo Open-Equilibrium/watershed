@@ -33,18 +33,23 @@ printf 'scope\n' >> "$fault_dir/systemd-run.calls"
 # Preserve the exact production image while the mount namespace alters its host interface.
 /bin/cp -- "$7" "$fault_dir/scoped-executor"
 /bin/chmod 0755 "$fault_dir/scoped-executor"
+self_test_argument=$8
+if [ -e "$fault_dir/private-mount-namespace" ]; then
+  set -- /usr/bin/bwrap --bind / / -- \
+    "$fault_root/barrier" "$fault_dir/scoped-executor" "$self_test_argument"
+else
+  set -- "$fault_root/barrier" "$fault_dir/scoped-executor" "$self_test_argument"
+fi
 exec "$fault_root/systemd-run-real" \
   --user --scope --quiet --collect \
-  --property=Delegate=pids -- \
-  /usr/bin/bwrap --bind / / -- \
-  "$fault_root/barrier" "$fault_dir/scoped-executor" "$8"
+  --property=Delegate=pids -- "$@"
 WRAPPER
   /bin/cat > "$negative_root/barrier" <<'BARRIER'
 #!/bin/sh
 set -eu
 fault_dir=/opt/watershed-m12-fault/current
 IFS=: read -r _ _ cgroup < /proc/self/cgroup
-printf '%s %s %s\n' "$$" "$PPID" "$cgroup" > "$fault_dir/state.pending"
+printf '%s %s\n' "$$" "$cgroup" > "$fault_dir/state.pending"
 /bin/mv -- "$fault_dir/state.pending" "$fault_dir/state"
 IFS= read -r _ < "$fault_dir/release"
 LLVM_PROFILE_FILE=/work/target/m12-scoped-%p-%m.profraw \
@@ -61,6 +66,9 @@ run_negative() {
   install -d -m 0700 -o watershed -g watershed "$fault_dir"
   /usr/bin/mkfifo "$fault_dir/release"
   chown watershed:watershed "$fault_dir/release"
+  if [ "$fault" = missing-cgroup-v2 ]; then
+    : > "$fault_dir/private-mount-namespace"
+  fi
   : > "$fault_dir/empty"
   printf 'memory\n' > "$fault_dir/no-pids"
   chmod 0444 "$fault_dir/empty" "$fault_dir/no-pids"
@@ -73,7 +81,6 @@ run_negative() {
     /usr/bin/unshare --mount /bin/sh -ec '
       command_pid=
       scoped_pid=
-      monitor_pid=
       tracer_pid=
       command_status=not-observed
       call_count=not-observed
@@ -137,21 +144,16 @@ run_negative() {
       done
       set -- $(/bin/cat "$M12_FAULT_DIR/state")
       scoped_pid=$1
-      monitor_pid=$2
-      cgroup=$3
+      cgroup=$2
       scope=${cgroup%/supervisor}
-      phase=assert-private-mount-namespace
-      test "$(/usr/bin/readlink /proc/self/ns/mnt)" != \
-        "$(/usr/bin/readlink "/proc/$scoped_pid/ns/mnt")"
-      phase=isolate-bubblewrap-monitor
-      IFS=: read -r _ _ monitor_cgroup < "/proc/$monitor_pid/cgroup"
-      test "$monitor_cgroup" = "$cgroup"
-      /bin/mkdir "/sys/fs/cgroup$scope/harness"
-      printf '%s\n' "$monitor_pid" > "/sys/fs/cgroup$scope/harness/cgroup.procs"
-      IFS=: read -r _ _ monitor_cgroup < "/proc/$monitor_pid/cgroup"
-      test "$monitor_cgroup" = "$scope/harness"
-      IFS=: read -r _ _ child_cgroup < "/proc/$scoped_pid/cgroup"
-      test "$child_cgroup" = "$scope"
+      phase=assert-mount-namespace
+      if [ "$M12_FAULT_KIND" = missing-cgroup-v2 ]; then
+        test "$(/usr/bin/readlink /proc/self/ns/mnt)" != \
+          "$(/usr/bin/readlink "/proc/$scoped_pid/ns/mnt")"
+      else
+        test "$(/usr/bin/readlink /proc/self/ns/mnt)" = \
+          "$(/usr/bin/readlink "/proc/$scoped_pid/ns/mnt")"
+      fi
       phase=inject-fault
       case "$M12_FAULT_KIND" in
         missing-cgroup-v2)
@@ -159,19 +161,17 @@ run_negative() {
             /bin/mount -t tmpfs -o mode=0755 none /sys/fs/cgroup
           ;;
         missing-pids-controller)
-          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
-            /bin/mount --bind "$M12_FAULT_DIR/no-pids" \
+          /bin/mount --bind "$M12_FAULT_DIR/no-pids" \
             "/sys/fs/cgroup$scope/cgroup.controllers"
           ;;
         missing-delegation)
-          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
-            /bin/mount --bind "$M12_FAULT_DIR/empty" \
+          /bin/mount --bind "$M12_FAULT_DIR/empty" \
             "/sys/fs/cgroup$scope/cgroup.subtree_control"
           ;;
         missing-capacity-events|missing-cleanup-evidence)
           # Pause after the Tool cgroup is created and before its controls are read.
           /usr/bin/strace -e trace=write \
-            -e inject=write:delay_enter=2s:when=2 \
+            -e inject=write:delay_enter=2s:when=3 \
             -o "$M12_FAULT_DIR/strace" -p "$scoped_pid" \
             2> "$M12_FAULT_DIR/strace.stderr" &
           tracer_pid=$!
@@ -195,8 +195,7 @@ run_negative() {
           else
             control=cgroup.events
           fi
-          /usr/bin/nsenter --mount="/proc/$scoped_pid/ns/mnt" -- \
-            /bin/mount --bind "$M12_FAULT_DIR/empty" \
+          /bin/mount --bind "$M12_FAULT_DIR/empty" \
             "/sys/fs/cgroup$scope/tool/$control"
           ;;
         *) exit 1 ;;
