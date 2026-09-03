@@ -803,7 +803,7 @@ mod tests {
             proto::canonical_executor_preflight_v0(&expected_response).expect("canonical response"),
         )
         .expect("response is UTF-8");
-        let request_bytes = format!("printf '%s' '{response}'").into_bytes();
+        let request_bytes = format!("printf '%s' '{response}'\n").into_bytes();
         let executor = File::open("/bin/sh").expect("shell executor opens");
 
         assert!(matches!(
@@ -821,8 +821,8 @@ mod tests {
     #[test]
     fn continuous_executor_output_cannot_starve_its_deadline_or_cleanup() {
         for writer in [
-            "exec /bin/cat /dev/zero",
-            "exec /bin/sh -c '/bin/cat /dev/zero >&2'",
+            "exec /bin/cat /dev/zero\n",
+            "exec /bin/sh -c '/bin/cat /dev/zero >&2'\n",
         ] {
             reset_process_group_cleanup_calls_for_test();
             let request = one_shot_request();
