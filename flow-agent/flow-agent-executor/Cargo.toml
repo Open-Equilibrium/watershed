@@ -26,3 +26,4 @@ signal-hook.workspace = true
 [[bin]]
 name = "flow-executor"
 path = "src/main.rs"
+test = false
