@@ -96,14 +96,17 @@ pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMe
     let started = Instant::now();
     let executor = PreparedExecutor::prepare_selected()
         .map_err(|_| "selected Executor did not prepare for M1.2 evidence")?;
-    let dispatch = executor
-        .execute(
+    let prepared = executor
+        .prepare_tool(
             &workspace,
             &policy,
             command_policy,
             &invocation,
             "m12-startup-evidence",
         )
+        .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
+    let dispatch = executor
+        .execute_prepared(prepared)
         .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
     let ExecutorDispatchOutcome::Completed(execution) = dispatch else {
         return Err("selected Executor rejected the M1.2 evidence Tool before launch".to_owned());

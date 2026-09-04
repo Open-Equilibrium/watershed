@@ -1,3 +1,15 @@
+#[cfg(feature = "m12-install-acceptance")]
+use crate::runtime::{
+    config_io::load_global_config,
+    context::ContextModelProfile,
+    conversations::{
+        RunLogRecord, conversation_status_page, inspect_run_attempts, project_tool_run_log_page,
+    },
+    productive::OpenAiCodexProvider,
+    run_attempts::{RunAttemptKind, RunAttemptLifecycle},
+    session::run_productive_session_with_provider,
+    validate::validate_session_log_text,
+};
 use crate::runtime::{
     executor::{
         ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
@@ -8,6 +20,8 @@ use crate::runtime::{
     tool_runner::ToolInvocation,
     types::RuntimeError,
 };
+#[cfg(feature = "m12-install-acceptance")]
+use crate::tests::helpers::configured_smoke_productive_execution_fixture;
 use std::{
     env, fs,
     os::unix::fs::PermissionsExt as _,
@@ -29,6 +43,7 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
     let root = crate::tests::helpers::empty_workspace("executor-fake-conformance");
     fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
         .expect("fake companion parent is private");
+    isolate_executor_configuration(&root);
     let fixture = compile_fake_executor(&root);
 
     for (mode, expected_code) in [
@@ -160,6 +175,157 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
             .exists(),
         "preflight timeout must not dispatch a Tool"
     );
+}
+
+#[cfg(feature = "m12-install-acceptance")]
+#[test]
+fn productive_session_uses_the_selected_executor_and_persists_its_receipt() {
+    if crate::tests::test_support::run_current_test_isolated_session_home() {
+        return;
+    }
+
+    let executor_root = crate::tests::helpers::empty_workspace("executor-productive-session");
+    fs::set_permissions(&*executor_root, fs::Permissions::from_mode(0o700))
+        .expect("fake companion parent is private");
+    isolate_executor_configuration(&executor_root);
+    let fixture = compile_fake_executor(&executor_root);
+    let executor = stage_case(&fixture, &executor_root, "productive-session");
+    let marker = executor.with_extension("tool-spawned");
+    configure_executor_path(&executor).expect("productive Executor is selected");
+
+    // This exact test owns its process, so the feature-gated provider switch cannot leak.
+    unsafe { env::set_var("FLOW_AGENT_M12_INSTALL_ACCEPTANCE", "1") };
+    let (workspace, fixture) = configured_smoke_productive_execution_fixture();
+    let config = load_global_config().expect("productive config loads");
+    let mut provider = OpenAiCodexProvider;
+    let output = run_productive_session_with_provider(
+        &workspace,
+        &fixture.anchored,
+        &config,
+        "gpt-m12-install-acceptance",
+        ContextModelProfile::stub_v0(),
+        &fixture.registry,
+        fixture.smoke_flow(),
+        &fixture.policy,
+        None,
+        true,
+        || Ok(fixture.credential().clone()),
+        "",
+        None,
+        &mut provider,
+    )
+    .expect("productive session completes through the selected Executor");
+
+    assert!(!output.failed);
+    assert!(
+        marker.is_file(),
+        "the selected Executor dispatches the Tool"
+    );
+    let events =
+        validate_session_log_text(&output.session_path, &output.session_id, &output.stdout)
+            .expect("productive event stream validates");
+    let event_sequences = [
+        proto::EventType::ToolStarted,
+        proto::EventType::ToolCompleted,
+        proto::EventType::SessionCompleted,
+    ]
+    .map(|event_type| {
+        let matching = events
+            .iter()
+            .filter(|event| event.event_type == event_type)
+            .collect::<Vec<_>>();
+        assert_eq!(matching.len(), 1, "one {event_type:?} event persists");
+        matching[0].sequence
+    });
+    assert!(
+        event_sequences.windows(2).all(|pair| pair[0] < pair[1]),
+        "Tool start, Tool completion, and session completion persist in order"
+    );
+
+    let status = conversation_status_page(&workspace, None).expect("conversation status reads");
+    assert_eq!(status.conversations.len(), 1);
+    assert_eq!(status.conversations[0].uncertain_attempts, 0);
+    let conversation_id = &status.conversations[0].conversation_id;
+    let attempts = inspect_run_attempts(&workspace, conversation_id, &output.session_id)
+        .expect("productive attempts read");
+    assert_eq!(attempts.len(), 3, "two Provider turns surround one Tool");
+    let tool_attempts = attempts
+        .iter()
+        .filter(|attempt| attempt.attempt_kind == RunAttemptKind::Tool)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_attempts.len(), 1);
+    let tool_attempt = tool_attempts[0];
+    assert_eq!(tool_attempt.lifecycle, RunAttemptLifecycle::Completed);
+    assert_eq!(tool_attempt.outcome, Some(RunAttemptOutcome::Completed));
+    assert_eq!(tool_attempt.tool_id.as_deref(), Some("echo"));
+    assert!(tool_attempt.request_hash.starts_with("sha256:"));
+    let expected_enforcement = tool_attempt
+        .expected_enforcement
+        .as_ref()
+        .expect("Tool intent persists its enforcement expectation");
+    assert_eq!(
+        expected_enforcement.runtime_profile,
+        proto::RuntimeReadProfileV0::Exact
+    );
+    assert_eq!(
+        expected_enforcement.max_concurrent_processes_and_threads,
+        16
+    );
+
+    let projected = project_tool_run_log_page(
+        &workspace,
+        conversation_id,
+        &output.session_id,
+        "echo",
+        None,
+    )
+    .expect("Tool attempt projection reads");
+    assert!(projected.continuation_cursor.is_none());
+    assert_eq!(projected.records.len(), 2);
+    let persisted_request_hash = match &projected.records[0] {
+        RunLogRecord::Intent { request_hash, .. } => request_hash,
+        other => panic!("expected Tool intent, got {other:?}"),
+    };
+    assert_eq!(persisted_request_hash, &tool_attempt.request_hash);
+    let durable_output = match &projected.records[1] {
+        RunLogRecord::TerminalResult {
+            outcome: RunAttemptOutcome::Completed,
+            exit_code: Some(0),
+            durable_output: Some(output),
+            ..
+        } => output,
+        other => panic!("expected completed Tool result, got {other:?}"),
+    };
+    assert_eq!(durable_output["schema"], "flow-tool-attempt-output-v1");
+    assert_eq!(
+        durable_output["request_hash"],
+        tool_attempt.request_hash.as_str()
+    );
+    assert_eq!(
+        durable_output["enforcement"]["applied_policy_digest"],
+        expected_enforcement.applied_policy_digest.as_str()
+    );
+    assert_eq!(durable_output["enforcement"]["executor"], "fake-executor");
+    assert_eq!(durable_output["enforcement"]["backend"], "fake-backend");
+    assert_eq!(durable_output["enforcement"]["isolation_active"], true);
+    assert_eq!(durable_output["enforcement"]["runtime_profile"], "exact");
+    assert_eq!(
+        durable_output["enforcement"]["max_concurrent_processes_and_threads"],
+        16
+    );
+    assert_eq!(
+        durable_output["tool_result"]["value"]["status"]["value"],
+        "completed"
+    );
+    assert_eq!(
+        durable_output["tool_result"]["value"]["stdout"]["value"],
+        "\n"
+    );
+}
+
+fn isolate_executor_configuration(root: &Path) {
+    // Cargo's exact-test child and nextest both give this test exclusive process state.
+    unsafe { env::set_var("XDG_CONFIG_HOME", root.join("xdg-config")) };
 }
 
 fn compile_fake_executor(root: &Path) -> PathBuf {

@@ -119,21 +119,6 @@ impl PreparedExecutor {
         }
     }
 
-    /// Executes one policy-bound Tool through a fresh one-shot Executor process.
-    #[cfg(feature = "m12-startup-evidence")]
-    pub(crate) fn execute(
-        &self,
-        workspace: &AnchoredWorkspace,
-        policy: &core_policy::PolicyArtifact,
-        command_policy: &core_policy::CommandPolicy,
-        invocation: &ToolInvocation,
-        request_id: &str,
-    ) -> Result<ExecutorDispatchOutcome, RuntimeError> {
-        let prepared =
-            self.prepare_tool(workspace, policy, command_policy, invocation, request_id)?;
-        self.execute_prepared(prepared)
-    }
-
     /// Retains and hashes the exact Executor request without launching any process.
     pub(crate) fn prepare_tool(
         &self,
