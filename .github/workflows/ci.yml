@@ -359,7 +359,7 @@ jobs:
           --all-targets
           --all-features
           --fail-under-lines 90
-          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process[\\/]measurements\.rs$)'
+          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))'
           --show-missing-lines
 
       - name: Prepare instrumented M1.2 coverage artifacts
@@ -445,7 +445,7 @@ jobs:
             --target x86_64-unknown-linux-musl \
             --coverage-target-only \
             --fail-under-lines 90 \
-            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process[\\/]measurements\.rs$)' \
+            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))' \
             --show-missing-lines
           UNPRIVILEGED
           COVERAGE

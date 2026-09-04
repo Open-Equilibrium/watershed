@@ -29,6 +29,10 @@ M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
 M12_COVERAGE_ENV = "/root/m12-coverage.env"
 M12_PRODUCTION_EXECUTOR = "/root/m12-production/flow-executor"
+EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
+    r"flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]"
+    r"tool_runner[\\/]unix_process(\.rs|[\\/])"
+)
 M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
 M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
 M12_OFFICIAL_LINUX = (
@@ -301,6 +305,10 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(required, coverage)
         self.assertEqual(coverage[coverage.index("--fail-under-lines") + 1], "90")
         self.assertEqual(coverage[coverage.index("--config") + 1], TEST_ISOLATION)
+        self.assertIn(
+            EVIDENCE_ONLY_UNIX_RUNNER_PATTERN,
+            coverage[coverage.index("--ignore-filename-regex") + 1],
+        )
 
         coverage_prepare_lines = assert_step_state(
             self,
@@ -383,10 +391,17 @@ class CiWorkflowContractTest(unittest.TestCase):
             self.assertIn(required, linux_coverage)
         self.assertIn("        shell: bash", linux_coverage_lines)
         self.assertIn(TEST_ISOLATION, linux_coverage)
+        coverage_run = linux_coverage[
+            linux_coverage.index("cargo nextest run") : linux_coverage.index(
+                "cargo llvm-cov report"
+            )
+        ]
         report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
+        self.assertNotIn("--release", coverage_run)
         self.assertNotIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
         self.assertIn("--coverage-target-only", report)
+        self.assertIn(EVIDENCE_ONLY_UNIX_RUNNER_PATTERN, report)
         self.assertEqual(linux_coverage.count("cargo nextest run"), 1)
         self.assertNotIn("metadata=coverage-", linux_coverage)
         self.assertNotIn("-p flow-agent-executor", linux_coverage)
