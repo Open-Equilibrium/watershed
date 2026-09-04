@@ -354,6 +354,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
         instrumented = coverage_prepare[coverage_prepare.index(f". {M12_COVERAGE_ENV}") :]
         self.assertNotIn("cargo build", instrumented)
+        self.assertNotIn("--release", instrumented)
         self.assertNotIn("readelf -l", coverage_prepare)
         self.assertNotIn("metadata=coverage-", coverage_prepare)
         self.assertNotIn("target/m12-dynamic", coverage_prepare)
@@ -383,7 +384,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("        shell: bash", linux_coverage_lines)
         self.assertIn(TEST_ISOLATION, linux_coverage)
         report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
-        self.assertIn("--release", report)
+        self.assertNotIn("--release", report)
         self.assertIn(f"--target {M12_TARGET}", report)
         self.assertIn("--coverage-target-only", report)
         self.assertEqual(linux_coverage.count("cargo nextest run"), 1)
