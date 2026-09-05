@@ -202,6 +202,7 @@ if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
   install -m 0755 "$coverage_executor" "$bundle/flow-executor"
   install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"
   install -m 0755 "$coverage_executor" "$standard_prefix/bin/flow-executor"
+  run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
 fi
 M12_INSTALL_BUNDLE="$bundle" \
   M12_STANDARD_PREFIX="$standard_prefix" \

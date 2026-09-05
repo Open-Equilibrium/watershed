@@ -759,8 +759,13 @@ class CiWorkflowContractTest(unittest.TestCase):
         readiness_negatives = installer_acceptance.index(
             "scripts/run-m12-readiness-negatives.sh"
         )
+        instrumented_check = installer_acceptance.index(
+            'run_as_watershed "$standard_prefix/bin/flow" executor check',
+            coverage_switch,
+        )
         self.assertLess(production_check, coverage_switch)
-        self.assertLess(coverage_switch, readiness_negatives)
+        self.assertLess(coverage_switch, instrumented_check)
+        self.assertLess(instrumented_check, readiness_negatives)
         self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertNotIn("loginctl show-user", installer_acceptance)
