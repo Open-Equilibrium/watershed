@@ -5,7 +5,7 @@ use crate::{
         context::{CONTEXT_SAFETY_MARGIN, ContextModelProfile, OPERATOR_MODEL_PROFILE_ID},
         conversations::{
             append_productive_run_checkpoint, conversation_status_page,
-            create_conversation_run_with_model_profile, migrate_legacy_session,
+            create_conversation_run_with_model_profile, reserve_conversation_continuation,
         },
         fs_guards::AnchoredWorkspace,
         instructions::{read_applicable_agent_instructions, read_workspace_agent_instructions},
@@ -14,86 +14,96 @@ use crate::{
             continue_conversation, continue_conversation_with_execution_activation,
             continue_conversation_with_live_events, continue_conversation_with_provider,
             resume_conversation_run, resume_conversation_run_with_execution_activation,
-            resume_conversation_run_with_live_events, run_flow,
-            run_flow_with_root_input_and_live_events, run_productive_session_with_provider,
+            resume_conversation_run_with_live_events, run_flow_with_root_input_and_live_events,
+            run_productive_session_with_provider, set_productive_executor_readiness_observer,
         },
         session_reading::SessionEventReader,
         session_store::open_flow_agent_home,
-        types::{EmitMode, RunOutput, RuntimeError},
+        types::{EmitMode, RuntimeError},
     },
     tests::{
         conversations::{write_terminal_recovery_snapshot, write_terminal_run},
         helpers::{
-            disable_smoke_echo_tool, disabled_configured_smoke_productive_execution_fixture,
-            empty_workspace, write_productive_workspace_config,
+            disabled_configured_smoke_productive_execution_fixture, empty_workspace,
+            smoke_productive_execution_fixture, write_productive_workspace_config,
         },
-        test_support::{TempWorkspace, workspace_copy},
+        test_support::workspace_copy,
     },
 };
 use proto::EventType;
 use std::{fs, fs::OpenOptions, path::Path};
 
-fn continue_legacy_session(
-    migrate_first: bool,
-) -> (TempWorkspace, RunOutput, String, SessionProvider) {
-    let workspace = workspace_copy("smoke-flow");
-    disable_smoke_echo_tool(&workspace);
-    let legacy =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("legacy fixture run completes");
-    if migrate_first {
-        migrate_legacy_session(&workspace, &legacy.session_id).expect("legacy bundle migrates");
-    }
+#[test]
+fn executor_readiness_failure_precedes_continuation_reservation() {
+    let (workspace, fixture) = smoke_productive_execution_fixture();
     write_productive_workspace_config(&workspace);
-    let mut provider = SessionProvider::default();
-    let output = continue_conversation_with_provider(
+    let definition = crate::runtime::session_definition::session_definition_metadata(
+        &fixture.registry,
+        fixture.smoke_flow(),
+    )
+    .expect("definition metadata");
+    let profile = ContextModelProfile {
+        context_limit: 128_000,
+        id: OPERATOR_MODEL_PROFILE_ID,
+        output_reserve: 16_384,
+        safety_margin: CONTEXT_SAFETY_MARGIN,
+    };
+    create_conversation_run_with_model_profile(
         &workspace,
-        &legacy.session_id,
+        "conversation",
+        "run",
+        &definition.flow_definition_id,
+        &definition.registry_hash,
+        &definition.flow_definition_hash,
+        ("gpt-fixture", profile),
+    )
+    .expect("recorded Tool-bearing run is created");
+    crate::tests::conversations::write_terminal_run(&workspace, "conversation", "run");
+    append_productive_run_checkpoint(
+        &workspace,
+        "conversation",
+        "run",
+        None,
+        &write_terminal_recovery_snapshot(&workspace, "conversation", "run"),
+        2,
+        "2026-07-30T12:00:01Z",
+    )
+    .expect("root checkpoint appends");
+    set_productive_executor_readiness_observer(|| {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "injected unsupported Tool platform",
+        ))
+    });
+    let mut provider = SessionProvider::default();
+
+    let error = continue_conversation_with_provider(
+        &workspace,
+        "conversation",
         None,
         None,
         None,
         false,
-        &session_credential(),
+        || panic!("credential resolution must follow Executor readiness"),
         &mut provider,
     )
-    .expect("public one-id legacy continuation completes");
-    (workspace, output, legacy.session_id, provider)
-}
+    .expect_err("failed readiness must stop before continuation reservation");
 
-#[test]
-fn public_one_id_continuation_migrates_a_valid_legacy_bundle() {
-    let (workspace, output, conversation_id, provider) = continue_legacy_session(false);
-
-    assert_eq!(provider.calls, 1);
-    assert_eq!(output.session_id, format!("{conversation_id}-2"));
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+    ));
+    assert_eq!(provider.calls, 0);
     assert!(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join(format!("{conversation_id}.jsonl"))
-            .try_exists()
-            .is_ok_and(|present| !present),
-        "legacy source is retired"
+        !crate::tests::helpers::workspace_session_dir(&workspace)
+            .join("conversation/runs/conversation")
+            .exists()
     );
-    let page = conversation_status_page(&workspace, None).expect("conversation status");
-    assert_eq!(page.conversations[0].conversation_id, conversation_id);
-    assert_eq!(page.conversations[0].run_count, 2);
-}
-
-#[test]
-fn public_one_id_continuation_binds_an_already_migrated_legacy_parent_to_the_current_model() {
-    let (workspace, output, conversation_id, provider) = continue_legacy_session(true);
-
-    assert_eq!(provider.calls, 1);
-    let definition = fs::read_to_string(
-        crate::tests::helpers::workspace_session_dir(&workspace)
-            .join(conversation_id)
-            .join("runs")
-            .join(output.session_id)
-            .join("run-log.jsonl"),
-    )
-    .expect("continuation Run definition reads");
-    assert!(definition.lines().next().is_some_and(|line| {
-        line.contains("\"model\":\"gpt-fixture\"")
-            && line.contains("\"model_profile_id\":\"operator-model-v0\"")
-    }));
+    reserve_conversation_continuation(&workspace, "conversation", None)
+        .expect("failed readiness leaves continuation reservation available")
+        .release()
+        .expect("continuation reservation releases");
 }
 
 #[test]
@@ -121,7 +131,7 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
         &fixture.policy,
         None,
         false,
-        credential,
+        || Ok(credential.clone()),
         "",
         None,
         &mut initial_provider,
@@ -175,7 +185,7 @@ fn productive_continuation_rejects_missing_or_mismatched_parent_profile_before_p
             None,
             None,
             false,
-            credential,
+            || Ok(credential.clone()),
             &mut continuation_provider,
         )
         .expect_err("productive parent profile is required to match");
@@ -421,7 +431,7 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
         &fixture.policy,
         None,
         false,
-        credential,
+        || Ok(credential.clone()),
         "Agent guidance.",
         None,
         &mut provider,
@@ -444,7 +454,7 @@ fn productive_continuation_uses_the_selected_history_input_and_live_checkpoint_s
         )),
         Some(notifier),
         false,
-        credential,
+        || Ok(credential.clone()),
         &mut provider,
     )
     .expect("productive continuation completes");
@@ -518,7 +528,7 @@ fn conversation_continuation_rejects_registry_drift_before_auth_or_run_creation(
         None,
         None,
         false,
-        &session_credential(),
+        || Ok(session_credential()),
         &mut provider,
     )
     .expect_err("registry drift must reject continuation");

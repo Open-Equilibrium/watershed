@@ -4,16 +4,17 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1.1 — Flow Agent practical execution.** Current milestone status is canonical in [PLAN.md](PLAN.md#m11--flow-agent-practical-execution). M1.1 extends the deterministic M1 foundation with productive provider, Tool, Conversation, authoring, authentication, cancellation and durability behavior; OS isolation remains the separate M1.2 stage.
+**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). Productive Tools use the one-shot Executor boundary; Ubuntu 24.04 x64 is the only productive platform, including for Custom Executors, and other platforms fail closed.
 
 ## Repo layout
 
 ```
 core/         core-script (building-block model/parser) and core-policy
               (capability model + policy→sandbox compiler)
-proto/        proto: event schema and serialization (the integration seam)
-flow-agent/   flow-agent-core (engine/runtime/session) and flow-agent-cli
-              (human CLI, machine-readable run mode, tail/replay/resume)
+proto/        proto: event and Executor wire schemas/types (the integration seam)
+flow-agent/   flow-agent-core (engine/runtime/session), flow-agent-cli
+              (human CLI, machine-readable run mode, tail/replay/resume), and
+              flow-agent-executor (one-shot Ubuntu isolation companion)
 meta-harness/ host-scoped headless control plane for local CLI agents
 liquid/       local-first Page/Block workspace and app-building product
 docs/         governance, specs, decisions
@@ -30,24 +31,67 @@ cargo build --locked --workspace
 cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
-Set `FLOW_AGENT_HOME` to an unused absolute path, explicitly import the checked-in smoke fixture, then run it from its Workspace. Its fixture profile selects deterministic stubs; this does not call a provider or execute a general external process:
+### Install productive Flow Agent on Ubuntu 24.04 x64
 
-```console
-cargo run -p flow-agent-cli -- import flow-agent/fixtures/smoke-flow
-cd flow-agent/fixtures/smoke-flow
-cargo run -p flow-agent-cli -- run smoke-flow --emit jsonl
-cargo run -p flow-agent-cli -- replay smoke-flow smoke-flow --emit jsonl
-cargo run -p flow-agent-cli -- tail smoke-flow smoke-flow --emit jsonl --no-follow
-cargo run -p flow-agent-cli -- sessions status
+From the repository root, build and stage one administrator-owned bundle. The installer requires `install.sh`, `flow` and, for the standard path, the static `flow-executor` as regular executable siblings. It installs into an unused absolute prefix and does not perform upgrades.
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes --no-install-recommends \
+  apparmor bubblewrap build-essential musl-tools procps util-linux
+rustup target add x86_64-unknown-linux-musl
+cargo build --locked --release -p flow-agent-cli --bin flow
+cargo build --locked --release -p flow-agent-executor --bin flow-executor \
+  --target x86_64-unknown-linux-musl
+
+install_bundle=$(sudo mktemp -d /var/tmp/watershed-install.XXXXXX)
+sudo chmod 0755 "$install_bundle"
+sudo install -m 0755 install/install.sh "$install_bundle/install.sh"
+sudo install -m 0755 target/release/flow "$install_bundle/flow"
+sudo install -m 0755 \
+  target/x86_64-unknown-linux-musl/release/flow-executor \
+  "$install_bundle/flow-executor"
 ```
 
-Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/).
+Choose one installation path. The standard path installs and checks the bundled Default Executor. On Ubuntu 24.04, authorize its unprivileged Bubblewrap user namespace once:
 
-For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. Use productive execution only on the [enabled targets](SECURITY.md#enforcement-per-flow). Agentic Engineers define each Flow's available Tools and capability limits through its Building Blocks; other users may run those predefined Flows. Productive Tools share the operator's OS identity until M1.2.
+```sh
+sudo tee /etc/apparmor.d/watershed-bwrap-userns >/dev/null <<'APPARMOR'
+abi <abi/4.0>,
+include <tunables/global>
+
+/usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+APPARMOR
+sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
+```
+
+```sh
+sudo /bin/sh "$install_bundle/install.sh" --prefix /opt/watershed
+/opt/watershed/bin/flow executor check
+```
+
+Run the command from the unprivileged operating-system account that will run Flow. The installer verifies the Default Executor as that account; if it fails, do not disable the kernel restriction.
+
+The custom path explicitly omits the Default Executor. After installation, the operating-system account that will run Flow Agent selects an administrator-reviewed absolute Custom Executor and checks it; do not use `sudo` for these two configuration commands unless that account is root.
+
+```sh
+sudo /bin/sh "$install_bundle/install.sh" \
+  --prefix /opt/watershed --no-default-executor
+/opt/watershed/bin/flow executor configure --path /absolute/path/to/custom-executor
+/opt/watershed/bin/flow executor check
+```
+
+`/bin/sh install/install.sh --help` is the canonical option summary. Custom Executor readiness validates the protocol boundary but is not a compatibility or security certification; see the [Executor architecture](docs/concept/flow-agent-executor-architecture.md).
+
+Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authoring or runtime state. Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in deterministic examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/) and make no provider, subprocess or isolation claim.
+
+For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. The standard Ubuntu installation resolves its sibling `flow-executor`; `flow executor check` reports readiness. Agentic Engineers define each Flow's Tools, exact mounts and runtime-read profile; other users may run those predefined Flows without gaining an escalation surface. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
 
 `FLOW_AGENT_HOME` defaults to `~/.flow` on Unix and `%USERPROFILE%\.flow` on Windows. Its `config.yaml` and registry are the sole implicit technical authority. Workspace `.flow` content is not discovered; optional global-home and harness-start Workspace `AGENTS.md` files provide instructions only.
 
-The M1 baseline cannot productively call an LLM/provider, run external Tools or scripts, guarantee OS isolation or allow network destinations. M1.1 adds declared provider and Tool execution; its complete command and storage boundary is in [`PROTOCOL.md`](PROTOCOL.md). OS isolation remains scheduled for M1.2.
+The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Productive Tool networking is deny-all; positive grants remain deferred.
 
 ## Product boundaries
 
@@ -58,7 +102,7 @@ Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN
 - **Why & how it fits together:** [VISION.md](VISION.md)
 - **Build plan & milestones:** [PLAN.md](PLAN.md)
 - **Current implementation architecture:** [docs/architecture.md](docs/architecture.md)
-- **M1.2 Executor and Sandbox target:** [docs/concept/flow-agent-executor-architecture.md](docs/concept/flow-agent-executor-architecture.md)
+- **Executor and Sandbox architecture:** [docs/concept/flow-agent-executor-architecture.md](docs/concept/flow-agent-executor-architecture.md)
 - **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
 - **Open decisions (human decision page):** [docs/decisions/open-decisions.html](docs/decisions/open-decisions.html)
 - **Terminology:** [GLOSSARY.md](GLOSSARY.md)

@@ -1,5 +1,5 @@
 mod invocation;
-#[cfg(unix)]
+#[cfg(all(unix, any(test, feature = "m11-budget-evidence")))]
 mod unix_process;
 
 use crate::runtime::run_attempts::RunAttemptOutcome;
@@ -11,18 +11,19 @@ pub(crate) use invocation::{encoded_exec_vector_bytes, validate_tool_invocation}
 pub(crate) use unix_process::{
     PrimaryTrigger, READY_CANCELLATION_MARKER, force_reap_timeout_for_test, visible_exit_code,
 };
-#[cfg(unix)]
-pub(crate) use unix_process::{ToolRunControl, execute_tool_invocation};
 #[cfg(all(unix, any(test, feature = "m11-budget-evidence")))]
 pub(crate) use unix_process::{
-    measure_ready_process_group_cleanup, measure_ready_tool_cancellation,
+    ToolRunControl, execute_tool_invocation, measure_ready_process_group_cleanup,
+    measure_ready_tool_cancellation,
 };
 
-pub(crate) const MAX_TOOL_EXEC_ENTRIES: usize = 2_048;
-pub(crate) const MAX_TOOL_EXEC_BYTES: usize = 128 * 1024;
+#[cfg(test)]
+pub(crate) use proto::{
+    MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0 as MAX_TOOL_EXEC_BYTES,
+    MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0 as MAX_TOOL_EXEC_ENTRIES,
+};
 #[cfg_attr(not(unix), allow(dead_code))]
-pub(crate) const MAX_TOOL_STREAM_BYTES: usize = 4 * 1024 * 1024;
-pub(crate) const OWN_SCRIPT_EXECUTABLE: &str = "/bin/sh";
+pub(crate) const MAX_TOOL_STREAM_BYTES: usize = proto::MAX_EXECUTOR_TOOL_STREAM_BYTES_V0;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ToolInvocation {
@@ -50,6 +51,7 @@ pub(crate) struct ToolExecutionOutcome {
 }
 
 impl ToolExecutionOutcome {
+    #[cfg(any(test, all(unix, feature = "m11-budget-evidence")))]
     pub(crate) fn cancelled() -> Self {
         Self {
             status: RunAttemptOutcome::Cancelled,

@@ -3,7 +3,6 @@ use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredFile, with_anchored_replacement_temp_checked},
     types::RuntimeError,
 };
-use core_policy::ProtectedPathMatchMode;
 #[cfg(test)]
 use std::cell::RefCell;
 use std::io::{self, Write};
@@ -13,8 +12,7 @@ mod target;
 pub use target::{anchored_workspace_write_path, normalize_script_write_target};
 pub use target::{
     anchored_workspace_write_path_from, ensure_anchored_writable_regular_leaf,
-    ensure_resolved_anchored_script_target_not_protected, ensure_script_target_not_protected,
-    resolved_anchored_workspace_scoped_target, validate_script_write_target,
+    validate_script_write_target,
 };
 
 #[cfg(test)]
@@ -66,52 +64,20 @@ pub fn write_script_output(
     workspace: &AnchoredDir,
     target: &str,
     contents: &[u8],
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
-    let resolved_target = resolved_anchored_workspace_scoped_target(workspace, target)?;
-    ensure_script_target_not_protected(protected_path_match_mode, policy, &resolved_target)?;
     let path = anchored_workspace_write_path_from(workspace, target, true)?
         .expect("created script target parent is present");
-    replace_script_output_atomically_checked(&path, contents, |temp_path| {
-        let temp_name = temp_path
-            .diagnostic_path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| {
-                RuntimeError::Protocol(
-                    "own-script replacement temp must have a UTF-8 file name".to_owned(),
-                )
-            })?;
-        let (resolved_parent, _) = resolved_target.rsplit_once('/').ok_or_else(|| {
-            RuntimeError::Protocol(
-                "resolved own-script target must include a workspace-relative file name".to_owned(),
-            )
-        })?;
-        ensure_script_target_not_protected(
-            protected_path_match_mode,
-            policy,
-            &format!("{resolved_parent}/{temp_name}"),
-        )
-    })
+    replace_script_output_atomically_checked(&path, contents, |_| Ok(()))
 }
 
 pub fn preflight_own_script_outputs(
     workspace: &AnchoredDir,
     write: Option<&ScriptWrite>,
-    protected_path_match_mode: ProtectedPathMatchMode,
-    policy: &core_policy::CommandPolicy,
 ) -> Result<(), RuntimeError> {
-    if let Some(write) = write {
-        ensure_resolved_anchored_script_target_not_protected(
-            workspace,
-            &write.target,
-            protected_path_match_mode,
-            policy,
-        )?;
-        if let Some(path) = anchored_workspace_write_path_from(workspace, &write.target, false)? {
-            ensure_script_output_target_available(&path)?;
-        }
+    if let Some(write) = write
+        && let Some(path) = anchored_workspace_write_path_from(workspace, &write.target, false)?
+    {
+        ensure_script_output_target_available(&path)?;
     }
     Ok(())
 }

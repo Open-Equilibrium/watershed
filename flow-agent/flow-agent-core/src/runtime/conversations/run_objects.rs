@@ -162,25 +162,6 @@ impl RunObjectStore {
             object_count: writer.objects.len(),
         })
     }
-
-    #[cfg(test)]
-    pub(crate) fn seed_verified_inventory_for_memory_test(&self) {
-        let mut writer = self
-            .inner
-            .lock()
-            .expect("run object store lock is available");
-        for index in 0..writer.maximum_objects {
-            let mut digest = [0_u8; 32];
-            digest[24..].copy_from_slice(&u64::try_from(index).unwrap_or(u64::MAX).to_be_bytes());
-            writer.objects.insert(
-                digest,
-                RunObjectEntry {
-                    directory_synced: true,
-                    length: 0,
-                },
-            );
-        }
-    }
 }
 
 pub(super) fn read_run_object_uri(

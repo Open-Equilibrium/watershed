@@ -4,7 +4,8 @@ use crate::runtime::{
     stream_signature::FlowInvocation,
     types::{RUNTIME_ERROR_REASON, RuntimeError},
 };
-use proto::{EventEnvelope, EventType};
+use proto::EventEnvelope;
+use proto::EventType;
 use std::{io, path::PathBuf};
 
 pub(crate) const RUNTIME_IO_ERROR_KINDS: [(io::ErrorKind, &str); 15] = [
@@ -215,7 +216,6 @@ pub fn sandbox_negative_reason_for_operation(
         "environment" => Some(core_policy::DenyReasonCode::EnvironmentDenied),
         "interpreter" => Some(core_policy::DenyReasonCode::InterpreterEscapeDenied),
         "network" => Some(core_policy::DenyReasonCode::NetworkDenied),
-        "protected-path" => Some(core_policy::DenyReasonCode::ProtectedPathDenied),
         "symlink" => Some(core_policy::DenyReasonCode::SymlinkEscapeDenied),
         "write" => Some(core_policy::DenyReasonCode::WriteDenied),
         _ => None,
@@ -310,6 +310,7 @@ pub fn runtime_failure_for_tool_error(err: &RuntimeError, tool_id: &str) -> Opti
         RuntimeError::Denied { reason, .. } => reason.clone(),
         RuntimeError::Io { .. } => return None,
         RuntimeError::Json(_)
+        | RuntimeError::Executor(_)
         | RuntimeError::Policy(_)
         | RuntimeError::Registry(_)
         | RuntimeError::Protocol(_)
@@ -370,7 +371,6 @@ pub fn denial_message(reason: core_policy::DenyReasonCode) -> &'static str {
         core_policy::DenyReasonCode::NetworkDenied => "network egress denied by default",
         core_policy::DenyReasonCode::EnvironmentDenied => "environment read denied",
         core_policy::DenyReasonCode::ToolOutOfPhase => "tool is not available in the active phase",
-        core_policy::DenyReasonCode::ProtectedPathDenied => "protected path access denied",
         core_policy::DenyReasonCode::SymlinkEscapeDenied => "symlink escape denied",
         core_policy::DenyReasonCode::InterpreterEscapeDenied => "interpreter escape denied",
     }

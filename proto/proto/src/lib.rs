@@ -5,6 +5,7 @@
 mod canonical;
 mod error;
 mod event;
+mod executor;
 mod flow_value;
 mod metadata;
 mod session_object;
@@ -15,6 +16,31 @@ pub use event::{
     EventEnvelope, EventStateIdentifierKind, MAX_EVENT_PAYLOAD_STATE_IDENTIFIERS_V0,
     MAX_EVENT_STATE_IDENTIFIERS_V0, PhaseKind, ToolKind, ToolNetworkAccess, UnknownPhaseKind,
     UnknownToolKind, UnknownToolNetworkAccess,
+};
+pub use executor::{
+    EXECUTOR_BACKEND_V0, EXECUTOR_EXACT_EXECUTABLES_V0, EXECUTOR_FEATURE_DENY_NETWORK_V0,
+    EXECUTOR_FEATURE_DESCRIPTOR_MOUNTS_V0, EXECUTOR_FEATURE_MOUNT_IDENTITY_V0,
+    EXECUTOR_FEATURE_PROCESS_CAPACITY_V0, EXECUTOR_FEATURE_PROCESS_CONTAINMENT_V0,
+    EXECUTOR_FEATURE_STATIC_SELF_REEXEC_V0, EXECUTOR_MOUNT_DESCRIPTOR_BASE_V0, EXECUTOR_NAME_V0,
+    EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0, EXECUTOR_PLATFORM_V0, EXECUTOR_PREFLIGHT_SCHEMA_V0,
+    EXECUTOR_PROBE_SCHEMA_V0, EXECUTOR_PROTOCOL_VERSION_V0, EXECUTOR_REQUEST_SCHEMA_V0,
+    EXECUTOR_RESPONSE_SCHEMA_V0, EXECUTOR_START_SCHEMA_V0, EnforcementReceiptV0,
+    ExecutorErrorCodeV0, ExecutorExecVectorErrorV0, ExecutorLimitsV0, ExecutorMountAccessV0,
+    ExecutorMountOriginV0, ExecutorMountV0, ExecutorObjectKindV0, ExecutorPreflightV0,
+    ExecutorProbeV0, ExecutorProtocolError, ExecutorRequestV0, ExecutorResolvedMountV0,
+    ExecutorResolvedPolicyV0, ExecutorResponseV0, ExecutorRuntimeMountV0, ExecutorStartV0,
+    ExecutorToolClassificationV0, ExecutorToolResultV0, ExecutorToolStatusV0,
+    MAX_EXECUTOR_CONTROL_BYTES_V0, MAX_EXECUTOR_EXEC_VECTOR_BYTES_V0,
+    MAX_EXECUTOR_EXEC_VECTOR_ENTRIES_V0, MAX_EXECUTOR_MOUNTS_V0, MAX_EXECUTOR_PROBE_BYTES_V0,
+    MAX_EXECUTOR_REQUEST_BYTES_V0, MAX_EXECUTOR_RESPONSE_BYTES_V0, MAX_EXECUTOR_RUNTIME_MOUNTS_V0,
+    MAX_EXECUTOR_TOOL_STREAM_BYTES_V0, MAX_EXECUTOR_WORKSPACE_MOUNTS_V0, RuntimeReadProfileV0,
+    TOOL_FORCED_REAP_DEADLINE_V0, TOOL_OUTPUT_DRAIN_DEADLINE_V0, TOOL_TERMINATION_GRACE_V0,
+    UnixObjectIdentityV0, canonical_executor_preflight_v0, canonical_executor_probe_v0,
+    canonical_executor_request_v0, canonical_executor_response_v0, canonical_executor_start_v0,
+    decode_executor_stream_v0, encode_executor_stream_v0, parse_executor_preflight_v0,
+    parse_executor_probe_v0, parse_executor_request_v0, parse_executor_response_v0,
+    parse_executor_start_v0, resolved_policy_digest_v0, validate_enforcement_receipt_v0,
+    validate_executor_exec_vector_v0,
 };
 pub use flow_value::{
     CanonicalIntegerError, FlowValueValidationError, parse_canonical_i64, validate_flow_value_v0,

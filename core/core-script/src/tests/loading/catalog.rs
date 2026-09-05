@@ -31,13 +31,6 @@ fn registry_loader_resolves_hello_flow_refs_and_canonical_output() {
         vec!["read-file"]
     );
     assert!(registry.tool_block("ReadFile").is_some());
-    assert_eq!(
-        registry
-            .tool_blocks()
-            .map(|tool| tool.identity.id.as_str())
-            .collect::<Vec<_>>(),
-        ["read-file", "write-summary"]
-    );
     assert!(registry.instruction_block("InspectInput").is_some());
 
     let canonical = registry
@@ -73,7 +66,7 @@ fn flow_registry_retains_the_unique_transitive_definition_closure() {
         ),
         (
             "tool.yaml",
-            "tool:\n  id: endpoint-tool\n  name: EndpointTool\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+            "tool:\n  id: endpoint-tool\n  name: EndpointTool\n  tool_kind: predefined-command\n  command:\n    command_id: read-file\n    argv: []\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 32\n  read_only_mounts: []\n  writable_mounts: []\n  network: deny\n",
         ),
         (
             "unused.yaml",
@@ -151,7 +144,7 @@ fn parser_rejects_oversized_names_and_definition_text() {
         (
             "long-script.yaml",
             format!(
-                "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n  read_scope: []\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n"
+                "tool:\n  id: long-script\n  name: LongScript\n  tool_kind: own-script\n  command: script:long-script\n  script_runtime: posix-sh\n  script_body: {oversized_text}\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 32\n  read_only_mounts: []\n  writable_mounts: []\n  network: deny\n"
             ),
         ),
     ] {

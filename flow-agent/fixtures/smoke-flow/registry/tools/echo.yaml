@@ -6,7 +6,8 @@ tool:
     command_id: agent-echo
     argv: []
   allowed_parameters: []
-  read_scope: ["workspace"]
-  write_scope: []
-  protected_path_grants: []
+  max_concurrent_processes_and_threads: 16
+  runtime_profile: exact
+  read_only_mounts: ["workspace"]
+  writable_mounts: []
   network: deny

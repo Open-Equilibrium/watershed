@@ -7,18 +7,21 @@ use crate::{
         },
         conversations::{
             ConversationAttemptLog, ConversationEventWriter, ProductiveRecoveryWriter,
-            create_conversation_run_with_model_profile, read_conversation_history,
+            append_run_attempt_intent, create_conversation_run_with_model_profile,
+            read_conversation_history, reserve_conversation_run_recovery,
             set_conversation_file_sync_error_for_path_for_test,
         },
         live_events::live_event_channel,
         productive::{ProductiveExecution, execute_productive_flow_with_recovery},
+        run_attempts::{RunAttemptIntent, RunAttemptKind},
         session::{
             resume_conversation_run_with_provider,
             resume_conversation_run_with_provider_and_live_events,
+            set_productive_executor_readiness_observer,
         },
         session_definition::session_definition_metadata,
         session_reading::SessionEventReader,
-        types::{EmitMode, EventClock},
+        types::{EmitMode, EventClock, RuntimeError},
     },
     tests::{
         helpers::{
@@ -135,6 +138,84 @@ impl ProductiveResumeFixture {
 }
 
 #[test]
+fn executor_readiness_failure_precedes_recovery_reservation() {
+    let fixture = ProductiveResumeFixture::new(workspace_copy("smoke-flow"));
+    drop(fixture.create_recovery(&ContextHistory::default()));
+    set_productive_executor_readiness_observer(|| {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "injected unsupported Tool platform",
+        ))
+    });
+    let mut provider = SessionProvider::default();
+
+    let error = resume_conversation_run_with_provider(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        EmitMode::Human,
+        || panic!("credential resolution must follow Executor readiness"),
+        &mut provider,
+    )
+    .expect_err("failed readiness must stop before recovery reservation");
+
+    assert!(matches!(
+        error,
+        RuntimeError::Executor(ref failure)
+            if failure.code() == proto::ExecutorErrorCodeV0::PolicyUnsupported
+    ));
+    assert_eq!(provider.calls, 0);
+    reserve_conversation_run_recovery(&fixture.workspace, "conversation", "run")
+        .expect("failed readiness leaves recovery reservation available")
+        .release()
+        .expect("recovery reservation releases");
+}
+
+#[test]
+fn paired_resume_refuses_to_redispatch_an_uncertain_productive_attempt() {
+    let workspace = workspace_copy("smoke-flow");
+    disable_smoke_echo_tool(&workspace);
+    let fixture = ProductiveResumeFixture::new(workspace);
+    append_run_attempt_intent(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        &RunAttemptIntent {
+            attempt_id: "provider-001".to_owned(),
+            attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
+            request_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                .to_owned(),
+            tool_id: None,
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        },
+    )
+    .expect("uncertain Provider intent is durable");
+    let run_log = crate::tests::helpers::workspace_session_dir(&fixture.workspace)
+        .join("conversation/runs/run/run-log.jsonl");
+    let before = fs::read(&run_log).expect("Run Log reads before Resume");
+    let mut provider = SessionProvider::default();
+
+    let error = resume_conversation_run_with_provider(
+        &fixture.workspace,
+        "conversation",
+        "run",
+        EmitMode::Human,
+        || Ok(fixture.execution_fixture.credential().clone()),
+        &mut provider,
+    )
+    .expect_err("Resume must not automatically repeat an uncertain attempt");
+
+    assert_eq!(error.exit_code(), 65);
+    assert!(error.to_string().contains("uncertain"), "{error}");
+    assert_eq!(provider.calls, 0, "provider must not redispatch");
+    assert_eq!(
+        fs::read(&run_log).expect("Run Log reads after rejected Resume"),
+        before
+    );
+}
+
+#[test]
 fn exact_productive_resume_reuses_the_committed_attempt_and_finishes_the_addressed_run() {
     let workspace = workspace_copy("smoke-flow");
     disable_smoke_echo_tool(&workspace);
@@ -169,7 +250,7 @@ fn exact_productive_resume_reuses_the_committed_attempt_and_finishes_the_address
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut recovery_provider,
     )
     .expect("exact productive resume completes");
@@ -291,7 +372,7 @@ fn exact_productive_resume_resyncs_a_complete_recovery_record_before_publication
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut second_retry_provider,
     )
     .expect_err("reopen must resynchronize the visible terminal record");
@@ -320,7 +401,7 @@ fn exact_productive_resume_resyncs_a_complete_recovery_record_before_publication
         "conversation",
         "run",
         EmitMode::Human,
-        fixture.execution_fixture.credential(),
+        || Ok(fixture.execution_fixture.credential().clone()),
         &mut final_retry_provider,
     )
     .expect("the synchronized terminal record resumes exactly once");

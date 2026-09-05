@@ -10,19 +10,18 @@ use crate::runtime::{
     execution_plan::{
         FlowExecutionAction, FlowExecutionOptions, FlowExecutionPlan, PlannedToolContext,
         RuntimeExecution, RuntimeFailure, RuntimeToolPolicy, ToolSideEffectMode,
-        runtime_protected_path_match_mode,
     },
-    fs_guards::{AnchoredDir, AnchoredWorkspace},
+    fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
     openai_codex::ProviderTurn,
     planning::{emit_planned_tool, plan_flow},
     policy_resolution::command_policy_for_phase,
     productive::{
-        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor,
+        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor, ProductiveToolPreflight,
         execute_productive_flow_with_tool_executor,
     },
     stream_signature::FlowInvocation,
-    tool_runner::{ToolExecutionOutcome, ToolInvocation},
+    tool_runner::ToolInvocation,
     types::{
         EventClock, MAX_CANONICAL_EVENT_BYTES, MAX_FLOW_EVENTS, MAX_FLOW_INVOCATIONS,
         MAX_LIVE_FLOW_INVOCATIONS, MAX_SESSION_EVENT_BYTES, RuntimeError,
@@ -34,7 +33,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Condvar, Mutex, mpsc},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[test]
@@ -200,7 +199,6 @@ fn emit_hello_fixture_for_failure_budget(
             phase,
             policy: RuntimeToolPolicy {
                 command,
-                protected_path_match_mode: runtime_protected_path_match_mode(&policy.target),
                 stub_model_fixture_profile: false,
             },
             phase_failure_payload: &phase_failure_payload,
@@ -252,7 +250,6 @@ impl RuntimeEventSink for BlockingFlowStartedSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.event_type == EventType::FlowStarted && !self.blocked {
             self.blocked = true;
@@ -293,17 +290,52 @@ impl ProductiveProvider for ImmediateProductiveProvider {
 struct LiveLimitToolExecutor;
 
 impl ProductiveToolExecutor for LiveLimitToolExecutor {
+    type Prepared = ();
+    type Waiting = ();
+
     fn supports_productive_tools(&self) -> bool {
         true
     }
 
-    fn execute(
+    fn prepare(
         &mut self,
         _invocation: &ToolInvocation,
-        _workspace: &AnchoredDir,
-        _timeout: Duration,
-    ) -> Result<ToolExecutionOutcome, RuntimeError> {
+        _workspace: &AnchoredWorkspace,
+        _policy: &core_policy::PolicyArtifact,
+        _command_policy: &core_policy::CommandPolicy,
+        _request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError> {
         panic!("the live invocation limit must reject before productive Tool dispatch")
+    }
+
+    fn request_hash<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
+        unreachable!()
+    }
+
+    fn policy_digest<'a>(&self, _prepared: &'a Self::Prepared) -> &'a str {
+        unreachable!()
+    }
+
+    fn max_concurrent_processes_and_threads(&self, _prepared: &Self::Prepared) -> u32 {
+        unreachable!()
+    }
+
+    fn runtime_profile(&self, _prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
+        unreachable!()
+    }
+
+    fn preflight(
+        &mut self,
+        _prepared: Self::Prepared,
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        unreachable!()
+    }
+
+    fn start(
+        &mut self,
+        _waiting: Self::Waiting,
+    ) -> Result<crate::runtime::executor::ExecutorDispatchOutcome, RuntimeError> {
+        unreachable!()
     }
 }
 
@@ -373,33 +405,7 @@ fn smoke_apply_plan(session_id: &str) -> (PathBuf, FlowExecutionPlan) {
 }
 
 #[test]
-fn resume_commits_only_events_after_the_persisted_prefix() {
-    let (workspace, plan) = smoke_apply_plan("resumesuffix001");
-    let mut sink = CollectingEventSink::default();
-    apply_flow_with_sink(
-        FlowApplication {
-            workspace: &workspace,
-            session_id: "resumesuffix001",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Resume {
-                    prefix_event_count: 2,
-                },
-            ),
-            plan: &plan,
-        },
-        Some(&mut sink),
-    )
-    .expect("resume applies the uncommitted suffix");
-
-    assert!(
-        sink.0.iter().all(|event| event.sequence > 2),
-        "resume must not re-commit persisted events"
-    );
-}
-
-#[test]
-fn production_apply_and_resume_reject_live_flow_overflow() {
+fn production_apply_rejects_live_flow_overflow() {
     let (started, observed) = mpsc::channel();
     let release = Arc::new((Mutex::new(false), Condvar::new()));
     let workers = (0..MAX_LIVE_FLOW_INVOCATIONS)
@@ -452,21 +458,6 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
         },
         Some(&mut overflow_sink),
     );
-    let (resume_workspace, resume_plan) = smoke_apply_plan("liveresumeoverflow");
-    let resume_overflow = apply_flow_with_sink(
-        FlowApplication {
-            workspace: &resume_workspace,
-            session_id: "liveresumeoverflow",
-            options: FlowExecutionOptions::new(
-                EventClock::fixed_fixture(),
-                ToolSideEffectMode::Resume {
-                    prefix_event_count: 2,
-                },
-            ),
-            plan: &resume_plan,
-        },
-        None,
-    );
     let (productive_overflow, productive_sink, provider_calls) =
         productive_execution_at_live_limit();
     let (released, wake) = &*release;
@@ -500,8 +491,6 @@ fn production_apply_and_resume_reject_live_flow_overflow() {
     let diagnostic = &overflow_sink.0[1];
     assert_eq!(diagnostic.payload["code"], "runtime_error");
     assert_eq!(diagnostic.payload["message"], "runtime execution failed");
-    let error = resume_overflow.expect_err("resume must reacquire every active prefix flow");
-    assert!(error.to_string().contains("max 32"), "{error}");
     let productive_overflow =
         productive_overflow.expect("productive live invocation failure is terminalized");
     let error = productive_overflow

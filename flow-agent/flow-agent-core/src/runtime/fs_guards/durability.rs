@@ -77,7 +77,7 @@ fn observe_windows_directory_sync(boundary: WindowsDirectorySyncBoundary) {
     });
 }
 
-pub(crate) fn directory_sync_checkpoint(path: &Path) -> Result<(), RuntimeError> {
+fn directory_sync_checkpoint(path: &Path) -> Result<(), RuntimeError> {
     #[cfg(test)]
     DIRECTORY_SYNC_TRACE.with_borrow_mut(|trace| {
         if let Some(trace) = trace {
@@ -154,7 +154,7 @@ pub(crate) fn sync_directory(path: &Path) -> Result<(), RuntimeError> {
 }
 
 #[cfg(windows)]
-pub(super) fn sync_windows_directory(
+fn sync_windows_directory(
     path: &Path,
     expected_identity: Option<AnchoredDirectoryIdentity>,
 ) -> Result<(), RuntimeError> {

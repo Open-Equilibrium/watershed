@@ -8,8 +8,13 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+
 [features]
 m11-budget-evidence = []
+m12-install-acceptance = []
+m12-startup-evidence = []
 
 [dependencies]
 cap-fs-ext.workspace = true
@@ -36,3 +41,11 @@ tokio = { workspace = true, features = ["test-util"] }
 [[example]]
 name = "m11_budgets"
 required-features = ["m11-budget-evidence"]
+
+[[example]]
+name = "m12_executor_startup"
+required-features = ["m12-startup-evidence"]
+
+[[example]]
+name = "custom_executor_conformance"
+required-features = ["m12-startup-evidence"]

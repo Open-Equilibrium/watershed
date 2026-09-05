@@ -6,6 +6,8 @@ use crate::runtime::types::RuntimeError;
 use std::{io, path::Path};
 
 pub(crate) use lifecycle::CredentialStore;
+#[cfg(any(all(target_os = "linux", target_arch = "x86_64"), all(test, windows)))]
+pub(crate) use platform::default_credential_store_path;
 
 #[cfg(test)]
 pub(crate) use lifecycle::CREDENTIAL_STORE_MAX_BYTES;
@@ -15,7 +17,7 @@ pub(crate) use platform::{
 };
 #[cfg(all(test, windows))]
 pub(crate) use platform::{
-    default_credential_store_path, set_windows_credential_world_access_for_test,
+    set_windows_credential_world_access_for_test,
     windows_credential_directory_is_current_user_only_for_test,
     windows_credential_file_is_current_user_only_for_test,
 };

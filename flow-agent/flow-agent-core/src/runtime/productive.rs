@@ -4,18 +4,22 @@ use crate::runtime::run_attempts::RunAttemptKind;
 use crate::runtime::{
     context::ContextModelProfile,
     conversations::MAX_CONVERSATION_RECORD_BYTES,
-    fs_guards::{AnchoredDir, AnchoredWorkspace},
+    executor::{
+        ExecutorDispatchOutcome, ExecutorPreflightOutcome, PreparedExecutor, PreparedExecutorTool,
+        PreparedExecutorWaiting,
+    },
+    fs_guards::AnchoredWorkspace,
     oauth_credential::CredentialRecord,
     openai_codex::{OPENAI_CODEX_RESPONSES_URL, ProviderTurn, request_responses_at},
     productive_capacity::ProductiveDispatchReservation,
     responses::MAX_RESPONSES_DECODED_STREAM_BYTES,
-    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolExecutionOutcome, ToolInvocation},
+    tool_runner::{MAX_TOOL_STREAM_BYTES, ToolInvocation},
     types::{
         CANCELLED_REASON, EventClock, MAX_SESSION_OBJECT_BYTES, RUNTIME_ERROR_REASON, RuntimeError,
     },
 };
-use std::time::Duration;
 
+mod attempt_codec;
 mod execution;
 mod platform;
 mod provider_result;
@@ -23,15 +27,20 @@ mod provider_turn;
 mod reconciliation;
 mod tool;
 mod tool_result;
-pub(crate) use execution::execute_productive_flow_with_recovery;
+#[cfg(test)]
+pub(crate) use attempt_codec::{recovered_tool_terminal, recovered_tool_value};
+pub(crate) use execution::execute_productive_flow_with_tool_executor_and_recovery;
 #[cfg(test)]
 pub(crate) use execution::{
-    execute_productive_flow, execute_productive_flow_with_tool_executor,
-    execute_productive_flow_with_tool_executor_and_recovery,
+    execute_productive_flow, execute_productive_flow_with_recovery,
+    execute_productive_flow_with_tool_executor,
 };
 pub(crate) use platform::ensure_productive_execution_platform;
+pub(crate) use platform::ensure_productive_tool_execution_platform;
 #[cfg(test)]
 pub(crate) use platform::productive_execution_supported_release;
+#[cfg(test)]
+pub(crate) use platform::productive_tool_execution_supported_release;
 #[cfg(test)]
 pub(crate) use provider_result::MAX_ACCUMULATED_PROVIDER_INPUT_BYTES;
 pub(crate) use provider_result::MAX_DURABLE_PROVIDER_OUTPUT_BYTES;
@@ -46,15 +55,12 @@ pub use reconciliation::{
 #[cfg(all(test, unix))]
 pub(crate) use tool::SystemProductiveToolExecutor;
 #[cfg(test)]
-pub(crate) use tool::recovered_tool_value;
+pub(crate) use tool::test_enforcement_receipt;
 #[cfg(test)]
-pub(crate) use tool::{recovered_tool_terminal, tool_result_value, tool_terminal};
+pub(crate) use tool_result::{tool_result_value, tool_terminal};
 
-const PROVIDER_CANCELLED_SCHEMA_V0: &str = "flow-provider-cancelled-v0";
 const PROVIDER_ERROR_SCHEMA_V0: &str = "flow-provider-error-v0";
-const PROVIDER_OUTPUT_SCHEMA_V1: &str = "flow-provider-output-v1";
 const PROVIDER_OUTPUT_SCHEMA_V2: &str = "flow-provider-output-v2";
-const TOOL_ATTEMPT_OUTPUT_SCHEMA_V0: &str = "flow-tool-attempt-output-v0";
 
 #[cfg(test)]
 type ProductiveResultPersistObserver = (RunAttemptKind, Box<dyn FnOnce()>);
@@ -150,19 +156,137 @@ impl ProductiveProvider for OpenAiCodexProvider {
         credential: &CredentialRecord,
         body: &serde_json::Value,
     ) -> Result<ProviderTurn, RuntimeError> {
+        #[cfg(feature = "m12-install-acceptance")]
+        // This feature-gated CI fixture is the only provider hook before network dispatch.
+        if let Some(turn) = crate::runtime::m12_install_acceptance::maybe_provider_turn(body)? {
+            return Ok(turn);
+        }
         request_responses_at(OPENAI_CODEX_RESPONSES_URL, credential, body)
     }
 }
 
 pub(crate) trait ProductiveToolExecutor {
+    type Prepared;
+    type Waiting;
+
     fn supports_productive_tools(&self) -> bool;
 
-    fn execute(
+    fn prepare(
         &mut self,
         invocation: &ToolInvocation,
-        workspace: &AnchoredDir,
-        timeout: Duration,
-    ) -> Result<ToolExecutionOutcome, RuntimeError>;
+        workspace: &AnchoredWorkspace,
+        policy: &core_policy::PolicyArtifact,
+        command_policy: &core_policy::CommandPolicy,
+        request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError>;
+
+    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str;
+
+    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str;
+
+    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32;
+
+    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0;
+
+    fn validate_enforcement_receipt(
+        &self,
+        prepared: &Self::Prepared,
+        receipt: &proto::EnforcementReceiptV0,
+    ) -> Result<(), RuntimeError> {
+        proto::validate_enforcement_receipt_v0(
+            receipt,
+            self.policy_digest(prepared),
+            self.runtime_profile(prepared),
+            self.max_concurrent_processes_and_threads(prepared),
+        )
+        .map_err(|_| {
+            RuntimeError::Protocol(
+                "Executor enforcement receipt does not match its prepared request".to_owned(),
+            )
+        })
+    }
+
+    fn preflight(
+        &mut self,
+        prepared: Self::Prepared,
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError>;
+
+    fn start(&mut self, waiting: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError>;
+}
+
+pub(crate) enum ProductiveToolPreflight<T> {
+    Ready(T),
+    Rejected(proto::ExecutorErrorCodeV0),
+}
+
+impl ProductiveToolExecutor for Option<PreparedExecutor> {
+    type Prepared = PreparedExecutorTool;
+    type Waiting = PreparedExecutorWaiting;
+
+    fn supports_productive_tools(&self) -> bool {
+        self.is_some()
+    }
+
+    fn prepare(
+        &mut self,
+        invocation: &ToolInvocation,
+        workspace: &AnchoredWorkspace,
+        policy: &core_policy::PolicyArtifact,
+        command_policy: &core_policy::CommandPolicy,
+        request_id: &str,
+    ) -> Result<Self::Prepared, RuntimeError> {
+        self.as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .prepare_tool(workspace, policy, command_policy, invocation, request_id)
+    }
+
+    fn request_hash<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        prepared.request_hash()
+    }
+
+    fn policy_digest<'a>(&self, prepared: &'a Self::Prepared) -> &'a str {
+        prepared.policy_digest()
+    }
+
+    fn max_concurrent_processes_and_threads(&self, prepared: &Self::Prepared) -> u32 {
+        prepared.max_concurrent_processes_and_threads()
+    }
+
+    fn runtime_profile(&self, prepared: &Self::Prepared) -> proto::RuntimeReadProfileV0 {
+        prepared.runtime_profile()
+    }
+
+    fn preflight(
+        &mut self,
+        prepared: Self::Prepared,
+    ) -> Result<ProductiveToolPreflight<Self::Waiting>, RuntimeError> {
+        match self
+            .as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .preflight_prepared(prepared)?
+        {
+            ExecutorPreflightOutcome::Ready(waiting) => {
+                Ok(ProductiveToolPreflight::Ready(*waiting))
+            }
+            ExecutorPreflightOutcome::Rejected(code) => Ok(ProductiveToolPreflight::Rejected(code)),
+        }
+    }
+
+    fn start(&mut self, waiting: Self::Waiting) -> Result<ExecutorDispatchOutcome, RuntimeError> {
+        self.as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .start_prepared(waiting)
+    }
+
+    fn validate_enforcement_receipt(
+        &self,
+        prepared: &Self::Prepared,
+        receipt: &proto::EnforcementReceiptV0,
+    ) -> Result<(), RuntimeError> {
+        self.as_ref()
+            .ok_or(RuntimeError::ProductiveExecutionUnavailable)?
+            .validate_prepared_receipt(prepared, receipt)
+    }
 }
 
 struct ProductiveContext<'a, P, A, S, T> {
@@ -209,8 +333,6 @@ fn emit_and_commit<S: crate::runtime::event_writer::RuntimeEventSink>(
         &action.event,
         &action.canonical_jsonl,
         action.context_checkpoint.clone(),
-        #[cfg(test)]
-        sink.measurement_started_at(),
     );
     if result.is_err() {
         *event_commit_failed = true;
@@ -238,16 +360,12 @@ pub(crate) const PRODUCTIVE_CLOSURE_OBJECT_BYTES: u64 = MAX_SESSION_OBJECT_BYTES
 
 pub(crate) fn provider_dispatch_reservation(
     compiled: &crate::runtime::context::CompiledContext,
-) -> Result<ProductiveDispatchReservation, RuntimeError> {
+) -> ProductiveDispatchReservation {
     let context_bytes = u64::try_from(compiled.manifest.line.len()).unwrap_or(u64::MAX);
-    let context_object_bytes = compiled.objects.iter().try_fold(0_u64, |total, object| {
-        total
-            .checked_add(u64::try_from(object.bytes.len()).unwrap_or(u64::MAX))
-            .ok_or_else(|| {
-                RuntimeError::Protocol("provider context object byte count overflow".to_owned())
-            })
-    })?;
-    Ok(ProductiveDispatchReservation {
+    let context_object_bytes = compiled.objects.iter().fold(0_u64, |total, object| {
+        total.saturating_add(u64::try_from(object.bytes.len()).unwrap_or(u64::MAX))
+    });
+    ProductiveDispatchReservation {
         context_bytes,
         event_bytes: PROVIDER_EVENT_RESERVATION_BYTES,
         event_count: u64::try_from(MAX_PROVIDER_MESSAGE_DELTA_CHUNKS + PRODUCTIVE_CLOSURE_RECORDS)
@@ -255,11 +373,8 @@ pub(crate) fn provider_dispatch_reservation(
         event_record_bytes: u64::try_from(MAX_CONVERSATION_RECORD_BYTES + 1).unwrap_or(u64::MAX),
         metadata_bytes: PRODUCTIVE_METADATA_RESERVATION_BYTES,
         object_bytes: context_object_bytes
-            .checked_add(MAX_DURABLE_PROVIDER_OUTPUT_BYTES as u64)
-            .and_then(|bytes| bytes.checked_add(PRODUCTIVE_CLOSURE_OBJECT_BYTES))
-            .ok_or_else(|| {
-                RuntimeError::Protocol("provider object reservation overflow".to_owned())
-            })?,
+            .saturating_add(MAX_DURABLE_PROVIDER_OUTPUT_BYTES as u64)
+            .saturating_add(PRODUCTIVE_CLOSURE_OBJECT_BYTES),
         object_count: compiled
             .objects
             .len()
@@ -267,7 +382,7 @@ pub(crate) fn provider_dispatch_reservation(
                 MAX_DURABLE_PROVIDER_OUTPUT_BYTES.div_ceil(MAX_SESSION_OBJECT_BYTES as usize),
             )
             .saturating_add(PRODUCTIVE_CLOSURE_OBJECTS),
-    })
+    }
 }
 
 pub(crate) fn tool_dispatch_reservation() -> ProductiveDispatchReservation {

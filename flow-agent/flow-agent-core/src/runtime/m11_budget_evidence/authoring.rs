@@ -7,7 +7,7 @@ use crate::runtime::authoring::{
 use core_script::{
     BlockIdentity, MAX_REGISTRY_ENTRIES, MAX_REGISTRY_FILE_BYTES, MAX_REGISTRY_TOTAL_BYTES,
     NetworkDeny, NetworkPolicy, RegistryBlock, RegistryBlockKind, ToolBlock, ToolCommand, ToolKind,
-    parse_registry_block, registry_block_definition_bytes,
+    ToolRuntimeProfile, parse_registry_block, registry_block_definition_bytes,
 };
 use std::{fs, path::Path, time::Instant};
 
@@ -25,9 +25,10 @@ pub(crate) fn maximum_tool() -> RegistryBlock {
         script_runtime: None,
         script_body: None,
         allowed_parameters: Vec::new(),
-        read_scope: Vec::new(),
-        write_scope: Vec::new(),
-        protected_path_grants: Vec::new(),
+        max_concurrent_processes_and_threads: 16,
+        runtime_profile: ToolRuntimeProfile::Exact,
+        read_only_mounts: Vec::new(),
+        writable_mounts: Vec::new(),
         network: NetworkPolicy::Deny(NetworkDeny),
     });
     let empty_bytes = registry_block_definition_bytes(&block)

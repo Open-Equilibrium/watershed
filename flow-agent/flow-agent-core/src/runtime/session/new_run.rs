@@ -3,15 +3,13 @@ use super::reconcile_productive_preflight;
 #[cfg(test)]
 use super::{run_post_config_observer, run_pre_plan_observer};
 #[cfg(test)]
-use crate::runtime::event_writer::EventWriterTimings;
-#[cfg(test)]
 use crate::runtime::event_writer::post_writer_finish_observer;
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_anchored_workspace, preflight_flow_execution_plan},
     auth::resolve_openai_codex_credential,
     config_io::{ExecutionBackend, load_global_config_authority, require_execution_backend},
     event_writer::SerialSessionWriter,
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target},
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
     fs_guards::{AnchoredFile, AnchoredWorkspace},
     instructions::read_applicable_agent_instructions,
     live_events::LiveEventNotifier,
@@ -33,15 +31,7 @@ pub fn run_flow(
     flow_ref: &str,
     emit: EmitMode,
 ) -> Result<RunOutput, RuntimeError> {
-    run_flow_internal_with_root_input(
-        workspace,
-        flow_ref,
-        None,
-        None,
-        #[cfg(test)]
-        None,
-        emit == EmitMode::Jsonl,
-    )
+    run_flow_internal_with_root_input(workspace, flow_ref, None, None, emit == EmitMode::Jsonl)
 }
 
 /// Runs a Flow with one validated typed selected-root-Flow input.
@@ -56,8 +46,6 @@ pub fn run_flow_with_root_input(
         flow_ref,
         Some(root_input),
         None,
-        #[cfg(test)]
-        None,
         emit == EmitMode::Jsonl,
     )
 }
@@ -71,15 +59,8 @@ pub fn run_flow_with_live_events(
     flow_ref: &str,
     notifier: LiveEventNotifier,
 ) -> Result<RunOutput, RuntimeError> {
-    let mut output = run_flow_internal_with_root_input(
-        workspace,
-        flow_ref,
-        None,
-        Some(notifier),
-        #[cfg(test)]
-        None,
-        false,
-    )?;
+    let mut output =
+        run_flow_internal_with_root_input(workspace, flow_ref, None, Some(notifier), false)?;
     output.stdout.clear();
     Ok(output)
 }
@@ -96,8 +77,6 @@ pub fn run_flow_with_root_input_and_live_events(
         flow_ref,
         Some(root_input),
         Some(notifier),
-        #[cfg(test)]
-        None,
         false,
     )?;
     output.stdout.clear();
@@ -119,8 +98,6 @@ pub fn run_flow_with_execution_activation<G>(
         flow_ref,
         root_input,
         notifier,
-        #[cfg(test)]
-        None,
         emit == EmitMode::Jsonl && !live,
         activate,
     )?;
@@ -130,23 +107,11 @@ pub fn run_flow_with_execution_activation<G>(
     Ok(output)
 }
 
-#[cfg(test)]
-pub fn run_flow_internal(
-    workspace: impl AsRef<Path>,
-    flow_ref: &str,
-    notifier: Option<LiveEventNotifier>,
-    timings: Option<&mut EventWriterTimings>,
-    capture_jsonl: bool,
-) -> Result<RunOutput, RuntimeError> {
-    run_flow_internal_with_root_input(workspace, flow_ref, None, notifier, timings, capture_jsonl)
-}
-
 fn run_flow_internal_with_root_input(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
-    #[cfg(test)] timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
 ) -> Result<RunOutput, RuntimeError> {
     run_flow_internal_with_root_input_and_activation(
@@ -154,20 +119,16 @@ fn run_flow_internal_with_root_input(
         flow_ref,
         root_input,
         notifier,
-        #[cfg(test)]
-        timings,
         capture_jsonl,
         |_| Ok(()),
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_flow_internal_with_root_input_and_activation<G>(
     workspace: impl AsRef<Path>,
     flow_ref: &str,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
-    #[cfg(test)] timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
     activate: impl FnOnce(bool) -> Result<G, RuntimeError>,
 ) -> Result<RunOutput, RuntimeError> {
@@ -176,8 +137,6 @@ fn run_flow_internal_with_root_input_and_activation<G>(
         flow_ref,
         root_input,
         notifier,
-        #[cfg(test)]
-        timings,
         capture_jsonl,
         activate,
         (|result| result, |result| result),
@@ -195,7 +154,6 @@ pub(crate) fn run_flow_internal_with_cleanup_observer(
     run_flow_internal_with_cleanup_observer_impl(
         workspace,
         flow_ref,
-        None,
         None,
         None,
         capture_jsonl,
@@ -219,7 +177,6 @@ pub(crate) fn run_flow_internal_with_stage_observers(
         flow_ref,
         None,
         None,
-        None,
         capture_jsonl,
         |_| Ok(()),
         (after_operation, after_finalization),
@@ -233,7 +190,6 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     flow_ref: &str,
     root_input: Option<core_script::FlowValue>,
     notifier: Option<LiveEventNotifier>,
-    #[cfg(test)] timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
     activate: impl FnOnce(bool) -> Result<G, RuntimeError>,
     stage_observers: (
@@ -264,18 +220,14 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     )?;
     let definition_metadata =
         reconcile_productive_preflight(session_definition_metadata(&registry, flow_block))?;
-    let policy = reconcile_productive_preflight(core_policy::compile_policy_artifact(
-        &registry,
-        flow_ref,
-        runtime_policy_target(),
-    ))?;
+    let policy =
+        reconcile_productive_preflight(core_policy::compile_policy_artifact(&registry, flow_ref))?;
     if let ExecutionBackend::OpenAiCodex {
         model,
         model_profile,
     } = backend
     {
         reconcile_productive_preflight(ensure_productive_execution_platform())?;
-        let credential = reconcile_productive_preflight(resolve_openai_codex_credential())?;
         let agent_instructions = reconcile_productive_preflight(
             read_applicable_agent_instructions(&authority.home, &execution_workspace),
         )?;
@@ -291,7 +243,7 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
             &policy,
             root_input,
             capture_jsonl,
-            &credential,
+            resolve_openai_codex_credential,
             &agent_instructions,
             notifier,
             &mut provider,
@@ -325,12 +277,7 @@ fn run_flow_internal_with_cleanup_observer_impl<G>(
     let mut finalization_result = Ok(());
     let operation_result = (|| {
         write_reserved_session_metadata(&reservation, Some(&definition_metadata))?;
-        let mut serial_writer = SerialSessionWriter::start(
-            &reservation,
-            notifier,
-            #[cfg(test)]
-            timings,
-        )?;
+        let mut serial_writer = SerialSessionWriter::start(&reservation, notifier)?;
         if capture_jsonl {
             serial_writer.enable_jsonl_capture();
         }

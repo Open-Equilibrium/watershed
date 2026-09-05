@@ -1,7 +1,7 @@
 use crate::runtime::types::{MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits};
 use cap_fs_ext::{DirExt, MetadataExt as _};
 use cap_std::{ambient_authority, fs::Dir};
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 use std::cell::RefCell;
 use std::{
     ffi::OsStr,
@@ -22,9 +22,17 @@ mod bounded_read;
 pub use bounded_read::for_each_reader_line_with_limit;
 pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
 
+mod local_state;
+#[cfg(test)]
+pub(crate) use local_state::PROTECTED_STATE_LOCK_DEADLINE;
+#[cfg(any(unix, test))]
+pub(crate) use local_state::unix_access_is_private;
+pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
+
 mod anchored_file;
 #[cfg(windows)]
 pub(crate) use anchored_file::open_files_share_identity;
+pub use anchored_file::validate_real_file;
 pub use anchored_file::{
     AnchoredFile, AnchoredFileIdentity, anchored_file_identity, create_anchored_file,
     create_anchored_file_for_update, ensure_anchored_new_leaf_available,
@@ -33,7 +41,7 @@ pub use anchored_file::{
     open_anchored_file_for_read, open_anchored_file_for_update, open_anchored_real_file_for_read,
     open_anchored_session_log_append_file, read_anchored_file_with_limit,
     read_anchored_to_string_with_limit, remove_owned_anchored_file,
-    validate_open_session_log_append_file, validate_real_file, verify_owned_anchored_file,
+    validate_open_session_log_append_file, verify_owned_anchored_file,
     verify_owned_anchored_marker, with_anchored_replacement_temp,
 };
 #[cfg(test)]
@@ -53,9 +61,11 @@ pub(crate) use durability::{
 pub(crate) use durability::{sync_directory, sync_retained_directory as sync_anchored_directory};
 
 mod runtime_dirs;
+pub use runtime_dirs::RuntimeDirs;
 #[cfg(test)]
 pub use runtime_dirs::ensure_runtime_dirs;
-pub use runtime_dirs::{RuntimeDirs, open_runtime_dir};
+#[cfg(test)]
+pub use runtime_dirs::open_runtime_dir;
 pub(crate) use runtime_dirs::{
     ensure_anchored_runtime_dirs, open_anchored_runtime_dir, open_anchored_runtime_dir_read_only,
 };
@@ -86,11 +96,13 @@ mod segmented_jsonl;
 pub(crate) use segmented_jsonl::verify_segmented_jsonl_inventory;
 #[cfg(test)]
 pub use segmented_jsonl::with_segmented_jsonl_discovery_metrics_for_test;
+#[cfg(any(test, target_os = "linux", feature = "m11-budget-evidence"))]
+pub use segmented_jsonl::{SegmentedJsonlLeaf, parse_segmented_jsonl_leaf};
 pub use segmented_jsonl::{
-    SegmentedJsonlLeaf, canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
-    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, parse_segmented_jsonl_leaf,
-    retry_event_segment_discovery, segmented_jsonl_files, segmented_jsonl_leaf,
-    segmented_jsonl_leaf_stem, segmented_jsonl_path, segmented_jsonl_segment_count,
+    canonical_segmented_jsonl_sibling, for_each_segmented_jsonl_line,
+    for_each_segmented_jsonl_member, is_segmented_jsonl_ordinal, retry_event_segment_discovery,
+    segmented_jsonl_files, segmented_jsonl_leaf, segmented_jsonl_leaf_stem, segmented_jsonl_path,
+    segmented_jsonl_segment_count,
 };
 
 #[derive(Clone, Debug)]
@@ -161,6 +173,55 @@ fn open_anchored_windows_publishable_directory(parent: &Dir, leaf: &str) -> io::
 }
 
 impl AnchoredDir {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    pub(crate) fn open_capability_nofollow(
+        &self,
+        relative: &str,
+    ) -> Result<std::os::fd::OwnedFd, RuntimeError> {
+        use rustix::fs::{Mode, OFlags};
+
+        let mut descriptor = rustix::io::dup(self.dir.as_ref()).map_err(|source| {
+            path_io_error(
+                &self.path,
+                std::io::Error::from_raw_os_error(source.raw_os_error()),
+            )
+        })?;
+        if relative.is_empty() {
+            return Ok(descriptor);
+        }
+        for component in std::path::Path::new(relative).components() {
+            let std::path::Component::Normal(component) = component else {
+                return Err(RuntimeError::Protocol(
+                    "workspace capability path is not canonical".to_owned(),
+                ));
+            };
+            descriptor = rustix::fs::openat(
+                &descriptor,
+                component,
+                OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(|source| {
+                path_io_error(
+                    &self.path.join(relative),
+                    std::io::Error::from_raw_os_error(source.raw_os_error()),
+                )
+            })?;
+            let stat = rustix::fs::fstat(&descriptor).map_err(|source| {
+                path_io_error(
+                    &self.path.join(relative),
+                    std::io::Error::from_raw_os_error(source.raw_os_error()),
+                )
+            })?;
+            if rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::Symlink {
+                return Err(RuntimeError::Protocol(
+                    "workspace capability path must not contain symlinks".to_owned(),
+                ));
+            }
+        }
+        Ok(descriptor)
+    }
+
     pub(crate) fn workspace(path: &Path) -> Result<Self, RuntimeError> {
         let dir = Dir::open_ambient_dir(path, ambient_authority())
             .map_err(|source| path_io_error(path, source))?;
@@ -255,6 +316,8 @@ impl AnchoredDir {
                     }
                     #[cfg(not(unix))]
                     {
+                        #[cfg(all(test, windows))]
+                        observe_private_directory_missing();
                         create_private_anchored_directory(&self.dir, leaf)
                     }
                 } else {
@@ -309,15 +372,6 @@ impl AnchoredDir {
             validate_opened_private_directory(&path, &child.dir)?;
         }
         Ok(Some(child))
-    }
-
-    #[cfg(windows)]
-    pub(crate) fn open_existing_child(
-        &self,
-        leaf: &str,
-        error_mode: DirectoryErrorMode,
-    ) -> Result<Self, RuntimeError> {
-        self.open_existing_child_with_publication(leaf.as_ref(), error_mode, false)
     }
 
     fn open_existing_child_with_publication(
@@ -647,7 +701,7 @@ pub(crate) fn validate_unix_private_directory_metadata(
             path.display()
         )));
     }
-    if mode & 0o077 != 0 {
+    if !unix_access_is_private(owner_uid, mode, effective_uid) {
         return Err(RuntimeError::Protocol(format!(
             "{} must not grant group or other access",
             path.display()
@@ -694,15 +748,34 @@ pub(crate) fn windows_directory_is_current_user_only_for_test(
         .map_err(|source| path_io_error(path, source))
 }
 
-#[cfg(all(test, unix))]
-type PrivateDirectoryOpenObserver = Box<dyn FnOnce()>;
+#[cfg(all(test, any(unix, windows)))]
+type PrivateDirectoryObserver = Box<dyn FnOnce()>;
 
 #[cfg(all(test, unix))]
 std::thread_local! {
-    static PRIVATE_DIRECTORY_CREATE_OBSERVER: RefCell<Option<PrivateDirectoryOpenObserver>> =
+    static PRIVATE_DIRECTORY_CREATE_OBSERVER: RefCell<Option<PrivateDirectoryObserver>> =
         RefCell::new(None);
-    static PRIVATE_DIRECTORY_OPEN_OBSERVER: RefCell<Option<PrivateDirectoryOpenObserver>> =
+    static PRIVATE_DIRECTORY_OPEN_OBSERVER: RefCell<Option<PrivateDirectoryObserver>> =
         RefCell::new(None);
+}
+
+#[cfg(all(test, windows))]
+std::thread_local! {
+    static PRIVATE_DIRECTORY_MISSING_OBSERVER: RefCell<Option<PrivateDirectoryObserver>> =
+        RefCell::new(None);
+}
+
+#[cfg(all(test, windows))]
+pub fn set_private_directory_missing_observer(observer: impl FnOnce() + 'static) {
+    PRIVATE_DIRECTORY_MISSING_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
+}
+
+#[cfg(all(test, windows))]
+fn observe_private_directory_missing() {
+    let observer = PRIVATE_DIRECTORY_MISSING_OBSERVER.with_borrow_mut(Option::take);
+    if let Some(observer) = observer {
+        observer();
+    }
 }
 
 #[cfg(all(test, unix))]

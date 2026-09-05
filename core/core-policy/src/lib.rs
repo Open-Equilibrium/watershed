@@ -4,21 +4,16 @@
 
 mod artifact;
 mod compile;
-mod protected_paths;
 
 pub use artifact::{
     AllowedParameterPolicy, CommandPolicy, DenyReasonCode, EnvironmentDefault, EnvironmentPolicy,
     FilesystemPolicy, NetworkPolicy, PhaseScope, PolicyArtifact, PolicyArtifactError,
     PolicyArtifactValidationError, PolicyTarget, RuntimeLimits, canonical_artifact_json,
-    protected_path_match_mode_for_policy_target,
 };
 pub use compile::{PolicyCompileError, compile_policy_artifact};
 pub use core_script::{
-    NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkTransport, ParameterValueType,
-    ScriptRuntime, ToolKind,
-};
-pub use protected_paths::{
-    DEFAULT_PROTECTED_PATHS, ProtectedPathMatchMode, protected_path_pattern_matches,
+    MAX_FILESYSTEM_MOUNTS, NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkTransport,
+    ParameterValueType, ScriptRuntime, ToolKind, ToolRuntimeProfile,
 };
 
 /// Policy artifact version string emitted by the v0 compiler.
@@ -53,6 +48,15 @@ impl TrustedPredefinedCommand {
             Self::Echo => "agent-echo",
             Self::Negative => "agent-negative",
             Self::Read => "agent-read",
+        }
+    }
+
+    /// Returns the executable used by productive runtime commands.
+    pub const fn productive_executable(self) -> Option<&'static str> {
+        match self {
+            Self::Echo => Some("/bin/echo"),
+            Self::Negative => None,
+            Self::Read => Some("/bin/cat"),
         }
     }
 

@@ -1,5 +1,3 @@
-#[cfg(test)]
-use crate::runtime::session_lock::SessionReservation;
 use crate::runtime::{
     digest::is_lowercase_sha256_hex,
     fs_guards::{
@@ -13,8 +11,6 @@ use crate::runtime::{
         MAX_SESSION_SEGMENT_BYTES, RuntimeError, SessionStreamLimits,
     },
 };
-#[cfg(test)]
-use std::cell::Cell;
 use std::{collections::BTreeMap, ffi::OsStr, io, path::Path};
 
 const CONTEXT_STREAM_STEM_SUFFIX: &str = ".contexts";
@@ -46,15 +42,6 @@ impl SessionBundlePaths {
 
     pub(crate) fn from_dirs(dirs: &RuntimeDirs, session_id: &str) -> Self {
         Self::new(dirs.sessions.clone(), dirs.logs.clone(), session_id)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_reservation(reservation: &SessionReservation) -> Self {
-        Self::new(
-            reservation.session_path.parent.clone(),
-            reservation.log_path.parent.clone(),
-            &reservation.session_id,
-        )
     }
 
     pub(crate) fn contexts_in(logs: &AnchoredDir, session_id: &str) -> AnchoredFile {
@@ -90,7 +77,7 @@ impl SessionBundlePaths {
         format!("{session_id}{METADATA_SUFFIX}")
     }
 
-    pub(crate) fn object_prefix(session_id: &str) -> String {
+    fn object_prefix(session_id: &str) -> String {
         format!("{session_id}{OBJECT_DIGEST_SEPARATOR}")
     }
 
@@ -352,23 +339,4 @@ pub(crate) fn ensure_session_object_total(bytes: u64) -> Result<(), RuntimeError
         )));
     }
     Ok(())
-}
-
-#[cfg(test)]
-pub(crate) fn generated_zero_byte_session_objects_for_test(
-    sessions: &AnchoredDir,
-    session_id: &str,
-    count: usize,
-    opened: &Cell<usize>,
-) -> Result<(BTreeMap<String, AnchoredFile>, u64), RuntimeError> {
-    let names = (0..count).map(|index| {
-        Ok(Some(SessionBundlePaths::object_leaf(
-            session_id,
-            &format!("{index:064x}"),
-        )))
-    });
-    collect_session_objects(sessions, session_id, names, |_| {
-        opened.set(opened.get() + 1);
-        Ok(0)
-    })
 }

@@ -4,7 +4,6 @@ use crate::runtime::{
     fs_guards::AnchoredDir,
     types::RuntimeError,
 };
-use core_policy::ProtectedPathMatchMode;
 
 #[cfg(test)]
 std::thread_local! {
@@ -29,7 +28,6 @@ pub fn fixture_tool_applied_ids() -> Vec<String> {
 
 pub fn compile_fixture_tool_effect(
     tool: &core_script::ToolBlock,
-    protected_path_match_mode: ProtectedPathMatchMode,
     policy: &core_policy::CommandPolicy,
 ) -> Result<(PlannedFixtureEffect, Option<&'static str>), RuntimeError> {
     match (&tool.tool_kind, &tool.command) {
@@ -48,7 +46,7 @@ pub fn compile_fixture_tool_effect(
             ))
         }
         (core_script::ToolKind::OwnScript, core_script::ToolCommand::OwnScript(_)) => {
-            let write = plan_own_script(tool, protected_path_match_mode, policy)?;
+            let write = plan_own_script(tool, policy)?;
             Ok((
                 PlannedFixtureEffect::OwnScript {
                     progress: "stub write completed".to_owned(),
@@ -75,12 +73,9 @@ pub fn preflight_planned_fixture_effect(
             execute_predefined_command(&action.command_policy, command_id, argv)?;
             Ok(())
         }
-        PlannedFixtureEffect::OwnScript { write, .. } => preflight_own_script_outputs(
-            workspace,
-            write.as_ref(),
-            action.protected_path_match_mode,
-            &action.command_policy,
-        ),
+        PlannedFixtureEffect::OwnScript { write, .. } => {
+            preflight_own_script_outputs(workspace, write.as_ref())
+        }
     }
 }
 
@@ -101,13 +96,7 @@ pub fn apply_planned_fixture_effect(
         }
         PlannedFixtureEffect::OwnScript { write, .. } => {
             if let Some(write) = write {
-                write_script_output(
-                    workspace,
-                    &write.target,
-                    &write.contents,
-                    action.protected_path_match_mode,
-                    &action.command_policy,
-                )?;
+                write_script_output(workspace, &write.target, &write.contents)?;
             }
             Ok(())
         }

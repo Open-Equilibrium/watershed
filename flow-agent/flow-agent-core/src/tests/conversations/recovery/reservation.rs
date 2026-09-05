@@ -1,8 +1,9 @@
-use super::super::super::helpers::{empty_workspace, ensure_workspace_log_dir};
+use super::super::super::helpers::empty_workspace;
 use super::super::recovery_fixtures::{
     published_productive_recovery_fixture, unpublished_productive_run_fixture,
     write_large_multi_segment_event_prefix, write_terminal_recovery_fixture,
     write_terminal_recovery_snapshot, write_terminal_recovery_snapshot_with_parent,
+    write_terminal_recovery_snapshot_with_parent_and_prior_event_count,
 };
 use super::super::{FLOW_HASH, REGISTRY_HASH, create_review_run, entry, write_terminal_run};
 use crate::runtime::{
@@ -68,12 +69,17 @@ fn active_continuation_serializes_run_publication() {
     )
     .expect("reserved continuation Run is created");
     write_terminal_run(&workspace, "review", "review-2");
-    append_conversation_entry(
-        &workspace,
-        "review",
-        &entry("continued", Some("root"), "review-2", 2),
-    )
-    .expect("reserved continuation history appends");
+    let mut continued = entry("continued", Some("root"), "review-2", 2);
+    continued.recovery_snapshot_hash =
+        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+            &workspace,
+            "review",
+            "review-2",
+            Some("root"),
+            2,
+        );
+    append_conversation_entry(&workspace, "review", &continued)
+        .expect("reserved continuation history appends");
     first.release().expect("first continuation releases");
 
     let second = reserve_conversation_continuation(&workspace, "review", None)
@@ -163,20 +169,31 @@ fn continuation_reservation_selects_latest_or_explicit_entry_without_erasing_des
         .expect("conversation run is created");
         write_terminal_run(&workspace, "review", run_id);
     }
-    append_conversation_entry(&workspace, "review", &entry("root", None, "review", 2))
-        .expect("root appends");
-    append_conversation_entry(
-        &workspace,
-        "review",
-        &entry("left", Some("root"), "review-2", 2),
-    )
-    .expect("left appends");
-    append_conversation_entry(
-        &workspace,
-        "review",
-        &entry("right", Some("root"), "review-3", 2),
-    )
-    .expect("right appends");
+    let mut root = entry("root", None, "review", 2);
+    root.recovery_snapshot_hash = write_terminal_recovery_snapshot(&workspace, "review", "review");
+    append_conversation_entry(&workspace, "review", &root).expect("root appends");
+
+    let mut left = entry("left", Some("root"), "review-2", 2);
+    left.recovery_snapshot_hash =
+        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+            &workspace,
+            "review",
+            "review-2",
+            Some("root"),
+            2,
+        );
+    append_conversation_entry(&workspace, "review", &left).expect("left appends");
+
+    let mut right = entry("right", Some("root"), "review-3", 2);
+    right.recovery_snapshot_hash =
+        write_terminal_recovery_snapshot_with_parent_and_prior_event_count(
+            &workspace,
+            "review",
+            "review-3",
+            Some("root"),
+            2,
+        );
+    append_conversation_entry(&workspace, "review", &right).expect("right appends");
 
     let latest = reserve_conversation_continuation(&workspace, "review", None)
         .expect("latest entry is reservable");
@@ -466,21 +483,6 @@ fn productive_conversation_reservation_uses_one_unique_id_pair() {
     assert_eq!(second.conversation_id(), "review-2");
     assert_eq!(second.run_session_id(), "review-2");
     second.release().expect("second release");
-}
-
-#[test]
-fn productive_conversation_reservation_skips_a_canonical_legacy_log_collision() {
-    let workspace = empty_workspace("productive-conversation-legacy-log-collision");
-    let logs = ensure_workspace_log_dir(&workspace);
-    fs::write(logs.join("review.contexts.jsonl"), "")
-        .expect("legacy context stream collision writes");
-
-    let reservation = reserve_new_conversation_run(&workspace, "review")
-        .expect("legacy log collision selects a unique candidate");
-
-    assert_eq!(reservation.conversation_id(), "review-2");
-    assert_eq!(reservation.run_session_id(), "review-2");
-    reservation.release().expect("reservation releases");
 }
 
 #[test]

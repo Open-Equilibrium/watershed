@@ -4,7 +4,6 @@ use super::workspace::{
 use crate::{
     runtime::{
         context::{ContextHistory, ContextModelProfile},
-        execution_plan::runtime_policy_target,
         fs_guards::AnchoredWorkspace,
         oauth_credential::CredentialRecord,
         productive::ProductiveExecution,
@@ -113,8 +112,7 @@ pub(in crate::tests) fn load_productive_execution_fixture_with_credential(
     credential: CredentialRecord,
 ) -> ProductiveExecutionFixture {
     let registry = load_test_registry(workspace, flow_id);
-    let policy = core_policy::compile_policy_artifact(&registry, flow_id, runtime_policy_target())
-        .expect("policy");
+    let policy = core_policy::compile_policy_artifact(&registry, flow_id).expect("policy");
     let anchored = AnchoredWorkspace::open(workspace).expect("workspace anchor");
     ProductiveExecutionFixture {
         anchored,

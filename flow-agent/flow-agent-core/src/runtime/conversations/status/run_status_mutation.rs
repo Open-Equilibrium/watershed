@@ -167,7 +167,7 @@ fn validate_run_creation_shape(
     Ok((actual, construction))
 }
 
-pub(super) fn validate_complete_created_run(
+fn validate_complete_created_run(
     run: &AnchoredDir,
     expected_run_log_sha256: &str,
     unpublished_productive_run: bool,

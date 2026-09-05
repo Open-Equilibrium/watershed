@@ -1,5 +1,6 @@
 use crate::runtime::{
     context::{ContextHistory, ContextObject},
+    digest::sha256_hex,
     error::PROVIDER_ERROR_REASON,
     types::{CANCELLED_REASON, RuntimeError},
 };
@@ -65,15 +66,6 @@ impl RunAttemptOutcome {
             .find(|outcome| outcome.as_str() == value)
     }
 
-    pub(crate) const fn from_tool_terminal_event(event_type: EventType) -> Option<Self> {
-        match event_type {
-            EventType::ToolCompleted => Some(Self::Completed),
-            EventType::ToolFailed => Some(Self::Failed),
-            EventType::ToolTimedOut => Some(Self::TimedOut),
-            _ => None,
-        }
-    }
-
     pub(crate) const fn tool_terminal_event(self) -> EventType {
         match self {
             Self::Completed => EventType::ToolCompleted,
@@ -89,76 +81,19 @@ impl std::fmt::Display for RunAttemptOutcome {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum LegacyToolObservationOutcome {
-    Uncertain,
-    Completed,
-    Failed,
-    TimedOut,
-}
-
-impl LegacyToolObservationOutcome {
-    const ALL: [Self; 4] = [
-        Self::Uncertain,
-        Self::Completed,
-        Self::Failed,
-        Self::TimedOut,
-    ];
-
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Uncertain => "uncertain",
-            Self::Completed => RunAttemptOutcome::Completed.as_str(),
-            Self::Failed => RunAttemptOutcome::Failed.as_str(),
-            Self::TimedOut => RunAttemptOutcome::TimedOut.as_str(),
-        }
-    }
-
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|outcome| outcome.as_str() == value)
-    }
-
-    pub(crate) const fn from_terminal(outcome: RunAttemptOutcome) -> Option<Self> {
-        match outcome {
-            RunAttemptOutcome::Completed => Some(Self::Completed),
-            RunAttemptOutcome::Failed => Some(Self::Failed),
-            RunAttemptOutcome::TimedOut => Some(Self::TimedOut),
-            RunAttemptOutcome::Cancelled => None,
-        }
-    }
-
-    pub(crate) const fn is_uncertain(self) -> bool {
-        matches!(self, Self::Uncertain)
-    }
-}
-
-impl Serialize for LegacyToolObservationOutcome {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for LegacyToolObservationOutcome {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::parse(&value).ok_or_else(|| {
-            serde::de::Error::custom(format!("unknown legacy Tool observation outcome: {value}"))
-        })
-    }
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ToolEnforcementExpectation {
+    pub(crate) applied_policy_digest: String,
+    pub(crate) max_concurrent_processes_and_threads: u32,
+    pub(crate) runtime_profile: proto::RuntimeReadProfileV0,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RunAttemptIntent {
     pub(crate) attempt_id: String,
     pub(crate) attempt_kind: RunAttemptKind,
+    pub(crate) expected_enforcement: Option<ToolEnforcementExpectation>,
     pub(crate) request_hash: String,
     pub(crate) tool_id: Option<String>,
     pub(crate) timestamp: String,
@@ -204,6 +139,7 @@ pub(crate) enum ToolTerminalClassification {
     NonzeroExit,
     OutputCollectorFailed,
     OutputDrainTimeout,
+    ProcessCapacityExceeded,
     ProcessReapFailed,
     ProcessSetupFailed,
     ProcessSignalFailed,
@@ -216,11 +152,12 @@ pub(crate) enum ToolTerminalClassification {
 }
 
 impl ToolTerminalClassification {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::Cancelled,
         Self::NonzeroExit,
         Self::OutputCollectorFailed,
         Self::OutputDrainTimeout,
+        Self::ProcessCapacityExceeded,
         Self::ProcessReapFailed,
         Self::ProcessSetupFailed,
         Self::ProcessSignalFailed,
@@ -238,6 +175,7 @@ impl ToolTerminalClassification {
             Self::NonzeroExit => "nonzero_exit",
             Self::OutputCollectorFailed => "output_collector_failed",
             Self::OutputDrainTimeout => "output_drain_timeout",
+            Self::ProcessCapacityExceeded => "process_capacity_exceeded",
             Self::ProcessReapFailed => "process_reap_failed",
             Self::ProcessSetupFailed => "process_setup_failed",
             Self::ProcessSignalFailed => "process_signal_failed",
@@ -256,11 +194,7 @@ impl ToolTerminalClassification {
             .find(|classification| classification.as_str() == value)
     }
 
-    pub(crate) fn matches_terminal(
-        self,
-        outcome: RunAttemptOutcome,
-        exit_code: Option<i32>,
-    ) -> bool {
+    fn matches_terminal(self, outcome: RunAttemptOutcome, exit_code: Option<i32>) -> bool {
         match (outcome, self) {
             (RunAttemptOutcome::TimedOut, Self::ToolTimedOut)
             | (RunAttemptOutcome::Cancelled, Self::Cancelled) => exit_code.is_none(),
@@ -274,6 +208,7 @@ impl ToolTerminalClassification {
                 RunAttemptOutcome::Failed,
                 Self::OutputCollectorFailed
                 | Self::OutputDrainTimeout
+                | Self::ProcessCapacityExceeded
                 | Self::ProcessReapFailed
                 | Self::ProcessSignalFailed
                 | Self::ReconciledFailure
@@ -311,7 +246,8 @@ pub(crate) struct RunAttemptState {
     pub(crate) attempt_kind: RunAttemptKind,
     pub(crate) lifecycle: RunAttemptLifecycle,
     pub(crate) outcome: Option<RunAttemptOutcome>,
-    pub(crate) request_hash: Option<String>,
+    pub(crate) expected_enforcement: Option<ToolEnforcementExpectation>,
+    pub(crate) request_hash: String,
     pub(crate) timestamp: String,
     pub(crate) tool_id: Option<String>,
 }
@@ -319,14 +255,7 @@ pub(crate) struct RunAttemptState {
 pub(crate) trait ProductiveAttemptLog {
     fn persist_objects(&mut self, objects: &[ContextObject]) -> Result<(), RuntimeError>;
 
-    fn intent(
-        &mut self,
-        kind: RunAttemptKind,
-        attempt_id: &str,
-        request_hash: &str,
-        tool_id: Option<&str>,
-        timestamp: &str,
-    ) -> Result<(), RuntimeError>;
+    fn intent(&mut self, intent: &RunAttemptIntent) -> Result<(), RuntimeError>;
 
     fn terminal(&mut self, result: &RunAttemptResult) -> Result<(), RuntimeError>;
 }
@@ -398,4 +327,22 @@ pub(crate) trait ProductiveRecovery {
     fn terminal_snapshot_hash(&self) -> Option<&str> {
         None
     }
+}
+
+pub(crate) fn read_verified_session_object(
+    recovery: &dyn ProductiveRecovery,
+    uri: &str,
+    description: &str,
+) -> Result<Vec<u8>, RuntimeError> {
+    let bytes = recovery.read_object(uri)?;
+    let expected_uri =
+        core_script::build_session_object_uri(&sha256_hex(&bytes)).map_err(|error| {
+            RuntimeError::Protocol(format!("{description} URI is invalid: {error}"))
+        })?;
+    if expected_uri != uri {
+        return Err(RuntimeError::Protocol(format!(
+            "{description} does not match its URI digest"
+        )));
+    }
+    Ok(bytes)
 }

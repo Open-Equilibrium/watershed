@@ -83,6 +83,44 @@ fn registry_schema_ties_tool_kind_to_command_shape() {
 }
 
 #[test]
+fn registry_schema_defines_the_bounded_mount_profile_grammar() {
+    let schema = registry_schema();
+    let tool = &schema["$defs"]["tool"];
+    let properties = &tool["properties"];
+
+    assert_eq!(properties["runtime_profile"]["default"], "exact");
+    assert_eq!(
+        properties["runtime_profile"]["enum"],
+        serde_json::json!(["exact", "host-system-read"])
+    );
+    for field in ["read_only_mounts", "writable_mounts"] {
+        assert_eq!(
+            properties[field]["maxItems"],
+            super::super::model::MAX_FILESYSTEM_MOUNTS
+        );
+        assert!(
+            tool["required"]
+                .as_array()
+                .is_some_and(|required| required.contains(&serde_json::json!(field)))
+        );
+    }
+}
+
+#[test]
+fn registry_schema_requires_positive_tool_process_capacity() {
+    let schema = registry_schema();
+    let tool = &schema["$defs"]["tool"];
+    let capacity = &tool["properties"]["max_concurrent_processes_and_threads"];
+
+    assert_eq!(capacity["type"], "integer");
+    assert_eq!(capacity["minimum"], 1);
+    assert_eq!(capacity["maximum"], u32::MAX);
+    assert!(tool["required"].as_array().is_some_and(|required| {
+        required.contains(&serde_json::json!("max_concurrent_processes_and_threads"))
+    }));
+}
+
+#[test]
 fn registry_schema_bounds_string_and_enum_parameters() {
     let parsed = registry_schema();
     let parameter_rules = parsed["$defs"]["allowed_parameter"]["allOf"]

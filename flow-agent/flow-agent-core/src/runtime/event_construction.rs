@@ -14,8 +14,6 @@ use crate::runtime::{
     validate::SessionAppendValidationState,
 };
 use proto::{EventEnvelope, EventType};
-#[cfg(test)]
-use std::time::Instant;
 use std::{collections::BTreeMap, path::Path};
 
 mod payload;
@@ -43,8 +41,6 @@ pub struct RuntimeEventBuilder {
     pub(crate) clock: EventClock,
     pub(crate) context_manifests: RuntimeStreamSignatureBuilder,
     pub(crate) events: RuntimeStreamSignatureBuilder,
-    #[cfg(test)]
-    pub(crate) event_transition_nanos: Vec<u128>,
     pub(crate) failure_status: HumanFailureStatus,
     pub(crate) history: ContextHistory,
     pub(crate) flow_counter: u64,
@@ -66,8 +62,6 @@ impl RuntimeEventBuilder {
             clock,
             context_manifests: RuntimeStreamSignatureBuilder::new(CONTEXT_PLAN_DOMAIN),
             events: RuntimeStreamSignatureBuilder::new(EVENT_PLAN_DOMAIN),
-            #[cfg(test)]
-            event_transition_nanos: Vec::new(),
             failure_status: HumanFailureStatus::default(),
             history: ContextHistory::default(),
             flow_counter: 0,
@@ -123,12 +117,10 @@ impl RuntimeEventBuilder {
         tool: &core_script::ToolBlock,
         policy: RuntimeToolPolicy<'_>,
     ) -> Result<(), RuntimeError> {
-        let protected_path_match_mode = policy.protected_path_match_mode.as_str();
         let canonical = proto::canonical_json(&serde_json::json!({
             "command_policy": policy.command,
             "domain": TOOL_EXECUTION_INTENT_DOMAIN,
             "flow_id": invocation.flow_id,
-            "protected_path_match_mode": protected_path_match_mode,
             "stub_model_fixture_profile": policy.stub_model_fixture_profile,
             "tool": tool,
         }))
@@ -165,7 +157,6 @@ impl RuntimeEventBuilder {
             completion_sequence,
             effect,
             failure_transition,
-            protected_path_match_mode: policy.protected_path_match_mode,
         };
         self.actions
             .push(FlowExecutionAction::Fixture(Box::new(action.clone())));
@@ -236,8 +227,6 @@ impl RuntimeEventBuilder {
         event_type: EventType,
         payload: serde_json::Value,
     ) -> Result<(), RuntimeError> {
-        #[cfg(test)]
-        let transition_started_at = Instant::now();
         let sequence = self.sequence + 1;
         // WHY: enforce event budgets before storing the event so oversized in-cap flows
         // cannot accumulate unbounded memory.
@@ -298,9 +287,6 @@ impl RuntimeEventBuilder {
             })));
         self.sequence = sequence;
         self.history.record(&event);
-        #[cfg(test)]
-        self.event_transition_nanos
-            .push(transition_started_at.elapsed().as_nanos());
         if let Some(invocation) = invocation {
             match event.event_type {
                 EventType::PhaseEntered => {
@@ -331,8 +317,6 @@ impl RuntimeEventBuilder {
         RuntimeExecution {
             actions: self.actions.into(),
             context_manifests: self.context_manifests.signature(),
-            #[cfg(test)]
-            event_transition_nanos: self.event_transition_nanos,
             events: self.events.signature(),
             failed,
             failure_status: self.failure_status.into_status(),

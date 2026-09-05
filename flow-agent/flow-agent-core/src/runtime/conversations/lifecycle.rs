@@ -50,9 +50,8 @@ fn observe_conversation_root_cleanup(path: &std::path::Path) {
 pub(super) fn reconcile_releases(
     run: Result<(), RuntimeError>,
     conversation: Result<(), RuntimeError>,
-    legacy: Result<(), RuntimeError>,
 ) -> Result<(), RuntimeError> {
-    reconcile_release_results([run, conversation, legacy])
+    reconcile_release_results([run, conversation])
 }
 
 fn reconcile_release_results(

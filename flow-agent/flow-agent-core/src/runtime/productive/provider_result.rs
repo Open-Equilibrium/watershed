@@ -1,9 +1,9 @@
-use super::{PROVIDER_ERROR_SCHEMA_V0, PROVIDER_OUTPUT_SCHEMA_V1, PROVIDER_OUTPUT_SCHEMA_V2};
+use super::{PROVIDER_ERROR_SCHEMA_V0, PROVIDER_OUTPUT_SCHEMA_V2};
 use crate::runtime::{
     context::ContextObject,
     digest::sha256_hex,
     openai_codex::{ProviderTokenUsage, ProviderToolCall, ProviderTurn},
-    run_attempts::ProductiveRecovery,
+    run_attempts::{ProductiveRecovery, read_verified_session_object},
     types::{MAX_PROVIDER_ERROR_MESSAGE_CHARS, RuntimeError},
 };
 use proto::parse_unique_json;
@@ -151,15 +151,12 @@ pub(crate) fn provider_turn_from_durable_output(
 ) -> Result<ProviderTurn, RuntimeError> {
     let reference: ProviderOutputReference =
         serde_json::from_value(durable_output.clone()).map_err(RuntimeError::Json)?;
-    let token_usage = match reference.schema.as_str() {
-        PROVIDER_OUTPUT_SCHEMA_V1 if reference.token_usage.is_none() => None,
-        PROVIDER_OUTPUT_SCHEMA_V2 => reference.token_usage,
-        _ => {
-            return Err(RuntimeError::Protocol(
-                "recovered provider output has an unsupported schema".to_owned(),
-            ));
-        }
-    };
+    if reference.schema != PROVIDER_OUTPUT_SCHEMA_V2 {
+        return Err(RuntimeError::Protocol(
+            "recovered provider output has an unsupported schema".to_owned(),
+        ));
+    }
+    let token_usage = reference.token_usage;
     if reference.provider_output_objects.is_empty() {
         return Err(RuntimeError::Protocol(
             "recovered provider output has an unsupported schema".to_owned(),
@@ -273,24 +270,6 @@ fn verify_provider_result_session_objects_at(
             Ok(())
         }
     }
-}
-
-pub(super) fn read_verified_session_object(
-    recovery: &dyn ProductiveRecovery,
-    uri: &str,
-    description: &str,
-) -> Result<Vec<u8>, RuntimeError> {
-    let bytes = recovery.read_object(uri)?;
-    let expected_uri =
-        core_script::build_session_object_uri(&sha256_hex(&bytes)).map_err(|error| {
-            RuntimeError::Protocol(format!("{description} URI is invalid: {error}"))
-        })?;
-    if expected_uri != uri {
-        return Err(RuntimeError::Protocol(format!(
-            "{description} does not match its URI digest"
-        )));
-    }
-    Ok(bytes)
 }
 
 pub(super) fn durable_provider_error(

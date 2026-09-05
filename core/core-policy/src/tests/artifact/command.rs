@@ -76,6 +76,32 @@ fn policy_artifact_rejects_mismatched_command_shapes() {
 }
 
 #[test]
+fn policy_artifact_requires_positive_process_capacity() {
+    let mut zero = valid_policy_artifact("capacity-tool");
+    zero.commands[0].max_concurrent_processes_and_threads = 0;
+    let error = zero.validate().expect_err("zero capacity must fail closed");
+    assert_eq!(
+        error.to_string(),
+        "tool capacity-tool max_concurrent_processes_and_threads must be positive"
+    );
+
+    let mut missing =
+        serde_json::to_value(valid_policy_artifact("capacity-tool")).expect("artifact serializes");
+    missing["commands"][0]
+        .as_object_mut()
+        .expect("command policy is an object")
+        .remove("max_concurrent_processes_and_threads");
+    let error = serde_json::from_value::<PolicyArtifact>(missing)
+        .expect_err("process capacity must be explicit");
+    assert!(
+        error
+            .to_string()
+            .contains("max_concurrent_processes_and_threads"),
+        "{error}"
+    );
+}
+
+#[test]
 fn policy_artifact_rejects_malformed_allowed_parameters() {
     let mut bad_name = valid_policy_artifact("parameter-tool");
     bad_name.commands[0].allowed_parameters[0].name = "file".to_owned();

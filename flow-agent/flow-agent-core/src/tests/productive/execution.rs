@@ -1,8 +1,9 @@
 use super::super::{support::write_registry_definition, test_support::workspace_copy};
 use super::support::{
-    FakeToolExecutor, MemoryAttempts, MemorySink, ScriptedProvider,
-    disabled_smoke_productive_execution_fixture, load_productive_execution_fixture,
-    single_tool_provider_turn, smoke_productive_execution_fixture,
+    FakeToolExecutionFault, FakeToolExecutor, InjectedAttemptRecovery, MemoryAttempts, MemorySink,
+    ScriptedProvider, disabled_smoke_productive_execution_fixture,
+    load_productive_execution_fixture, single_tool_provider_turn,
+    smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     context::ContextManifestCheckpoint,
@@ -10,6 +11,7 @@ use crate::runtime::{
     openai_codex::{ProviderToolCall, ProviderTurn},
     productive::{
         ProductiveExecution, execute_productive_flow, execute_productive_flow_with_tool_executor,
+        execute_productive_flow_with_tool_executor_and_recovery,
     },
     run_attempts::{RunAttemptKind, RunAttemptOutcome},
     session::run_flow,
@@ -17,7 +19,7 @@ use crate::runtime::{
     validate::validate_session_log_text,
 };
 use proto::{EventEnvelope, EventType};
-use std::{collections::VecDeque, fs, time::Instant};
+use std::{collections::VecDeque, fs};
 
 #[derive(Default)]
 struct OneShotRejectingEventSink {
@@ -35,7 +37,6 @@ impl RuntimeEventSink for ToolStartedRejectingEventSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if event.event_type == EventType::ToolStarted {
             return Err(RuntimeError::Protocol(
@@ -52,7 +53,6 @@ impl RuntimeEventSink for OneShotRejectingEventSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         if !self.rejected && event.event_type == EventType::PhaseCompleted {
             self.rejected = true;
@@ -134,6 +134,7 @@ fn productive_tool_started_commit_failure_settles_without_dispatch() {
     .expect_err("ToolStarted commit failure stops Productive execution");
 
     assert!(error.to_string().contains("ToolStarted commit rejected"));
+    assert_eq!(tools.preflights, 1);
     assert!(tools.invocations.is_empty());
     let tool_intent = attempts
         .intents
@@ -141,15 +142,189 @@ fn productive_tool_started_commit_failure_settles_without_dispatch() {
         .find(|(kind, _, _)| *kind == RunAttemptKind::Tool)
         .expect("Tool intent is durable before ToolStarted");
     assert!(
-        attempts
-            .results
-            .iter()
-            .any(|(kind, attempt_id, outcome, _)| {
-                *kind == RunAttemptKind::Tool
-                    && attempt_id == &tool_intent.1
-                    && outcome == RunAttemptOutcome::Cancelled.as_str()
-            })
+        attempts.results.iter().all(|(kind, attempt_id, _, _)| {
+            *kind != RunAttemptKind::Tool || attempt_id != &tool_intent.1
+        }),
+        "a failed ToolStarted commit leaves the never-started attempt uncertain"
     );
+}
+
+#[test]
+fn productive_executor_boundary_failure_closes_tool_event_and_leaves_attempt_uncertain() {
+    for fault in [
+        FakeToolExecutionFault::ExecutorError,
+        FakeToolExecutionFault::InvalidTerminal,
+        FakeToolExecutionFault::RequestHashMismatch,
+        FakeToolExecutionFault::ReceiptMismatch,
+    ] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor {
+            fault,
+            ..FakeToolExecutor::default()
+        };
+
+        let execution = execute_productive_flow_with_tool_executor(
+            fixture.execution(flow, "productive-executor-boundary-failure"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+        )
+        .expect("Executor boundary failure remains a terminal failed session");
+
+        assert!(execution.failed, "{fault:?}");
+        assert_eq!(tools.invocations.len(), 1, "{fault:?}");
+        assert_eq!(attempts.intents.len(), 2, "{fault:?}");
+        assert_eq!(attempts.results.len(), 1, "{fault:?}");
+        assert_eq!(attempts.intents[1].0, RunAttemptKind::Tool, "{fault:?}");
+        assert_eq!(provider.bodies.len(), 1, "{fault:?}");
+        assert!(
+            attempts
+                .results
+                .iter()
+                .all(|(kind, _, _, _)| *kind != RunAttemptKind::Tool),
+            "untrusted Executor output must leave the Tool attempt uncertain: {fault:?}"
+        );
+        let tool_failed = sink
+            .0
+            .iter()
+            .find(|event| event.event_type == EventType::ToolFailed)
+            .expect("ToolStarted has a matching ToolFailed event");
+        assert_eq!(tool_failed.payload["error"], "runtime_error", "{fault:?}");
+    }
+}
+
+#[test]
+fn productive_policy_rejection_precedes_tool_lifecycle_and_replays_without_start() {
+    for (fault, error, stage, started) in [
+        (
+            FakeToolExecutionFault::PolicyRejected,
+            "executor_policy_unsupported",
+            "preflight",
+            false,
+        ),
+        (
+            FakeToolExecutionFault::StartedExecutorError,
+            "sandbox_setup_failed",
+            "started",
+            true,
+        ),
+    ] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor {
+            fault,
+            ..FakeToolExecutor::default()
+        };
+
+        let execution = execute_productive_flow_with_tool_executor(
+            fixture.execution(flow, "productive-definitive-executor-error"),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+        )
+        .expect("definitive Executor error closes the failed session");
+
+        assert!(execution.failed);
+        let result = attempts
+            .terminal_results
+            .iter()
+            .find(|result| result.attempt_kind == RunAttemptKind::Tool)
+            .expect("definitive Executor error settles the Tool attempt")
+            .clone();
+        assert_eq!(result.outcome, RunAttemptOutcome::Failed);
+        assert_eq!(result.classification, None);
+        assert_eq!(result.exit_code, None);
+        assert_eq!(tools.preflights, 1);
+        assert_eq!(
+            result.durable_output,
+            Some(serde_json::json!({
+                "error": error,
+                "schema": "flow-executor-stage-error-v0",
+                "stage": stage,
+            }))
+        );
+        assert_eq!(tools.invocations.len(), usize::from(started));
+        assert_eq!(
+            sink.0
+                .iter()
+                .filter(|event| event.event_type == EventType::ToolStarted)
+                .count(),
+            usize::from(started)
+        );
+        assert_eq!(
+            sink.0
+                .iter()
+                .filter(|event| event.event_type == EventType::ToolFailed)
+                .count(),
+            usize::from(started)
+        );
+        assert!(
+            !sink
+                .0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolCompleted)
+        );
+
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response", "call")]),
+        };
+        let mut resumed_attempts = MemoryAttempts::default();
+        let mut resumed_sink = MemorySink::default();
+        let mut resumed_tools = FakeToolExecutor::default();
+        let mut recovery = InjectedAttemptRecovery::ToolResult(result);
+
+        let resumed = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, "productive-definitive-executor-error-resume"),
+            &mut provider,
+            &mut resumed_attempts,
+            &mut resumed_sink,
+            &mut resumed_tools,
+            &mut recovery,
+        )
+        .expect("Resume replays the definitive Executor error");
+
+        assert!(resumed.failed);
+        assert_eq!(resumed_tools.preflights, 0);
+        assert!(resumed_tools.invocations.is_empty());
+        assert_eq!(
+            resumed_sink
+                .0
+                .iter()
+                .filter(|event| event.event_type == EventType::ToolStarted)
+                .count(),
+            usize::from(started)
+        );
+        assert_eq!(
+            resumed_sink
+                .0
+                .iter()
+                .filter(|event| event.event_type == EventType::ToolFailed)
+                .count(),
+            usize::from(started)
+        );
+        assert!(
+            !resumed_sink
+                .0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolCompleted)
+        );
+    }
 }
 
 #[test]

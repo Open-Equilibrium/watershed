@@ -5,7 +5,6 @@ mod writer;
 pub(in crate::runtime::conversations) use layout::run_segment_leaf;
 #[cfg(test)]
 pub(crate) use layout::target_segment_count_for_test;
-pub(in crate::runtime::conversations) use reader::jsonl_segment_from_open_file;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use reader::read_jsonl;
 #[cfg(test)]

@@ -3,18 +3,14 @@ use super::{
         create_directory_alias, empty_workspace, remove_directory_alias, reserve_session_log,
         reserve_session_log_with_publish_observer,
     },
-    support::assert_active_session,
     test_support::workspace_copy,
 };
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
-use crate::runtime::session_bundle::{SessionBundleInventory, SessionBundlePaths};
 use crate::runtime::{
     fs_guards::{
         AnchoredWorkspace, ensure_runtime_dirs, set_directory_sync_error_for_path_for_test,
         set_owned_file_remove_observer, start_directory_sync_trace_for_test,
         take_directory_sync_trace_for_test,
     },
-    resume::resume_session,
     session::run_flow,
     session_authority::{SessionOwnershipLease, session_ownership_is_active},
     session_candidates::suffixed_session_id,
@@ -512,40 +508,6 @@ fn reservation_rejects_a_non_unicode_object_published_after_candidate_selection(
     assert_eq!(
         fs::read(object_path).expect("object sentinel remains readable"),
         b"foreign object member"
-    );
-}
-
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
-#[test]
-fn bundle_inspection_rejects_a_non_unicode_object_in_its_namespace() {
-    let workspace = empty_workspace("bundle-non-unicode-object-inventory");
-    let reservation =
-        reserve_session_log(&workspace, "nonunicode003").expect("Run bundle reserved");
-    let paths = SessionBundlePaths::from_reservation(&reservation);
-    reservation.activate().expect("reservation activates");
-    drop(reservation);
-    fs::write(paths.events.diagnostic_path(), b"event\n").expect("event segment written");
-    fs::write(paths.contexts.diagnostic_path(), b"context\n").expect("context segment written");
-    fs::write(paths.metadata.diagnostic_path(), b"metadata").expect("metadata written");
-    fs::write(
-        paths
-            .sessions
-            .path
-            .join(non_unicode_object_leaf("nonunicode003")),
-        b"foreign object member",
-    )
-    .expect("non-Unicode object written");
-
-    let error = SessionBundleInventory::inspect(paths)
-        .expect_err("non-Unicode object name in the session namespace must be rejected");
-
-    assert!(
-        matches!(
-            &error,
-            RuntimeError::Protocol(message)
-                if message.contains("non-canonical session object name")
-        ),
-        "unexpected bundle inspection error: {error}"
     );
 }
 
@@ -1188,12 +1150,8 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
         .expect("runtime dirs")
         .sessions;
     let session_dir = sessions.path.clone();
-    let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {
-        let err = resume_session(&workspace, "publish001", EmitMode::Jsonl)
-            .expect_err("published session must already be locked");
-        assert_active_session(err, "publish001", "publish001.lock");
-    })
-    .expect("session published under lock");
+    let published = reserve_session_log_with_publish_observer(&workspace, "publish001", || {})
+        .expect("session published under lock");
     published.rollback().expect("reservation rolls back");
 
     let held_lock = sessions.file("smoke001.lock");

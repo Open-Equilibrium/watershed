@@ -1,14 +1,13 @@
-use super::{POLICY_TARGETS, fixture_registry};
+use super::fixture_registry;
 use crate::{
-    DenyReasonCode, NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkTransport,
-    PolicyArtifact, PolicyArtifactError, PolicyArtifactValidationError, PolicyCompileError,
-    PolicyTarget, canonical_artifact_json, compile_policy_artifact,
+    DenyReasonCode, PolicyArtifact, PolicyArtifactError, PolicyArtifactValidationError,
+    PolicyCompileError, canonical_artifact_json, compile_policy_artifact,
 };
 use serde_json::Value;
 use std::{fs, path::Path};
 
 #[test]
-fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
+fn policy_compiler_matches_canonical_fixtures() {
     for fixture in ["smoke-flow", "hello-flow"] {
         let registry = fixture_registry(fixture, fixture);
 
@@ -22,22 +21,12 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
         let expected_artifact: PolicyArtifact =
             serde_json::from_str(&expected).expect("expected policy fixture parses");
 
-        for target in POLICY_TARGETS {
-            let artifact = compile_policy_artifact(&registry, fixture, target)
-                .expect("policy artifact compiles");
-            let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
-            let mut expected_artifact = expected_artifact.clone();
-            expected_artifact.target = artifact.target.clone();
-            let expected = canonical_artifact_json(&expected_artifact)
-                .expect("expected policy artifact serializes");
+        let artifact =
+            compile_policy_artifact(&registry, fixture).expect("policy artifact compiles");
+        let actual = canonical_artifact_json(&artifact).expect("artifact serializes");
 
-            assert_eq!(actual, expected, "{fixture} {:?}", artifact.target);
-            assert_eq!(
-                artifact, expected_artifact,
-                "{fixture} {:?}",
-                artifact.target
-            );
-        }
+        assert_eq!(actual, expected, "{fixture}");
+        assert_eq!(artifact, expected_artifact, "{fixture}");
     }
 }
 
@@ -45,12 +34,8 @@ fn policy_compiler_matches_m1_linux_and_macos_fixtures() {
 fn policy_compiler_reports_a_missing_root_flow() {
     let registry = fixture_registry("smoke-flow", "smoke-flow");
 
-    let err = compile_policy_artifact(
-        &registry,
-        "missing-flow",
-        PolicyTarget::LinuxLandlockSeccomp,
-    )
-    .expect_err("missing root flow must fail");
+    let err = compile_policy_artifact(&registry, "missing-flow")
+        .expect_err("missing root flow must fail");
 
     assert_eq!(
         err.to_string(),
@@ -83,7 +68,7 @@ fn smoke_registry_with_tool(
 }
 
 #[test]
-fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
+fn policy_compiler_rejects_non_empty_network_allowlists_for_supported_target() {
     let registry = smoke_registry_with_tool(|tool| {
         tool.network = core_script::NetworkPolicy::Declared {
             default: core_script::NetworkDefault::Deny,
@@ -96,7 +81,7 @@ fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
         };
     });
 
-    let err = compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::LinuxLandlockSeccomp)
+    let err = compile_policy_artifact(&registry, "smoke-flow")
         .expect_err("network allowlist is rejected");
 
     assert!(matches!(
@@ -111,33 +96,30 @@ fn policy_compiler_rejects_non_empty_network_allowlists_for_os_enforced_m1() {
 }
 
 #[test]
-fn policy_compiler_preserves_macos_network_allowlists() {
+fn policy_compiler_preserves_the_selected_runtime_profile() {
     let registry = smoke_registry_with_tool(|tool| {
-        tool.network = core_script::NetworkPolicy::Declared {
-            default: core_script::NetworkDefault::Deny,
-            allow: vec![core_script::NetworkAllowEntry {
-                kind: core_script::NetworkAllowKind::Cidr,
-                transport: core_script::NetworkTransport::Tcp,
-                cidr: "192.0.2.0/24".to_owned(),
-                port: 443,
-            }],
-        };
+        tool.runtime_profile = core_script::ToolRuntimeProfile::HostSystemRead;
     });
 
-    let artifact = compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::MacosSeatbelt)
-        .expect("macOS policy artifacts may carry reviewed CIDR allowlists");
+    let artifact = compile_policy_artifact(&registry, "smoke-flow")
+        .expect("the selected runtime profile compiles");
 
-    assert_eq!(artifact.target, PolicyTarget::MacosSeatbelt);
-    assert_eq!(artifact.commands[0].network.default, NetworkDefault::Deny);
     assert_eq!(
-        artifact.commands[0].network.allow,
-        vec![NetworkAllowEntry {
-            cidr: "192.0.2.0/24".to_owned(),
-            kind: NetworkAllowKind::Cidr,
-            port: 443,
-            transport: NetworkTransport::Tcp,
-        }]
+        artifact.commands[0].runtime_profile,
+        core_script::ToolRuntimeProfile::HostSystemRead
     );
+}
+
+#[test]
+fn policy_compiler_preserves_process_capacity() {
+    let registry = smoke_registry_with_tool(|tool| {
+        tool.max_concurrent_processes_and_threads = 7;
+    });
+
+    let artifact = compile_policy_artifact(&registry, "smoke-flow")
+        .expect("the configured process capacity compiles");
+
+    assert_eq!(artifact.commands[0].max_concurrent_processes_and_threads, 7);
 }
 
 #[test]
@@ -149,7 +131,7 @@ fn policy_compiler_rejects_unknown_predefined_commands() {
         };
     });
 
-    let err = compile_policy_artifact(&registry, "smoke-flow", PolicyTarget::LinuxLandlockSeccomp)
+    let err = compile_policy_artifact(&registry, "smoke-flow")
         .expect_err("unknown predefined command must fail closed");
 
     assert!(err.to_string().contains("unknown trusted command"), "{err}");

@@ -1,100 +1,58 @@
-# Performance Targets (NFR)
+# Performance
 
-Non-functional targets. These are **evidence-based, falsifiable guidelines**: every target must have a test or benchmark (see `TESTING.md`). Targets are split into product-level goals and implementation budgets so the MVP can fail fast on the actual bottleneck.
+Performance is an architectural quality KPI, not a set of estimated pass/fail numbers. Design for responsive interaction, bounded resource use, useful concurrency and proportional work. Prefer streaming, bounded queues, incremental processing, narrow data movement and explicit ownership; avoid repeated parsing, copies, scans, process starts, blocking and serialization when a simpler boundary removes them.
 
-A performance-gate exceedance blocks release until it is dispositioned; the selected number is not immutable. The maintainer classifies the exceedance as small or large. A small exceedance requires re-evaluating the numeric target and its evidence. A large exceedance requires re-evaluating the workload, architecture and limit structure. Optimize only when a small, clear and maintainable fix is feasible; otherwise add an open design decision before changing the implementation or target. This policy does not relax functional, safety or capacity boundaries explicitly defined as hard limits or exact `F`-row contracts.
+Timing, throughput and RSS measurements are observational regression evidence. They do not fail a build or block a release because an absolute value or percentage changed. A numeric performance SLO may become binding only after the maintainer approves a measured user requirement, reference environment, stable workload and enforcement method through the decision flow.
 
-Rationale for the Rust core: low per-agent memory footprint, true multi-core parallelism, and a post-M1 Wasmtime plugin isolation path — properties a Node runtime cannot meet at the required scale.
+This policy does not relax hard security, correctness, capacity, liveness or durability bounds. Deadlines that terminate stalled external work, byte/count limits that prevent unbounded resource use, checked arithmetic, protocol limits, coverage and evidence-integrity checks remain enforced by their canonical contracts.
+
+## Review convention
+
+Every product change is reviewed for its performance effects alongside security, stability, functionality, simplicity and maintainability. Review the relevant call paths and consumers rather than one file in isolation. Evidence must answer:
+
+- Does the architecture keep work and retained state bounded by the product contract?
+- Does cost scale with useful input, or does the change introduce avoidable repeated work, copying, polling, contention or global serialization?
+- Are concurrency and cancellation paths free of avoidable blocking and leaks?
+- Does a simpler design remove work or state without weakening correctness or isolation?
+- Do fixed-workload observations show a material regression, and if so, is its architectural cause understood?
+
+Prefer an architectural simplification over a local micro-optimization. Never weaken isolation, cleanup, correctness or a hard capacity boundary to improve a measurement. If a material regression has no clear maintainable fix, retain the evidence and record the tradeoff through the decision flow.
+
+## Evidence convention
+
+Performance evidence uses a fixed, documented workload and records the environment, exact inputs and exclusions, raw observations and useful aggregates such as p50, p95, maximum and RSS growth. Values remain unadjusted; do not subtract estimated work or normalize away an observed cost. Compare like-for-like runs and keep enough history to identify trends.
+
+CI may fail when the workload, lifecycle, schema, measurement integrity, report completeness or artifact retention is invalid. It must not compare timing, throughput or RSS observations with an estimated threshold. Command and test timeouts remain deadlock guards, not performance claims.
 
 ## Flow Agent
 
-Flow Agent budgets govern work while Flow Agent is executing. Dormant on-disk conversation histories and run bundles have no count, age or byte quota and never trigger retention or deletion. Complete-history validation uses the per-command temporary index selected by [CV-03, CV-04, CV-09 and CV-13–CV-14](flow-agent/benchmarks/M1_1_BUDGETS.md#conversations-and-run-logs): it has bounded scan, memory and scratch, uses checked arithmetic and performs at most O(n log n) work. Other command reads likewise keep scan, projection, memory, output and latency streaming or bounded by an approved budget.
-
-Product target:
-- **10 parallel top-level flows** on a laptop-class device with at least 4 logical cores, 16 GiB RAM and SSD storage. Their roots and subflows share the process-wide limit of 32 live invocations. Model/provider processes, tool processes, network latency and caller-owned output buffers are excluded.
+Flow Agent should add little overhead around provider and Tool work, remain responsive under useful concurrency and stream histories and artifacts without retaining complete data unnecessarily. Roots and Subflows share the hard process-wide capacity limit below; provider and Tool processes, network latency and caller-owned buffers are outside Flow Agent performance evidence.
 
 ### ADR-0068 safety envelope
 
-These hard limits always apply and are not multiplied into one promised workload:
+These hard capacity and liveness limits are not performance thresholds and are not multiplied into one promised maximum workload:
 
-- Flow tree depth: 16 levels, root = level 1.
-- Direct fan-out: 32 subflow references per Flow definition.
-- Cumulative invocations: 512 per Run, root-inclusive. Every start counts, including repeated definitions, loop iterations and failed starts.
-- Live invocations: 32 process-wide across all sessions. A started non-terminal root or subflow counts while running or waiting for model, tool or child work; queued, terminal and fully paused work does not.
-- Canonical events: 155,750 per Run across all segments, resumes, errors and future event families.
-- Canonical storage: 320 KiB per event including LF, 16 MiB per event segment or context-manifest segment, 352 MiB total event data, 48 MiB total context-manifest data, 16 MiB per immutable object, at most 131,072 immutable objects per Run and 5.5 GiB for the complete Run bundle. Object data may use at most 5,216 MiB, reserving the other 416 MiB for the two JSONL streams and metadata. The former 10 MiB event-stream limit is removed.
+- Flow tree depth: 16 levels, root-inclusive.
+- Direct fan-out: 32 Subflow references per Flow definition.
+- Cumulative invocations: 512 per Run, including failed starts.
+- Live invocations: 32 process-wide across all sessions.
+- Canonical events: 155,750 per Run.
+- Canonical storage: 320 KiB per event including LF; 16 MiB per event or context-manifest segment; 352 MiB total event data; 48 MiB total context-manifest data; 16 MiB per immutable object; 131,072 immutable objects; 5,216 MiB object data; and 5.5 GiB per complete Run bundle.
 
-The 155,750-event sizing model is `2 session + 1,024 Flow lifecycle + 1,024 Phase lifecycle + 102,400 provider-message lifecycle + 51,200 Tool lifecycle + 100 terminal/error reserve`. It represents 51,200 message pairs and 25,600 Tool lifecycle pairs. The 100-event term is sizing slack for terminal orchestration, not an independently addressable product limit. These are capacity assumptions, not independent product limits.
+The event sizing model, segment rotation, storage admission and exact boundary tests are canonical in `PROTOCOL.md`, `TESTING.md` and the [M1.1 limits matrix](flow-agent/benchmarks/M1_1_BUDGETS.md). Dormant on-disk histories and Run bundles have no retention quota and are never deleted by these limits.
 
-Sixteen MiB is a per-segment rotation boundary, not a session or RAM limit. Rotation occurs before a record would cross it and never splits a record. An event stream uses at most 22 segments; record-boundary slack can make that count bind before the 352 MiB byte ceiling. Arbitrary unsplit manifest records use at most five segments. This keeps sequential reads and recovery bounded without the extra file/flush overhead of materially smaller segments or the larger per-read burst of 32/64 MiB segments.
+### M1.1 evidence
 
-The representative payload distribution is 90% of events at 768 B, the next 9% at 12 KiB, the next 0.9% at 96 KiB and the final 0.1% at 320 KiB. This is a distribution of complete canonical event sizes, not `max payload / 2`. Exactly 16,000 events occupy 48,152,576 B (45.92 MiB).
+The [M1.1 limits matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) owns every fixed functional limit and the selected observational workloads. The Ubuntu 24.04 x64 evidence suite runs each warmup and sample in a fresh child, records unadjusted timing and Linux RSS observations, validates that its fixed RSS fixture is detectable and retains the `m11-performance-evidence` artifact. It has no timing or RSS pass/fail comparison.
 
-Synthetic event-storage/replay workload:
+### M1.2 Executor evidence
 
-- Representative: 10 sessions, each with 32 cumulative invocations and 16,000 total events under that payload distribution; aggregate 320 invocations, 160,000 events and 459.22 MiB. The 32-live process cap still applies.
-- Full-cap: one 155,750-event session with the synthetic 288 B/event profile (42.78 MiB).
-- Stability: ten sessions each reach 155,750 events with the 288 B/event profile. This does not simultaneously maximize payload sizes, registry size, live model contexts or tool output.
-
-M1 implementation budgets (ADR-0049):
-- FSM transition overhead p95 <= 1 ms per event, excluding model and tool work.
-- Local no-op tool dispatch overhead p95 <= 50 ms per run, excluding the tool's own runtime.
-- Memory overhead <= 11 MiB per active top-level flow before LLM/tool payloads, including one unique resolved registry closure shared by that Flow and its subflows (ADR-0067, ADR-0150).
-- Log/event append latency p95 <= 5 ms per event for the `hello-flow` canonical serialization and local append path.
-- Live-notification attempt p95 <= 50 ms after a successful append, covering the bounded high-watermark update and non-blocking wake-up attempt but excluding caller-owned replay and transport (ADR-0059, ADR-0062).
-- `message.delta`/`tool.progress` micro-batches wait no longer than 25 ms before append; semantic or terminal events close a pending batch immediately (ADR-0059).
-- Concurrency smoke: 10 fixture top-level flows complete without harness-level deadlock or unbounded memory growth; 10 near-limit closures remain within the same 110 MiB aggregate RSS budget.
-- Callback-streaming full-Run replay uses the workload, latency and peak-RSS evidence in [CV-17/CV-18](flow-agent/benchmarks/M1_1_BUDGETS.md#conversations-and-run-logs). Full-Run inspection with a retained maximum object inventory completes <= 15 s with <= 256 MiB RSS growth.
-- Incremental tail read p95 <= 100 ms for one newly committed event up to 320 KiB, with <= 64 MiB retained-reader RSS growth.
-- The representative ten-session and ten-full-cap event-storage/replay gates each complete <= 120 s; they are not end-to-end runtime gates.
-
-Timing and RSS gates run in release mode, one performance test process at a time, on the fixed `ubuntu-24.04` x64 CI image. Other operating systems run functional boundary tests; performance claims require the reference hardware class above.
-
-ADR-0150 recalibrated the per-Flow guideline from 20 fresh isolated release-mode samples in [CI run 32571620281](https://github.com/Open-Equilibrium/watershed/actions/runs/32571620281) at commit `7679ebc`. Peak RSS growth ranged from 10,559,488 to 10,756,096 bytes, with a 10,645,299.2-byte mean. Eleven MiB is the smallest whole-MiB ceiling above the observed maximum and leaves 778,240 bytes, or 7.24%, measurement headroom. The 110 MiB aggregate gate preserves the exact tenfold relationship for 10 concurrent top-level Flows.
-
-ADR-0151 recalibrated two latency guidelines from independent 30-sample Ubuntu release runs. At commit `188318b`, [push run 32572626735](https://github.com/Open-Equilibrium/watershed/actions/runs/32572626735) measured migration/replay p95 of 1.192 s/12.354 s and [pull-request run 32572629127](https://github.com/Open-Equilibrium/watershed/actions/runs/32572629127) measured 1.191 s/12.309 s. At commit `e575a38`, [pull-request run 32595596467](https://github.com/Open-Equilibrium/watershed/actions/runs/32595596467) on EPYC 9V74 measured 1.107 s/11.873 s, while [push run 32595594814](https://github.com/Open-Equilibrium/watershed/actions/runs/32595594814) on EPYC 7763 measured 1.434 s/14.121 s. The hosted reference class therefore includes material CPU variance: CV-12 migration is 1.6 s and CV-17 replay is 15 s, leaving 11.61% and 6.22% above the slower fresh p95 values. Workloads, samples, functional and capacity boundaries, and RSS guidelines are unchanged.
-
-Tool runs are bounded/headless; the harness itself must not be the bottleneck when local inference is fast.
-
-The event budgets measure individual events, not averages of batch averages; ordering and durability semantics are canonical in `PROTOCOL.md`.
-
-ADR-0107 selects the E3 evidence scope, balanced bundle A and finite evidence matrix; ADR-0123 adds the bounded status-summary contract and reuses its fixed status-page workload. The [M1.1 budget matrix](flow-agent/benchmarks/M1_1_BUDGETS.md) is the single source for every selected numeric cap, deadline and optimized gate, its exact counting rule, functional boundary proof, named performance workload, measurement-validation fixture and justified exclusion. Its evidence must pass before M1.1 product behavior begins. Under ADR-0106, every optimized workload sample and warmup runs in a fresh child process. Linux peak RSS growth is `post-workload VmHWM - pre-workload VmRSS`, which includes rather than subtracts recorded lifetime-high-water slack; retained growth is `post-workload VmRSS - pre-workload VmRSS`. Reports remain unadjusted. Because `flow-tool-result-v0` stores each non-inline stdout/stderr stream as one immutable object, the per-stream collector caps in [TR-01/TR-02](flow-agent/benchmarks/M1_1_BUDGETS.md#tool-runner) remain below the existing per-object limit.
+The one-shot Executor and Sandbox architecture is canonical in `PROTOCOL.md`. The [M1.2 startup evidence](flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) records one fixed productive Tool invocation per fresh child as one unadjusted `executor_elapsed_ns` distribution across preparation, readiness, transient scope/cgroup creation, the one-shot Sandbox lifecycle, complete cleanup and result/receipt validation. Review the design for avoidable probe, policy, descriptor and process-start work without weakening readiness or isolation; Custom Executor performance is administrator-owned. The configured process/thread capacity is a hard security capability, never a performance threshold.
 
 ## Meta-Harness
 
-Product target:
-- **Reactivity in the millisecond range** for control/monitoring actions (start/stop/steer/config), **excluding** network/internet latency and excluding LLM/tool execution time.
-
-Implementation budgets to define before M2:
-- Session-registry update latency.
-- Adapter event-normalization latency.
-- AgentPulse metric-sample ingestion latency.
-- Config-resolution latency for shared building blocks resolved to target CLIs.
+Control and monitoring should feel immediate when they are not waiting on a model, Tool or network. Keep configuration resolution incremental, event normalization bounded and AgentPulse ingestion proportional to active sessions. Add fixed observational workloads with each implemented surface that introduces a meaningful cost center.
 
 ## Liquid
 
-Product targets (tiered; each tier gets its own benchmark — ADR-0014):
-
-1. **Local UI:** p95 < 100 ms from user action to acknowledged workspace mutation; representative Pages and Arrange mode hold a 60 fps render budget.
-2. **Single shared workspace:** **250 concurrent active actors** (humans + agents) with p95 mutation→ack < 250 ms and p95 committed mutation→replica-visible < 1 s while connected to the central Sync Server.
-3. **Organization scale (design-for):** **1,000 users + 5,000 agents** across many Workspaces via Workspace sharding and scope-filtered query/event subscriptions, holding the tier-2 latencies. Subscription filtering limits live fan-out; it does not change the authorized Workspace as the replication unit. Depends on D-035 and is **not** an MVP gate.
-4. **Throughput budget:** ≥ 1,000 mutations/s sustained per workspace node, including action-history append.
-
-The binding constraint at scale is event fan-out, not mutation processing; scope-filtered live subscriptions are therefore a design assumption, not an optimization.
-
-Implementation budgets to define before M3:
-- Block update dispatch latency.
-- Page/View render/update latency for representative content and Arrange mode.
-- Workspace query latency for common PowerBar lookups and CLI/API reads.
-- Action-history append latency per workspace mutation.
-- Diff calculation latency for common Block/Page changes.
-- Revert latency for recent actions.
-- Memory per Block/View/session card.
-- App Runtime startup, action-dispatch, memory and CPU/time-limit enforcement.
-- Sync Server commit acknowledgement and replica catch-up latency after reconnect.
-
-## Notes
-
-- "ms range" applies to Watershed's own overhead (event dispatch, state updates, rendering pipeline), not to externally-bound latency (LLM, network, remote tools).
-- Product targets are not enough by themselves; each milestone must convert its target into lower-level benchmark budgets before implementation starts.
-- Targets are reviewed per milestone; changes go through an ADR (see `AGENTS.md`).
+Local interaction should feel immediate, shared workspaces should remain responsive under useful human and agent concurrency, and organization scale should come from workspace sharding and scope-filtered subscriptions rather than global fan-out. Rendering, mutation, history, query, sync and App Runtime paths should avoid whole-workspace recomputation and unbounded retained state. Add representative fixed observational workloads as those surfaces are implemented; select a hard SLO only through the evidence rule above.

@@ -5,7 +5,6 @@ use crate::{
         FilesystemPolicy, NetworkPolicy, PhaseScope, PolicyArtifact, PolicyArtifactValidationError,
         PolicyTarget, RuntimeLimits, policy_artifact_error,
     },
-    protected_paths::DEFAULT_PROTECTED_PATHS,
 };
 use core_script::NetworkDefault;
 use std::{
@@ -55,7 +54,6 @@ impl std::error::Error for PolicyCompileError {
 pub fn compile_policy_artifact(
     registry: &core_script::ResolvedRegistry,
     flow_ref: &str,
-    target: PolicyTarget,
 ) -> Result<PolicyArtifact, PolicyCompileError> {
     let flow_block = registry
         .flow_block(flow_ref)
@@ -78,7 +76,7 @@ pub fn compile_policy_artifact(
         let tool = registry
             .tool_block(&tool_id)
             .expect("resolved registry preserves collected tools");
-        commands.push(command_policy_from_tool(tool, &target)?);
+        commands.push(command_policy_from_tool(tool)?);
     }
 
     let artifact = PolicyArtifact {
@@ -100,7 +98,7 @@ pub fn compile_policy_artifact(
             },
         },
         source_flow_definition_id: flow_block.identity.id.clone(),
-        target,
+        target: PolicyTarget::LinuxBubblewrapSeccomp,
     };
     artifact
         .validate()
@@ -170,9 +168,8 @@ fn collect_phase_policy_scope(
     }
 }
 
-pub(crate) fn command_policy_from_tool(
+fn command_policy_from_tool(
     tool: &core_script::ToolBlock,
-    target: &PolicyTarget,
 ) -> Result<CommandPolicy, PolicyCompileError> {
     let (command_id, argv, executable, script_runtime) = match (&tool.tool_kind, &tool.command) {
         (
@@ -210,7 +207,7 @@ pub(crate) fn command_policy_from_tool(
             default: NetworkDefault::Deny,
         },
         core_script::NetworkPolicy::Declared { allow, .. } => {
-            if matches!(target, PolicyTarget::LinuxLandlockSeccomp) && !allow.is_empty() {
+            if !allow.is_empty() {
                 return Err(PolicyCompileError::NonEmptyNetworkAllowlist {
                     tool_id: tool.identity.id.clone(),
                 });
@@ -236,15 +233,12 @@ pub(crate) fn command_policy_from_tool(
         },
         executable,
         filesystem: FilesystemPolicy {
-            protected_path_grants: tool.protected_path_grants.clone(),
-            protected_paths: DEFAULT_PROTECTED_PATHS
-                .iter()
-                .map(|path| (*path).to_owned())
-                .collect(),
-            read_roots: tool.read_scope.clone(),
-            write_roots: tool.write_scope.clone(),
+            read_only_mounts: tool.read_only_mounts.clone(),
+            writable_mounts: tool.writable_mounts.clone(),
         },
+        max_concurrent_processes_and_threads: tool.max_concurrent_processes_and_threads,
         network,
+        runtime_profile: tool.runtime_profile,
         script_runtime,
         tool_id: tool.identity.id.clone(),
         tool_kind: tool.tool_kind.clone(),

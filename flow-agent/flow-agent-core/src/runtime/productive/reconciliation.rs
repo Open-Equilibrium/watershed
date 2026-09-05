@@ -1,6 +1,5 @@
-use super::TOOL_ATTEMPT_OUTPUT_SCHEMA_V0;
-use super::tool::validate_tool_result_streams;
-use super::tool_result::{ToolResultFields, parse_tool_result};
+use super::attempt_codec::{parse_tool_reconciliation, tool_attempt_output};
+use super::tool_result::{ToolResultFields, parse_tool_result, validate_tool_result_streams};
 use crate::runtime::{
     conversations::{
         RunAttemptLedger, RunObjectStore, inspect_run_attempts, with_conversation_run_ownership,
@@ -12,10 +11,9 @@ use crate::runtime::{
     types::RuntimeError,
     workspace_text::read_workspace_text_file,
 };
-use proto::parse_unique_json;
 
 /// Maximum canonical bytes accepted by `flow reconcile-tool`.
-pub const MAX_TOOL_RECONCILIATION_BYTES: usize = core_script::MAX_FLOW_VALUE_BYTES;
+pub const MAX_TOOL_RECONCILIATION_BYTES: usize = 128 * 1024;
 
 /// Reads one bounded Tool reconciliation result relative to the workspace.
 pub fn read_tool_reconciliation_file(
@@ -37,19 +35,19 @@ pub fn reconcile_tool_attempt(
     run_session_id: &str,
     source: &str,
 ) -> Result<(), RuntimeError> {
-    let tool_result = parse_tool_reconciliation(source)?;
+    let reconciliation = parse_tool_reconciliation(source, MAX_TOOL_RECONCILIATION_BYTES)?;
     let workspace = workspace.as_ref();
     with_conversation_run_ownership(workspace, conversation_id, run_session_id, || {
         let run_objects = RunObjectStore::open(workspace, conversation_id, run_session_id)?;
         let recovery = ReconciliationRecovery { run_objects };
+        let tool_result =
+            core_script::parse_flow_value_v0(reconciliation.tool_result).map_err(|error| {
+                RuntimeError::Usage(format!("Tool reconciliation result is invalid: {error}"))
+            })?;
         let fields = parse_tool_result(&tool_result)
             .map_err(|error| RuntimeError::Usage(format!("Tool reconciliation result {error}")))?;
         validate_tool_result_streams(&fields, &recovery)?;
         let (outcome, classification, exit_code) = reconciliation_terminal(&fields)?;
-        let durable_output = serde_json::json!({
-            "schema": TOOL_ATTEMPT_OUTPUT_SCHEMA_V0,
-            "tool_result": tool_result,
-        });
         let eligible = inspect_run_attempts(workspace, conversation_id, run_session_id)?
             .into_iter()
             .filter(|attempt| {
@@ -64,6 +62,32 @@ pub fn reconcile_tool_attempt(
             )));
         }
         let attempt = eligible.into_iter().next().expect("one eligible attempt");
+        if reconciliation.request_hash != attempt.request_hash {
+            return Err(RuntimeError::Usage(
+                "Tool reconciliation request hash does not match the uncertain attempt".to_owned(),
+            ));
+        }
+        let expected = attempt.expected_enforcement.as_ref().ok_or_else(|| {
+            RuntimeError::PersistedState(
+                "uncertain Tool attempt has no enforcement expectation".to_owned(),
+            )
+        })?;
+        proto::validate_enforcement_receipt_v0(
+            &reconciliation.enforcement,
+            &expected.applied_policy_digest,
+            expected.runtime_profile,
+            expected.max_concurrent_processes_and_threads,
+        )
+        .map_err(|error| {
+            RuntimeError::Usage(format!(
+                "Tool reconciliation enforcement receipt does not match the uncertain attempt: {error}"
+            ))
+        })?;
+        let durable_output = tool_attempt_output(
+            &reconciliation.enforcement,
+            &reconciliation.request_hash,
+            serde_json::json!(tool_result),
+        );
         RunAttemptLedger::open(workspace, conversation_id, run_session_id)?.append_result(
             &RunAttemptResult {
                 attempt_id: attempt.attempt_id,
@@ -87,33 +111,6 @@ impl ProductiveRecovery for ReconciliationRecovery {
     fn read_object(&self, uri: &str) -> Result<Vec<u8>, RuntimeError> {
         self.run_objects.read(uri)
     }
-}
-
-fn parse_tool_reconciliation(source: &str) -> Result<core_script::FlowValue, RuntimeError> {
-    if source.len() > MAX_TOOL_RECONCILIATION_BYTES {
-        return Err(RuntimeError::Usage(format!(
-            "Tool reconciliation result exceeds {MAX_TOOL_RECONCILIATION_BYTES} bytes"
-        )));
-    }
-    let document = parse_unique_json(source).map_err(|error| {
-        RuntimeError::Usage(format!(
-            "Tool reconciliation result is not valid duplicate-free JSON: {error}"
-        ))
-    })?;
-    let tool_result = core_script::parse_flow_value_v0(document.clone()).map_err(|error| {
-        RuntimeError::Usage(format!("Tool reconciliation result is invalid: {error}"))
-    })?;
-    let canonical = proto::canonical_json(&document).map_err(|error| {
-        RuntimeError::Usage(format!(
-            "Tool reconciliation result cannot be canonicalized: {error}"
-        ))
-    })?;
-    if canonical != source {
-        return Err(RuntimeError::Usage(
-            "Tool reconciliation result must use canonical JSON bytes".to_owned(),
-        ));
-    }
-    Ok(tool_result)
 }
 
 fn reconciliation_terminal(

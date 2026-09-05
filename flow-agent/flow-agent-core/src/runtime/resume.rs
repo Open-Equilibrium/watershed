@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::runtime::event_writer::post_writer_finish_observer;
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_anchored_workspace},
     config_io::{
@@ -8,12 +10,9 @@ use crate::runtime::{
         ResumeEventSink, ResumePreflightSink, RuntimeEventSink, RuntimePrefixSink,
         SerialSessionWriter, SerialWriterStart,
     },
-    execution_plan::{
-        FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target,
-    },
+    execution_plan::{FlowExecutionAction, FlowExecutionOptions, ToolSideEffectMode},
     fs_guards::{
-        AnchoredFile, AnchoredWorkspace, ensure_anchored_non_hardlinked_file,
-        open_anchored_runtime_dir,
+        AnchoredWorkspace, ensure_anchored_non_hardlinked_file, open_anchored_runtime_dir,
     },
     live_events::LiveEventNotifier,
     planning::plan_flow_with_workspace,
@@ -35,107 +34,15 @@ use crate::runtime::{
         human_run_status_from_failure,
     },
 };
-#[cfg(test)]
-use crate::runtime::{
-    conversations::legacy_flat_compatibility_is_available,
-    event_writer::{EventWriterTimings, post_writer_finish_observer},
-    types::{EmitMode, human_session_status_from_failure},
-};
 use proto::EventType;
 use std::{io, path::Path};
 
-/// Resumes one compatible persisted legacy flat session without repeating completed work.
-#[cfg(test)]
-pub(crate) fn resume_session(
-    workspace: impl AsRef<Path>,
-    session_id: &str,
-    emit: EmitMode,
-) -> Result<RunOutput, RuntimeError> {
-    let workspace = workspace.as_ref();
-    let _ = legacy_flat_compatibility_is_available(workspace, session_id)?;
-    resume_session_internal(workspace, session_id, None, None, emit == EmitMode::Jsonl)
-}
-
-/// Resumes a session with bounded, non-blocking committed-event notifications.
-///
-/// The caller owns the receiver and any blocking transport. Notifications cover only newly
-/// committed events; read their payloads from [`crate::SessionEventReader`] by sequence.
-#[cfg(test)]
-pub(crate) fn resume_session_with_live_events(
-    workspace: impl AsRef<Path>,
-    session_id: &str,
-    notifier: LiveEventNotifier,
-) -> Result<RunOutput, RuntimeError> {
-    let workspace = workspace.as_ref();
-    let _ = legacy_flat_compatibility_is_available(workspace, session_id)?;
-    let mut output = resume_session_internal(workspace, session_id, Some(notifier), None, false)?;
-    output.stdout.clear();
-    Ok(output)
-}
-
-#[cfg(test)]
-pub(crate) fn resume_session_internal(
+/// Resumes one current Fixture session without repeating completed work.
+pub(crate) fn resume_fixture_session_internal(
     workspace: impl AsRef<Path>,
     session_id: &str,
     notifier: Option<LiveEventNotifier>,
-    timings: Option<&mut EventWriterTimings>,
     capture_jsonl: bool,
-) -> Result<RunOutput, RuntimeError> {
-    resume_session_internal_with_cleanup_observer_impl(
-        workspace,
-        session_id,
-        notifier,
-        timings,
-        capture_jsonl,
-        human_session_status_from_failure,
-        |_| {},
-    )
-}
-
-pub(crate) fn resume_migrating_conversation_run_internal(
-    workspace: impl AsRef<Path>,
-    run_session_id: &str,
-    notifier: Option<LiveEventNotifier>,
-    capture_jsonl: bool,
-) -> Result<RunOutput, RuntimeError> {
-    resume_session_internal_with_cleanup_observer_impl(
-        workspace,
-        run_session_id,
-        notifier,
-        #[cfg(test)]
-        None,
-        capture_jsonl,
-        human_run_status_from_failure,
-        |_| {},
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn resume_session_internal_with_cleanup_observer(
-    workspace: impl AsRef<Path>,
-    session_id: &str,
-    capture_jsonl: bool,
-    before_cleanup: impl FnOnce(&AnchoredFile),
-) -> Result<RunOutput, RuntimeError> {
-    resume_session_internal_with_cleanup_observer_impl(
-        workspace,
-        session_id,
-        None,
-        None,
-        capture_jsonl,
-        human_session_status_from_failure,
-        before_cleanup,
-    )
-}
-
-fn resume_session_internal_with_cleanup_observer_impl(
-    workspace: impl AsRef<Path>,
-    session_id: &str,
-    notifier: Option<LiveEventNotifier>,
-    #[cfg(test)] timings: Option<&mut EventWriterTimings>,
-    capture_jsonl: bool,
-    human_status: fn(&str, &str, Option<&str>) -> String,
-    before_cleanup: impl FnOnce(&AnchoredFile),
 ) -> Result<RunOutput, RuntimeError> {
     let workspace = workspace.as_ref();
     if !proto::is_valid_session_id(session_id) {
@@ -192,8 +99,7 @@ fn resume_session_internal_with_cleanup_observer_impl(
             .flow_block(&flow_id)
             .expect("the loaded root Flow remains in the resolved registry");
         verify_resume_definition_metadata_values(session_id, &metadata, &registry, flow_block)?;
-        let policy =
-            core_policy::compile_policy_artifact(&registry, &flow_id, runtime_policy_target())?;
+        let policy = core_policy::compile_policy_artifact(&registry, &flow_id)?;
         let clock = resume_event_clock(config, inspection.clock)?;
         let recorded_context = read_anchored_context_manifest_signature(
             &logs,
@@ -221,8 +127,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
                     &action.event,
                     &action.canonical_jsonl,
                     action.context_checkpoint.clone(),
-                    #[cfg(test)]
-                    None,
                 )?;
             }
         }
@@ -300,8 +204,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
             validation: inspection.validation,
             commit_reservation: None,
             notifier,
-            #[cfg(test)]
-            timings,
         })?;
         if capture_jsonl {
             serial_writer.enable_jsonl_capture();
@@ -346,7 +248,7 @@ fn resume_session_internal_with_cleanup_observer_impl(
         let stdout = if capture_jsonl {
             captured_jsonl.expect("JSONL capture enabled before resumed runtime application")
         } else {
-            human_status(session_id, "resumed", failure_status.as_deref())
+            human_run_status_from_failure(session_id, "resumed", failure_status.as_deref())
         };
         if let Some(err) = terminal_error {
             return Err(RuntimeError::session_failed(session_id, err));
@@ -362,7 +264,6 @@ fn resume_session_internal_with_cleanup_observer_impl(
             stdout,
         })
     })();
-    before_cleanup(&lock.path);
     let cleanup_result = lock.release();
     reconcile_controlled_stages(operation_result, finalization_result, cleanup_result)
 }

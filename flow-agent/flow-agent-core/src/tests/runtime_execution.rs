@@ -7,7 +7,7 @@ use super::{
 };
 use crate::runtime::{
     apply::{FlowApplication, apply_flow_with_sink},
-    execution_plan::{FlowExecutionOptions, ToolSideEffectMode, runtime_policy_target},
+    execution_plan::{FlowExecutionOptions, ToolSideEffectMode},
     fixture_effects::{
         fixture_tool_applied_ids, fixture_tool_apply_count, reset_fixture_tool_apply_count,
     },
@@ -162,9 +162,8 @@ fn apply_uses_the_planned_fixture_effect_snapshot() {
         "instruction_refs: []",
     );
     let registry_a = load_test_registry(&workspace, "hello-flow");
-    let policy_a =
-        core_policy::compile_policy_artifact(&registry_a, "hello-flow", runtime_policy_target())
-            .expect("plan policy compiles");
+    let policy_a = core_policy::compile_policy_artifact(&registry_a, "hello-flow")
+        .expect("plan policy compiles");
     let root_flow_a = registry_a
         .flow_block("hello-flow")
         .expect("hello-flow fixture exists");
@@ -218,7 +217,7 @@ fn run_flow_keeps_started_audit_after_partial_apply_failure() {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'partial\\n' > out/blocker",
     );
-    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker");
 
     let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("later apply-time write is recorded as a failed run");
@@ -294,7 +293,7 @@ fn nested_partial_apply_failure_terminalizes_child_and_parent_flows() {
         "printf '%s\\n' \"$SUMMARY\" > out/summary.txt",
         "printf 'partial\\n' > out/blocker",
     );
-    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker/later.txt");
+    add_bad_write_tool_to_summarize(&workspace, "printf 'later\\n' > out/blocker");
 
     let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
         .expect("nested apply-time denial is recorded as a failed run");

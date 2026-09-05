@@ -134,14 +134,10 @@ fn apply_flow_with_workspace(
                 if live_invocations.should_process(&action.event)
                     && let Some(sink) = sink.as_deref_mut()
                 {
-                    #[cfg(test)]
-                    let measurement_started_at = sink.measurement_started_at();
                     sink.commit(
                         &action.event,
                         &action.canonical_jsonl,
                         action.context_checkpoint.clone(),
-                        #[cfg(test)]
-                        measurement_started_at,
                     )?;
                 }
                 event_signature.push(action.canonical_jsonl.as_bytes());
@@ -194,8 +190,6 @@ fn apply_flow_with_workspace(
     Ok(RuntimeExecution {
         actions: application.plan.actions.clone(),
         context_manifests: context_signature.signature(),
-        #[cfg(test)]
-        event_transition_nanos: Vec::new(),
         events: event_signature.signature(),
         failed: application.plan.execution.failed,
         failure_status: application.plan.execution.failure_status.clone(),
@@ -286,16 +280,10 @@ fn terminalize_planned_fixture_error(
     Ok(RuntimeExecution {
         actions: application.plan.actions.clone(),
         context_manifests: context_signature.signature(),
-        #[cfg(test)]
-        event_transition_nanos: Vec::new(),
         events: event_signature.signature(),
         failed: true,
         failure_status,
-        terminal_error: if matches!(
-            application.options.side_effect_mode,
-            ToolSideEffectMode::Resume { .. }
-        ) || !known_tool_failure
-        {
+        terminal_error: if !known_tool_failure {
             Some(error)
         } else {
             None
@@ -329,8 +317,6 @@ fn terminalize_live_invocation_error(
     Ok(RuntimeExecution {
         actions: application.plan.actions.clone(),
         context_manifests: context_signature.signature(),
-        #[cfg(test)]
-        event_transition_nanos: Vec::new(),
         events: event_signature.signature(),
         failed: true,
         failure_status: Some(render_human_failure_status(
@@ -378,15 +364,7 @@ fn commit_constructed_transition(
     for constructed in events {
         state.live_invocations.before_event(&constructed.event)?;
         if let Some(sink) = state.sink.as_deref_mut() {
-            #[cfg(test)]
-            let measurement_started_at = sink.measurement_started_at();
-            sink.commit(
-                &constructed.event,
-                &constructed.canonical_jsonl,
-                None,
-                #[cfg(test)]
-                measurement_started_at,
-            )?;
+            sink.commit(&constructed.event, &constructed.canonical_jsonl, None)?;
         }
         state
             .event_signature

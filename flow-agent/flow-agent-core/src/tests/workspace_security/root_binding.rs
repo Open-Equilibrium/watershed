@@ -19,7 +19,6 @@ use proto::{EventEnvelope, EventType};
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::Instant,
 };
 
 fn replace_ambient_registry_text(workspace: &Path, path: &str, before: &str, after: &str) {
@@ -50,7 +49,6 @@ fn tool_dispatch_rejects_a_workspace_root_rebound_after_run_or_tool_start() {
             event: &EventEnvelope,
             _canonical_jsonl: &str,
             _context_manifest: Option<ContextManifestCheckpoint>,
-            _measurement_started_at: Option<Instant>,
         ) -> Result<(), RuntimeError> {
             if !self.rebound
                 && !self.rebind_blocked

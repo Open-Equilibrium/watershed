@@ -1,12 +1,9 @@
 use super::{
-    contract::{CONVERSATION_RUNS_DIR, RUN_EVENTS_LEAF, RUN_EVENTS_STEM, protocol},
-    conversation_stream::{
-        jsonl_segment_from_open_file, open_anchored_jsonl_segment, run_segment_leaf,
-    },
+    contract::{CONVERSATION_RUNS_DIR, RUN_EVENTS_LEAF},
+    conversation_stream::open_anchored_jsonl_segment,
     storage::ConversationScanQuantum,
 };
 use crate::runtime::{
-    digest::finish_sha256,
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredWorkspace,
         DirectoryErrorMode, ensure_anchored_real_file, open_anchored_file_for_read,
@@ -24,7 +21,6 @@ use crate::runtime::{
     validate::SessionAppendValidationState,
 };
 use proto::EventEnvelope;
-use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{self, Read, Seek, SeekFrom},
@@ -32,87 +28,6 @@ use std::{
 };
 
 const MAX_IN_MEMORY_REPLAY_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-
-pub(super) fn visit_anchored_run_events(
-    run: &AnchoredDir,
-    session_id: &str,
-    mut visit: impl FnMut(&EventEnvelope, &str) -> Result<(), RuntimeError>,
-) -> Result<(), RuntimeError> {
-    let path = run.file(RUN_EVENTS_LEAF);
-    let segments = segmented_jsonl_files(&path, EVENT_STREAM_LIMITS)?;
-    let segment_count = segments.len();
-    let mut validation = SessionAppendValidationState::empty(session_id);
-    let mut quantum = ConversationScanQuantum::new();
-    for (index, segment) in segments.into_iter().enumerate() {
-        open_anchored_jsonl_segment(&segment, MAX_SESSION_SEGMENT_BYTES)?.scan(
-            MAX_CANONICAL_EVENT_BYTES,
-            index + 1 != segment_count,
-            &mut quantum,
-            |text| {
-                validation.validate_appended_with(path.diagnostic_path(), text, |event| {
-                    visit(event, text)
-                })
-            },
-        )?;
-    }
-    quantum.finish();
-    Ok(())
-}
-
-pub(super) fn visit_run_events_with_signatures(
-    run: &AnchoredDir,
-    session_id: &str,
-    count: usize,
-    visit: impl FnMut(&EventEnvelope, &str) -> Result<(), RuntimeError>,
-) -> Result<Vec<(u64, String)>, RuntimeError> {
-    let mut signatures = Vec::with_capacity(count);
-    visit_run_events_inner(run, session_id, count, Some(&mut signatures), visit)?;
-    Ok(signatures)
-}
-
-fn visit_run_events_inner(
-    run: &AnchoredDir,
-    session_id: &str,
-    count: usize,
-    mut signatures: Option<&mut Vec<(u64, String)>>,
-    mut visit: impl FnMut(&EventEnvelope, &str) -> Result<(), RuntimeError>,
-) -> Result<(), RuntimeError> {
-    let path = run.file(RUN_EVENTS_LEAF);
-    let mut validation = SessionAppendValidationState::empty(session_id);
-    let mut quantum = ConversationScanQuantum::new();
-    for index in 0..count {
-        let segment_path = run.file(run_segment_leaf(RUN_EVENTS_STEM, index));
-        let (file, metadata) = open_anchored_file_for_read(&segment_path)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || metadata.len() > MAX_SESSION_SEGMENT_BYTES
-        {
-            return Err(protocol("migrated stream segment is invalid"));
-        }
-        let stored_bytes = metadata.len();
-        let mut hasher = signatures.is_some().then(Sha256::new);
-        jsonl_segment_from_open_file(
-            file,
-            segment_path.diagnostic_path().to_owned(),
-            stored_bytes,
-        )?
-        .scan(MAX_CANONICAL_EVENT_BYTES, true, &mut quantum, |text| {
-            if let Some(hasher) = hasher.as_mut() {
-                hasher.update(text.as_bytes());
-            }
-            validation
-                .validate_appended_with(path.diagnostic_path(), text, |event| visit(event, text))
-        })?;
-        if let Some(hasher) = hasher {
-            signatures
-                .as_mut()
-                .expect("signature collection is enabled")
-                .push((stored_bytes, finish_sha256(hasher)));
-        }
-    }
-    quantum.finish();
-    Ok(())
-}
 
 pub(crate) fn ensure_in_memory_replay_output_limit(
     output_bytes: usize,
@@ -146,12 +61,14 @@ impl SessionEventReader {
         self.path.diagnostic_path()
     }
 
-    pub(crate) fn open_flat(workspace: &Path, session_id: &str) -> Result<Self, RuntimeError> {
+    /// Opens a session's validated log boundary without reading event payloads yet.
+    pub fn open(workspace: impl AsRef<Path>, session_id: &str) -> Result<Self, RuntimeError> {
         if !proto::is_valid_session_id(session_id) {
             return Err(RuntimeError::Usage(format!(
                 "invalid session_id {session_id:?}"
             )));
         }
+        let workspace = workspace.as_ref();
         let workspace_path =
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
         let workspace = AnchoredWorkspace::open_read_only(&workspace_path)?;
@@ -164,16 +81,11 @@ impl SessionEventReader {
         Self::open_flat_anchored(&workspace, &sessions, session_id)
     }
 
-    pub(super) fn open_flat_anchored(
+    fn open_flat_anchored(
         workspace: &AnchoredWorkspace,
         sessions: &AnchoredDir,
         session_id: &str,
     ) -> Result<Self, RuntimeError> {
-        if !proto::is_valid_session_id(session_id) {
-            return Err(RuntimeError::Usage(format!(
-                "invalid session_id {session_id:?}"
-            )));
-        }
         let path = SessionBundlePaths::events_in(sessions, session_id);
         ensure_anchored_real_file(&path)?;
         Ok(Self {
@@ -188,11 +100,20 @@ impl SessionEventReader {
         })
     }
 
-    pub(super) fn open_conversation_run_raw(
-        workspace: &Path,
+    /// Opens one validated run log owned by the addressed conversation.
+    pub fn open_conversation_run(
+        workspace: impl AsRef<Path>,
         conversation_id: &str,
         run_session_id: &str,
     ) -> Result<Self, RuntimeError> {
+        if !proto::is_valid_session_id(conversation_id)
+            || !proto::is_valid_session_id(run_session_id)
+        {
+            return Err(RuntimeError::Usage(
+                "invalid conversation or run session id".to_owned(),
+            ));
+        }
+        let workspace = workspace.as_ref();
         let workspace_path =
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
         let workspace = AnchoredWorkspace::open_read_only(&workspace_path)?;
@@ -204,12 +125,17 @@ impl SessionEventReader {
                 path: session_dir_path,
                 source: io::Error::from(io::ErrorKind::NotFound),
             })?;
-        let conversation = sessions
-            .child(conversation_id, false, DirectoryErrorMode::Protocol)?
-            .ok_or_else(|| RuntimeError::Io {
+        let Some(conversation) =
+            sessions.child(conversation_id, false, DirectoryErrorMode::Protocol)?
+        else {
+            if conversation_id == run_session_id {
+                return Self::open_flat_anchored(&workspace, &sessions, run_session_id);
+            }
+            return Err(RuntimeError::Io {
                 path: sessions.path.join(conversation_id),
                 source: io::Error::from(io::ErrorKind::NotFound),
-            })?;
+            });
+        };
         let runs = conversation
             .child(CONVERSATION_RUNS_DIR, false, DirectoryErrorMode::Protocol)?
             .ok_or_else(|| RuntimeError::Io {
@@ -242,7 +168,8 @@ impl SessionEventReader {
     /// event. Repeating this call is safe after a processing failure. The returned canonical
     /// records are bounded in memory; use [`Self::visit_verified_after`] for larger
     /// callback-streamed reads.
-    pub fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
+    #[cfg(test)]
+    pub(crate) fn read_after(&mut self, cursor: u64) -> Result<Vec<EventEnvelope>, RuntimeError> {
         let mut output_bytes = 0usize;
         let mut events = Vec::new();
         self.visit_verified_after_with(cursor, u64::MAX, true, |event, line| {
@@ -407,11 +334,8 @@ impl SessionEventReader {
         })
     }
 
-    /// Reads only the newly appended complete suffix after an initial verified read.
-    ///
-    /// This materializing compatibility path is bounded to complete canonical bytes. Streaming
-    /// receivers should use [`Self::visit_incremental_after`].
-    pub fn read_incremental_after(
+    #[cfg(test)]
+    pub(crate) fn read_incremental_after(
         &mut self,
         cursor: u64,
     ) -> Result<Vec<EventEnvelope>, RuntimeError> {
@@ -432,16 +356,14 @@ impl SessionEventReader {
         self.visit_incremental_after_with(cursor, through_sequence, &mut || {}, visit)
     }
 
+    #[cfg(test)]
     pub(crate) fn read_incremental_after_with(
         &mut self,
         cursor: u64,
         after_read: &mut impl FnMut(),
     ) -> Result<Vec<EventEnvelope>, RuntimeError> {
-        let mut output_bytes = 0usize;
         let mut events = Vec::new();
-        self.visit_incremental_after_with(cursor, u64::MAX, after_read, |event, line| {
-            output_bytes = output_bytes.saturating_add(line.len());
-            ensure_in_memory_replay_output_limit(output_bytes)?;
+        self.visit_incremental_after_with(cursor, u64::MAX, after_read, |event, _line| {
             events.push(event.clone());
             Ok(())
         })?;
@@ -663,7 +585,7 @@ impl SessionEventReader {
         Ok(consumed)
     }
 
-    pub(crate) fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
+    fn incremental_segments(&self) -> Result<Vec<AnchoredFile>, RuntimeError> {
         let observed = u64::try_from(self.observed_segment_count).unwrap_or(u64::MAX);
         let mut segments = Vec::new();
         for ordinal in 1..=observed {
@@ -687,7 +609,7 @@ impl SessionEventReader {
         Ok(segments)
     }
 
-    pub(crate) fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
+    fn session_ownership_active(&self) -> Result<bool, RuntimeError> {
         if !self.workspace_identity_is_current()? || !self.ownership.is_active()? {
             return Ok(false);
         }
@@ -705,25 +627,21 @@ impl SessionEventReader {
         Ok(current.identity() == self.workspace_identity)
     }
 
-    pub(crate) fn inactive_partial(&self) -> RuntimeError {
+    fn inactive_partial(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} contains an incomplete final JSONL line without active session ownership",
             self.path.diagnostic_path().display()
         ))
     }
 
-    pub(crate) fn inactive_empty(&self) -> RuntimeError {
+    fn inactive_empty(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} is empty without active session ownership",
             self.path.diagnostic_path().display()
         ))
     }
 
-    pub(crate) fn ensure_cursor(
-        &self,
-        cursor: u64,
-        latest_sequence: u64,
-    ) -> Result<(), RuntimeError> {
+    fn ensure_cursor(&self, cursor: u64, latest_sequence: u64) -> Result<(), RuntimeError> {
         if cursor <= latest_sequence {
             return Ok(());
         }
@@ -733,7 +651,7 @@ impl SessionEventReader {
         )))
     }
 
-    pub(crate) fn changed_outside_append_only(&self) -> RuntimeError {
+    fn changed_outside_append_only(&self) -> RuntimeError {
         RuntimeError::Protocol(format!(
             "{} changed outside append-only session semantics",
             self.path.diagnostic_path().display()
@@ -741,7 +659,7 @@ impl SessionEventReader {
     }
 }
 
-pub fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
+fn complete_jsonl_prefix_len(bytes: &[u8]) -> usize {
     bytes
         .iter()
         .rposition(|byte| *byte == b'\n')

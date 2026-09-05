@@ -143,7 +143,7 @@ where
     result
 }
 
-pub(crate) fn write_new_events(
+fn write_new_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     first_committed_sequence: &mut Option<u64>,
@@ -167,7 +167,7 @@ pub(crate) fn write_new_events(
     Ok(output_open)
 }
 
-pub(crate) fn write_verified_events(
+fn write_verified_events(
     reader: &mut SessionEventReader,
     cursor: &mut u64,
     through_sequence: u64,
@@ -262,7 +262,14 @@ mod tests {
         .expect("session start serializes");
         fs::write(&base_path, &started).expect("session start writes");
         let mut reader = SessionEventReader::open(&workspace, session_id).expect("session opens");
-        assert_eq!(reader.read_after(0).expect("session start reads").len(), 1);
+        let mut initial_events = 0usize;
+        reader
+            .visit_verified_after(0, u64::MAX, |_event, _line| {
+                initial_events = initial_events.saturating_add(1);
+                Ok(())
+            })
+            .expect("session start reads");
+        assert_eq!(initial_events, 1);
 
         let mut segment_ordinal = 1usize;
         let mut segment_bytes = started.len();

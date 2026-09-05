@@ -1,8 +1,8 @@
 use super::support::{
     FakeProvider, FakeToolExecutor, InjectedAttemptRecovery, MemoryAttempts, MemorySink,
     RecoveryObjectTerminal, ScriptedProvider, assert_controlled_cancellation_lifecycle,
-    disabled_smoke_productive_execution_fixture, single_tool_provider_turn,
-    smoke_productive_execution_fixture,
+    disabled_smoke_productive_execution_fixture, fake_tool_attempt_output,
+    single_tool_provider_turn, smoke_productive_execution_fixture,
 };
 use crate::runtime::{
     openai_codex::ProviderTurn,
@@ -46,14 +46,6 @@ fn productive_recovery_rejects_incomplete_or_mismatched_attempts_before_redispat
             RunAttemptKind::Provider,
             "completed",
             None,
-        )),
-        InjectedAttemptRecovery::ProviderResult(provider_result(
-            RunAttemptKind::Provider,
-            "completed",
-            Some(serde_json::json!({
-                "provider_output_objects": [],
-                "schema": "flow-provider-output-v1",
-            })),
         )),
     ];
 
@@ -173,6 +165,10 @@ fn productive_recovery_fails_closed_on_corrupted_committed_provider_errors() {
             "unexpected": true,
         }),
         serde_json::json!({
+            "schema": "flow-provider-error-v0",
+        }),
+        serde_json::json!({
+            "message": null,
             "schema": "flow-provider-error-v0",
         }),
         serde_json::json!({
@@ -309,7 +305,7 @@ fn productive_recovery_resumes_a_cancelled_provider_attempt() {
 }
 
 #[test]
-fn productive_recovery_rejects_a_provider_result_in_the_tool_slot() {
+fn productive_recovery_resumes_a_cancelled_tool_attempt_without_redispatch() {
     let (_workspace, fixture) = smoke_productive_execution_fixture();
     let flow = fixture.smoke_flow();
     let mut provider = ScriptedProvider {
@@ -319,26 +315,161 @@ fn productive_recovery_rejects_a_provider_result_in_the_tool_slot() {
     let mut attempts = MemoryAttempts::default();
     let mut sink = MemorySink::default();
     let mut tools = FakeToolExecutor::default();
-    let mut recovery = InjectedAttemptRecovery::ToolWrongKind;
+    let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+        attempt_id: "tool-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Tool,
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some(CANCELLED_REASON.to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:00Z".to_owned(),
+        durable_output: None,
+    });
 
-    let error = execute_productive_flow_with_tool_executor_and_recovery(
-        fixture.execution(flow, "productive-wrong-tool-recovery-fixture"),
+    let execution = execute_productive_flow_with_tool_executor_and_recovery(
+        fixture.execution(flow, "productive-cancelled-tool-recovery"),
         &mut provider,
         &mut attempts,
         &mut sink,
         &mut tools,
         &mut recovery,
     )
-    .expect_err("wrong-kind Tool recovery stops exact recovery");
+    .expect("recovered Tool cancellation closes the enclosing lifecycle");
 
-    assert!(error.to_string().contains("wrong kind"));
-    assert!(tools.invocations.is_empty());
-    assert!(
-        !sink
-            .0
-            .iter()
-            .any(|event| event.event_type == EventType::ToolCompleted)
-    );
+    assert!(execution.failed);
+    assert!(matches!(
+        execution.terminal_error,
+        Some(RuntimeError::Cancelled)
+    ));
+    assert_eq!(provider.bodies.len(), 1);
+    assert!(tools.invocations.is_empty(), "the Tool must not redispatch");
+    assert_eq!(attempts.intents.len(), 1, "only the Provider intent is new");
+    assert_controlled_cancellation_lifecycle(&sink.0);
+}
+
+#[test]
+fn productive_recovery_rejects_invalid_tool_attempts_before_redispatch() {
+    for (name, mut recovery, expected) in [
+        (
+            "recovery-error",
+            InjectedAttemptRecovery::ToolError,
+            "fixture Tool recovery failure",
+        ),
+        (
+            "wrong-kind",
+            InjectedAttemptRecovery::ToolWrongKind,
+            "wrong kind",
+        ),
+    ] {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+
+        let error = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, &format!("productive-invalid-tool-recovery-{name}")),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect_err("invalid Tool recovery stops exact recovery");
+
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert!(tools.invocations.is_empty(), "{name}");
+        assert!(
+            !sink
+                .0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolCompleted),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn productive_recovery_rejects_tampered_tool_bindings_before_redispatch() {
+    type OutputMutation = fn(&mut serde_json::Value);
+    let cases: [(&str, OutputMutation, &str); 3] = [
+        (
+            "missing-receipt",
+            |output| {
+                output
+                    .as_object_mut()
+                    .expect("attempt output is a map")
+                    .remove("enforcement");
+            },
+            "has no enforcement receipt",
+        ),
+        (
+            "wrong-request-hash",
+            |output| output["request_hash"] = "1".repeat(64).into(),
+            "does not match the prepared request hash",
+        ),
+        (
+            "wrong-runtime-profile",
+            |output| output["enforcement"]["runtime_profile"] = "host-system-read".into(),
+            "enforcement receipt does not match",
+        ),
+    ];
+
+    for (name, mutate, expected) in cases {
+        let (_workspace, fixture) = smoke_productive_execution_fixture();
+        let flow = fixture.smoke_flow();
+        let mut provider = ScriptedProvider {
+            bodies: Vec::new(),
+            turns: VecDeque::from([single_tool_provider_turn("response-tool", "call-1")]),
+        };
+        let mut attempts = MemoryAttempts::default();
+        let mut sink = MemorySink::default();
+        let mut tools = FakeToolExecutor::default();
+        let mut output = fake_tool_attempt_output(serde_json::json!({
+            "type": "map",
+            "value": {
+                "schema": {"type": "string", "value": "flow-tool-result-v0"},
+                "status": {"type": "string", "value": "completed"},
+                "exit_code": {"type": "integer", "value": "0"},
+                "stdout": {"type": "string", "value": "stdout"},
+                "stderr": {"type": "string", "value": ""}
+            }
+        }));
+        mutate(&mut output);
+        let mut recovery = InjectedAttemptRecovery::ToolResult(RunAttemptResult {
+            attempt_id: "tool-000001".to_owned(),
+            attempt_kind: RunAttemptKind::Tool,
+            outcome: RunAttemptOutcome::Completed,
+            classification: None,
+            exit_code: Some(0),
+            timestamp: "2026-07-30T12:00:00Z".to_owned(),
+            durable_output: Some(output),
+        });
+
+        let error = execute_productive_flow_with_tool_executor_and_recovery(
+            fixture.execution(flow, &format!("productive-tool-tamper-{name}")),
+            &mut provider,
+            &mut attempts,
+            &mut sink,
+            &mut tools,
+            &mut recovery,
+        )
+        .expect_err("tampered durable Tool evidence must fail closed");
+
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+        assert_eq!(provider.bodies.len(), 1, "{name}");
+        assert!(tools.invocations.is_empty(), "{name}");
+        assert!(
+            !sink
+                .0
+                .iter()
+                .any(|event| event.event_type == EventType::ToolCompleted),
+            "{name}"
+        );
+    }
 }
 
 #[test]
@@ -359,22 +490,21 @@ fn productive_recovery_verifies_referenced_tool_result_objects_before_continuing
         classification: None,
         exit_code: Some(0),
         timestamp: "2026-07-30T12:00:00Z".to_owned(),
-        durable_output: Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
-            "tool_result": {
-                "type": "map",
-                "value": {
-                    "schema": {"type": "string", "value": "flow-tool-result-v0"},
-                    "status": {"type": "string", "value": "completed"},
-                    "exit_code": {"type": "integer", "value": "0"},
-                    "stdout": {
-                        "type": "session-object",
-                        "value": "session-object:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                    },
-                    "stderr": {"type": "string", "value": ""}
-                }
-            }
-        })),
+        durable_output: Some(super::support::fake_tool_attempt_output(
+            serde_json::json!({
+                    "type": "map",
+                    "value": {
+                        "schema": {"type": "string", "value": "flow-tool-result-v0"},
+                        "status": {"type": "string", "value": "completed"},
+                        "exit_code": {"type": "integer", "value": "0"},
+                        "stdout": {
+                            "type": "session-object",
+                            "value": "session-object:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        },
+                        "stderr": {"type": "string", "value": ""}
+                    }
+            }),
+        )),
     });
 
     let error = execute_productive_flow_with_tool_executor_and_recovery(

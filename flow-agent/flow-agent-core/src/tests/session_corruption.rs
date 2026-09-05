@@ -1,20 +1,16 @@
 use super::{
-    helpers::{
-        base_event, event_line, first_event_line, flow_started_line, write_definition_hash_metadata,
-    },
+    helpers::{base_event, event_line, first_event_line, flow_started_line},
     support::validate_appended_session_log_text,
-    test_support::{expected_stream, stream_prefix, workspace_copy},
+    test_support::{expected_stream, workspace_copy},
 };
 use crate::runtime::{
     event_writer::set_post_writer_finish_observer,
-    failures::canonical_event_stream,
-    resume::resume_session,
     session::run_flow,
     session_reading::SessionEventReader,
     types::{EmitMode, RuntimeError},
     validate::validate_session_log_text,
 };
-use proto::{EventEnvelope, EventType};
+use proto::EventType;
 use std::{fs, path::Path};
 
 #[test]
@@ -44,55 +40,6 @@ fn run_jsonl_capture_uses_writer_accepted_stream_after_path_replacement() {
 }
 
 #[test]
-fn resume_jsonl_capture_uses_new_writer_accepted_events_after_path_replacement() {
-    let workspace = workspace_copy("smoke-flow");
-    let completed =
-        run_flow(&workspace, "smoke-flow", EmitMode::Jsonl).expect("fixture run completes");
-    let prefix = stream_prefix(&completed.stdout, 2);
-    let prior_event_count = prefix.lines().count();
-    fs::write(&completed.session_path, &prefix).expect("partial live session written");
-    write_definition_hash_metadata(&workspace, &completed.session_id, "smoke-flow");
-    let replacement = prefix
-        .lines()
-        .next()
-        .map(|line| format!("{line}\n"))
-        .expect("prefix contains an event");
-    let replacement_for_observer = replacement.clone();
-    let accepted_path = crate::tests::helpers::workspace_session_dir(&workspace)
-        .join("smoke-flow.resume-writer-accepted");
-    let accepted_path_for_observer = accepted_path.clone();
-    set_post_writer_finish_observer(move |path| {
-        fs::rename(path.diagnostic_path(), &accepted_path_for_observer)
-            .expect("writer-accepted resumed stream retained");
-        fs::write(path.diagnostic_path(), replacement_for_observer)
-            .expect("resumed path replaced with a shorter valid stream");
-    });
-
-    let resumed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        resume_session(&workspace, &completed.session_id, EmitMode::Jsonl)
-    }));
-    let output = resumed
-        .expect("resume capture must not panic after path replacement")
-        .expect("resume capture remains available after path replacement");
-    let accepted = fs::read_to_string(&accepted_path).expect("accepted resumed stream readable");
-    let accepted_events =
-        validate_session_log_text(&accepted_path, &completed.session_id, &accepted)
-            .expect("accepted resumed stream validates");
-    let expected = canonical_event_stream(
-        accepted_events
-            .get(prior_event_count..)
-            .expect("accepted resumed stream retains its prefix"),
-    )
-    .expect("accepted resumed suffix is canonical");
-
-    assert_eq!(output.stdout, expected);
-    assert_eq!(
-        fs::read_to_string(&completed.session_path).expect("replacement resume path readable"),
-        replacement
-    );
-}
-
-#[test]
 fn corrupted_session_log_is_rejected_without_rewrite() {
     let workspace = workspace_copy("smoke-flow");
     let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
@@ -102,11 +49,6 @@ fn corrupted_session_log_is_rejected_without_rewrite() {
 
     let mut reader = SessionEventReader::open(&workspace, "bad001").expect("reader opens");
     assert!(reader.read_after(0).is_err());
-    assert_eq!(
-        fs::read_to_string(&path).expect("corrupt log remains readable"),
-        before
-    );
-    assert!(resume_session(&workspace, "bad001", EmitMode::Jsonl).is_err());
     assert_eq!(
         fs::read_to_string(&path).expect("corrupt log remains readable"),
         before
@@ -160,106 +102,6 @@ fn session_log_filename_must_match_envelope_session_id() {
         .expect_err("session id mismatch must fail");
 
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("expected")));
-}
-
-#[test]
-fn resume_rejects_session_log_without_started_event() {
-    let workspace = workspace_copy("smoke-flow");
-    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
-    let path = session_dir.join("missing-start.jsonl");
-    let event = EventEnvelope {
-        flow_id: Some("flow-001".to_owned()),
-        ..EventEnvelope::new(
-            "evt-001",
-            EventType::ToolCompleted,
-            "missing-start",
-            1,
-            "2026-01-01T00:00:00Z",
-            "flow-agent-cli",
-            serde_json::json!({
-                "exit_code": 0,
-                "tool_id": "read-fixture",
-            }),
-        )
-    }
-    .canonical_jsonl()
-    .expect("tool event serializes");
-    fs::write(&path, &event).expect("malformed lifecycle log written");
-
-    let err = resume_session(&workspace, "missing-start", EmitMode::Jsonl)
-        .expect_err("missing-start log must not resume");
-
-    assert!(
-        matches!(err, RuntimeError::Protocol(message) if message.contains("must start with session.started"))
-    );
-    assert_eq!(
-        fs::read_to_string(&path).expect("malformed lifecycle log remains readable"),
-        event
-    );
-}
-
-#[test]
-fn resume_rejects_tool_completion_without_tool_start() {
-    let workspace = workspace_copy("smoke-flow");
-    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
-    let path = session_dir.join("missing-tool-start.jsonl");
-    let started = EventEnvelope::new(
-        "evt-001",
-        EventType::SessionStarted,
-        "missing-tool-start",
-        1,
-        "2026-01-01T00:00:00Z",
-        "flow-agent-cli",
-        serde_json::json!({"reason":"fixture-start"}),
-    )
-    .canonical_jsonl()
-    .expect("session event serializes");
-    let flow_started = EventEnvelope {
-        flow_id: Some("flow-001".to_owned()),
-        ..EventEnvelope::new(
-            "evt-002",
-            EventType::FlowStarted,
-            "missing-tool-start",
-            2,
-            "2026-01-01T00:00:01Z",
-            "flow-agent-cli",
-            serde_json::json!({
-                "flow_definition_id": "smoke-flow",
-            }),
-        )
-    }
-    .canonical_jsonl()
-    .expect("flow event serializes");
-    let tool_completed = EventEnvelope {
-        flow_id: Some("flow-001".to_owned()),
-        ..EventEnvelope::new(
-            "evt-003",
-            EventType::ToolCompleted,
-            "missing-tool-start",
-            3,
-            "2026-01-01T00:00:02Z",
-            "flow-agent-cli",
-            serde_json::json!({
-                "exit_code": 0,
-                "tool_id": "echo",
-            }),
-        )
-    }
-    .canonical_jsonl()
-    .expect("tool event serializes");
-    let before = format!("{started}{flow_started}{tool_completed}");
-    fs::write(&path, &before).expect("malformed tool lifecycle log written");
-
-    let err = resume_session(&workspace, "missing-tool-start", EmitMode::Jsonl)
-        .expect_err("missing tool start log must not resume");
-
-    assert!(
-        matches!(err, RuntimeError::Protocol(message) if message.contains("tool.completed must follow tool.started"))
-    );
-    assert_eq!(
-        fs::read_to_string(&path).expect("malformed tool lifecycle log remains readable"),
-        before
-    );
 }
 
 #[test]
@@ -359,12 +201,14 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
+                "max_concurrent_processes_and_threads": 1,
                 "network_access": "deny",
-                "read_scope": [],
+                "read_only_mounts": [],
                 "tool_id": "echo",
                 "tool_kind": "predefined-command",
                 "tool_name": "Echo",
-                "write_scope": [],
+                "runtime_profile": "exact",
+                "writable_mounts": [],
             }),
         ),
         event_line(
@@ -413,12 +257,14 @@ fn session_log_allows_tool_reuse_in_later_phase_execution() {
             Some("flow-001"),
             serde_json::json!({
                 "allowed_parameters": [],
+                "max_concurrent_processes_and_threads": 1,
                 "network_access": "deny",
-                "read_scope": [],
+                "read_only_mounts": [],
                 "tool_id": "echo",
                 "tool_kind": "predefined-command",
                 "tool_name": "Echo",
-                "write_scope": [],
+                "runtime_profile": "exact",
+                "writable_mounts": [],
             }),
         ),
         event_line(

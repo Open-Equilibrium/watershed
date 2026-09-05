@@ -13,12 +13,8 @@ pub const EVENT_WRITER_BATCH_WINDOW: Duration = Duration::from_millis(25);
 pub const EVENT_WRITER_DIRTY_SYNC_INTERVAL: Duration = Duration::from_secs(1);
 
 pub struct WriterOutcome {
-    #[cfg(test)]
-    pub(crate) append_latency_nanos: Option<u128>,
     pub(crate) appended: bool,
     pub(crate) error: Option<RuntimeError>,
-    #[cfg(test)]
-    pub(crate) notification_latency_nanos: Option<u128>,
 }
 
 impl WriterOutcome {
@@ -28,12 +24,8 @@ impl WriterOutcome {
 
     pub(crate) fn not_appended(error: Option<RuntimeError>) -> Self {
         Self {
-            #[cfg(test)]
-            append_latency_nanos: None,
             appended: false,
             error,
-            #[cfg(test)]
-            notification_latency_nanos: None,
         }
     }
 }
@@ -43,10 +35,6 @@ pub struct QueuedEvent {
     pub(crate) canonical_jsonl: String,
     pub(crate) context_manifest: Option<ContextManifestCheckpoint>,
     pub(crate) event: Box<EventEnvelope>,
-    #[cfg(test)]
-    pub(crate) measurement_started_at: Option<Instant>,
-    #[cfg(test)]
-    pub(crate) pre_batch_latency_nanos: Option<u128>,
 }
 
 pub(crate) struct FailedBatchPartition {
@@ -271,15 +259,6 @@ impl PendingEventBatch {
     pub(crate) fn push(&mut self, event: QueuedEvent) {
         let now = Instant::now();
         self.start(now);
-        #[cfg(test)]
-        let event = {
-            let mut event = event;
-            event.pre_batch_latency_nanos = event
-                .measurement_started_at
-                .take()
-                .map(|started_at| started_at.elapsed().as_nanos());
-            event
-        };
         self.events.push(event);
     }
 
@@ -290,7 +269,7 @@ impl PendingEventBatch {
         })
     }
 
-    pub(crate) fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.events.len() == EVENT_WRITER_BATCH_CAPACITY
     }
 

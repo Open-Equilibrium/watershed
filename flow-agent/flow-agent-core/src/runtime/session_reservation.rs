@@ -1,3 +1,4 @@
+use crate::runtime::session_lock::{SessionLockGuard, open_or_create_anchored_session_marker};
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredDirectoryIdentity, AnchoredFile, AnchoredFileIdentity,
@@ -13,7 +14,7 @@ use crate::runtime::{
         suffixed_session_id,
     },
     session_definition::{SessionDefinitionMetadata, ascii_case_alias},
-    session_lock::{SessionLockGuard, SessionReservation, open_or_create_anchored_session_marker},
+    session_lock::SessionReservation,
     session_store::workspace_store_path,
     stage_results::reconcile_controlled_stages,
     types::{LOG_STORAGE_DIR, RuntimeError, SESSION_STORAGE_DIR},

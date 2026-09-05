@@ -8,6 +8,7 @@ use crate::runtime::{
     },
     run_attempts::{
         ProductiveRecovery, RunAttemptIntent, RunAttemptKind, RunAttemptOutcome, RunAttemptResult,
+        ToolEnforcementExpectation,
     },
 };
 use std::{
@@ -28,6 +29,7 @@ fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
         &RunAttemptIntent {
             attempt_id: "provider-000001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: request_hash.to_owned(),
             tool_id: None,
             timestamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -45,7 +47,7 @@ fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
             "provider_output_objects": [
                 "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
             ],
-            "schema": "flow-provider-output-v1"
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_result(&workspace, "review", "review-1", &result)
@@ -74,6 +76,73 @@ fn exact_recovery_promotes_a_completed_attempt_without_redispatch() {
             .expect("promoted recovery metadata reads")
             .len()
             > header_len
+    );
+}
+
+#[test]
+fn productive_recovery_rejects_cross_ledger_attempt_conflicts() {
+    let workspace = empty_workspace("conversation-recovery-attempt-conflict");
+    let mut recovery =
+        standard_review_recovery_writer(&workspace, None, &ContextHistory::default());
+    let recorded = RunAttemptResult {
+        attempt_id: "provider-000001".to_owned(),
+        attempt_kind: RunAttemptKind::Provider,
+        outcome: RunAttemptOutcome::Completed,
+        classification: None,
+        exit_code: None,
+        timestamp: "2026-01-01T00:00:01Z".to_owned(),
+        durable_output: Some(serde_json::json!({
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
+        })),
+    };
+    recovery
+        .record_attempt(None, REQUEST_HASH, &recorded)
+        .expect("recovery attempt record commits");
+    drop(recovery);
+    append_run_attempt_intent(
+        &workspace,
+        "review",
+        "review-1",
+        &RunAttemptIntent {
+            attempt_id: recorded.attempt_id.clone(),
+            attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
+            request_hash: REQUEST_HASH.to_owned(),
+            tool_id: None,
+            timestamp: "2026-01-01T00:00:00Z".to_owned(),
+        },
+    )
+    .expect("provider intent commits");
+    append_run_attempt_result(
+        &workspace,
+        "review",
+        "review-1",
+        &RunAttemptResult {
+            timestamp: "2026-01-01T00:00:02Z".to_owned(),
+            ..recorded
+        },
+    )
+    .expect("conflicting provider result commits independently");
+
+    let mut resumed = ProductiveRecoveryWriter::open_for_resume(&workspace, "review", "review-1")
+        .expect("individually valid recovery ledgers open");
+    let error = resumed
+        .recover_attempt(
+            RunAttemptKind::Provider,
+            "provider-000001",
+            REQUEST_HASH,
+            None,
+        )
+        .expect_err("cross-ledger disagreement must fail closed");
+
+    assert!(
+        error
+            .to_string()
+            .contains("conflicts with its completed run-log result"),
+        "{error}"
     );
 }
 
@@ -129,6 +198,7 @@ fn productive_recovery_round_trips_every_committed_boundary() {
     let intent = RunAttemptIntent {
         attempt_id: "provider-000001".to_owned(),
         attempt_kind: RunAttemptKind::Provider,
+        expected_enforcement: None,
         request_hash: request_hash.to_owned(),
         tool_id: None,
         timestamp: "2026-01-01T00:00:00Z".to_owned(),
@@ -141,8 +211,10 @@ fn productive_recovery_round_trips_every_committed_boundary() {
         exit_code: None,
         timestamp: "2026-01-01T00:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_intent(&workspace, "review", "review-1", &intent)
@@ -245,8 +317,10 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
         exit_code: None,
         timestamp: "2026-07-30T12:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_intent(
@@ -256,6 +330,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
         &RunAttemptIntent {
             attempt_id: provider_result.attempt_id.clone(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: request_hash.clone(),
             tool_id: None,
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -298,6 +373,7 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
             &RunAttemptIntent {
                 attempt_id: "provider-000002".to_owned(),
                 attempt_kind: RunAttemptKind::Provider,
+                expected_enforcement: None,
                 request_hash: extra_hash.to_owned(),
                 tool_id: None,
                 timestamp: "2026-07-30T12:00:02Z".to_owned(),
@@ -316,8 +392,10 @@ fn complete_recovery_fixture(name: &str, extra_completed_attempt: bool) -> Compl
                 exit_code: None,
                 timestamp: "2026-07-30T12:00:03Z".to_owned(),
                 durable_output: Some(serde_json::json!({
-                    "provider_output_objects": [],
-                    "schema": "flow-provider-output-v1"
+                    "provider_output_objects": [
+                        "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                    ],
+                    "schema": "flow-provider-output-v2"
                 })),
             },
         )
@@ -433,6 +511,29 @@ fn productive_recovery_rejects_every_replayed_boundary_divergence() {
         .expect_err("Phase identity divergence fails closed");
     assert!(error.to_string().contains("diverged"), "{error}");
 
+    let mut recovery =
+        ProductiveRecoveryWriter::open_for_resume(&fixture.workspace, "review", "review-1")
+            .expect("complete recovery opens");
+    recovery
+        .recover_attempt(
+            RunAttemptKind::Provider,
+            "provider-000001",
+            &fixture.request_hash,
+            None,
+        )
+        .expect("provider replays");
+    let error = recovery
+        .phase_boundary(
+            "flow-000001",
+            "phase-000001",
+            "review-phase",
+            1,
+            &core_script::FlowValue::String("different result".to_owned()),
+            false,
+        )
+        .expect_err("Phase result divergence fails closed");
+    assert!(error.to_string().contains("result diverged"), "{error}");
+
     let mut recovery = replay_provider_and_phase(&fixture);
     let error = recovery
         .transition_boundary("flow-000001", "different-phase", Some("summary-phase"))
@@ -476,6 +577,11 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         &RunAttemptIntent {
             attempt_id: "tool-000001".to_owned(),
             attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: "0".repeat(64),
+                max_concurrent_processes_and_threads: 16,
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),
             timestamp: "2026-07-30T12:00:00Z".to_owned(),
@@ -490,7 +596,13 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         exit_code: Some(0),
         timestamp: "2026-07-30T12:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "schema": "flow-tool-attempt-output-v0",
+            "enforcement": crate::runtime::productive::test_enforcement_receipt(
+                "0".repeat(64),
+                16,
+                core_script::ToolRuntimeProfile::Exact,
+            ),
+            "request_hash": request_hash,
+            "schema": "flow-tool-attempt-output-v1",
             "tool_result": {"type": "string", "value": "inspected"}
         })),
     };
@@ -508,6 +620,11 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
         &RunAttemptIntent {
             attempt_id: second_result.attempt_id.clone(),
             attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: "0".repeat(64),
+                max_concurrent_processes_and_threads: 16,
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            }),
             request_hash: request_hash.to_owned(),
             tool_id: Some("inspect".to_owned()),
             timestamp: "2026-07-30T12:00:02Z".to_owned(),
@@ -516,6 +633,37 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
     .expect("second Tool intent commits");
     append_run_attempt_result(&workspace, "review", "review-1", &second_result)
         .expect("second Tool result commits");
+    let cancelled_result = RunAttemptResult {
+        attempt_id: "tool-000003".to_owned(),
+        outcome: RunAttemptOutcome::Cancelled,
+        classification: Some("cancelled".to_owned()),
+        exit_code: None,
+        timestamp: "2026-07-30T12:00:04Z".to_owned(),
+        durable_output: Some(serde_json::json!({
+            "schema": "flow-attempt-cancelled-v0",
+        })),
+        ..result.clone()
+    };
+    append_run_attempt_intent(
+        &workspace,
+        "review",
+        "review-1",
+        &RunAttemptIntent {
+            attempt_id: cancelled_result.attempt_id.clone(),
+            attempt_kind: RunAttemptKind::Tool,
+            expected_enforcement: Some(ToolEnforcementExpectation {
+                applied_policy_digest: "0".repeat(64),
+                max_concurrent_processes_and_threads: 16,
+                runtime_profile: proto::RuntimeReadProfileV0::Exact,
+            }),
+            request_hash: request_hash.to_owned(),
+            tool_id: Some("inspect".to_owned()),
+            timestamp: "2026-07-30T12:00:03Z".to_owned(),
+        },
+    )
+    .expect("cancelled Tool intent commits");
+    append_run_attempt_result(&workspace, "review", "review-1", &cancelled_result)
+        .expect("cancelled Tool result commits without its recovery record");
     recovery
         .record_attempt(Some("inspect"), request_hash, &result)
         .expect("Tool recovery record commits");
@@ -547,6 +695,17 @@ fn productive_recovery_round_trips_a_tool_attempt_on_every_platform() {
             )
             .expect("second Tool attempt replays"),
         Some(second_result.clone())
+    );
+    assert_eq!(
+        resumed
+            .recover_attempt(
+                RunAttemptKind::Tool,
+                "tool-000003",
+                request_hash,
+                Some("inspect"),
+            )
+            .expect("cancelled Tool result reconstructs its missing recovery record"),
+        Some(cancelled_result)
     );
 
     let error = resumed
@@ -651,6 +810,7 @@ fn header_only_recovery_with_completed_attempt(
         &RunAttemptIntent {
             attempt_id: "provider-000001".to_owned(),
             attempt_kind: RunAttemptKind::Provider,
+            expected_enforcement: None,
             request_hash: REQUEST_HASH.to_owned(),
             tool_id: None,
             timestamp: "2026-08-16T12:00:00Z".to_owned(),
@@ -665,8 +825,10 @@ fn header_only_recovery_with_completed_attempt(
         exit_code: None,
         timestamp: "2026-08-16T12:00:01Z".to_owned(),
         durable_output: Some(serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [
+                "session-object:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            ],
+            "schema": "flow-provider-output-v2"
         })),
     };
     append_run_attempt_result(&workspace, "review", "review-1", &result)

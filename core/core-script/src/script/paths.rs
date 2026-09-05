@@ -96,32 +96,6 @@ pub fn normalize_safe_relative_path(value: &str) -> Option<String> {
     Some(value.to_owned())
 }
 
-/// Normalizes a safe slash-separated relative protected-path pattern.
-pub fn normalize_protected_path_pattern(value: &str) -> Option<String> {
-    let normalized = value.replace('\\', "/");
-    if normalized.is_empty()
-        || normalized.starts_with('/')
-        || normalized.contains('$')
-        || has_windows_drive_prefix(&normalized)
-        || normalized.split('/').any(|segment| {
-            segment == "."
-                || segment == ".."
-                || segment.contains("**") && segment != "**"
-                || path_component_has_windows_alias(segment)
-                || path_pattern_component_has_windows_invalid_character(segment)
-        })
-    {
-        return None;
-    }
-    Some(
-        normalized
-            .split('/')
-            .filter(|segment| !segment.is_empty())
-            .collect::<Vec<_>>()
-            .join("/"),
-    )
-}
-
 /// Returns whether `path` is equal to or contained under `scope`.
 pub fn relative_path_is_inside_scope(path: &str, scope: &str) -> bool {
     normalize_safe_relative_path(path).as_deref() == Some(path)
@@ -170,12 +144,6 @@ fn path_component_has_windows_invalid_character(component: &str) -> bool {
     component
         .bytes()
         .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|' | b'?' | b'*'))
-}
-
-fn path_pattern_component_has_windows_invalid_character(component: &str) -> bool {
-    component
-        .bytes()
-        .any(|byte| byte < b' ' || matches!(byte, b'<' | b'>' | b':' | b'"' | b'|'))
 }
 
 fn matches_lower_token(value: &str, min_len: usize, max_len: usize) -> bool {

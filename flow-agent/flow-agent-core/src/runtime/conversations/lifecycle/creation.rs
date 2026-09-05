@@ -7,7 +7,7 @@ use super::super::status::{StatusTransactionCrashPoint, status_run_mutation_chec
 use super::super::{
     contract::{
         CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, CONVERSATION_STATUS_LEAF,
-        RUN_CONTEXTS_LEAF, RUN_EVENTS_LEAF, RUN_LOG_LEAF, RUN_LOG_RECORD_SCHEMA_V0,
+        RUN_CONTEXTS_LEAF, RUN_EVENTS_LEAF, RUN_LOG_LEAF, RUN_LOG_RECORD_SCHEMA_V1,
         RUN_OBJECTS_DIR, RUN_SESSION_LOCK_LEAF, UNPUBLISHED_PRODUCTIVE_RUN_MARKER, protocol,
         run_creation_identity_marker_name, validate_hash, validate_id,
     },
@@ -434,7 +434,7 @@ fn create_conversation_run_with_publication_marker(
                 )
             });
         let definition = RunLogRecord::Definition {
-            schema: RUN_LOG_RECORD_SCHEMA_V0.to_owned(),
+            schema: RUN_LOG_RECORD_SCHEMA_V1.to_owned(),
             flow_definition_id: flow_definition_id.to_owned(),
             registry_hash: registry_hash.to_owned(),
             flow_definition_hash: flow_definition_hash.to_owned(),
@@ -443,8 +443,6 @@ fn create_conversation_run_with_publication_marker(
             model_context_limit,
             output_reserve,
             safety_margin,
-            legacy_session_id: None,
-            legacy_source_manifest: None,
         };
         let mut definition_bytes = canonical_json(&definition)?.into_bytes();
         definition_bytes.push(b'\n');

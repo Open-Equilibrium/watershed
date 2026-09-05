@@ -107,11 +107,6 @@ fn sandbox_negative_policy_fixtures_reach_dispatch_with_their_declared_reason() 
         ),
         ("sandbox-negative-network", "network-tool", "network_denied"),
         (
-            "sandbox-negative-protected-path",
-            "protected-path-tool",
-            "protected_path_denied",
-        ),
-        (
             "sandbox-negative-symlink",
             "symlink-tool",
             "symlink_escape_denied",
@@ -426,7 +421,7 @@ fn out_of_phase_fixture_denial_does_not_apply_to_other_flows_by_phase_id() {
     let workspace = workspace_copy("smoke-flow");
     fs::write(
         session_home_path().join("registry/tools/unrelated-negative.yaml"),
-        "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  read_scope: [\"workspace\"]\n  write_scope: []\n  protected_path_grants: []\n  network: deny\n",
+        "tool:\n  id: unrelated-negative\n  name: UnrelatedNegative\n  tool_kind: predefined-command\n  command:\n    command_id: agent-negative\n    argv: [\"write\"]\n  allowed_parameters: []\n  max_concurrent_processes_and_threads: 16\n  runtime_profile: exact\n  read_only_mounts: [\"workspace\"]\n  writable_mounts: []\n  network: deny\n",
     )
     .expect("unrelated sentinel tool written");
     replace_registry_text(
@@ -484,18 +479,6 @@ fn sandbox_negative_command_grammar_rejects_extra_and_unknown_operations() {
 
 #[test]
 fn runtime_failure_and_sandbox_negative_helpers_cover_edge_paths() {
-    assert_eq!(
-        runtime_failure_for_tool_error(
-            &RuntimeError::Denied {
-                reason: core_policy::DenyReasonCode::ProtectedPathDenied,
-                message: "protected path denied".to_owned(),
-            },
-            "tool"
-        )
-        .expect("protected path maps")
-        .reason,
-        core_policy::DenyReasonCode::ProtectedPathDenied.as_str()
-    );
     assert_eq!(
         runtime_failure_for_tool_error(
             &RuntimeError::Denied {

@@ -1,11 +1,13 @@
 use super::super::{helpers::load_test_registry, test_support::workspace_copy};
 use super::support::{CountingObjectRecovery, ObjectRecovery};
 use crate::runtime::{
+    digest::sha256_hex,
     openai_codex::{ProviderTokenUsage, ProviderToolCall, ProviderTurn},
     productive::{
-        durable_provider_output, parse_provider_result, provider_turn_from_durable_output,
-        verify_provider_result_session_objects,
+        MAX_DURABLE_PROVIDER_OUTPUT_BYTES, durable_provider_output, parse_provider_result,
+        provider_turn_from_durable_output, verify_provider_result_session_objects,
     },
+    types::MAX_SESSION_OBJECT_BYTES,
 };
 use std::{cell::Cell, collections::BTreeMap};
 #[test]
@@ -46,42 +48,11 @@ fn provider_attempt_output_round_trips_and_rejects_ambiguous_recovery_data() {
         turn.tool_calls[0].arguments
     );
 
-    let mut legacy_reference = durable.reference.clone();
-    legacy_reference["schema"] = serde_json::json!("flow-provider-output-v1");
-    legacy_reference
-        .as_object_mut()
-        .expect("reference object")
-        .remove("token_usage");
-    let legacy = provider_turn_from_durable_output(&legacy_reference, &recovery)
-        .expect("legacy provider output recovers without usage");
-    assert_eq!(legacy.token_usage, None);
-
-    for reference in [
-        serde_json::json!({
-            "provider_output_objects": [],
-            "schema": "flow-provider-output-v1"
-        }),
-        serde_json::json!({
-            "provider_output_objects": ["session-object:sha256:unused"],
-            "schema": "flow-provider-output-v0"
-        }),
-        serde_json::json!({
-            "provider_output_objects": ["a", "b", "c", "d", "e"],
-            "schema": "flow-provider-output-v1"
-        }),
-        serde_json::json!({
-            "extra": true,
-            "provider_output_objects": ["session-object:sha256:unused"],
-            "schema": "flow-provider-output-v1"
-        }),
-        serde_json::json!({
-            "provider_output_objects": ["session-object:sha256:unused"],
-            "schema": "flow-provider-output-v1",
-            "token_usage": {"input_tokens": 1}
-        }),
-    ] {
-        assert!(provider_turn_from_durable_output(&reference, &recovery).is_err());
-    }
+    let unsupported = serde_json::json!({
+        "provider_output_objects": ["session-object:sha256:unused"],
+        "schema": "flow-provider-output-v9"
+    });
+    assert!(provider_turn_from_durable_output(&unsupported, &recovery).is_err());
 
     for bytes in [
         b"not-json".to_vec(),
@@ -89,12 +60,13 @@ fn provider_attempt_output_round_trips_and_rejects_ambiguous_recovery_data() {
         br#"{"extra":true,"output_text":"","response_id":"x","retained_items":[],"tool_calls":[]}"#
             .to_vec(),
     ] {
+        let digest = sha256_hex(&bytes);
         let reference = serde_json::json!({
-            "provider_output_objects": ["session-object:sha256:fixture"],
-            "schema": "flow-provider-output-v1"
+            "provider_output_objects": [format!("session-object:sha256:{digest}")],
+            "schema": "flow-provider-output-v2"
         });
         let recovery = ObjectRecovery(BTreeMap::from([(
-            "session-object:sha256:fixture".to_owned(),
+            format!("session-object:sha256:{digest}"),
             bytes,
         )]));
         assert!(provider_turn_from_durable_output(&reference, &recovery).is_err());
@@ -127,6 +99,47 @@ fn recovered_provider_output_objects_must_match_their_digest_uris() {
         .expect_err("provider output whose bytes do not match its URI must fail closed");
 
     assert!(error.to_string().contains("does not match its URI digest"));
+}
+
+#[test]
+fn provider_output_capacity_fails_closed_before_live_or_recovered_use() {
+    let oversized = ProviderTurn {
+        token_usage: None,
+        response_id: "response-oversized".to_owned(),
+        output_text: "x".repeat(MAX_DURABLE_PROVIDER_OUTPUT_BYTES),
+        retained_items: Vec::new(),
+        tool_calls: Vec::new(),
+    };
+    let error = match durable_provider_output(&oversized) {
+        Err(error) => error,
+        Ok(_) => panic!("snapshot envelope must push maximum text beyond the durable byte limit"),
+    };
+    assert!(error.to_string().contains("durable recovery byte limit"));
+
+    let unused_uri = format!("session-object:sha256:{}", "a".repeat(64));
+    let max_objects = MAX_DURABLE_PROVIDER_OUTPUT_BYTES.div_ceil(MAX_SESSION_OBJECT_BYTES as usize);
+    for (name, reference, expected) in [
+        (
+            "empty",
+            serde_json::json!({
+                "provider_output_objects": [],
+                "schema": "flow-provider-output-v2"
+            }),
+            "unsupported schema",
+        ),
+        (
+            "too-many",
+            serde_json::json!({
+                "provider_output_objects": vec![unused_uri; max_objects + 1],
+                "schema": "flow-provider-output-v2"
+            }),
+            "too many objects",
+        ),
+    ] {
+        let error = provider_turn_from_durable_output(&reference, &ObjectRecovery::default())
+            .expect_err("invalid recovered capacity metadata must fail closed");
+        assert!(error.to_string().contains(expected), "{name}: {error}");
+    }
 }
 
 #[test]

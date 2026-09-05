@@ -135,11 +135,6 @@ impl ResolvedRegistry {
         self.named_block(RegistryBlockKind::Tool, reference, &self.tools)
     }
 
-    /// Returns tool blocks in canonical id order.
-    pub fn tool_blocks(&self) -> impl Iterator<Item = &ToolBlock> {
-        self.tools.values()
-    }
-
     /// Resolves an instruction by id or unambiguous name.
     pub fn instruction_block(&self, reference: &str) -> Option<&InstructionBlock> {
         self.named_block(

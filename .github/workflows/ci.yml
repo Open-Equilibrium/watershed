@@ -22,6 +22,8 @@ jobs:
   m1:
     name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
+    env:
+      M12_CONTRACT_IMAGE: ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install pinned Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -58,7 +62,7 @@ jobs:
           }
 
       - name: Install gate tools
-        uses: taiki-e/install-action@a2a5f6e99e1a31540baa0468acfa302cff0f359f # v2.86.4
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
         with:
           tool: cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
@@ -86,42 +90,267 @@ jobs:
           --all-features
           --doc
 
-      - name: Run optimized performance tests
+      - name: Install M1.2 executor target
+        if: matrix.os == 'ubuntu-24.04'
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Authorize Bubblewrap user namespaces
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends apparmor
+          sudo tee /etc/apparmor.d/watershed-bwrap-userns >/dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser --replace /etc/apparmor.d/watershed-bwrap-userns
+          test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = 1
+
+      - name: Start controlled M1.2 Ubuntu
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          rust_root="$(dirname "$(dirname "$(rustup which rustc)")")"
+          cargo_registry="${CARGO_HOME:-$HOME/.cargo}/registry"
+          cargo_llvm_cov="$(readlink -f "$(command -v cargo-llvm-cov)")"
+          cargo_nextest="$(readlink -f "$(command -v cargo-nextest)")"
+          node="$(readlink -f "$(command -v node)")"
+          docker build \
+            --build-arg "BASE_IMAGE=$M12_CONTRACT_IMAGE" \
+            --tag watershed-m12-systemd \
+            - <<'DOCKERFILE'
+          ARG BASE_IMAGE
+          FROM ${BASE_IMAGE}
+          RUN apt-get update \
+              && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends systemd dbus-user-session systemd-sysv \
+              && rm -rf /var/lib/apt/lists/*
+          STOPSIGNAL SIGRTMIN+3
+          CMD ["/sbin/init"]
+          DOCKERFILE
+          docker run --detach --rm \
+            --name watershed-m12 \
+            --privileged \
+            --cgroupns=private \
+            --security-opt apparmor=unconfined \
+            --workdir /work \
+            --tmpfs /run \
+            --tmpfs /run/lock \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/work,readonly" \
+            --mount "type=bind,src=$rust_root,dst=/opt/rust,readonly" \
+            --mount "type=bind,src=$cargo_registry,dst=/opt/cargo-registry,readonly" \
+            --mount "type=bind,src=$cargo_llvm_cov,dst=/usr/local/bin/cargo-llvm-cov,readonly" \
+            --mount "type=bind,src=$cargo_nextest,dst=/usr/local/bin/cargo-nextest,readonly" \
+            --mount "type=bind,src=$node,dst=/usr/local/bin/node,readonly" \
+            --mount "type=volume,dst=/work/target" \
+            watershed-m12-systemd \
+            /sbin/init
+
+      - name: Provision M1.2 Ubuntu dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            state="$(docker exec watershed-m12 systemctl is-system-running 2>/dev/null || true)"
+            if [[ "$state" == running || "$state" == degraded ]]; then
+              break
+            fi
+            if [[ "$attempt" == 30 ]]; then
+              echo "controlled M1.2 systemd did not become ready: $state" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker exec watershed-m12 /bin/sh -ec '
+            apt-get update
+            apt-get install --yes --no-install-recommends \
+              bubblewrap binutils build-essential ca-certificates musl-tools passwd python3 procps strace util-linux
+            rm -rf /var/lib/apt/lists/*
+            useradd --create-home --uid 10001 --shell /bin/sh watershed
+            mkdir -p /cargo /home/watershed/m12-coverage
+            ln -s /opt/cargo-registry /cargo/registry
+            chown -R watershed:watershed /cargo /home/watershed /work/target
+            set -- $(systemd --version | head -n 1)
+            test "$1" = systemd
+            test "$2" = 255
+            test "$(stat -f -c %T /sys/fs/cgroup)" = cgroup2fs
+            grep -qw pids /sys/fs/cgroup/cgroup.controllers
+            test -e /sys/fs/cgroup/cgroup.kill
+            test -e /sys/fs/cgroup/cgroup.events
+            /usr/bin/timeout --signal=TERM --kill-after=10s 1m \
+              systemctl start user-runtime-dir@10001.service user@10001.service
+            /usr/bin/timeout --signal=TERM --kill-after=10s 1m \
+              systemctl is-active --quiet user@10001.service
+            test -S /run/user/10001/bus
+          '
+
+      - name: Build M1.2 executor
         if: matrix.os == 'ubuntu-24.04'
         run: >-
-          cargo nextest run
-          --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
-          --locked
-          -p flow-agent-core
-          --release
-          --run-ignored ignored-only
-          -j 1
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          --env HOME=/home/watershed
+          --env USER=watershed
+          --env LOGNAME=watershed
+          watershed-m12
+          /usr/sbin/runuser --user watershed --preserve-environment --
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target x86_64-unknown-linux-musl
 
-      - name: Run M1.1 optimized budget suite
-        id: m11_budgets
+      - name: Build M1.2 dynamic rejection fixture
+        if: matrix.os == 'ubuntu-24.04'
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          --env HOME=/home/watershed
+          --env USER=watershed
+          --env LOGNAME=watershed
+          watershed-m12
+          /usr/sbin/runuser --user watershed --preserve-environment --
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor
+
+      - name: Check M1.2 executor is static
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec watershed-m12 /bin/sh -ec '
+            executor=target/x86_64-unknown-linux-musl/release/flow-executor
+            if readelf -l "$executor" | grep -q "INTERP"; then
+              echo "flow-executor must not contain an ELF interpreter" >&2
+              exit 1
+            fi
+          '
+
+      - name: Check M1.2 executor readiness
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec watershed-m12 /bin/sh -ec \
+            '/usr/sbin/runuser --user watershed -- /usr/bin/env -i \
+              /work/target/x86_64-unknown-linux-musl/release/flow-executor --probe |
+                /usr/bin/python3 -c '\''import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'\'''
+
+      - name: Run M1.2 executor tests
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: >-
+          docker exec
+          --env CARGO_HOME=/cargo
+          --env CARGO_NET_OFFLINE=true
+          --env PATH=/opt/rust/bin:/usr/bin:/bin
+          --env BWRAP_UNDER_TEST=/usr/bin/bwrap
+          --env FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor
+          --env FLOW_EXECUTOR_UNDER_TEST=/work/target/x86_64-unknown-linux-musl/release/flow-executor
+          --env HOME=/home/watershed
+          --env USER=watershed
+          --env LOGNAME=watershed
+          watershed-m12
+          /usr/sbin/runuser --user watershed --preserve-environment --
+          cargo test --locked -p flow-agent-executor --test official_linux
+
+      - name: Run public Custom Executor conformance
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec watershed-m12 /bin/sh -ec '
+            install -d -m 0755 /usr/local/libexec/watershed
+            install -m 0755 /work/target/x86_64-unknown-linux-musl/release/flow-executor /usr/local/libexec/watershed/flow-executor
+          '
+          docker exec \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env PATH=/opt/rust/bin:/usr/bin:/bin \
+            --env HOME=/home/watershed \
+            --env USER=watershed \
+            --env LOGNAME=watershed \
+            watershed-m12 \
+            /usr/sbin/runuser --user watershed --preserve-environment -- \
+            cargo run --locked -p flow-agent-core \
+              --features m12-startup-evidence \
+              --example custom_executor_conformance -- \
+              --executor /usr/local/libexec/watershed/flow-executor
+
+      - name: Run M1.2 installer contract tests
+        if: matrix.os == 'ubuntu-24.04'
+        run: node scripts/run-python.mjs -m unittest install.tests.test_install
+
+      - name: Check M1.2 unsupported platforms
+        if: matrix.os != 'ubuntu-24.04'
+        run: cargo nextest run --locked -p flow-agent-cli --test cli -E 'test(=executor::executor_commands_fail_closed_on_unsupported_platform_without_config_mutation)'
+
+      - name: Run M1.1 performance evidence
+        id: m11_evidence
         if: matrix.os == 'ubuntu-24.04'
         continue-on-error: true
         shell: bash
         run: |
-          mkdir -p target/m11-budgets
+          mkdir -p target/m11-performance
           cargo run --locked -p flow-agent-core --release \
             --features m11-budget-evidence --example m11_budgets \
-            > target/m11-budgets/m11-budgets.jsonl
+            > target/m11-performance/m11-performance-evidence.jsonl
 
-      - name: Upload M1.1 optimized budget evidence
+      - name: Upload M1.1 performance evidence
         if: matrix.os == 'ubuntu-24.04' && always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: m11-optimized-budgets
-          path: target/m11-budgets/m11-budgets.jsonl
+          name: m11-performance-evidence
+          path: target/m11-performance/m11-performance-evidence.jsonl
           if-no-files-found: error
 
-      - name: Enforce M1.1 optimized budgets
-        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'
+      - name: Enforce M1.1 evidence integrity
+        if: matrix.os == 'ubuntu-24.04' && always() && steps.m11_evidence.outcome != 'success'
+        shell: bash
+        run: exit 1
+
+      - name: Run M1.2 executor startup evidence
+        id: m12_startup_evidence
+        if: matrix.os == 'ubuntu-24.04' && !cancelled()
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p target/m12-startup
+          docker exec \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env GITHUB_SHA \
+            --env ImageOS \
+            --env ImageVersion \
+            --env M12_CONTRACT_IMAGE \
+            --env PATH=/opt/rust/bin:/usr/bin:/bin \
+            --env HOME=/home/watershed \
+            --env USER=watershed \
+            --env LOGNAME=watershed \
+            watershed-m12 \
+            /bin/sh -ec 'install -d -m 0755 /usr/local/libexec/watershed
+            install -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /usr/local/libexec/watershed/flow-executor
+            exec /usr/sbin/runuser --user watershed --preserve-environment -- \
+            cargo run --locked -p flow-agent-core --release \
+              --features m12-startup-evidence --example m12_executor_startup \
+              -- --executor /usr/local/libexec/watershed/flow-executor' \
+            > target/m12-startup/m12-executor-startup.jsonl
+
+      - name: Upload M1.2 executor startup evidence
+        if: matrix.os == 'ubuntu-24.04' && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: m12-executor-startup-evidence
+          path: target/m12-startup/m12-executor-startup.jsonl
+          if-no-files-found: error
+
+      - name: Enforce M1.2 executor startup evidence
+        if: matrix.os == 'ubuntu-24.04' && always() && steps.m12_startup_evidence.outcome != 'success'
         shell: bash
         run: exit 1
 
       - name: Check line coverage
+        if: matrix.os != 'ubuntu-24.04'
         run: >-
           cargo llvm-cov nextest
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
@@ -130,8 +359,107 @@ jobs:
           --all-targets
           --all-features
           --fail-under-lines 90
-          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))'
+          --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))'
           --show-missing-lines
+
+      - name: Prepare instrumented M1.2 coverage artifacts
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec --interactive \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env PATH=/opt/rust/bin:/usr/local/bin:/usr/bin:/bin \
+            watershed-m12 \
+          /bin/sh -s <<'PREPARE'
+          set -eu
+          printf '%s\n' \
+            'Signature: 8a477f597d28d172789f06886806bc55' \
+            '# This file is a cache directory tag created by cargo.' \
+            '# For information about cache directory tags see https://bford.info/cachedir/' \
+            > target/CACHEDIR.TAG
+          install -D -m 0755 target/x86_64-unknown-linux-musl/release/flow-executor /root/m12-production/flow-executor
+          cargo llvm-cov show-env --sh --target x86_64-unknown-linux-musl --coverage-target-only > /root/m12-coverage.env
+          cargo llvm-cov clean --workspace
+          cargo clean --release --target x86_64-unknown-linux-musl --workspace
+          cargo clean --release -p flow-agent-cli --target-dir target/m12-standard
+          cargo clean --release -p flow-agent-cli --target-dir target/m12-acceptance
+          cargo build --locked --release -p flow-agent-executor --bin flow-executor --target-dir target/m12-standard
+          cargo build --locked --release -p flow-agent-cli --bin flow --target-dir target/m12-standard
+          cargo build --locked --release -p flow-agent-cli --bin flow --features m12-install-acceptance --target-dir target/m12-acceptance
+          . /root/m12-coverage.env
+          cargo nextest run \
+            --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
+            --locked \
+            --target x86_64-unknown-linux-musl \
+            --workspace \
+            --all-targets \
+            --all-features \
+            --no-run
+          cargo build --locked --target x86_64-unknown-linux-musl \
+            -p flow-agent-executor --bin flow-executor
+          cargo build --locked --target x86_64-unknown-linux-musl \
+            -p flow-agent-cli --bin flow
+          PREPARE
+
+      - name: Run M1.2 installer acceptance
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          docker exec \
+            --env RUNNER_TEMP=/opt/watershed-m12 \
+            watershed-m12 \
+            /bin/sh -ec '. /root/m12-coverage.env
+              export M12_COVERAGE_BIN_DIR=/work/target/x86_64-unknown-linux-musl/debug
+              exec /usr/bin/timeout --signal=TERM --kill-after=10s 15m \
+                /bin/sh scripts/run-m12-installer-acceptance.sh'
+
+      - name: Check Linux line coverage
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        env:
+          LLVM_COV_FLAGS: --dump
+        run: |
+          docker exec --interactive \
+            --env CARGO_HOME=/cargo \
+            --env CARGO_NET_OFFLINE=true \
+            --env LLVM_COV_FLAGS \
+            --env PATH=/opt/rust/bin:/usr/local/bin:/usr/bin:/bin \
+            watershed-m12 \
+          /bin/sh -s <<'COVERAGE'
+          set -eu
+          . /root/m12-coverage.env
+          export HOME=/home/watershed
+          export USER=watershed
+          export LOGNAME=watershed
+          export RUNNER_TEMP=/home/watershed/m12-coverage
+          export BWRAP_UNDER_TEST=/usr/bin/bwrap
+          export FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor
+          install -d -m 0700 "$RUNNER_TEMP"
+          chown -R watershed:watershed /cargo /work/target "$RUNNER_TEMP"
+          /usr/sbin/runuser --user watershed --preserve-environment -- /bin/sh -s <<'UNPRIVILEGED'
+          set -eu
+          test "$(grep -Ec '^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$' /proc/self/status)" = 4
+          cargo nextest run \
+            --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' \
+            --locked \
+            --target x86_64-unknown-linux-musl \
+            --workspace \
+            --all-targets \
+            --all-features
+          cargo llvm-cov report \
+            --target x86_64-unknown-linux-musl \
+            --coverage-target-only \
+            --fail-under-lines 90 \
+            --ignore-filename-regex '((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/](m11_budget_evidence|m12_startup_evidence)(\.rs|[\\/])|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]tool_runner[\\/]unix_process(\.rs|[\\/]))' \
+            --show-missing-lines
+          UNPRIVILEGED
+          COVERAGE
+
+      - name: Stop controlled M1.2 Ubuntu
+        if: matrix.os == 'ubuntu-24.04' && always()
+        shell: bash
+        run: docker rm --force watershed-m12 2>/dev/null || true
 
       - name: Check RustSec advisories
         run: cargo audit

@@ -4,7 +4,7 @@ use super::{
 };
 
 #[test]
-fn replay_tail_and_sessions_read_persisted_event_log() {
+fn replay_and_tail_read_fixture_sessions_without_productive_inventory() {
     let fixture = workspace_copy("smoke-flow");
     let run = flow_command()
         .current_dir(&fixture)
@@ -37,13 +37,7 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
 
     assert!(sessions.status.success());
     let sessions_stdout = String::from_utf8(sessions.stdout).expect("stdout should be UTF-8");
-    assert!(
-        sessions_stdout.starts_with(
-            "conversation smoke-flow: 1 runs, 0 uncertain attempts, latest entry legacy-"
-        ),
-        "{sessions_stdout}"
-    );
-    assert_eq!(sessions_stdout.lines().count(), 1, "{sessions_stdout}");
+    assert!(sessions_stdout.is_empty(), "{sessions_stdout}");
 
     let json_status = flow_command()
         .current_dir(&fixture)
@@ -55,7 +49,5 @@ fn replay_tail_and_sessions_read_persisted_event_log() {
     let page: serde_json::Value =
         serde_json::from_slice(&json_status.stdout).expect("JSON status should be valid");
     assert_eq!(page["schema"], "flow-conversation-status-page-v0");
-    assert_eq!(page["conversations"][0]["conversation_id"], "smoke-flow");
-    assert_eq!(page["conversations"][0]["run_count"], 1);
-    assert_eq!(page["conversations"][0]["uncertain_attempts"], 0);
+    assert_eq!(page["conversations"], serde_json::json!([]));
 }

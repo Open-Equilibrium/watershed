@@ -359,7 +359,7 @@ mod tests {
                     "the installed handler processed the first active CTRL_C_EVENT"
                 );
                 drop(operation);
-                std::process::exit(65);
+                return;
             }
             std::thread::sleep(Duration::from_millis(250));
             send_ctrl_c();
@@ -369,7 +369,10 @@ mod tests {
         }
 
         let controlled = run_windows_signal_child("controlled");
-        assert_eq!(controlled.code(), Some(65));
+        assert!(
+            controlled.success(),
+            "controlled child failed: {controlled}"
+        );
 
         let repeated = run_windows_signal_child("repeated");
         assert_eq!(repeated.code(), Some(HARD_INTERRUPT_EXIT_CODE));
@@ -390,8 +393,9 @@ mod tests {
                 .env("WATERSHED_INSTALLED_CTRL_C_MARKER", &marker)
                 .spawn()
                 .expect("signal child starts");
-        wait_for_marker(&marker, &mut child);
-        let status = wait_for_child(&mut child);
+        let watchdog = signal_child_watchdog();
+        wait_for_marker(&marker, &mut child, watchdog);
+        let status = wait_for_child(&mut child, watchdog);
         let _ = std::fs::remove_file(marker);
         status
     }
@@ -440,16 +444,27 @@ mod tests {
                 .env("WATERSHED_INSTALLED_SIGINT_MARKER", &marker)
                 .spawn()
                 .expect("signal child starts");
-        wait_for_marker(&marker, &mut child);
+        let watchdog = signal_child_watchdog();
+        wait_for_marker(&marker, &mut child, watchdog);
         signal(&mut child);
-        let status = wait_for_child(&mut child);
+        let status = wait_for_child(&mut child, watchdog);
         let _ = std::fs::remove_file(marker);
         status
     }
 
+    #[cfg(windows)]
+    fn signal_child_watchdog() -> Duration {
+        Duration::from_secs(30)
+    }
+
+    #[cfg(unix)]
+    fn signal_child_watchdog() -> Duration {
+        Duration::from_secs(5)
+    }
+
     #[cfg(any(unix, windows))]
-    fn wait_for_marker(marker: &Path, child: &mut Child) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+    fn wait_for_marker(marker: &Path, child: &mut Child, watchdog: Duration) {
+        let deadline = Instant::now() + watchdog;
         while !marker.exists() {
             assert!(
                 child
@@ -458,10 +473,15 @@ mod tests {
                     .is_none(),
                 "signal child exited before activating"
             );
-            assert!(
-                Instant::now() < deadline,
-                "signal child activation timed out"
-            );
+            if Instant::now() >= deadline {
+                if marker.exists() {
+                    return;
+                }
+                child.kill().expect("timed-out signal child is terminated");
+                child.wait().expect("timed-out signal child is reaped");
+                let _ = std::fs::remove_file(marker);
+                panic!("signal child activation timed out");
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -476,8 +496,8 @@ mod tests {
     }
 
     #[cfg(any(unix, windows))]
-    fn wait_for_child(child: &mut Child) -> ExitStatus {
-        let deadline = Instant::now() + Duration::from_secs(5);
+    fn wait_for_child(child: &mut Child, watchdog: Duration) -> ExitStatus {
+        let deadline = Instant::now() + watchdog;
         loop {
             if let Some(status) = child.try_wait().expect("signal child status is readable") {
                 return status;

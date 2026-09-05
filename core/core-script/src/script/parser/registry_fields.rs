@@ -26,9 +26,10 @@ fn reject_tool_fields(source_name: &str, value: &noyalib::Value) -> Result<(), R
             "script_runtime",
             "script_body",
             "allowed_parameters",
-            "read_scope",
-            "write_scope",
-            "protected_path_grants",
+            "max_concurrent_processes_and_threads",
+            "runtime_profile",
+            "read_only_mounts",
+            "writable_mounts",
             "network",
         ],
     )?;
@@ -338,9 +339,8 @@ mod tests {
     argv: []
     extra: true
   allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
+  read_only_mounts: []
+  writable_mounts: []
   network: deny
 "#
             .to_owned(),

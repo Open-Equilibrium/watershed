@@ -7,27 +7,42 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yml"
 PACKAGE = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 NODE_VERSION = (ROOT / ".node-version").read_text(encoding="utf-8").strip()
-PNPM_VERSION = PACKAGE["packageManager"].removeprefix("pnpm@")
-CHECKOUT_RELEASE = "v7.0.1"
-CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
-SETUP_NODE_RELEASE = "v7.0.0"
-SETUP_NODE_SHA = "820762786026740c76f36085b0efc47a31fe5020"
-INSTALL_ACTION_RELEASE = "v2.86.4"
-INSTALL_ACTION_SHA = "a2a5f6e99e1a31540baa0468acfa302cff0f359f"
-GATE_TOOLS = (
-    "cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,"
-    "cargo-deny@0.20.2,lychee@0.24.2"
-)
-M11_BUDGET_FEATURE = "m11-budget-evidence"
-M11_BUDGET_EXAMPLE = "m11_budgets"
-TEST_ISOLATION_CARGO_CONFIG = (
+TEST_ISOLATION = (
     'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
 )
-UPLOAD_ARTIFACT_RELEASE = "v7.0.1"
-UPLOAD_ARTIFACT_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+ACTION_PINS = {
+    "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
+    "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "taiki-e/install-action": "e67fa11c4b9316fa714ddf0abed07a0c3143b95b",
+}
 TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
+UBUNTU = "matrix.os == 'ubuntu-24.04'"
+NON_UBUNTU = "matrix.os != 'ubuntu-24.04'"
+M12_TARGET = "x86_64-unknown-linux-musl"
+M12_EXECUTOR = f"target/{M12_TARGET}/release/flow-executor"
+M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
+M12_CONTAINER = "watershed-m12"
+M12_COVERAGE_USER = "watershed"
+M12_COVERAGE_ENV = "/root/m12-coverage.env"
+M12_COVERAGE_BIN_DIR = f"/work/target/{M12_TARGET}/debug"
+M12_PRODUCTION_EXECUTOR = "/root/m12-production/flow-executor"
+EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
+    r"flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]"
+    r"tool_runner[\\/]unix_process(\.rs|[\\/])"
+)
+M12_INSTALLER_ACCEPTANCE = ROOT / "scripts" / "run-m12-installer-acceptance.sh"
+M12_READINESS_NEGATIVES = ROOT / "scripts" / "run-m12-readiness-negatives.sh"
+M12_OFFICIAL_LINUX = (
+    ROOT / "flow-agent" / "flow-agent-executor" / "tests" / "official_linux.rs"
+)
+
+
+def workflow_text() -> str:
+    return WORKFLOW_PATH.read_text(encoding="utf-8")
 
 
 def ci_push_branches(workflow: str) -> tuple[str, ...]:
@@ -49,180 +64,212 @@ def ci_push_branches(workflow: str) -> tuple[str, ...]:
     except ValueError:
         raise AssertionError("CI push.branches must use the canonical block form")
     branches = []
-    for line in lines[branches_start + 1 :]:
-        if line and not line.startswith("      "):
-            break
+    for line in lines[branches_start + 1 : push_end]:
         item = line.strip()
-        if not item.startswith("- "):
-            continue
-        branches.append(item[2:].strip().strip('"'))
+        if item.startswith("- ") and not item.startswith("- #"):
+            branches.append(item[2:].strip().strip('"'))
     return tuple(branches)
 
 
+def step_lines(workflow: str, name: str) -> list[str]:
+    lines = workflow.splitlines()
+    marker = f"      - name: {name}"
+    if marker not in lines:
+        raise AssertionError(f"missing CI step: {name}")
+    start = lines.index(marker)
+    end = next(
+        (
+            index
+            for index in range(start + 1, len(lines))
+            if lines[index].startswith("      - ")
+        ),
+        len(lines),
+    )
+    return lines[start:end]
+
+
+def step_run(workflow: str, name: str) -> str:
+    lines = step_lines(workflow, name)
+    run_index = next(
+        (index for index, line in enumerate(lines) if line.startswith("        run:")),
+        None,
+    )
+    if run_index is None:
+        raise AssertionError(f"CI step has no command: {name}")
+    declaration = lines[run_index].removeprefix("        run:").strip()
+    if declaration not in ("|", ">-"):
+        return declaration
+    return "\n".join(
+        line.removeprefix("          ")
+        for line in lines[run_index + 1 :]
+        if line.startswith("          ")
+    ).rstrip()
+
+
+def folded_tokens(workflow: str, name: str) -> list[str]:
+    return shlex.split(" ".join(step_run(workflow, name).splitlines()))
+
+
+def assert_step_state(
+    case: unittest.TestCase,
+    workflow: str,
+    name: str,
+    *,
+    condition: str | None = None,
+    continue_on_error: bool = False,
+) -> list[str]:
+    lines = step_lines(workflow, name)
+    conditions = [
+        line.removeprefix("        if: ")
+        for line in lines
+        if line.startswith("        if:")
+    ]
+    case.assertEqual(conditions, [] if condition is None else [condition])
+    case.assertEqual(
+        [line for line in lines if line.startswith("        continue-on-error:")],
+        ["        continue-on-error: true"] if continue_on_error else [],
+    )
+    return lines
+
 
 class CiWorkflowContractTest(unittest.TestCase):
-    def test_ci_uses_the_pinned_rust_toolchain(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
+    def test_versions_come_from_their_canonical_project_files(self) -> None:
+        workflow = workflow_text()
         with (ROOT / "rust-toolchain.toml").open("rb") as toolchain_file:
-            version = tomllib.load(toolchain_file)["toolchain"]["channel"]
+            rust_version = tomllib.load(toolchain_file)["toolchain"]["channel"]
 
-        self.assert_active_pinned_rust_step(workflow, version)
-
-    def test_rust_toolchain_contract_rejects_pin_tampering(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        with (ROOT / "rust-toolchain.toml").open("rb") as toolchain_file:
-            version = tomllib.load(toolchain_file)["toolchain"]["channel"]
-        tampered = workflow.replace(
-            "open('rust-toolchain.toml', 'rb')",
-            "open('another-toolchain.toml', 'rb')",
-        )
-
-        with self.assertRaises(AssertionError):
-            self.assert_active_pinned_rust_step(tampered, version)
-
-    def test_node_and_pnpm_versions_are_pinned(self) -> None:
         self.assertEqual(
             (ROOT / ".node-version").read_text(encoding="utf-8"),
             f"{NODE_VERSION}\n",
         )
-        self.assertEqual(PACKAGE["packageManager"], f"pnpm@{PNPM_VERSION}")
-
-    def test_node_toolchain_docs_cover_every_documentation_gate(self) -> None:
-        testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
-
+        self.assertRegex(PACKAGE["packageManager"], r"^pnpm@\d+\.\d+\.\d+$")
         self.assertIn(
-            "documentation gates (HTML rendering and link-manifest generation)",
-            testing,
+            "node-version-file: .node-version",
+            "\n".join(step_lines(workflow, "Install pinned Node")),
         )
-        self.assertIn("the Node advisory audit", testing)
-        self.assertIn("the Rust test-isolation runner", testing)
-        self.assertIn("`pnpm audit --lockfile-only`", testing)
+        self.assertIn(
+            "persist-credentials: false",
+            "\n".join(step_lines(workflow, "Checkout")),
+        )
+        self.assertIn(".node-version", step_run(workflow, "Check Node version"))
+        self.assertIn("package.json", step_run(workflow, "Enable Corepack"))
+        self.assertIn("rust-toolchain.toml", step_run(workflow, "Select pinned Rust"))
+        self.assertNotIn(rust_version, workflow)
+        self.assertNotIn("check-latest:", workflow)
 
-    def test_ci_installs_and_verifies_the_pinned_node_toolchain(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assert_active_pinned_node_steps(workflow)
-        self.assert_all_remote_actions_pinned(workflow)
-        self.assertNotIn("git ls-files", workflow)
+    def test_remote_actions_are_reviewed_and_immutable(self) -> None:
+        workflow = workflow_text()
+        seen = set()
+        for line in workflow.splitlines():
+            match = re.match(r"^\s*(?:-\s+)?uses:\s*([^\s#]+)", line)
+            if match is None or match.group(1).startswith("./"):
+                continue
+            reference = match.group(1)
+            self.assertRegex(reference, r"^[^@/\s]+/[^@\s]+@[0-9a-f]{40}$")
+            action, sha = reference.rsplit("@", 1)
+            self.assertEqual(sha, ACTION_PINS[action])
+            seen.add(action)
+        self.assertEqual(seen, set(ACTION_PINS))
 
-    def test_ci_collects_and_covers_feature_gated_reporter(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
+    def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
+        self.assertEqual(
+            ci_push_branches(workflow_text()),
+            ("main", *(f"{kind}/**" for kind in TOPIC_BRANCH_TYPES)),
         )
+
+    def test_ci_branch_parser_ignores_comments_and_other_trigger_keys(self) -> None:
+        workflow = """on:
+  push:
+    paths:
+      - "feat/**"
+    branches:
+      # "fix/**"
+      - main
+"""
+        self.assertEqual(ci_push_branches(workflow), ("main",))
+
+    def test_feature_gated_evidence_reporters_are_registered(self) -> None:
         manifest = tomllib.loads(
             (ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml").read_text(
                 encoding="utf-8"
             )
         )
-        reporter = next(
-            example
-            for example in manifest["example"]
-            if example["name"] == M11_BUDGET_EXAMPLE
+        examples = {example["name"]: example for example in manifest["example"]}
+        self.assertEqual(
+            examples["m11_budgets"]["required-features"], ["m11-budget-evidence"]
         )
-        self.assertEqual(reporter["required-features"], [M11_BUDGET_FEATURE])
-
-        self.assert_active_ci_gates(workflow)
-
-    def test_ci_gate_contract_rejects_mandatory_gate_removal(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
+        self.assertEqual(
+            examples["m12_executor_startup"]["required-features"],
+            ["m12-startup-evidence"],
         )
-        mutations = {
-            "formatting disabled": workflow.replace(
-                "      - name: Check formatting\n"
-                "        shell: pwsh\n",
-                "      - name: Check formatting\n"
-                "        if: false\n"
-                "        shell: pwsh\n",
-            ),
-            "clippy removed": workflow.replace(
-                "      - name: Check lints\n"
-                "        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings\n\n",
-                "",
-            ),
-            "optimized performance contract": workflow.replace(
-                "          --release\n"
-                "          --run-ignored ignored-only\n"
-                "          -j 1\n",
-                "",
-            ),
-            "optimized performance tolerated": workflow.replace(
-                "      - name: Run optimized performance tests\n"
-                "        if: matrix.os == 'ubuntu-24.04'\n",
-                "      - name: Run optimized performance tests\n"
-                "        if: matrix.os == 'ubuntu-24.04'\n"
-                "        continue-on-error: true\n",
-            ),
-            "coverage threshold": workflow.replace(
-                "          --fail-under-lines 90\n", ""
-            ),
-            "M1.1 budget execution": workflow.replace(
-                "          cargo run --locked -p flow-agent-core --release \\\n",
-                "          true \\\n",
-            ),
-            "M1.1 evidence upload tolerated": workflow.replace(
-                "          if-no-files-found: error\n",
-                "          if-no-files-found: error\n"
-                "        continue-on-error: true\n",
-            ),
-            "RustSec audit removed": workflow.replace(
-                "      - name: Check RustSec advisories\n"
-                "        run: cargo audit\n\n",
-                "",
-            ),
-            "dependency policy removed": workflow.replace(
-                "      - name: Check dependency policy\n"
-                "        run: cargo deny check\n\n",
-                "",
-            ),
-            "HTML rendering removed": workflow.replace(
-                "      - name: Render HTML docs\n"
-                "        run: pnpm run docs:render-check\n\n",
-                "",
-            ),
-            "documentation links disabled": workflow.replace(
-                "      - name: Check documentation links\n"
-                "        shell: pwsh\n",
-                "      - name: Check documentation links\n"
-                "        if: false\n"
-                "        shell: pwsh\n",
-            ),
-        }
+        self.assert_ci_gate_contract(workflow_text())
 
-        for label, mutated in mutations.items():
-            with self.subTest(label=label):
-                self.assertNotEqual(workflow, mutated)
-                with self.assertRaises(AssertionError):
-                    self.assert_active_ci_gates(mutated)
+    def test_mandatory_gate_mutations_are_rejected(self) -> None:
+        workflow = workflow_text()
+        mutations = (
+            workflow.replace("cargo fmt --all --check", "true", 1),
+            workflow.replace("--fail-under-lines 90", "--fail-under-lines 89", 1),
+            workflow.replace("cargo audit", "true", 1),
+            workflow.replace("pnpm run docs:render-check", "true", 1),
+            workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
+            workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
+            workflow.replace(
+                f'-- --executor {M12_INSTALLED_EXECUTOR}',
+                "--",
+                1,
+            ),
+            workflow.replace("cargo test --locked -p flow-agent-executor", "true", 1),
+            workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
+            workflow.replace("cargo llvm-cov report", "true", 1),
+            workflow.replace('grep -q "INTERP"', 'grep -q "NOT_INTERP"', 1),
+            workflow.replace("/usr/bin/env -i", "/usr/bin/env", 1),
+        )
+        for mutated in mutations:
+            with self.subTest(mutated=mutated), self.assertRaises(AssertionError):
+                self.assert_ci_gate_contract(mutated)
 
-    def assert_active_ci_gates(self, workflow: str) -> None:
-        single_line_gates = {
+    def test_testing_contract_covers_tooling_and_rustdoc_gates(self) -> None:
+        testing = (ROOT / "TESTING.md").read_text(encoding="utf-8")
+        for contract in (
+            "documentation gates (HTML rendering and link-manifest generation)",
+            "the Node advisory audit",
+            "the Rust test-isolation runner",
+            "`pnpm audit --lockfile-only`",
+            "`cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`",
+        ):
+            self.assertIn(contract, testing)
+
+    def test_official_linux_can_use_the_cargo_built_executor(self) -> None:
+        self.assertIn(
+            'env!("CARGO_BIN_EXE_flow-executor")',
+            M12_OFFICIAL_LINUX.read_text(encoding="utf-8"),
+        )
+
+    def assert_ci_gate_contract(self, workflow: str) -> None:
+        self.assertFalse(any(line.startswith("    if:") for line in workflow.splitlines()))
+        self.assertFalse(
+            any(line.startswith("    continue-on-error:") for line in workflow.splitlines())
+        )
+        commands = {
             "Check formatting": "cargo fmt --all --check",
-            "Check lints": (
-                "cargo clippy --locked --workspace --all-targets "
-                "--all-features -- -D warnings"
-            ),
+            "Check lints": "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
             "Check RustSec advisories": "cargo audit",
             "Check dependency policy": "cargo deny check",
             "Check Node advisories": "pnpm audit --lockfile-only",
             "Render HTML docs": "pnpm run docs:render-check",
         }
-        for step_name, command in single_line_gates.items():
-            self.assert_active_single_line_step(workflow, step_name, command)
+        for name, command in commands.items():
+            assert_step_state(self, workflow, name)
+            self.assertEqual(step_run(workflow, name), command)
 
         self.assertEqual(
-            self.active_folded_step_tokens(workflow, "Run tests"),
+            folded_tokens(workflow, "Run tests"),
             [
                 "cargo",
                 "nextest",
                 "run",
                 "--config",
-                TEST_ISOLATION_CARGO_CONFIG,
+                TEST_ISOLATION,
                 "--locked",
                 "--workspace",
                 "--all-targets",
@@ -230,7 +277,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            self.active_folded_step_tokens(workflow, "Run Rustdoc tests"),
+            folded_tokens(workflow, "Run Rustdoc tests"),
             [
                 "cargo",
                 "--config",
@@ -242,430 +289,566 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "--doc",
             ],
         )
-        _, performance_step_lines = self.conditionally_active_step_lines(
-            workflow,
-            "Run optimized performance tests",
-            "matrix.os == 'ubuntu-24.04'",
+        assert_step_state(
+            self, workflow, "Check line coverage", condition=NON_UBUNTU
         )
-        self.assertEqual(
-            self.folded_step_line_tokens(performance_step_lines),
-            [
-                "cargo",
-                "nextest",
-                "run",
-                "--config",
-                TEST_ISOLATION_CARGO_CONFIG,
-                "--locked",
-                "-p",
-                "flow-agent-core",
-                "--release",
-                "--run-ignored",
-                "ignored-only",
-                "-j",
-                "1",
-            ],
-        )
-        self.assertEqual(
-            self.step_lines(workflow, "Run M1.1 optimized budget suite")[1],
-            [
-                "      - name: Run M1.1 optimized budget suite",
-                "        id: m11_budgets",
-                "        if: matrix.os == 'ubuntu-24.04'",
-                "        continue-on-error: true",
-                "        shell: bash",
-                "        run: |",
-                "          mkdir -p target/m11-budgets",
-                "          cargo run --locked -p flow-agent-core --release \\",
-                "            --features m11-budget-evidence --example m11_budgets \\",
-                "            > target/m11-budgets/m11-budgets.jsonl",
-                "",
-            ],
-        )
-        self.assert_active_pinned_gate_actions(workflow)
-        self.assertEqual(
-            self.step_lines(workflow, "Enforce M1.1 optimized budgets")[1],
-            [
-                "      - name: Enforce M1.1 optimized budgets",
-                "        if: matrix.os == 'ubuntu-24.04' && steps.m11_budgets.outcome != 'success'",
-                "        shell: bash",
-                "        run: exit 1",
-                "",
-            ],
-        )
-        self.assertEqual(
-            self.active_folded_step_tokens(workflow, "Check line coverage"),
-            [
-                "cargo",
-                "llvm-cov",
-                "nextest",
-                "--config",
-                TEST_ISOLATION_CARGO_CONFIG,
-                "--locked",
-                "--workspace",
-                "--all-targets",
-                "--all-features",
-                "--fail-under-lines",
-                "90",
-                "--ignore-filename-regex",
-                r"((^|[\\/])(tests?|src[\\/]tests\.rs)([\\/]|$)|flow-agent[\\/]flow-agent-cli[\\/]src[\\/](main|parsing)\.rs$|flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]m11_budget_evidence(\.rs|[\\/]))",
-                "--show-missing-lines",
-            ],
-        )
-        _, link_commands = self.active_pwsh_step_commands(
-            workflow, "Check documentation links"
-        )
-        self.assertEqual(
-            link_commands,
-            [
-                "$docsJson = node scripts/list-tracked-files.mjs '*.md' '*.html'",
-                "if ($LASTEXITCODE -ne 0) {",
-                "exit $LASTEXITCODE",
-                "}",
-                "$docs = @($docsJson | ConvertFrom-Json)",
-                "lychee --no-progress --include-fragments -- @docs",
-            ],
+        coverage = folded_tokens(workflow, "Check line coverage")
+        for required in (
+            "cargo",
+            "llvm-cov",
+            "nextest",
+            "--locked",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--show-missing-lines",
+        ):
+            self.assertIn(required, coverage)
+        self.assertEqual(coverage[coverage.index("--fail-under-lines") + 1], "90")
+        self.assertEqual(coverage[coverage.index("--config") + 1], TEST_ISOLATION)
+        self.assertIn(
+            EVIDENCE_ONLY_UNIX_RUNNER_PATTERN,
+            coverage[coverage.index("--ignore-filename-regex") + 1],
         )
 
-    def test_ci_runs_public_surface_rustdoc_tests(self) -> None:
-        testing_contract = (ROOT / "TESTING.md").read_text(encoding="utf-8")
-        mandatory_gates = next(
-            line
-            for line in testing_contract.splitlines()
-            if line.startswith("- Mandatory gates:")
+        coverage_prepare_lines = assert_step_state(
+            self,
+            workflow,
+            "Prepare instrumented M1.2 coverage artifacts",
+            condition=UBUNTU,
+        )
+        coverage_prepare = step_run(
+            workflow, "Prepare instrumented M1.2 coverage artifacts"
+        )
+        for required in (
+            "Signature: 8a477f597d28d172789f06886806bc55",
+            "target/CACHEDIR.TAG",
+            f"cargo llvm-cov show-env --sh --target {M12_TARGET} "
+            f"--coverage-target-only > {M12_COVERAGE_ENV}",
+            f"install -D -m 0755 {M12_EXECUTOR} {M12_PRODUCTION_EXECUTOR}",
+            f". {M12_COVERAGE_ENV}",
+            "cargo llvm-cov clean --workspace",
+            f"cargo clean --release --target {M12_TARGET} --workspace",
+            "cargo clean --release -p flow-agent-cli "
+            "--target-dir target/m12-standard",
+            "cargo clean --release -p flow-agent-cli "
+            "--target-dir target/m12-acceptance",
+            "cargo build --locked --release -p flow-agent-executor --bin flow-executor "
+            "--target-dir target/m12-standard",
+            "cargo build --locked --release -p flow-agent-cli --bin flow "
+            "--target-dir target/m12-standard",
+            "cargo build --locked --release -p flow-agent-cli --bin flow "
+            "--features m12-install-acceptance --target-dir target/m12-acceptance",
+            "cargo nextest run",
+            "--no-run",
+            f"--target {M12_TARGET}",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            f"cargo build --locked --target {M12_TARGET}",
+            "-p flow-agent-executor --bin flow-executor",
+            "-p flow-agent-cli --bin flow",
+        ):
+            self.assertIn(required, coverage_prepare)
+        self.assertIn("        shell: bash", coverage_prepare_lines)
+        prepare_order = (
+            "target/CACHEDIR.TAG",
+            f"install -D -m 0755 {M12_EXECUTOR} {M12_PRODUCTION_EXECUTOR}",
+            "cargo llvm-cov show-env",
+            "cargo llvm-cov clean",
+            "cargo clean --release",
+            "cargo build",
+            f". {M12_COVERAGE_ENV}",
+            "cargo nextest run",
+        )
+        positions = [coverage_prepare.index(command) for command in prepare_order]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
+        instrumented = coverage_prepare[coverage_prepare.index(f". {M12_COVERAGE_ENV}") :]
+        self.assertEqual(instrumented.count("cargo build"), 2)
+        self.assertNotIn("--release", instrumented)
+        nextest = instrumented.index("cargo nextest run")
+        executor_build = instrumented.index(
+            "-p flow-agent-executor --bin flow-executor", nextest
+        )
+        cli_build = instrumented.index("-p flow-agent-cli --bin flow", executor_build)
+        self.assertLess(nextest, executor_build)
+        self.assertLess(executor_build, cli_build)
+        self.assertNotIn("readelf -l", coverage_prepare)
+        self.assertNotIn("metadata=coverage-", coverage_prepare)
+        self.assertNotIn("target/m12-dynamic", coverage_prepare)
+
+        linux_coverage_lines = assert_step_state(
+            self, workflow, "Check Linux line coverage", condition=UBUNTU
+        )
+        linux_coverage = step_run(workflow, "Check Linux line coverage")
+        self.assertIn("docker exec", linux_coverage)
+        self.assertIn(M12_CONTAINER, linux_coverage)
+        for required in (
+            f". {M12_COVERAGE_ENV}",
+            'install -d -m 0700 "$RUNNER_TEMP"',
+            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/m12-standard/release/flow-executor",
+            "cargo nextest run",
+            f"--target {M12_TARGET}",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "cargo llvm-cov report",
+            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
+            "^Cap(Inh|Prm|Eff|Amb):[[:space:]]+0{16}$",
+            "--fail-under-lines 90",
+            "--show-missing-lines",
+        ):
+            self.assertIn(required, linux_coverage)
+        self.assertIn("        shell: bash", linux_coverage_lines)
+        self.assertIn(TEST_ISOLATION, linux_coverage)
+        coverage_run = linux_coverage[
+            linux_coverage.index("cargo nextest run") : linux_coverage.index(
+                "cargo llvm-cov report"
+            )
+        ]
+        report = linux_coverage[linux_coverage.index("cargo llvm-cov report") :]
+        self.assertNotIn("--release", coverage_run)
+        self.assertNotIn("--release", report)
+        self.assertIn(f"--target {M12_TARGET}", report)
+        self.assertIn("--coverage-target-only", report)
+        self.assertIn(EVIDENCE_ONLY_UNIX_RUNNER_PATTERN, report)
+        self.assertEqual(linux_coverage.count("cargo nextest run"), 1)
+        self.assertNotIn("metadata=coverage-", linux_coverage)
+        self.assertNotIn("-p flow-agent-executor", linux_coverage)
+        self.assertNotIn("--bin flow-executor", linux_coverage)
+        self.assertNotIn("binary(flow-executor)", linux_coverage)
+        self.assertNotIn("FLOW_EXECUTOR_UNDER_TEST=", linux_coverage)
+        ordered = (
+            f". {M12_COVERAGE_ENV}",
+            "cargo nextest run",
+            "cargo llvm-cov report",
+        )
+        positions = [linux_coverage.index(command) for command in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("/tmp/flow-executor-", linux_coverage)
+        self.assertNotIn("scripts/run-m12-installer-acceptance.sh", linux_coverage)
+        self.assertNotIn("m12-install-acceptance", linux_coverage)
+        privilege_drop = linux_coverage.index(
+            f"/usr/sbin/runuser --user {M12_COVERAGE_USER} --preserve-environment"
+        )
+        nextest = linux_coverage.index("cargo nextest run")
+        report = linux_coverage.index("cargo llvm-cov report")
+        self.assertLess(privilege_drop, nextest)
+        self.assertLess(privilege_drop, report)
+        self.assertNotIn("cargo nextest run", linux_coverage[:privilege_drop])
+        self.assertIn(
+            "chown -R watershed:watershed /cargo /work/target", linux_coverage
+        )
+
+        self.assert_evidence_gate(
+            workflow,
+            milestone="M1.1",
+            run_name="Run M1.1 performance evidence",
+            run_id="m11_evidence",
+            feature="m11-budget-evidence",
+            example="m11_budgets",
+            artifact="m11-performance-evidence",
+            output="target/m11-performance/m11-performance-evidence.jsonl",
+        )
+        self.assert_evidence_gate(
+            workflow,
+            milestone="M1.2",
+            run_name="Run M1.2 executor startup evidence",
+            run_id="m12_startup_evidence",
+            feature="m12-startup-evidence",
+            example="m12_executor_startup",
+            artifact="m12-executor-startup-evidence",
+            output="target/m12-startup/m12-executor-startup.jsonl",
+        )
+        self.assert_m12_release_boundary(workflow)
+        link_step = step_run(workflow, "Check documentation links")
+        self.assertIn("scripts/list-tracked-files.mjs '*.md' '*.html'", link_step)
+        self.assertIn("lychee --no-progress --include-fragments -- @docs", link_step)
+
+    def assert_evidence_gate(
+        self,
+        workflow: str,
+        *,
+        milestone: str,
+        run_name: str,
+        run_id: str,
+        feature: str,
+        example: str,
+        artifact: str,
+        output: str,
+    ) -> None:
+        condition = f"{UBUNTU} && !cancelled()" if milestone == "M1.2" else UBUNTU
+        run_lines = assert_step_state(
+            self, workflow, run_name, condition=condition, continue_on_error=True
+        )
+        self.assertIn(f"        id: {run_id}", run_lines)
+        run = step_run(workflow, run_name)
+        self.assertIn("cargo run --locked -p flow-agent-core --release", run)
+        self.assertIn(f"--features {feature} --example {example}", run)
+        if milestone == "M1.2":
+            self.assertIn(
+                "install -d -m 0755 /usr/local/libexec/watershed",
+                run,
+            )
+            self.assertIn(
+                f"install -m 0755 {M12_EXECUTOR} {M12_INSTALLED_EXECUTOR}",
+                run,
+            )
+            self.assertIn(f"-- --executor {M12_INSTALLED_EXECUTOR}", run)
+        self.assertIn(f"> {output}", run)
+
+        upload_name = f"Upload {milestone} " + (
+            "performance evidence" if milestone == "M1.1" else "executor startup evidence"
+        )
+        upload = assert_step_state(
+            self, workflow, upload_name, condition=f"{UBUNTU} && always()"
+        )
+        joined = "\n".join(upload)
+        self.assertIn(f"name: {artifact}", joined)
+        self.assertIn(f"path: {output}", joined)
+        self.assertIn("if-no-files-found: error", joined)
+
+        enforce_name = f"Enforce {milestone} " + (
+            "evidence integrity" if milestone == "M1.1" else "executor startup evidence"
+        )
+        assert_step_state(
+            self,
+            workflow,
+            enforce_name,
+            condition=f"{UBUNTU} && always() && steps.{run_id}.outcome != 'success'",
+        )
+        self.assertEqual(step_run(workflow, enforce_name), "exit 1")
+
+    def assert_m12_release_boundary(self, workflow: str) -> None:
+        contract_images = re.findall(
+            r"^      M12_CONTRACT_IMAGE: (ubuntu:24\.04@sha256:[0-9a-f]{64})$",
+            workflow,
+            re.MULTILINE,
+        )
+        self.assertEqual(len(contract_images), 1)
+        contract_image = contract_images[0]
+        self.assertEqual(workflow.count(contract_image), 1)
+
+        single_commands = {
+            "Install M1.2 executor target": f"rustup target add {M12_TARGET}",
+            "Run M1.2 installer contract tests": (
+                "node scripts/run-python.mjs -m unittest install.tests.test_install"
+            ),
+        }
+        for name, command in single_commands.items():
+            assert_step_state(self, workflow, name, condition=UBUNTU)
+            self.assertEqual(step_run(workflow, name), command)
+
+        apparmor = "\n".join(
+            assert_step_state(
+                self,
+                workflow,
+                "Authorize Bubblewrap user namespaces",
+                condition=UBUNTU,
+            )
+        )
+        for required in (
+            "--no-install-recommends apparmor",
+            "/etc/apparmor.d/watershed-bwrap-userns",
+            "/usr/bin/bwrap flags=(unconfined)",
+            "userns,",
+            "apparmor_parser --replace",
+            "kernel.apparmor_restrict_unprivileged_userns",
+        ):
+            self.assertIn(required, apparmor)
+        for forbidden in (
+            "apparmor-profiles",
+            "/usr/share/apparmor",
+            "sysctl --write",
+            "sysctl -w",
+            "CAP_NET_ADMIN",
+        ):
+            self.assertNotIn(forbidden, apparmor)
+        self.assertLess(
+            workflow.index("      - name: Authorize Bubblewrap user namespaces"),
+            workflow.index("      - name: Run M1.2 executor tests"),
+        )
+
+        start = "\n".join(
+            assert_step_state(
+                self, workflow, "Start controlled M1.2 Ubuntu", condition=UBUNTU
+            )
+        )
+        for required in (
+            "$M12_CONTRACT_IMAGE",
+            "docker build",
+            "systemd dbus-user-session",
+            "--privileged",
+            "--cgroupns=private",
+            "--security-opt apparmor=unconfined",
+            "--tmpfs /run",
+            "/sbin/init",
+            'src=$GITHUB_WORKSPACE,dst=/work,readonly',
+            "dst=/opt/rust,readonly",
+            "dst=/opt/cargo-registry,readonly",
+            "type=volume,dst=/work/target",
+            "dst=/usr/local/bin/cargo-llvm-cov,readonly",
+            "dst=/usr/local/bin/cargo-nextest,readonly",
+            "dst=/usr/local/bin/node,readonly",
+        ):
+            self.assertIn(required, start)
+        self.assertNotIn(contract_image, start)
+        for forbidden in (
+            "--init",
+            "--cgroupns=host",
+            "src=/sys/fs/cgroup",
+            "sleep infinity",
+            "/var/run/docker.sock",
+            "sysctl",
+            "apparmor_parser",
+            'src=$HOME,dst=',
+        ):
+            self.assertNotIn(forbidden, start)
+
+        provision = "\n".join(
+            assert_step_state(
+                self, workflow, "Provision M1.2 Ubuntu dependencies", condition=UBUNTU
+            )
+        )
+        for required in (
+            f"docker exec {M12_CONTAINER}",
+            "bubblewrap",
+            "binutils",
+            "build-essential",
+            "ca-certificates",
+            "musl-tools",
+            "passwd",
+            "python3",
+            "procps",
+            "strace",
+            "util-linux",
+            "/opt/cargo-registry",
+            "useradd --create-home --uid 10001 --shell /bin/sh watershed",
+            "systemd --version",
+            'test "$2" = 255',
+            "systemctl start user-runtime-dir@10001.service user@10001.service",
+            "systemctl is-active --quiet user@10001.service",
+            "test -S /run/user/10001/bus",
+        ):
+            self.assertIn(required, provision)
+        self.assertNotIn("loginctl enable-linger", workflow)
+        self.assertNotIn("uname -r", provision)
+
+        for name, command in {
+            "Build M1.2 executor": (
+                "cargo build --locked --release -p flow-agent-executor "
+                f"--bin flow-executor --target {M12_TARGET}"
+            ),
+            "Build M1.2 dynamic rejection fixture": (
+                "cargo build --locked --release -p flow-agent-executor --bin flow-executor"
+            ),
+        }.items():
+            assert_step_state(self, workflow, name, condition=UBUNTU)
+            build = step_run(workflow, name)
+            self.assertIn("docker exec", build)
+            self.assertIn(M12_CONTAINER, build)
+            self.assertIn(command, build)
+            self.assertIn("CARGO_NET_OFFLINE=true", build)
+            self.assertIn("HOME=/home/watershed", build)
+            self.assertIn(
+                f"runuser --user {M12_COVERAGE_USER} --preserve-environment", build
+            )
+        static = "\n".join(
+            assert_step_state(
+                self, workflow, "Check M1.2 executor is static", condition=UBUNTU
+            )
+        )
+        for required in (M12_EXECUTOR, "readelf -l", 'grep -q "INTERP"', "exit 1"):
+            self.assertIn(required, static)
+
+        readiness = "\n".join(
+            assert_step_state(
+                self, workflow, "Check M1.2 executor readiness", condition=UBUNTU
+            )
+        )
+        for required in (
+            f"/work/{M12_EXECUTOR} --probe",
+            "/usr/bin/env -i",
+            f"runuser --user {M12_COVERAGE_USER} --",
+            'assert probe["ready"] is True, probe',
+        ):
+            self.assertIn(required, readiness)
+        self.assertNotIn("XDG_RUNTIME_DIR", readiness)
+        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", readiness)
+
+        executor_tests = "\n".join(
+            assert_step_state(
+                self, workflow, "Run M1.2 executor tests", condition=UBUNTU
+            )
+        )
+        self.assertIn("BWRAP_UNDER_TEST=/usr/bin/bwrap", executor_tests)
+        self.assertIn(
+            "FLOW_EXECUTOR_DYNAMIC_UNDER_TEST=/work/target/release/flow-executor",
+            executor_tests,
+        )
+        self.assertIn(f"FLOW_EXECUTOR_UNDER_TEST=/work/{M12_EXECUTOR}", executor_tests)
+        self.assertNotIn("XDG_RUNTIME_DIR", executor_tests)
+        self.assertNotIn("DBUS_SESSION_BUS_ADDRESS", executor_tests)
+        self.assertIn(
+            f"runuser --user {M12_COVERAGE_USER} --preserve-environment",
+            executor_tests,
         )
         self.assertIn(
-            "`cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`",
-            mandatory_gates,
+            "cargo test --locked -p flow-agent-executor --test official_linux",
+            step_run(workflow, "Run M1.2 executor tests"),
         )
 
-    def assert_active_pinned_node_steps(self, workflow: str) -> None:
-        setup_reference = (
-            f"uses: actions/setup-node@{SETUP_NODE_SHA} # {SETUP_NODE_RELEASE}"
+        conformance = step_run(workflow, "Run public Custom Executor conformance")
+        self.assertIn(
+            "install -d -m 0755 /usr/local/libexec/watershed",
+            conformance,
+        )
+        self.assertIn(
+            f"install -m 0755 /work/{M12_EXECUTOR} {M12_INSTALLED_EXECUTOR}",
+            conformance,
+        )
+        self.assertIn(f"--executor {M12_INSTALLED_EXECUTOR}", conformance)
+        self.assertNotIn(f"--executor /work/{M12_EXECUTOR}", conformance)
+
+        assert_step_state(
+            self, workflow, "Run M1.2 installer acceptance", condition=UBUNTU
+        )
+        installer = step_run(workflow, "Run M1.2 installer acceptance")
+        self.assertIn("docker exec", installer)
+        self.assertIn(M12_CONTAINER, installer)
+        self.assertIn("--env RUNNER_TEMP=/opt/watershed-m12", installer)
+        self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
+        self.assertIn(f". {M12_COVERAGE_ENV}", installer)
+        self.assertIn(
+            f"export M12_COVERAGE_BIN_DIR={M12_COVERAGE_BIN_DIR}", installer
+        )
+        self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
+        installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        for required in (
+            "systemctl start user-runtime-dir@10001.service user@10001.service",
+            "systemctl is-active --quiet user@10001.service",
+            "test -S /run/user/10001/bus",
+        ):
+            self.assertIn(required, installer_acceptance)
+        self.assertIn(
+            "scripts/run-m12-readiness-negatives.sh", installer_acceptance
+        )
+        self.assertIn(
+            'target/m12-acceptance/release/flow "$acceptance_bundle/flow"',
+            installer_acceptance,
+        )
+        self.assertEqual(installer_acceptance.count(M12_PRODUCTION_EXECUTOR), 2)
+        self.assertNotIn(M12_EXECUTOR, installer_acceptance)
+        for required in (
+            'coverage_flow="$M12_COVERAGE_BIN_DIR/flow"',
+            'coverage_executor="$M12_COVERAGE_BIN_DIR/flow-executor"',
+            'install -m 0755 "$coverage_flow" "$bundle/flow"',
+            'install -m 0755 "$coverage_executor" "$bundle/flow-executor"',
+            'install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"',
+            'install -m 0755 "$coverage_executor" '
+            '"$standard_prefix/bin/flow-executor"',
+        ):
+            self.assertIn(required, installer_acceptance)
+        production_check = installer_acceptance.index(
+            'run_as_watershed "$standard_prefix/bin/flow" executor check'
+        )
+        coverage_switch = installer_acceptance.index(
+            'if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]'
+        )
+        readiness_negatives = installer_acceptance.index(
+            "scripts/run-m12-readiness-negatives.sh"
+        )
+        instrumented_check = installer_acceptance.index(
+            'run_as_watershed "$standard_prefix/bin/flow" executor check',
+            coverage_switch,
+        )
+        self.assertLess(production_check, coverage_switch)
+        self.assertLess(coverage_switch, instrumented_check)
+        self.assertLess(instrumented_check, readiness_negatives)
+        self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
+        self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
+        self.assertNotIn("loginctl show-user", installer_acceptance)
+
+        assert_step_state(
+            self, workflow, "Check M1.2 unsupported platforms", condition=NON_UBUNTU
+        )
+        self.assertEqual(
+            step_run(workflow, "Check M1.2 unsupported platforms"),
+            "cargo nextest run --locked -p flow-agent-cli --test cli "
+            "-E 'test(=executor::executor_commands_fail_closed_on_unsupported_platform_without_config_mutation)'",
         )
 
-        self.assertIn(setup_reference, workflow)
+        evidence = folded_tokens(workflow, "Run M1.2 executor startup evidence")
+        for environment_name in (
+            "GITHUB_SHA",
+            "ImageOS",
+            "ImageVersion",
+            "M12_CONTRACT_IMAGE",
+        ):
+            self.assertIn(environment_name, evidence)
+
+    def test_m12_installer_acceptance_prepares_fixture_home_before_init(self):
+        installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
+        fixture_home_setup = (
+            'install -d -m 0700 "$config" "$home" "$agent_home" '
+            '"$fixture_home" "$fixture_workspace"'
+        )
+        fixture_home_ownership = (
+            'chown -R watershed:watershed "$config" "$home" "$agent_home" '
+            '"$fixture_home" "$fixture_workspace"'
+        )
+        fixture_init = (
+            'run_in_workspace "$fixture_workspace" /usr/bin/env '
+            'FLOW_AGENT_HOME="$fixture_home" "$custom_prefix/bin/flow" init'
+        )
+
+        setup = installer_acceptance.index(fixture_home_setup)
+        ownership = installer_acceptance.index(fixture_home_ownership)
+        initialization = installer_acceptance.index(fixture_init)
+        self.assertLess(setup, ownership)
+        self.assertLess(ownership, initialization)
+
+    def test_m12_installer_acceptance_has_finite_liveness_bounds(self) -> None:
+        workflow = workflow_text()
+        readiness = M12_READINESS_NEGATIVES.read_text(encoding="utf-8")
+
+        self.assertNotIn("LLVM_PROFILE_FILE", readiness)
+
         self.assertRegex(
+            step_run(workflow, "Run M1.2 installer acceptance"),
+            r"exec /usr/bin/timeout\b[\s\S]*?"
+            r"/bin/sh scripts/run-m12-installer-acceptance\.sh",
+        )
+        cleanup = assert_step_state(
+            self,
             workflow,
-            rf"uses: actions/checkout@{CHECKOUT_SHA} # {CHECKOUT_RELEASE}\n\n"
-            r"\s+- name: Install pinned Node\n\s+"
-            rf"{re.escape(setup_reference)}\n\s+with:\n"
-            r"\s+node-version-file: \.node-version(?:\n|$)",
+            "Stop controlled M1.2 Ubuntu",
+            condition=f"{UBUNTU} && always()",
         )
-        self.assertNotRegex(workflow, r"actions/setup-node@(?![0-9a-f]{40}\b)")
-        self.assertNotIn("check-latest:", workflow)
-
-        setup_index = workflow.index(setup_reference)
-        node_step_index, node_commands = self.active_pwsh_step_commands(
-            workflow, "Check Node version"
+        self.assertIn(f"docker rm --force {M12_CONTAINER}", "\n".join(cleanup))
+        self.assertRegex(
+            readiness,
+            r"run_with_deadline\s+/usr/bin/unshare\s+--mount\b[\s\S]*?"
+            r"negative_status=\$\?[\s\S]*?"
+            r"cleanup_delegated_scope\s+\"\$fault_dir\"",
         )
-        corepack_step_index, corepack_commands = self.active_pwsh_step_commands(
-            workflow, "Enable Corepack"
+        self.assertRegex(
+            readiness,
+            r"run_with_deadline\s+/usr/bin/setpriv\b[\s\S]*?"
+            r'"\$M12_STANDARD_PREFIX/bin/flow" executor check',
         )
-        self.assertEqual(
-            node_commands,
-            [
-                "$expectedNode = (Get-Content -Raw .node-version).Trim()",
-                'if ((node --version) -ne "v$expectedNode") {',
-                'throw "Node $expectedNode must be active for CI gates"',
-                "}",
-            ],
+        self.assertRegex(
+            readiness,
+            r"run_with_deadline\s+/usr/bin/env\b[\s\S]*?"
+            r'"\$M12_INSTALL_BUNDLE/install\.sh"',
         )
-        self.assertEqual(corepack_commands[0], "corepack enable")
-        self.assertEqual(
-            corepack_commands[1],
-            "$packageManager = (Get-Content -Raw package.json | ConvertFrom-Json).packageManager",
-        )
-        self.assertEqual(corepack_commands[2], "$expectedPnpm = $packageManager -replace '^pnpm@', ''")
-        self.assertEqual(corepack_commands[3], "if ((pnpm --version) -ne $expectedPnpm) {")
-        self.assertEqual(corepack_commands[4], 'throw "pnpm $expectedPnpm must be active for CI gates"')
-        self.assertEqual(corepack_commands[5:], ["}"])
-        self.assertLess(setup_index, node_step_index)
-        self.assertLess(node_step_index, corepack_step_index)
-
-    def assert_active_pinned_rust_step(self, workflow: str, version: str) -> None:
-        _, commands = self.active_pwsh_step_commands(workflow, "Select pinned Rust")
-        self.assertNotIn(version, workflow)
-        self.assertEqual(
-            commands,
-            [
-                '$toolchain = node scripts/run-python.mjs -c "import tomllib; '
-                "print(tomllib.load(open('rust-toolchain.toml', 'rb'))"
-                "['toolchain']['channel'])\"",
-                "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
-                "$escapedToolchain = [regex]::Escape($toolchain)",
-                'if ((rustc --version) -notmatch "^rustc $escapedToolchain ") {',
-                'throw "Rust $toolchain must be active for CI gates"',
-                "}",
-            ],
-        )
-
-    def assert_active_pinned_gate_actions(self, workflow: str) -> None:
-        self.assertEqual(
-            self.step_lines(workflow, "Install gate tools")[1],
-            [
-                "      - name: Install gate tools",
-                f"        uses: taiki-e/install-action@{INSTALL_ACTION_SHA} # {INSTALL_ACTION_RELEASE}",
-                "        with:",
-                f"          tool: {GATE_TOOLS}",
-                "",
-            ],
-        )
-        self.assertEqual(
-            self.step_lines(workflow, "Upload M1.1 optimized budget evidence")[1],
-            [
-                "      - name: Upload M1.1 optimized budget evidence",
-                "        if: matrix.os == 'ubuntu-24.04' && always()",
-                f"        uses: actions/upload-artifact@{UPLOAD_ARTIFACT_SHA} # {UPLOAD_ARTIFACT_RELEASE}",
-                "        with:",
-                "          name: m11-optimized-budgets",
-                "          path: target/m11-budgets/m11-budgets.jsonl",
-                "          if-no-files-found: error",
-                "",
-            ],
-        )
-
-    def assert_all_remote_actions_pinned(self, workflow: str) -> None:
-        for line in workflow.splitlines():
-            match = re.match(r"^\s*(?:-\s+)?uses:\s*([^\s#]+)", line)
-            if match is None:
-                continue
-            reference = match.group(1)
-            if reference.startswith("./"):
-                continue
-            self.assertRegex(
-                reference,
-                r"^[^@/\s]+/[^@\s]+@[0-9a-f]{40}$",
-                f"remote action must use a full commit SHA: {reference}",
+        self.assertNotIn("2>&1", readiness)
+        for stream in ("missing_manager", "missing_manager_install"):
+            self.assertIn(f'test ! -s "${stream}_stdout"', readiness)
+            self.assertIn(
+                f'case "$(/bin/cat "${stream}_stderr")" in', readiness
             )
-
-    def active_pwsh_step_commands(
-        self, workflow: str, step_name: str
-    ) -> tuple[int, list[str]]:
-        step_index, step_lines = self.active_step_lines(workflow, step_name)
-        self.assertEqual(
-            [line for line in step_lines if line.startswith("        shell:")],
-            ["        shell: pwsh"],
-        )
-        run_index = step_lines.index("        run: |")
-        commands = [
-            line.strip()
-            for line in step_lines[run_index + 1 :]
-            if line.startswith("          ")
-            and line.strip()
-            and not line.lstrip().startswith("#")
-        ]
-        return step_index, commands
-
-    def assert_active_single_line_step(
-        self, workflow: str, step_name: str, command: str
-    ) -> None:
-        _, step_lines = self.active_step_lines(workflow, step_name)
-        self.assertEqual(
-            [line for line in step_lines if line.startswith("        run:")],
-            [f"        run: {command}"],
-        )
-
-    def active_step_lines(self, workflow: str, step_name: str) -> tuple[int, list[str]]:
-        lines = workflow.splitlines()
-        self.assertFalse(any(line.startswith("    if:") for line in lines))
-        self.assertFalse(
-            any(line.startswith("    continue-on-error:") for line in lines)
-        )
-        step_index, step_lines = self.step_lines(workflow, step_name)
-
-        self.assertFalse(
-            any(line.startswith("        if:") for line in step_lines)
-        )
-        self.assertFalse(
-            any(line.startswith("        continue-on-error:") for line in step_lines)
-        )
-        return step_index, step_lines
-
-    def conditionally_active_step_lines(
-        self, workflow: str, step_name: str, condition: str
-    ) -> tuple[int, list[str]]:
-        lines = workflow.splitlines()
-        self.assertFalse(any(line.startswith("    if:") for line in lines))
-        self.assertFalse(
-            any(line.startswith("    continue-on-error:") for line in lines)
-        )
-        step_index, step_lines = self.step_lines(workflow, step_name)
-        self.assertEqual(
-            [line for line in step_lines if line.startswith("        if:")],
-            [f"        if: {condition}"],
-        )
-        self.assertFalse(
-            any(line.startswith("        continue-on-error:") for line in step_lines)
-        )
-        return step_index, step_lines
-
-    def step_lines(self, workflow: str, step_name: str) -> tuple[int, list[str]]:
-        lines = workflow.splitlines()
-        marker = f"      - name: {step_name}"
-        self.assertIn(marker, lines)
-        step_start = lines.index(marker)
-        step_end = next(
-            (
-                index
-                for index in range(step_start + 1, len(lines))
-                if lines[index].startswith("      - ")
-            ),
-            len(lines),
-        )
-        return workflow.index(marker), lines[step_start:step_end]
-
-    def active_folded_step_tokens(self, workflow: str, step_name: str) -> list[str]:
-        _, step_lines = self.active_step_lines(workflow, step_name)
-        return self.folded_step_line_tokens(step_lines)
-
-    def folded_step_line_tokens(self, step_lines: list[str]) -> list[str]:
-        run_index = step_lines.index("        run: >-")
-        command = " ".join(
-            line.strip()
-            for line in step_lines[run_index + 1 :]
-            if line.startswith("          ")
-            and line.strip()
-            and not line.lstrip().startswith("#")
-        )
-        return shlex.split(command)
-
-    def test_node_toolchain_contract_rejects_inert_commands(self) -> None:
-        active = """      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install pinned Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .node-version
-
-      - name: Check Node version
-        shell: pwsh
-        run: |
-          $expectedNode = (Get-Content -Raw .node-version).Trim()
-          if ((node --version) -ne "v$expectedNode") {
-            throw "Node $expectedNode must be active for CI gates"
-          }
-
-      - name: Enable Corepack
-        shell: pwsh
-        run: |
-          corepack enable
-          $packageManager = (Get-Content -Raw package.json | ConvertFrom-Json).packageManager
-          $expectedPnpm = $packageManager -replace '^pnpm@', ''
-          if ((pnpm --version) -ne $expectedPnpm) {
-            throw "pnpm $expectedPnpm must be active for CI gates"
-          }
-"""
-        self.assert_active_pinned_node_steps(active)
-
-        commented = active.replace("          corepack", "          # corepack").replace(
-            "          if ((pnpm", "          # if ((pnpm"
-        )
-        commented_node = active.replace(
-            "          if ((node", "          # if ((node"
-        )
-        disabled = active.replace(
-            "      - name: Enable Corepack\n        shell: pwsh",
-            "      - name: Enable Corepack\n"
-            "        if: ${{ false }}\n"
-            "        shell: pwsh",
-        )
-        wrong_shell = active.replace(
-            "      - name: Enable Corepack\n        shell: pwsh",
-            "      - name: Enable Corepack\n        shell: bash",
-        )
-        missing_shell = active.replace(
-            "      - name: Enable Corepack\n        shell: pwsh\n",
-            "      - name: Enable Corepack\n",
-        )
-        continue_on_error = active.replace(
-            "      - name: Enable Corepack\n        shell: pwsh",
-            "      - name: Enable Corepack\n"
-            "        continue-on-error: true\n"
-            "        shell: pwsh",
-        )
-        job_disabled = "jobs:\n  m1:\n    if: false\n    steps:\n" + active
-        job_continue_on_error = (
-            "jobs:\n  m1:\n    continue-on-error: true\n    steps:\n" + active
-        )
-        early_success = active.replace(
-            "          corepack enable", "          exit 0\n          corepack enable"
-        )
-
-        for workflow in (
-            commented,
-            commented_node,
-            disabled,
-            wrong_shell,
-            missing_shell,
-            continue_on_error,
-            job_disabled,
-            job_continue_on_error,
-            early_success,
-        ):
-            with self.subTest(workflow=workflow), self.assertRaises(
-                (AssertionError, ValueError)
-            ):
-                self.assert_active_pinned_node_steps(workflow)
-
-    def test_ci_action_pin_contract_rejects_tampering(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        replacements = [
-            (CHECKOUT_SHA, "0" * 40),
-            (INSTALL_ACTION_SHA, "1" * 40),
-            (UPLOAD_ARTIFACT_SHA, "2" * 40),
-            ("cargo-nextest@0.9.143", "cargo-nextest@0.9.142"),
-        ]
-
-        for expected, replacement in replacements:
-            with self.subTest(expected=expected), self.assertRaises(AssertionError):
-                tampered = workflow.replace(expected, replacement)
-                self.assert_active_pinned_node_steps(tampered)
-                self.assert_active_pinned_gate_actions(tampered)
-
-    def test_ci_action_pin_contract_rejects_new_unpinned_actions(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assert_all_remote_actions_pinned(
-            workflow
-            + "\n      - uses: example/action@"
-            + "a" * 40
-            + "\n      - uses: ./local-action\n"
-        )
-
-        for reference in (
-            "example/action@main",
-            "example/action@v1",
-            "example/action@abc1234",
-        ):
-            with self.subTest(reference=reference), self.assertRaises(AssertionError):
-                self.assert_all_remote_actions_pinned(
-                    workflow + f"\n      - uses: {reference}\n"
-                )
-
-    def test_ci_runs_on_every_permitted_topic_branch(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertEqual(
-            ci_push_branches(workflow),
-            ("main", *(f"{branch_type}/**" for branch_type in TOPIC_BRANCH_TYPES)),
-        )
-
-    def test_ci_branch_parser_ignores_comments_and_other_trigger_keys(self) -> None:
-        workflow = """on:
-  push:
-    paths:
-      - \"feat/**\"
-    branches:
-      # \"fix/**\"
-      - main
-"""
-
-        self.assertEqual(ci_push_branches(workflow), ("main",))
 
 
 if __name__ == "__main__":

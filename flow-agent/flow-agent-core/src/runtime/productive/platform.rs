@@ -15,6 +15,24 @@ pub(crate) fn ensure_productive_execution_platform() -> Result<(), RuntimeError>
     }
 }
 
+pub(crate) fn ensure_productive_tool_execution_platform() -> Result<(), RuntimeError> {
+    let release = current_productive_execution_release();
+    if release.as_deref().is_some_and(|release| {
+        productive_tool_execution_supported_release(
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            release,
+        )
+    }) {
+        Ok(())
+    } else {
+        Err(RuntimeError::executor(
+            proto::ExecutorErrorCodeV0::PolicyUnsupported,
+            "productive Tool execution requires Ubuntu 24.04 x64",
+        ))
+    }
+}
+
 pub(crate) fn productive_execution_supported_release(
     target_os: &str,
     target_arch: &str,
@@ -27,13 +45,21 @@ pub(crate) fn productive_execution_supported_release(
     }
 }
 
+pub(crate) fn productive_tool_execution_supported_release(
+    target_os: &str,
+    target_arch: &str,
+    release: &str,
+) -> bool {
+    target_os == "linux" && target_arch == "x86_64" && ubuntu_24_04_release(release)
+}
+
 #[cfg(target_os = "linux")]
-pub(crate) fn current_productive_execution_release() -> Option<String> {
+fn current_productive_execution_release() -> Option<String> {
     std::fs::read_to_string("/etc/os-release").ok()
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn current_productive_execution_release() -> Option<String> {
+fn current_productive_execution_release() -> Option<String> {
     use std::process::{Command, Stdio};
 
     let output = Command::new("/usr/bin/sw_vers")
@@ -51,7 +77,7 @@ pub(crate) fn current_productive_execution_release() -> Option<String> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub(crate) fn current_productive_execution_release() -> Option<String> {
+fn current_productive_execution_release() -> Option<String> {
     None
 }
 

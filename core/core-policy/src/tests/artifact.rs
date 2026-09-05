@@ -1,14 +1,23 @@
 use crate::{
-    AllowedParameterPolicy, CommandPolicy, DEFAULT_PROTECTED_PATHS, EnvironmentDefault,
-    EnvironmentPolicy, FilesystemPolicy, NetworkAllowEntry, NetworkAllowKind, NetworkDefault,
-    NetworkPolicy, NetworkTransport, POLICY_VERSION_V0, ParameterValueType, PhaseScope,
-    PolicyArtifact, PolicyTarget, RuntimeLimits, ToolKind, canonical_artifact_json,
+    AllowedParameterPolicy, CommandPolicy, EnvironmentDefault, EnvironmentPolicy, FilesystemPolicy,
+    NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkPolicy, NetworkTransport,
+    POLICY_VERSION_V0, ParameterValueType, PhaseScope, PolicyArtifact, PolicyTarget, RuntimeLimits,
+    ToolKind, ToolRuntimeProfile, canonical_artifact_json,
 };
 
 mod command;
 mod environment;
 mod filesystem;
 mod network;
+
+#[test]
+fn policy_target_serializes_as_linux_bubblewrap_seccomp() {
+    assert_eq!(
+        serde_json::to_string(&PolicyTarget::LinuxBubblewrapSeccomp)
+            .expect("policy target serializes"),
+        r#""linux-bubblewrap-seccomp""#
+    );
+}
 
 #[test]
 fn policy_artifact_rejects_unsupported_policy_version() {
@@ -40,6 +49,20 @@ fn policy_artifact_rejects_unknown_top_level_fields() {
             .contains("unknown field `future_restriction`"),
         "{error}"
     );
+}
+
+#[test]
+fn policy_artifact_requires_an_explicit_runtime_profile() {
+    let mut value = serde_json::to_value(valid_policy_artifact("missing-runtime-profile"))
+        .expect("policy artifact serializes");
+    value["commands"][0]
+        .as_object_mut()
+        .expect("command policy is an object")
+        .remove("runtime_profile");
+
+    let error = serde_json::from_value::<PolicyArtifact>(value)
+        .expect_err("compiled policy artifacts must carry their selected runtime profile");
+    assert!(error.to_string().contains("runtime_profile"), "{error}");
 }
 
 #[test]
@@ -191,7 +214,7 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
             timeout_ms: 1000,
         },
         source_flow_definition_id: "sort-flow".to_owned(),
-        target: PolicyTarget::LinuxLandlockSeccomp,
+        target: PolicyTarget::LinuxBubblewrapSeccomp,
     };
 
     let json = canonical_artifact_json(&artifact).expect("canonical JSON");
@@ -219,19 +242,11 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
         vec!["alpha", "beta"]
     );
     assert_eq!(
-        canonical.commands[0].filesystem.read_roots,
+        canonical.commands[0].filesystem.read_only_mounts,
         vec!["workspace/a", "workspace/b"]
     );
     assert_eq!(
-        canonical.commands[0].filesystem.protected_path_grants,
-        vec!["workspace/a.env", "workspace/z.env"]
-    );
-    assert_eq!(
-        canonical.commands[0].filesystem.protected_paths,
-        vec!["**/.env", "**/.ssh"]
-    );
-    assert_eq!(
-        canonical.commands[0].filesystem.write_roots,
+        canonical.commands[0].filesystem.writable_mounts,
         vec!["workspace/a-out", "workspace/z-out"]
     );
     assert_eq!(canonical.commands[0].network.allow[0].cidr, "10.0.0.0/24");
@@ -253,7 +268,7 @@ fn policy_artifact_canonical_json_sorts_schema_arrays() {
 fn command_policy(
     tool_id: &str,
     allowed_values: Vec<&str>,
-    read_roots: Vec<&str>,
+    read_only_mounts: Vec<&str>,
 ) -> CommandPolicy {
     CommandPolicy {
         allowed_parameters: vec![
@@ -289,11 +304,13 @@ fn command_policy(
         },
         executable: format!("/bin/{tool_id}"),
         filesystem: FilesystemPolicy {
-            protected_path_grants: vec!["workspace/z.env".to_owned(), "workspace/a.env".to_owned()],
-            protected_paths: vec!["**/.ssh".to_owned(), "**/.env".to_owned()],
-            read_roots: read_roots.iter().map(|root| (*root).to_owned()).collect(),
-            write_roots: vec!["workspace/z-out".to_owned(), "workspace/a-out".to_owned()],
+            read_only_mounts: read_only_mounts
+                .iter()
+                .map(|mount| (*mount).to_owned())
+                .collect(),
+            writable_mounts: vec!["workspace/z-out".to_owned(), "workspace/a-out".to_owned()],
         },
+        max_concurrent_processes_and_threads: 32,
         network: NetworkPolicy {
             allow: vec![
                 NetworkAllowEntry {
@@ -311,6 +328,7 @@ fn command_policy(
             ],
             default: NetworkDefault::Deny,
         },
+        runtime_profile: ToolRuntimeProfile::Exact,
         script_runtime: None,
         tool_id: tool_id.to_owned(),
         tool_kind: ToolKind::PredefinedCommand,
@@ -330,7 +348,7 @@ fn valid_policy_artifact(tool_id: &str) -> PolicyArtifact {
             timeout_ms: 1000,
         },
         source_flow_definition_id: format!("{tool_id}-flow"),
-        target: PolicyTarget::LinuxLandlockSeccomp,
+        target: PolicyTarget::LinuxBubblewrapSeccomp,
     }
 }
 
@@ -338,11 +356,7 @@ fn valid_command_policy(tool_id: &str) -> CommandPolicy {
     let mut command = command_policy(tool_id, vec!["a"], vec!["workspace"]);
     command.command_id = "agent-echo".to_owned();
     command.executable = "registry:agent-echo".to_owned();
-    command.filesystem.write_roots = vec!["workspace".to_owned()];
-    command.filesystem.protected_paths = DEFAULT_PROTECTED_PATHS
-        .iter()
-        .map(|path| (*path).to_owned())
-        .collect();
+    command.filesystem.writable_mounts = vec!["workspace/out".to_owned()];
     command.network.allow.clear();
     command
 }

@@ -5,7 +5,6 @@ use crate::{
     tests::{support::event_timestamp, test_support::expected_stream},
 };
 use proto::{EventEnvelope, EventType};
-use std::time::Instant;
 
 #[derive(Default)]
 pub(in crate::tests) struct CollectingEventSink(pub(in crate::tests) Vec<EventEnvelope>);
@@ -16,7 +15,6 @@ impl RuntimeEventSink for CollectingEventSink {
         event: &EventEnvelope,
         _canonical_jsonl: &str,
         _context_manifest: Option<ContextManifestCheckpoint>,
-        _measurement_started_at: Option<Instant>,
     ) -> Result<(), RuntimeError> {
         self.0.push(event.clone());
         Ok(())
@@ -155,12 +153,14 @@ pub(in crate::tests) fn tool_started_line(event_id: &str, sequence: u64) -> Stri
         Some("flow-001"),
         serde_json::json!({
             "allowed_parameters": [],
+            "max_concurrent_processes_and_threads": 1,
             "network_access": "deny",
-            "read_scope": ["workspace"],
+            "read_only_mounts": ["workspace"],
             "tool_id": "tool",
             "tool_kind": "predefined-command",
             "tool_name": "Tool",
-            "write_scope": [],
+            "runtime_profile": "exact",
+            "writable_mounts": [],
         }),
     )
 }

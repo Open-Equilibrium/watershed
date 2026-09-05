@@ -3,17 +3,44 @@ use super::super::helpers::create_windows_junction;
 use super::super::helpers::empty_workspace;
 #[cfg(windows)]
 use crate::runtime::fs_guards::AnchoredWorkspace;
-#[cfg(windows)]
-use crate::runtime::fs_guards::set_windows_directory_world_access_for_test;
 use crate::runtime::fs_guards::validate_unix_private_directory_metadata;
 use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
 #[cfg(unix)]
 use crate::runtime::fs_guards::{
     set_private_directory_create_observer, set_private_directory_open_observer,
 };
+#[cfg(windows)]
+use crate::runtime::fs_guards::{
+    set_private_directory_missing_observer, set_windows_directory_world_access_for_test,
+    windows_directory_is_current_user_only_for_test,
+};
 #[cfg(any(unix, windows))]
 use crate::runtime::types::RuntimeError;
 use std::fs;
+
+#[cfg(windows)]
+#[test]
+fn anchored_directory_rejects_a_non_unicode_leaf_before_access() {
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt as _};
+
+    let workspace = empty_workspace("anchored-directory-non-unicode");
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+    let leaf = OsString::from_wide(&[0xD800]);
+
+    let error = parent
+        .private_child(&leaf, true, DirectoryErrorMode::Protocol)
+        .expect_err("non-Unicode directory leaf must be rejected");
+
+    assert!(
+        matches!(
+            &error,
+            RuntimeError::Io { source, .. }
+                if source.kind() == std::io::ErrorKind::InvalidInput
+        ),
+        "{error}"
+    );
+    assert!(!workspace.join(leaf).exists(), "no directory was created");
+}
 
 #[cfg(windows)]
 #[test]
@@ -269,6 +296,30 @@ fn private_child_creation_overrides_a_world_accessible_parent_dacl() {
     private
         .private_child("nested", true, DirectoryErrorMode::Protocol)
         .expect("validated private directory creates a private child");
+}
+
+#[cfg(windows)]
+#[test]
+fn private_child_accepts_a_concurrent_private_creation() {
+    let workspace = empty_workspace("private-directory-windows-concurrent-create");
+    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
+    let competitor = parent.clone();
+    set_private_directory_missing_observer(move || {
+        competitor
+            .private_child("private", true, DirectoryErrorMode::Protocol)
+            .expect("competitor creates the private directory")
+            .expect("created private directory opens");
+    });
+
+    parent
+        .private_child("private", true, DirectoryErrorMode::Protocol)
+        .expect("concurrent private creation is accepted")
+        .expect("concurrently created private directory opens");
+
+    assert!(
+        windows_directory_is_current_user_only_for_test(&workspace.join("private"))
+            .expect("private directory permissions read")
+    );
 }
 
 #[cfg(windows)]

@@ -5,40 +5,12 @@ use std::{
     path::Path,
 };
 
-mod legacy;
 mod shared;
-use legacy::LegacyLifecycleState;
 pub(crate) use shared::lifecycle_payload_string;
 use shared::{
     LifecycleTracker, MessageLifecycleKey, ToolLifecycleKey, open_child_lifecycle_error,
     require_lifecycle_flow_id, terminal_lifecycle_error,
 };
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SessionWireFormat {
-    Current,
-    M1Legacy,
-}
-
-impl SessionWireFormat {
-    pub(super) fn marker(event: &EventEnvelope) -> Option<Self> {
-        match event.event_type {
-            EventType::PhaseEntered => Some(
-                if event.payload.get("phase_execution_id").is_some()
-                    || event.payload.get("phase_kind").is_some()
-                    || event.payload.get("iteration").is_some()
-                {
-                    Self::Current
-                } else {
-                    Self::M1Legacy
-                },
-            ),
-            EventType::PhaseCompleted | EventType::PhaseFailed => Some(Self::Current),
-            EventType::StepStarted | EventType::StepCompleted => Some(Self::M1Legacy),
-            _ => None,
-        }
-    }
-}
 
 fn validate_message_delta(
     lifecycle: &SessionLifecycleState,
@@ -120,19 +92,11 @@ pub(crate) struct SessionLifecycleState {
     active_message_roles: BTreeMap<MessageLifecycleKey, String>,
     active_phases: BTreeMap<String, Vec<PhaseLifecycleKey>>,
     tools_without_progress: BTreeSet<ToolLifecycleKey>,
-    legacy: LegacyLifecycleState,
 }
 
 impl SessionLifecycleState {
-    fn lifecycle_tool_key(
-        &self,
-        event: &EventEnvelope,
-        wire_format: SessionWireFormat,
-    ) -> ToolLifecycleKey {
-        match wire_format {
-            SessionWireFormat::Current => lifecycle_tool_key(event, &self.active_phases),
-            SessionWireFormat::M1Legacy => self.legacy.tool_key(event),
-        }
+    fn lifecycle_tool_key(&self, event: &EventEnvelope) -> ToolLifecycleKey {
+        lifecycle_tool_key(event, &self.active_phases)
     }
 
     fn require_active_work(
@@ -140,16 +104,8 @@ impl SessionLifecycleState {
         path: &Path,
         line_number: usize,
         event: &EventEnvelope,
-        wire_format: SessionWireFormat,
     ) -> Result<(), RuntimeError> {
-        match wire_format {
-            SessionWireFormat::Current => {
-                require_active_leaf_phase(path, line_number, event, &self.active_phases)?;
-            }
-            SessionWireFormat::M1Legacy => {
-                self.legacy.require_active_step(path, line_number, event)?;
-            }
-        }
+        require_active_leaf_phase(path, line_number, event, &self.active_phases)?;
         Ok(())
     }
 
@@ -178,7 +134,6 @@ impl SessionLifecycleState {
         path: &Path,
         line_number: usize,
         event: &EventEnvelope,
-        wire_format: SessionWireFormat,
     ) -> Result<(), RuntimeError> {
         if line_number > 1 && event.event_type == EventType::SessionStarted {
             return Err(RuntimeError::Protocol(format!(
@@ -210,16 +165,6 @@ impl SessionLifecycleState {
         }
         validate_lifecycle_parent(path, line_number, event, &self.flows, &self.flow_parents)?;
 
-        if wire_format == SessionWireFormat::M1Legacy {
-            self.legacy.validate_structure(
-                &self.tools,
-                &self.active_message_roles,
-                path,
-                line_number,
-                event,
-            )?;
-        }
-
         match event.event_type {
             EventType::FlowStarted => {
                 require_lifecycle_flow_id(path, line_number, event)?;
@@ -241,33 +186,18 @@ impl SessionLifecycleState {
                         event.event_type.as_str()
                     )));
                 }
-                match wire_format {
-                    SessionWireFormat::Current => {
-                        if let Some(phase) = self
-                            .active_phases
-                            .get(&flow_id)
-                            .and_then(|phases| phases.last())
-                        {
-                            return Err(open_child_lifecycle_error(
-                                path,
-                                line_number,
-                                event,
-                                "phase",
-                                &phase.phase_execution_id,
-                            ));
-                        }
-                    }
-                    SessionWireFormat::M1Legacy => {
-                        if let Some(step_id) = self.legacy.active_step_id(&flow_id) {
-                            return Err(open_child_lifecycle_error(
-                                path,
-                                line_number,
-                                event,
-                                "step",
-                                step_id,
-                            ));
-                        }
-                    }
+                if let Some(phase) = self
+                    .active_phases
+                    .get(&flow_id)
+                    .and_then(|phases| phases.last())
+                {
+                    return Err(open_child_lifecycle_error(
+                        path,
+                        line_number,
+                        event,
+                        "phase",
+                        &phase.phase_execution_id,
+                    ));
                 }
                 if let Some(child) = self.flows.active_keys().find(|child| {
                     self.flow_parents.get(*child).and_then(Option::as_deref)
@@ -282,7 +212,7 @@ impl SessionLifecycleState {
                     ));
                 }
             }
-            EventType::PhaseEntered if wire_format == SessionWireFormat::Current => {
+            EventType::PhaseEntered => {
                 let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
                 let phase = lifecycle_phase_key(event);
                 if let Some(terminal_line) =
@@ -372,18 +302,9 @@ impl SessionLifecycleState {
                     ));
                 }
             }
-            EventType::StepStarted | EventType::StepCompleted | EventType::PhaseEntered => {}
             EventType::ToolStarted => {
-                let tool = match wire_format {
-                    SessionWireFormat::Current => {
-                        require_active_leaf_phase(path, line_number, event, &self.active_phases)?;
-                        lifecycle_tool_key(event, &self.active_phases)
-                    }
-                    SessionWireFormat::M1Legacy => {
-                        self.legacy.require_active_step(path, line_number, event)?;
-                        self.legacy.tool_key(event)
-                    }
-                };
+                require_active_leaf_phase(path, line_number, event, &self.active_phases)?;
+                let tool = lifecycle_tool_key(event, &self.active_phases);
                 self.reject_terminal_tool_event(path, line_number, event, &tool)?;
                 if self.tools.is_started(&tool) {
                     return Err(RuntimeError::Protocol(format!(
@@ -394,7 +315,7 @@ impl SessionLifecycleState {
                 }
             }
             EventType::ToolProgress | EventType::ToolCompleted | EventType::ToolTimedOut => {
-                let tool = self.lifecycle_tool_key(event, wire_format);
+                let tool = self.lifecycle_tool_key(event);
                 self.reject_terminal_tool_event(path, line_number, event, &tool)?;
                 if !self.tools.is_started(&tool) {
                     return Err(RuntimeError::Protocol(format!(
@@ -407,12 +328,9 @@ impl SessionLifecycleState {
             }
             EventType::ToolFailed => {
                 let flow_id = require_lifecycle_flow_id(path, line_number, event)?;
-                let tool = self.lifecycle_tool_key(event, wire_format);
+                let tool = self.lifecycle_tool_key(event);
                 self.reject_terminal_tool_event(path, line_number, event, &tool)?;
-                let after_phase_entered = match wire_format {
-                    SessionWireFormat::Current => self.active_phases.contains_key(&flow_id),
-                    SessionWireFormat::M1Legacy => self.legacy.has_active_phase(&flow_id),
-                };
+                let after_phase_entered = self.active_phases.contains_key(&flow_id);
                 if !self.tools.is_started(&tool) && after_phase_entered {
                     return Err(RuntimeError::Protocol(format!(
                         "{} line {line_number} tool.failed must follow tool.started after phase.entered for flow_id {flow_id:?}",
@@ -421,11 +339,11 @@ impl SessionLifecycleState {
                 }
             }
             EventType::MessageDelta => {
-                self.require_active_work(path, line_number, event, wire_format)?;
+                self.require_active_work(path, line_number, event)?;
                 validate_message_delta(self, path, line_number, event)?;
             }
             EventType::MessageCompleted => {
-                self.require_active_work(path, line_number, event, wire_format)?;
+                self.require_active_work(path, line_number, event)?;
                 validate_message_completed(self, path, line_number, event)?;
             }
             EventType::SessionStarted
@@ -441,12 +359,7 @@ impl SessionLifecycleState {
         Ok(())
     }
 
-    pub(crate) fn record_event(
-        &mut self,
-        line_number: usize,
-        event: &EventEnvelope,
-        wire_format: SessionWireFormat,
-    ) {
+    pub(crate) fn record_event(&mut self, line_number: usize, event: &EventEnvelope) {
         match event.event_type {
             EventType::FlowStarted => {
                 let flow_id = event
@@ -473,16 +386,10 @@ impl SessionLifecycleState {
                     .flow_id
                     .clone()
                     .expect("validated phase.entered events include flow_id");
-                match wire_format {
-                    SessionWireFormat::Current => self
-                        .active_phases
-                        .entry(flow_id)
-                        .or_default()
-                        .push(lifecycle_phase_key(event)),
-                    SessionWireFormat::M1Legacy => {
-                        self.legacy.record_phase_entered(flow_id, event);
-                    }
-                }
+                self.active_phases
+                    .entry(flow_id)
+                    .or_default()
+                    .push(lifecycle_phase_key(event));
             }
             EventType::PhaseCompleted | EventType::PhaseFailed => {
                 let flow_id = event
@@ -498,37 +405,22 @@ impl SessionLifecycleState {
                 }
                 self.terminal_phases.insert(phase_execution_id, line_number);
             }
-            EventType::StepStarted => {
-                let flow_id = event
-                    .flow_id
-                    .clone()
-                    .expect("validated step.started events include flow_id");
-                self.legacy.record_step_started(flow_id, event);
-            }
-            EventType::StepCompleted => {
-                let flow_id = event
-                    .flow_id
-                    .clone()
-                    .expect("validated step.completed events include flow_id");
-                self.legacy
-                    .record_step_completed(&flow_id, line_number, event);
-            }
             EventType::ToolStarted => {
-                let tool = self.lifecycle_tool_key(event, wire_format);
+                let tool = self.lifecycle_tool_key(event);
                 self.tools_without_progress.insert(tool.clone());
                 self.tools.start(tool);
             }
             EventType::ToolProgress => {
-                let tool = self.lifecycle_tool_key(event, wire_format);
+                let tool = self.lifecycle_tool_key(event);
                 self.tools_without_progress.remove(&tool);
             }
             EventType::ToolCompleted | EventType::ToolTimedOut => {
-                let tool = self.lifecycle_tool_key(event, wire_format);
+                let tool = self.lifecycle_tool_key(event);
                 self.tools.finish(tool.clone(), line_number);
                 self.tools_without_progress.remove(&tool);
             }
             EventType::ToolFailed => {
-                let tool = self.lifecycle_tool_key(event, wire_format);
+                let tool = self.lifecycle_tool_key(event);
                 self.tools_without_progress.remove(&tool);
                 self.tools.finish(tool, line_number);
             }
@@ -589,9 +481,6 @@ impl SessionLifecycleState {
                 "phase",
                 &phase.phase_execution_id,
             ));
-        }
-        if let Some(step_id) = self.legacy.first_active_step_id() {
-            return Err(open_lifecycle_error(path, "step", step_id));
         }
         if let Some(tool) = self.tools.active_keys().next() {
             return Err(open_lifecycle_error(path, "tool", &tool.tool_id));
@@ -775,11 +664,4 @@ fn lifecycle_message_key(
         flow_id: require_lifecycle_flow_id(path, line_number, event)?,
         message_id: lifecycle_payload_string(event, "message_id"),
     })
-}
-
-#[cfg(test)]
-pub fn stream_is_completed(events: &[EventEnvelope]) -> bool {
-    events
-        .last()
-        .is_some_and(|event| event.event_type == EventType::SessionCompleted)
 }

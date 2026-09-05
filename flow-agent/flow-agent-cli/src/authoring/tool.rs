@@ -4,7 +4,7 @@ use super::{
 use core_script::{
     AllowedParameter, NetworkAllowEntry, NetworkAllowKind, NetworkDefault, NetworkDeny,
     NetworkPolicy, NetworkTransport, ParameterValueType, RegistryBlockKind, ScriptRuntime,
-    ToolBlock, ToolCommand, ToolKind,
+    ToolBlock, ToolCommand, ToolKind, ToolRuntimeProfile,
 };
 use flow_agent_core::RuntimeError;
 use std::path::Path;
@@ -12,9 +12,11 @@ use std::path::Path;
 pub(super) const USAGE: &str = concat!(
     "Usage:\n",
     "  flow create tool --id ID --name NAME --tool-kind predefined-command ",
-    "--command-id ID [--argv TOKEN]... [TOOL_OPTIONS]\n",
+    "--command-id ID [--argv TOKEN]... --max-concurrent-processes-and-threads N ",
+    "[TOOL_OPTIONS]\n",
     "  flow create tool --id ID --name NAME --tool-kind own-script ",
-    "<--script-body-file PATH|--script-body-stdin> [TOOL_OPTIONS]\n",
+    "<--script-body-file PATH|--script-body-stdin> ",
+    "--max-concurrent-processes-and-threads N [TOOL_OPTIONS]\n",
     "\n",
     "TOOL_OPTIONS:\n",
     "  [--parameter --parameter-name NAME ",
@@ -22,8 +24,8 @@ pub(super) const USAGE: &str = concat!(
     "--parameter-required <true|false> [--parameter-allowed-value VALUE]... ",
     "[--parameter-value-pattern REGEX] [--parameter-max-length N] ",
     "[--parameter-min I64] [--parameter-max I64] --end-parameter]...\n",
-    "  [--read-scope PATH]... [--write-scope PATH]... ",
-    "[--protected-path-grant PATH]...\n",
+    "  [--runtime-profile <exact|host-system-read>] ",
+    "[--read-only-mount PATH]... [--writable-mount PATH]...\n",
     "  <--network deny|--network-default deny ",
     "[--network-allow --network-kind cidr --network-transport <tcp|udp> ",
     "--network-cidr CIDR --network-port PORT --end-network-allow]...>",
@@ -37,9 +39,10 @@ struct Fields {
     argv: Vec<String>,
     script_body: Option<ContentSource>,
     parameters: Vec<AllowedParameter>,
-    read_scope: Vec<String>,
-    write_scope: Vec<String>,
-    protected_path_grants: Vec<String>,
+    max_concurrent_processes_and_threads: Option<u32>,
+    runtime_profile: Option<ToolRuntimeProfile>,
+    read_only_mounts: Vec<String>,
+    writable_mounts: Vec<String>,
     network: Option<NetworkPolicy>,
     network_allow: Vec<NetworkAllowEntry>,
 }
@@ -67,11 +70,31 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
                 set_once_with(&mut fields.script_body, flag, || Ok(ContentSource::Stdin))?
             }
             "--parameter" => fields.parameters.push(parse_parameter(&mut cursor)?),
-            "--read-scope" => fields.read_scope.push(cursor.value(flag)?.to_owned()),
-            "--write-scope" => fields.write_scope.push(cursor.value(flag)?.to_owned()),
-            "--protected-path-grant" => fields
-                .protected_path_grants
-                .push(cursor.value(flag)?.to_owned()),
+            "--max-concurrent-processes-and-threads" => {
+                let value = parse_number(
+                    cursor.value(flag)?,
+                    "--max-concurrent-processes-and-threads",
+                )?;
+                if value == 0 {
+                    return Err(RuntimeError::Usage(
+                        "--max-concurrent-processes-and-threads must be positive".to_owned(),
+                    ));
+                }
+                set_once(
+                    &mut fields.max_concurrent_processes_and_threads,
+                    value,
+                    flag,
+                )?;
+            }
+            "--runtime-profile" => {
+                let value = cursor.value(flag)?;
+                let profile = ToolRuntimeProfile::parse(value).ok_or_else(|| {
+                    RuntimeError::Usage(format!("invalid --runtime-profile {value:?}"))
+                })?;
+                set_once(&mut fields.runtime_profile, profile, flag)?;
+            }
+            "--read-only-mount" => fields.read_only_mounts.push(cursor.value(flag)?.to_owned()),
+            "--writable-mount" => fields.writable_mounts.push(cursor.value(flag)?.to_owned()),
             "--network" => {
                 let value = cursor.value(flag)?;
                 let deny = NetworkDeny::parse(value)
@@ -159,9 +182,14 @@ pub(super) fn parse(workspace: &Path, args: &[String]) -> Result<ToolBlock, Runt
         script_runtime,
         script_body,
         allowed_parameters: fields.parameters,
-        read_scope: fields.read_scope,
-        write_scope: fields.write_scope,
-        protected_path_grants: fields.protected_path_grants,
+        max_concurrent_processes_and_threads: fields
+            .max_concurrent_processes_and_threads
+            .ok_or_else(|| {
+                RuntimeError::Usage("missing --max-concurrent-processes-and-threads".to_owned())
+            })?,
+        runtime_profile: fields.runtime_profile.unwrap_or_default(),
+        read_only_mounts: fields.read_only_mounts,
+        writable_mounts: fields.writable_mounts,
         network,
     })
 }
@@ -237,9 +265,7 @@ pub(super) fn parse_parameter(cursor: &mut Cursor<'_>) -> Result<AllowedParamete
     Ok(parameter)
 }
 
-pub(super) fn parse_network_allow(
-    cursor: &mut Cursor<'_>,
-) -> Result<NetworkAllowEntry, RuntimeError> {
+fn parse_network_allow(cursor: &mut Cursor<'_>) -> Result<NetworkAllowEntry, RuntimeError> {
     cursor.expect("--network-kind")?;
     let kind = NetworkAllowKind::parse(cursor.value("--network-kind")?)
         .ok_or_else(|| RuntimeError::Usage("--network-kind accepts only cidr".to_owned()))?;
@@ -269,6 +295,66 @@ mod tests {
     };
     use std::{fs, path::Path};
 
+    fn minimal_predefined_tool_without_capacity() -> Vec<String> {
+        args(&[
+            "--id",
+            "inspect",
+            "--name",
+            "Inspect",
+            "--tool-kind",
+            "predefined-command",
+            "--command-id",
+            "agent-report",
+            "--network",
+            "deny",
+        ])
+    }
+
+    fn minimal_predefined_tool() -> Vec<String> {
+        let mut arguments = minimal_predefined_tool_without_capacity();
+        arguments.extend([
+            "--max-concurrent-processes-and-threads".to_owned(),
+            "16".to_owned(),
+        ]);
+        arguments
+    }
+
+    #[test]
+    fn process_capacity_is_explicit_and_positive() {
+        assert_usage(
+            parse(Path::new("."), &minimal_predefined_tool_without_capacity()),
+            "missing --max-concurrent-processes-and-threads",
+        );
+
+        for value in ["0", "not-a-number"] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend([
+                "--max-concurrent-processes-and-threads".to_owned(),
+                value.to_owned(),
+            ]);
+            assert_usage(
+                parse(Path::new("."), &arguments),
+                "--max-concurrent-processes-and-threads",
+            );
+        }
+
+        let tool = parse(Path::new("."), &minimal_predefined_tool())
+            .expect("positive process capacity is accepted");
+        assert_eq!(tool.max_concurrent_processes_and_threads, 16);
+    }
+
+    #[test]
+    fn runtime_profile_values_are_closed() {
+        for profile in ["broad", "HOST-SYSTEM-READ"] {
+            let mut arguments = minimal_predefined_tool();
+            arguments.extend(["--runtime-profile".to_owned(), profile.to_owned()]);
+            assert_usage(
+                parse(Path::new("."), &arguments),
+                "invalid --runtime-profile",
+            );
+        }
+    }
+
     #[test]
     fn network_allow_groups_follow_top_level_occurrence_order() {
         let tool = parse(
@@ -294,6 +380,8 @@ mod tests {
                 "predefined-command",
                 "--command-id",
                 "agent-report",
+                "--max-concurrent-processes-and-threads",
+                "16",
                 "--network-allow",
                 "--network-kind",
                 "cidr",

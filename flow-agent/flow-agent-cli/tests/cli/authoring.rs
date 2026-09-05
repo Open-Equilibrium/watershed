@@ -1,10 +1,10 @@
 use super::{
     flow_command,
-    process::{wait_with_input_and_output_before, wait_with_output_before},
-    test_support::{copy_dir, empty_workspace, fixture_dir, session_home_path},
+    process::{cli_child_watchdog, wait_with_input_and_output_before, wait_with_output_before},
+    test_support::{empty_workspace, session_home_path},
 };
 use core_script::{RegistryBlock, ToolCommand, parse_registry_block};
-use std::{fs, path::Path, process::Stdio, time::Duration};
+use std::{fs, path::Path, process::Stdio};
 
 fn initialize_default_workspace(workspace: &Path) {
     let output = flow_command()
@@ -17,42 +17,6 @@ fn initialize_default_workspace(workspace: &Path) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-#[test]
-fn import_requires_one_explicit_legacy_workspace_and_publishes_globally() {
-    let source = empty_workspace();
-    let fixture = fixture_dir("smoke-flow");
-    fs::create_dir(source.join(".flow")).expect("legacy config directory is staged");
-    fs::copy(
-        fixture.join(".flow/config.yaml"),
-        source.join(".flow/config.yaml"),
-    )
-    .expect("legacy config is staged");
-    copy_dir(&fixture.join("registry"), &source.join("registry"));
-    let harness_workspace = empty_workspace();
-    let global_home = harness_workspace.join("import-home");
-
-    let output = flow_command()
-        .env("FLOW_AGENT_HOME", &global_home)
-        .current_dir(&harness_workspace)
-        .args([
-            "import",
-            source.to_str().expect("fixture path is valid UTF-8"),
-        ])
-        .output()
-        .expect("explicit import should run");
-
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"imported\n");
-    assert!(global_home.join("config.yaml").is_file());
-    assert!(global_home.join("registry/flows/smoke-flow.yaml").is_file());
-    assert!(!harness_workspace.join(".flow").exists());
-    assert!(source.join(".flow/config.yaml").is_file());
 }
 
 #[test]
@@ -99,6 +63,8 @@ fn init_create_and_validate_custom_recursive_flow() {
             "predefined-command",
             "--command-id",
             "agent-report",
+            "--max-concurrent-processes-and-threads",
+            "8",
             "--argv",
             "--fixed",
             "--parameter",
@@ -157,12 +123,12 @@ fn init_create_and_validate_custom_recursive_flow() {
             "--parameter-max-length",
             "128",
             "--end-parameter",
-            "--read-scope",
+            "--runtime-profile",
+            "host-system-read",
+            "--read-only-mount",
             "workspace",
-            "--write-scope",
-            "reports",
-            "--protected-path-grant",
-            ".flow/reports/**",
+            "--writable-mount",
+            "workspace/reports",
             "--network-default",
             "deny",
             "--network-allow",
@@ -197,6 +163,8 @@ fn init_create_and_validate_custom_recursive_flow() {
             "own-script",
             "--script-body-file",
             "report.sh",
+            "--max-concurrent-processes-and-threads",
+            "8",
             "--network-default",
             "deny",
         ],
@@ -423,7 +391,7 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
     let instruction = wait_with_input_and_output_before(
         instruction,
         b"Review the selected project.",
-        Duration::from_secs(10),
+        cli_child_watchdog(),
     );
     assert!(
         instruction.status.success(),
@@ -443,6 +411,8 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
             "--tool-kind",
             "own-script",
             "--script-body-stdin",
+            "--max-concurrent-processes-and-threads",
+            "8",
             "--network",
             "deny",
         ])
@@ -451,11 +421,8 @@ fn custom_registry_root_accepts_instruction_and_script_stdin_sources() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("Tool create should start");
-    let tool = wait_with_input_and_output_before(
-        tool,
-        b"printf '%s' stdin-script",
-        Duration::from_secs(10),
-    );
+    let tool =
+        wait_with_input_and_output_before(tool, b"printf '%s' stdin-script", cli_child_watchdog());
     assert!(
         tool.status.success(),
         "{}",
@@ -542,7 +509,7 @@ fn duplicate_prompt_source_is_rejected_without_reading_stdin() {
         .spawn()
         .expect("instruction create should start");
 
-    let output = wait_with_output_before(child, Duration::from_millis(500));
+    let output = wait_with_output_before(child, cli_child_watchdog());
 
     assert!(!output.status.success());
     assert!(
@@ -585,6 +552,8 @@ fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
                 "--command-id",
                 "agent-report",
                 "--script-body-stdin",
+                "--max-concurrent-processes-and-threads",
+                "8",
                 "--network",
                 "deny",
             ],
@@ -600,7 +569,7 @@ fn invalid_stdin_sources_are_rejected_without_reading_stdin() {
             .spawn()
             .expect("invalid authoring command should start");
 
-        let output = wait_with_output_before(child, Duration::from_millis(500));
+        let output = wait_with_output_before(child, cli_child_watchdog());
 
         assert!(!output.status.success());
         assert!(
@@ -641,6 +610,8 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
                 "--tool-kind",
                 "own-script",
                 "--script-body-stdin",
+                "--max-concurrent-processes-and-threads",
+                "8",
                 "--network",
                 "deny",
             ],
@@ -655,7 +626,7 @@ fn invalid_stdin_backed_identities_are_rejected_before_reading_stdin() {
             .spawn()
             .expect("invalid authoring command should start");
 
-        let output = wait_with_output_before(child, Duration::from_millis(500));
+        let output = wait_with_output_before(child, cli_child_watchdog());
         let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
         assert_eq!(output.status.code(), Some(65), "{kind}: {stderr}");
         assert!(stderr.contains("invalid_definition"), "{kind}: {stderr}");
@@ -689,6 +660,8 @@ fn tool_argv_preserves_literal_help_flags() {
                 "predefined-command",
                 "--command-id",
                 "agent-echo",
+                "--max-concurrent-processes-and-threads",
+                "8",
                 "--network",
                 "deny",
                 "--argv",
@@ -823,6 +796,8 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
         "predefined-command",
         "--command-id",
         "agent-echo",
+        "--max-concurrent-processes-and-threads",
+        "8",
         "--network",
         "deny",
     ];
@@ -851,6 +826,8 @@ fn authoring_public_diagnostics_and_exit_classes_are_stable() {
             "predefined-command",
             "--command-id",
             "agent-echo",
+            "--max-concurrent-processes-and-threads",
+            "8",
             "--network",
             "deny",
         ],

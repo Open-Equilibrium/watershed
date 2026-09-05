@@ -3,7 +3,9 @@ use serde_json::Value;
 
 pub(super) fn workload_contract(id: M11BudgetWorkloadId) -> (Value, &'static [&'static str]) {
     let exclusions: &'static [&'static str] = match id {
-        M11BudgetWorkloadId::RssDetectionFixture => &["product timing and product RSS gates"],
+        M11BudgetWorkloadId::RssDetectionFixture => {
+            &["product timing and product RSS interpretation"]
+        }
         M11BudgetWorkloadId::RunnerFourNoopLaunches => &["executable lookup and useful Tool work"],
         M11BudgetWorkloadId::RunnerTermination | M11BudgetWorkloadId::RunnerCancellation => {
             &["process spawn and useful Tool work"]
@@ -20,8 +22,7 @@ pub(super) fn workload_contract(id: M11BudgetWorkloadId) -> (Value, &'static [&'
         M11BudgetWorkloadId::RunLogProjectionPage => {
             &["unrelated Tool records and dormant Run Logs"]
         }
-        M11BudgetWorkloadId::ConversationMigrationQuantum
-        | M11BudgetWorkloadId::ConversationReplayQuantum
+        M11BudgetWorkloadId::ConversationReplayQuantum
         | M11BudgetWorkloadId::ConversationHistoryValidationQuantum => {
             &["dormant inventory outside one fixed scan quantum"]
         }

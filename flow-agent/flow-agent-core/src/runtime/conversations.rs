@@ -8,15 +8,12 @@ pub(crate) use contract::{
     CONVERSATION_HISTORY_LEAF, CONVERSATION_RUNS_DIR, CONVERSATION_STATUS_LEAF,
     MAX_CONVERSATION_IO_BUFFER_BYTES, MAX_CONVERSATION_SCAN_BYTES, MAX_CONVERSATION_SCAN_RECORDS,
     MAX_CONVERSATION_STATUS_BYTES, MAX_CONVERSATION_STATUS_RECORDS, RUN_EVENTS_STEM, RUN_LOG_LEAF,
-    RUN_LOG_RECORD_SCHEMA_V0, TOOL_RUN_LOG_PAGE_SCHEMA,
+    RUN_LOG_RECORD_SCHEMA_V1, TOOL_RUN_LOG_PAGE_SCHEMA,
 };
 pub(crate) use contract::{MAX_CONVERSATION_RECORD_BYTES, RUN_EVENTS_LEAF};
 
-mod event_reader;
 mod history_index;
 mod session_event_stream;
-pub use event_reader::SessionEventReader;
-pub(crate) use event_reader::ensure_in_memory_replay_output_limit;
 #[cfg(test)]
 pub(crate) use history_index::append_conversation_entry;
 pub(crate) use history_index::append_productive_run_checkpoint;
@@ -24,7 +21,7 @@ pub(crate) use history_index::append_productive_run_checkpoint;
 pub(crate) use history_index::read_conversation_history;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) use history_index::{
-    CONVERSATION_ENTRY_SCHEMA_V0, ConversationEntry, ConversationEntryType,
+    CONVERSATION_ENTRY_SCHEMA_V1, ConversationEntry, ConversationEntryType,
 };
 #[cfg(test)]
 pub(crate) use history_index::{
@@ -41,6 +38,8 @@ pub(crate) use history_index::{
 pub(crate) use history_index::{
     MAX_HISTORY_INDEX_ID_BYTES, validate_conversation_history_for_budget,
 };
+pub use session_event_stream::SessionEventReader;
+pub(crate) use session_event_stream::ensure_in_memory_replay_output_limit;
 
 mod event_persistence;
 
@@ -49,22 +48,6 @@ pub(crate) use attempt_log::ConversationAttemptLog;
 
 mod conversation_writer;
 pub(crate) use conversation_writer::ConversationEventWriter;
-
-mod legacy_manifest;
-mod legacy_migration;
-#[cfg(test)]
-pub(crate) use legacy_migration::legacy_session_is_terminal;
-#[cfg(test)]
-pub(crate) use legacy_migration::{
-    LegacyEventScanPoint, LegacyMigrationControlFile, LegacyMigrationCrashPoint,
-    set_legacy_event_scan_observer, set_legacy_migration_control_write_failure,
-    set_legacy_migration_crash_point, set_legacy_migration_roots_observer,
-    set_legacy_object_copy_observer,
-};
-pub(crate) use legacy_migration::{
-    legacy_flat_compatibility_is_available, migrate_legacy_session,
-    migrate_legacy_session_if_present,
-};
 
 mod lifecycle;
 #[cfg(all(test, unix))]
@@ -109,9 +92,10 @@ pub(crate) use recovery_record::ProductiveRecoveryRecord;
 
 mod recovery;
 pub(crate) use recovery::{
-    ProductiveConversationReservation, ProductiveRecoveryWriter, reserve_conversation_continuation,
-    reserve_conversation_run_recovery, reserve_new_conversation_run,
-    with_conversation_run_ownership,
+    ProductiveConversationReservation, ProductiveRecoveryWriter,
+    read_conversation_continuation_definition, read_conversation_recovery_definition,
+    reserve_conversation_continuation, reserve_conversation_run_recovery,
+    reserve_new_conversation_run, with_conversation_run_ownership,
 };
 
 mod status;

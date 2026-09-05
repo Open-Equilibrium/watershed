@@ -1,0 +1,180 @@
+//! Feature-gated observational evidence for the M1.2 Executor startup boundary.
+
+use std::{
+    path::Path,
+    time::{Duration, Instant},
+};
+
+use crate::runtime::{
+    digest::{is_lowercase_sha256_hex, strip_sha256_prefix},
+    executor::{ExecutorDispatchOutcome, PreparedExecutor},
+    fs_guards::AnchoredWorkspace,
+    productive::ensure_productive_tool_execution_platform,
+    run_attempts::RunAttemptOutcome,
+    tool_runner::ToolInvocation,
+};
+
+/// Fixed process-and-thread capacity used by the M1.2 startup evidence Tool.
+pub const M12_EXECUTOR_STARTUP_PROCESS_CAPACITY: u32 = 8;
+
+fn fixed_executor_policy() -> core_policy::PolicyArtifact {
+    core_policy::PolicyArtifact {
+        commands: vec![core_policy::CommandPolicy {
+            allowed_parameters: Vec::new(),
+            argv: Vec::new(),
+            command_id: "agent-echo".to_owned(),
+            environment: core_policy::EnvironmentPolicy {
+                allow: Vec::new(),
+                default: core_policy::EnvironmentDefault::Clear,
+            },
+            executable: "registry:agent-echo".to_owned(),
+            filesystem: core_policy::FilesystemPolicy {
+                read_only_mounts: vec!["workspace".to_owned()],
+                writable_mounts: Vec::new(),
+            },
+            max_concurrent_processes_and_threads: M12_EXECUTOR_STARTUP_PROCESS_CAPACITY,
+            network: core_policy::NetworkPolicy {
+                allow: Vec::new(),
+                default: core_policy::NetworkDefault::Deny,
+            },
+            runtime_profile: core_policy::ToolRuntimeProfile::Exact,
+            script_runtime: None,
+            tool_id: "m12-startup-noop".to_owned(),
+            tool_kind: core_policy::ToolKind::PredefinedCommand,
+        }],
+        phase_scope: vec![core_policy::PhaseScope {
+            phase_id: "evidence".to_owned(),
+            tool_ids: vec!["m12-startup-noop".to_owned()],
+        }],
+        policy_version: core_policy::POLICY_VERSION_V0.to_owned(),
+        runtime_limits: core_policy::RuntimeLimits {
+            headless: true,
+            timeout_ms: 5_000,
+        },
+        source_flow_definition_id: "m12-executor-startup".to_owned(),
+        target: core_policy::PolicyTarget::LinuxBubblewrapSeccomp,
+    }
+}
+
+/// One unadjusted observation through the selected and prepared Executor.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct M12ExecutorStartupMeasurement {
+    /// Preparation and readiness through validated Tool result and enforcement receipt.
+    pub executor_elapsed: Duration,
+    /// Exact process-and-thread capacity confirmed by the Executor receipt.
+    pub max_concurrent_processes_and_threads: u32,
+}
+
+fn is_prefixed_lower_sha256(value: &str) -> bool {
+    strip_sha256_prefix(value).is_some_and(is_lowercase_sha256_hex)
+}
+
+/// Rejects public M1.2 Executor checks outside the canonical contract host.
+pub fn ensure_m12_executor_host() -> Result<(), String> {
+    ensure_productive_tool_execution_platform()
+        .map_err(|_| "M1.2 Executor startup requires Ubuntu 24.04 x64".to_owned())
+}
+
+/// Measures one fixed no-op Tool through the real prepared Executor boundary.
+pub fn run_m12_executor_startup(workspace: &Path) -> Result<M12ExecutorStartupMeasurement, String> {
+    ensure_m12_executor_host()?;
+    let policy = fixed_executor_policy();
+    policy
+        .validate()
+        .map_err(|_| "M1.2 evidence policy was invalid")?;
+    let command_policy = policy
+        .commands
+        .first()
+        .ok_or("M1.2 evidence command was missing")?;
+    let workspace =
+        AnchoredWorkspace::open(workspace).map_err(|_| "M1.2 evidence workspace did not open")?;
+    let invocation = ToolInvocation {
+        executable: "/bin/echo".to_owned(),
+        argv: Vec::new(),
+    };
+
+    let started = Instant::now();
+    let executor = PreparedExecutor::prepare_selected()
+        .map_err(|_| "selected Executor did not prepare for M1.2 evidence")?;
+    let prepared = executor
+        .prepare_tool(
+            &workspace,
+            &policy,
+            command_policy,
+            &invocation,
+            "m12-startup-evidence",
+        )
+        .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
+    let dispatch = executor
+        .execute_prepared(prepared)
+        .map_err(|_| "selected Executor did not complete M1.2 evidence")?;
+    let ExecutorDispatchOutcome::Completed(execution) = dispatch else {
+        return Err("selected Executor rejected the M1.2 evidence Tool before launch".to_owned());
+    };
+
+    if execution.outcome.status != RunAttemptOutcome::Completed
+        || execution.outcome.classification.is_some()
+        || execution.outcome.exit_code != Some(0)
+        || execution.outcome.stdout != b"\n"
+        || !execution.outcome.stderr.is_empty()
+    {
+        return Err("Executor did not return the exact no-op Tool result".to_owned());
+    }
+    if !execution.enforcement.isolation_active
+        || execution.enforcement.runtime_profile != proto::RuntimeReadProfileV0::Exact
+        || execution.enforcement.max_concurrent_processes_and_threads
+            != M12_EXECUTOR_STARTUP_PROCESS_CAPACITY
+        || !is_lowercase_sha256_hex(&execution.enforcement.applied_policy_digest)
+        || !is_prefixed_lower_sha256(&execution.request_hash)
+    {
+        return Err("Executor did not return the exact enforcement evidence".to_owned());
+    }
+    let executor_elapsed = started.elapsed();
+
+    Ok(M12ExecutorStartupMeasurement {
+        executor_elapsed,
+        max_concurrent_processes_and_threads: execution
+            .enforcement
+            .max_concurrent_processes_and_threads,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        M12_EXECUTOR_STARTUP_PROCESS_CAPACITY, fixed_executor_policy, is_prefixed_lower_sha256,
+    };
+
+    #[test]
+    fn fixed_evidence_policy_is_an_exact_empty_echo() {
+        let policy = fixed_executor_policy();
+
+        policy.validate().unwrap();
+        let command = &policy.commands[0];
+        assert_eq!(command.command_id, "agent-echo");
+        assert!(command.argv.is_empty());
+        assert!(command.environment.allow.is_empty());
+        assert_eq!(
+            command.runtime_profile,
+            core_policy::ToolRuntimeProfile::Exact
+        );
+        assert_eq!(command.filesystem.read_only_mounts, ["workspace"]);
+        assert_eq!(
+            command.max_concurrent_processes_and_threads,
+            M12_EXECUTOR_STARTUP_PROCESS_CAPACITY
+        );
+    }
+
+    #[test]
+    fn startup_evidence_accepts_only_the_run_log_request_hash_format() {
+        assert!(is_prefixed_lower_sha256(&format!(
+            "sha256:{}",
+            "a".repeat(64)
+        )));
+        assert!(!is_prefixed_lower_sha256(&"a".repeat(64)));
+        assert!(!is_prefixed_lower_sha256(&format!(
+            "sha256:{}",
+            "A".repeat(64)
+        )));
+    }
+}

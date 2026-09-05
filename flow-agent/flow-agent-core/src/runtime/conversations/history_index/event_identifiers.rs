@@ -450,8 +450,7 @@ const fn identifier_kind_byte(kind: EventStateIdentifierKind) -> u8 {
         EventStateIdentifierKind::Phase => 5,
         EventStateIdentifierKind::Tool => 6,
         EventStateIdentifierKind::Message => 7,
-        EventStateIdentifierKind::Step => 8,
-        EventStateIdentifierKind::Attempt => 9,
+        EventStateIdentifierKind::Attempt => 8,
     }
 }
 
@@ -465,8 +464,7 @@ fn identifier_kind_from_byte(value: u8) -> Result<EventStateIdentifierKind, Runt
         5 => Ok(EventStateIdentifierKind::Phase),
         6 => Ok(EventStateIdentifierKind::Tool),
         7 => Ok(EventStateIdentifierKind::Message),
-        8 => Ok(EventStateIdentifierKind::Step),
-        9 => Ok(EventStateIdentifierKind::Attempt),
+        8 => Ok(EventStateIdentifierKind::Attempt),
         _ => Err(protocol("event identifier index has an invalid kind")),
     }
 }
@@ -480,8 +478,7 @@ const fn identifier_namespace(kind: EventStateIdentifierKind) -> u8 {
         EventStateIdentifierKind::Phase => 4,
         EventStateIdentifierKind::Tool => 5,
         EventStateIdentifierKind::Message => 6,
-        EventStateIdentifierKind::Step => 7,
-        EventStateIdentifierKind::Attempt => 8,
+        EventStateIdentifierKind::Attempt => 7,
     }
 }
 
@@ -492,7 +489,6 @@ const fn identifier_pass(kind: EventStateIdentifierKind) -> u8 {
         EventStateIdentifierKind::FlowDefinition
         | EventStateIdentifierKind::PhaseExecution
         | EventStateIdentifierKind::Phase
-        | EventStateIdentifierKind::Step
         | EventStateIdentifierKind::Tool
         | EventStateIdentifierKind::Attempt
         | EventStateIdentifierKind::Message => 2,

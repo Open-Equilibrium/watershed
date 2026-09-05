@@ -3,9 +3,8 @@ use std::{hint::black_box, path::Path, time::Instant};
 
 #[cfg(unix)]
 use crate::runtime::tool_runner::{
-    MAX_TOOL_STREAM_BYTES, OWN_SCRIPT_EXECUTABLE, ToolInvocation, ToolRunControl,
-    ToolTerminalClassification, execute_tool_invocation, measure_ready_process_group_cleanup,
-    measure_ready_tool_cancellation,
+    MAX_TOOL_STREAM_BYTES, ToolInvocation, ToolRunControl, ToolTerminalClassification,
+    execute_tool_invocation, measure_ready_process_group_cleanup, measure_ready_tool_cancellation,
 };
 #[cfg(unix)]
 use crate::runtime::{fs_guards::AnchoredWorkspace, run_attempts::RunAttemptOutcome};
@@ -118,7 +117,7 @@ pub(super) fn runner_dual_stream_caps(temp_root: &Path) -> Result<M11BudgetOutco
     let workspace = AnchoredWorkspace::open(temp_root)
         .map_err(|_| "runner workspace did not open".to_owned())?;
     let invocation = ToolInvocation {
-        executable: OWN_SCRIPT_EXECUTABLE.to_owned(),
+        executable: proto::EXECUTOR_OWN_SCRIPT_EXECUTABLE_V0.to_owned(),
         argv: vec![
             "-c".to_owned(),
             format!(

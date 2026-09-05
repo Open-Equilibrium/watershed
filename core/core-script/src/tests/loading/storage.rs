@@ -418,9 +418,9 @@ tool:
   script_body: |
     echo outside
   allowed_parameters: []
-  read_scope: []
-  write_scope: []
-  protected_path_grants: []
+  max_concurrent_processes_and_threads: 32
+  read_only_mounts: []
+  writable_mounts: []
   network: deny
 "#,
     )

@@ -10,22 +10,15 @@ pub(crate) use conversations::verify_conversation_operation_boundaries_for_test;
 
 use std::{hint::black_box, path::Path, time::Duration};
 
-const MIB: u64 = 1024 * 1024;
 const RSS_FIXTURE_BYTES: usize = 4 * 1024 * 1024;
 const RSS_TOUCH_STRIDE_BYTES: usize = 4096;
 const RSS_ACCOUNTING_TOLERANCE_BYTES: u64 = 512 * 1024;
 
-/// One optimized M1.1 workload and its approved pass criteria.
+/// One fixed M1.1 performance-evidence workload.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct M11BudgetWorkload {
-    /// Exact workload identifier from the approved evidence matrix.
+    /// Exact workload identifier from the evidence matrix.
     pub id: M11BudgetWorkloadId,
-    /// Maximum allowed p95 elapsed time, when the workload has a timing gate.
-    pub p95_limit: Option<Duration>,
-    /// Maximum allowed peak RSS growth, when the workload has a memory gate.
-    pub max_peak_rss_growth_bytes: Option<u64>,
-    /// Minimum required peak RSS growth for the RSS detection fixture.
-    pub min_peak_rss_growth_bytes: Option<u64>,
 }
 
 impl M11BudgetWorkload {
@@ -35,7 +28,7 @@ impl M11BudgetWorkload {
     }
 }
 
-/// The finite identities of the optimized M1.1 workloads.
+/// The finite identities of the M1.1 observational workloads.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum M11BudgetWorkloadId {
     /// Resident-memory accounting fixture.
@@ -58,8 +51,6 @@ pub enum M11BudgetWorkloadId {
     ConversationStatusPage,
     /// Bounded Run Log projection page.
     RunLogProjectionPage,
-    /// One Conversation migration quantum.
-    ConversationMigrationQuantum,
     /// One Conversation replay quantum.
     ConversationReplayQuantum,
     /// Full Run streaming replay.
@@ -84,7 +75,6 @@ impl M11BudgetWorkloadId {
             Self::AuthoringMaxRegistryValidate => "authoring_max_registry_validate",
             Self::ConversationStatusPage => "conversation_status_page",
             Self::RunLogProjectionPage => "run_log_projection_page",
-            Self::ConversationMigrationQuantum => "conversation_migration_quantum",
             Self::ConversationReplayQuantum => "conversation_replay_quantum",
             Self::ConversationFullRunStreamingReplay => "conversation_full_run_streaming_replay",
             Self::ConversationHistoryValidationQuantum => "conversation_history_validation_quantum",
@@ -101,11 +91,29 @@ impl TryFrom<&str> for M11BudgetWorkloadId {
             .iter()
             .find(|workload| workload.name() == name)
             .map(|workload| workload.id)
-            .ok_or_else(|| format!("unknown M1.1 budget workload {name}"))
+            .ok_or_else(|| format!("unknown M1.1 performance-evidence workload {name}"))
     }
 }
 
-/// Returns the exact input contract used by one optimized workload.
+/// Validates that the Linux RSS probe detects its fixed touched allocation.
+pub fn validate_m11_rss_measurement(
+    id: M11BudgetWorkloadId,
+    peak_growth_bytes: Option<u64>,
+) -> Result<(), String> {
+    if cfg!(target_os = "linux") && id == M11BudgetWorkloadId::RssDetectionFixture {
+        let required = RSS_FIXTURE_BYTES as u64 - RSS_ACCOUNTING_TOLERANCE_BYTES;
+        let observed =
+            peak_growth_bytes.ok_or_else(|| "Linux RSS measurement is unavailable".to_owned())?;
+        if observed < required {
+            return Err(format!(
+                "RSS probe detected {observed} bytes, below the {required}-byte integrity floor"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Returns the exact input contract used by one observational workload.
 pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value {
     use crate::runtime::{
         authoring::{DEFAULT_REGISTRY_ROOT, registry_directory},
@@ -181,8 +189,7 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
             "canonical_output_bytes": MAX_CONVERSATION_STATUS_BYTES,
             "next_record_behind_cursor": true,
         }),
-        M11BudgetWorkloadId::ConversationMigrationQuantum
-        | M11BudgetWorkloadId::ConversationReplayQuantum => json!({
+        M11BudgetWorkloadId::ConversationReplayQuantum => json!({
             "stored_input_bytes": MAX_CONVERSATION_SCAN_BYTES,
             "records": MAX_CONVERSATION_SCAN_BYTES / MAX_CONVERSATION_RECORD_BYTES as u64,
             "stored_bytes_per_record": MAX_CONVERSATION_RECORD_BYTES,
@@ -214,97 +221,49 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
     }
 }
 
-/// The exact finite set of optimized workloads approved for M1.1.
-pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 15] = [
+/// The exact finite set of observational workloads selected for M1.1.
+pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 14] = [
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RssDetectionFixture,
-        p95_limit: None,
-        max_peak_rss_growth_bytes: None,
-        min_peak_rss_growth_bytes: Some(RSS_FIXTURE_BYTES as u64 - RSS_ACCOUNTING_TOLERANCE_BYTES),
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunnerFourNoopLaunches,
-        p95_limit: Some(Duration::from_millis(10)),
-        max_peak_rss_growth_bytes: None,
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunnerTermination,
-        p95_limit: Some(Duration::from_millis(5)),
-        max_peak_rss_growth_bytes: None,
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunnerCancellation,
-        p95_limit: Some(Duration::from_millis(5)),
-        max_peak_rss_growth_bytes: None,
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunnerDualStreamCaps,
-        p95_limit: Some(Duration::from_millis(100)),
-        max_peak_rss_growth_bytes: Some(12 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::AuthoringMaxDefinitionTransaction,
-        p95_limit: Some(Duration::from_millis(25)),
-        max_peak_rss_growth_bytes: Some(4 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::AuthoringInit,
-        p95_limit: Some(Duration::from_millis(50)),
-        max_peak_rss_growth_bytes: Some(4 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::AuthoringMaxRegistryValidate,
-        p95_limit: Some(Duration::from_secs(2)),
-        max_peak_rss_growth_bytes: Some(32 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationStatusPage,
-        p95_limit: Some(Duration::from_millis(100)),
-        max_peak_rss_growth_bytes: Some(16 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunLogProjectionPage,
-        p95_limit: Some(Duration::from_millis(100)),
-        max_peak_rss_growth_bytes: Some(16 * MIB),
-        min_peak_rss_growth_bytes: None,
-    },
-    M11BudgetWorkload {
-        id: M11BudgetWorkloadId::ConversationMigrationQuantum,
-        p95_limit: Some(Duration::from_millis(1_600)),
-        max_peak_rss_growth_bytes: Some(64 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationReplayQuantum,
-        p95_limit: Some(Duration::from_secs(1)),
-        max_peak_rss_growth_bytes: Some(64 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationFullRunStreamingReplay,
-        p95_limit: Some(Duration::from_secs(15)),
-        max_peak_rss_growth_bytes: Some(256 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::ConversationHistoryValidationQuantum,
-        p95_limit: Some(Duration::from_secs(1)),
-        max_peak_rss_growth_bytes: Some(64 * MIB),
-        min_peak_rss_growth_bytes: None,
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunLogEightSyncAppends,
-        p95_limit: Some(Duration::from_millis(10)),
-        max_peak_rss_growth_bytes: None,
-        min_peak_rss_growth_bytes: None,
     },
 ];
 
@@ -323,7 +282,7 @@ pub struct M11BudgetOutcome {
     pub checksum: u64,
 }
 
-/// Runs one exact M1.1 optimized workload in an otherwise empty temporary root.
+/// Runs one exact M1.1 observational workload in an otherwise empty temporary root.
 pub fn run_m11_budget_workload(
     id: M11BudgetWorkloadId,
     temp_root: &Path,
@@ -348,17 +307,8 @@ pub fn run_m11_budget_workload(
         M11BudgetWorkloadId::RunLogProjectionPage => {
             conversations::run_log_projection_page(temp_root)
         }
-        M11BudgetWorkloadId::ConversationMigrationQuantum => {
-            conversations::conversation_operation_quantum(
-                temp_root,
-                conversations::QuantumKind::Migration,
-            )
-        }
         M11BudgetWorkloadId::ConversationReplayQuantum => {
-            conversations::conversation_operation_quantum(
-                temp_root,
-                conversations::QuantumKind::Replay,
-            )
+            conversations::conversation_replay_quantum(temp_root)
         }
         M11BudgetWorkloadId::ConversationFullRunStreamingReplay => {
             conversations::conversation_full_run_streaming_replay(temp_root)

@@ -13,6 +13,7 @@ pub(crate) mod error;
 pub(crate) mod event_construction;
 pub(crate) mod event_writer;
 pub(crate) mod execution_plan;
+pub(crate) mod executor;
 pub(crate) mod failures;
 pub(crate) mod fixture_effects;
 pub(crate) mod fixture_tools;
@@ -22,6 +23,10 @@ pub(crate) mod live_events;
 pub(crate) mod live_flow_invocations;
 #[cfg(any(test, feature = "m11-budget-evidence"))]
 pub(crate) mod m11_budget_evidence;
+#[cfg(feature = "m12-install-acceptance")]
+pub(crate) mod m12_install_acceptance;
+#[cfg(feature = "m12-startup-evidence")]
+pub(crate) mod m12_startup_evidence;
 pub(crate) mod oauth_credential;
 pub(crate) mod openai_codex;
 pub(crate) mod phase_control;
@@ -60,14 +65,18 @@ pub use auth::{
     AuthLoginMode, AuthStatus, login_openai_codex, logout_openai_codex, openai_codex_auth_status,
 };
 pub use authoring::{
-    create_global_registry_block, import_global_config_from_workspace, initialize_global_config,
-    read_authoring_file, validate_global_registry,
+    create_global_registry_block, initialize_global_config, read_authoring_file,
+    validate_global_registry,
 };
 pub use cancellation::{
     ProductiveInterruptAction, begin_productive_operation, request_productive_interrupt,
     settle_productive_operation,
 };
 pub use conversations::{conversation_status, project_tool_run_log};
+pub use executor::{
+    ExecutorSelection, ExecutorSelectionSource, configure_default_executor,
+    configure_executor_path, executor_check,
+};
 pub use live_events::{
     LiveEventNotification, LiveEventNotifier, LiveEventNotifyStatus, LiveEventReceiveError,
     LiveEventReceiver, live_event_channel,

@@ -22,11 +22,7 @@ pub(in crate::tests) use productive::{
     load_productive_execution_fixture_for_flow, load_productive_execution_fixture_with_credential,
     smoke_productive_execution_fixture,
 };
-pub(super) use stream::{
-    fill_event_segments_to_final_byte, prefix_before_tool_started, prefix_through_tool_progress,
-    prefix_through_tool_started, workspace_at_write_summary_progress_with_existing_output,
-    write_definition_hash_metadata,
-};
+pub(super) use stream::fill_event_segments_to_final_byte;
 pub(super) use validation::{
     assert_invalid_event, assert_invalid_session_log, assert_invalid_stream,
 };

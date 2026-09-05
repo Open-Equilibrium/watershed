@@ -20,9 +20,7 @@ pub(crate) fn read_applicable_agent_instructions(
     })
 }
 
-pub(crate) fn read_global_agent_instructions(
-    global_home: &AnchoredDir,
-) -> Result<String, RuntimeError> {
+fn read_global_agent_instructions(global_home: &AnchoredDir) -> Result<String, RuntimeError> {
     read_optional_agent_instructions(global_home)
 }
 

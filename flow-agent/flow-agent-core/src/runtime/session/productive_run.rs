@@ -1,4 +1,4 @@
-use super::reconcile_productive_preflight;
+use super::{prepare_productive_tool_executor, reconcile_productive_preflight};
 #[cfg(test)]
 use super::{
     productive_pre_run_create_observer, productive_pre_run_publish_observer,
@@ -19,7 +19,10 @@ use crate::runtime::{
     execution_plan::RuntimeExecution,
     fs_guards::AnchoredWorkspace,
     live_events::LiveEventNotifier,
-    productive::{ProductiveExecution, ProductiveProvider, execute_productive_flow_with_recovery},
+    productive::{
+        ProductiveExecution, ProductiveProvider, ProductiveToolExecutor,
+        execute_productive_flow_with_tool_executor_and_recovery,
+    },
     run_attempts::ProductiveRecovery,
     session_definition::session_definition_metadata,
     stage_results::reconcile_controlled_stages,
@@ -30,7 +33,6 @@ use std::path::Path;
 struct ProductiveRunFinalization<'a> {
     capture_jsonl: bool,
     flow_id: &'a str,
-    recovering: bool,
     reservation: &'a crate::runtime::conversations::ProductiveConversationReservation,
     workspace: &'a Path,
 }
@@ -43,23 +45,12 @@ fn finalize_productive_run(
 ) -> Result<RunOutput, RuntimeError> {
     let finish_result = writer.finish();
     let runtime = reconcile_controlled_stages(runtime_result, finish_result, Ok(()))?;
-    let (missing_snapshot, missing_events) = if finalization.recovering {
-        (
-            "productive run recovery emitted no terminal snapshot",
-            "productive run recovery emitted no events",
-        )
-    } else {
-        (
-            "productive run emitted no terminal recovery snapshot",
-            "productive run emitted no events",
-        )
-    };
-    let recovery_snapshot_hash = recovery
-        .terminal_snapshot_hash()
-        .ok_or_else(|| RuntimeError::Protocol(missing_snapshot.to_owned()))?;
+    let recovery_snapshot_hash = recovery.terminal_snapshot_hash().ok_or_else(|| {
+        RuntimeError::Protocol("productive run emitted no terminal snapshot".to_owned())
+    })?;
     let (sequence, timestamp) = writer
         .last_checkpoint()
-        .ok_or_else(|| RuntimeError::Protocol(missing_events.to_owned()))?;
+        .ok_or_else(|| RuntimeError::Protocol("productive run emitted no events".to_owned()))?;
     let conversation_id = finalization.reservation.conversation_id();
     let run_session_id = finalization.reservation.run_session_id();
     append_productive_run_checkpoint(
@@ -104,31 +95,37 @@ fn finalize_productive_run(
     Ok(output)
 }
 
-fn execute_and_finalize_productive_run<P: ProductiveProvider>(
+fn execute_and_finalize_productive_run<P, T>(
     finalization: ProductiveRunFinalization<'_>,
     execution: ProductiveExecution<'_>,
     provider: &mut P,
+    tool_executor: &mut T,
     mut writer: ConversationEventWriter,
     mut recovery: ProductiveRecoveryWriter,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    T: ProductiveToolExecutor,
+{
     let mut attempts = ConversationAttemptLog::open_with_run_objects(
         finalization.workspace,
         finalization.reservation.conversation_id(),
         finalization.reservation.run_session_id(),
         recovery.run_objects(),
     )?;
-    let runtime_result = execute_productive_flow_with_recovery(
+    let runtime_result = execute_productive_flow_with_tool_executor_and_recovery(
         execution,
         provider,
         &mut attempts,
         &mut writer,
+        tool_executor,
         &mut recovery,
     );
     finalize_productive_run(finalization, runtime_result, &mut writer, &recovery)
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
+pub(crate) fn run_productive_session_with_provider<P, C>(
     workspace: &Path,
     execution_workspace: &AnchoredWorkspace,
     config: &crate::runtime::config_io::GlobalConfig,
@@ -139,11 +136,17 @@ pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
     policy: &core_policy::PolicyArtifact,
     root_input: Option<core_script::FlowValue>,
     capture_jsonl: bool,
-    credential: &crate::runtime::oauth_credential::CredentialRecord,
+    resolve_credential: C,
     agent_instructions: &str,
     notifier: Option<LiveEventNotifier>,
     provider: &mut P,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    C: FnOnce() -> Result<crate::runtime::oauth_credential::CredentialRecord, RuntimeError>,
+{
+    let mut tool_executor = prepare_productive_tool_executor(policy)?;
+    let credential = reconcile_productive_preflight(resolve_credential())?;
     let reservation = reconcile_productive_preflight(reserve_new_conversation_run(
         workspace,
         &flow_block.identity.id,
@@ -159,10 +162,11 @@ pub(crate) fn run_productive_session_with_provider<P: ProductiveProvider>(
         policy,
         root_input,
         capture_jsonl,
-        credential,
+        &credential,
         agent_instructions,
         notifier,
         provider,
+        &mut tool_executor,
         &reservation,
     );
     let cleanup = reservation.release();
@@ -185,6 +189,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
     agent_instructions: &str,
     notifier: Option<LiveEventNotifier>,
     provider: &mut P,
+    tool_executor: &mut Option<crate::runtime::executor::PreparedExecutor>,
     reservation: &crate::runtime::conversations::ProductiveConversationReservation,
 ) -> Result<RunOutput, RuntimeError> {
     let definition =
@@ -318,7 +323,6 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
             ProductiveRunFinalization {
                 capture_jsonl,
                 flow_id: &flow_block.identity.id,
-                recovering: false,
                 reservation,
                 workspace,
             },
@@ -338,6 +342,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
                 workspace: execution_workspace,
             },
             provider,
+            tool_executor,
             writer,
             recovery,
         )
@@ -345,7 +350,7 @@ pub(super) fn execute_reserved_productive_session<P: ProductiveProvider>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
+pub(crate) fn execute_reserved_productive_recovery<P, T>(
     workspace: &Path,
     execution_workspace: &AnchoredWorkspace,
     model: &str,
@@ -357,9 +362,14 @@ pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
     credential: &crate::runtime::oauth_credential::CredentialRecord,
     agent_instructions: &str,
     provider: &mut P,
+    tool_executor: &mut T,
     reservation: &crate::runtime::conversations::ProductiveConversationReservation,
     notifier: Option<LiveEventNotifier>,
-) -> Result<RunOutput, RuntimeError> {
+) -> Result<RunOutput, RuntimeError>
+where
+    P: ProductiveProvider,
+    T: ProductiveToolExecutor,
+{
     let conversation_id = reservation.conversation_id().to_owned();
     let run_session_id = reservation.run_session_id().to_owned();
     let clock = reservation.recovery_event_clock().ok_or_else(|| {
@@ -380,7 +390,6 @@ pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
         ProductiveRunFinalization {
             capture_jsonl,
             flow_id: &flow_block.identity.id,
-            recovering: true,
             reservation,
             workspace,
         },
@@ -400,6 +409,7 @@ pub(crate) fn execute_reserved_productive_recovery<P: ProductiveProvider>(
             workspace: execution_workspace,
         },
         provider,
+        tool_executor,
         writer,
         recovery,
     )
