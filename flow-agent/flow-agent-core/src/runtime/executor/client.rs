@@ -489,6 +489,12 @@ mod tests {
             ),
             (
                 WireStatus::Failed,
+                Some(WireClass::ProcessCapacityExceeded),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::ProcessCapacityExceeded),
+            ),
+            (
+                WireStatus::Failed,
                 Some(WireClass::SignalTermination),
                 RunAttemptOutcome::Failed,
                 Some(ToolTerminalClassification::SignalTermination),
@@ -516,6 +522,12 @@ mod tests {
                 Some(WireClass::ToolTimedOut),
                 RunAttemptOutcome::TimedOut,
                 Some(ToolTerminalClassification::ToolTimedOut),
+            ),
+            (
+                WireStatus::Failed,
+                Some(WireClass::OutputCollectorFailed),
+                RunAttemptOutcome::Failed,
+                Some(ToolTerminalClassification::OutputCollectorFailed),
             ),
             (
                 WireStatus::Failed,
