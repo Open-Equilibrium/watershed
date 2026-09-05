@@ -833,6 +833,22 @@ class CiWorkflowContractTest(unittest.TestCase):
             r"negative_status=\$\?[\s\S]*?"
             r"cleanup_delegated_scope\s+\"\$fault_dir\"",
         )
+        self.assertRegex(
+            readiness,
+            r"run_with_deadline\s+/usr/bin/setpriv\b[\s\S]*?"
+            r'"\$M12_STANDARD_PREFIX/bin/flow" executor check',
+        )
+        self.assertRegex(
+            readiness,
+            r"run_with_deadline\s+/usr/bin/env\b[\s\S]*?"
+            r'"\$M12_INSTALL_BUNDLE/install\.sh"',
+        )
+        self.assertNotIn("2>&1", readiness)
+        for stream in ("missing_manager", "missing_manager_install"):
+            self.assertIn(f'test ! -s "${stream}_stdout"', readiness)
+            self.assertIn(
+                f'case "$(/bin/cat "${stream}_stderr")" in', readiness
+            )
 
 
 if __name__ == "__main__":

@@ -343,28 +343,35 @@ restart_user_manager() {
 trap restart_user_manager EXIT
 run_with_deadline systemctl stop user@10001.service user-runtime-dir@10001.service
 test ! -S "$user_runtime/bus"
+missing_manager_stdout="$negative_root/missing-manager.stdout"
+missing_manager_stderr="$negative_root/missing-manager.stderr"
 set +e
-missing_manager=$(
-  /usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups \
-    /usr/bin/env PATH= HOME="$M12_HOME" XDG_CONFIG_HOME="$M12_CONFIG" \
-      "$M12_STANDARD_PREFIX/bin/flow" executor check 2>&1
-)
+run_with_deadline /usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups \
+  /usr/bin/env PATH= HOME="$M12_HOME" XDG_CONFIG_HOME="$M12_CONFIG" \
+    "$M12_STANDARD_PREFIX/bin/flow" executor check \
+  >"$missing_manager_stdout" 2>"$missing_manager_stderr"
 missing_manager_status=$?
 set -e
 test "$missing_manager_status" -eq 65
-case "$missing_manager" in
+test ! -s "$missing_manager_stdout"
+case "$(/bin/cat "$missing_manager_stderr")" in
   "error: executor_unavailable:"*) ;;
   *) exit 1 ;;
 esac
+missing_manager_install_stdout="$negative_root/missing-manager-install.stdout"
+missing_manager_install_stderr="$negative_root/missing-manager-install.stderr"
 set +e
-missing_manager_install=$(
-  cd / && PATH= HOME="$M12_HOME" XDG_CONFIG_HOME="$M12_CONFIG" SUDO_USER=watershed \
-    /bin/sh "$M12_INSTALL_BUNDLE/install.sh" --prefix "$negative_prefix" 2>&1
-)
+(
+  cd /
+  run_with_deadline /usr/bin/env PATH= HOME="$M12_HOME" \
+    XDG_CONFIG_HOME="$M12_CONFIG" SUDO_USER=watershed \
+    /bin/sh "$M12_INSTALL_BUNDLE/install.sh" --prefix "$negative_prefix"
+) >"$missing_manager_install_stdout" 2>"$missing_manager_install_stderr"
 missing_manager_install_status=$?
 set -e
 test "$missing_manager_install_status" -ne 0
-case "$missing_manager_install" in
+test ! -s "$missing_manager_install_stdout"
+case "$(/bin/cat "$missing_manager_install_stderr")" in
   *"readiness user has no active systemd user manager"*) ;;
   *) exit 1 ;;
 esac
