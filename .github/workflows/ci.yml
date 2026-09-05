@@ -396,6 +396,10 @@ jobs:
             --all-targets \
             --all-features \
             --no-run
+          cargo build --locked --target x86_64-unknown-linux-musl \
+            -p flow-agent-executor --bin flow-executor
+          cargo build --locked --target x86_64-unknown-linux-musl \
+            -p flow-agent-cli --bin flow
           PREPARE
 
       - name: Run M1.2 installer acceptance
@@ -405,8 +409,10 @@ jobs:
           docker exec \
             --env RUNNER_TEMP=/opt/watershed-m12 \
             watershed-m12 \
-            /bin/sh -ec 'exec /usr/bin/timeout --signal=TERM --kill-after=10s 15m \
-              /bin/sh scripts/run-m12-installer-acceptance.sh'
+            /bin/sh -ec '. /root/m12-coverage.env
+              export M12_COVERAGE_BIN_DIR=/work/target/x86_64-unknown-linux-musl/debug
+              exec /usr/bin/timeout --signal=TERM --kill-after=10s 15m \
+                /bin/sh scripts/run-m12-installer-acceptance.sh'
 
       - name: Check Linux line coverage
         if: matrix.os == 'ubuntu-24.04'

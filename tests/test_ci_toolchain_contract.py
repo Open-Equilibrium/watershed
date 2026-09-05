@@ -28,6 +28,7 @@ M12_INSTALLED_EXECUTOR = "/usr/local/libexec/watershed/flow-executor"
 M12_CONTAINER = "watershed-m12"
 M12_COVERAGE_USER = "watershed"
 M12_COVERAGE_ENV = "/root/m12-coverage.env"
+M12_COVERAGE_BIN_DIR = f"/work/target/{M12_TARGET}/debug"
 M12_PRODUCTION_EXECUTOR = "/root/m12-production/flow-executor"
 EVIDENCE_ONLY_UNIX_RUNNER_PATTERN = (
     r"flow-agent[\\/]flow-agent-core[\\/]src[\\/]runtime[\\/]"
@@ -344,6 +345,9 @@ class CiWorkflowContractTest(unittest.TestCase):
             "--workspace",
             "--all-targets",
             "--all-features",
+            f"cargo build --locked --target {M12_TARGET}",
+            "-p flow-agent-executor --bin flow-executor",
+            "-p flow-agent-cli --bin flow",
         ):
             self.assertIn(required, coverage_prepare)
         self.assertIn("        shell: bash", coverage_prepare_lines)
@@ -361,8 +365,15 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(coverage_prepare.count("cargo nextest run"), 1)
         instrumented = coverage_prepare[coverage_prepare.index(f". {M12_COVERAGE_ENV}") :]
-        self.assertNotIn("cargo build", instrumented)
+        self.assertEqual(instrumented.count("cargo build"), 2)
         self.assertNotIn("--release", instrumented)
+        nextest = instrumented.index("cargo nextest run")
+        executor_build = instrumented.index(
+            "-p flow-agent-executor --bin flow-executor", nextest
+        )
+        cli_build = instrumented.index("-p flow-agent-cli --bin flow", executor_build)
+        self.assertLess(nextest, executor_build)
+        self.assertLess(executor_build, cli_build)
         self.assertNotIn("readelf -l", coverage_prepare)
         self.assertNotIn("metadata=coverage-", coverage_prepare)
         self.assertNotIn("target/m12-dynamic", coverage_prepare)
@@ -708,7 +719,10 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn(M12_CONTAINER, installer)
         self.assertIn("--env RUNNER_TEMP=/opt/watershed-m12", installer)
         self.assertNotIn("--env RUNNER_TEMP=/tmp/", installer)
-        self.assertNotIn(M12_COVERAGE_ENV, installer)
+        self.assertIn(f". {M12_COVERAGE_ENV}", installer)
+        self.assertIn(
+            f"export M12_COVERAGE_BIN_DIR={M12_COVERAGE_BIN_DIR}", installer
+        )
         self.assertIn("scripts/run-m12-installer-acceptance.sh", installer)
         installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
         for required in (
@@ -726,6 +740,27 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         self.assertEqual(installer_acceptance.count(M12_PRODUCTION_EXECUTOR), 2)
         self.assertNotIn(M12_EXECUTOR, installer_acceptance)
+        for required in (
+            'coverage_flow="$M12_COVERAGE_BIN_DIR/flow"',
+            'coverage_executor="$M12_COVERAGE_BIN_DIR/flow-executor"',
+            'install -m 0755 "$coverage_flow" "$bundle/flow"',
+            'install -m 0755 "$coverage_executor" "$bundle/flow-executor"',
+            'install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"',
+            'install -m 0755 "$coverage_executor" '
+            '"$standard_prefix/bin/flow-executor"',
+        ):
+            self.assertIn(required, installer_acceptance)
+        production_check = installer_acceptance.index(
+            'run_as_watershed "$standard_prefix/bin/flow" executor check'
+        )
+        coverage_switch = installer_acceptance.index(
+            'if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]'
+        )
+        readiness_negatives = installer_acceptance.index(
+            "scripts/run-m12-readiness-negatives.sh"
+        )
+        self.assertLess(production_check, coverage_switch)
+        self.assertLess(coverage_switch, readiness_negatives)
         self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertNotIn("loginctl show-user", installer_acceptance)

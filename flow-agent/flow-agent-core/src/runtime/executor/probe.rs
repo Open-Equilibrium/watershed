@@ -68,6 +68,10 @@ fn probe_linux_executor(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    #[cfg(coverage)]
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
     let expected_parent = rustix::process::getpid();
     unsafe {
         command.pre_exec(move || configure_executor_child(expected_parent));
