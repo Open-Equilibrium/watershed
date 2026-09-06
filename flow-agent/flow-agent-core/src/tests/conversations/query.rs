@@ -5,6 +5,7 @@ use crate::runtime::{
         MAX_CONVERSATION_SCAN_RECORDS, MAX_CONVERSATION_STATUS_RECORDS, conversation_status,
         conversation_status_page, create_conversation_run,
     },
+    fs_guards::{start_directory_sync_trace_for_test, take_directory_sync_trace_for_test},
     types::{EmitMode, RuntimeError},
 };
 use std::fs;
@@ -28,8 +29,10 @@ fn conversation_page_count_budget_and_human_truncation_notice() {
         )
         .expect("conversation run is created");
     }
+    start_directory_sync_trace_for_test();
     let first_jsonl =
         conversation_status(&workspace, None, EmitMode::Jsonl).expect("first JSONL page reads");
+    let full_page_syncs = take_directory_sync_trace_for_test().len();
     assert!(first_jsonl.ends_with('\n'));
     assert_eq!(first_jsonl.lines().count(), 1);
     let first: serde_json::Value =
@@ -50,8 +53,14 @@ fn conversation_page_count_budget_and_human_truncation_notice() {
     let token = first["continuation_token"]
         .as_str()
         .expect("first page continues");
+    start_directory_sync_trace_for_test();
     let second_jsonl = conversation_status(&workspace, Some(token), EmitMode::Jsonl)
         .expect("second JSONL page reads");
+    assert_eq!(
+        full_page_syncs,
+        take_directory_sync_trace_for_test().len(),
+        "status root preparation must not scale with the number of returned summaries"
+    );
     assert!(second_jsonl.ends_with('\n'));
     assert_eq!(second_jsonl.lines().count(), 1);
     let second: serde_json::Value =
