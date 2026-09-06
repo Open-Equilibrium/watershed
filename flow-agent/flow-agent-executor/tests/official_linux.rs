@@ -154,9 +154,8 @@ try:
     subprocess.Popen(["/bin/true"])
 except OSError:
     pass
-print("output-cap-wins-over-process-capacity")
-for child in children:
-    child.terminate()
+print("output-cap-wins-over-process-capacity", flush=True)
+# Keep the Tool alive until Executor cleanup; a prior normal exit is reportable.
 for child in children:
     child.wait()
 PY"#,
