@@ -207,6 +207,43 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertIn(b"failed readiness", installed.stderr)
             self.assertEqual(list((prefix / "bin").iterdir()), [])
 
+    def test_host_prerequisite_failure_explains_explicit_authoring_opt_out(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            bundle = self.bundle(root)
+            readiness_called = root / "readiness-called"
+            diagnostic = "error: executor_unavailable: pids.events omits max"
+            (bundle / "flow").write_text(
+                "#!/bin/sh\n"
+                "test \"$1 $2\" = \"executor check\" || exit 64\n"
+                f": > {shlex.quote(str(readiness_called))}\n"
+                f"printf '%s\\n' {shlex.quote(diagnostic)} >&2\n"
+                "exit 65\n",
+                encoding="utf-8",
+            )
+            (bundle / "flow").chmod(0o755)
+            prefix = root / "prefix with spaces"
+
+            rejected = self.install(bundle, prefix)
+
+            self.assertEqual(rejected.returncode, 1, rejected.stderr)
+            self.assertTrue(readiness_called.is_file())
+            self.assertIn(diagnostic.encode(), rejected.stderr)
+            self.assertEqual(rejected.stdout, b"")
+            self.assertEqual(list((prefix / "bin").iterdir()), [])
+
+            readiness_called.unlink()
+            opted_out = self.install(bundle, prefix, "--no-default-executor")
+
+            self.assertEqual(opted_out.returncode, 0, opted_out.stderr)
+            self.assertEqual(
+                [path.name for path in (prefix / "bin").iterdir()], ["flow"]
+            )
+            self.assertFalse(readiness_called.exists())
+            self.assertIn(b"--no-default-executor", rejected.stderr)
+            self.assertIn(b"authoring", rejected.stderr.lower())
+            self.assertIn(b"fixture", rejected.stderr.lower())
+
     def test_replacing_validated_bundle_fails_without_running_substituted_flow(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

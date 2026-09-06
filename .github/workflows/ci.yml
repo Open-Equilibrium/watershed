@@ -51,6 +51,10 @@ jobs:
       - name: Run repository tooling tests
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
 
+      - name: Run M1.2 installer contract tests
+        if: matrix.os == 'ubuntu-24.04'
+        run: node scripts/run-python.mjs -m unittest install.tests.test_install
+
       - name: Select pinned Rust
         shell: pwsh
         run: |
@@ -276,10 +280,6 @@ jobs:
               --features m12-startup-evidence \
               --example custom_executor_conformance -- \
               --executor /usr/local/libexec/watershed/flow-executor
-
-      - name: Run M1.2 installer contract tests
-        if: matrix.os == 'ubuntu-24.04'
-        run: node scripts/run-python.mjs -m unittest install.tests.test_install
 
       - name: Check M1.2 unsupported platforms
         if: matrix.os != 'ubuntu-24.04'
