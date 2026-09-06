@@ -4,7 +4,7 @@ use super::{
         MAX_CONVERSATION_STATUS_RECORDS, protocol, validate_id,
     },
     status::{read_status_summary, recover_status_transaction, status_recovery_is_required},
-    storage::{canonical_json, existing_anchored_conversation},
+    storage::{canonical_json, required_child},
 };
 use crate::runtime::{
     fs_guards::{AnchoredDir, AnchoredWorkspace, ensure_anchored_runtime_dirs, path_io_error},
@@ -66,7 +66,7 @@ pub(crate) fn conversation_status_page(
     let mut processed_cursor = None;
     let page_candidate_count = candidates.len().min(MAX_CONVERSATION_STATUS_RECORDS);
     for (index, id) in candidates.iter().take(page_candidate_count).enumerate() {
-        let status = conversation_status_summary(workspace, id)?;
+        let status = conversation_status_summary(&anchored_workspace, &roots.sessions, id)?;
         let status_bytes = canonical_json(&status)?.len();
         conversations.push(status);
         let candidate_has_more = inventory_has_more || index + 1 < page_candidate_count;
@@ -114,13 +114,14 @@ fn conversation_status_page_bytes(
 }
 
 fn conversation_status_summary(
-    workspace: &Path,
+    workspace: &AnchoredWorkspace,
+    sessions: &AnchoredDir,
     conversation_id: &str,
 ) -> Result<ConversationStatus, RuntimeError> {
-    let conversation = existing_anchored_conversation(workspace, conversation_id)?;
+    let conversation = required_child(sessions, conversation_id, "conversation")?;
     if status_recovery_is_required(&conversation)? {
         let key = conversation_ownership_key(conversation_id);
-        let lease = SessionOwnershipLease::acquire(workspace, &key, &conversation.path)?;
+        let lease = SessionOwnershipLease::acquire_anchored(workspace, &key, &conversation.path)?;
         let operation = recover_status_transaction(&conversation, conversation_id);
         reconcile_controlled_stages(operation, Ok(()), lease.release())?;
     }
