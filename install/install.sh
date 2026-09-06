@@ -289,7 +289,7 @@ if [ "$install_executor" -eq 1 ]; then
     wait_for_readiness_status || fail 'installed Default Executor did not report readiness'
     stop_readiness
     if [ "$readiness_status" -ne 0 ]; then
-        fail 'installed Default Executor failed readiness'
+        fail 'installed Default Executor failed readiness; resolve the reported cause for productive Tools, or rerun with --no-default-executor for authoring and Fixture execution only'
     fi
     /bin/rm -- "$readiness_status_file" || fail 'cannot remove readiness status'
     /bin/rmdir -- "$readiness_config" || fail 'cannot remove readiness configuration'
