@@ -121,7 +121,7 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Status:** Implementation complete; repository closeout is in progress.
+**Status:** Ubuntu runtime implementation is present; the native release additions in [PLATFORMS.md](PLATFORMS.md) and the end-user distribution in [README.md](README.md) remain incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and the ordered repository closeout remain pending. Meta-Harness/Liquid implementation and three-workstream development planning are outside this change.
 
 **Purpose:** establish a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
 
