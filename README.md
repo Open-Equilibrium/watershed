@@ -4,7 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). Productive Tools use the one-shot Executor boundary; Ubuntu 24.04 x64 is the only productive platform, including for Custom Executors, and other platforms fail closed.
+**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). Productive Tools use the one-shot Executor boundary; Ubuntu 24.04 x64 is the only productive Tool platform, including for Custom Executors, and Tool execution on other platforms fails closed.
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
 
@@ -33,9 +33,9 @@ cargo build --locked --workspace
 cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]' --locked --workspace --all-targets
 ```
 
-### Install productive Flow Agent on Ubuntu 24.04 x64
+### Developer/test installation on Ubuntu 24.04 x64
 
-From the repository root, build and stage one administrator-owned bundle. The installer requires `install.sh`, `flow` and, for the standard path, the static `flow-executor` as regular executable siblings. It installs into an unused absolute prefix and does not perform upgrades.
+The end-user distribution must follow the [prebuilt-artifact installation contract](SECURITY.md#m12-tool-execution-trust-boundary); it is not implemented yet. For developer/test staging, build one administrator-owned bundle from the repository root. The installer requires `install.sh`, `flow` and, for the standard path, the static `flow-executor` as regular executable siblings. It installs into an unused absolute prefix and does not perform upgrades.
 
 ```sh
 sudo apt-get update

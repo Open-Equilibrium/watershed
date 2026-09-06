@@ -44,7 +44,7 @@ flowchart TD
   B --> T[Tool process and descendants]
 ```
 
-The Fixture path is deterministic and in process and makes no OS-isolation claim. Productive Tool execution uses the one-shot Executor contract; official productive targets without the Ubuntu boundary fail closed.
+The Fixture path is deterministic and in process and makes no OS-isolation claim. Productive Tool execution uses the one-shot Executor contract and fails closed outside Ubuntu. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md).
 
 ### Persistence and inputs
 
