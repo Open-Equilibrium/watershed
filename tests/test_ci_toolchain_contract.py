@@ -157,6 +157,18 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertNotIn(rust_version, workflow)
         self.assertNotIn("check-latest:", workflow)
 
+    def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
+        workflow = workflow_text()
+        assert_step_state(self, workflow, "Install pinned Corepack")
+        self.assertRegex(
+            step_run(workflow, "Install pinned Corepack"),
+            r"\Anpm install --global corepack@\d+\.\d+\.\d+\Z",
+        )
+        self.assertLess(
+            workflow.index("      - name: Install pinned Corepack"),
+            workflow.index("      - name: Enable Corepack"),
+        )
+
     def test_remote_actions_are_reviewed_and_immutable(self) -> None:
         workflow = workflow_text()
         seen = set()
@@ -189,18 +201,6 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(ci_push_branches(workflow), ("main",))
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
-    def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
-        workflow = workflow_text()
-        assert_step_state(self, workflow, "Install pinned Corepack")
-        self.assertRegex(
-            step_run(workflow, "Install pinned Corepack"),
-            r"\Anpm install --global corepack@\d+\.\d+\.\d+\Z",
-        )
-        self.assertLess(
-            workflow.index("      - name: Install pinned Corepack"),
-            workflow.index("      - name: Enable Corepack"),
-        )
-
         manifest = tomllib.loads(
             (ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml").read_text(
                 encoding="utf-8"

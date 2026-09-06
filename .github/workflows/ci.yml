@@ -467,6 +467,9 @@ jobs:
       - name: Check dependency policy
         run: cargo deny check
 
+      - name: Install pinned Corepack
+        run: npm install --global corepack@0.36.0
+
       - name: Enable Corepack
         shell: pwsh
         run: |
@@ -485,9 +488,6 @@ jobs:
 
       - name: Render HTML docs
         run: pnpm run docs:render-check
-      - name: Install pinned Corepack
-        run: npm install --global corepack@0.36.0
-
 
       - name: Check documentation links
         shell: pwsh
