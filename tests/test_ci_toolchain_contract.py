@@ -125,7 +125,8 @@ def assert_step_state(
         for line in lines
         if line.startswith("        if:")
     ]
-    case.assertEqual(conditions, [] if condition is None else [condition])
+    product = "steps.scope.outputs.product == 'true'"
+    case.assertEqual(conditions, [product if condition is None else f"{product} && ({condition})"])
     case.assertEqual(
         [line for line in lines if line.startswith("        continue-on-error:")],
         ["        continue-on-error: true"] if continue_on_error else [],

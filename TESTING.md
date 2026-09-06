@@ -97,6 +97,7 @@ Repository tooling requires Python 3.11 or newer for its standard-library TOML p
 
 ## CI
 
+- Required job names remain present for changes limited to [repository agent setup](AGENTS.md#conventions), but no product gates run. Mixed changes and manual runs retain every gate; pull requests compare their complete change against the base commit. Documentation-link inputs exclude repository agent setup.
 - Flow Agent runs on its native Linux x86_64 and macOS ARM64 targets. Windows CI checks only the implemented shared crates, not Flow Agent or a Windows 11 Liquid release. Product-specific native evidence remains required by [PLATFORMS.md](PLATFORMS.md).
 - Mandatory gates: `rustfmt --check` over every tracked Rust source, `cargo clippy`, `cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'`, `cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc` (shared packages only on Windows), complete Flow Agent performance-evidence artifacts, the M1 coverage gate, `cargo audit` + `cargo deny`, `pnpm audit`, and the `lychee` docs link + HTML render checks. Package selections are canonical in CI.
 - A local cross-build or a Windows editor session cannot substitute for the pushed branch's native Flow Agent gates. Verify their actual CI results with `gh`.
