@@ -192,10 +192,15 @@ class CiWorkflowContractTest(unittest.TestCase):
     def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
         workflow = workflow_text()
         assert_step_state(self, workflow, "Install pinned Corepack")
+        provision = step_run(workflow, "Install pinned Corepack")
+        self.assertIn("Join-Path $env:RUNNER_TEMP watershed-node-tools", provision)
         self.assertRegex(
-            step_run(workflow, "Install pinned Corepack"),
-            r"\Anpm install --global corepack@\d+\.\d+\.\d+\Z",
+            provision,
+            r"npm install --global --prefix \$toolsRoot corepack@\d+\.\d+\.\d+",
         )
+        self.assertIn("$IsWindows", provision)
+        self.assertIn("Join-Path $toolsRoot bin", provision)
+        self.assertIn("$env:GITHUB_PATH", provision)
         self.assertLess(
             workflow.index("      - name: Install pinned Corepack"),
             workflow.index("      - name: Enable Corepack"),

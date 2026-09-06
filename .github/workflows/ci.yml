@@ -486,7 +486,13 @@ jobs:
         run: cargo deny check
 
       - name: Install pinned Corepack
-        run: npm install --global corepack@0.36.0
+        shell: pwsh
+        run: |
+          $toolsRoot = Join-Path $env:RUNNER_TEMP watershed-node-tools
+          npm install --global --prefix $toolsRoot corepack@0.36.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $toolsBin = if ($IsWindows) { $toolsRoot } else { Join-Path $toolsRoot bin }
+          $toolsBin | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Enable Corepack
         shell: pwsh
