@@ -795,6 +795,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             'install -m 0755 "$coverage_flow" "$bundle/flow"',
             'install -m 0755 "$coverage_executor" "$bundle/flow-executor"',
             'install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"',
+            'install -m 0755 "$coverage_flow" "$custom_prefix/bin/flow"',
             'install -m 0755 "$coverage_executor" '
             '"$standard_prefix/bin/flow-executor"',
         ):
@@ -815,6 +816,12 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertLess(production_check, coverage_switch)
         self.assertLess(coverage_switch, instrumented_check)
         self.assertLess(instrumented_check, readiness_negatives)
+        selection_check = 'check_custom_selection\n'
+        self.assertIn(selection_check, installer_acceptance[:coverage_switch])
+        self.assertIn(
+            selection_check,
+            installer_acceptance[instrumented_check:readiness_negatives],
+        )
         self.assertIn("[ -e /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertIn("[ -L /var/lib/systemd/linger/watershed ]", installer_acceptance)
         self.assertNotIn("loginctl show-user", installer_acceptance)

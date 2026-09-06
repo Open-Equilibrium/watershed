@@ -188,11 +188,15 @@ if [ -e "$unavailable_workspace/.flow" ]; then
   printf 'productive Executor preflight mutated the workspace\n' >&2
   exit 1
 fi
-executor="$bundle/flow-executor"
-run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$executor"
-run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
-run_as_watershed "$standard_prefix/bin/flow" executor configure --default
-run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+check_custom_selection() {
+  run_as_watershed "$custom_prefix/bin/flow" executor configure --path "$bundle/flow-executor"
+  test -f "$config/flow-agent/executor.json"
+  run_as_watershed "$custom_prefix/bin/flow" executor check </dev/null
+  run_as_watershed "$standard_prefix/bin/flow" executor configure --default
+  test ! -e "$config/flow-agent/executor.json"
+  run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+}
+check_custom_selection
 if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
   coverage_flow="$M12_COVERAGE_BIN_DIR/flow"
   coverage_executor="$M12_COVERAGE_BIN_DIR/flow-executor"
@@ -201,8 +205,10 @@ if [ -n "${M12_COVERAGE_BIN_DIR:-}" ]; then
   install -m 0755 "$coverage_flow" "$bundle/flow"
   install -m 0755 "$coverage_executor" "$bundle/flow-executor"
   install -m 0755 "$coverage_flow" "$standard_prefix/bin/flow"
+  install -m 0755 "$coverage_flow" "$custom_prefix/bin/flow"
   install -m 0755 "$coverage_executor" "$standard_prefix/bin/flow-executor"
   run_as_watershed "$standard_prefix/bin/flow" executor check </dev/null
+  check_custom_selection
 fi
 M12_INSTALL_BUNDLE="$bundle" \
   M12_STANDARD_PREFIX="$standard_prefix" \
