@@ -50,7 +50,7 @@ mod conversation_writer;
 pub(crate) use conversation_writer::ConversationEventWriter;
 
 mod lifecycle;
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) use lifecycle::set_run_creation_stage_observer;
 #[cfg(test)]
 pub(crate) use lifecycle::{

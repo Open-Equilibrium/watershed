@@ -107,11 +107,7 @@ mod tests {
             executor_args(&strings(&["executor", "configure", "--default"])).unwrap(),
             ExecutorCommand::ConfigureDefault
         );
-        let absolute = if cfg!(windows) {
-            r"C:\trusted\flow-executor.exe"
-        } else {
-            "/trusted/flow-executor"
-        };
+        let absolute = "/trusted/flow-executor";
         assert_eq!(
             executor_args(&strings(&["executor", "configure", "--path", absolute])).unwrap(),
             ExecutorCommand::ConfigurePath(absolute.into())

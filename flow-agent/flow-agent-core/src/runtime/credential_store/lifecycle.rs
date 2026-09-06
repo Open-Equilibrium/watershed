@@ -9,12 +9,10 @@ use super::{
     },
     store_io,
 };
-#[cfg(any(unix, windows))]
 use super::{
     platform::verify_private_open_file,
     storage::{recover_abandoned_stages_anchored, replace_atomically_anchored},
 };
-#[cfg(any(unix, windows))]
 use crate::runtime::fs_guards::{
     AnchoredDir, DirectoryErrorMode, open_anchored_file_for_read, sync_anchored_directory,
 };
@@ -24,7 +22,6 @@ use crate::runtime::{
     types::RuntimeError,
 };
 use serde::{Deserialize, Serialize};
-#[cfg(any(unix, windows))]
 use std::{ffi::OsStr, path::Component, sync::OnceLock};
 use std::{
     fs::{self, File},
@@ -66,7 +63,6 @@ pub(crate) struct CredentialStore {
     path: PathBuf,
     protect_parent: bool,
     durable_ancestor: PathBuf,
-    #[cfg(any(unix, windows))]
     protected_parent: OnceLock<AnchoredDir>,
 }
 
@@ -78,7 +74,6 @@ impl CredentialStore {
             path,
             protect_parent: false,
             durable_ancestor,
-            #[cfg(any(unix, windows))]
             protected_parent: OnceLock::new(),
         }
     }
@@ -90,23 +85,12 @@ impl CredentialStore {
             path,
             protect_parent: true,
             durable_ancestor,
-            #[cfg(any(unix, windows))]
             protected_parent: OnceLock::new(),
         }
     }
 
     pub(crate) fn platform_default() -> Result<Self, RuntimeError> {
-        #[cfg(not(any(unix, windows)))]
-        return Err(auth_store_failure());
-
         let path = default_credential_store_path()?;
-        #[cfg(windows)]
-        let durable_ancestor = path
-            .parent()
-            .and_then(Path::parent)
-            .ok_or_else(auth_store_failure)?
-            .to_owned();
-        #[cfg(not(windows))]
         let durable_ancestor = path
             .ancestors()
             .last()
@@ -120,18 +104,11 @@ impl CredentialStore {
             path,
             protect_parent: true,
             durable_ancestor,
-            #[cfg(any(unix, windows))]
             protected_parent: OnceLock::new(),
         })
     }
 
     pub(crate) fn read(&self) -> Result<Option<CredentialRecord>, RuntimeError> {
-        #[cfg(not(any(unix, windows)))]
-        if self.protect_parent {
-            return Err(auth_store_failure());
-        }
-
-        #[cfg(any(unix, windows))]
         if self.protect_parent {
             let Some(parent) = self.open_protected_parent(false)? else {
                 return Ok(None);
@@ -203,7 +180,6 @@ impl CredentialStore {
         if !needs_refresh(&current, now_epoch_milliseconds) {
             return Ok(current);
         }
-        #[cfg(any(unix, windows))]
         if self.protect_parent {
             let parent = self
                 .open_protected_parent(true)?
@@ -252,12 +228,6 @@ impl CredentialStore {
         wait: impl FnMut(Duration),
         mutation: impl FnOnce(Option<&CredentialRecord>) -> Option<CredentialRecord>,
     ) -> Result<(), RuntimeError> {
-        #[cfg(not(any(unix, windows)))]
-        if self.protect_parent {
-            return Err(auth_store_failure());
-        }
-
-        #[cfg(any(unix, windows))]
         if self.protect_parent {
             let parent = self
                 .open_protected_parent(true)?
@@ -307,7 +277,6 @@ impl CredentialStore {
         now: impl FnMut() -> Duration,
         wait: impl FnMut(Duration),
     ) -> Result<StoreLock, RuntimeError> {
-        #[cfg(any(unix, windows))]
         if self.protect_parent {
             let parent = self
                 .open_protected_parent(true)?
@@ -320,7 +289,6 @@ impl CredentialStore {
         StoreLock::acquire(self.lock_path(), now, wait)
     }
 
-    #[cfg(any(unix, windows))]
     fn open_protected_parent(&self, create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
         if let Some(parent) = self.protected_parent.get() {
             parent.validate_private()?;
@@ -340,7 +308,6 @@ impl CredentialStore {
         Ok(Some(parent.clone()))
     }
 
-    #[cfg(any(unix, windows))]
     fn read_anchored(
         &self,
         parent: &AnchoredDir,
@@ -366,7 +333,6 @@ impl CredentialStore {
         decode_credential_document(&bytes)
     }
 
-    #[cfg(any(unix, windows))]
     fn read_anchored_and_finalize(
         &self,
         parent: &AnchoredDir,
@@ -377,7 +343,6 @@ impl CredentialStore {
         Ok(current)
     }
 
-    #[cfg(any(unix, windows))]
     fn write_document_anchored(
         &self,
         parent: &AnchoredDir,
@@ -387,12 +352,10 @@ impl CredentialStore {
         replace_atomically_anchored(&parent.file(self.credential_leaf()?), &bytes)
     }
 
-    #[cfg(any(unix, windows))]
     fn credential_leaf(&self) -> Result<&OsStr, RuntimeError> {
         self.path.file_name().ok_or_else(auth_store_failure)
     }
 
-    #[cfg(any(unix, windows))]
     fn lock_leaf(&self) -> Result<PathBuf, RuntimeError> {
         self.lock_path()
             .file_name()
@@ -401,7 +364,6 @@ impl CredentialStore {
     }
 }
 
-#[cfg(any(unix, windows))]
 fn open_credential_parent(
     path: &Path,
     durable_ancestor: &Path,
@@ -419,7 +381,6 @@ fn open_credential_parent(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut current = AnchoredDir::workspace(durable_ancestor)?;
-    #[cfg(unix)]
     current.validate_not_group_or_other_writable()?;
     let mut chain = vec![current.clone()];
     if leaves.is_empty() {
@@ -428,7 +389,7 @@ fn open_credential_parent(
     for (index, leaf) in leaves.iter().enumerate() {
         let final_parent = index + 1 == leaves.len();
         let next = if final_parent {
-            current.private_publishable_child(leaf, create, DirectoryErrorMode::Protocol)?
+            current.private_child(leaf, create, DirectoryErrorMode::Protocol)?
         } else {
             match current.child(leaf, false, DirectoryErrorMode::Protocol)? {
                 Some(child) => Some(child),
@@ -441,7 +402,6 @@ fn open_credential_parent(
         let Some(next) = next else {
             return Ok(None);
         };
-        #[cfg(unix)]
         if !final_parent {
             next.validate_not_group_or_other_writable()?;
         }

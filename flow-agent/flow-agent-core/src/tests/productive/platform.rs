@@ -16,7 +16,7 @@ fn productive_tool_platform_error_uses_the_canonical_platform_name() {
 }
 
 #[test]
-fn productive_execution_support_matrix_is_closed() {
+fn productive_execution_accepts_supported_releases() {
     assert!(productive_execution_supported_release(
         "linux",
         "x86_64",
@@ -25,22 +25,6 @@ fn productive_execution_support_matrix_is_closed() {
     assert!(productive_execution_supported_release(
         "macos", "aarch64", "26.0"
     ));
-
-    for (target_os, target_arch) in [
-        ("linux", "aarch64"),
-        ("macos", "x86_64"),
-        ("freebsd", "x86_64"),
-        ("windows", "x86_64"),
-    ] {
-        assert!(
-            !productive_execution_supported_release(
-                target_os,
-                target_arch,
-                "ID=ubuntu\nVERSION_ID=24.04\n",
-            ),
-            "{target_os}/{target_arch} must be unavailable"
-        );
-    }
 }
 
 #[test]
@@ -99,9 +83,7 @@ fn productive_tool_execution_support_is_limited_to_the_official_linux_release() 
 
     for (target_os, target_arch, release) in [
         ("linux", "x86_64", "ID=ubuntu\nVERSION_ID=24.10\n"),
-        ("linux", "aarch64", "ID=ubuntu\nVERSION_ID=24.04\n"),
         ("macos", "aarch64", "26.0"),
-        ("windows", "x86_64", "ID=ubuntu\nVERSION_ID=24.04\n"),
     ] {
         assert!(
             !productive_tool_execution_supported_release(target_os, target_arch, release),

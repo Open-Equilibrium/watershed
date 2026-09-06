@@ -47,7 +47,6 @@ pub(crate) fn canonical_decimal(value: &str, max: u64) -> bool {
         && value.parse::<u64>().is_ok_and(|value| value <= max)
 }
 
-#[cfg(any(unix, test))]
 pub(crate) fn unix_access_is_private(owner_uid: u32, mode: u32, effective_uid: u32) -> bool {
     owner_uid == effective_uid && mode & 0o077 == 0
 }

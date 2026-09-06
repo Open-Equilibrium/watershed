@@ -115,7 +115,6 @@ fn published_credential_parent_sync_failure_is_distinct_and_reuses_the_replaceme
     assert_eq!(refreshes.get(), 1);
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn published_credential_protection_failure_is_distinct_and_next_lock_finalizes() {
     let workspace = empty_workspace("credential-published-protection-failure");
@@ -291,7 +290,6 @@ fn unprotected_credential_mutation_recovers_only_exact_abandoned_stages() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn protected_credential_mutation_recovers_an_abandoned_stage() {
     let workspace = empty_workspace("protected-credential-abandoned-stage-recovery");

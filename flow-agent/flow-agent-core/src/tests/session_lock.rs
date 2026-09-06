@@ -1,5 +1,3 @@
-#[cfg(windows)]
-use super::helpers::create_windows_junction;
 use super::{helpers::empty_workspace, support::assert_active_session};
 use crate::runtime::{
     fs_guards::{AnchoredWorkspace, ensure_runtime_dirs},
@@ -137,34 +135,6 @@ fn earlier_lock_guard_cannot_release_a_later_owner_at_the_same_path() {
     assert!(second.path.diagnostic_path().exists());
 }
 
-#[cfg(windows)]
-#[test]
-fn lock_release_rejects_junction_replacement_without_touching_its_target() {
-    let workspace = empty_workspace("junction-lock-owner");
-    let outside = empty_workspace("junction-lock-owner-outside");
-    let sessions = ensure_runtime_dirs(&workspace)
-        .expect("runtime dirs")
-        .sessions;
-    let anchored = AnchoredWorkspace::open(&workspace).expect("workspace opens");
-    let guard = acquire_anchored_session_lock(&anchored, &sessions, "junctionlock001")
-        .expect("lock owner acquires");
-    let lock_path = guard.path.diagnostic_path().to_owned();
-    let outside_marker = outside.join("foreign-owner");
-    fs::write(&outside_marker, b"foreign owner").expect("foreign marker written");
-    guard.path.remove().expect("lock file removed");
-    create_windows_junction(&lock_path, &outside);
-
-    guard
-        .release()
-        .expect_err("junction replacement must not be released as the original lock");
-
-    assert_eq!(
-        fs::read(&outside_marker).expect("foreign marker remains readable"),
-        b"foreign owner"
-    );
-    fs::remove_dir(&lock_path).expect("junction removed");
-}
-
 #[test]
 fn released_lock_guard_drop_does_not_touch_a_later_owner() {
     let workspace = empty_workspace("released-lock-owner");
@@ -187,7 +157,6 @@ fn released_lock_guard_drop_does_not_touch_a_later_owner() {
     fs::remove_file(lock_path).expect("later owner releases its lock");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn lock_release_rejects_hardlinked_ownership_without_removing_either_name() {
     let workspace = empty_workspace("hardlinked-lock-owner");
@@ -211,7 +180,6 @@ fn lock_release_rejects_hardlinked_ownership_without_removing_either_name() {
     guard.release().expect("owner releases after alias removal");
 }
 
-#[cfg(unix)]
 #[test]
 fn lock_release_rejects_symlink_replacement_without_touching_its_target() {
     use std::os::unix::fs::symlink;

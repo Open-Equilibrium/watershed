@@ -7,7 +7,6 @@ use crate::runtime::{
     types::RuntimeError,
 };
 use std::time::Duration;
-#[cfg(unix)]
 use std::time::Instant;
 
 pub(crate) struct SystemProductiveToolExecutor;
@@ -23,7 +22,7 @@ impl ProductiveToolExecutor for SystemProductiveToolExecutor {
     type Waiting = SystemPreparedTool;
 
     fn supports_productive_tools(&self) -> bool {
-        cfg!(unix)
+        true
     }
 
     fn prepare(
@@ -102,7 +101,6 @@ impl SystemProductiveToolExecutor {
         workspace: &AnchoredDir,
         timeout: Duration,
     ) -> Result<ToolExecutionOutcome, RuntimeError> {
-        #[cfg(unix)]
         {
             let deadline = Instant::now()
                 .checked_add(timeout)
@@ -114,13 +112,6 @@ impl SystemProductiveToolExecutor {
                     cancelled: crate::runtime::cancellation::productive_cancellation(),
                     deadline,
                 },
-            ))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (invocation, workspace, timeout);
-            Err(RuntimeError::Usage(
-                "productive Tools are unavailable on this platform".to_owned(),
             ))
         }
     }

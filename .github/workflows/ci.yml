@@ -20,14 +20,23 @@ permissions:
 
 jobs:
   m1:
-    name: Flow Agent gates (${{ matrix.os }}) [${{ github.event_name }}]
+    name: ${{ matrix.product }} gates (${{ matrix.os }}) [${{ github.event_name }}]
     runs-on: ${{ matrix.os }}
     env:
       M12_CONTRACT_IMAGE: ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26, windows-latest]
+        include:
+          - os: ubuntu-24.04
+            packages: --workspace
+            product: Flow Agent
+          - os: macos-26
+            packages: --workspace
+            product: Flow Agent
+          - os: windows-latest
+            packages: -p core-script -p core-policy -p proto
+            product: Shared contracts
 
     steps:
       - name: Checkout
@@ -65,6 +74,15 @@ jobs:
             throw "Rust $toolchain must be active for CI gates"
           }
 
+      - name: Check Flow build targets
+        shell: pwsh
+        run: |
+          $targetTest = Join-Path $env:RUNNER_TEMP flow-build-targets.exe
+          rustc --test --edition 2024 --deny warnings flow-agent/build.rs -o $targetTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $targetTest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Install gate tools
         uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
         with:
@@ -75,14 +93,14 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Check lints
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked ${{ matrix.packages }} --all-targets --all-features -- -D warnings
 
       - name: Run tests
         run: >-
           cargo nextest run
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
-          --workspace
+          ${{ matrix.packages }}
           --all-targets
           --all-features
 
@@ -90,7 +108,7 @@ jobs:
         run: >-
           cargo --config .cargo/test-isolation.toml test
           --locked
-          --workspace
+          ${{ matrix.packages }}
           --all-features
           --doc
 
@@ -282,7 +300,7 @@ jobs:
               --executor /usr/local/libexec/watershed/flow-executor
 
       - name: Check M1.2 unsupported platforms
-        if: matrix.os != 'ubuntu-24.04'
+        if: matrix.os == 'macos-26'
         run: cargo nextest run --locked -p flow-agent-cli --test cli -E 'test(=executor::executor_commands_fail_closed_on_unsupported_platform_without_config_mutation)'
 
       - name: Run M1.1 performance evidence
@@ -355,7 +373,7 @@ jobs:
           cargo llvm-cov nextest
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
-          --workspace
+          ${{ matrix.packages }}
           --all-targets
           --all-features
           --fail-under-lines 90

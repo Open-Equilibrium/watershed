@@ -8,14 +8,12 @@ use crate::runtime::{
     types::RuntimeError,
 };
 
-#[cfg(windows)]
 use crate::runtime::fs_guards::validate_real_file;
 use std::{
     fs,
     io::{Read, Seek, Write},
 };
 
-#[cfg(windows)]
 #[test]
 fn real_file_validation_rejects_a_directory() {
     let workspace = empty_workspace("real-file-directory");
@@ -92,7 +90,6 @@ fn replacement_temp_cleanup_failure_preserves_both_causes_and_allows_retry() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn append_rejects_hardlinked_leaf_without_changing_target() {
     let workspace = empty_workspace("session-hardlink");
@@ -114,7 +111,6 @@ fn append_rejects_hardlinked_leaf_without_changing_target() {
     );
 }
 
-#[cfg(windows)]
 #[test]
 fn session_log_append_handle_cannot_overwrite_existing_records() {
     let workspace = empty_workspace("session-append-semantics");

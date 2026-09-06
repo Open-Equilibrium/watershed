@@ -520,7 +520,6 @@ fn test_event_pair(session_id: &str, second_type: EventType) -> [EventEnvelope; 
     ]
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
     let workspace = empty_workspace("event-writer-visible-batch-prefix");
@@ -589,7 +588,6 @@ fn failed_batch_retains_a_complete_prefix_already_observed_by_a_reader() {
     reservation.rollback().expect("reservation rolls back");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
     let workspace = empty_workspace("event-writer-cleanup-failure-prefix");
@@ -637,7 +635,6 @@ fn cleanup_sync_failure_still_reports_the_complete_persisted_prefix() {
     reservation.rollback().expect("reservation rolls back");
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn failed_truncation_reports_no_readable_prefix() {
     let workspace = empty_workspace("event-writer-failed-truncation");

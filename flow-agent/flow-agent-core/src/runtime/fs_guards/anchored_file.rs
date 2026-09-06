@@ -1,7 +1,7 @@
+use super::AnchoredDir;
 use super::bounded_read::{
     decode_utf8, for_each_reader_line_with_limit_inner, path_io_error, read_opened_file_with_limit,
 };
-use super::{AnchoredDir, has_windows_reparse_point};
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 #[cfg(test)]
@@ -22,19 +22,7 @@ pub fn open_anchored_session_log_append_file(
     path: &AnchoredFile,
 ) -> Result<fs::File, RuntimeError> {
     let mut options = cap_std::fs::OpenOptions::new();
-    #[cfg(not(windows))]
     options.append(true);
-    #[cfg(windows)]
-    {
-        use cap_std::fs::OpenOptionsExt as _;
-
-        const FILE_SHARE_READ: u32 = 0x0000_0001;
-        const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-        options
-            .read(true)
-            .append(true)
-            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
-    }
     options.follow(FollowSymlinks::No);
     let file = path.open(&options)?;
     validate_open_session_log_append_file(&path.path, &file)?;
@@ -49,11 +37,11 @@ pub fn validate_open_session_log_append_file(
         .metadata()
         .map_err(|source| path_io_error(path, source))?;
     validate_real_file(path, &metadata)?;
-    ensure_not_hardlinked_open_file(path, file, &metadata)
+    ensure_not_hardlinked_open_file(path, &metadata)
 }
 
 pub fn validate_real_file(path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if metadata.file_type().is_symlink() || has_windows_reparse_point(metadata) {
+    if metadata.file_type().is_symlink() {
         return Err(RuntimeError::Protocol(format!(
             "{} must not be a symlink or reparse point",
             path.display()
@@ -200,13 +188,6 @@ fn create_anchored_replacement_temp(
             .create_new(true)
             .write(true)
             .follow(FollowSymlinks::No);
-        #[cfg(windows)]
-        {
-            use cap_std::fs::OpenOptionsExt as _;
-            use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_WRITE, WRITE_DAC};
-
-            options.access_mode(FILE_GENERIC_WRITE | WRITE_DAC);
-        }
         match temp_path.open(&options) {
             Ok(file) => return Ok((temp_path, file)),
             Err(RuntimeError::Io { source, .. })
@@ -269,7 +250,7 @@ pub fn open_anchored_file_for_read(
     file: &AnchoredFile,
 ) -> Result<(fs::File, fs::Metadata), RuntimeError> {
     let (opened, metadata) = open_anchored_real_file_for_read(file)?;
-    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)?;
+    ensure_not_hardlinked_open_file(&file.path, &metadata)?;
     Ok((opened, metadata))
 }
 
@@ -284,7 +265,7 @@ pub fn open_anchored_file_for_update(
         .metadata()
         .map_err(|source| path_io_error(&file.path, source))?;
     validate_real_file(&file.path, &metadata)?;
-    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)?;
+    ensure_not_hardlinked_open_file(&file.path, &metadata)?;
     Ok((opened, metadata))
 }
 
@@ -337,57 +318,10 @@ pub fn remove_owned_anchored_file(
     )))
 }
 
-#[cfg(unix)]
-fn hard_link_count(_path: &Path, metadata: &fs::Metadata) -> Result<u64, RuntimeError> {
-    Ok(std::os::unix::fs::MetadataExt::nlink(metadata))
-}
-
-#[cfg(windows)]
-fn hard_link_count_for_open_file(path: &Path, file: &fs::File) -> Result<u64, RuntimeError> {
-    Ok(windows_open_file_information(path, file)?.number_of_links)
-}
-
-#[cfg(windows)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct WindowsOpenFileInformation {
-    pub(super) volume_serial_number: u64,
-    pub(super) file_index: u64,
-    pub(super) number_of_links: u64,
-}
-
-#[cfg(windows)]
-pub(super) fn windows_open_file_information(
-    path: &Path,
-    file: &fs::File,
-) -> Result<WindowsOpenFileInformation, RuntimeError> {
-    use cap_fs_ext::MetadataExt as _;
-
-    let file =
-        cap_std::fs::File::from_std(file.try_clone().map_err(|source| RuntimeError::Io {
-            path: path.to_owned(),
-            source,
-        })?);
-    let metadata = file.metadata().map_err(|source| RuntimeError::Io {
-        path: path.to_owned(),
-        source,
-    })?;
-    Ok(WindowsOpenFileInformation {
-        volume_serial_number: metadata.dev(),
-        file_index: metadata.ino(),
-        number_of_links: metadata.nlink(),
-    })
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AnchoredFileIdentity {
-    #[cfg(unix)]
     device: u64,
-    #[cfg(unix)]
     inode: u64,
-    #[cfg(windows)]
-    file_index: u64,
-    #[cfg(windows)]
-    volume_serial_number: u64,
 }
 
 pub fn anchored_file_identity(
@@ -398,30 +332,12 @@ pub fn anchored_file_identity(
         .metadata()
         .map_err(|source| path_io_error(path, source))?;
     validate_real_file(path, &metadata)?;
-    ensure_not_hardlinked_open_file(path, file, &metadata)?;
+    ensure_not_hardlinked_open_file(path, &metadata)?;
 
-    #[cfg(unix)]
-    {
-        Ok(AnchoredFileIdentity {
-            device: std::os::unix::fs::MetadataExt::dev(&metadata),
-            inode: std::os::unix::fs::MetadataExt::ino(&metadata),
-        })
-    }
-    #[cfg(windows)]
-    {
-        let identity = windows_open_file_information(path, file)?;
-        Ok(AnchoredFileIdentity {
-            file_index: identity.file_index,
-            volume_serial_number: identity.volume_serial_number,
-        })
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        Err(RuntimeError::Protocol(format!(
-            "{} file identity verification is unsupported on this platform",
-            path.display(),
-        )))
-    }
+    Ok(AnchoredFileIdentity {
+        device: std::os::unix::fs::MetadataExt::dev(&metadata),
+        inode: std::os::unix::fs::MetadataExt::ino(&metadata),
+    })
 }
 
 pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
@@ -432,40 +348,6 @@ pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeErro
         .create_new(true)
         .follow(FollowSymlinks::No);
     file.open(&options)
-}
-
-fn create_private_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
-    ensure_anchored_new_leaf_available(file)?;
-    let mut options = cap_std::fs::OpenOptions::new();
-    options
-        .write(true)
-        .create_new(true)
-        .follow(FollowSymlinks::No);
-    #[cfg(windows)]
-    {
-        use cap_std::fs::OpenOptionsExt as _;
-        use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_WRITE, WRITE_DAC, WRITE_OWNER};
-
-        options.access_mode(FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER);
-    }
-    let opened = file.open(&options)?;
-    #[cfg(windows)]
-    {
-        crate::runtime::windows_private_dir::set_opened_file_current_user_only(&opened)
-            .map_err(|source| path_io_error(&file.path, source))?;
-        if !crate::runtime::windows_private_dir::opened_file_is_current_user_only(&opened)
-            .map_err(|source| path_io_error(&file.path, source))?
-        {
-            return Err(path_io_error(
-                &file.path,
-                io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "private file is not current-user-only",
-                ),
-            ));
-        }
-    }
-    Ok(opened)
 }
 
 pub fn create_anchored_file_for_update(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
@@ -481,14 +363,14 @@ pub fn create_anchored_file_for_update(file: &AnchoredFile) -> Result<fs::File, 
         .metadata()
         .map_err(|source| path_io_error(&file.path, source))?;
     validate_real_file(&file.path, &metadata)?;
-    ensure_not_hardlinked_open_file(&file.path, &opened, &metadata)?;
+    ensure_not_hardlinked_open_file(&file.path, &metadata)?;
     Ok(opened)
 }
 
 pub(crate) fn reserve_new_anchored_file(
     path: &AnchoredFile,
 ) -> Result<AnchoredFileIdentity, RuntimeError> {
-    let file = create_private_anchored_file(path)?;
+    let file = create_anchored_file(path)?;
     anchored_file_identity(path.diagnostic_path(), &file)
 }
 
@@ -505,12 +387,12 @@ pub fn verify_owned_anchored_file(
     kind: &str,
 ) -> Result<(), RuntimeError> {
     let (current, current_metadata) = open_anchored_real_file_for_read(path)?;
-    ensure_not_hardlinked_open_file(path.diagnostic_path(), &current, &current_metadata)?;
+    ensure_not_hardlinked_open_file(path.diagnostic_path(), &current_metadata)?;
     let acquired_metadata = acquired
         .metadata()
         .map_err(|source| path_io_error(path.diagnostic_path(), source))?;
     validate_real_file(path.diagnostic_path(), &acquired_metadata)?;
-    ensure_not_hardlinked_open_file(path.diagnostic_path(), acquired, &acquired_metadata)?;
+    ensure_not_hardlinked_open_file(path.diagnostic_path(), &acquired_metadata)?;
     if !open_files_share_identity(path.diagnostic_path(), acquired, &current)? {
         return Err(RuntimeError::Protocol(format!(
             "{} {kind} identity changed while ownership was active",
@@ -520,18 +402,17 @@ pub fn verify_owned_anchored_file(
     Ok(())
 }
 
-#[cfg(unix)]
 pub fn open_files_share_identity(
-    _path: &Path,
+    path: &Path,
     left: &fs::File,
     right: &fs::File,
 ) -> Result<bool, RuntimeError> {
     let left = left
         .metadata()
-        .map_err(|source| path_io_error(_path, source))?;
+        .map_err(|source| path_io_error(path, source))?;
     let right = right
         .metadata()
-        .map_err(|source| path_io_error(_path, source))?;
+        .map_err(|source| path_io_error(path, source))?;
     Ok(
         std::os::unix::fs::MetadataExt::dev(&left) == std::os::unix::fs::MetadataExt::dev(&right)
             && std::os::unix::fs::MetadataExt::ino(&left)
@@ -539,43 +420,15 @@ pub fn open_files_share_identity(
     )
 }
 
-#[cfg(windows)]
-pub fn open_files_share_identity(
-    path: &Path,
-    left: &fs::File,
-    right: &fs::File,
-) -> Result<bool, RuntimeError> {
-    let left = windows_open_file_information(path, left)?;
-    let right = windows_open_file_information(path, right)?;
-    Ok(left.volume_serial_number == right.volume_serial_number
-        && left.file_index == right.file_index)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn open_files_share_identity(
-    _path: &Path,
-    _left: &fs::File,
-    _right: &fs::File,
-) -> Result<bool, RuntimeError> {
-    Ok(false)
-}
-
 pub fn ensure_anchored_non_hardlinked_file(file: &AnchoredFile) -> Result<(), RuntimeError> {
     open_anchored_file_for_read(file).map(|_| ())
 }
 
-#[cfg(any(unix, windows))]
 pub fn ensure_not_hardlinked_open_file(
     path: &Path,
-    file: &fs::File,
-    _metadata: &fs::Metadata,
+    metadata: &fs::Metadata,
 ) -> Result<(), RuntimeError> {
-    #[cfg(unix)]
-    let _ = file;
-    #[cfg(unix)]
-    let links = hard_link_count(path, _metadata)?;
-    #[cfg(windows)]
-    let links = hard_link_count_for_open_file(path, file)?;
+    let links = std::os::unix::fs::MetadataExt::nlink(metadata);
     if links == 0 {
         return Err(RuntimeError::Protocol(format!(
             "{} was unlinked while open",
@@ -588,14 +441,5 @@ pub fn ensure_not_hardlinked_open_file(
             path.display()
         )));
     }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn ensure_not_hardlinked_open_file(
-    _path: &Path,
-    _file: &fs::File,
-    _metadata: &fs::Metadata,
-) -> Result<(), RuntimeError> {
     Ok(())
 }

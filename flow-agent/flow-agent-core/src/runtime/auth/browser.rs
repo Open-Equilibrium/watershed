@@ -6,7 +6,6 @@ use crate::runtime::{
     types::RuntimeError,
 };
 use sha2::{Digest, Sha256};
-#[cfg(unix)]
 use std::process::Command;
 use std::{
     io::{Read, Write},
@@ -183,56 +182,17 @@ pub(crate) fn write_loopback_response(
         .map_err(|_| auth_protocol())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BrowserLauncher {
-    #[cfg(windows)]
-    NativeWindows,
-    #[cfg(unix)]
-    Executable(&'static str),
-}
-
-pub(crate) fn system_browser_launcher() -> BrowserLauncher {
-    #[cfg(target_os = "windows")]
-    return BrowserLauncher::NativeWindows;
+pub(crate) fn system_browser_launcher() -> &'static str {
     #[cfg(target_os = "macos")]
-    return BrowserLauncher::Executable("/usr/bin/open");
-    #[cfg(all(unix, not(target_os = "macos")))]
-    return BrowserLauncher::Executable("/usr/bin/xdg-open");
+    return "/usr/bin/open";
+    #[cfg(not(target_os = "macos"))]
+    return "/usr/bin/xdg-open";
 }
 
 fn open_system_browser(url: &str) -> Result<(), RuntimeError> {
-    match system_browser_launcher() {
-        #[cfg(windows)]
-        BrowserLauncher::NativeWindows => open_system_browser_with_windows_shell(url),
-        #[cfg(unix)]
-        BrowserLauncher::Executable(executable) => Command::new(executable)
-            .arg(url)
-            .spawn()
-            .map(|_| ())
-            .map_err(|_| auth_protocol()),
-    }
-}
-
-#[cfg(windows)]
-fn open_system_browser_with_windows_shell(url: &str) -> Result<(), RuntimeError> {
-    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
-    let url = url
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let result = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            url.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            SW_SHOWNORMAL,
-        )
-    };
-    if result as usize > 32 {
-        Ok(())
-    } else {
-        Err(auth_protocol())
-    }
+    Command::new(system_browser_launcher())
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| auth_protocol())
 }

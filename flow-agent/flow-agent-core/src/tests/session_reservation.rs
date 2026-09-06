@@ -23,28 +23,17 @@ use crate::runtime::{
     session_store::workspace_store_leaf,
     types::{EmitMode, RuntimeError},
 };
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[cfg(not(target_os = "macos"))]
 use std::ffi::OsString;
 use std::{fs, io};
 
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 fn non_unicode_object_leaf(session_id: &str) -> OsString {
     use std::os::unix::ffi::OsStringExt;
 
     let mut bytes = format!("{session_id}.object.sha256-").into_bytes();
     bytes.push(0xff);
     OsString::from_vec(bytes)
-}
-
-#[cfg(windows)]
-fn non_unicode_object_leaf(session_id: &str) -> OsString {
-    use std::os::windows::ffi::OsStringExt;
-
-    let mut units = format!("{session_id}.object.sha256-")
-        .encode_utf16()
-        .collect::<Vec<_>>();
-    units.push(0xd800);
-    OsString::from_wide(&units)
 }
 
 fn session_definition_metadata(
@@ -148,7 +137,6 @@ fn reserved_candidate_rejects_materialization_in_another_workspace() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn reserved_candidate_rejects_a_rebound_workspace_path() {
     let workspace = empty_workspace("reservation-rebound-original");
@@ -470,7 +458,7 @@ fn unique_reservation_skips_orphan_namespaces() {
     );
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn unique_reservation_skips_a_non_unicode_object_namespace() {
     let workspace = empty_workspace("reservation-non-unicode-object-inventory");
@@ -489,7 +477,7 @@ fn unique_reservation_skips_a_non_unicode_object_namespace() {
     );
 }
 
-#[cfg(any(all(unix, not(target_os = "macos")), windows))]
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn reservation_rejects_a_non_unicode_object_published_after_candidate_selection() {
     let workspace = empty_workspace("reservation-non-unicode-object-race");
@@ -1170,7 +1158,6 @@ fn session_reservation_publishes_under_lock_and_suffixes_lock_collisions() {
     drop(held_lock_file);
 }
 
-#[cfg(unix)]
 #[test]
 fn session_reservation_cleanup_stays_bound_to_the_opened_runtime_directory() {
     use std::os::unix::fs::symlink;

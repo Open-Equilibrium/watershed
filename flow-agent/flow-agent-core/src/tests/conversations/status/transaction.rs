@@ -234,7 +234,6 @@ fn conversation_status_rejects_a_summary_that_contradicts_its_transaction() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn conversation_status_rejects_unsafe_transaction_stage() {
     use std::os::unix::fs::symlink;

@@ -1,4 +1,3 @@
-#[cfg(any(unix, windows))]
 use super::platform::{
     open_anchored_lock_file, private_create_new_anchored_file, verify_private_anchored_file,
 };
@@ -7,7 +6,6 @@ use super::{
     platform::{create_new_file, open_lock_file, sync_credential_directory},
     store_io,
 };
-#[cfg(any(unix, windows))]
 use crate::runtime::fs_guards::{AnchoredFile, sync_anchored_directory};
 use crate::runtime::fs_guards::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
 use crate::runtime::{digest::sha256_hex, types::RuntimeError};
@@ -54,7 +52,6 @@ impl StoreLock {
         Self::acquire_opened(file, &path, now, wait)
     }
 
-    #[cfg(any(unix, windows))]
     pub(crate) fn acquire_anchored(
         path: &AnchoredFile,
         now: impl FnMut() -> Duration,
@@ -99,7 +96,6 @@ pub(super) fn recover_abandoned_stages(path: &Path) -> Result<(), RuntimeError> 
     Ok(())
 }
 
-#[cfg(any(unix, windows))]
 pub(super) fn recover_abandoned_stages_anchored(path: &AnchoredFile) -> Result<(), RuntimeError> {
     let parent = &path.parent;
     let destination = path.leaf.as_os_str();
@@ -144,26 +140,9 @@ fn is_credential_staging_leaf(leaf: &OsStr, destination: &OsStr) -> bool {
 }
 
 fn credential_destination_identity(destination: &OsStr) -> String {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::ffi::OsStrExt as _;
 
-        sha256_hex(destination.as_bytes())
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt as _;
-
-        let bytes = destination
-            .encode_wide()
-            .flat_map(|unit| unit.to_le_bytes())
-            .collect::<Vec<_>>();
-        sha256_hex(&bytes)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        sha256_hex(destination.as_encoded_bytes())
-    }
+    sha256_hex(destination.as_bytes())
 }
 
 fn credential_staging_leaf(destination: &OsStr, process_id: u32, counter: u64) -> String {
@@ -217,7 +196,6 @@ pub(super) fn replace_atomically(path: &Path, bytes: &[u8]) -> Result<(), Runtim
     operation
 }
 
-#[cfg(any(unix, windows))]
 pub(super) fn replace_atomically_anchored(
     path: &AnchoredFile,
     bytes: &[u8],
@@ -289,10 +267,7 @@ pub(super) fn validate_durable_ancestor(
     }
     let metadata = fs::symlink_metadata(durable_ancestor)
         .map_err(|error| store_io(durable_ancestor, error))?;
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || crate::runtime::fs_guards::has_windows_reparse_point(&metadata)
-    {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
         return Err(auth_store_failure());
     }
     Ok(())

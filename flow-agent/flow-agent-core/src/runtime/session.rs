@@ -70,7 +70,7 @@ pub(crate) fn set_run_post_config_observer(observer: impl FnOnce() + 'static) {
     RUN_POST_CONFIG_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }
 
-#[cfg(all(test, any(unix, windows)))]
+#[cfg(test)]
 pub(crate) fn set_run_pre_plan_observer(observer: impl FnOnce() + 'static) {
     RUN_PRE_PLAN_OBSERVER.with_borrow_mut(|slot| *slot = Some(Box::new(observer)));
 }

@@ -60,7 +60,6 @@ fn credential_resolution_refreshes_near_expiry_under_the_store_lock() {
     assert_eq!(store.read().expect("stored refresh"), Some(resolved));
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn protected_credential_store_coordinates_the_end_to_end_lifecycle() {
     let workspace = empty_workspace("protected-credential-lifecycle");
@@ -279,7 +278,6 @@ fn credential_refresh_reuses_a_winner_after_lock_contention() {
     assert_credential_refresh_reuses_a_winner_after_lock_contention(false);
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn protected_credential_refresh_reuses_a_winner_after_lock_contention() {
     assert_credential_refresh_reuses_a_winner_after_lock_contention(true);

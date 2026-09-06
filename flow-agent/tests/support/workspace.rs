@@ -107,22 +107,10 @@ fn workspace_store_dir(workspace: &Path) -> PathBuf {
         .join(format!("workspace-v1-{key}"))
 }
 
-#[cfg(unix)]
 fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt as _;
 
     path.as_os_str().as_bytes().to_vec()
-}
-
-#[cfg(windows)]
-#[allow(dead_code)]
-fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt as _;
-
-    path.as_os_str()
-        .encode_wide()
-        .flat_map(u16::to_le_bytes)
-        .collect()
 }
 
 fn test_session_home() -> &'static PathBuf {

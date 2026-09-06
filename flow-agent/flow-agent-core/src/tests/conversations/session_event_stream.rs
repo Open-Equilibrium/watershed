@@ -6,7 +6,6 @@ use super::super::{
     support::{append_session_log_line, event_timestamp},
     test_support::{TempWorkspace, expected_stream, workspace_copy},
 };
-#[cfg(unix)]
 use crate::runtime::types::EventClock;
 use crate::runtime::{
     fs_guards::{AnchoredWorkspace, ensure_runtime_dirs, segmented_jsonl_path},
@@ -552,7 +551,6 @@ fn reader_rejects_an_incomplete_suffix_after_session_ownership_ends() {
     ));
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn reader_ownership_remains_bound_when_workspace_alias_is_retargeted() {
     let source = empty_workspace("tail-ownership-source");
@@ -587,7 +585,6 @@ fn reader_ownership_remains_bound_when_workspace_alias_is_retargeted() {
     assert_eq!(sequences(&events), [1]);
 }
 
-#[cfg(unix)]
 #[test]
 fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path() {
     let parent = empty_workspace("tail-ownership-root-replacement");
@@ -636,37 +633,6 @@ fn reader_ownership_ignores_an_active_replacement_at_the_original_workspace_path
     assert_protocol_contains(
         result,
         "contains an incomplete final JSONL line without active session ownership",
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn reader_does_not_block_session_directory_rename() {
-    let parent = empty_workspace("tail-read-only-workspace");
-    let workspace = parent.join("workspace");
-    fs::create_dir(&workspace).expect("workspace created");
-    let session_id = "tailreadonly001";
-    let session_dir = crate::tests::helpers::ensure_workspace_session_dir(&workspace);
-    let moved_session_dir =
-        crate::tests::helpers::workspace_store_dir(&workspace).join("sessions-moved");
-    let started = session_event_line(session_id, "evt-started", EventType::SessionStarted, 1);
-    let completed = session_event_line(session_id, "evt-completed", EventType::SessionCompleted, 2);
-    fs::write(
-        session_dir.join(format!("{session_id}.jsonl")),
-        format!("{started}{completed}"),
-    )
-    .expect("session stream written");
-    let mut reader = SessionEventReader::open(&workspace, session_id).expect("reader opens");
-
-    fs::rename(&session_dir, &moved_session_dir)
-        .expect("read-only reader must not block session directory rename");
-    let result = reader.read_after(0);
-    drop(reader);
-    fs::rename(&moved_session_dir, &session_dir).expect("session directory restored");
-
-    assert_eq!(
-        sequences(&result.expect("moved session still reads")),
-        [1, 2]
     );
 }
 
@@ -748,7 +714,6 @@ fn reader_rejects_partial_bytes_after_a_terminal_event() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn live_reader_stays_bound_to_the_opened_session_directory() {
     use std::os::unix::fs::symlink;

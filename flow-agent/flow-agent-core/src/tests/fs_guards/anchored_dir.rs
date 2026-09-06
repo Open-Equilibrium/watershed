@@ -1,88 +1,12 @@
-#[cfg(windows)]
-use super::super::helpers::create_windows_junction;
 use super::super::helpers::empty_workspace;
-#[cfg(windows)]
-use crate::runtime::fs_guards::AnchoredWorkspace;
 use crate::runtime::fs_guards::validate_unix_private_directory_metadata;
 use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
-#[cfg(unix)]
 use crate::runtime::fs_guards::{
     set_private_directory_create_observer, set_private_directory_open_observer,
 };
-#[cfg(windows)]
-use crate::runtime::fs_guards::{
-    set_private_directory_missing_observer, set_windows_directory_world_access_for_test,
-    windows_directory_is_current_user_only_for_test,
-};
-#[cfg(any(unix, windows))]
 use crate::runtime::types::RuntimeError;
 use std::fs;
 
-#[cfg(windows)]
-#[test]
-fn anchored_directory_rejects_a_non_unicode_leaf_before_access() {
-    use std::{ffi::OsString, os::windows::ffi::OsStringExt as _};
-
-    let workspace = empty_workspace("anchored-directory-non-unicode");
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-    let leaf = OsString::from_wide(&[0xD800]);
-
-    let error = parent
-        .private_child(&leaf, true, DirectoryErrorMode::Protocol)
-        .expect_err("non-Unicode directory leaf must be rejected");
-
-    assert!(
-        matches!(
-            &error,
-            RuntimeError::Io { source, .. }
-                if source.kind() == std::io::ErrorKind::InvalidInput
-        ),
-        "{error}"
-    );
-    assert!(!workspace.join(leaf).exists(), "no directory was created");
-}
-
-#[cfg(windows)]
-#[test]
-fn anchored_directory_rejects_non_leaf_paths_before_access() {
-    let workspace = empty_workspace("anchored-directory-non-leaf");
-    let outside = empty_workspace("anchored-directory-non-leaf-outside");
-    let intermediate = workspace.join("intermediate");
-    fs::create_dir_all(workspace.join("nested/target")).expect("nested directory created");
-    create_windows_junction(&intermediate, &outside);
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    for leaf in [
-        r"nested\target",
-        "nested/target",
-        r"intermediate\created",
-        "intermediate/created",
-        ".",
-        "..",
-        r"\rooted",
-        r"C:\rooted",
-        "target:stream",
-    ] {
-        let error = parent
-            .child(leaf, true, DirectoryErrorMode::Protocol)
-            .expect_err("non-leaf directory path must be rejected");
-        assert!(
-            matches!(
-                &error,
-                RuntimeError::Io { source, .. }
-                    if source.kind() == std::io::ErrorKind::InvalidInput
-            ),
-            "{leaf:?}: {error}"
-        );
-    }
-    assert!(
-        !outside.join("created").exists(),
-        "an intermediate junction target must receive no side effect"
-    );
-    fs::remove_dir(intermediate).expect("test junction removed");
-}
-
-#[cfg(unix)]
 #[test]
 fn private_child_revalidates_permissions_on_the_opened_directory() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -110,7 +34,6 @@ fn private_child_revalidates_permissions_on_the_opened_directory() {
     assert!(err.to_string().contains("group or other access"), "{err}");
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_creation_does_not_chmod_a_replacement_target() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -158,7 +81,6 @@ fn private_directory_validation_rejects_an_owner_other_than_the_effective_user()
     assert!(error.to_string().contains("current user"), "{error}");
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_reports_a_removed_open_race_as_io() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -187,7 +109,6 @@ fn private_child_reports_a_removed_open_race_as_io() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn private_child_still_denies_a_symlink_open_race() {
     use std::os::unix::fs::{PermissionsExt as _, symlink};
@@ -223,7 +144,7 @@ fn private_child_still_denies_a_symlink_open_race() {
 }
 
 // macOS rejects non-UTF-8 directory entries before this race can be constructed.
-#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn private_child_denies_a_non_unicode_symlink_open_race() {
     use std::{
@@ -260,107 +181,4 @@ fn private_child_denies_a_non_unicode_symlink_open_race() {
         ),
         "{err}"
     );
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_rejects_a_preexisting_world_accessible_directory() {
-    let workspace = empty_workspace("private-directory-windows-existing");
-    let private = workspace.join("private");
-    fs::create_dir(&private).expect("private directory created");
-    set_windows_directory_world_access_for_test(&private).expect("world access configured");
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    let err = parent
-        .private_child("private", false, DirectoryErrorMode::Protocol)
-        .expect_err("world-accessible private directory must be rejected");
-
-    assert!(
-        err.to_string().contains("current Windows user only"),
-        "{err}"
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_creation_overrides_a_world_accessible_parent_dacl() {
-    let workspace = empty_workspace("private-directory-windows-create");
-    set_windows_directory_world_access_for_test(&workspace).expect("world access configured");
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-
-    parent
-        .private_child("private", true, DirectoryErrorMode::Protocol)
-        .expect("private directory creation succeeds");
-
-    let private = AnchoredDir::workspace(&workspace.join("private")).expect("private dir opens");
-    private
-        .private_child("nested", true, DirectoryErrorMode::Protocol)
-        .expect("validated private directory creates a private child");
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_accepts_a_concurrent_private_creation() {
-    let workspace = empty_workspace("private-directory-windows-concurrent-create");
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-    let competitor = parent.clone();
-    set_private_directory_missing_observer(move || {
-        competitor
-            .private_child("private", true, DirectoryErrorMode::Protocol)
-            .expect("competitor creates the private directory")
-            .expect("created private directory opens");
-    });
-
-    parent
-        .private_child("private", true, DirectoryErrorMode::Protocol)
-        .expect("concurrent private creation is accepted")
-        .expect("concurrently created private directory opens");
-
-    assert!(
-        windows_directory_is_current_user_only_for_test(&workspace.join("private"))
-            .expect("private directory permissions read")
-    );
-}
-
-#[cfg(windows)]
-#[test]
-fn private_child_creation_remains_bound_to_the_opened_parent() {
-    let workspace = empty_workspace("private-directory-windows-parent-binding");
-    fs::remove_dir(&*workspace).expect("workspace junction path starts absent");
-    let original = empty_workspace("private-directory-windows-original");
-    let outside = empty_workspace("private-directory-windows-outside");
-    create_windows_junction(&workspace, &original);
-    let parent = AnchoredDir::workspace(&workspace).expect("workspace opens");
-    fs::remove_dir(&*workspace).expect("original workspace junction removed");
-    create_windows_junction(&workspace, &outside);
-
-    let result = parent.private_child("private", true, DirectoryErrorMode::Protocol);
-
-    assert!(
-        !outside.join("private").exists(),
-        "ambient workspace replacement must receive no side effect"
-    );
-    result.expect("creation remains bound to the opened parent");
-    assert!(original.join("private").is_dir());
-}
-
-#[cfg(windows)]
-#[test]
-fn read_only_workspace_rejects_a_root_junction() {
-    let workspace = empty_workspace("read-only-workspace-root-junction");
-    fs::remove_dir(&*workspace).expect("workspace junction path starts absent");
-    let outside = empty_workspace("read-only-workspace-root-junction-target");
-    create_windows_junction(&workspace, &outside);
-
-    let err = AnchoredWorkspace::open_read_only(&workspace)
-        .expect_err("read-only workspace root junction must be rejected");
-
-    assert!(
-        matches!(
-            &err,
-            RuntimeError::Protocol(message) if message.contains("reparse point")
-        ),
-        "{err}"
-    );
-    fs::remove_dir(&*workspace).expect("test junction removed");
 }

@@ -245,7 +245,7 @@ fn applicable_agent_instructions_load_global_then_harness_workspace() {
     .expect("global instructions write");
     fs::write(workspace.join("AGENTS.md"), "Workspace guidance.\n")
         .expect("workspace instructions write");
-    let home = open_flow_agent_home(false, true)
+    let home = open_flow_agent_home(false)
         .expect("global home opens")
         .expect("global home exists");
     let workspace = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
@@ -257,7 +257,6 @@ fn applicable_agent_instructions_load_global_then_harness_workspace() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn workspace_agent_instructions_refuse_symlinks() {
     use std::os::unix::fs::symlink;

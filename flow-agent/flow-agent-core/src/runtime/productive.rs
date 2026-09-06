@@ -52,7 +52,7 @@ pub(crate) use provider_result::{
 pub use reconciliation::{
     MAX_TOOL_RECONCILIATION_BYTES, read_tool_reconciliation_file, reconcile_tool_attempt,
 };
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) use tool::SystemProductiveToolExecutor;
 #[cfg(test)]
 pub(crate) use tool::test_enforcement_receipt;

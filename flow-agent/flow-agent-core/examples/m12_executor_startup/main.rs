@@ -165,11 +165,7 @@ mod tests {
     use std::{io, path::PathBuf};
 
     fn executor_path() -> PathBuf {
-        PathBuf::from(if cfg!(windows) {
-            r"C:\flow-executor.exe"
-        } else {
-            "/flow-executor"
-        })
+        PathBuf::from("/flow-executor")
     }
 
     fn config(warmups: usize, samples: usize) -> Config {

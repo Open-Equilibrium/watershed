@@ -76,11 +76,6 @@ fn current_productive_execution_release() -> Option<String> {
         .flatten()
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn current_productive_execution_release() -> Option<String> {
-    None
-}
-
 fn ubuntu_24_04_release(release: &str) -> bool {
     let mut id = None;
     let mut version_id = None;

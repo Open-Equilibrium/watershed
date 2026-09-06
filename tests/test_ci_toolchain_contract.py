@@ -107,7 +107,8 @@ def step_run(workflow: str, name: str) -> str:
 
 
 def folded_tokens(workflow: str, name: str) -> list[str]:
-    return shlex.split(" ".join(step_run(workflow, name).splitlines()))
+    command = step_run(workflow, name).replace("${{ matrix.packages }}", "--workspace")
+    return shlex.split(" ".join(command.splitlines()))
 
 
 def assert_step_state(
@@ -133,6 +134,37 @@ def assert_step_state(
 
 
 class CiWorkflowContractTest(unittest.TestCase):
+    def test_native_platform_gates_select_the_owned_packages(self) -> None:
+        workflow = workflow_text()
+        scopes = dict(re.findall(
+            r"^          - os: ([^\n]+)\n            packages: ([^\n]+)$",
+            workflow,
+            re.MULTILINE,
+        ))
+        self.assertEqual(scopes, {
+            "ubuntu-24.04": "--workspace",
+            "macos-26": "--workspace",
+            "windows-latest": "-p core-script -p core-policy -p proto",
+        })
+        for name in ("Check lints", "Run tests", "Run Rustdoc tests", "Check line coverage"):
+            command = step_run(workflow, name)
+            self.assertIn("${{ matrix.packages }}", command)
+            for os_name, packages in scopes.items():
+                with self.subTest(gate=name, platform=os_name):
+                    rendered = command.replace("${{ matrix.packages }}", packages)
+                    tokens = shlex.split(" ".join(rendered.splitlines()))
+                    if os_name == "windows-latest":
+                        self.assertEqual(
+                            [tokens[index + 1] for index, token in enumerate(tokens) if token == "-p"],
+                            ["core-script", "core-policy", "proto"],
+                        )
+                        self.assertNotIn("--workspace", tokens)
+                    else:
+                        self.assertIn("--workspace", tokens)
+        assert_step_state(
+            self, workflow, "Check M1.2 unsupported platforms", condition="matrix.os == 'macos-26'"
+        )
+
     def test_versions_come_from_their_canonical_project_files(self) -> None:
         workflow = workflow_text()
         with (ROOT / "rust-toolchain.toml").open("rb") as toolchain_file:
@@ -264,7 +296,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         )
         commands = {
             "Check formatting": "cargo fmt --all --check",
-            "Check lints": "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
+            "Check lints": "cargo clippy --locked ${{ matrix.packages }} --all-targets --all-features -- -D warnings",
             "Check RustSec advisories": "cargo audit",
             "Check dependency policy": "cargo deny check",
             "Check Node advisories": "pnpm audit",
@@ -783,7 +815,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("loginctl show-user", installer_acceptance)
 
         assert_step_state(
-            self, workflow, "Check M1.2 unsupported platforms", condition=NON_UBUNTU
+            self, workflow, "Check M1.2 unsupported platforms", condition="matrix.os == 'macos-26'"
         )
         self.assertEqual(
             step_run(workflow, "Check M1.2 unsupported platforms"),

@@ -3,7 +3,6 @@ use super::super::{
     productive_recovery_support::{InterruptingProductiveRecovery, ProductiveInterruptionPoint},
     support::run_isolated_test,
 };
-#[cfg(unix)]
 use super::support::FakeToolExecutor;
 use super::support::{
     FakeProvider, ScriptedProvider, UnsupportedToolExecutor,
@@ -35,13 +34,11 @@ use crate::runtime::{
     session_definition::{SessionDefinitionMetadata, session_definition_metadata},
     types::{RunOutput, RuntimeError},
 };
-#[cfg(unix)]
 use crate::runtime::{
     openai_codex::{ProviderToolCall, ProviderTurn},
     productive::execute_productive_flow_with_tool_executor_and_recovery,
     run_attempts::RunAttemptKind,
 };
-#[cfg(unix)]
 use crate::tests::helpers::configured_smoke_productive_execution_fixture;
 use std::{collections::VecDeque, fs, path::Path};
 
@@ -521,7 +518,6 @@ fn productive_recovery_reuses_committed_provider_attempt_without_redispatch() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn productive_recovery_reuses_committed_tool_attempt_without_redispatch() {
     let (workspace, fixture) = configured_smoke_productive_execution_fixture();

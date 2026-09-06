@@ -31,7 +31,7 @@ The initial adoption wedge is technical teams that need reusable, measurable, an
 
 **Decision state:** M0 and M1 are unblocked; accepted decisions are in [`ADR-LOG.md`](docs/adr/ADR-LOG.md).
 
-**DoD:** the scaffold compiles on Linux, macOS, and Windows; its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
+**DoD:** the scaffold compiles for each implemented product's targets in [PLATFORMS.md](PLATFORMS.md); its canonical contracts and fixtures are sufficient to implement M1 without architectural guesses; and all M0 gates defined by the canonical test, security, and CI sources pass.
 
 ### M1 — Flow Agent deterministic runtime foundation
 

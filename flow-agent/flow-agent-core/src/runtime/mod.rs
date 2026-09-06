@@ -55,10 +55,6 @@ pub(crate) mod stream_signature;
 pub(crate) mod tool_runner;
 pub(crate) mod types;
 pub(crate) mod validate;
-#[cfg(windows)]
-pub(crate) mod windows_anchored_dir;
-#[cfg(windows)]
-pub(crate) mod windows_private_dir;
 pub(crate) mod workspace_text;
 
 pub use auth::{

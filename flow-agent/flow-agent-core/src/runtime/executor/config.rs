@@ -278,13 +278,11 @@ fn acquire_config_lock(path: &Path, protect: bool) -> Result<ProtectedStateLock,
     }
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(if protect { 0o600 } else { 0o666 });
     }
     let file = options.open(path).map_err(|error| config_io(path, error))?;
-    #[cfg(unix)]
     if protect {
         use std::os::unix::fs::PermissionsExt as _;
         file.set_permissions(fs::Permissions::from_mode(0o600))
@@ -321,7 +319,6 @@ fn verify_regular_unlinked(metadata: &fs::Metadata) -> Result<(), RuntimeError> 
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(config_failure("protected Executor configuration is unsafe"));
     }
-    #[cfg(unix)]
     if std::os::unix::fs::MetadataExt::nlink(metadata) != 1 {
         return Err(config_failure("protected Executor configuration is unsafe"));
     }

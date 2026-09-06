@@ -78,7 +78,6 @@ pub(in crate::tests) fn disabled_smoke_productive_execution_fixture()
     (workspace, fixture)
 }
 
-#[cfg(unix)]
 pub(in crate::tests) fn configured_smoke_productive_execution_fixture()
 -> (TempWorkspace, ProductiveExecutionFixture) {
     let (workspace, fixture) = smoke_productive_execution_fixture();

@@ -823,7 +823,6 @@ fn open_scratch_file_for_update(path: &AnchoredFile) -> Result<(File, fs::Metada
     open_anchored_file_for_update(path)
 }
 
-#[cfg(unix)]
 fn available_space(path: &Path) -> Result<u64, RuntimeError> {
     #[cfg(test)]
     if let Some(bytes) = AVAILABLE_SPACE_OVERRIDE.with(Cell::get) {
@@ -838,40 +837,4 @@ fn available_space(path: &Path) -> Result<u64, RuntimeError> {
     stat.f_bavail
         .checked_mul(stat.f_frsize)
         .ok_or_else(|| protocol("available scratch space overflow"))
-}
-
-#[cfg(windows)]
-fn available_space(path: &Path) -> Result<u64, RuntimeError> {
-    #[cfg(test)]
-    if let Some(bytes) = AVAILABLE_SPACE_OVERRIDE.with(Cell::get) {
-        return Ok(bytes);
-    }
-    use std::os::windows::ffi::OsStrExt as _;
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-    let wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let mut available = 0u64;
-    let result = unsafe {
-        GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if result == 0 {
-        Err(path_io_error(path, std::io::Error::last_os_error()))
-    } else {
-        Ok(available)
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn available_space(_path: &Path) -> Result<u64, RuntimeError> {
-    Err(protocol(
-        "history validation scratch space cannot be admitted on this platform",
-    ))
 }

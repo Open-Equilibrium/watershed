@@ -131,9 +131,8 @@ fn main() {
     if input.read_line(&mut start).expect("start is read") == 0 {
         return;
     }
-    let expected_start = format!(
-        "{{\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-start-v0\"}}\n"
-    );
+    let expected_start =
+        format!("{{\"request_id\":\"{request_id}\",\"schema\":\"flow-executor-start-v0\"}}\n");
     if start != expected_start {
         return;
     }

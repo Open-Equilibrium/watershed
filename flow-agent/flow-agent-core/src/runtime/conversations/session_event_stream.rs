@@ -71,7 +71,7 @@ impl SessionEventReader {
         let workspace = workspace.as_ref();
         let workspace_path =
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
-        let workspace = AnchoredWorkspace::open_read_only(&workspace_path)?;
+        let workspace = AnchoredWorkspace::open(&workspace_path)?;
         let session_dir_path = workspace_store_path(&workspace)?.join(SESSION_STORAGE_DIR);
         let sessions = open_anchored_runtime_dir_read_only(&workspace, SESSION_STORAGE_DIR)?
             .ok_or_else(|| RuntimeError::Io {
@@ -116,7 +116,7 @@ impl SessionEventReader {
         let workspace = workspace.as_ref();
         let workspace_path =
             fs::canonicalize(workspace).map_err(|source| path_io_error(workspace, source))?;
-        let workspace = AnchoredWorkspace::open_read_only(&workspace_path)?;
+        let workspace = AnchoredWorkspace::open(&workspace_path)?;
         let ownership_key = run_ownership_key(conversation_id, run_session_id);
         let ownership = SessionOwnershipObserver::open_anchored(&workspace, &ownership_key)?;
         let session_dir_path = workspace_store_path(&workspace)?.join(SESSION_STORAGE_DIR);
@@ -617,7 +617,7 @@ impl SessionEventReader {
     }
 
     fn workspace_identity_is_current(&self) -> Result<bool, RuntimeError> {
-        let current = match AnchoredWorkspace::open_read_only(&self.workspace_path) {
+        let current = match AnchoredWorkspace::open(&self.workspace_path) {
             Ok(current) => current,
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
                 return Ok(false);

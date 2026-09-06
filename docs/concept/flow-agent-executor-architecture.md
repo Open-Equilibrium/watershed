@@ -8,7 +8,7 @@ Flow Agent validates a Tool request and compiles its policy. One short-lived Exe
 
 The standard installation supplies an official, statically linked `flow-executor` sibling. An administrator may explicitly omit it or select an absolute Custom Executor override. Building Blocks, Flow users, providers, Tools, Workspaces and environment variables cannot select or replace the Executor. Failure never chooses a weaker path.
 
-The official productive M1.2 backend is stock Bubblewrap plus seccomp inside a transient systemd user scope with a delegated cgroup-v2 PIDs controller on Ubuntu 24.04 x64. The required host interfaces are probed directly; no kernel-version guess or weaker fallback is used. All productive Tool execution, including an administrator-owned Custom Executor, is limited to that platform. macOS, Windows and other targets fail before Executor selection or Tool spawn; provider-only Flows do not use this boundary. A Custom Executor receives no Flow Agent compatibility or security guarantee.
+The official productive M1.2 backend is stock Bubblewrap plus seccomp inside a transient systemd user scope with a delegated cgroup-v2 PIDs controller on Ubuntu 24.04 x64. The required host interfaces are probed directly; no kernel-version guess or weaker fallback is used. All productive Tool execution, including an administrator-owned Custom Executor, is limited to that platform. macOS fails before Executor selection or Tool spawn; provider-only Flows do not use this boundary. A Custom Executor receives no Flow Agent compatibility or security guarantee.
 
 ## Responsibility split
 

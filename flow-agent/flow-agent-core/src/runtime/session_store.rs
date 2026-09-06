@@ -7,7 +7,6 @@ use crate::runtime::{
     types::{GLOBAL_WORKSPACES_DIR, RuntimeError},
 };
 use std::{
-    ffi::OsString,
     fs,
     path::{Path, PathBuf},
 };
@@ -26,21 +25,7 @@ impl WorkspaceStore {
         workspace: &AnchoredWorkspace,
         create: bool,
     ) -> Result<Option<Self>, RuntimeError> {
-        Self::open_with_access(workspace, create, false)
-    }
-
-    pub(crate) fn open_read_only(
-        workspace: &AnchoredWorkspace,
-    ) -> Result<Option<Self>, RuntimeError> {
-        Self::open_with_access(workspace, false, true)
-    }
-
-    fn open_with_access(
-        workspace: &AnchoredWorkspace,
-        create: bool,
-        read_only: bool,
-    ) -> Result<Option<Self>, RuntimeError> {
-        let Some(home) = open_flow_agent_home(create, read_only)? else {
+        let Some(home) = open_flow_agent_home(create)? else {
             return Ok(None);
         };
         let Some(workspaces) =
@@ -90,20 +75,16 @@ pub(crate) fn workspace_store_path(workspace: &AnchoredWorkspace) -> Result<Path
         .join(workspace_store_leaf(workspace)?))
 }
 
-pub(crate) fn open_flow_agent_home(
-    create: bool,
-    read_only: bool,
-) -> Result<Option<AnchoredDir>, RuntimeError> {
+pub(crate) fn open_flow_agent_home(create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
     let home_path = flow_agent_home_path()?;
-    open_flow_agent_home_at(&home_path, create, read_only)
+    open_flow_agent_home_at(&home_path, create)
 }
 
 pub(crate) fn open_flow_agent_home_at(
     home_path: &Path,
     create: bool,
-    read_only: bool,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let (parent, leaf, _) = open_flow_agent_home_parent_at(home_path, read_only)?;
+    let (parent, leaf) = open_flow_agent_home_parent_at(home_path)?;
     let home = parent.private_child(&leaf, create, DirectoryErrorMode::Protocol)?;
     if create && home.is_some() {
         sync_anchored_directory(&parent)?;
@@ -111,10 +92,7 @@ pub(crate) fn open_flow_agent_home_at(
     Ok(home)
 }
 
-fn open_flow_agent_home_parent_at(
-    path: &Path,
-    read_only: bool,
-) -> Result<(AnchoredDir, String, PathBuf), RuntimeError> {
+fn open_flow_agent_home_parent_at(path: &Path) -> Result<(AnchoredDir, String), RuntimeError> {
     if !path.is_absolute() {
         return Err(RuntimeError::Usage(
             "FLOW_AGENT_HOME must name an absolute directory".to_owned(),
@@ -130,18 +108,8 @@ fn open_flow_agent_home_parent_at(
             RuntimeError::Usage("global Flow home must end in a UTF-8 directory name".to_owned())
         })?;
     let parent = fs::canonicalize(parent).map_err(|source| path_io_error(parent, source))?;
-    #[cfg(windows)]
-    let parent = if read_only {
-        AnchoredDir::read_only_workspace(&parent)?
-    } else {
-        AnchoredDir::workspace(&parent)?
-    };
-    #[cfg(not(windows))]
-    let parent = {
-        let _ = read_only;
-        AnchoredDir::workspace(&parent)?
-    };
-    Ok((parent, leaf.to_owned(), path.to_owned()))
+    let parent = AnchoredDir::workspace(&parent)?;
+    Ok((parent, leaf.to_owned()))
 }
 
 pub(crate) fn flow_agent_home_path() -> Result<PathBuf, RuntimeError> {
@@ -158,19 +126,9 @@ pub(crate) fn flow_agent_home_path() -> Result<PathBuf, RuntimeError> {
 }
 
 fn default_flow_agent_home() -> Result<PathBuf, RuntimeError> {
-    let home = platform_home_dir()
+    let home = std::env::var_os("HOME")
         .ok_or_else(|| RuntimeError::Usage("the user home directory is unavailable".to_owned()))?;
     Ok(PathBuf::from(home).join(FLOW_AGENT_HOME_LEAF))
-}
-
-#[cfg(windows)]
-fn platform_home_dir() -> Option<OsString> {
-    std::env::var_os("USERPROFILE")
-}
-
-#[cfg(not(windows))]
-fn platform_home_dir() -> Option<OsString> {
-    std::env::var_os("HOME")
 }
 
 pub(crate) fn workspace_store_leaf(workspace: &AnchoredWorkspace) -> Result<String, RuntimeError> {
@@ -182,19 +140,8 @@ pub(crate) fn workspace_store_leaf(workspace: &AnchoredWorkspace) -> Result<Stri
     Ok(format!("{WORKSPACE_STORE_PREFIX}{}", sha256_hex(&key)))
 }
 
-#[cfg(unix)]
 pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt as _;
 
     path.as_os_str().as_bytes().to_vec()
-}
-
-#[cfg(windows)]
-pub(crate) fn stable_native_path_bytes(path: &Path) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt as _;
-
-    path.as_os_str()
-        .encode_wide()
-        .flat_map(u16::to_le_bytes)
-        .collect()
 }

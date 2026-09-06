@@ -91,7 +91,7 @@ Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authori
 
 For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. The standard Ubuntu installation resolves its sibling `flow-executor`; `flow executor check` reports readiness. Agentic Engineers define each Flow's Tools, exact mounts and runtime-read profile; other users may run those predefined Flows without gaining an escalation surface. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
 
-`FLOW_AGENT_HOME` defaults to `~/.flow` on Unix and `%USERPROFILE%\.flow` on Windows. Its `config.yaml` and registry are the sole implicit technical authority. Workspace `.flow` content is not discovered; optional global-home and harness-start Workspace `AGENTS.md` files provide instructions only.
+The Global Flow home and its configuration authority are defined in [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees).
 
 The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Productive Tool networking is deny-all; positive grants remain deferred.
 

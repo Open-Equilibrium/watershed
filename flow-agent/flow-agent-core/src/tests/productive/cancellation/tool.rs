@@ -1,4 +1,3 @@
-#[cfg(unix)]
 use crate::runtime::{
     fs_guards::AnchoredDir, productive::SystemProductiveToolExecutor, tool_runner::ToolInvocation,
 };
@@ -20,7 +19,6 @@ use crate::{
 };
 use proto::EventType;
 use std::collections::VecDeque;
-#[cfg(unix)]
 use std::{path::Path, time::Duration};
 
 #[test]
@@ -237,7 +235,6 @@ fn tool_cancellation_persists_cancelled_attempt_and_lifecycle() {
     assert_controlled_cancellation_lifecycle(&sink.0);
 }
 
-#[cfg(unix)]
 #[test]
 fn system_productive_tool_executor_observes_process_cancellation() {
     const CHILD_ENV: &str = "WATERSHED_PRODUCTIVE_TOOL_CANCELLATION_CHILD";

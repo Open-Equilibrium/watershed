@@ -34,7 +34,7 @@ pub(super) fn wait_with_output_before(child: Child, timeout: Duration) -> Output
 }
 
 pub(super) fn cli_child_watchdog() -> Duration {
-    if cfg!(windows) || std::env::var_os("CARGO_LLVM_COV").is_some() {
+    if std::env::var_os("CARGO_LLVM_COV").is_some() {
         Duration::from_secs(30)
     } else {
         Duration::from_secs(10)

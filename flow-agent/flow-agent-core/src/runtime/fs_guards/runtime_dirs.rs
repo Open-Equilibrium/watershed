@@ -53,7 +53,7 @@ pub(crate) fn open_anchored_runtime_dir_read_only(
     workspace: &AnchoredWorkspace,
     leaf: &str,
 ) -> Result<Option<AnchoredDir>, RuntimeError> {
-    let Some(store) = WorkspaceStore::open_read_only(workspace)? else {
+    let Some(store) = WorkspaceStore::open(workspace, false)? else {
         return Ok(None);
     };
     store.child(leaf, false)

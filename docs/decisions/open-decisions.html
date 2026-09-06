@@ -140,11 +140,11 @@
       <article id="d-056" class="decision">
         <h3>D-056 - Existing Output Security-Metadata Matrix</h3>
         <p><strong>Status:</strong> Open before post-M1 existing-output replacement; not an M1.1 blocker.</p>
-        <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Linux, macOS and Windows, and what happens when a required field cannot be read or applied?</p>
+        <p><strong>Question:</strong> Which exact security-metadata fields must atomic own-script output replacement preserve on Flow Agent's native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>, and what happens when a required field cannot be read or applied?</p>
         <p><strong>Decided direction:</strong> The ADR-0087/ADR-0088 create-only boundary rejects every existing output target in M1.1; replacement remains unavailable until this finite per-platform field matrix is decided and implemented.</p>
         <ul><li><strong>A:</strong> Preserve a maintainer-selected native field set and fail when any selected field is unavailable. Pro: explicit, testable preservation. Con: replacements can fail because of privileges or platform support.</li><li><strong>B:</strong> Preserve a smaller maintainer-selected field set and reject targets carrying selected unsupported metadata. Pro: a narrower implementation. Con: detection and rejection rules remain platform-specific.</li></ul>
         <p><strong>Recommendation:</strong> A; choose the exact fields and unavailable-field behavior only with platform evidence.</p>
-        <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass Linux, macOS and Windows fixtures for every required field before restoring existing-output replacement.</p>
+        <p><strong>Acceptance criterion:</strong> Record the exact finite matrix and failure behavior, then pass native fixtures on each supported Flow Agent target for every required field before restoring existing-output replacement.</p>
       </article>
       <article id="d-058" class="decision">
         <h3>D-058 - Portable Conversation Archive And Tree Handoff</h3>

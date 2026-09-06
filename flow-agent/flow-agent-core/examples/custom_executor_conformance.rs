@@ -160,11 +160,7 @@ mod tests {
     use std::{cell::Cell, io, path::PathBuf};
 
     fn executor_path() -> PathBuf {
-        PathBuf::from(if cfg!(windows) {
-            r"C:\trusted\flow-executor.exe"
-        } else {
-            "/trusted/flow-executor"
-        })
+        PathBuf::from("/trusted/flow-executor")
     }
 
     #[test]

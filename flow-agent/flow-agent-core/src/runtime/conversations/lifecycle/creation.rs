@@ -36,14 +36,13 @@ use crate::runtime::{
 };
 use std::path::Path;
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 type RunCreationStageObserver = Box<dyn FnOnce(&Path)>;
 
 #[cfg(test)]
 std::thread_local! {
     static PRODUCTIVE_RUN_CREATION_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
-    #[cfg(unix)]
     static RUN_CREATION_STAGE_OBSERVER: std::cell::RefCell<Option<RunCreationStageObserver>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -53,7 +52,7 @@ pub(crate) fn set_productive_run_creation_observer(observer: impl FnOnce() + 'st
     PRODUCTIVE_RUN_CREATION_OBSERVER.with(|slot| slot.replace(Some(Box::new(observer))));
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 pub(crate) fn set_run_creation_stage_observer(observer: impl FnOnce(&Path) + 'static) {
     RUN_CREATION_STAGE_OBSERVER.with(|slot| slot.replace(Some(Box::new(observer))));
 }
@@ -67,7 +66,7 @@ fn productive_run_creation_observer() {
     });
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 fn run_creation_stage_observer(stage: &Path) {
     RUN_CREATION_STAGE_OBSERVER.with(|slot| {
         if let Some(observer) = slot.replace(None) {
@@ -457,11 +456,11 @@ fn create_conversation_run_with_publication_marker(
             .create_dir(&staging_name)
             .map_err(|source| path_io_error(&stage, source))?;
         let created_stage = runs_dir
-            .publishable_child(&staging_name, DirectoryErrorMode::Protocol)?
+            .child(&staging_name, false, DirectoryErrorMode::Protocol)?
             .expect("new run staging directory is present");
         let created_stage_identity = created_stage.identity()?;
         let stage_marker = run_creation_identity_marker_name(created_stage_identity);
-        #[cfg(all(test, unix))]
+        #[cfg(test)]
         run_creation_stage_observer(&stage);
         partial_run = Some((
             runs_dir.clone(),
@@ -502,7 +501,6 @@ fn create_conversation_run_with_publication_marker(
         sync_anchored_directory(&created_stage)?;
         #[cfg(test)]
         status_run_mutation_checkpoint(StatusTransactionCrashPoint::RunCreationStagePopulated);
-        #[cfg(not(windows))]
         let Some(stage_for_publication) =
             runs_dir.child(&staging_name, false, DirectoryErrorMode::Protocol)?
         else {
@@ -510,22 +508,12 @@ fn create_conversation_run_with_publication_marker(
                 "run-creation staging artifact disappeared before publication",
             ));
         };
-        #[cfg(not(windows))]
         if stage_for_publication.identity()? != created_stage_identity {
             return Err(protocol(
                 "run-creation staging artifact identity changed before publication",
             ));
         }
-        #[cfg(not(windows))]
         drop(stage_for_publication);
-        #[cfg(windows)]
-        crate::runtime::windows_anchored_dir::publish_anchored_directory(
-            &created_stage.dir,
-            &runs_dir.dir,
-            run_session_id,
-        )
-        .map_err(|source| path_io_error(&run, source))?;
-        #[cfg(not(windows))]
         runs_dir
             .dir
             .rename(&staging_name, &runs_dir.dir, run_session_id)

@@ -3,9 +3,8 @@ use crate::{
     runtime::{
         RuntimeError,
         auth::{
-            AuthStatus, BrowserLauncher, auth_status_from_store, logout_from_store,
-            parse_token_body, run_browser_login_with_components, store_login_credential,
-            system_browser_launcher,
+            AuthStatus, auth_status_from_store, logout_from_store, parse_token_body,
+            run_browser_login_with_components, store_login_credential, system_browser_launcher,
         },
         credential_store::CredentialStore,
         oauth_credential::CredentialRecord,
@@ -20,15 +19,11 @@ use std::{
 
 #[test]
 fn system_browser_launcher_does_not_depend_on_path_lookup() {
-    #[cfg(windows)]
-    assert_eq!(system_browser_launcher(), BrowserLauncher::NativeWindows);
-    #[cfg(unix)]
-    match system_browser_launcher() {
-        BrowserLauncher::Executable(executable) => assert!(
-            std::path::Path::new(executable).is_absolute(),
-            "browser launcher must be an absolute trusted executable: {executable}"
-        ),
-    }
+    let executable = system_browser_launcher();
+    assert!(
+        std::path::Path::new(executable).is_absolute(),
+        "browser launcher must be an absolute trusted executable: {executable}"
+    );
 }
 
 #[test]

@@ -244,51 +244,9 @@ pub(in crate::tests) fn workspace_with_later_invalid_own_script_path() -> TempWo
 }
 
 pub(in crate::tests) fn create_directory_alias(link: &Path, target: &Path) {
-    #[cfg(unix)]
     std::os::unix::fs::symlink(target, link).expect("directory alias is created");
-    #[cfg(windows)]
-    create_windows_junction(link, target);
-    #[cfg(not(any(unix, windows)))]
-    panic!("directory aliases are unsupported on this platform");
 }
 
 pub(in crate::tests) fn remove_directory_alias(link: &Path) {
-    #[cfg(unix)]
     fs::remove_file(link).expect("directory alias is removed");
-    #[cfg(windows)]
-    fs::remove_dir(link).expect("directory alias is removed");
-    #[cfg(not(any(unix, windows)))]
-    panic!("directory aliases are unsupported on this platform");
-}
-
-#[cfg(windows)]
-pub(in crate::tests) fn create_windows_junction(link: &Path, target: &Path) {
-    let link = cmd_compatible_windows_path(link);
-    let target = cmd_compatible_windows_path(target);
-    let output = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(&link)
-        .arg(&target)
-        .output()
-        .expect("mklink command runs");
-    assert!(
-        output.status.success(),
-        "junction creation failed for {} -> {}: stdout={} stderr={}",
-        link.display(),
-        target.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[cfg(windows)]
-fn cmd_compatible_windows_path(path: &Path) -> PathBuf {
-    let text = path.as_os_str().to_string_lossy().replace('/', r"\");
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        PathBuf::from(format!(r"\\{rest}"))
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        PathBuf::from(rest)
-    } else {
-        PathBuf::from(text)
-    }
 }

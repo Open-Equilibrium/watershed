@@ -1,7 +1,5 @@
 mod root_binding;
 
-#[cfg(windows)]
-use super::helpers::create_windows_junction;
 use super::{
     helpers::{
         assert_no_session_artifacts, create_directory_alias, empty_workspace,
@@ -95,7 +93,6 @@ fn shared_workspace_tool_write_parents_are_concurrent_safe() {
     }
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -121,7 +118,6 @@ fn run_flow_rejects_symlinked_log_dir_without_side_effects() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -144,7 +140,6 @@ fn run_flow_rejects_symlinked_session_leaf_without_side_effects() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_summary_leaf_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -371,7 +366,6 @@ fn tool_started_commit_failure_prevents_own_script_side_effect() {
     assert!(!workspace.join("out/summary.txt").exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
     use std::os::unix::fs::symlink;
@@ -393,27 +387,6 @@ fn run_flow_rejects_symlinked_summary_ancestor_without_side_effects() {
     assert_no_session_artifacts(&workspace, "hello-flow");
 }
 
-#[cfg(windows)]
-#[test]
-fn run_flow_rejects_junction_summary_ancestor_without_side_effects() {
-    let workspace = workspace_copy("hello-flow");
-    let outside = empty_workspace("outside-summary-junction");
-    fs::remove_dir_all(workspace.join("out")).expect("fixture out directory removed");
-    create_windows_junction(&workspace.join("out"), &outside);
-
-    let err = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect_err("junction summary ancestor must fail");
-
-    assert_denied(
-        err,
-        core_policy::DenyReasonCode::SymlinkEscapeDenied,
-        "reparse",
-    );
-    assert!(!outside.join("summary.txt").exists());
-    assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[cfg(any(unix, windows))]
 #[test]
 fn own_script_internal_directory_alias_cannot_escape_writable_mount() {
     let workspace = workspace_copy("hello-flow");
@@ -434,7 +407,7 @@ fn own_script_internal_directory_alias_cannot_escape_writable_mount() {
         .expect("own-script plan compiles")
         .expect("own-script plan writes output");
     let anchored_workspace = AnchoredDir::workspace(&workspace).expect("workspace anchors");
-    let expected_alias = if cfg!(windows) { "reparse" } else { "symlink" };
+    let expected_alias = "symlink";
 
     let preflight_err = preflight_own_script_outputs(&anchored_workspace, Some(&write))
         .expect_err("preflight rejects the aliased write ancestor");
@@ -454,7 +427,6 @@ fn own_script_internal_directory_alias_cannot_escape_writable_mount() {
     assert!(!workspace.join("private/summary.txt").exists());
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn run_flow_rejects_hardlinked_summary_leaf_without_side_effects() {
     let workspace = workspace_copy("hello-flow");
@@ -473,30 +445,4 @@ fn run_flow_rejects_hardlinked_summary_leaf_without_side_effects() {
         "outside\n"
     );
     assert_no_session_artifacts(&workspace, "hello-flow");
-}
-
-#[cfg(not(any(unix, windows)))]
-#[test]
-fn run_flow_replaces_hardlinked_summary_leaf_without_modifying_link_target_when_link_count_unverified()
- {
-    let workspace = workspace_copy("hello-flow");
-    fs::create_dir_all(workspace.join("out")).expect("out dir");
-    let outside = empty_workspace("outside-summary-hardlink-unverified");
-    let outside_target = outside.join("summary.txt");
-    fs::write(&outside_target, "outside\n").expect("outside target written");
-    let summary_path = workspace.join("out/summary.txt");
-    fs::hard_link(&outside_target, &summary_path).expect("summary hard link");
-
-    let output = run_flow(&workspace, "hello-flow", EmitMode::Jsonl)
-        .expect("unverifiable hardlink is safely replaced");
-
-    assert!(!output.failed);
-    assert_eq!(
-        fs::read_to_string(&outside_target).expect("outside target readable"),
-        "outside\n"
-    );
-    assert_eq!(
-        fs::read_to_string(&summary_path).expect("summary is replaced"),
-        "hello\n"
-    );
 }

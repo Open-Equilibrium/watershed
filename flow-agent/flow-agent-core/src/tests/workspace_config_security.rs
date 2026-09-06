@@ -40,7 +40,7 @@ fn global_configuration_is_the_only_implicit_flow_authority() {
         "model: forbidden\ncredentials: forbidden\n",
     )
     .expect("workspace instructions are written");
-    let home = open_flow_agent_home(false, true)
+    let home = open_flow_agent_home(false)
         .expect("global home opens")
         .expect("global home exists");
     let anchored_workspace = AnchoredWorkspace::open(&workspace).expect("workspace anchors");
@@ -92,7 +92,6 @@ fn unfinished_global_initialization_fails_before_session_mutation() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn inaccessible_ambient_workspace_config_is_never_probed() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -108,7 +107,6 @@ fn inaccessible_ambient_workspace_config_is_never_probed() {
     assert!(!output.failed);
 }
 
-#[cfg(unix)]
 #[test]
 fn inaccessible_global_config_fails_before_session_mutation() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -495,7 +493,6 @@ fn global_config_missing_fails_closed() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn global_config_rejects_symlinked_config_file() {
     use std::os::unix::fs::symlink;
@@ -512,7 +509,6 @@ fn global_config_rejects_symlinked_config_file() {
     assert!(matches!(err, RuntimeError::Protocol(message) if message.contains("symlink")));
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn global_config_rejects_hardlinked_config_file() {
     let _workspace = workspace_copy("hello-flow");
@@ -531,7 +527,6 @@ fn global_config_rejects_hardlinked_config_file() {
     );
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn global_config_rejects_linked_home_directory() {
     let global_home = absent_global_home();

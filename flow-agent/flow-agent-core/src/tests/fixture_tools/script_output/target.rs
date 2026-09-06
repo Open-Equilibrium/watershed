@@ -1,15 +1,11 @@
-#[cfg(unix)]
 use super::super::super::helpers::empty_workspace;
 use super::super::super::{helpers::fixture_runtime_policy, support::assert_denied};
 use crate::runtime::fixture_tools::validate_script_write_target;
-#[cfg(unix)]
 use crate::runtime::{
     fixture_tools::anchored_workspace_write_path, fs_guards::with_anchored_replacement_temp,
 };
-#[cfg(unix)]
 use std::fs;
 
-#[cfg(unix)]
 #[test]
 fn publish_stays_bound_to_the_opened_target_directory() {
     use std::{io::Write as _, os::unix::fs::symlink};

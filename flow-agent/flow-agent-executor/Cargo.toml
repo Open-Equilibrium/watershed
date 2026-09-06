@@ -1,6 +1,7 @@
 [package]
 name = "flow-agent-executor"
 description = "Official fail-closed Flow Agent sandbox Executor."
+build = "../build.rs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

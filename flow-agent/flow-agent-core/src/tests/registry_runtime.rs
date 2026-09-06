@@ -1,7 +1,5 @@
 mod own_script;
 
-#[cfg(windows)]
-use super::helpers::create_windows_junction;
 use super::{
     helpers::{
         assert_invalid_stream, empty_workspace, fixture_runtime_policy, flow_id_for_definition,
@@ -37,7 +35,6 @@ fn registry_root_must_stay_inside_global_home() {
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }
 
-#[cfg(unix)]
 #[test]
 fn registry_root_rejects_symlinked_path_components() {
     use std::os::unix::fs::symlink;
@@ -62,33 +59,6 @@ fn registry_root_rejects_symlinked_path_components() {
         err,
         RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
             if message.contains("symlink")
-    ));
-    assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
-}
-
-#[cfg(windows)]
-#[test]
-fn registry_root_rejects_junction_path_components() {
-    let workspace = workspace_copy("smoke-flow");
-    let outside = empty_workspace("outside-registry-root-junction");
-    copy_dir(
-        &fixture_dir("smoke-flow").join("registry"),
-        &outside.join("registry"),
-    );
-    create_windows_junction(&session_home_path().join("link"), &outside);
-    fs::write(
-        session_home_path().join("config.yaml"),
-        "fixture_profile: stub-model\nregistry_root: link/registry\nstub_model: deterministic\n",
-    )
-    .expect("config rewrite succeeds");
-
-    let err = run_flow(&workspace, "smoke-flow", EmitMode::Jsonl)
-        .expect_err("junction registry root component must fail");
-
-    assert!(matches!(
-        err,
-        RuntimeError::Registry(core_script::RegistryError::UnsafePath { message, .. })
-            if message.contains("reparse")
     ));
     assert!(!crate::tests::helpers::workspace_session_dir(&workspace).exists());
 }

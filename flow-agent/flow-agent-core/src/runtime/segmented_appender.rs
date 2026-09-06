@@ -2,8 +2,6 @@
 use crate::runtime::fs_guards::{
     SegmentedJsonlLeaf, parse_segmented_jsonl_leaf, segmented_jsonl_leaf_stem,
 };
-#[cfg(windows)]
-use crate::runtime::fs_guards::{open_anchored_file_for_update, open_files_share_identity};
 use crate::runtime::{
     fs_guards::{
         AnchoredDir, AnchoredFile, AnchoredFileIdentity, anchored_file_identity,
@@ -589,20 +587,6 @@ impl SessionLogAppender {
         C: FnOnce(&mut fs::File, u64) -> io::Result<()>,
     {
         let path = current_path.diagnostic_path();
-        #[cfg(windows)]
-        let cleanup = |append_file: &mut fs::File, retained_len| {
-            let (mut cleanup_file, _) = open_anchored_file_for_update(current_path)
-                .map_err(|error| io::Error::other(error.to_string()))?;
-            if !open_files_share_identity(path, append_file, &cleanup_file)
-                .map_err(|error| io::Error::other(error.to_string()))?
-            {
-                return Err(io::Error::other(format!(
-                    "{} session log identity changed before incomplete-suffix cleanup",
-                    path.display()
-                )));
-            }
-            cleanup(&mut cleanup_file, retained_len)
-        };
         append_native_event_batch_with(
             &mut self.file,
             path,
