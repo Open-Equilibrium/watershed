@@ -17,7 +17,7 @@ ACTION_PINS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "taiki-e/install-action": "e67fa11c4b9316fa714ddf0abed07a0c3143b95b",
+    "taiki-e/install-action": "7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c",
 }
 TOPIC_BRANCH_TYPES = ("feat", "fix", "docs", "test", "ci", "chore", "refactor")
 UBUNTU = "matrix.os == 'ubuntu-24.04'"
@@ -189,6 +189,18 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertEqual(ci_push_branches(workflow), ("main",))
 
     def test_feature_gated_evidence_reporters_are_registered(self) -> None:
+    def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
+        workflow = workflow_text()
+        assert_step_state(self, workflow, "Install pinned Corepack")
+        self.assertRegex(
+            step_run(workflow, "Install pinned Corepack"),
+            r"\Anpm install --global corepack@\d+\.\d+\.\d+\Z",
+        )
+        self.assertLess(
+            workflow.index("      - name: Install pinned Corepack"),
+            workflow.index("      - name: Enable Corepack"),
+        )
+
         manifest = tomllib.loads(
             (ROOT / "flow-agent" / "flow-agent-core" / "Cargo.toml").read_text(
                 encoding="utf-8"
@@ -234,7 +246,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "documentation gates (HTML rendering and link-manifest generation)",
             "the Node advisory audit",
             "the Rust test-isolation runner",
-            "`pnpm audit --lockfile-only`",
+            "`pnpm audit`",
             "`cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`",
         ):
             self.assertIn(contract, testing)
@@ -255,7 +267,7 @@ class CiWorkflowContractTest(unittest.TestCase):
             "Check lints": "cargo clippy --locked --workspace --all-targets --all-features -- -D warnings",
             "Check RustSec advisories": "cargo audit",
             "Check dependency policy": "cargo deny check",
-            "Check Node advisories": "pnpm audit --lockfile-only",
+            "Check Node advisories": "pnpm audit",
             "Render HTML docs": "pnpm run docs:render-check",
         }
         for name, command in commands.items():

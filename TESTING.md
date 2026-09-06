@@ -93,9 +93,11 @@ The same metrics AgentPulse reports (rework ratio, first-attempt success rate, c
 
 Node is a dev/CI-only toolchain for documentation gates (HTML rendering and link-manifest generation), the Node advisory audit, the runtime package review gate, the Rust test-isolation runner and the cross-platform Python launcher. [`.node-version`](.node-version) is the canonical Node version; `package.json#packageManager` pins pnpm. Watershed and Flow Agent have no Node product-runtime dependency.
 
+Repository tooling requires Python 3.11 or newer for its standard-library TOML parser. The launcher verifies this before running a script and reports missing prerequisites without installing them.
+
 ## CI
 
 - Run on Linux + macOS + Windows.
-- Mandatory gates: `rustfmt --check` over every tracked Rust source, `cargo clippy`, `cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'`, `cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`, complete Flow Agent performance-evidence artifacts, the M1 coverage gate, `cargo audit` + `cargo deny`, `pnpm audit --lockfile-only`, and the `lychee` docs link + HTML render checks.
+- Mandatory gates: `rustfmt --check` over every tracked Rust source, `cargo clippy`, `cargo nextest run --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'`, `cargo --config .cargo/test-isolation.toml test --locked --workspace --all-features --doc`, complete Flow Agent performance-evidence artifacts, the M1 coverage gate, `cargo audit` + `cargo deny`, `pnpm audit`, and the `lychee` docs link + HTML render checks.
 - If Windows cannot run llvm-cov because the Rust GNU profiler runtime is unavailable, verify the pushed branch's `Check line coverage` CI jobs with `gh`; do not add wrapper or WSL workaround code.
 - Block merge on any mandatory gate failure, including performance-evidence integrity and platform sandbox/parity checks; observed timing, throughput or RSS values do not fail the gate.

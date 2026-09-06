@@ -112,7 +112,7 @@ This is Liquid's **workspace** action history (over Liquid's own data), not a pr
 ## Plugins & supply chain
 
 - Post-M1 plugins run as **Wasmtime** modules: capability-scoped, sandboxed, with explicit grants and resource limits.
-- Dependency hygiene: committed lockfiles, exact pins and minimal dependencies; CI runs `cargo audit` (RustSec advisories), `cargo deny` (license/bans/sources/advisory policy via `deny.toml`) and `pnpm audit --lockfile-only`. `cargo vet` remains an optional later addition. Rust reduces but does not eliminate supply-chain risk (`build.rs`/proc-macros run at build time); future isolated runtimes must limit blast radius regardless of language.
+- Dependency hygiene: committed lockfiles, exact pins and minimal dependencies; CI runs `cargo audit` (RustSec advisories), `cargo deny` (license/bans/sources/advisory policy via `deny.toml`) and `pnpm audit`. `cargo vet` remains an optional later addition. Rust reduces but does not eliminate supply-chain risk (`build.rs`/proc-macros run at build time); future isolated runtimes must limit blast radius regardless of language.
 
 ## M0/M1 policy-emulation scope
 

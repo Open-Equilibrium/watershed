@@ -66,7 +66,7 @@ jobs:
           }
 
       - name: Install gate tools
-        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b # v2.87.4
+        uses: taiki-e/install-action@7b8d4719ee4aaa279bdf55df38dacb9ebfe12a6c # v2.87.6
         with:
           tool: cargo-nextest@0.9.143,cargo-llvm-cov@0.9.0,cargo-audit@0.22.2,cargo-deny@0.20.2,lychee@0.24.2
 
@@ -481,10 +481,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Check Node advisories
-        run: pnpm audit --lockfile-only
+        run: pnpm audit
 
       - name: Render HTML docs
         run: pnpm run docs:render-check
+      - name: Install pinned Corepack
+        run: npm install --global corepack@0.36.0
+
 
       - name: Check documentation links
         shell: pwsh
