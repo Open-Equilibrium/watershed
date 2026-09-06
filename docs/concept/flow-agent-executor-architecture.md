@@ -120,11 +120,7 @@ The backend uses stock Ubuntu Bubblewrap and preserves the verified mount identi
 
 ## Supported matrix
 
-| Target | Official behavior |
-|---|---|
-| Ubuntu 24.04 x64 | Stock Bubblewrap namespaces and exact mounts plus seccomp; transient systemd user scope; delegated cgroup-v2 PIDs leaf with reliable capacity and cleanup evidence; isolated Tool network namespace; deny all. |
-| macOS | Productive Tool execution fails closed. Reconsider only after a post-M1.2 review proves supported controls that prevent or contain process creation and guarantee descendant teardown without private-API debt. |
-| Windows and other targets | Productive Tool execution fails closed before Executor selection or Tool spawn. Custom Executors are not enabled. |
+The per-product matrix, native Release 1 requirements and current capability status are canonical in [PLATFORMS.md](../../PLATFORMS.md). The Ubuntu backend described here is implemented; the required macOS native backend is not yet available. A release target does not enable Tool execution before its boundary is proven.
 
 Positive Tool egress remains disabled. Provider traffic is not Tool egress.
 

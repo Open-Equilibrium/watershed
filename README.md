@@ -6,6 +6,8 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 **M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). Productive Tools use the one-shot Executor boundary; Ubuntu 24.04 x64 is the only productive platform, including for Custom Executors, and other platforms fail closed.
 
+[PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
+
 ## Repo layout
 
 ```
@@ -102,6 +104,7 @@ Sequencing and the MVP project-code VCS boundary are canonical in [PLAN.md](PLAN
 - **Why & how it fits together:** [VISION.md](VISION.md)
 - **Build plan & milestones:** [PLAN.md](PLAN.md)
 - **Current implementation architecture:** [docs/architecture.md](docs/architecture.md)
+- **Platform targets and available capabilities:** [PLATFORMS.md](PLATFORMS.md)
 - **Executor and Sandbox architecture:** [docs/concept/flow-agent-executor-architecture.md](docs/concept/flow-agent-executor-architecture.md)
 - **Rules for AI/human contributors:** [AGENTS.md](AGENTS.md)
 - **Open decisions (human decision page):** [docs/decisions/open-decisions.html](docs/decisions/open-decisions.html)

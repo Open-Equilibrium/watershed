@@ -33,14 +33,6 @@
         <p><strong>Recommendation:</strong> Keep block-all until one approach is selected and proven.</p>
         <p><strong>Acceptance criterion:</strong> Record the backend and runner, then pass a finite matrix for allowed and denied TCP/UDP CIDR/port rules, DNS, DoH, DoT, child processes and indirect connection attempts before enabling any positive grant.</p>
       </article>
-      <article id="d-047" class="decision">
-        <h3>D-047 - Windows Process Isolation</h3>
-        <p><strong>Status:</strong> Open, post-M1.2 blocker before Windows productive Tool support; Windows is outside the M1.2 MVP.</p>
-        <p><strong>Question:</strong> Which Windows enforcement boundary must Flow Agent use so real Tool processes and their children cannot exceed the declared filesystem, network and process policy?</p>
-        <ul><li><strong>A:</strong> Build a native boundary from restricted tokens or AppContainer, Job Objects, filesystem ACLs and enforceable network controls. Pro: native integration and lower steady-state overhead. Con: several mechanisms must compose correctly and parity is difficult to prove.</li><li><strong>B:</strong> Run Tools in a managed Hyper-V, Windows Sandbox or equivalent isolated environment. Pro: a stronger coarse boundary. Con: higher startup cost, optional host features and more file/network plumbing.</li><li><strong>C:</strong> Keep Windows productive Tool execution fail-closed until either A or B is proven. Pro: makes no unsupported parity claim. Con: productive execution remains unavailable on Windows.</li></ul>
-        <p><strong>Recommendation:</strong> Use C as the post-M1.2 posture while prototyping A; select A or B only after the same automated negative matrix proves read, write, network, process, child-process, policy-artifact parity and fail-closed behavior on the documented Windows runner.</p>
-        <p><strong>Acceptance criterion:</strong> Record the selected backend and runner, then pass that finite matrix before enabling Windows productive Tool execution or claiming platform parity.</p>
-      </article>
     </div>
   </section>
 
@@ -81,7 +73,7 @@
         <p><strong>Question:</strong> Should Meta-Harness reuse HerdR for host-local terminals, whole CLI agent processes and session persistence while retaining policy, normalized records, shared config, schedules, audit and AgentPulse? This boundary is unrelated to Flow's Executor protocol and does not manage Flow Tool Sandboxes.</p>
         <ul><li><strong>A:</strong> Integrate HerdR as an optional Meta-Harness agent executor through its versioned CLI/socket API. Pro: reuses terminal multiplexing, process persistence, agent detection and remote attachment while preserving Meta-Harness boundaries. Con: requires stable identity mapping, failure recovery and a maintained adapter.</li><li><strong>B:</strong> Require HerdR as the runtime for all external CLI agents. Pro: one execution path and an existing terminal UI. Con: couples M2 availability and semantics to HerdR's platform support, protocol and roadmap.</li><li><strong>C:</strong> Build the Meta-Harness agent executor independently and use HerdR only as a comparison. Pro: complete control over the CLI-process boundary. Con: duplicates substantial terminal, process and persistence work.</li></ul>
         <p><strong>Recommendation:</strong> A behind a backend-neutral Meta-Harness agent-executor contract, subject to a bounded integration spike; keep direct semantic adapters where they provide richer events.</p>
-        <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported Linux, macOS or Windows capabilities.</p>
+        <p><strong>Acceptance criterion:</strong> The spike starts, steers, observes and restores Codex plus one other CLI agent without an attached HerdR UI; preserves stable Meta-Harness session identity across detach and service restarts; routes every mutation through the Meta-Harness policy/audit gate; normalizes HerdR events without treating terminal inference as semantic truth; rejects cross-host process claims; and documents fail-closed behavior for unsupported capabilities on the native targets in <a href="../../PLATFORMS.md">PLATFORMS.md</a>.</p>
       </article>
     </div>
   </section>

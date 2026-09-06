@@ -2,6 +2,8 @@
 
 Cross-cutting security model for all tools. Do not re-decide these per tool.
 
+Product targets, available capabilities and native release requirements are canonical in [PLATFORMS.md](PLATFORMS.md). A release target never enables an unproven execution boundary.
+
 ## Reporting a vulnerability
 
 Report suspected vulnerabilities privately to **b-weber@gmx.at** — please do not open public issues for security problems. Include reproduction steps and affected files/components where possible. Reports are handled on a **best-effort basis**: this project gives **no guarantees** of response time, fixes, or any warranty of any kind; the software is provided "as is" (see `LICENSE`, AGPL-3.0-only §15–16). Coordinated disclosure is appreciated.
@@ -29,6 +31,8 @@ Provider connections stay in Flow Agent outside the Tool Sandbox; Tool deny-all 
 Building Blocks, provider output and Workspace-local files cannot select or replace an Executor. A missing, incompatible, unsupported or failed Executor/backend prevents productive Tool spawn and has no fallback or escalation path. The Fixture executor remains available for deterministic tests and carries no OS-isolation claim. [`PROTOCOL.md`](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162) owns the process contract; the [architecture concept](docs/concept/flow-agent-executor-architecture.md) explains the responsibility split.
 
 Because scripts are human-reviewable security/capability artifacts, they pass through one private `core-script` Safe-YAML parser into one unambiguous model (ADR-0031, ADR-0061). It accepts one YAML 1.2 document and rejects duplicate or merge keys, anchors, aliases, explicit tags, nulls, unknown fields and configured resource-budget violations; there is no fallback parser. The checked-in JSON Schema files document the intended shape, existing semantic and registry validation remains authoritative, and the Flow Agent V-Spec defines canonical bytes.
+
+Installation distributes prebuilt artifacts and makes ordinary package dependencies explicit. Missing kernel capabilities, a user manager, delegation or host security policy must produce an actionable failure, not an automatic kernel/systemd upgrade, AppArmor/sysctl change, service activation or lingering configuration. Administrators decide and apply host-wide changes separately. The installer must not treat installation authority as permission to weaken isolation, and product execution remains unprivileged.
 
 Registry access starts from one opened capability for the Global Flow home. Loading opens every registry directory and YAML leaf without following links. M1.1 authoring must open or create each component relative to its already-open parent without following symbolic links or Windows reparse points, use exclusive no-replace creation, and verify the opened object's type and identity before descent; it never follows a successful path check with an ambient path reopen. Linux and macOS are the primary targets; the private boundary remains portable to Windows (ADR-0063, ADR-0064).
 
