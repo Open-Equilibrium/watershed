@@ -79,6 +79,8 @@ The dev-only [native probe](scripts/probe-macos-self-protection.py) exercises di
 
 CI can run this experiment on the selected branch with `gh workflow run ci.yml --ref <topic-branch> -f mac_self_protection_evaluation=true`; every normal gate remains enabled. Retain the exact source revision and probe-step results. These initial filesystem cases do not test native build/Metal workloads, supported Apple API stability, signed distribution or the complete protected-object contract in D-063. A separate shipping decision and full native acceptance remain mandatory even if the probe passes.
 
+**Native observation, 2026-09-07:** [CI run 34126835476, Mac job 101757384600](https://github.com/Open-Equilibrium/watershed/actions/runs/34126835476/job/101757384600) tested source `dcfc439fbebe501d9efbf8907fa0e1663c984d19` on macOS 26.6.2 ARM64, Darwin 25.6.0. The unprotected control completed all seven mutations and the permitted scratch write (expected exit 1). The profile allowed scratch writes and denied direct write/delete/replacement, a newly started child's write and a symlink alias write. Pre-existing hardlink-alias writes and inherited writable-handle writes still changed the protected fixture: profile exit 1, six cases passed and two violated the target. This disproves the simple path-only profile as a sufficient boundary, not every possible native design. No expectations were weakened; D-063 remains open.
+
 ### Current legacy evidence
 
 - **Continuous testability:** every Fixture test remains runnable without a Default Sandbox Executor and makes no OS-isolation claim. Productive Tool tests exercise the Executor protocol or the official Ubuntu backend; they never substitute Fixture emulation for isolation evidence.
