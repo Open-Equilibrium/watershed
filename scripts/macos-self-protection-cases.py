@@ -88,7 +88,7 @@ result.write_text(json.dumps(observations))
 def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
     import pty  # Native call site only; the admission tests also run on Windows.
 
-    homes = [root / "owner" / "homes" / name for name in ("first", "second")]
+    homes = [root / "owner" / "homes" / name for name in ("first", 'second "quoted"\\slash-\u2603\nline')]
     store, project, bin_dir = root / "platform-store", root / "project", root / "bin"
     for directory in [*homes, store, project, bin_dir]: directory.mkdir(parents=True)
     files = [bin_dir / name for name in ("flow", "flow-executor", "custom-executor")]
@@ -131,9 +131,10 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
     inventory_before = admit(roots, files)
     command = [sys.executable, "-c", OPERATIONS, str(plan), str(result), str(ready), str(release)]
     if guarded:
-        policy = project / "policy.sb"
-        policy.write_text(probe.profile(homes[0], True, roots[1:], files, [terminal]), encoding="utf-8")
-        command = [str(probe.SANDBOX_EXEC), "-f", str(policy), *command]
+        policy, parameters = project / "policy.sb", {}
+        policy.write_text(probe.profile(homes[0], True, roots[1:], files, [terminal], parameters), encoding="utf-8")
+        bindings = [argument for key, value in parameters.items() for argument in ("-D", f"{key}={value}")]
+        command = [str(probe.SANDBOX_EXEC), *bindings, "-f", str(policy), *command]
     child = None
     try:
         with (project / "child.log").open("wb") as log:
@@ -175,7 +176,46 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
         os.close(slave); os.close(master)
 
 
+DETACHED = r"""
+import json, os, sys, time
+from pathlib import Path
+target, release, result = map(Path, sys.argv[1:])
+if os.fork(): raise SystemExit(0)
+os.setsid()
+deadline = time.monotonic() + 5
+while not release.exists():
+    if time.monotonic() >= deadline: os._exit(72)
+    time.sleep(.01)
+try: target.write_bytes(b'changed-by-probe\n')
+except OSError as error: state = {'state':'error', 'errno':error.errno}
+else: state = {'state':'ok'}
+result.write_text(json.dumps(state))
+os._exit(0)
+"""
+
+
+def detached(probe, root: Path, guarded: bool) -> dict:
+    data = probe.fixture(root, "detached")
+    release, result = data["scratch"] / "release", data["scratch"] / "result.json"
+    command = [sys.executable, "-c", DETACHED, str(data["file"]), str(release), str(result)]
+    if guarded:
+        policy = data["scratch"] / "policy.sb"
+        policy.write_text(probe.profile(data["protected"], True), encoding="utf-8")
+        command = [str(probe.SANDBOX_EXEC), "-f", str(policy), *command]
+    leader = probe.invoke(command, data["scratch"], data["scratch"] / "leader.log")
+    # The actual Tool-root exit is observed before the helper may attempt its write.
+    if leader.get("returncode") != 0 or leader.get("timeout"):
+        return {"case": "helper_after_parent_exit", "outcome": "failure", "leader": leader}
+    release.write_bytes(b"parent-exited")
+    deadline = time.monotonic() + 5
+    while not result.exists() and time.monotonic() < deadline: time.sleep(.01)
+    child, intact = probe.read_marker(result), probe.unchanged(data["file"])
+    passed = child == {"state": "error", "errno": errno.EPERM} and intact if guarded else child == {"state": "ok"} and not intact
+    return {"case": "helper_after_parent_exit", "outcome": "pass" if passed else "violation" if child else "failure",
+            "leader_exit": leader["returncode"], "child": child, "protected_intact": intact}
+
+
 def run(probe, root: Path, guarded: bool) -> list[dict]:
-    try: return lifecycle(probe, root, guarded)
+    try: return lifecycle(probe, root, guarded) + [detached(probe, root, guarded)]
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         return [{"case": "lifecycle", "outcome": "failure", "detail": str(error)}]

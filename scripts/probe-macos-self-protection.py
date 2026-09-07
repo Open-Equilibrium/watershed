@@ -88,8 +88,11 @@ test "$write_status" -eq "$4"
 
 
 def profile(protected_root: Path, protect_ancestors: bool = False,
-            additional_roots=(), files=(), read_denied=()) -> str:
-    quote = lambda path: json.dumps(str(path), ensure_ascii=False)
+            additional_roots=(), files=(), read_denied=(), parameters=None) -> str:
+    def quote(path):
+        if parameters is None: return json.dumps(str(path), ensure_ascii=False)
+        key = f"PATH_{len(parameters)}"; parameters[key] = str(path)
+        return f'(param "{key}")'
     roots = [protected_root, *additional_roots]
     policy = "(version 1)\n(allow default)\n"
     for root in roots: policy += "(deny file-write* (subpath %s))\n" % quote(root)
