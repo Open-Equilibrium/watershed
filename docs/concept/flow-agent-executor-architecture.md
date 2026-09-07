@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-**Status: accepted replacement architecture, not implemented (ADR-0166/ADR-0167).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. The bounded Mac feasibility evaluation and initial configuration scope are authorized; [D-063](../decisions/open-decisions.html#d-063) still blocks shipping-mechanism selection and configuration-transaction implementation. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
+**Status: accepted replacement architecture, not implemented (ADR-0166–ADR-0168).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. The bounded Mac feasibility evaluation and initial configuration review lifecycle are authorized; [D-063](../decisions/open-decisions.html#d-063) still blocks shipping-mechanism and protected-object selection. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
 
 ## Responsibility and architecture
 
@@ -91,14 +91,14 @@ flowchart TD
   Policy -->|deny| Reject
   Policy -->|ask| Review["Authorized person reviews exact change"]
   Review -->|Rejected| Reject
-  Review -->|No authorized answer| Unanswered["No mutation; pending or failure rules remain D-063"]
+  Review -->|No answer within five minutes or channel lost| Unanswered["Reject; end requesting Run; no pending approval queue"]
   Review -->|Approved| Recheck["Revalidate change, authority and base version"]
   Policy -->|allow| Recheck
   Recheck -->|Mismatch or forbidden authority change| Reject
   Recheck -->|Valid| Apply["Flow applies and records change"]
 ```
 
-Ordinary assigned Tool execution still does not require a prompt. `ask` applies to the explicit configuration request, not arbitrary filesystem calls. `allow` remains a scoped permission, not a writable mount of the Flow home. No actor can approve more than the configured scope. Credential values must not appear in the review. The approved [initial field catalog and local-owner scope](../../SECURITY.md#configuration-and-migration-boundary) do not select an approval surface or unanswered-request protocol; those remain D-063 choices. The diagram introduces no CLI command, socket or new service contract.
+Ordinary assigned Tool execution still does not require a prompt. `ask` applies to the explicit configuration request, not arbitrary filesystem calls. `allow` remains a scoped permission, not a writable mount of the Flow home. No actor can approve more than the configured scope. Credential values must not appear in the review. The approved [catalog and terminal review lifecycle](../../SECURITY.md#configuration-and-migration-boundary) run after Tool completion; JSONL, redirected-input and unattended Runs reject `ask`. The diagram introduces no socket or new service contract.
 
 ### 4. Changed or replayed approval
 
@@ -121,7 +121,7 @@ sequenceDiagram
   Note over F: Existing Run retains its established authority
 ```
 
-A request that raises the requesting Tool's own permission is forbidden even if another mutable setting appears harmless. Concurrent configuration edits, duplicate requests and crashes need a finite transaction/recovery design before implementation. Existing durable-attempt rules forbid automatic repetition when an effect is uncertain; they do not by themselves define the new approval storage or protocol.
+A request that raises the requesting Tool's own permission is forbidden even if another mutable setting appears harmless. The accepted lifecycle rejects version conflicts and reused consent, changes future Runs only and retains no pending approval after restart. Native channel protection and transaction/crash tests remain implementation acceptance, not completed evidence.
 
 ### 5. Compromised Tool
 
@@ -218,4 +218,4 @@ An outer container, VM or sandbox can add filesystem, network or resource limits
 
 The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
 
-D-063 must close the concrete OS mechanism, protected-object identity rules and configuration transaction/approval surface before a coherent schema/runtime/fixture migration. Native tests must then cover each in-scope outcome above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, conflicting or stale consent, missing protection, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).
+D-063 must close the concrete OS mechanism and protected-object identity rules before a coherent schema/runtime/fixture migration; the configuration review lifecycle is accepted in ADR-0168. Native tests must then cover each in-scope outcome above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, conflicting or stale consent, missing protection, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).

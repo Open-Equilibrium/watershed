@@ -121,7 +121,7 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Status:** The legacy Ubuntu runtime is implemented. Its broad isolation contract is superseded as the release target by ADR-0166, whose native mechanism and configuration-change transaction remain blocked by [D-063](docs/decisions/open-decisions.html#d-063). The prebuilt download installer remains incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and ordered repository closeout remain pending. This entry updates status, not the separate three-workstream development plan.
+**Status:** The legacy Ubuntu runtime is implemented. Its broad isolation contract is superseded as the release target by ADR-0166. Native mechanism/protected-object selection remains blocked by [D-063](docs/decisions/open-decisions.html#d-063); the configuration review lifecycle is accepted in ADR-0168, not implemented. The prebuilt download installer remains incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and ordered repository closeout remain pending. This entry updates status, not the separate three-workstream development plan.
 
 **Current implementation:** The one-shot Default Executor, administrator-owned Custom selection, exact mounts/runtime-read profiles, deny-all Tool networking, systemd/cgroup capacity and enforcement receipt are canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162). [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns their existing executable evidence. Do not describe those fields as the future cross-platform guarantee.
 
