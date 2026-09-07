@@ -1,6 +1,6 @@
 # Current implementation architecture
 
-These diagrams map the Rust workspace and major Flow Agent responsibility paths. The [Flow Agent Executor architecture](concept/flow-agent-executor-architecture.md) explains the M1.2 isolation design. Product topology is canonical in [`VISION.md`](../VISION.md); runtime behavior and storage contracts are canonical in [`PROTOCOL.md`](../PROTOCOL.md). Security and evidence remain in [`SECURITY.md`](../SECURITY.md) and [`TESTING.md`](../TESTING.md).
+These diagrams map the Rust workspace and major Flow Agent responsibility paths. The [Flow Agent Executor architecture](concept/flow-agent-executor-architecture.md) explains the approved replacement security target and its difference from the current implementation mapped here. Product topology is canonical in [`VISION.md`](../VISION.md); runtime behavior and storage contracts are canonical in [`PROTOCOL.md`](../PROTOCOL.md). Security and evidence remain in [`SECURITY.md`](../SECURITY.md) and [`TESTING.md`](../TESTING.md).
 
 ## Rust workspace crates
 
@@ -44,7 +44,7 @@ flowchart TD
   B --> T[Tool process and descendants]
 ```
 
-The Fixture path is deterministic and in process and makes no OS-isolation claim. Productive Tool execution uses the one-shot Executor contract and fails closed outside Ubuntu. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md).
+The Fixture path is deterministic and in process and makes no OS-isolation claim. Current legacy productive Tool execution uses the one-shot Executor contract and fails closed outside Ubuntu; the accepted replacement remains unimplemented. Provider-only Flows have a separate [platform boundary](../PLATFORMS.md).
 
 ### Persistence and inputs
 

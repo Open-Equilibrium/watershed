@@ -4,7 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). Productive Tools use the one-shot Executor boundary; Ubuntu 24.04 x64 is the only productive Tool platform, including for Custom Executors, and Tool execution on other platforms fails closed.
+**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). The current legacy implementation runs productive Tools only on Ubuntu 24.04 x64, including Custom Executors; other platforms fail closed. The approved, unimplemented replacement is [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) on Linux x86_64 and macOS ARM64. Concrete implementation decisions remain [D-063](docs/decisions/open-decisions.html#d-063).
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
 
@@ -89,11 +89,11 @@ sudo /bin/sh "$install_bundle/install.sh" \
 
 Set `FLOW_AGENT_HOME` to an unused absolute path before exercising local authoring or runtime state. Workspace layout is illustrated in [`docs/concept/V-Spec_FlowAgent.html`](docs/concept/V-Spec_FlowAgent.html). [`PROTOCOL.md`](PROTOCOL.md) defines Registry authoring; the [registry schema](core/core-script/schemas/registry-block.schema.json) documents its intended field/type shape. Checked-in deterministic examples live under [`flow-agent/fixtures/`](flow-agent/fixtures/) and make no provider, subprocess or isolation claim.
 
-For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. The standard Ubuntu installation resolves its sibling `flow-executor`; `flow executor check` reports readiness. Agentic Engineers define each Flow's Tools, exact mounts and runtime-read profile; other users may run those predefined Flows without gaining an escalation surface. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
+For productive execution, initialize the Global Flow home with `flow init`, configure its provider and model through the V-Spec, inspect authoring grammar with `flow create <tool|instruction|phase|flow> --help`, authenticate through the commands in [PROTOCOL.md](PROTOCOL.md), then run the authored Flow. The standard Ubuntu installation resolves its sibling `flow-executor`; `flow executor check` reports readiness. In this legacy implementation, Engineers configure Tools, exact mounts and runtime-read profiles; those fields are not the approved replacement schema. The [security contract](SECURITY.md#m12-tool-execution-trust-boundary) owns the productive boundary.
 
 The Global Flow home and its configuration authority are defined in [PROTOCOL.md](PROTOCOL.md#local-run-storage-and-m11-conversation-trees).
 
-The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Productive Tool networking is deny-all; positive grants remain deferred.
+The complete command, storage and Executor contract is in [`PROTOCOL.md`](PROTOCOL.md). Current legacy Tool networking is deny-all. The approved replacement does not promise general network containment; Engineers must trust Tool implementations and their dependency/delegation chains.
 
 ## Product boundaries
 

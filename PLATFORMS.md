@@ -2,10 +2,12 @@
 
 Support is a product-and-capability contract, not a workspace-wide compilation claim. Release 1 requires native execution and verification on the targets below; a target in this table is not evidence that its implementation is available today.
 
+Flow Agent's accepted replacement boundary is [trusted Tools with mandatory native self-protection](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166), not general hostile-Tool containment. Its implementation and configuration-change protocol remain blocked by [D-063](docs/decisions/open-decisions.html#d-063). The existing Ubuntu Sandbox remains the legacy implementation until a coherent migration; it is not the future cross-platform security promise.
+
 | Product / capability | Release 1 native targets | Current implementation |
 |---|---|---|
 | Flow Agent authoring, Fixture execution and provider-only Flows | Linux x86_64; macOS ARM64 | Implemented; productive provider execution is restricted to Ubuntu 24.04 and macOS 26. |
-| Flow Agent Default Executor and Tool Sandbox | Linux x86_64; macOS ARM64 | Ubuntu 24.04 only. macOS Tool execution fails closed; its native backend and proof remain required before Release 1. |
+| Flow Agent Tool execution with mandatory self-protection | Linux x86_64; macOS ARM64 | Replacement not implemented. Legacy Ubuntu 24.04 Sandbox only; macOS Tool execution fails closed. Both native replacement boundaries require proof before the first Flow Agent release. |
 | Meta-Harness CLI, service and host-local agent control | Linux x86_64; macOS ARM64 | Not implemented. |
 | Liquid desktop client | Linux x86_64; macOS ARM64; Windows 11 x86_64 | Not implemented. |
 
@@ -23,4 +25,4 @@ On Windows 11 x86_64, users may access a supported remote host or use a Linux x8
 
 ## Evidence before a support claim
 
-Each native Executor must prove its declared filesystem, network, process/thread-capacity and descendant-cleanup guarantees, including cancellation and Executor failure, through the real boundary. Unsupported capabilities fail before Tool launch; no weaker backend, private-API workaround or parity claim is inferred from the platform target. [SECURITY.md](SECURITY.md) owns the invariants; [TESTING.md](TESTING.md) owns verification. The proposed Mac-specific contract is open in [D-063](docs/decisions/open-decisions.html#d-063) and changes no current guarantee. Release 1 remains blocked until both required native Executors are implemented and verified.
+Each native Executor must prove the exact [accepted security contract](SECURITY.md#accepted-flow-agent-security-target), including direct-write protection inherited by Tool children, controlled configuration changes and truthful cancellation/failure reporting. General network containment, exact mount equivalence, preventive process/thread ceilings and hostile crash cleanup are no longer required release guarantees. Unsupported protection fails before Tool launch; neither a private-API workaround nor a weaker fallback is inferred from the platform target. [D-063](docs/decisions/open-decisions.html#d-063) owns the remaining mechanism decisions and [TESTING.md](TESTING.md) owns evidence. Both native replacement implementations must be verified before the first Flow Agent release. An external sandbox needs separate nested-compatibility evidence; it cannot substitute for Flow's own readiness or establish platform support.

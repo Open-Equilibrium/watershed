@@ -1,152 +1,221 @@
-# Flow Agent Executor and Sandbox architecture
+# Flow Agent execution and security architecture
 
-This document explains the accepted M1.2 design. Normative milestone scope lives in [`PLAN.md`](../../PLAN.md), wire behavior in [`PROTOCOL.md`](../../PROTOCOL.md), security invariants in [`SECURITY.md`](../../SECURITY.md), evidence in [`TESTING.md`](../../TESTING.md), and terms in [`GLOSSARY.md`](../../GLOSSARY.md).
+**Status: accepted replacement architecture, not implemented (ADR-0166).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. [D-063](../decisions/open-decisions.html#d-063) blocks the native mechanism and configuration-transaction implementation. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
 
-## Decision in one minute
+## Responsibility and architecture
 
-Flow Agent validates a Tool request and compiles its policy. One short-lived Executor translates that policy and manages one Tool process tree in a fresh Sandbox. The Sandbox backend constructs the operating-system boundary. Provider traffic remains in Flow Agent, outside the Tool Sandbox.
+Flow Agent controls the workflow; the Executor starts and supervises a Tool; the native boundary protects Flow-owned files from direct Tool/child writes. Engineers trust Tool code and everything it executes or delegates to. These are separate responsibilities, not interchangeable layers of certification.
 
-The standard installation supplies an official, statically linked `flow-executor` sibling. An administrator may explicitly omit it or select an absolute Custom Executor override. Building Blocks, Flow users, providers, Tools, Workspaces and environment variables cannot select or replace the Executor. Failure never chooses a weaker path.
-
-The official productive M1.2 backend is stock Bubblewrap plus seccomp inside a transient systemd user scope with a delegated cgroup-v2 PIDs controller on Ubuntu 24.04 x64. The required host interfaces are probed directly; no kernel-version guess or weaker fallback is used. All productive Tool execution, including an administrator-owned Custom Executor, is limited to that platform. macOS fails before Executor selection or Tool spawn; provider-only Flows do not use this boundary. A Custom Executor receives no Flow Agent compatibility or security guarantee.
-
-## Responsibility split
+| Component | Responsibility | Not its promise |
+|---|---|---|
+| Engineer | Select Building Blocks, trustworthy code/dependencies and explicit permission scopes. | A Tool's description or marketplace listing proves safety. |
+| Flow Agent | Validate calls and transitions, retain Run authority, handle durable effects and mediate configuration changes. | Infer all effects of arbitrary commands or make Tool results truthful. |
+| Executor | Preserve the existing short-lived companion seam, prepare mandatory protection before launch, bound transport/waiting and report observed results and cleanup. | Decide permissions, approve configuration, or certify third-party executors. |
+| Native boundary | Block direct modifications of protected Flow objects by the Tool and its children. | Contain all other host effects, independent services or privileged actors. |
+| Tool and dependency chain | Implement the admitted action correctly even for hostile inputs. | Rely on Flow to repair unsafe path handling, shell construction or delegated authority. |
+| Authorized approver | Decide the exact proposed configuration change within the Engineer's permitted scope. | Grant unlimited access, approve on behalf of a different actor, or rewrite current Run authority. |
 
 ```mermaid
 flowchart TD
-  AE[Agentic Engineer] -->|authors Tool capabilities| FA[Flow Agent]
-  U[Flow user] -->|runs predefined Flow| FA
-  FA <--> P[Provider]
-  FA -->|one bounded handshake| E[Executor]
-  A[Administrator] -->|installs or selects| E
-  E --> B[Sandbox backend]
-  B --> T[Tool process and descendants]
-  FA -. deterministic tests .-> F[Fixture executor]
-  F --> PE[Policy emulation only]
+  Engineer["Engineer: trusted definitions and change scopes"] --> Flow["Flow Agent: validate and retain authority"]
+  Model["Untrusted model request"] --> Flow
+  Flow --> Executor["Short-lived flow-executor"]
+  Executor --> Guard["Mandatory native write protection"]
+  Guard --> Tool["Tool process"]
+  Tool --> Child["New helper: inherits protection"]
+  Tool -.-> Config["Flow-owned configuration request gate"]
+  Flow --> Config
+  Person["Authorized person when ask applies"] --> Config
+  Config --> Files["Protected Flow configuration"]
+  Tool -.-> Service["Independent service: delegated authority"]
 ```
 
-| Owner | Responsibility |
+The existing `flow` / `flow-executor` separation remains useful; removing broad isolation does not require embedding every launcher in the controller. Flow owns selection and launch authorization. The companion never receives permission to let a Tool overwrite protected files. Configuration mediation belongs to Flow, not to an unrestricted privileged helper or a model-controlled replacement Executor. Current administrator-selected Custom Executors remain part of the trusted installation, without third-party certification; the replacement must not make a Custom selection an automatic protection bypass.
+
+## Security case matrix
+
+The cases partition the supported authority paths and failure classes. They are not a claim to enumerate every possible exploit or prove that an OS primitive is correct. Native acceptance must establish the general boundary and then exercise representative operations, not keep searching for spelling variants of commands.
+
+| Case | Boundary and expected outcome |
 |---|---|
-| Agentic Engineer | Select the Tool identity, parameters, exact mounts, runtime-read profile, positive process/thread capacity and deny-all network policy. |
-| Flow Agent | Validate authority, derive the selected Executor, prove readiness, compile canonical policy, persist attempt state, validate both handshake stages and fail closed. |
-| Executor | Preflight one request, wait for explicit `Start`, translate its exact capabilities, manage one Tool process tree and return a bounded Tool result or typed error. |
-| Sandbox backend | Construct and enforce filesystem, process and deny-all network isolation. |
-| Administrator | Own the installed sibling or protected Custom Executor override and assess any third-party implementation. |
+| [1. Ordinary or invalid request](#1-ordinary-or-invalid-request) | Flow accepts only a valid in-scope invocation; trusted Tool code implements its effects. |
+| [2. Direct protected write](#2-direct-protected-write) | Native denial, including child processes; no escalation or automatic retry. |
+| [3. Configuration permission](#3-configuration-permission) | Deny, ask or scoped allow; Flow applies only a concrete authorized change. |
+| [4. Changed or replayed approval](#4-changed-or-replayed-approval) | No stale consent, self-escalation or silent current-Run authority change. |
+| [5. Compromised Tool](#5-compromised-tool) | Direct protected writes remain blocked; unrelated host effects and false results are not contained. |
+| [6. Compromised new helper](#6-compromised-new-helper) | Helper inherits direct-write protection; the trusted dependency assumption is nevertheless broken. |
+| [7. Independent third-party service](#7-independent-third-party-service) | Service acts with separate authority and may bypass Flow's local write guard. |
+| [8. Missing boundary or interrupted execution](#8-missing-boundary-or-interrupted-execution) | No unprotected launch; post-launch uncertainty is not success or permission to replay. |
+| [9. Parallel agents](#9-parallel-agents) | Separate Run ownership does not serialize shared project edits or reserve host resources. |
+| [10. External sandbox](#10-external-sandbox) | Extra containment is possible only when nested prerequisites work; no fallback. |
 
-The Fixture executor remains in process, deterministic and independent of Sandbox installation. It is not a productive escape hatch and makes no isolation claim. Meta-Harness may supervise the whole `flow` CLI process but never selects or manages a Flow Tool Sandbox; Liquid has no responsibility in this boundary.
-
-## Selection and readiness
+### 1. Ordinary or invalid request
 
 ```mermaid
 flowchart TD
-  S[Resolve Flow Agent executable] --> O{Protected Custom override?}
-  O -->|yes| C[Open absolute Custom Executor]
-  O -->|no| D[Open sibling flow-executor]
-  C --> P[Probe protocol, platform, backend and runtime manifests]
-  D --> P
-  P -->|ready| R[Durably reserve productive Run]
-  P -->|failure| F[Fail without Run or Tool spawn]
+  Input["Model requests Tool with parameters"] --> Check{"Available here and valid?"}
+  Check -->|No| Reject["Reject before Tool effects"]
+  Check -->|Yes| Ready{"Mandatory native boundary ready?"}
+  Ready -->|No| Stop["Fail before launch"]
+  Ready -->|Yes| Intent["Persist intent and authorize launch"]
+  Intent --> Run["Execute trusted Tool"]
+  Run --> Result["Record bounded result"]
 ```
 
-The standard installer includes the sibling unless the administrator chooses `--no-default-executor`. `flow executor configure --path <absolute-path>` selects a protected Custom Executor override; `flow executor configure --default` removes it. Resolution never uses the Workspace, `PATH`, a shell, the working directory or provider output.
+A read Tool must enforce its own promised project scope, including links, replacement races and hostile path input relevant to its implementation. Flow's parameter validation does not inspect every later file operation. A build Tool's dependency chain includes build scripts, plugins and project code, including code the model may have edited. A correct implementation must not confuse untrusted text with new execution authority.
 
-Flow Agent probes the selected object once before durable productive Run reservation. An absent, unsafe, replaced, incompatible or unready object fails with stable diagnostics and creates no Run. Official readiness includes an active systemd user manager plus delegated cgroup-v2 capacity and cleanup evidence; installation neither enables lingering nor adds a Watershed service. A passing probe is advisory, not certification; every Tool execution still validates its enforcement receipt.
-
-On Ubuntu 24.04 x64, implementers can run the public observable-protocol check without changing their current configuration:
-
-```bash
-cargo run --locked -p flow-agent-core --features m12-startup-evidence --example custom_executor_conformance -- --executor /absolute/path/to/flow-executor
-```
-
-The isolated check probes the Custom Executor and dispatches one fixed exact-profile `/bin/echo` request. Passing is advisory evidence only; it does not certify compatibility, policy equivalence, security or operations. [`TESTING.md`](../../TESTING.md) defines the canonical coverage boundary.
-
-## One Tool invocation
+### 2. Direct protected write
 
 ```mermaid
 sequenceDiagram
+  participant T as Tool or new helper
+  participant G as Native boundary
+  participant P as Protected Flow files
   participant F as Flow Agent
-  participant S as Run store
-  participant E as Executor
-  participant C as cgroup v2
-  participant B as Bubblewrap/seccomp
-  participant T as Tool
-  F->>F: Validate Tool call and compile canonical policy
-  F->>S: Synchronize Tool intent
-  F->>E: One bounded request
-  E->>E: Validate request and policy
-  alt Preflight rejects
-    E-->>F: Stable typed preflight Error
-    F->>S: Persist terminal failure
-  else Ready
-    E-->>F: Ready (same process waits)
-    F->>S: Attempt tool.started commit
-    alt Commit fails
-      F--xE: Close without Start
-      F->>S: Intent remains uncertain
-    else Commit succeeds
-      alt Cancellation wins before Start
-        F--xE: Close without Start
-        F->>S: Persist terminal cancellation and recovery
-      else Start remains authorized
-        F->>E: Matching Start
-        E->>C: Create fresh limited Tool leaf
-        E->>B: Construct exact mounts and isolation
-        B->>T: Start Tool root in leaf
-        T-->>E: Bounded output and exit
-        E->>B: Terminate descendants and tear down
-        E->>C: Prove empty and remove leaf
-        E-->>F: Tool result and enforcement receipt
-        F->>F: Validate receipt against the policy
-        F->>S: Persist terminal result and receipt
-      end
-    end
-  end
+  T->>G: Write, delete or replace protected object
+  G-->>T: Denied, protected object unchanged
+  T-->>F: Tool result or failure
+  Note over F: No permission popup inferred from an OS error
+  Note over F: No restart with broader direct-write authority
 ```
 
-One Executor process spans the bounded handshake for one invocation. It first enters one empty transient systemd scope so the PIDs controller is delegated for that invocation; this envelope contains no Tool. A failed `tool.started` commit or cancellation before `Start` closes the waiting process without creating a Tool boundary; the canonical [durable-attempt contract](../../PROTOCOL.md#m11-codex-subscription-provider) owns the distinct recovery outcomes. Only after matching `Start` does the Executor create the limited Tool cgroup leaf and Bubblewrap boundary. The configured positive capacity counts the Tool root, every descendant and every thread; trusted Executor and Sandbox supervisor processes stay outside the leaf. Capacity exhaustion is typed from the leaf's kernel event evidence. There is no daemon, socket, persistent per-Flow Sandbox, pooled guest or remote transport. Exact request, framing, descriptor, digest and receipt rules live in the canonical [`PROTOCOL.md` process and framing contract](../../PROTOCOL.md#process-and-framing-contract).
+A direct-write block is not a whole-Tool rollback. The Tool may already have edited other files or contacted a service. A Tool may also catch an OS error and report success; the blocked write stays blocked, but Flow does not thereby know the Tool's result is truthful. The final native mechanism must cover object identity and child inheritance, not just match a path in command text. Configuration permission does not lift this guard.
 
-## Filesystem and runtime reads
+### 3. Configuration permission
 
-Each `read_only_mounts` entry becomes an exact read-only mount and each `writable_mounts` entry an exact writable mount. Flow Agent resolves and verifies sources before dispatch so later path replacement cannot redirect a mount.
+```mermaid
+flowchart TD
+  Request["Tool submits concrete configuration change"] --> Valid{"Valid target and within Engineer scope?"}
+  Valid -->|No| Reject["Reject without configuration mutation"]
+  Valid -->|Yes| Policy{"Configured policy"}
+  Policy -->|deny| Reject
+  Policy -->|ask| Review["Authorized person reviews exact change"]
+  Review -->|Rejected| Reject
+  Review -->|No authorized answer| Unanswered["No mutation; pending or failure rules remain D-063"]
+  Review -->|Approved| Recheck["Revalidate change, authority and base version"]
+  Policy -->|allow| Recheck
+  Recheck -->|Mismatch or forbidden authority change| Reject
+  Recheck -->|Valid| Apply["Flow applies and records change"]
+```
 
-Every Tool uses one runtime-read profile:
+Ordinary assigned Tool execution still does not require a prompt. `ask` applies to the explicit configuration request, not arbitrary filesystem calls. `allow` remains a scoped permission, not a writable mount of the Flow home. No actor can approve more than the configured scope. Credential values must not appear in the review. The editable-field catalog, actual approval surface and headless pending behavior remain D-063 choices; the diagram introduces no CLI command, socket or new service contract.
 
-- `exact` is the default. It exposes only the bounded executable/interpreter/library objects advertised by the administrator-owned Executor readiness response.
-- `host-system-read` is an explicit Agentic Engineer choice. It adds only the official Executor's fixed reviewed read-only Ubuntu system roots.
+### 4. Changed or replayed approval
 
-Flow selects the configured profile before compiling the policy. The Executor cannot add a runtime path afterward, and Flow users, providers and Tools cannot change or escalate the profile. The official Ubuntu Executor is statically linked, so its own bootstrap does not require broad runtime reads; a dynamic official artifact fails readiness.
+```mermaid
+sequenceDiagram
+  participant T as Tool
+  participant F as Flow Agent
+  participant U as Authorized person
+  participant C as Shared configuration
+  T->>F: Propose change A against version V
+  F->>U: Review exact A
+  U-->>F: Approve A
+  F->>C: Check expected version V and current authority
+  alt Proposal changed, base changed or approval no longer applicable
+    F-->>T: Reject, no substituted or repeated effect
+  else Exact authorized change remains valid
+    F->>C: Apply A through controlled mutation
+    F-->>T: Recorded outcome
+  end
+  Note over F: Existing Run retains its established authority
+```
 
-The backend uses stock Ubuntu Bubblewrap and preserves the verified mount identities while constructing the Tool boundary. A protected inner supervisor validates the boundary, supervises the Tool as Sandbox PID 1 and returns its terminal status. Missing or inconsistent evidence fails closed. There is no bundled Bubblewrap, Landlock-only path, broad compatibility mount or unsandboxed fallback. The canonical protocol contract linked above owns inherited-descriptor and older-Bubblewrap self-reexec mechanics.
+A request that raises the requesting Tool's own permission is forbidden even if another mutable setting appears harmless. Concurrent configuration edits, duplicate requests and crashes need a finite transaction/recovery design before implementation. Existing durable-attempt rules forbid automatic repetition when an effect is uncertain; they do not by themselves define the new approval storage or protocol.
 
-## Supported matrix
+### 5. Compromised Tool
 
-The per-product matrix, native Release 1 requirements and current capability status are canonical in [PLATFORMS.md](../../PLATFORMS.md). The Ubuntu backend described here is implemented; the required macOS native backend is not yet available. A release target does not enable Tool execution before its boundary is proven.
+```mermaid
+flowchart TD
+  Tool["Compromised Tool inside native boundary"] --> FlowWrite["Direct write to protected Flow file"]
+  FlowWrite --> Denied["Blocked by mandatory native protection"]
+  Tool --> Project["Other host files or network effects"]
+  Project --> Authority["Possible within available OS authority"]
+  Tool --> Lie["False result returned to Flow"]
+  Lie --> Untrusted["Result is not proof of correctness"]
+```
 
-Positive Tool egress remains disabled. Provider traffic is not Tool egress.
+This violates the trusted-Tool assumption. The narrow direct-write guarantee still has to work within its declared scope, but it is not a certificate that running hostile code is safe. The Tool may damage project data, read accessible secrets, exhaust resources or lie. Flow does not automatically detect compromise. If the controller, installed enforcement component or OS itself is compromised, the enforcement assumption fails as well.
 
-## Reference architectures
+### 6. Compromised new helper
 
-The cited projects informed the boundary but are neither dependencies nor support promises.
+```mermaid
+flowchart TD
+  Good["Correct Tool"] --> Launch["Starts a helper or executes project code"]
+  Launch --> Bad["Compromised code inherits native restriction"]
+  Bad --> Direct["Direct protected Flow write"]
+  Direct --> Denied["Blocked"]
+  Bad --> Other["Other effects or false output"]
+  Other --> Risk["Not generally contained by Flow"]
+```
 
-### Pi Coding Agent
+The parent being correct is insufficient: the complete executable chain must be trusted. The same reasoning applies to an imported library running inside the parent, an interpreter, a test runner or a dependency hook. A new process does not lose the direct-write restriction merely because another Tool launches it. A call to an independent service is different and belongs to case 7.
 
-Pi's built-in Tools use the Pi process's host authority. Extensions can replace Tool operations with OS-sandbox or Gondolin integrations. Flow Agent adopts the narrow replaceable seam, but supplies a fail-closed default boundary instead of transferring isolation choice to an ordinary user.
+### 7. Independent third-party service
 
-### Codex CLI
+```mermaid
+sequenceDiagram
+  participant T as Tool inside boundary
+  participant S as Independent local application or service
+  participant P as Host files including Flow files
+  T->>S: Request an action through an allowed integration
+  Note over S: Separate process authority, not a newly confined child
+  S->>P: Perform action with its own OS rights
+  Note over S,P: Flow's Tool write guard does not govern this access
+```
 
-Codex integrates approvals, permission profiles, command transformation, managed networking, lifecycle and several platform helpers. Flow Agent needs only its policy-aware one-shot Executor, Ubuntu backend, lifecycle and evidence. It does not add interactive approvals, PTYs, a proxy, a remote execution service, a bundled Sandbox binary or multiple official platform stacks.
+A trustworthy Tool can call a compromised service, or correctly request an intentionally powerful action from a trustworthy service. Either can affect Flow files if the service has the necessary local authority. Remote services can affect local files only through some local authority or access path; a remote request alone does not create local filesystem rights. The Engineer owns integration trust. Extending the guarantee to these actors would require another boundary decision, not a stronger warning message. An external sandbox may block the integration, but that is separate deployment protection.
 
-This reduction keeps the product boundary auditable. The security-critical work remains exact capability translation, packaging, descendant cleanup and hostile black-box evidence, not the JSON transport itself.
+### 8. Missing boundary or interrupted execution
 
-## Evidence and quality goals
+```mermaid
+flowchart TD
+  Prepare["Prepare Tool execution"] --> Guard{"Required protection established?"}
+  Guard -->|No| Refuse["No Tool launch and no weaker fallback"]
+  Guard -->|Yes| Start["Durable authorization then Tool launch"]
+  Start --> Terminal{"Reliable terminal evidence?"}
+  Terminal -->|Yes| Record["Record observed outcome"]
+  Terminal -->|No: timeout, cancellation or crash| Unknown["Stop further dispatch; preserve uncertainty"]
+  Unknown --> Cleanup["Attempt supported cleanup; report only what is known"]
+  Cleanup --> NoReplay["Do not automatically repeat uncertain effects"]
+```
 
-The canonical test matrix is in [`TESTING.md`](../../TESTING.md). It covers protocol framing, selection/readiness, exact mounts and replacement races, both runtime profiles, stock Bubblewrap compatibility, exact process/thread capacity, independent concurrent leaves, cleanup and crash collection, deny-all networking, receipts, persistence/recovery, installation opt-out and fail-closed targets. Performance observations include the complete fresh scope/cgroup/Sandbox lifecycle and follow [`PERFORMANCE.md`](../../PERFORMANCE.md); no estimated timing, throughput or RSS value is a release gate.
+A timeout is not proof that every helper stopped. Removing hostile-descendant cleanup guarantees does not remove bounded waits, cancellation handling or honest recovery. A write restriction must survive in a child that outlives its parent for as long as that child can run; the new native acceptance must demonstrate that inheritance property. It does not promise that the child cannot keep changing its other admitted resources.
 
-## Pinned reference sources
+### 9. Parallel agents
 
-Research snapshot: 2026-08-17.
+```mermaid
+flowchart TD
+  A["Flow Run A"] --> StoreA["Owned Run A state"]
+  B["Flow Run B"] --> StoreB["Owned Run B state"]
+  A --> Config["Same-user global configuration authority"]
+  B --> Config
+  A --> ToolA["Tool A"]
+  B --> ToolB["Tool B"]
+  ToolA --> Project["Shared writable project files"]
+  ToolB --> Project
+  Project --> Race["Concurrent edits need separate coordination"]
+  ToolA --> Host["Shared CPU, RAM, disk and GPU"]
+  ToolB --> Host
+```
 
-- Pi Coding Agent, commit [`8720548`](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c), MIT: [`README.md`, `security.md` and `rpc.md`](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c/packages/coding-agent), the [`sandbox/index.ts` example](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c/packages/coding-agent/examples/extensions/sandbox), and the [`gondolin/index.ts` example](https://github.com/earendil-works/pi/tree/87205484bf749c2140fef5d1bea68995d57e739c/packages/coding-agent/examples/extensions/gondolin).
-- OpenAI Codex CLI, commit [`21cfd36`](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3), Apache-2.0: [sandbox orchestration](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/core/src/sandboxing), [Linux backend](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/linux-sandbox), and [platform policy transformation](https://github.com/openai/codex/tree/21cfd369efca2df70c904c580b2e7e2e3eddb3c3/codex-rs/sandboxing/src).
+Private Run ownership is not a per-Run OS identity. Twenty correctly implemented Tools can still conflict on one file or overcommit a laptop. The native protected-object set and its behavior with multiple Flow homes must be explicit under D-063; a selected home's protection must not be advertised as automatic discovery and protection of every other installation. No project-code VCS, scheduler or new cross-agent locking product is introduced here.
 
-Any later dependency requires the repository's normal licensing, security and supply-chain review.
+### 10. External sandbox
+
+```mermaid
+flowchart TD
+  Outer["Optional deployment-owned sandbox"] --> Flow["Flow Agent and its Executor"]
+  Flow --> Ready{"Required inner protection and runtime access available?"}
+  Ready -->|No| Refuse["Reject unsupported deployment; no unprotected fallback"]
+  Ready -->|Yes| Inner["Native Flow-file protection"]
+  Inner --> Tool["Tool operates under both sets of restrictions"]
+```
+
+An outer container, VM or sandbox can add filesystem, network or resource limits. It may also block the native mechanism, provider connection or intended Mac automation. Compatibility must be tested with real nested execution; there is no support promise for arbitrary sandbox products. A user-selected outer environment does not turn a Linux guest into native macOS Tool support or replace required native release evidence.
+
+## Migration and native acceptance
+
+The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
+
+D-063 must close the concrete OS mechanism, protected-object identity rules and configuration transaction/approval surface before a coherent schema/runtime/fixture migration. Native tests must then cover each in-scope outcome above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, conflicting or stale consent, missing protection, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).

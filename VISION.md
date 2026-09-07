@@ -26,7 +26,7 @@ This file owns the integrated platform model. Per-product internals live in the 
 
 Each product works without the layers above it. Together they add normalized sessions, permissioned agent actions, cross-device workspace access and reversible human/agent collaboration.
 
-The M1.2 Flow Agent implementation builds on the deterministic M1 foundation and practical M1.1 provider/process execution with the Flow-owned Executor and OS-isolation boundary described in the [executor architecture concept](docs/concept/flow-agent-executor-architecture.md), which lists canonical ownership for status, scope and evidence.
+Flow Agent builds on deterministic orchestration and practical provider/Tool execution. Its approved replacement trusts Tool implementations while protecting Flow-owned files through a native Executor boundary; it does not promise containment of arbitrary hostile Tools. The [execution/security architecture](docs/concept/flow-agent-executor-architecture.md) separates that unimplemented target from current legacy isolation and explains configuration approvals and delegated authority.
 
 Watershed is AGPL/free software: users can inspect, run, self-host, fork and verify its behavior. This is a public-good and community-trust posture, not an open-core monetization model (ADR-0019).
 
@@ -58,13 +58,13 @@ flowchart TD
   subgraph FLOW["Flow Agent-owned execution boundary"]
     FA["Flow Agent process on the same host"] <--> PROVIDER["Provider or local model endpoint"]
     FA --> EXECUTOR["Configured Executor"]
-    EXECUTOR --> TOOL["Sandboxed Tool process"]
+    EXECUTOR --> TOOL["Tool under native Flow-file protection"]
   end
 ```
 
 The Sync Server and headless Liquid replica are separate logical roles, though one hosted deployment may co-locate them. In the M3 MVP, user devices sync each authorized Workspace in full. Resource-scoped Roles govern Liquid surfaces but do not hide replicated bytes from the authorized device owner. Stable resource identity and versioned sync keep selective replication possible in a later protocol. A headless replica receives a Workspace only after workspace-level opt-in because it adds a server execution boundary.
 
-Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded. Meta-Harness may start or observe Flow Agent but does not select or manage its Executor or Tool Sandbox.
+Workspace sync and live agent control are separate planes. Offline replicas keep working locally. Cached agent state is visibly stale and cannot imply that a live command succeeded. Meta-Harness may start or observe Flow Agent but does not select or manage its Executor or Tool protection. This topology describes the approved target, not evidence that the replacement protection is implemented.
 
 ## Local operation and portable continuity
 

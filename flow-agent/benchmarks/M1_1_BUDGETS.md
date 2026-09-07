@@ -79,6 +79,8 @@ The concrete Run writer inventories current stored usage and admits the complete
 
 ## Tool runner
 
+The rows below validate the existing runner's bounded behavior. They do not establish the approved replacement's protection or guarantee that hostile descendants cannot survive; security scope is canonical in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target).
+
 Stream caps count raw bytes read from each pipe before UTF-8 classification.
 
 | ID | Selected contract | Exact fixture and functional proof | Performance observation or exclusion |

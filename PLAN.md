@@ -121,29 +121,13 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Status:** Ubuntu runtime implementation is present; the native release additions in [PLATFORMS.md](PLATFORMS.md) and the end-user distribution in [README.md](README.md) remain incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and the ordered repository closeout remain pending. Meta-Harness/Liquid implementation and three-workstream development planning are outside this change.
+**Status:** The legacy Ubuntu runtime is implemented. Its broad isolation contract is superseded as the release target by ADR-0166, whose native mechanism and configuration-change transaction remain blocked by [D-063](docs/decisions/open-decisions.html#d-063). The prebuilt download installer remains incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and ordered repository closeout remain pending. This entry updates status, not the separate three-workstream development plan.
 
-**Purpose:** establish a Flow-owned Executor boundary that enforces each declared Tool policy at the operating-system boundary while preserving deterministic fixture execution and a working default installation.
+**Current implementation:** The one-shot Default Executor, administrator-owned Custom selection, exact mounts/runtime-read profiles, deny-all Tool networking, systemd/cgroup capacity and enforcement receipt are canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162). [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns their existing executable evidence. Do not describe those fields as the future cross-platform guarantee.
 
-**Deliverables:**
+**Approved replacement:** Implement the [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md), retaining the Default Executor and migrating unreleased runtime, definitions, schemas and tests coherently without ignored security settings or compatibility aliases.
 
-1. A versioned one-shot Executor protocol for exactly one Tool invocation: Flow Agent owns policy validation, Executor selection and lifecycle, bounded request/preflight/Start/terminal validation, durable attempt state and fail-closed errors. Each productive invocation receives a fresh Sandbox and process-capacity boundary; no daemon, socket, persistent per-Flow Sandbox, pool or remote transport is in M1.2. The standard installation resolves its administrator-owned sibling `flow-executor`; an administrator may select a protected absolute Custom Executor override.
-2. One official Default Sandbox Executor installed by the standard Flow Agent installation path. `--no-default-executor` is an explicit administrator opt-out; it preserves authoring, validation and fixture execution but leaves productive Tool execution fail-closed until a Custom Executor is configured on the supported Ubuntu 24.04 x64 platform. Flow Agent provides the protocol, implementer documentation, actionable diagnostics and an advisory compatibility probe, but makes no third-party compatibility or security guarantee.
-3. Ubuntu 24.04 x64 enforcement through stock Bubblewrap namespaces/mounts plus seccomp and a transient systemd user scope with a delegated cgroup-v2 PIDs controller. Every Tool declares a positive concurrent process-and-thread capacity; only its root and descendants enter the fresh limited leaf. Readiness requires the exact systemd/cgroup interfaces, including reliable capacity events and cleanup; there is no bundled, Landlock-only or unsandboxed fallback.
-4. Exact pre-opened `read_only_mounts` and `writable_mounts` plus `runtime_profile`. `exact` is the default readiness-advertised executable/interpreter/library manifest; `host-system-read` is an explicit Agentic Engineer choice that adds only the Executor's fixed reviewed system roots. Flow users, providers and Tools cannot select, widen or escalate either profile, and no fallback exists.
-5. The unchanged deterministic Fixture executor and fake-Executor conformance fixtures, so M1/M1.1 contracts remain testable before, during and after backend implementation.
-6. A hostile escape matrix covering exact mount boundaries, traversal, links and replacement races, interpreter escape, environment and credential leakage, child processes, direct and indirect network access, process/session escape, timeout, cancellation and teardown.
-
-**DoD:**
-
-- A standard Ubuntu installation proves Executor/backend readiness before durable Run reservation and runs a productive Flow out of the box; both standard and opt-out installation paths have automated acceptance tests.
-- Real Tool processes cannot exceed declared read, write, deny-all network or process boundaries on every exact platform for which support is claimed. Provider traffic remains Flow Agent traffic outside the Tool Sandbox.
-- Protocol conformance tests cover success, the same-process request/`Ready`/committed-`tool.started`/`Start` order, safe pre-Start aborts, stage-specific recovery, unsupported versions and policy, malformed/oversized output, timeout, premature exit, missing evidence and unavailable configuration without spawning a Tool after failed preflight.
-- Negative tests exercise the official applied OS boundary, not M1 policy emulation, and demonstrate equivalence between canonical policy and applied restrictions.
-- Descendants inherit restrictions; backend, protocol or readiness failure never launches a weaker path; the canonical enforcement receipt and policy digest are persisted with the terminal Tool attempt.
-- The architecture and plain-language comparison with Pi Coding Agent and Codex CLI remain visible in [`docs/concept/flow-agent-executor-architecture.md`](docs/concept/flow-agent-executor-architecture.md).
-
-**Platform boundary:** Native release targets and required evidence follow [PLATFORMS.md](PLATFORMS.md). Official macOS Tool execution is currently fail-closed; native Windows Flow execution is not a product target. Positive CIDR/port grants remain disabled until [D-046](docs/decisions/open-decisions.html#d-046) is decided and proven. No backend choice transfers Flow Executor ownership to Meta-Harness or Liquid.
+**DoD:** Close D-063, implement and verify that exact boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Current Linux tests, Mac refusal tests and diagrams do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 

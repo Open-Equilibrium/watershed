@@ -17,8 +17,9 @@ export async function assertDecisionPage(page) {
 
   for (const [id, heading] of [
     ["d-063", "Flow Agent - First Release"],
+    ["d-066", "Flow Agent - First Release"],
     ["d-065", "Watershed - Shared Release Safeguards"],
-    ["d-046", "Flow Agent - Permissions, Integrations And Offline Use"],
+    ["d-067", "Flow Agent - Permissions, Integrations And Offline Use"],
     ["d-020", "Flow Agent - Permissions, Integrations And Offline Use"],
   ]) {
     const section = page.locator("section").filter({ has: page.locator(`#${id}`) });

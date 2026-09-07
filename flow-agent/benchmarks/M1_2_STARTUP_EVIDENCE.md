@@ -1,5 +1,7 @@
 # M1.2 Executor Startup Evidence
 
+**Current legacy implementation:** This workload measures the existing Ubuntu Executor, not the approved replacement in [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). Its exact mounts, process capacity and cleanup checks remain current-code evidence until coherent migration; they are not future general-isolation guarantees.
+
 This file is the single source for the M1.2 startup workload, evidence and regression policy. Protocol, security and platform behavior remain canonical in `PROTOCOL.md`, `SECURITY.md` and `TESTING.md`.
 
 ## Workload and method
