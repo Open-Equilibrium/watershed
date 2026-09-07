@@ -103,7 +103,7 @@ def require(api, command, root, name):
     return result
 
 
-def bundle(api, root, binary, sandboxed, grant):
+def bundle(api, root, binary, sandboxed, grant, executable):
     identifier = "org.watershed.probe." + root.parent.name.replace("-", ".") + "." + root.name
     app = root / "Probe.app"
     contents = app / "Contents"; executables = contents / "MacOS"
@@ -120,6 +120,7 @@ def bundle(api, root, binary, sandboxed, grant):
             if inherited: entitlements["com.apple.security.inherit"] = True
             else:
                 entitlements["com.apple.security.files.user-selected.read-write"] = True
+                if executable: entitlements["com.apple.security.files.user-selected.executable"] = True
                 if grant:
                     entitlements["com.apple.security.temporary-exception.files.absolute-path.read-write"] = [str(grant) + "/"]
         path = root / f"{name}.entitlements"
@@ -135,7 +136,8 @@ def compare(api, root, binary, mode, host):
     protected = root / "flow-parent" / "flow-owned"; protected.mkdir(parents=True)
     nested = project / "flow-owned"; nested.mkdir()
     sandboxed = mode.startswith("app-")
-    launcher, helper = bundle(api, root, binary, sandboxed, project if mode == "app-project-exception" else None)
+    launcher, helper = bundle(api, root, binary, sandboxed, project if mode.startswith("app-project") else None,
+                              mode == "app-project-executable")
     external = project / "unmodified-program"; shutil.copyfile(binary, external); external.chmod(0o700)
     prefix = [str(launcher)]
     if mode == "profile-guard":
@@ -243,7 +245,7 @@ def main():
             host["sdk"] = require(api, ["/usr/bin/xcrun", "--show-sdk-path"], root, "find-sdk")["output"].strip()
             evidence["host_tool_paths"] = host
             evidence["results"] = []
-            for mode in ("unprotected", "profile-guard", "app-minimal", "app-project-exception"):
+            for mode in ("unprotected", "profile-guard", "app-minimal", "app-project-exception", "app-project-executable"):
                 result = compare(api, root / mode, binary, mode, host)
                 evidence["results"].append(result)
                 print(json.dumps({"experiment": evidence["experiment"], **result}, separators=(",", ":")), flush=True)
