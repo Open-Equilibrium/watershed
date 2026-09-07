@@ -35,7 +35,7 @@ def admit(roots: list[Path], files: list[Path], limit: int = 4096) -> int:
 
 
 OPERATIONS = r"""
-import errno, json, mmap, os, subprocess, sys, time
+import ctypes, errno, json, mmap, os, subprocess, sys, time
 from pathlib import Path
 plan, result, ready, release = map(Path, sys.argv[1:])
 rows = json.loads(plan.read_text())
@@ -56,7 +56,14 @@ for row in rows:
         elif action == 'link': os.link(target, auxiliary)
         elif action == 'rename': target.rename(auxiliary); Path(auxiliary).rename(target)
         elif action == 'chmod': target.chmod(0o777)
-        elif action == 'xattr': os.setxattr(target, 'user.watershed-probe', b'changed')
+        elif action == 'xattr':
+            # Darwin's six-argument API; Python's os.setxattr is Linux-only.
+            native = ctypes.CDLL(None, use_errno=True).setxattr
+            native.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p,
+                               ctypes.c_size_t, ctypes.c_uint32, ctypes.c_int]
+            native.restype = ctypes.c_int
+            if native(os.fsencode(target), b'user.watershed-probe', b'changed', 7, 0, 0) != 0:
+                number = ctypes.get_errno(); raise OSError(number, os.strerror(number))
         elif action == 'mmap':
             with target.open('r+b') as opened:
                 with mmap.mmap(opened.fileno(), 0) as mapped: mapped[0:1] = b'X'; mapped.flush()
@@ -147,7 +154,10 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
             inventory_after = admit(roots, files)
             release.write_bytes(b"go")
             code = child.wait(timeout=10)
-        if code != 0 or result.stat().st_size > probe.OUTPUT_LIMIT: raise ValueError("native helper failed")
+        if code != 0:
+            with (project / "child.log").open("rb") as log: detail = log.read(2048).decode("utf-8", "replace")
+            raise ValueError(f"native helper exit {code}: {detail}")
+        if result.stat().st_size > probe.OUTPUT_LIMIT: raise ValueError("native helper output exceeded limit")
         observations = json.loads(result.read_text())
         if [row["case"] for row in observations] != list(expected): raise ValueError("incomplete observations")
         for row in observations:
