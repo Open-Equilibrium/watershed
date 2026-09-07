@@ -102,6 +102,11 @@ jobs:
           done
           exit "$probe_status"
 
+      - name: Compare native App Sandbox (not release proof)
+        if: steps.scope.outputs.product == 'true' && (!cancelled() && matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        timeout-minutes: 6
+        run: python3 scripts/probe-macos-app-sandbox.py
+
       - name: Run M1.2 installer contract tests
         if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
         run: node scripts/run-python.mjs -m unittest install.tests.test_install
