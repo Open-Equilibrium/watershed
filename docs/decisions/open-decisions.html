@@ -69,7 +69,7 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
     <div class="grid">
       <details id="d-065" class="decision" style="grid-column:1/-1">
         <summary><h3>D-065 - Development And Release Publication Safeguards</h3></summary>
-        <p><strong>Status:</strong> Must be decided, implemented and verified before the first product release; applies to Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a> (ADR-0164/ADR-0165, formerly D-064); it does not require users to install a build-provenance verifier.</p>
+        <p><strong>Status:</strong> Must be decided, implemented and verified before the first product release; applies to Flow Agent, Meta-Harness and Liquid. This entry records open work, not active protection. The approved download contract is canonical in <a href="../../SECURITY.md#m12-tool-execution-trust-boundary">SECURITY.md</a> (ADR-0164/ADR-0165); it does not require users to install a build-provenance verifier.</p>
         <p><strong>Problem:</strong> A stolen publishing account or an unsafe build step could place a harmful program in the real GitHub Release, even while the visible source code remains unchanged. HTTPS and a matching checksum would still succeed. The development team must protect that trusted source without making installation harder for users.</p>
         <h4>Decisions required</h4>
         <ul>
