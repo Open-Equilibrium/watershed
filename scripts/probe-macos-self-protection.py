@@ -61,9 +61,13 @@ else:
 """
 
 
-def profile(protected_root: Path) -> str:
+def profile(protected_root: Path, protect_ancestors: bool = False) -> str:
     literal = json.dumps(str(protected_root), ensure_ascii=False)
-    return "(version 1)\n(allow default)\n(deny file-write* (subpath %s))\n" % literal
+    policy = "(version 1)\n(allow default)\n(deny file-write* (subpath %s))\n" % literal
+    if protect_ancestors:
+        for ancestor in protected_root.parents:
+            policy += "(deny file-write-unlink (literal %s))\n" % json.dumps(str(ancestor), ensure_ascii=False)
+    return policy
 
 
 def limit_output() -> None:
@@ -123,17 +127,23 @@ def run_case(mode: str, root: Path, name: str, kind: str) -> dict:
         auxiliary = data["outside"] / "relocated-container"
     elif kind == "handle":
         handle = data["file"].open("r+b", buffering=0); target, kind, fds = Path(str(handle.fileno())), "fd", (handle.fileno(),)
+    if mode == "guarded-launch" and data["file"].stat().st_nlink != 1:
+        intact = unchanged(data["file"])
+        return {"case": name, "outcome": "pass" if name == "hardlink_alias" and intact else "failure",
+                "started": False, "readiness_rejection": "existing_hardlink", "protected_intact": intact}
     started, marker = data["scratch"] / "started.marker", data["scratch"] / "result.json"
     command = [sys.executable, "-c", PYTHON_HELPER, kind, str(target), str(auxiliary), str(started), str(marker)]
-    if mode == "profile":
-        policy = data["root"] / "probe.sb"; policy.write_text(profile(data["protected"]), encoding="utf-8")
+    if mode != "baseline":
+        policy = data["root"] / "probe.sb"
+        policy.write_text(profile(data["protected"], mode == "guarded-launch"), encoding="utf-8")
         command = [str(SANDBOX_EXEC), "-f", str(policy), *command]
-    result = invoke(command, data["root"], data["scratch"] / "child.log", fds)
+    result = invoke(command, data["root"], data["scratch"] / "child.log", () if mode == "guarded-launch" else fds)
     if handle is not None: handle.close()
     helper_started = started.is_file() and started.read_bytes() == b"started"
     child, intact = read_marker(marker), unchanged(data["file"])
     permitted = not denied and target.is_file() and target.read_bytes() == CHANGED
     explicit_denial = child and child.get("state") == "error" and child.get("errno") in {errno.EACCES, errno.EPERM}
+    closed_handle = mode == "guarded-launch" and kind == "fd" and child and child.get("state") == "error" and child.get("errno") == errno.EBADF
     succeeded = child and child.get("state") == "ok" and result.get("returncode") == 0
     if not result.get("launched") or result.get("timeout") or not helper_started or child is None:
         outcome = "failure"
@@ -146,13 +156,13 @@ def run_case(mode: str, root: Path, name: str, kind: str) -> dict:
             outcome = "pass" if permitted else "failure"
     elif not denied:
         outcome = "pass" if succeeded and permitted else "violation" if explicit_denial else "failure"
-    elif explicit_denial:
+    elif explicit_denial or closed_handle:
         outcome = "pass" if result["returncode"] == 10 and intact else "violation"
     elif succeeded:
         outcome = "violation"
     else: outcome = "failure"
     return {"case": name, "outcome": outcome, "started": helper_started, "returncode": result.get("returncode"),
-            "child": child, "protected_intact": intact, "permitted_control": permitted,
+            "child": child, "protected_intact": intact, "permitted_control": permitted, "closed_handle": bool(closed_handle),
             "detail": result.get("error") or result.get("output", "")}
 
 
@@ -166,7 +176,8 @@ def emit(evidence: dict, code: int) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--mode", required=True, choices=("baseline", "profile"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", required=True, choices=("baseline", "profile", "guarded-launch"))
     args = parser.parse_args(); system, machine = platform.system(), platform.machine().lower()
     evidence = {"mode": args.mode, "os": system, "arch": machine, "macos_version": platform.mac_ver()[0], "kernel_release": platform.release()}
     if system != "Darwin" or machine not in {"arm64", "aarch64"}:
