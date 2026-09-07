@@ -31,6 +31,12 @@ try:
     elif action == "unlink": Path(target).unlink()
     elif action == "replace":
         Path(auxiliary).write_bytes(b"changed-by-probe\n"); os.replace(auxiliary, target)
+    elif action == "link":
+        os.link(target, auxiliary); Path(auxiliary).write_bytes(b"changed-by-probe\n")
+    elif action == "relocate":
+        ancestor = Path(target).parent.parent
+        ancestor.rename(auxiliary)
+        (Path(auxiliary) / Path(target).relative_to(ancestor)).write_bytes(b"changed-by-probe\n")
     elif action == "fd":
         fd = int(target); os.lseek(fd, 0, os.SEEK_SET); os.write(fd, b"changed-by-probe\n"); os.fsync(fd)
     elif action == "spawn":
@@ -109,6 +115,12 @@ def run_case(mode: str, root: Path, name: str, kind: str) -> dict:
         target = data["outside"] / "symlink-alias"; target.symlink_to(data["file"]); kind = "write"
     elif kind == "hardlink":
         target = data["outside"] / "hardlink-alias"; os.link(data["file"], target); kind = "write"
+    elif kind == "link": auxiliary = data["outside"] / "new-hardlink-alias"
+    elif kind == "relocate":
+        container = data["root"] / "container"; container.mkdir()
+        data["protected"] = data["protected"].rename(container / "protected")
+        target = data["file"] = data["protected"] / "record.bin"
+        auxiliary = data["outside"] / "relocated-container"
     elif kind == "handle":
         handle = data["file"].open("r+b", buffering=0); target, kind, fds = Path(str(handle.fileno())), "fd", (handle.fileno(),)
     started, marker = data["scratch"] / "started.marker", data["scratch"] / "result.json"
@@ -165,7 +177,8 @@ def main() -> int:
         return emit(evidence, 2)
     cases = [("scratch_write", "scratch"), ("protected_write", "write"), ("protected_delete", "unlink"),
              ("atomic_replace", "replace"), ("child_inherits_guard", "spawn"), ("symlink_alias", "symlink"),
-             ("hardlink_alias", "hardlink"), ("inherited_writable_handle", "handle")]
+             ("hardlink_alias", "hardlink"), ("inherited_writable_handle", "handle"),
+             ("new_hardlink_alias", "link"), ("protected_ancestor_relocation", "relocate")]
     with tempfile.TemporaryDirectory(prefix="watershed-sandbox-probe-") as temporary:
         root = Path(temporary).resolve()
         evidence["cases"] = [safe_case(args.mode, root, *case) for case in cases]
