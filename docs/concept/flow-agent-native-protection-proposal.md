@@ -6,9 +6,69 @@
 
 Evaluate the native macOS profile mechanism as one part of a checked launch boundary, not as a path-only rule. Retain the short-lived Default Executor. Do not require a Linux VM, administrator privileges, a permanent service or an additional product runtime on Mac. `sandbox-exec` is supplied by macOS; Python is only the development probe's driver.
 
-The proposed boundary combines protected directories/program names, complete alias admission, inherited-handle removal, ancestor-move denial and terminal-channel isolation. An invalid installation must produce an actionable start error, never an automatic repair or an unprotected Tool. The maintainer must separately approve these restrictions and accept the unsupported Apple-interface maintenance risk before implementation as a release backend.
+The proposed boundary combines protected directories/program names, complete alias admission, inherited-handle removal, ancestor-move denial and terminal-channel isolation. An invalid installation must produce an actionable start error, never an automatic repair or an unprotected Tool. ADR-0169 accepts the alias and ancestor-move restrictions and reconfirms independent-service responsibility. The complete protected-object set, terminal-device policy and unsupported Apple-interface maintenance risk still require approval before implementation as a release backend.
 
 Ordinary non-interactive shell commands and project builds remain the intended use case. Tools receive bounded input/output pipes, not the human review terminal. The proposed terminal-device denial can break programs requiring direct terminal access, interactive password prompts or terminal-user-interface libraries. It is not a general promise that every Mac application works. Native GUI automation through independent services and Metal compatibility require their own evidence; neither is established by a C compilation test.
+
+## Native App Sandbox comparison
+
+The practical comparison is now separate from the earlier documentation-only assessment. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167) owns exact commands, source revisions and hosted ARM64 evidence. No Windows result is used as Mac proof. No production Executor, administrator service or release-signing identity is involved.
+
+### What Apple recommends
+
+The [SDK manual mirror for `sandbox-exec`](https://keith.github.io/xcode-man-pages/sandbox-exec.1.html) explicitly marks the command deprecated and recommends App Sandbox. The consulted sources do not supply a detailed deprecation rationale, a removal date or evidence that the old mechanism is inherently insecure. Do not turn deprecation into those claims. Apple's [current App Sandbox overview](https://developer.apple.com/documentation/security/app-sandbox) documents the supported entitlement-based resource boundary; App Sandbox is required for Mac App Store distribution, not limited to that distribution channel.
+
+The models differ: the profile candidate starts from host access and subtracts protected writes and terminal access. App Sandbox starts with constrained app authority and adds resource grants. These are native OS mechanisms, not Linux VMs. A supported app model is not a drop-in supported replacement for every custom command profile.
+
+### Configurations and fair controls
+
+- **Unprotected:** the same native helper performs the dangerous operations successfully. This establishes reachable effects, not protection.
+- **Checked profile:** the previously evaluated profile plus alias admission and descriptor removal. The retained raw-profile failures remain in the original probe.
+- **Minimal App Sandbox:** signed app and bundled helper, app-sandbox entitlement, helper inheritance, and user-selected read/write entitlement without an actual selection. Its own synthetic app container is the positive control; refusing an unselected project is expected, not a product defect.
+- **App Sandbox with project exception:** add Apple's documented temporary absolute-path read/write exception for one synthetic project directory. This is a fixed grant in the locally signed experiment, not a real file-selection or persistent-bookmark workflow.
+- **App Sandbox with executable-write permission:** retain that project exception and additionally enable `com.apple.security.files.user-selected.executable`; report its effect separately rather than assuming a failed build workflow cannot be configured correctly.
+
+The [Apple file-access guide](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox) describes container access, recursive folder selection and executable-write permission. Its restriction on execution outside app/container locations is specifically stated for **user-selected-file entitlements**, not proof that all host execution is impossible under every App Sandbox configuration. The [helper guide](https://developer.apple.com/documentation/xcode/embedding-a-helper-tool-in-a-sandboxed-app) supplies bundled-helper inheritance and local ad-hoc signing. The [temporary-exception reference](https://developer.apple.com/library/archive/documentation/Miscellaneous/Reference/EntitlementKeyReference/Chapters/AppSandboxTemporaryExceptionEntitlements.html) documents the separate path grant used here. Temporary exceptions are not established as a suitable release design merely because they work locally.
+
+### Observed security and compatibility
+
+The completed five-way comparison contains 133 observations: 26 each for the unprotected and checked-profile configurations, and 27 each for the three App Sandbox configurations, including their own-container controls. All unprotected mutation/control operations succeeded. No table entry is a general application-certification claim. Both project-exception variants produced the same functional outcomes below.
+
+| Case | Checked profile | App Sandbox with project exception |
+|---|---|---|
+| Write ordinary project file | Allowed | Allowed |
+| Write/delete/replace separate Flow file; change its metadata or mapped bytes | Explicit OS denial | Explicit OS denial |
+| New-session child and bundled helper write separate Flow file | Explicit OS denial after helper startup | Explicit OS denial after helper startup |
+| Existing external helper writes separate Flow file | Starts, then write denied | Starts, then write denied; minimal App Sandbox could not start this helper |
+| Symlink pointing to separate Flow file; create new hardlink from it | Denied | Denied |
+| Existing hardlink in the writable project pointing to Flow file | Layout rejected before launch | Write succeeds without that admission check |
+| Deliberately passed writable protected handle | Removed before launch | Write succeeds if deliberately passed |
+| Flow file underneath the writable project directory | Still denied by explicit protected subdirectory rule | Writable through the containing directory grant |
+| Move parent of separate protected directory | Denied | Denied |
+| Write controller's synthetic terminal device | Denied | Denied |
+| `/bin/sh` small noninteractive workload | Completes | Completes |
+| `/usr/bin/git --version`; `xcrun clang --version`; build through `xcrun` | Complete | Exit 1: `xcrun: error: cannot be used within an App Sandbox.` |
+| Directly resolved Xcode Git version and new synthetic repository | Complete | Complete |
+| Direct compiler with explicit SDK and linker location | Builds native program | Builds native program |
+| Run that newly built program | Completes | Denied despite the successful build, both without and with executable-write permission |
+
+The hardlink and handle results are **not App Sandbox escape claims**: granting an existing alias or passing already-open authority is a launcher/layout problem. App Sandbox also needs checked launch conditions. Conversely, the checked profile's successful rejection is not an OS-only result. Neither experiment promises whole-host safety or control over independent services.
+
+The nested-directory case matters to the product: granting a whole project or home directory is not equivalent to “everything in that directory except Flow's own files.” An App Sandbox design must refuse overlapping broad grants, arrange separate protected storage or establish another supported protection method. The test does not prove that all alternative layouts are impossible or approve a changed user workflow.
+
+`xcrun` is Apple's tool locator/launcher. Its refusal does not mean Git and compilers cannot run: the controller resolved existing Xcode tool locations before sandboxing, and the actual programs then ran without copying or re-signing them. However, arbitrary build scripts may invoke the refused launcher internally. The successful tiny direct build does not establish compatibility with those scripts, Xcode projects or every installed development tool.
+
+The generated program's launch returned `EPERM` in both project-exception variants; its file existed and the compiler exited 0. Adding executable-write permission to the app did not fix this compiler/helper workload. The experiment does not identify the precise quarantine/signature/helper-entitlement cause or prove that every supported execution arrangement is impossible. A container-based build/output arrangement would be a different, untested workflow, not transparent compatibility with arbitrary project commands.
+
+### User experience, terminal interaction and remaining proof
+
+For the profile candidate, ordinary host paths remain the default; installation admission establishes the protected exceptions. For App Sandbox, the user or installer must establish usable resource grants. A genuine folder-selection/bookmark workflow, grant overlap checks and stable signed distribution remain untested. Re-signing a test app with a fixture-specific absolute path is **not** a proposed per-user installation procedure.
+
+Programs that may need a private interactive terminal include `sudo` password prompts, `ssh`/`scp` password or key-passphrase prompts, a `git commit` that opens an editor, Vim/Nano, `less`, `fzf` and interactive coding-agent interfaces. These are compatibility examples, not individually tested failures. A simple stdin question is different from opening a terminal device. Noninteractive modes such as `git commit -m ...` may avoid that editor interaction, but do not certify hooks, authentication or every child process. Never solve password handling by forwarding secrets into Tool input/logs. A private Tool terminal separated from human approval would be a different design requiring approval and native tests, not an automatic fallback.
+
+Both approaches stay native, with no VM-induced Linux/host split. The probe records individual elapsed times, but different cold/warm states, fixed ordering and failed workloads preclude an overhead ranking. No latency, memory, GPU or all-workload performance conclusion follows. Metal/ML inference, GUI automation, real file-picker/bookmark grants, release signatures/notarization, downloaded-package quarantine and other macOS versions remain untested. The profile's prior 29-case publication/parent-exit/later-terminal matrix was not fully repeated for App Sandbox; do not imply evidence parity there.
+
+For the approved broad host-tool use case, the checked profile remains the more direct candidate, with explicit deprecated-interface maintenance risk. App Sandbox is a real alternative with working protection and some native development operations, but still requires a separately approved grant/layout/compatibility design. This comparison authorizes neither shipping mechanism and does not make either release-ready.
 
 ## Complete proposed protected set
 
@@ -101,4 +161,4 @@ The executable matrix partitions file access, alias admission, publication, inhe
 | Distribution | Build the actual download package; verify checksum failure paths, clean installation, quarantine/Gatekeeper behavior and the chosen release signing/notarization process on macOS. The local generated C binary's signature proves none of these. No release identity or credential is acquired by the probe. |
 | Release support | Approve the mechanism and protected-set restrictions, publish the tested OS range, retain Linux x86_64 and macOS ARM64 native gates and full lifecycle observations. Unsupported or failed readiness has no weaker fallback. OS updates require revalidation; a deprecated interface can force a compatibility update or explicit refusal. |
 
-The implementation and distribution rows are **release gates**, not tests completed by this proposal. Do not select a release OS range solely from one hosted runner patch version. Supported Apple App Sandbox documentation does not currently establish arbitrary existing host-program compatibility for this use case; [D-063](../decisions/open-decisions.html#d-063) retains that comparison and the shipping decision. A passing feasibility matrix supports this candidate, not the claim that it is the only possible design or already release-ready.
+The implementation and distribution rows are **release gates**, not tests completed by this proposal. Do not select a release OS range solely from one hosted runner patch version. The [native comparison](#native-app-sandbox-comparison) establishes specific App Sandbox successes and restrictions, not arbitrary host-program compatibility; [D-063](../decisions/open-decisions.html#d-063) retains the shipping decision. A passing feasibility matrix supports a candidate, not the claim that it is the only possible design or already release-ready.

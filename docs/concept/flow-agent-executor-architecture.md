@@ -216,7 +216,7 @@ An outer container, VM or sandbox can add filesystem, network or resource limits
 
 ## Migration and native acceptance
 
-The [native protection proposal](flow-agent-native-protection-proposal.md) specifies the evaluated candidate's object/lifecycle rules, implementation tradeoffs and the distinction between completed native primitive tests and outstanding product acceptance. It is not an additional accepted policy.
+The [native protection proposal](flow-agent-native-protection-proposal.md) specifies the evaluated candidate's object/lifecycle rules, native App Sandbox comparison and outstanding product acceptance. Only the explicitly accepted rules in `SECURITY.md`, including ADR-0169's file-layout restrictions, are policy; experimental success is not shipping approval.
 
 The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
 

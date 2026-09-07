@@ -6,7 +6,7 @@ Product targets, available capabilities and native release requirements are cano
 
 ## Accepted Flow Agent security target
 
-**ADR-0166–ADR-0168 are approved, not implemented.** This section owns the replacement Flow Agent contract. Existing M0/M1 policy artifacts, M1.2 wire fields, Ubuntu enforcement and their tests remain the **legacy implementation**, not the future release promise. They must remain functional until a coherent, tested migration replaces them. Native macOS Tool execution remains unavailable. [D-063](docs/decisions/open-decisions.html#d-063) owns the remaining native shipping-mechanism and protected-object choices; the evaluation permission below is not product approval of an undocumented OS interface, dependency or privileged service.
+**ADR-0166–ADR-0169 are approved, not implemented.** This section owns the replacement Flow Agent contract. Existing M0/M1 policy artifacts, M1.2 wire fields, Ubuntu enforcement and their tests remain the **legacy implementation**, not the future release promise. They must remain functional until a coherent, tested migration replaces them. Native macOS Tool execution remains unavailable. [D-063](docs/decisions/open-decisions.html#d-063) owns the remaining native shipping-mechanism and protected-object choices; the evaluation permission below is not product approval of an undocumented OS interface, dependency or privileged service.
 
 ### Guarantees and owners
 
@@ -25,6 +25,8 @@ Flow's own configuration, context, provider and storage operations are internal 
 ### Native self-protection and its limits
 
 Tools and newly started helpers must inherit the direct-write restriction, including when a helper is compromised. Ordinary helper creation must not escape it. A trusted Tool that asks an already-running editor, automation service or remote system to act delegates to that system's separate authority; such effects are not brought inside the boundary by the request. The Engineer must trust that integration. The narrow protection does not certify malicious Tools as safe, their outputs as truthful or project files as confidential.
+
+ADR-0169 accepts the file-layout restrictions: every hardlink name of a protected file must remain inside the protected set; internal publication aliases remain possible, but an outside alias or unverifiable inventory prevents Tool startup with an explanation, never automatic repair. Tools cannot remove or move ancestors containing protected Flow objects. Ordinary unrelated project-file operations remain outside that restriction. The maintainer also reconfirmed the independent-service exclusion above. This does not select the complete protected set, terminal-device policy or Mac shipping mechanism.
 
 Uniform native Linux x86_64/macOS ARM64 execution replaces the general exact-mount/runtime-read-profile policy, Tool deny-all networking, mandatory process/thread ceilings and hostile-descendant crash-cleanup guarantees. Remove legacy mechanisms only where they are unnecessary for the remaining protection and lifecycle. No automatic unsandboxed fallback, Linux VM requirement on Mac, performance estimate or claim that every old prerequisite disappears follows from this decision.
 
