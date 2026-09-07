@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           probe_status=0
-          for probe_mode in profile guarded-launch host-build; do
+          for probe_mode in profile guarded-launch host-build lifecycle-baseline lifecycle; do
             if python3 scripts/probe-macos-self-protection.py --mode "$probe_mode"; then
               result=0
             else

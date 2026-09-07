@@ -87,12 +87,18 @@ test "$write_status" -eq "$4"
 """
 
 
-def profile(protected_root: Path, protect_ancestors: bool = False) -> str:
-    literal = json.dumps(str(protected_root), ensure_ascii=False)
-    policy = "(version 1)\n(allow default)\n(deny file-write* (subpath %s))\n" % literal
+def profile(protected_root: Path, protect_ancestors: bool = False,
+            additional_roots=(), files=(), read_denied=()) -> str:
+    quote = lambda path: json.dumps(str(path), ensure_ascii=False)
+    roots = [protected_root, *additional_roots]
+    policy = "(version 1)\n(allow default)\n"
+    for root in roots: policy += "(deny file-write* (subpath %s))\n" % quote(root)
+    for path in files: policy += "(deny file-write* (literal %s))\n" % quote(path)
+    for path in read_denied: policy += "(deny file-read* file-write* (literal %s))\n" % quote(path)
     if protect_ancestors:
-        for ancestor in protected_root.parents:
-            policy += "(deny file-write-unlink (literal %s))\n" % json.dumps(str(ancestor), ensure_ascii=False)
+        ancestors = {ancestor for path in [*roots, *files] for ancestor in path.parents}
+        for ancestor in sorted(ancestors):
+            policy += "(deny file-write-unlink (literal %s))\n" % quote(ancestor)
     return policy
 
 
@@ -227,7 +233,8 @@ def emit(evidence: dict, code: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", required=True, choices=("baseline", "profile", "guarded-launch", "host-build"))
+    parser.add_argument("--mode", required=True, choices=("baseline", "profile", "guarded-launch", "host-build",
+                                                         "lifecycle-baseline", "lifecycle"))
     args = parser.parse_args(); system, machine = platform.system(), platform.machine().lower()
     evidence = {"mode": args.mode, "os": system, "arch": machine, "macos_version": platform.mac_ver()[0], "kernel_release": platform.release()}
     if system != "Darwin" or machine not in {"arm64", "aarch64"}:
@@ -242,7 +249,11 @@ def main() -> int:
              ("new_hardlink_alias", "link"), ("protected_ancestor_relocation", "relocate")]
     with tempfile.TemporaryDirectory(prefix="watershed-sandbox-probe-") as temporary:
         root = Path(temporary).resolve()
-        if args.mode == "host-build":
+        if args.mode.startswith("lifecycle"):
+            import runpy
+            cases_module = runpy.run_path(str(Path(__file__).with_name("macos-self-protection-cases.py")))
+            evidence["cases"] = cases_module["run"](sys.modules[__name__], root, args.mode == "lifecycle")
+        elif args.mode == "host-build":
             try:
                 evidence["cases"] = [run_build_case(root, guarded) for guarded in (False, True)]
             except (OSError, ValueError, subprocess.SubprocessError) as error:
