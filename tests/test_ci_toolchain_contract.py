@@ -175,6 +175,11 @@ class CiWorkflowContractTest(unittest.TestCase):
             (ROOT / ".node-version").read_text(encoding="utf-8"),
             f"{NODE_VERSION}\n",
         )
+        self.assertEqual(PACKAGE["engines"]["node"], ">=24.2.0")
+        self.assertGreaterEqual(
+            tuple(map(int, NODE_VERSION.split("."))),
+            tuple(map(int, PACKAGE["engines"]["node"][2:].split("."))),
+        )
         self.assertRegex(PACKAGE["packageManager"], r"^pnpm@\d+\.\d+\.\d+$")
         self.assertIn(
             "node-version-file: .node-version",
@@ -189,6 +194,26 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("rust-toolchain.toml", step_run(workflow, "Select pinned Rust"))
         self.assertNotIn(rust_version, workflow)
         self.assertNotIn("check-latest:", workflow)
+
+    def test_minimum_node_exercises_tooling_after_the_pinned_gates(self) -> None:
+        workflow = workflow_text()
+        names = ("Select minimum Node", "Install minimum Node", "Check minimum Node tooling")
+        for name in names:
+            assert_step_state(self, workflow, name, condition=UBUNTU)
+        selection = step_run(workflow, names[0])
+        self.assertIn("package.json", selection)
+        self.assertIn(".engines.node", selection)
+        self.assertIn("$env:GITHUB_OUTPUT", selection)
+        self.assertIn(
+            "node-version: ${{ steps.minimum-node.outputs.version }}",
+            "\n".join(step_lines(workflow, names[1])),
+        )
+        proof = step_run(workflow, names[2])
+        self.assertIn('node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"', proof)
+        self.assertIn("node scripts/check-html-render.mjs", proof)
+        self.assertLess(workflow.index("name: Check documentation links"), workflow.index(f"name: {names[0]}"))
+        for earlier, later in zip(names, names[1:]):
+            self.assertLess(workflow.index(f"name: {earlier}"), workflow.index(f"name: {later}"))
 
     def test_corepack_is_explicitly_provisioned_before_use(self) -> None:
         workflow = workflow_text()

@@ -2,6 +2,9 @@
   "name": "watershed-dev-tools",
   "private": true,
   "packageManager": "pnpm@12.3.4",
+  "engines": {
+    "node": ">=24.2.0"
+  },
   "description": "Dev-only tooling manifest. Not part of the product: Watershed ships no Node runtime (ADR-0001).",
   "license": "AGPL-3.0-only",
   "scripts": {

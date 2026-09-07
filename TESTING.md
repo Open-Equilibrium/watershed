@@ -91,7 +91,7 @@ The same metrics AgentPulse reports (rework ratio, first-attempt success rate, c
 
 ## Development toolchain
 
-Node is a dev/CI-only toolchain for documentation gates (HTML rendering and link-manifest generation), the Node advisory audit, the runtime package review gate, the Rust test-isolation runner and the cross-platform Python launcher. [`.node-version`](.node-version) is the canonical Node version; `package.json#packageManager` pins pnpm. Watershed and Flow Agent have no Node product-runtime dependency.
+Node is a dev/CI-only toolchain for documentation gates (HTML rendering and link-manifest generation), the Node advisory audit, the runtime package review gate, the Rust test-isolation runner and the cross-platform Python launcher. `package.json#engines.node` defines the supported Node range; [`.node-version`](.node-version) pins the reproducible development/CI version and `package.json#packageManager` pins pnpm. Ubuntu CI additionally exercises the repository tooling and HTML rendering at the declared Node minimum after the pinned gates. Watershed and Flow Agent have no Node product-runtime dependency.
 
 Repository tooling requires Python 3.11 or newer for its standard-library TOML parser. The launcher verifies this before running a script and reports missing prerequisites without installing them.
 

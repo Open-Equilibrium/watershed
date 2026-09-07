@@ -544,3 +544,28 @@ jobs:
           }
           $docs = @($docsJson | ConvertFrom-Json)
           lychee --no-progress --include-fragments -- @docs
+
+      - name: Select minimum Node
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        id: minimum-node
+        shell: pwsh
+        run: |
+          $requirement = (Get-Content -Raw package.json | ConvertFrom-Json).engines.node
+          if ($requirement -notmatch '^>=(\d+\.\d+\.\d+)$') {
+            throw 'The Node requirement must declare one minimum version as >=x.y.z'
+          }
+          "version=$($Matches[1])" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Install minimum Node
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.minimum-node.outputs.version }}
+
+      - name: Check minimum Node tooling
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
+        shell: bash
+        run: |
+          test "$(node --version)" = "v${{ steps.minimum-node.outputs.version }}"
+          node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
+          node scripts/check-html-render.mjs
