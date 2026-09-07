@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import plistlib
+import select
 import shutil
 import sys
 import tempfile
@@ -42,6 +43,11 @@ int main(int argc, char **argv) { @autoreleasepool {
     puts("probe_started"); fflush(stdout);
     const char *action = argv[1], *target = argv[2];
     if (!strcmp(action, "write")) return write_path(target);
+    if (!strcmp(action, "terminal")) {
+        int fd = open(target, O_WRONLY | O_NOCTTY); if (fd < 0) return failed();
+        int code = write(fd, value, sizeof(value)-1) == (ssize_t)(sizeof(value)-1) ? 0 : failed();
+        close(fd); return code;
+    }
     if (!strcmp(action, "unlink")) return unlink(target) == 0 ? 0 : failed();
     if (!strcmp(action, "chmod")) return chmod(target, 0400) == 0 ? 0 : failed();
     if (!strcmp(action, "replace") && argc == 4) return rename(argv[3], target) == 0 ? 0 : failed();
@@ -78,9 +84,9 @@ int main(int argc, char **argv) { @autoreleasepool {
 '''
 
 
-def classify_mutation(result, changed):
+def classify_mutation(result, changed, required_starts=1):
     """A launch failure, unrelated error, timeout or missing effect is never protection evidence."""
-    if not result.get("launched") or result.get("timeout") or "probe_started" not in result.get("output", "").splitlines():
+    if not result.get("launched") or result.get("timeout") or result.get("output", "").splitlines().count("probe_started") < required_starts:
         return "failure"
     if result.get("returncode") == 0 and changed:
         return "allowed"
@@ -124,7 +130,7 @@ def bundle(api, root, binary, sandboxed, grant):
     return launcher, helper
 
 
-def compare(api, root, binary, mode):
+def compare(api, root, binary, mode, host):
     root.mkdir(); project = root / "project"; project.mkdir()
     protected = root / "flow-parent" / "flow-owned"; protected.mkdir(parents=True)
     nested = project / "flow-owned"; nested.mkdir()
@@ -168,12 +174,24 @@ def compare(api, root, binary, mode):
         result = api.invoke([*prefix, *command], project, root / f"{name}.log", () if mode == "profile-guard" else fds)
         if handle: handle.close()
         changed = not api.unchanged(target) or target.stat().st_mode & 0o777 != 0o600
-        observation = classify_mutation(result, changed)
+        nested_start = action in {"helper", "external"}
+        observation = classify_mutation(result, changed, required_starts=2 if nested_start else 1)
+        if nested_start and result.get("output", "").splitlines().count("probe_started") < 2:
+            observation = "program_not_started"
         if mode == "profile-guard" and action == "fd" and result.get("returncode") == 11 and "probe_errno=9" in result.get("output", "") and not changed:
             observation = "closed_handle"
         results.append({"case": name, "observation": observation, "changed": changed, "command": result})
         if action == "rename" and auxiliary.exists(): auxiliary.rename(protected.parent)
         if action in {"symlink", "hardlink", "link"} and auxiliary.exists(): auxiliary.unlink()
+    master, slave = os.openpty()
+    try:
+        result = api.invoke([*prefix, "terminal", os.ttyname(slave)], project, root / "terminal.log")
+        delivered = bool(select.select([master], [], [], 0)[0])
+        if delivered: delivered = os.read(master, 256).replace(b"\r\n", b"\n") == api.CHANGED
+        results.append({"case": "controller_terminal_device", "observation": classify_mutation(result, delivered),
+                        "changed": delivered, "command": result})
+    finally:
+        os.close(master); os.close(slave)
     source = project / "hello.c"; source.write_text('int main(void) { return 0; }\n', encoding="utf-8")
     built = project / "built-program"
     workloads = [
@@ -183,6 +201,11 @@ def compare(api, root, binary, mode):
         ("project_program", ["exec", str(external), "write", str(project / "program-output")]),
         ("host_build", ["exec", "/usr/bin/xcrun", "clang", "-arch", "arm64", str(source), "-o", str(built)]),
         ("built_program", ["exec", str(built)]),
+        ("direct_git", ["exec", host["git"], "--version"]),
+        ("direct_git_project", ["exec", host["git"], "-c", "init.defaultBranch=probe", "init", "--quiet", str(project / "synthetic-repo")]),
+        ("direct_host_build", ["exec", host["clang"], "-arch", "arm64", "-isysroot", host["sdk"],
+                               "-B", str(Path(host["ld"]).parent), str(source), "-o", str(built)]),
+        ("direct_built_program", ["exec", str(built)]),
     ]
     if sandboxed: workloads.append(("own_container", ["container", "synthetic-probe.bin"]))
     for name, command in workloads:
@@ -191,7 +214,9 @@ def compare(api, root, binary, mode):
         elapsed = time.perf_counter_ns() - started
         results.append({"case": name, "observation": "completed" if result.get("returncode") == 0 and not result.get("timeout") else "not_completed",
                         "command": result, "elapsed_ns": elapsed,
-                        "artifact_exists": built.is_file() if name in {"host_build", "built_program"} else None})
+                        "artifact_exists": built.is_file() if name in {"host_build", "built_program", "direct_host_build", "direct_built_program"}
+                            else (project / "synthetic-repo" / ".git").is_dir() if name == "direct_git_project"
+                            else (project / "program-output").is_file() if name == "project_program" else None})
     return {"mode": mode, "cases": results}
 
 
@@ -203,6 +228,7 @@ def main():
         print(json.dumps(evidence)); return 2
     spec = importlib.util.spec_from_file_location("profile_probe", Path(__file__).with_name("probe-macos-self-protection.py"))
     api = importlib.util.module_from_spec(spec); spec.loader.exec_module(api)
+    api.CHILD_ENV.update({"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"})
     try:
         # Only this unique synthetic directory is created/read/removed; no existing home data is inspected.
         with tempfile.TemporaryDirectory(prefix="watershed-app-probe-", dir=Path.home()) as temporary:
@@ -212,9 +238,13 @@ def main():
             evidence["compiler"] = require(api, ["/usr/bin/xcrun", "clang", "--version"], root, "compiler")
             require(api, ["/usr/bin/xcrun", "clang", "-arch", "arm64", "-Wall", "-Wextra", "-Werror", "-framework", "Foundation",
                           str(source), "-o", str(binary)], root, "compile")
+            host = {name: require(api, ["/usr/bin/xcrun", "--find", name], root, "find-" + name)["output"].strip()
+                    for name in ("git", "clang", "ld")}
+            host["sdk"] = require(api, ["/usr/bin/xcrun", "--show-sdk-path"], root, "find-sdk")["output"].strip()
+            evidence["host_tool_paths"] = host
             evidence["results"] = []
             for mode in ("unprotected", "profile-guard", "app-minimal", "app-project-exception"):
-                result = compare(api, root / mode, binary, mode)
+                result = compare(api, root / mode, binary, mode, host)
                 evidence["results"].append(result)
                 print(json.dumps({"experiment": evidence["experiment"], **result}, separators=(",", ":")), flush=True)
     except (OSError, ValueError, RuntimeError) as error:

@@ -29,5 +29,12 @@ class NativeObservation(unittest.TestCase):
                 self.assertEqual(PROBE.classify_mutation(result, changed), expected)
         self.assertEqual(PROBE.classify_mutation({"launched": False}, False), "failure")
 
+    def test_failed_nested_program_start_does_not_prove_its_write_was_blocked(self):
+        result = {"launched": True, "returncode": 10, "timeout": False,
+                  "output": "probe_started\nprobe_errno=1\n"}
+        self.assertEqual(PROBE.classify_mutation(result, False, required_starts=2), "failure")
+        result["output"] = "probe_started\nprobe_started\nprobe_errno=1\n"
+        self.assertEqual(PROBE.classify_mutation(result, False, required_starts=2), "denied")
+
 
 if __name__ == "__main__": unittest.main()
