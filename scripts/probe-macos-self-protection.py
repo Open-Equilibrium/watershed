@@ -6,6 +6,7 @@ import errno
 import json
 import os
 import platform
+import signal
 import subprocess
 import sys
 import tempfile
@@ -60,6 +61,31 @@ else:
     record("ok")
 """
 
+BUILD_WORKLOAD = r"""
+export TMPDIR="$PWD"
+/usr/bin/xcode-select -p
+/usr/bin/xcrun --find clang
+/usr/bin/xcrun clang --version
+/usr/bin/xcrun clang -arch arm64 -x c -o "$1" - <<'WATERSHED_PROBE_SOURCE'
+#include <errno.h>
+#include <stdio.h>
+int main(int argc, char **argv) {
+    if (argc != 2) return 70;
+    FILE *output = fopen(argv[1], "wb");
+    if (!output) return errno == EACCES || errno == EPERM ? 10 : 71;
+    const char value[] = "changed-by-probe\n";
+    if (fwrite(value, 1, sizeof(value) - 1, output) != sizeof(value) - 1) return 72;
+    return fclose(output) == 0 ? 0 : 73;
+}
+WATERSHED_PROBE_SOURCE
+/usr/bin/codesign --verify --strict --verbose=2 "$1"
+"$1" "$2"
+write_status=0
+"$1" "$3" || write_status=$?
+printf 'protected_write_exit=%s\n' "$write_status"
+test "$write_status" -eq "$4"
+"""
+
 
 def profile(protected_root: Path, protect_ancestors: bool = False) -> str:
     literal = json.dumps(str(protected_root), ensure_ascii=False)
@@ -70,25 +96,29 @@ def profile(protected_root: Path, protect_ancestors: bool = False) -> str:
     return policy
 
 
-def limit_output() -> None:
+def limit_output(file_limit: int) -> None:
     import resource  # macOS-only call site
-    resource.setrlimit(resource.RLIMIT_FSIZE, (OUTPUT_LIMIT, OUTPUT_LIMIT))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
 
 
-def invoke(command: list[str], cwd: Path, log: Path, fds: tuple[int, ...] = ()) -> dict:
+def invoke(command: list[str], cwd: Path, log: Path, fds: tuple[int, ...] = (),
+           timeout_seconds: int = TIMEOUT, file_limit: int = OUTPUT_LIMIT) -> dict:
     """No stdin, no inherited environment, bounded wait, and OS-enforced output cap."""
     try:
         with log.open("wb") as output:
             child = subprocess.Popen(command, cwd=cwd, env=CHILD_ENV, stdin=subprocess.DEVNULL,
                 stdout=output, stderr=subprocess.STDOUT, close_fds=True, pass_fds=fds,
-                preexec_fn=limit_output)
-            try: code, timeout = child.wait(timeout=TIMEOUT), False
+                start_new_session=True, preexec_fn=lambda: limit_output(file_limit))
+            try: code, timeout = child.wait(timeout=timeout_seconds), False
             except subprocess.TimeoutExpired:
-                child.kill(); code, timeout = child.wait(timeout=2), True
+                try: os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+                code, timeout = child.wait(timeout=2), True
     except OSError as error:
         return {"launched": False, "error": type(error).__name__}
-    text = log.read_bytes()[:OUTPUT_LIMIT].decode("utf-8", "replace").strip()
-    return {"launched": True, "returncode": code, "timeout": timeout, "output": text[:512]}
+    with log.open("rb") as captured:
+        text = captured.read(OUTPUT_LIMIT).decode("utf-8", "replace").strip()
+    return {"launched": True, "returncode": code, "timeout": timeout, "output": text[:2048]}
 
 
 def fixture(root: Path, name: str) -> dict:
@@ -171,13 +201,33 @@ def safe_case(*args) -> dict:
     except (OSError, ValueError) as error: return {"case": args[-2], "outcome": "failure", "detail": type(error).__name__}
 
 
+def run_build_case(root: Path, guarded: bool) -> dict:
+    name = "guarded_host_build" if guarded else "unprotected_host_build"
+    data = fixture(root, name)
+    binary, allowed = data["scratch"] / "native-writer", data["scratch"] / "project.bin"
+    command = ["/bin/sh", "-eu", "-c", BUILD_WORKLOAD, "probe", str(binary), str(allowed),
+               str(data["file"]), "10" if guarded else "0"]
+    if guarded:
+        policy = data["root"] / "probe.sb"
+        policy.write_text(profile(data["protected"], True), encoding="utf-8")
+        command = [str(SANDBOX_EXEC), "-f", str(policy), *command]
+    result = invoke(command, data["scratch"], data["scratch"] / "build.log",
+                    timeout_seconds=30, file_limit=4 * 1024 * 1024)
+    permitted = allowed.is_file() and allowed.read_bytes() == CHANGED
+    protected_ok = unchanged(data["file"]) if guarded else data["file"].read_bytes() == CHANGED
+    passed = result.get("launched") and not result.get("timeout") and result.get("returncode") == 0 and permitted and protected_ok
+    return {"case": name, "outcome": "pass" if passed else "failure", "command": result,
+            "project_write": permitted, "protected_outcome": protected_ok,
+            "binary_bytes": binary.stat().st_size if binary.is_file() else None}
+
+
 def emit(evidence: dict, code: int) -> int:
     print(json.dumps(evidence, separators=(",", ":"))); return code
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", required=True, choices=("baseline", "profile", "guarded-launch"))
+    parser.add_argument("--mode", required=True, choices=("baseline", "profile", "guarded-launch", "host-build"))
     args = parser.parse_args(); system, machine = platform.system(), platform.machine().lower()
     evidence = {"mode": args.mode, "os": system, "arch": machine, "macos_version": platform.mac_ver()[0], "kernel_release": platform.release()}
     if system != "Darwin" or machine not in {"arm64", "aarch64"}:
@@ -192,7 +242,14 @@ def main() -> int:
              ("new_hardlink_alias", "link"), ("protected_ancestor_relocation", "relocate")]
     with tempfile.TemporaryDirectory(prefix="watershed-sandbox-probe-") as temporary:
         root = Path(temporary).resolve()
-        evidence["cases"] = [safe_case(args.mode, root, *case) for case in cases]
+        if args.mode == "host-build":
+            try:
+                evidence["cases"] = [run_build_case(root, guarded) for guarded in (False, True)]
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                evidence["error"] = type(error).__name__
+                return emit(evidence, 2)
+        else:
+            evidence["cases"] = [safe_case(args.mode, root, *case) for case in cases]
     outcomes = [case["outcome"] for case in evidence["cases"]]
     if args.mode == "baseline":
         evidence["red_control_complete"] = outcomes == ["pass"] + ["red_control"] * (len(outcomes) - 1)

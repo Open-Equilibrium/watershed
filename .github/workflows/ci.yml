@@ -91,13 +91,14 @@ jobs:
         shell: bash
         run: |
           probe_status=0
-          for probe_mode in profile guarded-launch; do
+          for probe_mode in profile guarded-launch host-build; do
             if python3 scripts/probe-macos-self-protection.py --mode "$probe_mode"; then
-              :
+              result=0
             else
               result=$?
-              if (( result > probe_status )); then probe_status=$result; fi
             fi
+            printf '%s exit_code=%s\n' "$probe_mode" "$result"
+            if (( result > probe_status )); then probe_status=$result; fi
           done
           exit "$probe_status"
 
