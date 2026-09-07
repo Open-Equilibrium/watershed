@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-**Status: accepted replacement architecture, not implemented (ADR-0166).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. [D-063](../decisions/open-decisions.html#d-063) blocks the native mechanism and configuration-transaction implementation. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
+**Status: accepted replacement architecture, not implemented (ADR-0166/ADR-0167).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. The bounded Mac feasibility evaluation and initial configuration scope are authorized; [D-063](../decisions/open-decisions.html#d-063) still blocks shipping-mechanism selection and configuration-transaction implementation. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
 
 ## Responsibility and architecture
 
@@ -98,7 +98,7 @@ flowchart TD
   Recheck -->|Valid| Apply["Flow applies and records change"]
 ```
 
-Ordinary assigned Tool execution still does not require a prompt. `ask` applies to the explicit configuration request, not arbitrary filesystem calls. `allow` remains a scoped permission, not a writable mount of the Flow home. No actor can approve more than the configured scope. Credential values must not appear in the review. The editable-field catalog, actual approval surface and headless pending behavior remain D-063 choices; the diagram introduces no CLI command, socket or new service contract.
+Ordinary assigned Tool execution still does not require a prompt. `ask` applies to the explicit configuration request, not arbitrary filesystem calls. `allow` remains a scoped permission, not a writable mount of the Flow home. No actor can approve more than the configured scope. Credential values must not appear in the review. The approved [initial field catalog and local-owner scope](../../SECURITY.md#configuration-and-migration-boundary) do not select an approval surface or unanswered-request protocol; those remain D-063 choices. The diagram introduces no CLI command, socket or new service contract.
 
 ### 4. Changed or replayed approval
 
