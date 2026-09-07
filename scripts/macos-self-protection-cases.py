@@ -67,7 +67,8 @@ for row in rows:
         elif action == 'mmap':
             with target.open('r+b') as opened:
                 with mmap.mmap(opened.fileno(), 0) as mapped: mapped[0:1] = b'X'; mapped.flush()
-        elif action == 'terminal':
+        elif action in ('terminal', 'late-terminal'):
+            if action == 'late-terminal': target = Path(target.read_text())
             fd = os.open(target, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK); os.close(fd)
         elif action == 'child':
             code = 'import os,sys; os.setsid(); open(sys.argv[1], "wb").write(b"changed-by-probe\\n")'
@@ -126,6 +127,8 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
     master, slave = pty.openpty()
     terminal = Path(os.ttyname(slave)).resolve()
     operation("review_terminal_handle", "terminal", terminal)
+    late_terminal = project / "late-terminal"
+    operation("terminal_created_after_launch", "late-terminal", late_terminal)
     plan, result, ready, release = [project / name for name in ("plan.json", "result.json", "ready", "release")]
     plan.write_text(json.dumps(rows), encoding="utf-8")
     inventory_before = admit(roots, files)
@@ -135,7 +138,7 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
         policy.write_text(probe.profile(homes[0], True, roots[1:], files, [terminal], parameters), encoding="utf-8")
         bindings = [argument for key, value in parameters.items() for argument in ("-D", f"{key}={value}")]
         command = [str(probe.SANDBOX_EXEC), *bindings, "-f", str(policy), *command]
-    child = None
+    child, late_master, late_slave = None, None, None
     try:
         with (project / "child.log").open("wb") as log:
             child = subprocess.Popen(command, cwd=project, env=probe.CHILD_ENV, stdin=subprocess.DEVNULL,
@@ -144,6 +147,8 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
             deadline = time.monotonic() + 5
             while not ready.exists() and child.poll() is None and time.monotonic() < deadline: time.sleep(.01)
             if not ready.is_file(): raise ValueError("native helper did not become ready")
+            late_master, late_slave = pty.openpty()
+            late_terminal.write_text(str(Path(os.ttyname(late_slave)).resolve()))
             # Real trusted-parent operations after the protected child has started.
             stage.write_bytes(probe.ORIGINAL); os.link(stage, late)
             staged_replacement = homes[0] / "replace-stage"; staged_replacement.write_bytes(probe.ORIGINAL)
@@ -174,6 +179,8 @@ def lifecycle(probe, root: Path, guarded: bool) -> list[dict]:
         if child is not None and child.poll() is None:
             os.killpg(child.pid, 9); child.wait(timeout=2)
         os.close(slave); os.close(master)
+        if late_slave is not None: os.close(late_slave)
+        if late_master is not None: os.close(late_master)
 
 
 DETACHED = r"""

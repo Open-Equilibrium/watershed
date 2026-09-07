@@ -98,6 +98,8 @@ def profile(protected_root: Path, protect_ancestors: bool = False,
     for root in roots: policy += "(deny file-write* (subpath %s))\n" % quote(root)
     for path in files: policy += "(deny file-write* (literal %s))\n" % quote(path)
     for path in read_denied: policy += "(deny file-read* file-write* (literal %s))\n" % quote(path)
+    if read_denied:
+        policy += '(deny file-read* file-write* (regex "^/dev/(tty|pty|console)"))\n'
     if protect_ancestors:
         ancestors = {ancestor for path in [*roots, *files] for ancestor in path.parents}
         for ancestor in sorted(ancestors):
@@ -218,7 +220,7 @@ def run_build_case(root: Path, guarded: bool) -> dict:
                str(data["file"]), "10" if guarded else "0"]
     if guarded:
         policy = data["root"] / "probe.sb"
-        policy.write_text(profile(data["protected"], True), encoding="utf-8")
+        policy.write_text(profile(data["protected"], True, read_denied=[Path("/dev/tty")]), encoding="utf-8")
         command = [str(SANDBOX_EXEC), "-f", str(policy), *command]
     result = invoke(command, data["scratch"], data["scratch"] / "build.log",
                     timeout_seconds=30, file_limit=4 * 1024 * 1024)
