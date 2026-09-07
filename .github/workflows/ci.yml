@@ -2,6 +2,11 @@ name: CI
 
 on:
   workflow_dispatch:
+    inputs:
+      mac_self_protection_evaluation:
+        description: Run the ADR-0167 experimental Mac guard probe (not release proof)
+        type: boolean
+        default: false
   pull_request:
     branches: [main]
   push:
@@ -66,6 +71,24 @@ jobs:
       - name: Run repository tooling tests
         if: steps.scope.outputs.product == 'true'
         run: node scripts/run-python.mjs -m unittest discover -s tests -p "test_*.py"
+
+      - name: Establish experimental Mac unprotected red control
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          if python3 scripts/probe-macos-self-protection.py --mode baseline; then
+            echo 'Unprotected control unexpectedly satisfied the guard assertions' >&2
+            exit 1
+          else
+            probe_status=$?
+            test "$probe_status" -eq 1
+          fi
+
+      - name: Evaluate experimental Mac profile (not release proof)
+        if: steps.scope.outputs.product == 'true' && (matrix.os == 'macos-26' && github.event_name == 'workflow_dispatch' && inputs.mac_self_protection_evaluation)
+        timeout-minutes: 2
+        run: python3 scripts/probe-macos-self-protection.py --mode profile
 
       - name: Run M1.2 installer contract tests
         if: steps.scope.outputs.product == 'true' && (matrix.os == 'ubuntu-24.04')
