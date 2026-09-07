@@ -44,12 +44,23 @@ export async function assertDecisionPage(page) {
   assert.equal(await page.locator("#d-065 p").first().isVisible(), false, "questions stay independent");
   const inferenceLink = mac.getByRole("link", { name: "D-061", exact: true });
   await inferenceLink.click();
+  assert.equal(new URL(page.url()).hash, "#d-061", "question links update the address");
   const inference = page.locator("#d-061");
   assert.equal(await inference.locator("p").first().isVisible(), true, "in-page links reveal their question");
   await inference.locator("summary").press("Space");
   assert.equal(await inference.locator("p").first().isVisible(), false);
   await inferenceLink.click();
   assert.equal(await inference.locator("p").first().isVisible(), true, "repeated links reopen a collapsed question");
+  await mac.locator("summary").press("Enter");
+  assert.equal(await mac.locator("p").first().isVisible(), false);
+  await page.goBack();
+  assert.equal(new URL(page.url()).hash, "#d-063", "reopening the same question adds no history entry");
+  await mac.locator("p").first().waitFor({ state: "visible" });
+  await inference.locator("summary").press("Enter");
+  assert.equal(await inference.locator("p").first().isVisible(), false);
+  await page.goForward();
+  assert.equal(new URL(page.url()).hash, "#d-061", "forward navigation restores the question address");
+  await inference.locator("p").first().waitFor({ state: "visible" });
 
   await page.goto(url, { waitUntil: "load" });
   for (const decision of await page.locator(".decision").all()) {

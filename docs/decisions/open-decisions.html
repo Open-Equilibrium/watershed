@@ -266,12 +266,20 @@ function revealDecision(hash) {
   if (decision?.matches("details.decision")) {
     decision.open = true;
     decision.scrollIntoView();
+    return true;
   }
+  return false;
 }
-addEventListener("hashchange", () => revealDecision(location.hash));
+addEventListener("hashchange", event => {
+  if (event.newURL === location.href) revealDecision(location.hash);
+});
 document.addEventListener("click", event => {
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
   const link = event.target.closest('a[href^="#"]');
-  if (link) revealDecision(link.hash);
+  if (link && revealDecision(link.hash)) {
+    event.preventDefault();
+    if (location.hash !== link.hash) history.pushState(null, "", link.hash);
+  }
 });
 revealDecision(location.hash);
 </script>
