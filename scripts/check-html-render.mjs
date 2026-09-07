@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright";
+import { assertDecisionPage } from "./check-decision-page.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
@@ -224,6 +225,10 @@ async function checkDocument(browser, doc, viewport) {
     await assertVisibleLayout(page, expectedText, viewport, label);
     if (viewport.name === "mobile") {
       await assertNoHorizontalOverflow(page, label);
+    }
+
+    if (doc.relativePath === "docs/decisions/open-decisions.html") {
+      await assertDecisionPage(page);
     }
 
     if (consoleErrors.length > 0) {
