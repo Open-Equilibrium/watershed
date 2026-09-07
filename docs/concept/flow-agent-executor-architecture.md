@@ -216,6 +216,8 @@ An outer container, VM or sandbox can add filesystem, network or resource limits
 
 ## Migration and native acceptance
 
+The [native protection proposal](flow-agent-native-protection-proposal.md) specifies the evaluated candidate's object/lifecycle rules, implementation tradeoffs and the distinction between completed native primitive tests and outstanding product acceptance. It is not an additional accepted policy.
+
 The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
 
 D-063 must close the concrete OS mechanism and protected-object identity rules before a coherent schema/runtime/fixture migration; the configuration review lifecycle is accepted in ADR-0168. Native tests must then cover each in-scope outcome above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, conflicting or stale consent, missing protection, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).
