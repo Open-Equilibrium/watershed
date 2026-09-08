@@ -1,6 +1,10 @@
 use crate::runtime::{
-    fs_guards::{AnchoredDir, DirectoryErrorMode, verify_protected_aliases},
+    fs_guards::{
+        AnchoredDir, DirectoryErrorMode, set_private_directory_open_observer,
+        verify_protected_aliases,
+    },
     session_store::open_flow_agent_home_at,
+    types::RuntimeError,
 };
 use crate::tests::helpers::empty_workspace;
 use std::{
@@ -112,4 +116,63 @@ fn metadata_inventory_counts_distinct_covered_names_across_overlapping_roots() {
         error.to_string().contains("unsupported file type"),
         "{error}"
     );
+}
+
+#[test]
+fn metadata_inventory_rejects_busy_or_incomplete_scans_and_releases_its_leases() {
+    let workspace = empty_workspace("protected-inventory-interruption");
+    let roots = ["home", "platform"].map(|name| {
+        open_flow_agent_home_at(&workspace.join(name), true)
+            .expect("private store opens")
+            .expect("private store exists")
+    });
+    let publisher = fs::File::open(&roots[1].path).expect("publisher handle opens");
+    publisher
+        .try_lock_shared()
+        .expect("publication lease is held");
+    let error = verify_protected_aliases(&roots, &[])
+        .expect_err("admission cannot accept a snapshot during publication");
+    assert!(matches!(error, RuntimeError::Io { source, .. }
+        if source.kind() == std::io::ErrorKind::WouldBlock));
+    drop(publisher);
+
+    let child = roots[0]
+        .private_child("nested", true, DirectoryErrorMode::Protocol)
+        .expect("nested store opens")
+        .expect("nested store exists");
+    fs::write(child.path.join("data"), b"preserved").expect("nested fixture is staged");
+    for replace in [false, true] {
+        let original = child.path.clone();
+        let moved = workspace.join("interrupted-directory");
+        let retained = moved.clone();
+        set_private_directory_open_observer(move || {
+            fs::rename(&original, &moved).expect("checked directory is displaced");
+            if replace {
+                fs::create_dir(&original).expect("different directory takes the checked name");
+            }
+        });
+        let error = verify_protected_aliases(&roots, &[])
+            .expect_err("a disappeared or replaced subtree cannot be a complete inventory");
+        if replace {
+            assert!(
+                error.to_string().contains("changed during admission"),
+                "{error}"
+            );
+        } else {
+            assert!(matches!(error, RuntimeError::Io { source, .. }
+                if source.kind() == std::io::ErrorKind::NotFound));
+        }
+        assert_eq!(fs::read(retained.join("data")).unwrap(), b"preserved");
+        for root in &roots {
+            let lease = fs::File::open(&root.path).expect("independent lease handle opens");
+            lease
+                .try_lock()
+                .expect("failed admission releases every acquired lease");
+        }
+        if replace {
+            fs::remove_dir(&child.path).expect("test owner removes the empty replacement");
+        }
+        fs::rename(&retained, &child.path).expect("test owner repairs the interrupted layout");
+        verify_protected_aliases(&roots, &[]).expect("repaired complete inventory is admitted");
+    }
 }

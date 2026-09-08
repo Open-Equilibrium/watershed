@@ -1,11 +1,14 @@
 use super::super::helpers::empty_workspace;
 use crate::runtime::fs_guards::validate_unix_private_directory_metadata;
-use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
+use crate::runtime::fs_guards::{
+    AnchoredDir, DirectoryErrorMode, create_anchored_file_for_update,
+    open_anchored_session_log_append_file,
+};
 use crate::runtime::fs_guards::{
     set_private_directory_create_observer, set_private_directory_open_observer,
 };
 use crate::runtime::types::RuntimeError;
-use std::fs;
+use std::{fs, io::Write as _, os::unix::fs::MetadataExt as _, path::Path};
 
 #[test]
 fn protected_home_publication_waits_for_admission_without_locking_other_homes() {
@@ -17,6 +20,23 @@ fn protected_home_publication_waits_for_admission_without_locking_other_homes() 
     };
     let home = open_home("home");
     let other = open_home("other");
+    let nested = home
+        .private_child("nested", true, DirectoryErrorMode::Protocol)
+        .expect("nested publication directory opens")
+        .expect("nested publication directory exists");
+    for (name, bytes) in [
+        ("source", "source"),
+        ("current", "old"),
+        ("stage", "new"),
+        ("log", "old\n"),
+    ] {
+        fs::write(nested.path.join(name), bytes).expect("publication fixture is staged");
+    }
+    nested
+        .create_dir("stage-dir")
+        .expect("directory stage is created");
+    fs::write(nested.path.join("stage-dir/data"), b"directory payload")
+        .expect("directory stage is populated");
     let publisher = fs::File::open(&home.path).expect("independent publisher handle opens");
     publisher
         .try_lock_shared()
@@ -34,9 +54,73 @@ fn protected_home_publication_waits_for_admission_without_locking_other_homes() 
         .expect_err("publication must not race admission");
     assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
     assert!(!home.path.join("pending").exists());
+    let publish = |operation| match operation {
+        "create" => create_anchored_file_for_update(&nested.file("created")).map(|_| ()),
+        "hardlink" => nested.file("source").hard_link_to(Path::new("alias")),
+        "replace" => nested.file("stage").rename_to(Path::new("current")),
+        "directory" => nested
+            .rename("stage-dir", "published-dir")
+            .map_err(|source| RuntimeError::Io {
+                path: nested.path.clone(),
+                source,
+            }),
+        _ => unreachable!("fixed publication matrix"),
+    };
+    let operations = ["create", "hardlink", "replace", "directory"];
+    std::thread::scope(|scope| {
+        let publishers = operations.map(|operation| {
+            let publish = &publish;
+            (operation, scope.spawn(move || publish(operation)))
+        });
+        for (operation, publisher) in publishers {
+            let error = publisher
+                .join()
+                .expect("publisher joins")
+                .expect_err("nested namespace publication must not race admission");
+            assert!(
+                matches!(error, RuntimeError::Io { source, .. }
+                if source.kind() == std::io::ErrorKind::WouldBlock),
+                "{operation}"
+            );
+        }
+    });
+    for absent in ["created", "alias", "published-dir"] {
+        assert!(
+            !nested.path.join(absent).exists(),
+            "{absent} was not published"
+        );
+    }
+    assert_eq!(fs::read(nested.path.join("current")).unwrap(), b"old");
+    assert_eq!(fs::read(nested.path.join("stage")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(nested.path.join("stage-dir/data")).unwrap(),
+        b"directory payload"
+    );
+    // Appending to an admitted file changes no names and must not serialize a Run.
+    open_anchored_session_log_append_file(&nested.file("log"))
+        .expect("existing log opens during admission")
+        .write_all(b"new\n")
+        .expect("existing log appends during admission");
+    assert_eq!(fs::read(nested.path.join("log")).unwrap(), b"old\nnew\n");
     drop(admission);
     home.create_dir("pending")
         .expect("publication resumes after admission");
+    for operation in operations {
+        publish(operation)
+            .unwrap_or_else(|error| panic!("{operation} retries after admission: {error}"));
+    }
+    assert!(nested.path.join("created").is_file());
+    assert_eq!(
+        fs::metadata(nested.path.join("source")).unwrap().ino(),
+        fs::metadata(nested.path.join("alias")).unwrap().ino()
+    );
+    assert_eq!(fs::read(nested.path.join("current")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(nested.path.join("published-dir/data")).unwrap(),
+        b"directory payload"
+    );
+    assert!(!nested.path.join("stage").exists());
+    assert!(!nested.path.join("stage-dir").exists());
 }
 
 #[test]

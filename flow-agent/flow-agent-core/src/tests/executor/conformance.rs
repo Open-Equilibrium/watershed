@@ -188,6 +188,44 @@ fn fake_companions_cover_the_closed_executor_protocol_matrix() {
     assert!(request.resolved_policy.environment.is_empty());
     assert_eq!(request.resolved_policy.limits.timeout_ms, 1_000);
     assert!(!request.resolved_policy.protected_objects.is_empty());
+    let flow = env::current_exe().expect("current Flow image resolves");
+    let home = crate::runtime::session_store::open_flow_agent_home(false)
+        .expect("selected home opens")
+        .expect("selected home exists");
+    let platform = crate::runtime::credential_store::default_credential_store_path()
+        .expect("synthetic platform store resolves");
+    let mut expected_paths = vec![
+        home.path,
+        platform
+            .parent()
+            .expect("platform store has a parent")
+            .to_owned(),
+        flow.clone(),
+        root.join("fake-executor-valid"),
+    ];
+    let sibling = flow.with_file_name("flow-executor");
+    match fs::symlink_metadata(&sibling) {
+        Ok(_) => expected_paths.push(sibling),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("official sibling metadata is unavailable: {error}"),
+    }
+    let mut expected_paths = expected_paths
+        .iter()
+        .map(|path| fs::canonicalize(path).expect("protected fixture path canonicalizes"))
+        .collect::<Vec<_>>();
+    expected_paths.sort();
+    expected_paths.dedup();
+    let mut actual_paths = request
+        .resolved_policy
+        .protected_objects
+        .iter()
+        .map(|object| PathBuf::from(&object.path))
+        .collect::<Vec<_>>();
+    actual_paths.sort();
+    assert_eq!(
+        actual_paths, expected_paths,
+        "complete selected inventory is bound once"
+    );
     for object in &request.resolved_policy.protected_objects {
         let metadata = fs::metadata(&object.path).expect("protected object identity reads");
         assert_eq!(object.identity.device, metadata.dev());
@@ -527,7 +565,16 @@ fn prepare_case(
             "$HOME;\nnext".to_owned(),
         ],
     };
+    let home = crate::runtime::session_store::open_flow_agent_home(false)?
+        .expect("prepared controller retains an existing home");
+    let admission = fs::File::open(&home.path).expect("independent admission handle opens");
+    admission
+        .try_lock()
+        .expect("controller admission released its lease");
+    // Tool preparation uses the admitted set even while another admission owns
+    // the namespace lease; a retained-history rescan would fail this preparation.
     let prepared = executor.prepare_tool(&workspace, &policy, command, &invocation, REQUEST_ID)?;
+    drop(admission);
     Ok((executor, prepared))
 }
 
