@@ -74,7 +74,6 @@ Canonical terms. Use these exactly; do not introduce synonyms. Tool names are fi
 - **OS isolation** — Enforceable filesystem, process and network restrictions applied by a Sandbox backend to each real Tool process and its descendants. Provider traffic remains Flow Agent traffic outside the Tool Sandbox.
 
 - **Self-protection** — Flow Agent's approved, not yet implemented native restriction against direct modification of protected Flow-owned objects by Tools and newly launched children. Independent unconfined services are outside this boundary; see [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target).
-- **Configuration change request** — A Tool's concrete proposal for a Flow-applied configuration change, never direct protected-file access. Deferred until after the first Flow Agent release (ADR-0173); the catalog and approval contract live in [SECURITY.md](SECURITY.md#after-the-first-flow-agent-release-configuration-proposals).
 
 ## Flow Agent runtime surfaces
 

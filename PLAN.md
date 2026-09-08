@@ -121,13 +121,13 @@ No implementation or release claim follows from a documentation decision alone. 
 
 ### M1.2 — Flow Agent OS isolation
 
-**Status:** The legacy Ubuntu runtime is implemented. Its broad isolation contract is superseded as the release target by ADR-0166. Mac Seatbelt and protected overlapping locations are selected in ADR-0172; [D-063](docs/decisions/open-decisions.html#d-063) retains the additional-home inventory choice. ADR-0173 defers the accepted ADR-0168 Tool-initiated configuration workflow until after the first Flow Agent release; configuration administration remains manual for that release. The prebuilt download installer remains incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and ordered repository closeout remain pending. This entry updates status, not the separate three-workstream development plan.
+**Status:** The legacy Ubuntu runtime is implemented. Its broad isolation contract is superseded as the release target by ADR-0166. Mac Seatbelt and protected overlapping locations are selected in ADR-0172; ADR-0174 settles protection of this installation's required objects. Configuration administration remains manual for the first Flow Agent release; deferred work and discussion context belong to the [later roadmap](#later-flow-agent-roadmap). The prebuilt download installer remains incomplete. Full KPI rounds, the unchanged-candidate convergence sweep and ordered repository closeout remain pending. This entry updates status, not the separate three-workstream development plan.
 
 **Current implementation:** The one-shot Default Executor, administrator-owned Custom selection, exact mounts/runtime-read profiles, deny-all Tool networking, systemd/cgroup capacity and enforcement receipt are canonical in [PROTOCOL.md](PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162). [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns their existing executable evidence. Do not describe those fields as the future cross-platform guarantee.
 
 **Approved replacement:** Implement the [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md), retaining the Default Executor and migrating unreleased runtime, definitions, schemas and tests coherently without ignored security settings or compatibility aliases.
 
-**DoD:** Close D-063, implement and verify that exact boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Current Linux tests, Mac refusal tests and diagrams do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
+**DoD:** Implement and verify the accepted boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Current Linux tests, Mac refusal tests and diagrams do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
 
 ### M2 — Meta-Harness MVP + AgentPulse
 
@@ -202,3 +202,17 @@ The target product is canonical in [`docs/concept/V-Spec_Liquid.html`](docs/conc
 - Import/export paths let integrations become Apps for users and compact CLI actions for agents without exposing MCP concepts in normal UX.
 
 **M3d DoD:** an installed Block Registry package is isolated, upgradeable and responsive; an external MCP integration can be permissioned once, represented as an App or headless integration, and invoked through the same action contract from Liquid or an authorized agent.
+
+## Later Flow Agent roadmap
+
+These entries retain scope and decision context, not detailed future-feature specifications or release commitments.
+
+### Tool-initiated configuration changes
+
+**Deferred until after the first Flow Agent release (ADR-0173).** The purpose is to let Tools request limited configuration changes without direct access to Flow files. Manual administration is sufficient initially and avoids building a proposal protocol and approval UI before the core execution boundary is ready.
+
+**Prior discussion (ADR-0167/ADR-0168):** The approved direction was Flow-applied, scope-limited proposals with default denial, optional local-owner approval or preconfigured limited permission. The initial scope was model/context-budget settings, not credentials, executable selection or Tool permissions. Review after Tool completion, bounded waiting, exact non-reusable consent and changes affecting future Runs were intended to avoid self-escalation and accidental repeated changes. Revisit the useful scope, unattended operation, review experience and conflict/recovery handling when scheduling this feature; retain no detailed protocol or diagram in advance.
+
+### Protection of other independent Flow installations
+
+**Discussion only; no feature commitment (ADR-0174).** The first release protects this installation's required objects under [SECURITY.md](SECURITY.md#native-self-protection-and-its-limits). Multiple Runs can share that home. Earlier discussion considered an administrator-listed set of other homes: it could protect deliberately separate installations from each other's Tools, but adds discovery, publication coordination and maintenance complexity. First establish whether users need separate homes instead of shared-home Runs; decide whether to add this protection before specifying it. No automatic whole-disk discovery or future delivery is approved.

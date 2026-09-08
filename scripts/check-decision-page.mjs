@@ -16,11 +16,11 @@ export async function assertDecisionPage(page) {
   }
 
   for (const [id, heading] of [
-    ["d-063", "Flow Agent - First Release"],
     ["d-066", "Flow Agent - First Release"],
     ["d-065", "Watershed - Shared Release Safeguards"],
     ["d-067", "Flow Agent - Permissions, Integrations And Offline Use"],
     ["d-020", "Flow Agent - Permissions, Integrations And Offline Use"],
+    ["d-059", "Flow Agent - Permissions, Integrations And Offline Use"],
   ]) {
     const section = page.locator("section").filter({ has: page.locator(`#${id}`) });
     assert.equal(await section.getByRole("heading", { level: 2 }).innerText(), heading);
@@ -36,31 +36,32 @@ export async function assertDecisionPage(page) {
   assert.equal(anchors.unique, true, "decision anchors must be unique");
   assert.deepEqual(anchors.missing, [], "local navigation must resolve");
   assert.equal(await page.locator("#post-m1-2").count(), 1, "preserve the merged section's old anchor");
+  assert.equal(await page.locator("#d-063").count(), 0, "the decided protection scope leaves the live index");
 
   const url = page.url().split("#")[0];
-  await page.goto(`${url}#d-063`, { waitUntil: "load" });
-  const mac = page.locator("#d-063");
-  assert.equal(await mac.locator("p").first().isVisible(), true, "direct links reveal their question");
+  await page.goto(`${url}#d-067`, { waitUntil: "load" });
+  const marketplace = page.locator("#d-067");
+  assert.equal(await marketplace.locator("p").first().isVisible(), true, "direct links reveal their question");
   assert.equal(await page.locator("#d-065 p").first().isVisible(), false, "questions stay independent");
-  const inferenceLink = mac.getByRole("link", { name: "D-061", exact: true });
-  await inferenceLink.click();
-  assert.equal(new URL(page.url()).hash, "#d-061", "question links update the address");
-  const inference = page.locator("#d-061");
-  assert.equal(await inference.locator("p").first().isVisible(), true, "in-page links reveal their question");
-  await inference.locator("summary").press("Space");
-  assert.equal(await inference.locator("p").first().isVisible(), false);
-  await inferenceLink.click();
-  assert.equal(await inference.locator("p").first().isVisible(), true, "repeated links reopen a collapsed question");
-  await mac.locator("summary").press("Enter");
-  assert.equal(await mac.locator("p").first().isVisible(), false);
+  const toolsLink = marketplace.getByRole("link", { name: "D-066", exact: true });
+  await toolsLink.click();
+  assert.equal(new URL(page.url()).hash, "#d-066", "question links update the address");
+  const standardTools = page.locator("#d-066");
+  assert.equal(await standardTools.locator("p").first().isVisible(), true, "in-page links reveal their question");
+  await standardTools.locator("summary").press("Space");
+  assert.equal(await standardTools.locator("p").first().isVisible(), false);
+  await toolsLink.click();
+  assert.equal(await standardTools.locator("p").first().isVisible(), true, "repeated links reopen a collapsed question");
+  await marketplace.locator("summary").press("Enter");
+  assert.equal(await marketplace.locator("p").first().isVisible(), false);
   await page.goBack();
-  assert.equal(new URL(page.url()).hash, "#d-063", "reopening the same question adds no history entry");
-  await mac.locator("p").first().waitFor({ state: "visible" });
-  await inference.locator("summary").press("Enter");
-  assert.equal(await inference.locator("p").first().isVisible(), false);
+  assert.equal(new URL(page.url()).hash, "#d-067", "reopening the same question adds no history entry");
+  await marketplace.locator("p").first().waitFor({ state: "visible" });
+  await standardTools.locator("summary").press("Enter");
+  assert.equal(await standardTools.locator("p").first().isVisible(), false);
   await page.goForward();
-  assert.equal(new URL(page.url()).hash, "#d-061", "forward navigation restores the question address");
-  await inference.locator("p").first().waitFor({ state: "visible" });
+  assert.equal(new URL(page.url()).hash, "#d-066", "forward navigation restores the question address");
+  await standardTools.locator("p").first().waitFor({ state: "visible" });
 
   await page.goto(url, { waitUntil: "load" });
   for (const decision of await page.locator(".decision").all()) {

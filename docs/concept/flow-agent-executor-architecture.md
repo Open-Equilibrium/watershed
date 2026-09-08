@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-**Status: accepted replacement architecture, not implemented (ADR-0166–ADR-0173).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Mac Seatbelt and protected overlapping locations are selected; [D-063](../decisions/open-decisions.html#d-063) retains the protected-inventory choice. ADR-0173 defers Tool-initiated configuration changes until after the first Flow Agent release; cases 3–4 below describe that later feature. Diagrams specify intended outcomes, not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
+**Status: accepted first-release replacement architecture, not implemented (ADR-0166–ADR-0174).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Mac Seatbelt, protected overlapping locations and this installation's protected inventory are selected. Later features and discussion context belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap). Diagrams specify intended first-release outcomes, not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
 
 ## Responsibility and architecture
 
@@ -13,7 +13,6 @@ Flow Agent controls the workflow; the Executor starts and supervises a Tool; the
 | Executor | Preserve the existing short-lived companion seam, prepare mandatory protection before launch, bound transport/waiting and report observed results and cleanup. | Decide permissions, approve configuration, or certify third-party executors. |
 | Native boundary | Block direct modifications of protected Flow objects by the Tool and its children. | Contain all other host effects, independent services or privileged actors. |
 | Tool and dependency chain | Implement the admitted action correctly even for hostile inputs. | Rely on Flow to repair unsafe path handling, shell construction or delegated authority. |
-| Authorized approver (post-first-release feature) | Decide the exact proposed configuration change within the Engineer's permitted scope. | Grant unlimited access, approve on behalf of a different actor, or rewrite current Run authority. |
 
 ```mermaid
 flowchart TD
@@ -27,7 +26,7 @@ flowchart TD
   Tool -.-> Service["Independent service: delegated authority"]
 ```
 
-The existing `flow` / `flow-executor` separation remains useful; removing broad isolation does not require embedding every launcher in the controller. Flow owns selection and launch authorization. The companion never receives permission to let a Tool overwrite protected files. The first-release diagram has no Tool configuration-proposal path; later mediation belongs to Flow, not an unrestricted privileged helper or model-controlled replacement Executor. Current administrator-selected Custom Executors remain part of the trusted installation, without third-party certification; the replacement must not make a Custom selection an automatic protection bypass.
+The existing `flow` / `flow-executor` separation remains useful; removing broad isolation does not require embedding every launcher in the controller. Flow owns selection and launch authorization. The companion never receives permission to let a Tool overwrite protected files. There is no Tool configuration-proposal path in this release. Current administrator-selected Custom Executors remain part of the trusted installation, without third-party certification; the replacement must not make a Custom selection an automatic protection bypass.
 
 ## Security case matrix
 
@@ -37,14 +36,12 @@ The cases partition the supported authority paths and failure classes. They are 
 |---|---|
 | [1. Ordinary or invalid request](#1-ordinary-or-invalid-request) | Flow accepts only a valid in-scope invocation; trusted Tool code implements its effects. |
 | [2. Direct protected write](#2-direct-protected-write) | Native denial, including child processes; no escalation or automatic retry. |
-| [3. Configuration permission](#3-configuration-permission) | **After the first Flow Agent release:** deny, ask or scoped allow; Flow applies only a concrete authorized change. |
-| [4. Changed or replayed approval](#4-changed-or-replayed-approval) | **After the first Flow Agent release:** no stale or reused consent. Current-Run authority integrity remains required in the first release. |
-| [5. Compromised Tool](#5-compromised-tool) | Direct protected writes remain blocked; unrelated host effects and false results are not contained. |
-| [6. Compromised new helper](#6-compromised-new-helper) | Helper inherits direct-write protection; the trusted dependency assumption is nevertheless broken. |
-| [7. Independent third-party service](#7-independent-third-party-service) | Service acts with separate authority and may bypass Flow's local write guard. |
-| [8. Missing boundary or interrupted execution](#8-missing-boundary-or-interrupted-execution) | No unprotected launch; post-launch uncertainty is not success or permission to replay. |
-| [9. Parallel agents](#9-parallel-agents) | Separate Run ownership does not serialize shared project edits or reserve host resources. |
-| [10. External sandbox](#10-external-sandbox) | Extra containment is possible only when nested prerequisites work; no fallback. |
+| [3. Compromised Tool](#3-compromised-tool) | Direct protected writes remain blocked; unrelated host effects and false results are not contained. |
+| [4. Compromised new helper](#4-compromised-new-helper) | Helper inherits direct-write protection; the trusted dependency assumption is nevertheless broken. |
+| [5. Independent third-party service](#5-independent-third-party-service) | Service acts with separate authority and may bypass Flow's local write guard. |
+| [6. Missing boundary or interrupted execution](#6-missing-boundary-or-interrupted-execution) | No unprotected launch; post-launch uncertainty is not success or permission to replay. |
+| [7. Parallel agents](#7-parallel-agents) | Separate Run ownership does not serialize shared project edits or reserve host resources. |
+| [8. External sandbox](#8-external-sandbox) | Extra containment is possible only when nested prerequisites work; no fallback. |
 
 ### 1. Ordinary or invalid request
 
@@ -80,55 +77,9 @@ sequenceDiagram
   Note over F: No restart with broader direct-write authority
 ```
 
-A direct-write block is not a whole-Tool rollback. The Tool may already have edited other files or contacted a service. A Tool may also catch an OS error and report success; the blocked write stays blocked, but Flow does not thereby know the Tool's result is truthful. The final native mechanism must cover object identity and child inheritance, not just match a path in command text. Configuration permission does not lift this guard.
+A direct-write block is not a whole-Tool rollback. The Tool may already have edited other files or contacted a service. A Tool may also catch an OS error and report success; the blocked write stays blocked, but Flow does not thereby know the Tool's result is truthful. The final native mechanism must cover object identity and child inheritance, not just match a path in command text. No Tool permission lifts this guard.
 
-### 3. Configuration permission
-
-**Deferred beyond the first Flow Agent release (ADR-0173).** That release offers no Tool configuration-proposal protocol or approval UI; see the [canonical scope](../../SECURITY.md#configuration-and-migration-boundary).
-
-```mermaid
-flowchart TD
-  Request["Tool submits concrete configuration change"] --> Valid{"Valid target and within Engineer scope?"}
-  Valid -->|No| Reject["Reject without configuration mutation"]
-  Valid -->|Yes| Policy{"Configured policy"}
-  Policy -->|deny| Reject
-  Policy -->|ask| Review["Authorized person reviews exact change"]
-  Review -->|Rejected| Reject
-  Review -->|No answer within five minutes or channel lost| Unanswered["Reject; end requesting Run; no pending approval queue"]
-  Review -->|Approved| Recheck["Revalidate change, authority and base version"]
-  Policy -->|allow| Recheck
-  Recheck -->|Mismatch or forbidden authority change| Reject
-  Recheck -->|Valid| Apply["Flow applies and records change"]
-```
-
-Ordinary assigned Tool execution still does not require a prompt. `ask` applies to the explicit configuration request, not arbitrary filesystem calls. `allow` remains a scoped permission, not a writable mount of the Flow home. No actor can approve more than the configured scope. Credential values must not appear in the review. The approved [catalog and terminal review lifecycle](../../SECURITY.md#configuration-and-migration-boundary) run after Tool completion; JSONL, redirected-input and unattended Runs reject `ask`. The diagram introduces no socket or new service contract.
-
-### 4. Changed or replayed approval
-
-**Deferred feature acceptance, not a first-release gate (ADR-0173).** Manual configuration validation, safe publication and unchanged current-Run authority are not deferred.
-
-```mermaid
-sequenceDiagram
-  participant T as Tool
-  participant F as Flow Agent
-  participant U as Authorized person
-  participant C as Shared configuration
-  T->>F: Propose change A against version V
-  F->>U: Review exact A
-  U-->>F: Approve A
-  F->>C: Check expected version V and current authority
-  alt Proposal changed, base changed or approval no longer applicable
-    F-->>T: Reject, no substituted or repeated effect
-  else Exact authorized change remains valid
-    F->>C: Apply A through controlled mutation
-    F-->>T: Recorded outcome
-  end
-  Note over F: Existing Run retains its established authority
-```
-
-A request that raises the requesting Tool's own permission is forbidden even if another mutable setting appears harmless. The accepted lifecycle rejects version conflicts and reused consent, changes future Runs only and retains no pending approval after restart. Native channel protection and transaction/crash tests remain implementation acceptance, not completed evidence.
-
-### 5. Compromised Tool
+### 3. Compromised Tool
 
 ```mermaid
 flowchart TD
@@ -142,7 +93,7 @@ flowchart TD
 
 This violates the trusted-Tool assumption. The narrow direct-write guarantee still has to work within its declared scope, but it is not a certificate that running hostile code is safe. The Tool may damage project data, read accessible secrets, exhaust resources or lie. Flow does not automatically detect compromise. If the controller, installed enforcement component or OS itself is compromised, the enforcement assumption fails as well.
 
-### 6. Compromised new helper
+### 4. Compromised new helper
 
 ```mermaid
 flowchart TD
@@ -154,9 +105,9 @@ flowchart TD
   Other --> Risk["Not generally contained by Flow"]
 ```
 
-The parent being correct is insufficient: the complete executable chain must be trusted. The same reasoning applies to an imported library running inside the parent, an interpreter, a test runner or a dependency hook. A new process does not lose the direct-write restriction merely because another Tool launches it. A call to an independent service is different and belongs to case 7.
+The parent being correct is insufficient: the complete executable chain must be trusted. The same reasoning applies to an imported library running inside the parent, an interpreter, a test runner or a dependency hook. A new process does not lose the direct-write restriction merely because another Tool launches it. A call to an independent service is different and belongs to case 5.
 
-### 7. Independent third-party service
+### 5. Independent third-party service
 
 ```mermaid
 sequenceDiagram
@@ -171,7 +122,7 @@ sequenceDiagram
 
 A trustworthy Tool can call a compromised service, or correctly request an intentionally powerful action from a trustworthy service. Either can affect Flow files if the service has the necessary local authority. Remote services can affect local files only through some local authority or access path; a remote request alone does not create local filesystem rights. The Engineer owns integration trust. Extending the guarantee to these actors would require another boundary decision, not a stronger warning message. An external sandbox may block the integration, but that is separate deployment protection.
 
-### 8. Missing boundary or interrupted execution
+### 6. Missing boundary or interrupted execution
 
 ```mermaid
 flowchart TD
@@ -187,7 +138,7 @@ flowchart TD
 
 A timeout is not proof that every helper stopped. Removing hostile-descendant cleanup guarantees does not remove bounded waits, cancellation handling or honest recovery. A write restriction must survive in a child that outlives its parent for as long as that child can run; the new native acceptance must demonstrate that inheritance property. It does not promise that the child cannot keep changing its other admitted resources.
 
-### 9. Parallel agents
+### 7. Parallel agents
 
 ```mermaid
 flowchart TD
@@ -204,9 +155,9 @@ flowchart TD
   ToolB --> Host
 ```
 
-Private Run ownership is not a per-Run OS identity. Twenty correctly implemented Tools can still conflict on one file or overcommit a laptop. The native protected-object set and its behavior with multiple Flow homes must be explicit under D-063; a selected home's protection must not be advertised as automatic discovery and protection of every other installation. No project-code VCS, scheduler or new cross-agent locking product is introduced here.
+Private Run ownership is not a per-Run OS identity. Twenty correctly implemented Tools can still conflict on one file or overcommit a laptop. ADR-0174 protects this installation's required objects; Tools from an independently configured home do not automatically protect another home. Shared-home Runs retain the same protected set, not mutual Run isolation. No project-code VCS, scheduler or new cross-agent locking product is introduced here.
 
-### 10. External sandbox
+### 8. External sandbox
 
 ```mermaid
 flowchart TD
@@ -225,4 +176,4 @@ The [native protection proposal](flow-agent-native-protection-proposal.md) speci
 
 The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
 
-D-063 must close the remaining protected-inventory choice before a coherent schema/runtime/fixture migration; the Mac mechanism is already selected. Native tests must cover first-release outcomes on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, missing protection, manual/internal publication, cancellation and crash outcomes. Cases 3–4 and the configuration review UI/consent/transaction tests become acceptance gates for the later feature, not this release. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).
+The selected boundary requires a coherent schema/runtime/fixture migration. Native tests must cover the outcomes above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, missing protection, manual/internal publication, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service and cross-installation exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).

@@ -1,12 +1,12 @@
 # Native Flow-file protection proposal
 
-**Mac mechanism and overlap policy selected (ADR-0172); product implementation pending.** The accepted guarantees and exclusions belong to [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). This document specifies the checked Seatbelt design and the remaining additional-home choice in D-063. ADR-0173 defers Tool-initiated configuration changes and their review integration below until after the first Flow Agent release. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167) owns reproducible commands, native observations and their limits. The existing Linux implementation and fail-closed Mac product behavior remain unchanged.
+**Mac mechanism, overlap policy and first-release inventory selected (ADR-0172/ADR-0174); product implementation pending.** The accepted guarantees and exclusions belong to [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). This document specifies the checked Seatbelt design for this installation's required objects. Later features and discussion context belong to the [roadmap](../../PLAN.md#later-flow-agent-roadmap), not this design. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167) owns reproducible commands, native observations and their limits. The existing Linux implementation and fail-closed Mac product behavior remain unchanged.
 
 ## Recommendation and user consequences
 
 Implement the selected native macOS profile mechanism as one part of a checked launch boundary, not as a path-only rule. Retain the short-lived Default Executor. Do not require a Linux VM, administrator privileges, a permanent service or an additional product runtime on Mac. `sandbox-exec` is supplied by macOS; Python is only the development probe's driver.
 
-The boundary combines protected directories/program names, complete alias admission, inherited-handle removal, ancestor-move denial and terminal-channel isolation. An invalid installation must produce an actionable start error, never an automatic repair or an unprotected Tool. ADR-0169 accepts the alias and ancestor-move restrictions and reconfirms independent-service responsibility; ADR-0170 accepts the terminal-access compatibility cost under [SECURITY.md](../../SECURITY.md#native-self-protection-and-its-limits). ADR-0172 accepts the deprecated Apple-interface maintenance risk. D-063 retains only the proposed coverage of additional independent Flow homes, not reapproval of the current home's required protection.
+The boundary combines protected directories/program names, complete alias admission, inherited-handle removal, ancestor-move denial and terminal-channel isolation. An invalid installation must produce an actionable start error, never an automatic repair or an unprotected Tool. ADR-0169 accepts the alias and ancestor-move restrictions and reconfirms independent-service responsibility; ADR-0170 accepts the terminal-access compatibility cost under [SECURITY.md](../../SECURITY.md#native-self-protection-and-its-limits). ADR-0172 accepts the deprecated Apple-interface maintenance risk. ADR-0174 excludes additional independent homes from the first-release protected inventory.
 
 Ordinary non-interactive shell commands and project builds remain the intended use case. Tools receive bounded input/output pipes, not the human review terminal. The proposed terminal-device denial can break programs requiring direct terminal access, interactive password prompts or terminal-user-interface libraries. It is not a general promise that every Mac application works. Native GUI automation through independent services and Metal compatibility require their own evidence; neither is established by a C compilation test.
 
@@ -111,20 +111,19 @@ ADR-0172 allows deliberate home/installation placement inside a Tool-writable di
 
 The corrected [instruction-file rule](../../SECURITY.md#native-self-protection-and-its-limits) keeps the global `AGENTS.md` protected with the whole Flow home and only Workspace-local instructions editable. Editable local instructions can steer future requests; they cannot expand available Tools or turn Tool output into consent. No per-filename hole inside the global home is required.
 
-## Complete proposed protected set
+## Complete protected set
 
 Resolve the following from trusted controller/installation configuration before Tool launch, never from model output or a Tool-supplied exclusion. Anchor canonical objects using the existing no-follow filesystem discipline; do not later resolve authority again through mutable path text.
 
-| Object class | Proposed coverage and update rule |
+| Object class | First-release coverage and update rule |
 |---|---|
 | Selected `FLOW_AGENT_HOME` | Entire home: global Flow configuration, registry, runtime history, context/objects, global `AGENTS.md`, locks and staging files, including future publications. Protect directory ancestry; local instructions outside the protected store have no Flow-owned write restriction. |
-| Additional Flow homes | Optional expansion still awaiting D-063: an explicit administrator-owned set fixed before execution. The default shared home already covers concurrent Runs using that home; there is no whole-disk search or automatic promise for undisclosed independent homes. If this expansion is selected, every home needing mutual protection must be admitted before starting those Tools. |
 | Platform credential/selection store | Entire Flow-owned platform directory, including `credentials.json`, `executor.json`, locks and staging names. These are outside the selected home today; their locations remain canonical in [PROTOCOL.md](../../PROTOCOL.md). The inventory inspects metadata, never credential contents. |
 | Installed program objects | Current `flow`, the official sibling `flow-executor` and any explicitly selected Custom Executor, including every covered name of the same file. Reject missing or unresolved objects. Custom code still belongs to the trusted installation, not third-party certification. |
 | Path ancestry | Prevent Tools from removing or renaming any canonical ancestor of a protected directory or program. Do not prohibit ordinary unrelated child-file edits in those ancestors. Moving a parent folder containing Flow data is consequently unavailable to Tools. |
-| Terminal access | No terminal/approval handles are inherited. Deny direct access to the supported Mac terminal-device namespace, including later-created terminals; protect `/dev/tty` and console paths as well as the selected device. This prevents a different Run's new terminal from becoming an unguarded direct entry point. ADR-0173 does not remove this accepted restriction. The deferred review feature additionally requires Flow to own and pin its review terminal before running Tools. |
+| Terminal access | No terminal handles are inherited. Deny direct access to the supported Mac terminal-device namespace, including later-created terminals; protect `/dev/tty` and console paths as well as the selected device. This prevents a different Run's new terminal from becoming an unguarded direct entry point. ADR-0173 does not remove this accepted restriction. |
 
-Undisclosed installations, project files, backups and exported copies are not automatically protected objects. Changing the admitted home/image set is manual installation maintenance, not one of the automated configuration fields. Do not claim that an already-running Tool acquires protection for a newly admitted outside directory: its native policy is immutable. Maintenance must account for previously started helpers; bounded waiting is not proof that all of them ended.
+Other independent Flow homes, project files, backups and exported copies are not automatically protected objects. Changing this installation's admitted home/program locations is manual maintenance. Do not claim that an already-running Tool acquires protection for a newly admitted outside directory: its native policy is immutable. Maintenance must account for previously started helpers; bounded waiting is not proof that all of them ended.
 
 ## General invariant, not command-name filtering
 
@@ -145,7 +144,7 @@ Unconfined external writers, privileged actors and controller/OS compromise are 
 
 ```mermaid
 flowchart TD
-  Select["Controller selects homes, platform store and installed images"] --> Admit["Anchor objects and verify all covered aliases under publication lease"]
+  Select["Controller selects this home's stores and installed images"] --> Admit["Anchor objects and verify all covered aliases under publication lease"]
   Admit -->|Incomplete, changed or external alias| Refuse["Explain start error; no Tool; no automatic repair"]
   Admit -->|Complete| Prepare["Bind paths as data; remove inherited authority; prepare native restriction"]
   Prepare -->|Not supported or not verified| Refuse
@@ -164,32 +163,6 @@ flowchart TD
 - **Install:** finalize program publication before a new installation starts Tools. Current installation does not upgrade existing programs. An external hardlink to a selected program is a readiness error; an interrupted install must be finalized or deliberately repaired by its owner. This proposal does not add an automatic updater or change system/kernel policy.
 - **Finish/crash:** terminate further dispatch and retain truthful effects/uncertainty evidence. The restriction stays on a surviving helper; protection must not depend on the Executor remaining alive. Do not promise that arbitrary hostile descendants have all been killed. Never redispatch an uncertain effect.
 
-## Configuration review integration
-
-**After the first Flow Agent release (ADR-0173), not a gate for that release.** The [approved ADR-0168 workflow](../../SECURITY.md#after-the-first-flow-agent-release-configuration-proposals) remains normative for the deferred feature. Its implementation must use separate controller-owned input, discard pre-review buffered input, safely render untrusted output and show an unmistakable controller review of the exact change. Render control and bidirectional formatting characters visibly rather than executing or visually hiding them. A Tool's stdout, a literal `yes`, an escape sequence or a forged attention event must never count as consent. A native terminal-open denial is necessary evidence, not a completed approval UI or transaction test.
-
-```mermaid
-sequenceDiagram
-  participant T as Tool or surviving helper
-  participant G as Native restriction
-  participant F as Flow controller
-  participant U as Local owner
-  T-->>F: Tool output and explicit proposal
-  Note over F: Output is untrusted data, not consent
-  F->>F: Finish Tool; validate proposal; stop further dispatch
-  T->>G: Open current or later review terminal
-  G-->>T: Direct access denied; no inherited review handle
-  F->>U: Controller-owned exact-change review
-  alt Explicit valid consent within five minutes
-    U-->>F: Approve this proposal
-    F->>F: Revalidate version and scope; atomic publication for future Runs
-  else Refusal, silence, cancellation or lost channel
-    F->>F: Reject and end requesting Run; no retained approval queue
-  end
-```
-
-An Engineer-authorized independent GUI/automation service may act with its own authority, including on a terminal. That remains delegated host authority, not direct Tool-channel isolation. Do not advertise secure human approval against a compromised controller, terminal application or such a service. If a deployment needs that stronger guarantee, this proposal is insufficient; a separately trusted approval surface would require another decision.
-
 ## Finite evidence and release acceptance
 
 The executable matrix partitions file access, alias admission, publication, inherited authority, helper lifetime, review-device access and ordinary host-program compatibility. It deliberately includes unprotected controls. It is not an exhaustive list of commands or a mathematical proof that Apple's private implementation has no defects.
@@ -198,8 +171,7 @@ The executable matrix partitions file access, alias admission, publication, inhe
 |---|---|
 | Native feasibility | Existing direct-write/link/handle controls plus multi-root publication, metadata/mapped writes, ordinary project writes/hardlinks, child inheritance, parent exit and current/later terminal tests pass on native ARM64 macOS. The raw path-only profile remains a recorded counterexample. |
 | Product admission | Implement anchored discovery and coordinated publication, then run real runtime/installer concurrency and interruption tests. The fixture scanner is deliberately single-owner; its passing tests do **not** prove race-safe production admission. |
-| Configuration transaction — **post-first-release feature gate** | Implement ADR-0168 and test actual CLI review, pre-buffered/forged output, wrong/stale/reused consent, exact scope, rejection/timeout/channel loss, simultaneous publishers and each crash boundary. No mock interaction may be reported as native end-to-end consent evidence. ADR-0173 defers these feature-specific tests, not safe manual/internal publication. |
 | Distribution | Build the actual download package; verify checksum failure paths, clean installation, quarantine/Gatekeeper behavior and the chosen release signing/notarization process on macOS. The local generated C binary's signature proves none of these. No release identity or credential is acquired by the probe. |
-| Release support | Resolve the additional-home inventory choice, publish the tested OS range, retain Linux x86_64 and macOS ARM64 native gates and full lifecycle observations. The Mac mechanism and mandatory restrictions are selected, not verified product behavior. Unsupported or failed readiness has no weaker fallback. OS updates require revalidation; a deprecated interface can force a compatibility update or explicit refusal. |
+| Release support | Publish the tested OS range, retain Linux x86_64 and macOS ARM64 native gates and full lifecycle observations. Prove editable local versus protected global instructions, this installation's complete protected set and safe overlapping locations; state that independent homes are outside the guarantee. The selected Mac mechanism is not verified product behavior. Unsupported or failed readiness has no weaker fallback. OS updates require revalidation; a deprecated interface can force a compatibility update or explicit refusal. |
 
-Product admission, distribution and release support are **first Flow Agent release gates**, not tests completed by this design. The separately marked configuration transaction row gates only the later feature. Do not select a release OS range solely from one hosted runner patch version. The [native comparison](#native-app-sandbox-comparison) establishes specific App Sandbox successes and restrictions, not arbitrary host-program compatibility; [D-063](../decisions/open-decisions.html#d-063) retains the additional-home choice. A passing feasibility matrix and an approved mechanism are not the claim that it is the only possible design or already release-ready.
+Product admission, distribution and release support are **first Flow Agent release gates**, not tests completed by this design. Do not select a release OS range solely from one hosted runner patch version. The [native comparison](#native-app-sandbox-comparison) establishes specific App Sandbox successes and restrictions, not arbitrary host-program compatibility. A passing feasibility matrix and an approved mechanism are not the claim that it is the only possible design or already release-ready.

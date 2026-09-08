@@ -4,7 +4,7 @@ Watershed is an **AGPL/free-software AI-native work platform** for reusable, mea
 
 ## Project status
 
-**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). The current legacy implementation runs productive Tools only on Ubuntu 24.04 x64, including Custom Executors; other platforms fail closed. The approved, unimplemented replacement is [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) on Linux x86_64 and macOS ARM64. Concrete implementation decisions remain [D-063](docs/decisions/open-decisions.html#d-063).
+**M1.2 — Flow Agent OS isolation.** Current milestone status is canonical in [PLAN.md](PLAN.md#m12--flow-agent-os-isolation). The current legacy implementation runs productive Tools only on Ubuntu 24.04 x64, including Custom Executors; other platforms fail closed. The approved, unimplemented replacement is [trusted Tools with native Flow-file protection](SECURITY.md#accepted-flow-agent-security-target) on Linux x86_64 and macOS ARM64. The native mechanism and first-release protected scope are decided; implementation and native product verification remain pending.
 
 [PLATFORMS.md](PLATFORMS.md) defines each product's native release targets, current capabilities and required verification; compilation alone is not a support claim.
 
