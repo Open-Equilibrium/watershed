@@ -171,8 +171,11 @@ installation_committed=0
 readiness_config_created=0
 readiness_pid=
 readiness_pgid=
+readiness_scanner=/usr/bin/pgrep
 readiness_group_has_descendant() {
-    if readiness_members=$(/usr/bin/pgrep -g "$readiness_pgid" 2>/dev/null); then
+    # Darwin's EXIT-trap command substitution can report a missing command as 1.
+    [ -x "$readiness_scanner" ] || return 0
+    if readiness_members=$("$readiness_scanner" -g "$readiness_pgid" 2>/dev/null); then
         for readiness_member in $readiness_members; do
             [ "$readiness_member" = "$readiness_pid" ] || return 0
         done
