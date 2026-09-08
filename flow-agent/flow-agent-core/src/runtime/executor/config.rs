@@ -1,17 +1,22 @@
 use crate::runtime::fs_guards::{
-    ProtectedStateLock, ProtectedStateLockError, canonical_decimal, sync_directory,
+    AnchoredDir, AnchoredFile, DirectoryErrorMode, ProtectedStateLock, ProtectedStateLockError,
+    canonical_decimal, open_anchored_file_for_read, sync_anchored_directory,
+    unix_access_is_private,
 };
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use crate::runtime::fs_guards::{unix_access_is_private, validate_unix_private_directory_metadata};
 use crate::runtime::types::RuntimeError;
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt as _};
+use cap_std::fs::{OpenOptions, OpenOptionsExt as _};
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsStr,
     fs,
-    fs::{File, OpenOptions},
+    fs::File,
     io::{self, Read as _, Write as _},
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    path::{Component, Path, PathBuf},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
     time::Instant,
 };
@@ -55,6 +60,7 @@ struct ExecutorConfigDocument {
 pub(crate) struct ExecutorConfigStore {
     path: PathBuf,
     protect: bool,
+    retained_parent: OnceLock<AnchoredDir>,
 }
 
 impl ExecutorConfigStore {
@@ -63,6 +69,7 @@ impl ExecutorConfigStore {
         Self {
             path,
             protect: false,
+            retained_parent: OnceLock::new(),
         }
     }
 
@@ -71,6 +78,7 @@ impl ExecutorConfigStore {
         Self {
             path,
             protect: true,
+            retained_parent: OnceLock::new(),
         }
     }
 
@@ -79,20 +87,28 @@ impl ExecutorConfigStore {
             path: crate::runtime::credential_store::default_credential_store_path()?
                 .with_file_name("executor.json"),
             protect: true,
+            retained_parent: OnceLock::new(),
         })
     }
 
     pub(crate) fn read(&self) -> Result<Option<ExecutorSelection>, RuntimeError> {
-        let metadata = match fs::symlink_metadata(&self.path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(config_io(&self.path, error)),
+        let Some(parent) = self.open_parent(false)? else {
+            return Ok(None);
         };
-        verify_regular_unlinked(&metadata)?;
-        if self.protect {
-            verify_private_file(&self.path, &metadata)?;
-            verify_private_parent(self.parent()?)?;
-        }
+        let path = self.anchored_path(&parent)?;
+        let (file, metadata) = match open_anchored_file_for_read(&path) {
+            Ok(opened) => opened,
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                return Ok(None);
+            }
+            Err(error) => {
+                return Err(config_guard_error(
+                    error,
+                    "protected Executor configuration is unsafe",
+                ));
+            }
+        };
+        verify_open_file(&metadata, self.protect)?;
         if metadata.len() > EXECUTOR_CONFIG_MAX_BYTES {
             return Err(config_failure(
                 "protected Executor configuration is oversized",
@@ -103,9 +119,7 @@ impl ExecutorConfigStore {
             observer();
         }
         let mut bytes = Vec::new();
-        File::open(&self.path)
-            .map_err(|error| config_io(&self.path, error))?
-            .take(EXECUTOR_CONFIG_MAX_BYTES + 1)
+        file.take(EXECUTOR_CONFIG_MAX_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| config_io(&self.path, error))?;
         if bytes.len() as u64 > EXECUTOR_CONFIG_MAX_BYTES {
@@ -133,7 +147,7 @@ impl ExecutorConfigStore {
             ));
         }
         let parent = self.ensure_parent()?;
-        let _lock = acquire_config_lock(&parent.join(".executor.lock"), self.protect)?;
+        let _lock = acquire_config_lock(&parent.file(".executor.lock"), self.protect)?;
         recover_abandoned_stages(&parent)?;
         let document = ExecutorConfigDocument {
             path: path.to_owned(),
@@ -152,19 +166,18 @@ impl ExecutorConfigStore {
 
     pub(crate) fn configure_default(&self) -> Result<bool, RuntimeError> {
         let parent = self.ensure_parent()?;
-        let _lock = acquire_config_lock(&parent.join(".executor.lock"), self.protect)?;
+        let _lock = acquire_config_lock(&parent.file(".executor.lock"), self.protect)?;
         recover_abandoned_stages(&parent)?;
-        let metadata = match fs::symlink_metadata(&self.path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(config_io(&self.path, error)),
-        };
-        verify_regular_unlinked(&metadata)?;
-        if self.protect {
-            verify_private_file(&self.path, &metadata)?;
+        let path = self.anchored_path(&parent)?;
+        match verify_anchored_file(&path, self.protect) {
+            Ok(()) => {}
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                return Ok(false);
+            }
+            Err(error) => return Err(error),
         }
-        fs::remove_file(&self.path).map_err(|error| config_io(&self.path, error))?;
-        sync_directory(&parent)?;
+        path.remove()?;
+        sync_anchored_directory(&parent)?;
         Ok(true)
     }
 
@@ -174,47 +187,72 @@ impl ExecutorConfigStore {
             .ok_or_else(|| config_failure("Executor configuration has no parent"))
     }
 
-    fn ensure_parent(&self) -> Result<PathBuf, RuntimeError> {
-        let parent = self.parent()?.to_owned();
-        match fs::symlink_metadata(&parent) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-            Ok(_) => return Err(config_failure("Executor configuration parent is unsafe")),
-            Err(error) if error.kind() == io::ErrorKind::NotFound && self.protect => {
-                let base = parent
-                    .parent()
-                    .ok_or_else(|| config_failure("Executor configuration base is unavailable"))?;
-                fs::create_dir_all(base).map_err(|error| config_io(base, error))?;
-                parent_missing_observer();
-                match create_private_directory(&parent) {
-                    Ok(()) => {}
-                    Err(RuntimeError::Io { source, .. })
-                        if source.kind() == io::ErrorKind::AlreadyExists => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                fs::create_dir_all(&parent).map_err(|error| config_io(&parent, error))?;
-            }
-            Err(error) => return Err(config_io(&parent, error)),
-        }
-        if self.protect {
-            verify_private_parent(&parent)?;
-        }
-        Ok(parent)
+    fn anchored_path(&self, parent: &AnchoredDir) -> Result<AnchoredFile, RuntimeError> {
+        let leaf = self
+            .path
+            .file_name()
+            .ok_or_else(|| config_failure("Executor configuration has no file name"))?;
+        Ok(parent.file(leaf))
     }
 
-    fn replace_atomically(&self, parent: &Path, bytes: &[u8]) -> Result<(), RuntimeError> {
-        match fs::symlink_metadata(&self.path) {
-            Ok(metadata) => {
-                verify_regular_unlinked(&metadata)?;
-                if self.protect {
-                    verify_private_file(&self.path, &metadata)?;
-                }
+    fn ensure_parent(&self) -> Result<AnchoredDir, RuntimeError> {
+        self.open_parent(true)?
+            .ok_or_else(|| config_failure("Executor configuration parent is unavailable"))
+    }
+
+    fn open_parent(&self, create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
+        if self.retained_parent.get().is_none() {
+            let mut components = self.parent()?.components();
+            if components.next() != Some(Component::RootDir) {
+                return Err(config_failure("Executor configuration parent is unsafe"));
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(config_io(&self.path, error)),
+            let mut current = AnchoredDir::workspace(Path::new("/"))?;
+            let mut components = components.peekable();
+            while let Some(component) = components.next() {
+                let Component::Normal(leaf) = component else {
+                    return Err(config_failure("Executor configuration parent is unsafe"));
+                };
+                let next = if self.protect && components.peek().is_none() {
+                    match current.private_child(leaf, false, DirectoryErrorMode::Protocol) {
+                        Ok(None) if create => {
+                            parent_missing_observer();
+                            current.private_child(leaf, true, DirectoryErrorMode::Protocol)
+                        }
+                        result => result,
+                    }
+                } else {
+                    current.child(leaf, create, DirectoryErrorMode::Protocol)
+                }
+                .map_err(|error| {
+                    config_guard_error(error, "Executor configuration parent is unsafe")
+                })?;
+                let Some(next) = next else {
+                    return Ok(None);
+                };
+                current = next;
+            }
+            let _ = self.retained_parent.set(current);
         }
-        let stage = parent.join(format!(
+        let parent = self
+            .retained_parent
+            .get()
+            .expect("Executor configuration parent is initialized");
+        if self.protect {
+            parent.validate_private().map_err(|error| {
+                config_guard_error(error, "Executor configuration parent is unsafe")
+            })?;
+        }
+        Ok(Some(parent.clone()))
+    }
+
+    fn replace_atomically(&self, parent: &AnchoredDir, bytes: &[u8]) -> Result<(), RuntimeError> {
+        let path = self.anchored_path(parent)?;
+        match verify_anchored_file(&path, self.protect) {
+            Ok(()) => {}
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let stage = parent.file(format!(
             ".executor.{}.{}.tmp",
             std::process::id(),
             STAGE_COUNTER.fetch_add(1, Ordering::Relaxed)
@@ -223,36 +261,34 @@ impl ExecutorConfigStore {
             let mut file = create_private_file(&stage, self.protect)?;
             file.write_all(bytes)
                 .and_then(|()| file.sync_all())
-                .map_err(|error| config_io(&stage, error))?;
-            fs::rename(&stage, &self.path).map_err(|error| config_io(&self.path, error))?;
-            let metadata =
-                fs::symlink_metadata(&self.path).map_err(|error| config_io(&self.path, error))?;
-            verify_regular_unlinked(&metadata)?;
-            if self.protect {
-                verify_private_file(&self.path, &metadata)?;
-            }
-            sync_directory(parent)
+                .map_err(|error| config_io(stage.diagnostic_path(), error))?;
+            stage.rename_to(&path)?;
+            verify_anchored_file(&path, self.protect)?;
+            sync_anchored_directory(parent)
         })();
         if operation.is_err() {
-            let _ = fs::remove_file(&stage);
+            let _ = stage.remove();
         }
         operation
     }
 }
 
-fn recover_abandoned_stages(parent: &Path) -> Result<(), RuntimeError> {
+fn recover_abandoned_stages(parent: &AnchoredDir) -> Result<(), RuntimeError> {
     let mut removed = false;
-    for entry in fs::read_dir(parent).map_err(|error| config_io(parent, error))? {
-        let entry = entry.map_err(|error| config_io(parent, error))?;
+    for entry in parent
+        .dir
+        .entries()
+        .map_err(|error| config_io(&parent.path, error))?
+    {
+        let entry = entry.map_err(|error| config_io(&parent.path, error))?;
         if !is_executor_staging_leaf(&entry.file_name()) {
             continue;
         }
-        let path = entry.path();
-        fs::remove_file(&path).map_err(|error| config_io(&path, error))?;
+        parent.file(entry.file_name()).remove()?;
         removed = true;
     }
     if removed {
-        sync_directory(parent)?;
+        sync_anchored_directory(parent)?;
     }
     Ok(())
 }
@@ -271,33 +307,34 @@ fn is_executor_staging_leaf(leaf: &OsStr) -> bool {
     canonical_decimal(pid, u32::MAX as u64) && canonical_decimal(counter, u64::MAX)
 }
 
-fn acquire_config_lock(path: &Path, protect: bool) -> Result<ProtectedStateLock, RuntimeError> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => {
-            verify_regular_unlinked(&metadata)?;
-            if protect {
-                verify_private_file(path, &metadata)?;
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(config_io(path, error)),
+fn acquire_config_lock(
+    path: &AnchoredFile,
+    protect: bool,
+) -> Result<ProtectedStateLock, RuntimeError> {
+    match verify_anchored_file(path, protect) {
+        Ok(()) => {}
+        Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
     let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(if protect { 0o600 } else { 0o666 });
-    }
-    let file = options.open(path).map_err(|error| config_io(path, error))?;
+    options
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(if protect { 0o600 } else { 0o666 })
+        .follow(FollowSymlinks::No);
+    let file = path
+        .open(&options)
+        .map_err(|error| config_guard_error(error, "protected Executor configuration is unsafe"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| config_io(path.diagnostic_path(), error))?;
+    verify_open_file(&metadata, protect)?;
     if protect {
         use std::os::unix::fs::PermissionsExt as _;
         file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|error| config_io(path, error))?;
-    }
-    let metadata = file.metadata().map_err(|error| config_io(path, error))?;
-    verify_regular_unlinked(&metadata)?;
-    if protect {
-        verify_private_file(path, &metadata)?;
+            .map_err(|error| config_io(path.diagnostic_path(), error))?;
     }
     let started = Instant::now();
     ProtectedStateLock::acquire(file, || started.elapsed(), thread::sleep).map_err(|error| {
@@ -305,7 +342,7 @@ fn acquire_config_lock(path: &Path, protect: bool) -> Result<ProtectedStateLock,
             ProtectedStateLockError::Busy => {
                 config_failure("protected Executor configuration is busy")
             }
-            ProtectedStateLockError::Io(error) => config_io(path, error),
+            ProtectedStateLockError::Io(error) => config_io(path.diagnostic_path(), error),
         }
     })
 }
@@ -321,68 +358,76 @@ fn config_io(path: &Path, source: io::Error) -> RuntimeError {
     }
 }
 
-fn verify_regular_unlinked(metadata: &fs::Metadata) -> Result<(), RuntimeError> {
-    if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(config_failure("protected Executor configuration is unsafe"));
+fn config_guard_error(error: RuntimeError, message: &str) -> RuntimeError {
+    match error {
+        RuntimeError::Protocol(_) => config_failure(message),
+        RuntimeError::Io { ref source, .. }
+            if source.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error())
+                || source.kind() == io::ErrorKind::NotADirectory =>
+        {
+            config_failure(message)
+        }
+        error => error,
     }
-    if std::os::unix::fs::MetadataExt::nlink(metadata) != 1 {
-        return Err(config_failure("protected Executor configuration is unsafe"));
-    }
-    Ok(())
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn create_private_directory(path: &Path) -> Result<(), RuntimeError> {
-    use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
-    let mut builder = fs::DirBuilder::new();
-    builder.mode(0o700);
-    builder
-        .create(path)
-        .map_err(|error| config_io(path, error))?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| config_io(path, error))
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn create_private_file(path: &Path, protect: bool) -> Result<File, RuntimeError> {
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+fn create_private_file(path: &AnchoredFile, protect: bool) -> Result<File, RuntimeError> {
+    use std::os::unix::fs::PermissionsExt as _;
     let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    options
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
     if protect {
         options.mode(0o600);
     }
-    let file = options.open(path).map_err(|error| config_io(path, error))?;
+    let file = path
+        .open(&options)
+        .map_err(|error| config_guard_error(error, "protected Executor configuration is unsafe"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| config_io(path.diagnostic_path(), error))?;
+    verify_open_file(&metadata, protect)?;
     if protect {
         file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|error| config_io(path, error))?;
+            .map_err(|error| config_io(path.diagnostic_path(), error))?;
     }
     Ok(file)
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn verify_private_parent(path: &Path) -> Result<(), RuntimeError> {
-    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-    let metadata = fs::symlink_metadata(path).map_err(|error| config_io(path, error))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(config_failure("Executor configuration parent is unsafe"));
-    }
-    validate_unix_private_directory_metadata(
-        path,
+fn verify_anchored_file(path: &AnchoredFile, protect: bool) -> Result<(), RuntimeError> {
+    use cap_std::fs::{MetadataExt as _, PermissionsExt as _};
+    let metadata = path.metadata()?;
+    verify_file_access(
+        metadata.is_file(),
         metadata.uid(),
         metadata.permissions().mode(),
-        rustix::process::geteuid().as_raw(),
+        metadata.nlink(),
+        protect,
     )
-    .map_err(|_| config_failure("Executor configuration parent is unsafe"))
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn verify_private_file(_path: &Path, metadata: &fs::Metadata) -> Result<(), RuntimeError> {
+fn verify_open_file(metadata: &fs::Metadata, protect: bool) -> Result<(), RuntimeError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-    if !unix_access_is_private(
+    verify_file_access(
+        metadata.is_file(),
         metadata.uid(),
         metadata.permissions().mode(),
-        rustix::process::geteuid().as_raw(),
-    ) || metadata.nlink() != 1
+        metadata.nlink(),
+        protect,
+    )
+}
+
+fn verify_file_access(
+    regular: bool,
+    owner: u32,
+    mode: u32,
+    links: u64,
+    protect: bool,
+) -> Result<(), RuntimeError> {
+    if !regular
+        || links != 1
+        || (protect && !unix_access_is_private(owner, mode, rustix::process::geteuid().as_raw()))
     {
         return Err(config_failure("protected Executor configuration is unsafe"));
     }
@@ -392,6 +437,71 @@ fn verify_private_file(_path: &Path, metadata: &fs::Metadata) -> Result<(), Runt
 #[cfg(test)]
 mod tests {
     use super::ExecutorConfigStore;
+
+    #[test]
+    fn protected_configuration_read_of_missing_parent_has_no_side_effects() {
+        let root = crate::tests::empty_workspace();
+        let store = ExecutorConfigStore::protected_at(root.join("missing/private/executor.json"));
+
+        assert!(store.read().expect("missing override reads").is_none());
+        assert!(
+            std::fs::read_dir(&*root)
+                .expect("fixture directory reads")
+                .next()
+                .is_none(),
+            "reading an absent parent must not create configuration state"
+        );
+        let executable = root.join("executor");
+        store
+            .configure(&executable)
+            .expect("first configuration stores after an absent read");
+        assert_eq!(
+            store
+                .read()
+                .expect("configured override reads")
+                .expect("override exists")
+                .path(),
+            executable
+        );
+    }
+
+    #[test]
+    fn configuration_safety_failures_remain_executor_unavailable() {
+        use std::{fs, os::unix::fs::PermissionsExt as _};
+
+        for unsafe_parent in [false, true] {
+            let root = crate::tests::empty_workspace();
+            let parent = root.join("private");
+            let config = parent.join("executor.json");
+            let executable = root.join("executor");
+            let store = ExecutorConfigStore::protected_at(config.clone());
+            store
+                .configure(&executable)
+                .expect("private override stores");
+            let bytes = fs::read(&config).expect("override document reads");
+            let (unsafe_path, mode) = if unsafe_parent {
+                (&parent, 0o755)
+            } else {
+                (&config, 0o644)
+            };
+            fs::set_permissions(unsafe_path, fs::Permissions::from_mode(mode))
+                .expect("fixture grants unsafe access");
+
+            for result in [
+                store.read().map(|_| ()),
+                store.configure(&executable),
+                store.configure_default().map(|_| ()),
+            ] {
+                let error = result.expect_err("unsafe configuration must be rejected");
+                assert!(
+                    matches!(&error, super::RuntimeError::Executor(failure)
+                        if failure.code() == proto::ExecutorErrorCodeV0::Unavailable),
+                    "{error}"
+                );
+            }
+            assert_eq!(fs::read(&config).expect("unsafe override remains"), bytes);
+        }
+    }
 
     #[test]
     fn executor_config_is_beside_the_canonical_credential_store() {
