@@ -2,7 +2,7 @@
 
 Support is a product-and-capability contract, not a workspace-wide compilation claim. Release 1 requires native execution and verification on the targets below; a target in this table is not evidence that its implementation is available today.
 
-Flow Agent's accepted replacement boundary is [trusted Tools with mandatory native self-protection](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166), not general hostile-Tool containment. Its implementation and configuration-change protocol remain blocked by [D-063](docs/decisions/open-decisions.html#d-063). The existing Ubuntu Sandbox remains the legacy implementation until a coherent migration; it is not the future cross-platform security promise.
+Flow Agent's accepted replacement boundary is [trusted Tools with mandatory native self-protection](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166), not general hostile-Tool containment. [D-063](docs/decisions/open-decisions.html#d-063) retains only the first-release choice on additional independent Flow homes. The existing Ubuntu Sandbox remains the legacy implementation until a coherent migration; it is not the future cross-platform security promise.
 
 | Product / capability | Release 1 native targets | Current implementation |
 |---|---|---|
