@@ -59,7 +59,6 @@ struct ExecutorConfigDocument {
 
 pub(crate) struct ExecutorConfigStore {
     path: PathBuf,
-    protect: bool,
     retained_parent: OnceLock<AnchoredDir>,
 }
 
@@ -68,16 +67,6 @@ impl ExecutorConfigStore {
     pub(crate) fn at(path: PathBuf) -> Self {
         Self {
             path,
-            protect: false,
-            retained_parent: OnceLock::new(),
-        }
-    }
-
-    #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
-    pub(crate) fn protected_at(path: PathBuf) -> Self {
-        Self {
-            path,
-            protect: true,
             retained_parent: OnceLock::new(),
         }
     }
@@ -86,7 +75,6 @@ impl ExecutorConfigStore {
         Ok(Self {
             path: crate::runtime::credential_store::default_credential_store_path()?
                 .with_file_name("executor.json"),
-            protect: true,
             retained_parent: OnceLock::new(),
         })
     }
@@ -108,7 +96,7 @@ impl ExecutorConfigStore {
                 ));
             }
         };
-        verify_open_file(&metadata, self.protect)?;
+        verify_open_file(&metadata)?;
         if metadata.len() > EXECUTOR_CONFIG_MAX_BYTES {
             return Err(config_failure(
                 "protected Executor configuration is oversized",
@@ -147,7 +135,7 @@ impl ExecutorConfigStore {
             ));
         }
         let parent = self.ensure_parent()?;
-        let _lock = acquire_config_lock(&parent.file(".executor.lock"), self.protect)?;
+        let _lock = acquire_config_lock(&parent.file(".executor.lock"))?;
         recover_abandoned_stages(&parent)?;
         let document = ExecutorConfigDocument {
             path: path.to_owned(),
@@ -166,10 +154,10 @@ impl ExecutorConfigStore {
 
     pub(crate) fn configure_default(&self) -> Result<bool, RuntimeError> {
         let parent = self.ensure_parent()?;
-        let _lock = acquire_config_lock(&parent.file(".executor.lock"), self.protect)?;
+        let _lock = acquire_config_lock(&parent.file(".executor.lock"))?;
         recover_abandoned_stages(&parent)?;
         let path = self.anchored_path(&parent)?;
-        match verify_anchored_file(&path, self.protect) {
+        match verify_anchored_file(&path) {
             Ok(()) => {}
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
                 return Ok(false);
@@ -212,7 +200,7 @@ impl ExecutorConfigStore {
                 let Component::Normal(leaf) = component else {
                     return Err(config_failure("Executor configuration parent is unsafe"));
                 };
-                let next = if self.protect && components.peek().is_none() {
+                let next = if components.peek().is_none() {
                     match current.private_child(leaf, false, DirectoryErrorMode::Protocol) {
                         Ok(None) if create => {
                             parent_missing_observer();
@@ -237,17 +225,15 @@ impl ExecutorConfigStore {
             .retained_parent
             .get()
             .expect("Executor configuration parent is initialized");
-        if self.protect {
-            parent.validate_private().map_err(|error| {
-                config_guard_error(error, "Executor configuration parent is unsafe")
-            })?;
-        }
+        parent.validate_private().map_err(|error| {
+            config_guard_error(error, "Executor configuration parent is unsafe")
+        })?;
         Ok(Some(parent.clone()))
     }
 
     fn replace_atomically(&self, parent: &AnchoredDir, bytes: &[u8]) -> Result<(), RuntimeError> {
         let path = self.anchored_path(parent)?;
-        match verify_anchored_file(&path, self.protect) {
+        match verify_anchored_file(&path) {
             Ok(()) => {}
             Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
@@ -258,12 +244,12 @@ impl ExecutorConfigStore {
             STAGE_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         let operation = (|| {
-            let mut file = create_private_file(&stage, self.protect)?;
+            let mut file = create_private_file(&stage)?;
             file.write_all(bytes)
                 .and_then(|()| file.sync_all())
                 .map_err(|error| config_io(stage.diagnostic_path(), error))?;
             stage.rename_to(&path)?;
-            verify_anchored_file(&path, self.protect)?;
+            verify_anchored_file(&path)?;
             sync_anchored_directory(parent)
         })();
         if operation.is_err() {
@@ -307,11 +293,8 @@ fn is_executor_staging_leaf(leaf: &OsStr) -> bool {
     canonical_decimal(pid, u32::MAX as u64) && canonical_decimal(counter, u64::MAX)
 }
 
-fn acquire_config_lock(
-    path: &AnchoredFile,
-    protect: bool,
-) -> Result<ProtectedStateLock, RuntimeError> {
-    match verify_anchored_file(path, protect) {
+fn acquire_config_lock(path: &AnchoredFile) -> Result<ProtectedStateLock, RuntimeError> {
+    match verify_anchored_file(path) {
         Ok(()) => {}
         Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
@@ -322,7 +305,7 @@ fn acquire_config_lock(
         .write(true)
         .create(true)
         .truncate(false)
-        .mode(if protect { 0o600 } else { 0o666 })
+        .mode(0o600)
         .follow(FollowSymlinks::No);
     let file = path
         .open(&options)
@@ -330,12 +313,10 @@ fn acquire_config_lock(
     let metadata = file
         .metadata()
         .map_err(|error| config_io(path.diagnostic_path(), error))?;
-    verify_open_file(&metadata, protect)?;
-    if protect {
-        use std::os::unix::fs::PermissionsExt as _;
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|error| config_io(path.diagnostic_path(), error))?;
-    }
+    verify_open_file(&metadata)?;
+    use std::os::unix::fs::PermissionsExt as _;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| config_io(path.diagnostic_path(), error))?;
     let started = Instant::now();
     ProtectedStateLock::acquire(file, || started.elapsed(), thread::sleep).map_err(|error| {
         match error {
@@ -371,31 +352,27 @@ fn config_guard_error(error: RuntimeError, message: &str) -> RuntimeError {
     }
 }
 
-fn create_private_file(path: &AnchoredFile, protect: bool) -> Result<File, RuntimeError> {
+fn create_private_file(path: &AnchoredFile) -> Result<File, RuntimeError> {
     use std::os::unix::fs::PermissionsExt as _;
     let mut options = OpenOptions::new();
     options
         .write(true)
         .create_new(true)
+        .mode(0o600)
         .follow(FollowSymlinks::No);
-    if protect {
-        options.mode(0o600);
-    }
     let file = path
         .open(&options)
         .map_err(|error| config_guard_error(error, "protected Executor configuration is unsafe"))?;
     let metadata = file
         .metadata()
         .map_err(|error| config_io(path.diagnostic_path(), error))?;
-    verify_open_file(&metadata, protect)?;
-    if protect {
-        file.set_permissions(fs::Permissions::from_mode(0o600))
-            .map_err(|error| config_io(path.diagnostic_path(), error))?;
-    }
+    verify_open_file(&metadata)?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|error| config_io(path.diagnostic_path(), error))?;
     Ok(file)
 }
 
-fn verify_anchored_file(path: &AnchoredFile, protect: bool) -> Result<(), RuntimeError> {
+fn verify_anchored_file(path: &AnchoredFile) -> Result<(), RuntimeError> {
     use cap_std::fs::{MetadataExt as _, PermissionsExt as _};
     let metadata = path.metadata()?;
     verify_file_access(
@@ -403,18 +380,16 @@ fn verify_anchored_file(path: &AnchoredFile, protect: bool) -> Result<(), Runtim
         metadata.uid(),
         metadata.permissions().mode(),
         metadata.nlink(),
-        protect,
     )
 }
 
-fn verify_open_file(metadata: &fs::Metadata, protect: bool) -> Result<(), RuntimeError> {
+fn verify_open_file(metadata: &fs::Metadata) -> Result<(), RuntimeError> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
     verify_file_access(
         metadata.is_file(),
         metadata.uid(),
         metadata.permissions().mode(),
         metadata.nlink(),
-        protect,
     )
 }
 
@@ -423,11 +398,10 @@ fn verify_file_access(
     owner: u32,
     mode: u32,
     links: u64,
-    protect: bool,
 ) -> Result<(), RuntimeError> {
     if !regular
         || links != 1
-        || (protect && !unix_access_is_private(owner, mode, rustix::process::geteuid().as_raw()))
+        || !unix_access_is_private(owner, mode, rustix::process::geteuid().as_raw())
     {
         return Err(config_failure("protected Executor configuration is unsafe"));
     }
@@ -441,7 +415,7 @@ mod tests {
     #[test]
     fn protected_configuration_read_of_missing_parent_has_no_side_effects() {
         let root = crate::tests::empty_workspace();
-        let store = ExecutorConfigStore::protected_at(root.join("missing/private/executor.json"));
+        let store = ExecutorConfigStore::at(root.join("missing/private/executor.json"));
 
         assert!(store.read().expect("missing override reads").is_none());
         assert!(
@@ -474,7 +448,7 @@ mod tests {
             let parent = root.join("private");
             let config = parent.join("executor.json");
             let executable = root.join("executor");
-            let store = ExecutorConfigStore::protected_at(config.clone());
+            let store = ExecutorConfigStore::at(config.clone());
             store
                 .configure(&executable)
                 .expect("private override stores");
@@ -522,12 +496,12 @@ mod tests {
         let peer_path = root.join("peer-executor");
         let peer_config = config.clone();
         super::set_parent_missing_observer(move || {
-            ExecutorConfigStore::protected_at(peer_config)
+            ExecutorConfigStore::at(peer_config)
                 .configure(&peer_path)
                 .expect("the peer wins first-use configuration");
         });
 
-        let store = ExecutorConfigStore::protected_at(config);
+        let store = ExecutorConfigStore::at(config);
         store
             .configure(&outer_path)
             .expect("the raced configuration serializes after its peer");
@@ -555,16 +529,16 @@ mod tests {
         let original = root.join("original-executor");
         let injected = root.join("injected-executor");
         let updated = root.join("updated-executor");
-        let store = ExecutorConfigStore::protected_at(config.clone());
+        let store = ExecutorConfigStore::at(config.clone());
         store
             .configure(&original)
             .expect("original override stores");
         let replacement_config = replacement.join("executor.json");
-        ExecutorConfigStore::protected_at(replacement_config.clone())
+        ExecutorConfigStore::at(replacement_config.clone())
             .configure(&injected)
             .expect("replacement namespace override stores");
         let replacement_bytes = fs::read(&replacement_config).expect("replacement document reads");
-        let retained_store = ExecutorConfigStore::protected_at(retained.join("executor.json"));
+        let retained_store = ExecutorConfigStore::at(retained.join("executor.json"));
 
         super::READ_VALIDATED_OBSERVER.with_borrow_mut(|slot| {
             *slot = Some(Box::new(move || {
