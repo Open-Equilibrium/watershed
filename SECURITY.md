@@ -6,7 +6,7 @@ Product targets, available capabilities and native release requirements are cano
 
 ## Accepted Flow Agent security target
 
-**ADR-0166–ADR-0175 define the integrated replacement; native verification is pending.** This section owns the Flow Agent security contract. The checked-in runtime, invocation policy and Executor wire now use trusted Tools with mandatory native self-protection on Linux and macOS. CI and installation acceptance are being migrated to that contract. Integration and passing Windows shared tests do not establish native protection or release readiness; [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns the previous baseline, red replacement run and outstanding native proof.
+**ADR-0166–ADR-0175 define the integrated replacement; native verification is pending.** This section owns the Flow Agent security contract. The checked-in runtime, invocation policy and Executor wire now use trusted Tools with mandatory native self-protection on Linux and macOS. CI and installation acceptance are being migrated to that contract. Integration and passing Windows shared tests do not establish native protection or release readiness; [TESTING.md](TESTING.md#m12-transition-and-executor-evidence) owns the previous baseline, red replacement run and outstanding native proof. Mac Executor launch is currently blocked on [D-069](docs/decisions/open-decisions.html#d-069); its proposed installation-trust change is not an accepted guarantee.
 
 ### Guarantees and owners
 

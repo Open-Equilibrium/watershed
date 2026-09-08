@@ -145,10 +145,6 @@ fn preflight_one_shot_with_deadline(
     unsafe {
         command.pre_exec(move || {
             configure_executor_child(expected_parent)?;
-            // Keep the pinned image available during Darwin's /dev/fd activation.
-            // This changes only the forked child's descriptor flags.
-            #[cfg(target_os = "macos")]
-            rustix::io::fcntl_setfd(&executor, rustix::io::FdFlags::empty())?;
             for &(source, target) in &remaps {
                 if c_dup2(source, target) < 0 {
                     return Err(std::io::Error::last_os_error());
