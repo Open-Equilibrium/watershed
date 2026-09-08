@@ -18,7 +18,7 @@ pub(super) fn inputs(files_per_child: usize) -> serde_json::Value {
         "unique_directories": CHILD_DIRECTORIES + 2,
         "fixture_file_entries": CHILD_DIRECTORIES * (files_per_child + 2),
         "operations": 1,
-        "operation": "verify_protected_directory_aliases",
+        "operation": "verify_protected_aliases",
         "input_bytes": 0,
         "output_bytes": 0,
         "checksum": "successfully created fixture file entries, including both hardlink names",
@@ -30,7 +30,7 @@ pub(super) fn inputs(files_per_child: usize) -> serde_json::Value {
 pub(super) fn run(temp_root: &Path, files_per_child: usize) -> Result<M11BudgetOutcome, String> {
     use super::outcome;
     use crate::runtime::{
-        fs_guards::{DirectoryErrorMode, verify_protected_directory_aliases},
+        fs_guards::{DirectoryErrorMode, verify_protected_aliases},
         session_store::open_flow_agent_home_at,
     };
     use std::{fs, time::Instant};
@@ -72,7 +72,7 @@ pub(super) fn run(temp_root: &Path, files_per_child: usize) -> Result<M11BudgetO
     }
 
     let started = Instant::now();
-    let verified = verify_protected_directory_aliases(&roots);
+    let verified = verify_protected_aliases(&roots, &[]);
     let elapsed = started.elapsed();
     verified.map_err(|error| error.to_string())?;
     Ok(outcome(elapsed, 1, 0, 0, fixture_file_entries))

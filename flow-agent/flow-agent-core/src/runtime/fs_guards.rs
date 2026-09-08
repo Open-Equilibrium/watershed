@@ -30,7 +30,7 @@ pub(crate) use local_state::PROTECTED_STATE_LOCK_DEADLINE;
 pub(crate) use local_state::unix_access_is_private;
 pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
 #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
-pub(crate) use protected_inventory::verify_protected_directory_aliases;
+pub(crate) use protected_inventory::verify_protected_aliases;
 
 mod anchored_file;
 pub use anchored_file::validate_real_file;

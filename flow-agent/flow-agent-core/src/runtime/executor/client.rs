@@ -1,5 +1,8 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use super::{ExecutorSelection, resolve_executor};
+use super::{
+    ExecutorSelection,
+    selection::{protected_directories, resolve_executor_with_roots},
+};
 use crate::runtime::{
     fs_guards::AnchoredWorkspace,
     tool_runner::{ToolExecutionOutcome, ToolInvocation},
@@ -105,24 +108,9 @@ impl PreparedExecutor {
     pub(crate) fn prepare_selected() -> Result<Self, RuntimeError> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let selection = resolve_executor()?;
+            let protected_directories = protected_directories(true)?;
+            let selection = resolve_executor_with_roots(&protected_directories)?;
             let runtime_sources = retain_runtime_sources(selection.probe())?;
-            let protected_directories = (|| {
-                let home = crate::runtime::session_store::open_flow_agent_home(true)?.ok_or_else(
-                    || RuntimeError::Protocol("global Flow home is unavailable".to_owned()),
-                )?;
-                let platform =
-                    super::config::ExecutorConfigStore::platform_default()?.ensure_parent()?;
-                let roots = vec![home, platform];
-                crate::runtime::fs_guards::verify_protected_directory_aliases(&roots)?;
-                Ok::<_, RuntimeError>(roots)
-            })()
-            .map_err(|error| {
-                RuntimeError::executor(
-                    proto::ExecutorErrorCodeV0::Unavailable,
-                    format!("protected directory admission failed: {error}"),
-                )
-            })?;
             Ok(Self {
                 selection,
                 runtime_sources,

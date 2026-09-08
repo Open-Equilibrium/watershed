@@ -5,14 +5,15 @@ use super::ExecutorSelectionSource;
 use super::process::{
     child_exited_without_reaping, configure_executor_child, terminate_child_or_fail_stop,
 };
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+use crate::runtime::fs_guards::AnchoredDir;
 use crate::runtime::types::RuntimeError;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-use std::fs::File;
 use std::path::Path;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use {crate::runtime::fs_guards::AnchoredFile, std::fs::File};
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{
-    fs,
     io::{self, Read},
     os::{
         fd::AsRawFd as _,
@@ -29,24 +30,58 @@ use std::{
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const MAX_PROBE_STDERR_BYTES: usize = 4 * 1024;
+#[derive(Debug)]
 pub(super) struct ProbedExecutor {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    pub(super) executable: File,
+    pub(super) programs: InstalledPrograms,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     pub(super) probe: proto::ExecutorProbeV0,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug)]
+pub(super) struct InstalledProgram {
+    pub(super) path: AnchoredFile,
+    pub(super) image: File,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[derive(Debug)]
+pub(super) struct InstalledPrograms {
+    pub(super) selected: InstalledProgram,
+    pub(super) flow: InstalledProgram,
+    pub(super) sibling: Option<InstalledProgram>,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl InstalledPrograms {
+    fn verify_aliases(&self, roots: &[AnchoredDir]) -> Result<(), RuntimeError> {
+        let images = [&self.selected, &self.flow]
+            .into_iter()
+            .chain(self.sibling.as_ref())
+            .map(|program| (&program.path, &program.image))
+            .collect::<Vec<_>>();
+        crate::runtime::fs_guards::verify_protected_aliases(roots, &images).map_err(|error| {
+            RuntimeError::executor(
+                proto::ExecutorErrorCodeV0::Unavailable,
+                format!("protected installation admission failed: {error}"),
+            )
+        })
+    }
 }
 
 pub(super) fn probe_executor(
     selection: &ExecutorSelection,
     installation_flow: &Path,
+    protected_directories: &[AnchoredDir],
 ) -> Result<ProbedExecutor, RuntimeError> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        probe_linux_executor(selection, installation_flow)
+        probe_linux_executor(selection, installation_flow, protected_directories)
     }
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
     {
-        let _ = (selection, installation_flow);
+        let _ = (selection, installation_flow, protected_directories);
         Err(protocol_failure(
             proto::ExecutorErrorCodeV0::PolicyUnsupported,
             "productive Executor support requires Ubuntu 24.04 x64",
@@ -58,9 +93,11 @@ pub(super) fn probe_executor(
 fn probe_linux_executor(
     selection: &ExecutorSelection,
     installation_flow: &Path,
+    protected_directories: &[AnchoredDir],
 ) -> Result<ProbedExecutor, RuntimeError> {
-    let executable = open_validated_executable(selection, installation_flow)?;
-    let inherited_path = format!("/proc/self/fd/{}", executable.as_raw_fd());
+    let programs = open_validated_executable(selection, installation_flow)?;
+    programs.verify_aliases(protected_directories)?;
+    let inherited_path = format!("/proc/self/fd/{}", programs.selected.image.as_raw_fd());
     let mut command = Command::new(inherited_path);
     command
         .arg("--probe")
@@ -150,7 +187,7 @@ fn probe_linux_executor(
         .map(str::trim)
         .filter(|diagnostic| !diagnostic.is_empty());
     validate_probe(selection, &probe, readiness_diagnostic)?;
-    Ok(ProbedExecutor { executable, probe })
+    Ok(ProbedExecutor { programs, probe })
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -246,30 +283,38 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedRead> 
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn open_validated_executable(
+pub(super) fn open_validated_executable(
     selection: &ExecutorSelection,
     installation_flow: &Path,
-) -> Result<File, RuntimeError> {
+) -> Result<InstalledPrograms, RuntimeError> {
     let executable = open_program(selection.path())?;
     let flow = open_program(installation_flow)?;
-    if selection.source() == ExecutorSelectionSource::Default {
-        validate_sibling_ownership(&flow, &executable)?;
+    let sibling = if selection.source() == ExecutorSelectionSource::Default {
+        validate_sibling_ownership(&flow.image, &executable.image)?;
+        None
     } else {
-        let sibling_path = super::selection::default_executor_path(installation_flow);
-        match fs::symlink_metadata(&sibling_path) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        let sibling_path = flow.path.parent.file("flow-executor");
+        match sibling_path.metadata() {
+            Err(RuntimeError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                None
+            }
             Err(_) => {
                 return Err(executor_unavailable(
                     "Default Executor sibling metadata is unavailable",
                 ));
             }
             Ok(_) => {
-                let sibling = open_program(&sibling_path)?;
-                validate_sibling_ownership(&flow, &sibling)?;
+                let sibling = open_anchored_program(sibling_path)?;
+                validate_sibling_ownership(&flow.image, &sibling.image)?;
+                Some(sibling)
             }
         }
-    }
-    Ok(executable)
+    };
+    Ok(InstalledPrograms {
+        selected: executable,
+        flow,
+        sibling,
+    })
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -288,9 +333,8 @@ fn validate_sibling_ownership(flow: &File, sibling: &File) -> Result<(), Runtime
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn open_program(path: &Path) -> Result<File, RuntimeError> {
+fn open_program(path: &Path) -> Result<InstalledProgram, RuntimeError> {
     use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
-    use rustix::fs::{Mode, OFlags};
     use std::path::Component;
 
     let parent_path = path
@@ -315,9 +359,16 @@ fn open_program(path: &Path) -> Result<File, RuntimeError> {
     let leaf = path
         .file_name()
         .ok_or_else(|| executor_unavailable("Executor executable is unavailable"))?;
+    open_anchored_program(parent.file(leaf))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn open_anchored_program(path: AnchoredFile) -> Result<InstalledProgram, RuntimeError> {
+    use rustix::fs::{Mode, OFlags};
+
     let descriptor = rustix::fs::openat(
-        &parent.dir,
-        leaf,
+        &path.parent.dir,
+        &path.leaf,
         OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
     )
@@ -328,21 +379,21 @@ fn open_program(path: &Path) -> Result<File, RuntimeError> {
         .map_err(|_| executor_unavailable("Executor executable metadata is unavailable"))?;
     let effective_uid = rustix::process::geteuid().as_raw();
     if !metadata.is_file()
-        || metadata.nlink() != 1
+        || metadata.nlink() == 0
         || metadata.permissions().mode() & 0o111 == 0
         || metadata.permissions().mode() & 0o022 != 0
         || !owner_is_trusted(metadata.uid(), effective_uid)
     {
         return Err(executor_unavailable("Executor executable is unsafe"));
     }
-    let parent_metadata = rustix::fs::fstat(&parent.dir)
+    let parent_metadata = rustix::fs::fstat(&path.parent.dir)
         .map_err(|_| executor_unavailable("Executor installation directory is unavailable"))?;
     if parent_metadata.st_mode & 0o022 != 0 || parent_metadata.st_uid != metadata.uid() {
         return Err(executor_unavailable(
             "Executor installation directory is unsafe",
         ));
     }
-    Ok(file)
+    Ok(InstalledProgram { path, image: file })
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -499,7 +550,7 @@ mod unsupported_platform_tests {
             ExecutorSelectionSource::Custom,
         );
 
-        let error = probe_executor(&selection, Path::new("official-flow"))
+        let error = probe_executor(&selection, Path::new("official-flow"), &[])
             .err()
             .expect("unsupported platforms cannot probe a productive Executor");
 
@@ -560,9 +611,14 @@ mod tests {
 
         let hard = root.join("hard");
         fs::hard_link(&target, &hard).expect("hard link is staged");
+        let linked = open_program(&hard).expect("candidate opens before combined alias admission");
         assert!(
-            open_program(&hard).is_err(),
-            "hard-linked executable must be rejected"
+            crate::runtime::fs_guards::verify_protected_aliases(
+                &[],
+                &[(&linked.path, &linked.image)]
+            )
+            .is_err(),
+            "a program with an unprotected alias must be rejected"
         );
     }
 

@@ -183,12 +183,12 @@ impl ExecutorConfigStore {
         Ok(parent.file(leaf))
     }
 
-    pub(crate) fn ensure_parent(&self) -> Result<AnchoredDir, RuntimeError> {
+    fn ensure_parent(&self) -> Result<AnchoredDir, RuntimeError> {
         self.open_parent(true)?
             .ok_or_else(|| config_failure("Executor configuration parent is unavailable"))
     }
 
-    fn open_parent(&self, create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
+    pub(super) fn open_parent(&self, create: bool) -> Result<Option<AnchoredDir>, RuntimeError> {
         if self.retained_parent.get().is_none() {
             let mut components = self.parent()?.components();
             if components.next() != Some(Component::RootDir) {

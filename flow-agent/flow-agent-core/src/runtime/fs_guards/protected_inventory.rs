@@ -4,8 +4,9 @@ use cap_fs_ext::MetadataExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Inspect names and metadata only, while cooperating publishers cannot change names.
-pub(crate) fn verify_protected_directory_aliases(
+pub(crate) fn verify_protected_aliases(
     roots: &[AnchoredDir],
+    images: &[(&super::AnchoredFile, &std::fs::File)],
 ) -> Result<(), RuntimeError> {
     let mut ordered = BTreeMap::new();
     for root in roots {
@@ -22,8 +23,30 @@ pub(crate) fn verify_protected_directory_aliases(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let image_metadata = images
+        .iter()
+        .map(|(name, image)| verified_image_metadata(name, image))
+        .collect::<Result<Vec<_>, _>>()?;
     let mut directories = BTreeSet::new();
     let mut aliases = BTreeMap::new();
+    let mut count_alias = |metadata: &cap_std::fs::Metadata,
+                           path: &std::path::Path,
+                           new_name: bool|
+     -> Result<(), RuntimeError> {
+        if metadata.nlink() > 1 {
+            let (expected, covered, first_path) = aliases
+                .entry((metadata.dev(), metadata.ino()))
+                .or_insert_with(|| (metadata.nlink(), 0_u64, path.to_owned()));
+            if *expected != metadata.nlink() {
+                return Err(RuntimeError::Protocol(format!(
+                    "{} protected file aliases changed during admission",
+                    first_path.display()
+                )));
+            }
+            *covered += u64::from(new_name);
+        }
+        Ok(())
+    };
     for root in ordered.values() {
         let identity = root.identity()?;
         if !directories.insert((identity.device, identity.inode)) {
@@ -72,19 +95,7 @@ pub(crate) fn verify_protected_directory_aliases(
                     pending.push((child, entries));
                 }
             } else if metadata.is_file() && metadata.nlink() > 0 {
-                if metadata.nlink() > 1 {
-                    let (expected, covered, first_path) =
-                        aliases
-                            .entry(identity)
-                            .or_insert((metadata.nlink(), 0_u64, path));
-                    if *expected != metadata.nlink() {
-                        return Err(RuntimeError::Protocol(format!(
-                            "{} protected file aliases changed during admission",
-                            first_path.display()
-                        )));
-                    }
-                    *covered += 1;
-                }
+                count_alias(&metadata, &path, true)?;
             } else {
                 return Err(RuntimeError::Protocol(format!(
                     "{} protected inventory contains an unsupported file type",
@@ -92,6 +103,24 @@ pub(crate) fn verify_protected_directory_aliases(
                 )));
             }
         }
+    }
+    let mut selected_names = BTreeSet::new();
+    for ((name, image), before) in images.iter().zip(image_metadata) {
+        let metadata = verified_image_metadata(name, image)?;
+        if (before.dev(), before.ino(), before.nlink())
+            != (metadata.dev(), metadata.ino(), metadata.nlink())
+        {
+            return Err(RuntimeError::Protocol(format!(
+                "{} protected image changed during admission",
+                name.path.display()
+            )));
+        }
+        let parent = name.parent.identity()?;
+        let parent_identity = (parent.device, parent.inode);
+        // Traversed parents already contributed every direct-child name.
+        let new_name = !directories.contains(&parent_identity)
+            && selected_names.insert((parent_identity, &name.leaf));
+        count_alias(&metadata, &name.path, new_name)?;
     }
     for (_, (expected, covered, path)) in aliases {
         if expected != covered {
@@ -102,4 +131,38 @@ pub(crate) fn verify_protected_directory_aliases(
         }
     }
     Ok(())
+}
+
+fn verified_image_metadata(
+    name: &super::AnchoredFile,
+    image: &std::fs::File,
+) -> Result<cap_std::fs::Metadata, RuntimeError> {
+    use std::os::unix::fs::MetadataExt;
+
+    if name.leaf.file_name() != Some(name.leaf.as_os_str()) {
+        return Err(RuntimeError::Protocol(format!(
+            "{} protected image must be an anchored direct-child name",
+            name.path.display()
+        )));
+    }
+    let metadata = name.metadata()?;
+    let retained = image
+        .metadata()
+        .map_err(|source| path_io_error(&name.path, source))?;
+    if !metadata.is_file()
+        || !retained.is_file()
+        || metadata.nlink() == 0
+        || (metadata.dev(), metadata.ino(), metadata.nlink())
+            != (
+                MetadataExt::dev(&retained),
+                MetadataExt::ino(&retained),
+                MetadataExt::nlink(&retained),
+            )
+    {
+        return Err(RuntimeError::Protocol(format!(
+            "{} protected image name changed or is not a linked regular file",
+            name.path.display()
+        )));
+    }
+    Ok(metadata)
 }

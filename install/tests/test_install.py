@@ -69,6 +69,7 @@ class PrefixInstallerTest(unittest.TestCase):
             "test \"$HOME\" = \"$XDG_CONFIG_HOME\" || exit 65\n"
             "physical_home=$(cd \"$HOME\" && /bin/pwd -P) || exit 65\n"
             "test \"$HOME\" = \"$physical_home\" || exit 65\n"
+            "test -z \"${FLOW_AGENT_HOME+x}\" || exit 65\n"
             "test ! -e \"$XDG_CONFIG_HOME/flow-agent/executor.json\" || exit 65\n"
             "probe=$(\"${0%/*}/flow-executor\" --probe) || exit 65\n"
             f"expected='{PROBE_DOCUMENT}'\n"
@@ -98,7 +99,7 @@ class PrefixInstallerTest(unittest.TestCase):
                 *args,
             ],
             cwd=unrelated_cwd,
-            env={"PATH": ""},
+            env={"PATH": "", "FLOW_AGENT_HOME": str(unrelated_cwd / "ignored-flow-home")},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,

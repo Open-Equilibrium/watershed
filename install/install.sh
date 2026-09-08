@@ -276,6 +276,7 @@ if [ "$install_executor" -eq 1 ]; then
         HOME=$(cd "$1" && /bin/pwd -P) || exit 1
         [ "$HOME" -ef "$1" ] || exit 1
         XDG_CONFIG_HOME=$HOME
+        unset FLOW_AGENT_HOME
         export PATH HOME XDG_CONFIG_HOME
         if cd / && "$2" executor check </dev/null; then
             readiness_status=0
