@@ -37,6 +37,8 @@ fn m11_performance_evidence_contract_is_the_exact_selected_set() {
         "conversation_full_run_streaming_replay",
         "conversation_history_validation_quantum",
         "run_log_eight_sync_appends",
+        "protected_inventory_512_files",
+        "protected_inventory_16384_files",
     ];
 
     assert_eq!(M11_BUDGET_WORKLOADS.len(), expected.len());

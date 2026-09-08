@@ -4,6 +4,7 @@ mod authoring;
 #[cfg(test)]
 pub(crate) use authoring::maximum_tool;
 mod conversations;
+mod protected_inventory;
 mod runner;
 #[cfg(test)]
 pub(crate) use conversations::verify_conversation_operation_boundaries_for_test;
@@ -59,6 +60,10 @@ pub enum M11BudgetWorkloadId {
     ConversationHistoryValidationQuantum,
     /// Eight synchronized Run Log appends.
     RunLogEightSyncAppends,
+    /// Protected inventory with 512 single-link files and 32 cross-root hardlinks.
+    ProtectedInventory512Files,
+    /// Protected inventory with 16,384 single-link files and 32 cross-root hardlinks.
+    ProtectedInventory16384Files,
 }
 
 impl M11BudgetWorkloadId {
@@ -79,6 +84,8 @@ impl M11BudgetWorkloadId {
             Self::ConversationFullRunStreamingReplay => "conversation_full_run_streaming_replay",
             Self::ConversationHistoryValidationQuantum => "conversation_history_validation_quantum",
             Self::RunLogEightSyncAppends => "run_log_eight_sync_appends",
+            Self::ProtectedInventory512Files => "protected_inventory_512_files",
+            Self::ProtectedInventory16384Files => "protected_inventory_16384_files",
         }
     }
 }
@@ -218,11 +225,17 @@ pub fn m11_budget_workload_inputs(id: M11BudgetWorkloadId) -> serde_json::Value 
             "canonical_synchronized_append_per_record": "append_jsonl",
             "replay_after_append": true,
         }),
+        M11BudgetWorkloadId::ProtectedInventory512Files => {
+            protected_inventory::inputs(protected_inventory::SMALL_FILES_PER_CHILD)
+        }
+        M11BudgetWorkloadId::ProtectedInventory16384Files => {
+            protected_inventory::inputs(protected_inventory::LARGE_FILES_PER_CHILD)
+        }
     }
 }
 
 /// The exact finite set of observational workloads selected for M1.1.
-pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 14] = [
+pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 16] = [
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RssDetectionFixture,
     },
@@ -264,6 +277,12 @@ pub const M11_BUDGET_WORKLOADS: [M11BudgetWorkload; 14] = [
     },
     M11BudgetWorkload {
         id: M11BudgetWorkloadId::RunLogEightSyncAppends,
+    },
+    M11BudgetWorkload {
+        id: M11BudgetWorkloadId::ProtectedInventory512Files,
+    },
+    M11BudgetWorkload {
+        id: M11BudgetWorkloadId::ProtectedInventory16384Files,
     },
 ];
 
@@ -318,6 +337,12 @@ pub fn run_m11_budget_workload(
         }
         M11BudgetWorkloadId::RunLogEightSyncAppends => {
             conversations::run_log_eight_sync_appends(temp_root, iteration)
+        }
+        M11BudgetWorkloadId::ProtectedInventory512Files => {
+            protected_inventory::run(temp_root, protected_inventory::SMALL_FILES_PER_CHILD)
+        }
+        M11BudgetWorkloadId::ProtectedInventory16384Files => {
+            protected_inventory::run(temp_root, protected_inventory::LARGE_FILES_PER_CHILD)
         }
     }
 }

@@ -17,6 +17,13 @@ fn protected_home_publication_waits_for_admission_without_locking_other_homes() 
     };
     let home = open_home("home");
     let other = open_home("other");
+    let publisher = fs::File::open(&home.path).expect("independent publisher handle opens");
+    publisher
+        .try_lock_shared()
+        .expect("another publisher begins");
+    home.create_dir("concurrent")
+        .expect("publishers may share the same home lease");
+    drop(publisher);
     let admission = fs::File::open(&home.path).expect("independent admission handle opens");
     admission.try_lock().expect("exclusive admission begins");
     other

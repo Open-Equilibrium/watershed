@@ -32,6 +32,13 @@ pub(super) fn workload_contract(id: M11BudgetWorkloadId) -> (Value, &'static [&'
         M11BudgetWorkloadId::RunLogEightSyncAppends => {
             &["session discovery and unrelated filesystem activity"]
         }
+        M11BudgetWorkloadId::ProtectedInventory512Files
+        | M11BudgetWorkloadId::ProtectedInventory16384Files => &[
+            "fixture creation, root opening and cleanup from elapsed time; RSS includes preparation",
+            "file content I/O, actual metadata bytes and scanner statistics (not returned)",
+            "cold-cache preparation, concurrent publishers and Tool/Executor work",
+            "real Flow home and environment mutation",
+        ],
     };
     (m11_budget_workload_inputs(id), exclusions)
 }

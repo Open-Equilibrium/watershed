@@ -129,6 +129,21 @@ A canonical-record cap counts canonical JSON bytes without the JSONL LF. Rotatio
 | CV-16 | In-memory replay output: 64 MiB | `F:in_memory_replay_accepts_exact_output_limit_and_rejects_one_byte_over`; exactly 67,108,864 canonical bytes succeed and one byte beyond returns typed `ReplayOutputLimitExceeded { limit_bytes }`. | F-only: public API boundary; large CLI replay uses callback streaming. |
 | CV-17 | Callback-streaming full-Run replay: exactly 352 MiB across 22 segments | `F:streaming_replay_emits_large_segmented_jsonl_without_returning_it` proves validated record streaming, byte identity and empty returned output above CV-16. | `P:conversation_full_run_streaming_replay` observes validation and hashing of exactly 369,098,752 bytes across 22 segments without retaining complete output. |
 
+## Protected inventory
+
+These are fixed observational benchmark inputs, not retention limits or supported maximums. Both workloads use the same helper and the production `verify_protected_directory_aliases` entry point. Each fresh child creates a synthetic private Flow home and a separate private platform root at explicit temporary paths using `open_flow_agent_home_at`; it does not consult the real Flow home or mutate the environment. The home contains 32 private child directories created through the production anchored directory API.
+
+| Workload ID | Single-link zero-byte regular files per child | Total single-link files | Fixture file entries / checksum |
+|---|---|---|---|
+| `P:protected_inventory_512_files` | 16 | 512 | 576 |
+| `P:protected_inventory_16384_files` | 512 | 16,384 | 16,448 |
+
+In addition to those single-link files, each child contains one zero-byte regular file hardlinked once into the platform root: 32 additional inodes, two protected names each, 64 additional file entries. The supplied roots are `[home, platform, home/child-00, home/child-00]`, covering 34 unique directories and exercising overlapping-child and duplicate-root deduplication. The checksum counts successfully created fixture file entries, including both hardlink names, and passes through the existing optimizer-resistant outcome helper; it is not a scanner-stat count.
+
+Elapsed time covers exactly one real `verify_protected_directory_aliases` call, including its directory leases and metadata inventory, with `operations = 1` and `input_bytes = output_bytes = 0`. Zero denotes no file-content I/O; the verifier returns no actual metadata-byte or scanner-stat counts. Root opening, directory/file creation, hardlink setup and cleanup are outside the measured interval. Preparation immediately precedes the call and warms filesystem caches; there is no cache eviction or preliminary verification scan. The unchanged harness's RSS observation includes fixture preparation and does not isolate verifier allocations. Concurrent publishers, Tool/Executor work and cold-cache behavior are excluded.
+
+The reference remains Ubuntu 24.04 x64 with the existing sampling, schema and observational timing/RSS rules. The call uses the verifier's existing Linux x86_64-or-test export; other production targets return an unavailable-workload error without creating a fixture.
+
 ## Completion criterion
 
-The matrix is finite: every hard selected contract has a named functional proof, and the 14 fixed observational workloads including the RSS detection fixture cover the representative paths above. A new hard boundary requires a maintainer decision; an evidence-workload change must remain fixed and documented.
+The matrix is finite: every hard selected contract has a named functional proof, and the 16 fixed observational workloads including the RSS detection fixture cover the representative paths above. A new hard boundary requires a maintainer decision; an evidence-workload change must remain fixed and documented.
