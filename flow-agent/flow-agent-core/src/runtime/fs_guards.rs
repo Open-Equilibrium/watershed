@@ -426,7 +426,16 @@ impl AnchoredWorkspace {
 
 fn directory_lease(dir: &Dir, shared: bool) -> io::Result<ProtectedStateLock> {
     // Reopen, never duplicate: separate acquisitions need separate lock ownership.
-    let file = dir.open_dir(".")?.into_std_file();
+    // Linux capability directories may use O_PATH, which cannot carry a file lock.
+    let file = fs::File::from(rustix::fs::openat(
+        dir,
+        ".",
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?);
     let started = std::time::Instant::now();
     let result = if shared {
         ProtectedStateLock::acquire_shared(file, || started.elapsed(), std::thread::sleep)
