@@ -68,6 +68,13 @@ metadata() {
     fi
 }
 
+matches_descriptor() {
+    # Shell -ef compares Darwin's descriptor device instead of its held object.
+    path_identity=$(metadata '%d:%i' '%d:%i' "$1") || return 1
+    descriptor_identity=$(metadata '%d:%i' '%d:%i' "$2") || return 1
+    [ "$path_identity" = "$descriptor_identity" ]
+}
+
 case "$0" in
     /*) installer=$0 ;;
     *) installer=$PWD/$0 ;;
@@ -100,7 +107,7 @@ validate_source() {
     source_path=$1
     source_name=$2
     [ -f "$source_path" ] || fail "missing regular bundle artifact: $source_name"
-    [ ! -L "$source_name" ] && [ "$source_name" -ef "$source_path" ] \
+    [ ! -L "$source_name" ] && matches_descriptor "$source_name" "$source_path" \
         || fail "bundle artifact changed during installation: $source_name"
     # Darwin's descriptor device does not expose the held file's execute access.
     [ -x "$source_name" ] || fail "bundle artifact is not executable: $source_name"
@@ -148,7 +155,7 @@ bin_owner=$(metadata '%u' '%u' "$bin_fd") || fail 'cannot inspect installation b
 # The working directory anchors publication and rollback on both native hosts;
 # Darwin's descriptor filesystem does not support traversing directory entries.
 cd "$bin" || fail 'cannot enter installation bin directory'
-[ . -ef "$bin_fd" ] || fail 'installation bin path changed during installation'
+matches_descriptor . "$bin_fd" || fail 'installation bin path changed during installation'
 flow_target=./flow
 executor_target=./flow-executor
 [ ! -e "$flow_target" ] && [ ! -L "$flow_target" ] || fail 'existing installation is not upgraded'
@@ -248,15 +255,15 @@ trap 'signal_exit 130' INT
 trap 'signal_exit 143' TERM
 
 verify_bundle_binding() {
-    [ "$bundle" -ef "$bundle_fd" ] || fail 'installer bundle path changed during installation'
-    [ "$flow_source_entry" -ef "$flow_source" ] || fail 'flow bundle artifact changed during installation'
+    matches_descriptor "$bundle" "$bundle_fd" || fail 'installer bundle path changed during installation'
+    matches_descriptor "$flow_source_entry" "$flow_source" || fail 'flow bundle artifact changed during installation'
     if [ "$install_executor" -eq 1 ]; then
-        [ "$executor_source_entry" -ef "$executor_source" ] \
+        matches_descriptor "$executor_source_entry" "$executor_source" \
             || fail 'flow-executor bundle artifact changed during installation'
     fi
 }
 verify_bin_binding() {
-    [ ! -L "$bin" ] && [ "$bin" -ef "$bin_fd" ] \
+    [ ! -L "$bin" ] && matches_descriptor "$bin" "$bin_fd" \
         || fail 'installation bin path changed during installation'
 }
 

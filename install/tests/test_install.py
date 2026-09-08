@@ -382,6 +382,33 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertEqual(list(original_bin.iterdir()), [])
             self.assertEqual(list((prefix / "bin").iterdir()), [])
 
+    def test_replacing_validated_source_artifact_fails_without_publication(self):
+        for name in ("flow", "flow-executor"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                validated = root / "validated"
+                release = root / "release"
+                self.pause_installer_after_validation(bundle, validated, release)
+                prefix = root / "prefix"
+                process = subprocess.Popen(
+                    ["/bin/sh", str(bundle / "install.sh"), "--prefix", str(prefix)],
+                    cwd=root, env={"PATH": ""},
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+
+                self.wait_for_installer_marker(process, validated)
+                original = root / "original-artifact"
+                (bundle / name).rename(original)
+                shutil.copy2(original, bundle / name)
+                self.assertNotEqual(original.stat().st_ino, (bundle / name).stat().st_ino)
+                release.touch()
+                _, stderr = process.communicate(timeout=5)
+
+                self.assertEqual(process.returncode, 1, stderr)
+                self.assertIn(f"{name} bundle artifact changed during installation".encode(), stderr)
+                self.assertEqual(list((prefix / "bin").iterdir()), [])
+
     def test_signal_at_each_publication_boundary_rolls_back(self):
         boundaries = (
             (
