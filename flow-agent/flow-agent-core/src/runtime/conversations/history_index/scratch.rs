@@ -624,8 +624,7 @@ fn remove_empty_scratch_dir(
         ));
     }
     drop(rebound);
-    root.dir
-        .remove_dir(leaf)
+    root.remove_dir(leaf)
         .map_err(|source| path_io_error(&root.path.join(leaf), source))
 }
 

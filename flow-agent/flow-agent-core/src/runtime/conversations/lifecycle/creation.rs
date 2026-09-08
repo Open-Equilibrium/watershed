@@ -255,7 +255,6 @@ fn cleanup_new_empty_conversation(
         }
         drop(runs);
         conversation
-            .dir
             .remove_dir(CONVERSATION_RUNS_DIR)
             .map_err(|source| {
                 path_io_error(&conversation.path.join(CONVERSATION_RUNS_DIR), source)
@@ -296,7 +295,6 @@ fn cleanup_new_empty_conversation(
     drop(current);
     drop(conversation);
     sessions
-        .dir
         .remove_dir(conversation_id)
         .map_err(|source| path_io_error(&sessions.path.join(conversation_id), source))?;
     sync_anchored_directory(sessions)
@@ -370,7 +368,7 @@ fn create_conversation_run_with_publication_marker(
     validate_hash(flow_definition_hash, "Flow definition hash")?;
     let sessions_dir = ensure_anchored_sessions(workspace)?;
     finish_incomplete_conversation_lifecycle(&sessions_dir, conversation_id)?;
-    let conversation_is_new = match sessions_dir.dir.create_dir(conversation_id) {
+    let conversation_is_new = match sessions_dir.create_dir(conversation_id) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
         Err(source) => {
@@ -452,7 +450,6 @@ fn create_conversation_run_with_publication_marker(
             Err(source) => return Err(path_io_error(&stage, source)),
         }
         runs_dir
-            .dir
             .create_dir(&staging_name)
             .map_err(|source| path_io_error(&stage, source))?;
         let created_stage = runs_dir
@@ -515,8 +512,7 @@ fn create_conversation_run_with_publication_marker(
         }
         drop(stage_for_publication);
         runs_dir
-            .dir
-            .rename(&staging_name, &runs_dir.dir, run_session_id)
+            .rename(&staging_name, &runs_dir, run_session_id)
             .map_err(|source| path_io_error(&run, source))?;
         if let Some((_, _, cleanup_leaf, cleanup_path, _, _)) = partial_run.as_mut() {
             *cleanup_leaf = run_session_id.to_owned();

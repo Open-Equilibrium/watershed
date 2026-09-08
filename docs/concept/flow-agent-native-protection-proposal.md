@@ -140,6 +140,8 @@ The invariant is preserved during execution because:
 
 Existing Flow processes must coordinate initial admission with their protected-file publication operations using an installation-owned lease and anchored identities. A scan racing a publisher is retried within a bounded admission attempt or rejected; it is not a valid snapshot. Do not serialize entire Runs or ordinary project work behind that admission lease. Do not rescan all retained history for every Tool call: retain one verified controller admission and preserve it through checked publisher operations. Measure the cost of the actual scanner and contention during integration; the small fixture scan supplies no large-history performance claim.
 
+The incremental directory-admission implementation and its remaining integration limits are recorded in [PROTOCOL.md](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162). It is not the completed native boundary or full installed-program inventory.
+
 Unconfined external writers, privileged actors and controller/OS compromise are the existing trust exclusions, not problems solved by the lease. Cooperative locks alone never constrain a malicious Tool. The native restriction is what preserves the established set against Tool code.
 
 ```mermaid

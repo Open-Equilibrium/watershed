@@ -48,7 +48,7 @@ pub(super) fn open_anchored_lock_file(path: &AnchoredFile) -> Result<File, Runti
         .truncate(false)
         .mode(0o600)
         .follow(FollowSymlinks::No);
-    let file = path.open(&options)?;
+    let file = path.open_creating(&options)?;
     let metadata = file
         .metadata()
         .map_err(|error| path_io_error(path.diagnostic_path(), error))?;
@@ -71,7 +71,7 @@ pub(super) fn private_create_new_anchored_file(path: &AnchoredFile) -> Result<Fi
         .create_new(true)
         .mode(0o600)
         .follow(FollowSymlinks::No);
-    let file = path.open(&options)?;
+    let file = path.open_creating(&options)?;
     harden_private_open_file(&file)
         .map_err(|error| path_io_error(path.diagnostic_path(), error))?;
     verify_private_open_file(path.diagnostic_path(), &file)?;

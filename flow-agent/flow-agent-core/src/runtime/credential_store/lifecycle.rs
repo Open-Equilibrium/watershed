@@ -199,7 +199,7 @@ impl CredentialStore {
         else {
             return Ok(None);
         };
-        let _ = self.protected_parent.set(parent);
+        let _ = self.protected_parent.set(parent.with_publication());
         let parent = self
             .protected_parent
             .get()

@@ -96,6 +96,8 @@ pub(crate) struct PreparedExecutor {
     selection: ExecutorSelection,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     runtime_sources: BTreeMap<String, RetainedSource>,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    _protected_directories: Vec<crate::runtime::fs_guards::AnchoredDir>,
 }
 
 impl PreparedExecutor {
@@ -105,9 +107,26 @@ impl PreparedExecutor {
         {
             let selection = resolve_executor()?;
             let runtime_sources = retain_runtime_sources(selection.probe())?;
+            let protected_directories = (|| {
+                let home = crate::runtime::session_store::open_flow_agent_home(true)?.ok_or_else(
+                    || RuntimeError::Protocol("global Flow home is unavailable".to_owned()),
+                )?;
+                let platform =
+                    super::config::ExecutorConfigStore::platform_default()?.ensure_parent()?;
+                let roots = vec![home, platform];
+                crate::runtime::fs_guards::verify_protected_directory_aliases(&roots)?;
+                Ok::<_, RuntimeError>(roots)
+            })()
+            .map_err(|error| {
+                RuntimeError::executor(
+                    proto::ExecutorErrorCodeV0::Unavailable,
+                    format!("protected directory admission failed: {error}"),
+                )
+            })?;
             Ok(Self {
                 selection,
                 runtime_sources,
+                _protected_directories: protected_directories,
             })
         }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]

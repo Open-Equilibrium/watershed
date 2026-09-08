@@ -23,10 +23,14 @@ pub use bounded_read::for_each_reader_line_with_limit;
 pub use bounded_read::{decode_utf8, path_io_error, read_opened_file_with_limit};
 
 mod local_state;
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+mod protected_inventory;
 #[cfg(test)]
 pub(crate) use local_state::PROTECTED_STATE_LOCK_DEADLINE;
 pub(crate) use local_state::unix_access_is_private;
 pub(crate) use local_state::{ProtectedStateLock, ProtectedStateLockError, canonical_decimal};
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+pub(crate) use protected_inventory::verify_protected_directory_aliases;
 
 mod anchored_file;
 pub use anchored_file::validate_real_file;
@@ -102,6 +106,7 @@ pub use segmented_jsonl::{
 pub struct AnchoredDir {
     pub(crate) dir: std::sync::Arc<Dir>,
     pub(crate) path: PathBuf,
+    publication_root: Option<std::sync::Arc<Dir>>,
 }
 
 #[derive(Debug)]
@@ -173,7 +178,21 @@ impl AnchoredDir {
         Ok(Self {
             dir: std::sync::Arc::new(dir),
             path: path.to_owned(),
+            publication_root: None,
         })
+    }
+
+    /// Share the retained root's namespace lease with every descendant publisher.
+    pub(crate) fn with_publication(mut self) -> Self {
+        self.publication_root = Some(self.dir.clone());
+        self
+    }
+
+    fn publication_guard(&self) -> io::Result<Option<ProtectedStateLock>> {
+        self.publication_root
+            .as_deref()
+            .map(|root| directory_lease(root, true))
+            .transpose()
     }
 
     pub(crate) fn child(
@@ -208,6 +227,9 @@ impl AnchoredDir {
             Ok(_) => false,
             Err(err) if err.kind() == io::ErrorKind::NotFound && !create => return Ok(None),
             Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                let _publication = self
+                    .publication_guard()
+                    .map_err(|source| path_io_error(&path, source))?;
                 let result = if private {
                     create_private_anchored_directory(&self.dir, leaf).map(|dir| {
                         created_private_dir = Some(dir);
@@ -239,6 +261,7 @@ impl AnchoredDir {
                 Ok(Self {
                     dir: std::sync::Arc::new(dir),
                     path: path.clone(),
+                    publication_root: self.publication_root.clone(),
                 })
             },
         )?;
@@ -279,6 +302,7 @@ impl AnchoredDir {
         Ok(Self {
             dir: std::sync::Arc::new(dir),
             path,
+            publication_root: self.publication_root.clone(),
         })
     }
 
@@ -289,6 +313,32 @@ impl AnchoredDir {
             parent: self.clone(),
             leaf,
         }
+    }
+
+    pub(crate) fn create_dir(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        let _publication = self.publication_guard()?;
+        self.dir.create_dir(leaf)
+    }
+
+    pub(crate) fn remove_dir(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        let _publication = self.publication_guard()?;
+        self.dir.remove_dir(leaf)
+    }
+
+    pub(crate) fn remove_file(&self, leaf: impl AsRef<Path>) -> io::Result<()> {
+        let _publication = self.publication_guard()?;
+        self.dir.remove_file(leaf)
+    }
+
+    pub(crate) fn rename(
+        &self,
+        from: impl AsRef<Path>,
+        target: &Self,
+        to: impl AsRef<Path>,
+    ) -> io::Result<()> {
+        let _source_publication = self.publication_guard()?;
+        let _target_publication = target.publication_guard()?;
+        self.dir.rename(from, &target.dir, to)
     }
 
     pub(crate) fn identity(&self) -> Result<AnchoredDirectoryIdentity, RuntimeError> {
@@ -372,6 +422,24 @@ impl AnchoredWorkspace {
         }
         Ok(())
     }
+}
+
+fn directory_lease(dir: &Dir, shared: bool) -> io::Result<ProtectedStateLock> {
+    // Reopen, never duplicate: separate acquisitions need separate lock ownership.
+    let file = dir.open_dir(".")?.into_std_file();
+    let started = std::time::Instant::now();
+    let result = if shared {
+        ProtectedStateLock::acquire_shared(file, || started.elapsed(), std::thread::sleep)
+    } else {
+        ProtectedStateLock::acquire(file, || started.elapsed(), std::thread::sleep)
+    };
+    result.map_err(|error| match error {
+        ProtectedStateLockError::Busy => io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "protected-store publication or admission is busy; retry later",
+        ),
+        ProtectedStateLockError::Io(error) => error,
+    })
 }
 
 fn verify_canonical_workspace_identity(

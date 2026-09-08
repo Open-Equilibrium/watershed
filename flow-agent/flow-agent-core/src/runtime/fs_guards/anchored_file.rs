@@ -81,19 +81,36 @@ impl AnchoredFile {
 
     pub(crate) fn remove(&self) -> Result<(), RuntimeError> {
         self.parent
-            .dir
             .remove_file(&self.leaf)
             .map_err(|source| path_io_error(&self.path, source))
     }
 
+    pub(crate) fn open_creating(
+        &self,
+        options: &cap_std::fs::OpenOptions,
+    ) -> Result<fs::File, RuntimeError> {
+        let _publication = self
+            .parent
+            .publication_guard()
+            .map_err(|source| path_io_error(&self.path, source))?;
+        self.open(options)
+    }
+
     pub(crate) fn rename_to(&self, target: &Self) -> Result<(), RuntimeError> {
         self.parent
-            .dir
-            .rename(&self.leaf, &target.parent.dir, &target.leaf)
+            .rename(&self.leaf, &target.parent, &target.leaf)
             .map_err(|source| path_io_error(&target.path, source))
     }
 
     pub(crate) fn hard_link_to(&self, target: &Self) -> Result<(), RuntimeError> {
+        let _source_publication = self
+            .parent
+            .publication_guard()
+            .map_err(|source| path_io_error(&self.path, source))?;
+        let _target_publication = target
+            .parent
+            .publication_guard()
+            .map_err(|source| path_io_error(&target.path, source))?;
         self.parent
             .dir
             .hard_link(&self.leaf, &target.parent.dir, &target.leaf)
@@ -188,7 +205,7 @@ fn create_anchored_replacement_temp(
             .create_new(true)
             .write(true)
             .follow(FollowSymlinks::No);
-        match temp_path.open(&options) {
+        match temp_path.open_creating(&options) {
             Ok(file) => return Ok((temp_path, file)),
             Err(RuntimeError::Io { source, .. })
                 if source.kind() == io::ErrorKind::AlreadyExists => {}
@@ -347,7 +364,7 @@ pub fn create_anchored_file(file: &AnchoredFile) -> Result<fs::File, RuntimeErro
         .write(true)
         .create_new(true)
         .follow(FollowSymlinks::No);
-    file.open(&options)
+    file.open_creating(&options)
 }
 
 pub fn create_anchored_file_for_update(file: &AnchoredFile) -> Result<fs::File, RuntimeError> {
@@ -358,7 +375,7 @@ pub fn create_anchored_file_for_update(file: &AnchoredFile) -> Result<fs::File, 
         .write(true)
         .create_new(true)
         .follow(FollowSymlinks::No);
-    let opened = file.open(&options)?;
+    let opened = file.open_creating(&options)?;
     let metadata = opened
         .metadata()
         .map_err(|source| path_io_error(&file.path, source))?;

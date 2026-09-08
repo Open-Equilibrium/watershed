@@ -89,7 +89,7 @@ pub(crate) fn open_flow_agent_home_at(
     if create && home.is_some() {
         sync_anchored_directory(&parent)?;
     }
-    Ok(home)
+    Ok(home.map(AnchoredDir::with_publication))
 }
 
 fn open_flow_agent_home_parent_at(path: &Path) -> Result<(AnchoredDir, String), RuntimeError> {

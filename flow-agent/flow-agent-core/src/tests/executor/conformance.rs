@@ -53,6 +53,9 @@ fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {
     let protected = home.path.join("runtime-owned-file");
     fs::write(&protected, b"synthetic Flow-owned bytes").expect("protected fixture is staged");
     PreparedExecutor::prepare_selected().expect("single-name protected file is admitted");
+    fs::hard_link(&protected, home.path.join("internal-stage"))
+        .expect("covered publication alias is staged");
+    PreparedExecutor::prepare_selected().expect("covered publication alias is admitted");
 
     let outside = root.join("project-alias");
     fs::hard_link(&protected, &outside).expect("outside alias is staged");

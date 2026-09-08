@@ -279,7 +279,6 @@ fn reclaim_productive_run(
         conversation_dir.file(CONVERSATION_HISTORY_LEAF).remove()?;
         status_summary_file(&conversation_dir).remove()?;
         conversation_dir
-            .dir
             .remove_dir(CONVERSATION_RUNS_DIR)
             .map_err(|source| path_io_error(&runs_path, source))?;
         sync_anchored_directory(&conversation_dir)?;
@@ -291,7 +290,6 @@ fn reclaim_productive_run(
         )?;
         drop(conversation_dir);
         sessions_dir
-            .dir
             .remove_dir(conversation_id)
             .map_err(|source| path_io_error(&conversation, source))?;
         sync_anchored_directory(&sessions_dir)?;

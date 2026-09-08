@@ -19,12 +19,34 @@ pub(crate) struct ProtectedStateLock {
 impl ProtectedStateLock {
     pub(crate) fn acquire(
         file: File,
+        now: impl FnMut() -> Duration,
+        wait: impl FnMut(Duration),
+    ) -> Result<Self, ProtectedStateLockError> {
+        Self::acquire_with(file, false, now, wait)
+    }
+
+    pub(super) fn acquire_shared(
+        file: File,
+        now: impl FnMut() -> Duration,
+        wait: impl FnMut(Duration),
+    ) -> Result<Self, ProtectedStateLockError> {
+        Self::acquire_with(file, true, now, wait)
+    }
+
+    fn acquire_with(
+        file: File,
+        shared: bool,
         mut now: impl FnMut() -> Duration,
         mut wait: impl FnMut(Duration),
     ) -> Result<Self, ProtectedStateLockError> {
         let started = now();
         loop {
-            match file.try_lock() {
+            let result = if shared {
+                file.try_lock_shared()
+            } else {
+                file.try_lock()
+            };
+            match result {
                 Ok(()) => return Ok(Self { _file: file }),
                 Err(TryLockError::WouldBlock)
                     if now().saturating_sub(started) < PROTECTED_STATE_LOCK_DEADLINE =>

@@ -8,6 +8,31 @@ use crate::runtime::types::RuntimeError;
 use std::fs;
 
 #[test]
+fn protected_home_publication_waits_for_admission_without_locking_other_homes() {
+    let workspace = empty_workspace("protected-publication-admission");
+    let open_home = |name| {
+        crate::runtime::session_store::open_flow_agent_home_at(&workspace.join(name), true)
+            .expect("private home opens")
+            .expect("private home exists")
+    };
+    let home = open_home("home");
+    let other = open_home("other");
+    let admission = fs::File::open(&home.path).expect("independent admission handle opens");
+    admission.try_lock().expect("exclusive admission begins");
+    other
+        .create_dir("unrelated")
+        .expect("other home remains available");
+    let error = home
+        .create_dir("pending")
+        .expect_err("publication must not race admission");
+    assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+    assert!(!home.path.join("pending").exists());
+    drop(admission);
+    home.create_dir("pending")
+        .expect("publication resumes after admission");
+}
+
+#[test]
 fn private_child_revalidates_permissions_on_the_opened_directory() {
     use std::os::unix::fs::PermissionsExt as _;
 

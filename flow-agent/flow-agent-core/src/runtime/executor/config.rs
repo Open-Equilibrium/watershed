@@ -183,7 +183,7 @@ impl ExecutorConfigStore {
         Ok(parent.file(leaf))
     }
 
-    fn ensure_parent(&self) -> Result<AnchoredDir, RuntimeError> {
+    pub(crate) fn ensure_parent(&self) -> Result<AnchoredDir, RuntimeError> {
         self.open_parent(true)?
             .ok_or_else(|| config_failure("Executor configuration parent is unavailable"))
     }
@@ -219,7 +219,7 @@ impl ExecutorConfigStore {
                 };
                 current = next;
             }
-            let _ = self.retained_parent.set(current);
+            let _ = self.retained_parent.set(current.with_publication());
         }
         let parent = self
             .retained_parent
@@ -308,7 +308,7 @@ fn acquire_config_lock(path: &AnchoredFile) -> Result<ProtectedStateLock, Runtim
         .mode(0o600)
         .follow(FollowSymlinks::No);
     let file = path
-        .open(&options)
+        .open_creating(&options)
         .map_err(|error| config_guard_error(error, "protected Executor configuration is unsafe"))?;
     let metadata = file
         .metadata()
@@ -361,7 +361,7 @@ fn create_private_file(path: &AnchoredFile) -> Result<File, RuntimeError> {
         .mode(0o600)
         .follow(FollowSymlinks::No);
     let file = path
-        .open(&options)
+        .open_creating(&options)
         .map_err(|error| config_guard_error(error, "protected Executor configuration is unsafe"))?;
     let metadata = file
         .metadata()
