@@ -349,6 +349,7 @@ class CiWorkflowContractTest(unittest.TestCase):
                 "cargo",
                 "nextest",
                 "run",
+                "--no-fail-fast",
                 "--config",
                 TEST_ISOLATION,
                 "--locked",

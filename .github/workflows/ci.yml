@@ -166,6 +166,7 @@ jobs:
         if: steps.scope.outputs.product == 'true'
         run: >-
           cargo nextest run
+          --no-fail-fast
           --config 'target."cfg(all())".runner = ["node", "../../scripts/run-isolated-rust-test.mjs"]'
           --locked
           ${{ matrix.packages }}

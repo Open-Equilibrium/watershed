@@ -78,6 +78,7 @@ fn every_golden_stream_matches_runtime_output() {
         return;
     }
 
+    let mut failures = Vec::new();
     for stream_path in expected_streams() {
         let fixture_name = stream_path
             .parent()
@@ -90,23 +91,76 @@ fn every_golden_stream_matches_runtime_output() {
             .and_then(|name| name.to_str())
             .expect("golden stream name is UTF-8");
         let workspace = workspace_copy(fixture_name);
-        let output = run_flow(&workspace, flow_ref, EmitMode::Jsonl)
-            .unwrap_or_else(|err| panic!("{flow_ref} fixture executes: {err}"));
-        let expected = fs::read_to_string(&stream_path)
-            .unwrap_or_else(|err| panic!("{}: {err}", stream_path.display()));
-        let expected_failed = expected.contains("\"event_type\":\"session.failed\"");
-
-        assert_eq!(output.failed, expected_failed, "{}", stream_path.display());
-        assert_eq!(output.stdout, expected, "{}", stream_path.display());
-        assert_eq!(
-            fs::read_to_string(
-                workspace_session_dir(&workspace).join(format!("{}.jsonl", output.session_id))
-            )
-            .expect("authoritative session log readable"),
-            expected,
-            "{fixture_name}/{flow_ref} session log"
+        let label = format!("{fixture_name}/{flow_ref}");
+        let output = match run_flow(&workspace, flow_ref, EmitMode::Jsonl) {
+            Ok(output) => output,
+            Err(err) => {
+                failures.push(format!("{label}: fixture execution failed: {err}"));
+                continue;
+            }
+        };
+        let failure_start = failures.len();
+        let session_log = fs::read_to_string(
+            workspace_session_dir(&workspace).join(format!("{}.jsonl", output.session_id)),
         );
+        match fs::read_to_string(&stream_path) {
+            Ok(expected) => {
+                let expected_failed = expected.contains("\"event_type\":\"session.failed\"");
+                if output.failed != expected_failed {
+                    failures.push(format!(
+                        "{label}: failed status mismatch: expected {expected_failed}, actual {}",
+                        output.failed
+                    ));
+                }
+                if output.stdout != expected {
+                    failures.push(format!(
+                        "{label}: stdout byte mismatch (expected {} bytes, actual {} bytes)",
+                        expected.len(),
+                        output.stdout.len()
+                    ));
+                }
+                if let Ok(actual) = &session_log
+                    && actual != &expected
+                {
+                    failures.push(format!(
+                        "{label}: authoritative session log byte mismatch (expected {} bytes, actual {} bytes)",
+                        expected.len(), actual.len()
+                    ));
+                }
+            }
+            Err(err) => failures.push(format!("{}: {err}", stream_path.display())),
+        }
+        if let Err(err) = &session_log {
+            failures.push(format!(
+                "{label}: authoritative session log unreadable: {err}"
+            ));
+        }
+        if failures.len() != failure_start {
+            eprintln!(
+                "{label}: complete actual stdout ({} UTF-8 bytes, JSON-encoded):\n{}",
+                output.stdout.len(),
+                serde_json::to_string(&output.stdout).expect("actual stdout encodes")
+            );
+            if let Ok(actual) = &session_log {
+                if actual == &output.stdout {
+                    eprintln!(
+                        "{label}: authoritative session log is byte-identical to actual stdout"
+                    );
+                } else {
+                    eprintln!(
+                        "{label}: complete actual session log ({} UTF-8 bytes, JSON-encoded):\n{}",
+                        actual.len(),
+                        serde_json::to_string(actual).expect("actual session log encodes")
+                    );
+                }
+            }
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "golden contract failures:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

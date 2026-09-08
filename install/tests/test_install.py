@@ -196,6 +196,44 @@ class PrefixInstallerTest(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in (root / "prefix" / "bin").iterdir()),
                              ["flow", "flow-executor"])
 
+    def test_unsafe_source_and_directory_metadata_rejects_before_publication(self):
+        cases = [
+            (name, mutation, diagnostic)
+            for name in ("flow", "flow-executor")
+            for mutation, diagnostic in (
+                ("non-executable", b"bundle artifact is not executable:"),
+                ("writable", b"writable bundle artifact is unsafe:"),
+                ("hardlink", b"hard-linked bundle artifact is unsafe:"),
+            )
+        ] + [
+            ("bundle", "writable", b"installer bundle is writable by other users"),
+            ("bin", "writable", b"installation bin directory is writable by other users"),
+        ]
+        for name, mutation, diagnostic in cases:
+            with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                bundle = self.bundle(root)
+                prefix = root / "prefix"
+                target = bundle / name
+                if name == "bundle":
+                    target = bundle
+                elif name == "bin":
+                    target = prefix / "bin"
+                    target.mkdir(parents=True)
+                if mutation == "hardlink":
+                    os.link(target, root / "artifact-alias")
+                else:
+                    target.chmod(0o644 if mutation == "non-executable" else 0o775)
+
+                args = ("--no-default-executor",) if name == "flow" else ()
+                rejected = self.install(bundle, prefix, *args)
+
+                self.assertEqual(rejected.returncode, 1, rejected.stderr)
+                self.assertEqual(rejected.stdout, b"")
+                self.assertIn(diagnostic, rejected.stderr)
+                if (prefix / "bin").exists():
+                    self.assertEqual(list((prefix / "bin").iterdir()), [])
+
     def test_installed_files_are_regular_executable_siblings(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)

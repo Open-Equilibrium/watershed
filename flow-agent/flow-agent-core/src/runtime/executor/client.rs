@@ -142,6 +142,7 @@ impl PreparedExecutor {
     }
 
     /// Runs both stages immediately for non-productive conformance and startup evidence.
+    #[cfg(any(test, feature = "m12-startup-evidence"))]
     pub(crate) fn execute_prepared(
         &self,
         prepared: PreparedExecutorTool,

@@ -55,7 +55,14 @@ case "$host" in
 esac
 metadata() {
     if [ "$host" = Darwin ]; then
-        /usr/bin/stat -L -f "$2" "$3"
+        case "$3" in
+            /dev/fd/[3-6])
+                # Pathname stat sees the descriptor device, not the held object.
+                # BSD stat without a file operand uses fstat on standard input.
+                /usr/bin/stat -f "$2" < "$3"
+                ;;
+            *) /usr/bin/stat -L -f "$2" "$3" ;;
+        esac
     else
         /usr/bin/stat -L -c "$1" -- "$3"
     fi
@@ -93,7 +100,10 @@ validate_source() {
     source_path=$1
     source_name=$2
     [ -f "$source_path" ] || fail "missing regular bundle artifact: $source_name"
-    [ -x "$source_path" ] || fail "bundle artifact is not executable: $source_name"
+    [ ! -L "$source_name" ] && [ "$source_name" -ef "$source_path" ] \
+        || fail "bundle artifact changed during installation: $source_name"
+    # Darwin's descriptor device does not expose the held file's execute access.
+    [ -x "$source_name" ] || fail "bundle artifact is not executable: $source_name"
     source_links=$(metadata '%h' '%l' "$source_path") || fail 'cannot inspect bundle artifact'
     [ "$source_links" -eq 1 ] || fail "hard-linked bundle artifact is unsafe: $source_name"
     source_mode=$(metadata '%a' '%Lp' "$source_path") || fail 'cannot inspect bundle artifact mode'

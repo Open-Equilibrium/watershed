@@ -79,7 +79,7 @@ sequenceDiagram
 |---|---|---|
 | Previous baseline `54ebc88`, [run 34231319294](https://github.com/Open-Equilibrium/watershed/actions/runs/34231319294) | Passed native baseline. | Evidence for that previous implementation only. |
 | Raw replacement `e001542`, [run 34232272591](https://github.com/Open-Equilibrium/watershed/actions/runs/34232272591) | RED on Linux and macOS; Windows shared tests pass. | Not new native GREEN or complete runtime verification. |
-| Integrated replacement in the shared checkout | Runtime/schema/wire changes and native test/CI migration are present. | Fresh native results and release-artifact acceptance remain pending; record their exact revision and run when available. |
+| Integrated replacement `fccce24`, [run 34241806417](https://github.com/Open-Equilibrium/watershed/actions/runs/34241806417) | Windows shared gates pass; native gates remain RED (Mac installer checks and Linux CLI diagnostic assertion). | The early failures leave most native runtime tests and release-artifact acceptance unverified. |
 
 The old systemd/container gate and its broad-isolation assertions no longer define release acceptance. Native tests must run on Ubuntu 24.04 x86_64 and macOS 26 ARM64. Record actual command exits, runner identity and tested artifact; source inspection, cross-builds and Windows shared tests cannot fill missing native evidence.
 

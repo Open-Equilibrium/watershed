@@ -765,7 +765,7 @@ fn legacy_tool_flags_reject_before_stdin_and_never_publish() {
         let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
         assert_eq!(output.status.code(), Some(64), "{flag}: {stderr}");
         assert!(
-            stderr.contains(&format!("unknown argument {flag:?}")),
+            stderr.contains(&format!(r#"unknown argument \"{flag}\""#)),
             "{flag}: {stderr}"
         );
         assert!(output.stdout.is_empty(), "{flag}");
