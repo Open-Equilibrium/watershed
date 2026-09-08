@@ -512,4 +512,59 @@ mod tests {
             "hard-linked executable must be rejected"
         );
     }
+
+    #[test]
+    fn custom_installation_requires_safe_present_programs_not_an_absent_default() {
+        let root = crate::tests::empty_workspace();
+        let flow = root.join("flow");
+        let custom = root.join("custom-executor");
+        let sibling = root.join("flow-executor");
+        for path in [&flow, &custom] {
+            fs::write(path, b"installed program").expect("program is staged");
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                .expect("program is executable");
+        }
+        let selection = ExecutorSelection::new(custom, ExecutorSelectionSource::Custom);
+        open_validated_executable(&selection, Some(&flow))
+            .expect("Custom-only installation does not require the absent default");
+        let default = ExecutorSelection::new(sibling.clone(), ExecutorSelectionSource::Default);
+        assert!(
+            open_validated_executable(&default, Some(&flow)).is_err(),
+            "default selection still requires its selected program"
+        );
+
+        fs::write(&sibling, b"installed default").expect("optional default is staged");
+        fs::set_permissions(&sibling, fs::Permissions::from_mode(0o700))
+            .expect("optional default is executable");
+        open_validated_executable(&selection, Some(&flow))
+            .expect("safe installed sibling is admitted with Custom selection");
+
+        fs::set_permissions(&sibling, fs::Permissions::from_mode(0o722))
+            .expect("unsafe sibling permissions are staged");
+        assert!(
+            open_validated_executable(&selection, Some(&flow)).is_err(),
+            "Custom selection must not hide an unsafe installed sibling"
+        );
+        fs::remove_file(&sibling).expect("unsafe test sibling is removed");
+        symlink(root.join("missing-default"), &sibling).expect("dangling sibling is staged");
+        assert!(
+            open_validated_executable(&selection, Some(&flow)).is_err(),
+            "dangling sibling must not be treated as an absent optional program"
+        );
+        fs::remove_file(&sibling).expect("dangling test sibling is removed");
+
+        fs::remove_file(&flow).expect("Flow removal is staged");
+        assert!(
+            open_validated_executable(&selection, Some(&flow)).is_err(),
+            "Custom selection does not make Flow optional"
+        );
+        fs::write(&flow, b"installed program").expect("Flow is restored");
+        fs::set_permissions(&flow, fs::Permissions::from_mode(0o700))
+            .expect("Flow is executable again");
+        fs::remove_file(selection.path()).expect("selected program removal is staged");
+        assert!(
+            open_validated_executable(&selection, Some(&flow)).is_err(),
+            "explicitly selected Custom Executor is always required"
+        );
+    }
 }
