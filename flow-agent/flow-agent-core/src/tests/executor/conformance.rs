@@ -57,6 +57,19 @@ fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {
         .expect("covered publication alias is staged");
     PreparedExecutor::prepare_selected().expect("covered publication alias is admitted");
 
+    let program_alias = home.path.join("selected-executor-alias");
+    fs::hard_link(&executor_path, &program_alias).expect("covered program alias is staged");
+    PreparedExecutor::prepare_selected()
+        .expect("the selected program and its home alias belong to one protected inventory");
+    let program_outside = root.join("unprotected-executor-alias");
+    fs::hard_link(&executor_path, &program_outside).expect("outside program alias is staged");
+    let error = PreparedExecutor::prepare_selected()
+        .err()
+        .expect("an additional unprotected program alias must be rejected");
+    assert_executor_code(&error, proto::ExecutorErrorCodeV0::Unavailable);
+    fs::remove_file(&program_outside).expect("owner removes the outside program alias");
+    PreparedExecutor::prepare_selected().expect("the repaired program inventory is admitted");
+
     let outside = root.join("project-alias");
     fs::hard_link(&protected, &outside).expect("outside alias is staged");
     let error = PreparedExecutor::prepare_selected()
