@@ -289,10 +289,35 @@ fn validate_sibling_ownership(flow: &File, sibling: &File) -> Result<(), Runtime
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn open_program(path: &Path) -> Result<File, RuntimeError> {
+    use crate::runtime::fs_guards::{AnchoredDir, DirectoryErrorMode};
     use rustix::fs::{Mode, OFlags};
+    use std::path::Component;
 
-    let descriptor = rustix::fs::open(
-        path,
+    let parent_path = path
+        .parent()
+        .filter(|_| path.is_absolute())
+        .ok_or_else(|| executor_unavailable("Executor installation directory is unavailable"))?;
+    let mut parent = AnchoredDir::workspace(Path::new("/"))
+        .map_err(|_| executor_unavailable("Executor installation root is unavailable"))?;
+    for component in parent_path.components().skip(1) {
+        let Component::Normal(leaf) = component else {
+            return Err(executor_unavailable(
+                "Executor installation directory is unsafe",
+            ));
+        };
+        parent = parent
+            .child(leaf, false, DirectoryErrorMode::Protocol)
+            .map_err(|_| executor_unavailable("Executor installation directory is unsafe"))?
+            .ok_or_else(|| {
+                executor_unavailable("Executor installation directory is unavailable")
+            })?;
+    }
+    let leaf = path
+        .file_name()
+        .ok_or_else(|| executor_unavailable("Executor executable is unavailable"))?;
+    let descriptor = rustix::fs::openat(
+        &parent.dir,
+        leaf,
         OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
         Mode::empty(),
     )
@@ -310,16 +335,9 @@ fn open_program(path: &Path) -> Result<File, RuntimeError> {
     {
         return Err(executor_unavailable("Executor executable is unsafe"));
     }
-    let parent = path
-        .parent()
-        .ok_or_else(|| executor_unavailable("Executor installation directory is unavailable"))?;
-    let parent_metadata = fs::symlink_metadata(parent)
+    let parent_metadata = rustix::fs::fstat(&parent.dir)
         .map_err(|_| executor_unavailable("Executor installation directory is unavailable"))?;
-    if !parent_metadata.is_dir()
-        || parent_metadata.file_type().is_symlink()
-        || parent_metadata.permissions().mode() & 0o022 != 0
-        || parent_metadata.uid() != metadata.uid()
-    {
+    if parent_metadata.st_mode & 0o022 != 0 || parent_metadata.st_uid != metadata.uid() {
         return Err(executor_unavailable(
             "Executor installation directory is unsafe",
         ));
