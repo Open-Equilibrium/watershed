@@ -79,7 +79,7 @@ sequenceDiagram
 |---|---|---|
 | Previous baseline `54ebc88`, [run 34231319294](https://github.com/Open-Equilibrium/watershed/actions/runs/34231319294) | Passed native baseline. | Evidence for that previous implementation only. |
 | Raw replacement `e001542`, [run 34232272591](https://github.com/Open-Equilibrium/watershed/actions/runs/34232272591) | RED on Linux and macOS; Windows shared tests pass. | Not new native GREEN or complete runtime verification. |
-| Integrated replacement `e3296a9`, [run 34243131561](https://github.com/Open-Equilibrium/watershed/actions/runs/34243131561) | Linux: 1,153 tests, 1,143 passed, 10 failed, none skipped; nextest exit 100. Golden outputs pass unchanged. Windows shared gates pass. Mac installer remains RED. | Linux failures cover stale companion platform fixtures, readiness diagnostics and native Tool startup. Complete native runtime, release-artifact, coverage and performance acceptance remain outstanding. |
+| Integrated replacement `59fd7cf`, [run 34245461547](https://github.com/Open-Equilibrium/watershed/actions/runs/34245461547) | Linux: 1,153 tests, 1,151 passed, two failed, none skipped; nextest exit 100. Golden outputs and native npm build pass. Mac installer: 17 of 18 tests pass. | Linux terminal/output-cap and cancellation evidence, plus Mac installer interruption, remain RED. Complete native runtime, release-artifact, coverage and performance acceptance remain outstanding. |
 
 The old systemd/container gate and its broad-isolation assertions no longer define release acceptance. Native tests must run on Ubuntu 24.04 x86_64 and macOS 26 ARM64. Record actual command exits, runner identity and tested artifact; source inspection, cross-builds and Windows shared tests cannot fill missing native evidence.
 

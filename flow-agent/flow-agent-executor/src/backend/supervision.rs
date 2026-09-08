@@ -9,6 +9,7 @@ use proto::{
 use rustix::fd::OwnedFd;
 use std::{
     io::{Read, Write},
+    os::unix::net::UnixStream,
     process::{Child, Command, ExitStatus},
     sync::{
         Arc,
@@ -100,6 +101,7 @@ pub(super) fn run_bounded(
     stderr_limit: u64,
     input: Vec<u8>,
     inherited: Vec<OwnedFd>,
+    mut cancellation: Option<UnixStream>,
 ) -> Result<ProcessOutcome, BackendError> {
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(timeout_ms))
@@ -184,7 +186,13 @@ pub(super) fn run_bounded(
         }
         if cleanup.is_none() && primary.is_some() {
             if status.is_none() {
-                signal_child(&child, rustix::process::Signal::TERM);
+                if let Some(mut control) = cancellation.take() {
+                    // The inner supervisor owns the Tool root. Terminating the
+                    // Bubblewrap monitor would kill it before it can report reaping.
+                    let _ = control.write_all(&[1]);
+                } else {
+                    signal_child(&child, rustix::process::Signal::TERM);
+                }
             }
             cleanup = Some(CleanupController::new(Instant::now()));
         }

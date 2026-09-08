@@ -3,7 +3,7 @@ use proto::{EnforcementReceiptV0, ExecutorRequestV0, ExecutorResponseV0};
 use rustix::fd::AsRawFd;
 use std::{
     io::{Read, Write},
-    os::unix::process::ExitStatusExt,
+    os::unix::{net::UnixStream, process::ExitStatusExt},
     process::{Command, ExitStatus, Stdio},
     sync::{
         Arc,
@@ -49,8 +49,13 @@ pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0,
     protection::verify_objects(&request).map_err(BackendError::setup)?;
     let bytes = proto::canonical_executor_request_v0(&request)
         .map_err(|error| BackendError::setup(error.to_string()))?;
-    let (reader, writer) = std::io::pipe().map_err(|error| {
-        BackendError::setup(format!("failed to create Tool status pipe: {error}"))
+    let (reader, writer) = UnixStream::pair().map_err(|error| {
+        BackendError::setup(format!("failed to create Tool control channel: {error}"))
+    })?;
+    let cancellation = reader.try_clone().map_err(|error| {
+        BackendError::setup(format!(
+            "failed to retain Tool cancellation channel: {error}"
+        ))
     })?;
     let writer = protection::retain_descriptor(writer).map_err(BackendError::setup)?;
     let (mut command, mut inherited) =
@@ -80,6 +85,7 @@ pub(super) fn execute(prepared: PreparedExecution) -> Result<ExecutorResponseV0,
         limits.max_stderr_bytes,
         bytes,
         inherited,
+        Some(cancellation),
     )?;
     // Only the trusted inner supervisor retains the status writer. A missing
     // record never becomes an invented Tool completion, including cancellation.
@@ -145,6 +151,9 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
         .map_err(|_| "invalid inner status descriptor".to_owned())?;
     let descriptor = protection::borrow_descriptor(descriptor)?;
     let mut status_file = std::fs::File::from(protection::retain_descriptor(descriptor)?);
+    let mut control = status_file
+        .try_clone()
+        .map_err(|error| format!("failed to retain inner cancellation channel: {error}"))?;
     let mut bytes = Vec::new();
     input
         .take(proto::MAX_EXECUTOR_REQUEST_BYTES_V0 as u64 + 1)
@@ -161,6 +170,12 @@ pub(crate) fn run_inner(status_descriptor: &str, input: impl Read) -> Result<(),
     let cancelled = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&cancelled))
         .map_err(|error| format!("failed to install inner cancellation: {error}"))?;
+    let control_cancelled = Arc::clone(&cancelled);
+    thread::spawn(move || {
+        let mut byte = [0];
+        let _ = control.read(&mut byte);
+        control_cancelled.store(true, Ordering::Release);
+    });
     let policy = &request.resolved_policy;
     let deadline = Instant::now()
         .checked_add(Duration::from_millis(policy.limits.timeout_ms))
@@ -209,7 +224,8 @@ pub(super) fn checked_output(mut command: Command) -> Result<String, BackendErro
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let outcome = supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), Vec::new())?;
+    let outcome =
+        supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), Vec::new(), None)?;
     if outcome.classification.is_some() {
         let status = match outcome.status.and_then(|status| status.code()) {
             Some(code) => format!("exit code {code}"),
@@ -231,7 +247,8 @@ pub(super) fn readiness() -> Result<String, BackendError> {
     command.arg("--inner-self-test");
     protection::inherit_only(&inherited.iter().map(AsRawFd::as_raw_fd).collect::<Vec<_>>())
         .map_err(BackendError::setup)?;
-    let outcome = supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), inherited)?;
+    let outcome =
+        supervision::run_bounded(command, 2_000, 1024, 1024, Vec::new(), inherited, None)?;
     if outcome.classification.is_some() {
         return Err(BackendError::unavailable(format!(
             "native protection self-test failed: {}",

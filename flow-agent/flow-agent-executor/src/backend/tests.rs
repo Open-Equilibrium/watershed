@@ -228,7 +228,7 @@ fn bounded_output_classifies_each_stream_and_preserves_its_exact_prefix() {
             b"vwxy".as_slice(),
         ),
     ] {
-        let outcome = run_bounded(shell(script), 2_000, 4, 4, Vec::new(), Vec::new())
+        let outcome = run_bounded(shell(script), 2_000, 4, 4, Vec::new(), Vec::new(), None)
             .expect("bounded direct-child supervision completes");
         assert_eq!(outcome.classification, classification, "{script}");
         assert_eq!(outcome.stdout, stdout, "{script}");
@@ -259,6 +259,7 @@ fn timeout_reaps_a_noncooperative_root_without_reporting_a_cleanup_exit_code() {
         4,
         Vec::new(),
         Vec::new(),
+        None,
     )
     .expect("bounded cleanup reaps the direct child");
     assert_eq!(outcome.classification, Some(Classification::ToolTimedOut));
