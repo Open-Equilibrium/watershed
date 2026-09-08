@@ -35,6 +35,47 @@ const REDACTED_DIAGNOSTIC: &str = "private-fixture-diagnostic";
 const FAKE_EXECUTOR_SOURCE: &str = include_str!("fake_companion_fixture.rs");
 
 #[test]
+fn controller_admission_rejects_a_protected_home_file_with_an_outside_alias() {
+    if crate::tests::test_support::run_current_test_isolated_session_home() {
+        return;
+    }
+
+    let root = crate::tests::helpers::empty_workspace("executor-home-alias-admission");
+    fs::set_permissions(&*root, fs::Permissions::from_mode(0o700))
+        .expect("synthetic installation is private");
+    isolate_executor_configuration(&root);
+    let fixture = compile_fake_executor(&root);
+    let executor_path = stage_case(&fixture, &root, "ready-without-start");
+    configure_executor_path(&executor_path).expect("valid Custom Executor is selected");
+    let home = crate::runtime::session_store::open_flow_agent_home(true)
+        .expect("isolated Flow home opens")
+        .expect("isolated Flow home exists");
+    let protected = home.path.join("runtime-owned-file");
+    fs::write(&protected, b"synthetic Flow-owned bytes").expect("protected fixture is staged");
+    PreparedExecutor::prepare_selected().expect("single-name protected file is admitted");
+
+    let outside = root.join("project-alias");
+    fs::hard_link(&protected, &outside).expect("outside alias is staged");
+    let error = PreparedExecutor::prepare_selected()
+        .err()
+        .expect("controller admission must reject an outside alias of any protected home file");
+
+    assert_executor_code(&error, proto::ExecutorErrorCodeV0::Unavailable);
+    assert!(
+        !executor_path.with_extension("tool-spawned").exists(),
+        "failed admission must not dispatch a Tool"
+    );
+    assert_eq!(
+        fs::read(&protected).expect("protected fixture reads"),
+        b"synthetic Flow-owned bytes"
+    );
+    assert_eq!(
+        fs::read(&outside).expect("outside alias reads"),
+        b"synthetic Flow-owned bytes"
+    );
+}
+
+#[test]
 fn fake_companions_cover_the_closed_executor_protocol_matrix() {
     if crate::tests::test_support::run_current_test_isolated_session_home() {
         return;
