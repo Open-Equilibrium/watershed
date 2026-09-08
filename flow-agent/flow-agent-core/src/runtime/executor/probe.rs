@@ -528,6 +528,18 @@ mod tests {
             "symbolic executable link must be rejected"
         );
 
+        let bin = root.join("bin");
+        fs::create_dir(&bin).expect("installation directory is staged");
+        let installed = bin.join("program");
+        fs::copy(&target, &installed).expect("single-link program is installed");
+        open_program(&installed).expect("real installation path is admitted");
+        let alias = root.join("installation-alias");
+        symlink(&root, &alias).expect("installation ancestor alias is staged");
+        assert!(
+            open_program(&alias.join("bin/program")).is_err(),
+            "an intermediate symbolic directory must not redirect installed authority"
+        );
+
         let hard = root.join("hard");
         fs::hard_link(&target, &hard).expect("hard link is staged");
         assert!(
