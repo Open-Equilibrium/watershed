@@ -142,7 +142,7 @@ fn write_new_file_with(
             )));
         }
         ensure_anchored_new_leaf_available(target)?;
-        temporary.hard_link_to(target)?;
+        temporary.hard_link_to(&target.leaf)?;
         drop(opened);
         temporary
             .remove()

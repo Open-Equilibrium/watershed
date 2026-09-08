@@ -174,7 +174,7 @@ fn replace_status_summary(
     create_bounded_canonical_json_file(&staged, summary, "staged conversation status summary")?;
     #[cfg(test)]
     status_transaction_checkpoint(StatusTransactionCrashPoint::SummaryStaged)?;
-    staged.rename_to(&target)?;
+    staged.rename_to(&target.leaf)?;
     sync_anchored_directory(conversation)
 }
 
@@ -335,7 +335,7 @@ fn record_status_transaction(
         transaction,
         "staged conversation status transaction",
     )?;
-    staged.rename_to(&target)?;
+    staged.rename_to(&target.leaf)?;
     sync_anchored_directory(conversation)
 }
 

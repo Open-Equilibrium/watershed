@@ -353,7 +353,7 @@ impl SessionObjectWriter {
                         drop(temp_file);
                         write_new(temp_path, &object.object.bytes)?;
                         ensure_anchored_new_leaf_available(&path)?;
-                        temp_path.rename_to(&path)
+                        temp_path.rename_to(&path.leaf)
                     })?;
                     self.record_publication(object.digest, object.object_bytes);
                     sync_parent = true;

@@ -25,7 +25,7 @@ fn publish_stays_bound_to_the_opened_target_directory() {
         drop(file);
         fs::rename(workspace.join("out"), &moved_output).expect("output directory moved");
         symlink(&outside, workspace.join("out")).expect("replacement output symlink created");
-        temp.rename_to(&target)
+        temp.rename_to(&target.leaf)
     })
     .expect("anchored replacement succeeds");
 

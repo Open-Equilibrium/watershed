@@ -248,7 +248,7 @@ impl ExecutorConfigStore {
             file.write_all(bytes)
                 .and_then(|()| file.sync_all())
                 .map_err(|error| config_io(stage.diagnostic_path(), error))?;
-            stage.rename_to(&path)?;
+            stage.rename_to(&path.leaf)?;
             verify_anchored_file(&path)?;
             sync_anchored_directory(parent)
         })();

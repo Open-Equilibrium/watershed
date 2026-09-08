@@ -330,15 +330,9 @@ impl AnchoredDir {
         self.dir.remove_file(leaf)
     }
 
-    pub(crate) fn rename(
-        &self,
-        from: impl AsRef<Path>,
-        target: &Self,
-        to: impl AsRef<Path>,
-    ) -> io::Result<()> {
-        let _source_publication = self.publication_guard()?;
-        let _target_publication = target.publication_guard()?;
-        self.dir.rename(from, &target.dir, to)
+    pub(crate) fn rename(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+        let _publication = self.publication_guard()?;
+        self.dir.rename(from, &self.dir, to)
     }
 
     pub(crate) fn identity(&self) -> Result<AnchoredDirectoryIdentity, RuntimeError> {

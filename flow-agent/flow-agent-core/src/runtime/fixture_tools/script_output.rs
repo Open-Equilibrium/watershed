@@ -113,7 +113,7 @@ fn replace_script_output_atomically_checked(
             ensure_script_output_target_available(path)?;
             #[cfg(test)]
             observe_script_output_publish();
-            match temp_path.hard_link_to(path) {
+            match temp_path.hard_link_to(&path.leaf) {
                 Ok(()) => {}
                 Err(RuntimeError::Io { source, .. })
                     if source.kind() == io::ErrorKind::AlreadyExists =>

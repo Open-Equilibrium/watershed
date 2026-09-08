@@ -96,24 +96,22 @@ impl AnchoredFile {
         self.open(options)
     }
 
-    pub(crate) fn rename_to(&self, target: &Self) -> Result<(), RuntimeError> {
+    pub(crate) fn rename_to(&self, leaf: &Path) -> Result<(), RuntimeError> {
+        let target = self.parent.file(leaf);
         self.parent
-            .rename(&self.leaf, &target.parent, &target.leaf)
+            .rename(&self.leaf, &target.leaf)
             .map_err(|source| path_io_error(&target.path, source))
     }
 
-    pub(crate) fn hard_link_to(&self, target: &Self) -> Result<(), RuntimeError> {
-        let _source_publication = self
+    pub(crate) fn hard_link_to(&self, leaf: &Path) -> Result<(), RuntimeError> {
+        let target = self.parent.file(leaf);
+        let _publication = self
             .parent
             .publication_guard()
             .map_err(|source| path_io_error(&self.path, source))?;
-        let _target_publication = target
-            .parent
-            .publication_guard()
-            .map_err(|source| path_io_error(&target.path, source))?;
         self.parent
             .dir
-            .hard_link(&self.leaf, &target.parent.dir, &target.leaf)
+            .hard_link(&self.leaf, &self.parent.dir, &target.leaf)
             .map_err(|source| path_io_error(&target.path, source))
     }
 }

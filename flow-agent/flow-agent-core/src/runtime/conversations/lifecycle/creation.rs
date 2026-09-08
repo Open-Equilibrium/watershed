@@ -512,7 +512,7 @@ fn create_conversation_run_with_publication_marker(
         }
         drop(stage_for_publication);
         runs_dir
-            .rename(&staging_name, &runs_dir, run_session_id)
+            .rename(&staging_name, run_session_id)
             .map_err(|source| path_io_error(&run, source))?;
         if let Some((_, _, cleanup_leaf, cleanup_path, _, _)) = partial_run.as_mut() {
             *cleanup_leaf = run_session_id.to_owned();

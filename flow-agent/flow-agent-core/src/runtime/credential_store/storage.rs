@@ -140,7 +140,7 @@ pub(super) fn replace_atomically_anchored(
             .and_then(|()| file.write_all(b"\n"))
             .and_then(|()| file.sync_all())
             .map_err(|error| store_io(temporary.diagnostic_path(), error))?;
-        temporary.rename_to(path)?;
+        temporary.rename_to(&path.leaf)?;
         let finalization = (|| {
             credential_protection_checkpoint(path.diagnostic_path())?;
             verify_private_anchored_file(path)?;
