@@ -551,8 +551,7 @@ mod unsupported_platform_tests {
         );
 
         let error = probe_executor(&selection, Path::new("official-flow"), &[])
-            .err()
-            .expect("unsupported platforms cannot probe a productive Executor");
+            .expect_err("unsupported platforms cannot probe a productive Executor");
 
         match error {
             RuntimeError::Executor(failure) => {
