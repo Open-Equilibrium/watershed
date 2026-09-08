@@ -1,6 +1,6 @@
 # Testing
 
-**Flow security replacement:** Runtime, invocation policy, wire and fixtures now use the [accepted replacement](SECURITY.md#accepted-flow-agent-security-target), with native verification pending. CI is being migrated to native Ubuntu 24.04 x86_64 and macOS 26 ARM64, including release-artifact acceptance. No new native GREEN result is available. Passing Windows shared tests and historical feasibility observations are not native product proof. Manual administration, protected global/editable local instructions, overlapping locations and the full selected inventory remain required acceptance boundaries.
+**Flow security replacement:** Runtime, invocation policy, wire and fixtures now use the [accepted replacement](SECURITY.md#accepted-flow-agent-security-target), with complete native acceptance pending. CI targets native Ubuntu 24.04 x86_64 and macOS 26 ARM64, including release-artifact acceptance. Passing stages are recorded below; neither a partial native result, Windows shared tests nor historical feasibility observations prove the complete product gate. Manual administration, protected global/editable local instructions, overlapping locations and the full selected inventory remain required acceptance boundaries.
 
 Verification strategy. Tests enforce product behavior and the boundaries in `SECURITY.md`; fixed workloads provide the observational evidence defined by `PERFORMANCE.md`. Definition of Done (see `AGENTS.md`) requires both where relevant.
 
@@ -79,7 +79,7 @@ sequenceDiagram
 |---|---|---|
 | Previous baseline `54ebc88`, [run 34231319294](https://github.com/Open-Equilibrium/watershed/actions/runs/34231319294) | Passed native baseline. | Evidence for that previous implementation only. |
 | Raw replacement `e001542`, [run 34232272591](https://github.com/Open-Equilibrium/watershed/actions/runs/34232272591) | RED on Linux and macOS; Windows shared tests pass. | Not new native GREEN or complete runtime verification. |
-| Integrated replacement `59fd7cf`, [run 34245461547](https://github.com/Open-Equilibrium/watershed/actions/runs/34245461547) | Linux: 1,153 tests, 1,151 passed, two failed, none skipped; nextest exit 100. Golden outputs and native npm build pass. Mac installer: 17 of 18 tests pass. | Linux terminal/output-cap and cancellation evidence, plus Mac installer interruption, remain RED. Complete native runtime, release-artifact, coverage and performance acceptance remain outstanding. |
+| Integrated replacement `f69dc42`, [run 34247329960](https://github.com/Open-Equilibrium/watershed/actions/runs/34247329960) | Linux: all 1,154 regular tests pass, none skipped; nextest exit 0. Release Executor: seven of eight acceptance tests pass, exit 100. Mac installer: 17 of 18 tests pass. | Release output-cap status reading reports a connection reset; Mac interruption cleanup remains RED at this revision. Expanded acceptance, native coverage, installation and performance proof remain outstanding. |
 
 The old systemd/container gate and its broad-isolation assertions no longer define release acceptance. Native tests must run on Ubuntu 24.04 x86_64 and macOS 26 ARM64. Record actual command exits, runner identity and tested artifact; source inspection, cross-builds and Windows shared tests cannot fill missing native evidence.
 

@@ -186,10 +186,12 @@ pub(super) fn run_bounded(
         }
         if cleanup.is_none() && primary.is_some() {
             if status.is_none() {
-                if let Some(mut control) = cancellation.take() {
+                if let Some(control) = cancellation.take() {
                     // The inner supervisor owns the Tool root. Terminating the
                     // Bubblewrap monitor would kill it before it can report reaping.
-                    let _ = control.write_all(&[1]);
+                    // EOF requests cancellation without leaving an unread byte
+                    // that could reset the returning status after a fast Tool exit.
+                    let _ = control.shutdown(std::net::Shutdown::Write);
                 } else {
                     signal_child(&child, rustix::process::Signal::TERM);
                 }
