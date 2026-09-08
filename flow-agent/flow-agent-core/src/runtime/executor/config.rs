@@ -26,6 +26,8 @@ static STAGE_COUNTER: AtomicU64 = AtomicU64::new(0);
 thread_local! {
     static PARENT_MISSING_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
+    static READ_VALIDATED_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
@@ -95,6 +97,10 @@ impl ExecutorConfigStore {
             return Err(config_failure(
                 "protected Executor configuration is oversized",
             ));
+        }
+        #[cfg(test)]
+        if let Some(observer) = READ_VALIDATED_OBSERVER.with_borrow_mut(Option::take) {
+            observer();
         }
         let mut bytes = Vec::new();
         File::open(&self.path)
@@ -423,6 +429,84 @@ mod tests {
                 .expect("the serialized configuration exists")
                 .path(),
             outer_path
+        );
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[test]
+    fn protected_configuration_retains_parent_replaced_after_read_validation() {
+        use std::fs;
+
+        let root = crate::tests::empty_workspace();
+        let parent = root.join("private");
+        let retained = root.join("retained");
+        let replacement = root.join("replacement");
+        let config = parent.join("executor.json");
+        let original = root.join("original-executor");
+        let injected = root.join("injected-executor");
+        let updated = root.join("updated-executor");
+        let store = ExecutorConfigStore::protected_at(config.clone());
+        store
+            .configure(&original)
+            .expect("original override stores");
+        let replacement_config = replacement.join("executor.json");
+        ExecutorConfigStore::protected_at(replacement_config.clone())
+            .configure(&injected)
+            .expect("replacement namespace override stores");
+        let replacement_bytes = fs::read(&replacement_config).expect("replacement document reads");
+        let retained_store = ExecutorConfigStore::protected_at(retained.join("executor.json"));
+
+        super::READ_VALIDATED_OBSERVER.with_borrow_mut(|slot| {
+            *slot = Some(Box::new(move || {
+                fs::rename(&parent, &retained).expect("validated parent moves");
+                fs::rename(&replacement, &parent).expect("replacement takes the checked name");
+            }));
+        });
+        let result = store.read();
+        assert!(
+            super::READ_VALIDATED_OBSERVER
+                .with_borrow_mut(Option::take)
+                .is_none(),
+            "the read must reach the deterministic parent replacement"
+        );
+        assert_eq!(
+            result
+                .expect("retained override reads")
+                .expect("override exists")
+                .path(),
+            original,
+            "a parent replaced after validation must not supply the Executor selection"
+        );
+
+        store
+            .configure(&updated)
+            .expect("retained override updates");
+        assert_eq!(
+            retained_store
+                .read()
+                .expect("retained namespace reads")
+                .expect("updated override exists")
+                .path(),
+            updated
+        );
+        assert_eq!(
+            fs::read(&config).expect("replacement document survives configure"),
+            replacement_bytes,
+            "configure must not overwrite the replacement namespace"
+        );
+        assert!(store.configure_default().expect("retained override resets"));
+        assert!(store.read().expect("reset override reads").is_none());
+        assert!(
+            retained_store
+                .read()
+                .expect("retained namespace reads")
+                .is_none()
+        );
+        assert!(!store.configure_default().expect("reset stays idempotent"));
+        assert_eq!(
+            fs::read(&config).expect("replacement document survives reset"),
+            replacement_bytes,
+            "reset must not remove the replacement namespace override"
         );
     }
 }
