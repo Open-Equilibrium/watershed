@@ -27,17 +27,6 @@ summary{cursor:pointer}summary h3{display:inline;margin:0}summary:focus-visible{
   <section id="release-1">
     <h2>Flow Agent - First Release</h2>
     <div class="grid">
-      <details id="d-068" class="decision" style="grid-column:1/-1">
-        <summary><h3>D-068 - Protected Programs In A Custom-Only Installation</h3></summary>
-        <p><strong>Status:</strong> M1.2 implementation clarification required. ADR-0174 settles this installation's protection, not protection of other independent homes. This question concerns which program files must exist when the administrator deliberately installs without the Default Executor.</p>
-        <p><strong>Conflict:</strong> The <a href="../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162">existing installation contract</a> permits <code>--no-default-executor</code> followed by selection of a Custom Executor. The <a href="../../scripts/run-m12-installer-acceptance.sh">native installer acceptance</a> checks that installation, Custom selection and readiness, not a productive Tool run after the override. However, the <a href="../concept/flow-agent-native-protection-proposal.md#complete-protected-set">new protected set</a> unconditionally lists the sibling <code>flow-executor</code> and rejects missing objects. Applied literally, it would refuse the intentionally absent file even when a valid Custom Executor is selected.</p>
-        <ul>
-          <li><strong>A - Require the programs actually used; also protect any installed Default Executor.</strong> Always require and protect <code>flow</code> and the selected Executor. Default selection requires its sibling; Custom selection may work without that sibling, but protects it too when present. Pro: preserves the explicit opt-out without installing an unused program. Con: admission must distinguish selected required programs from the optional sibling and test both paths.</li>
-          <li><strong>B - Require the Default Executor for every productive Tool installation.</strong> Even Custom execution requires an installed sibling. Pro: one fixed required inventory. Con: adds an unused prerequisite and changes the approved Custom-only workflow; the opt-out would no longer support productive Tools by itself.</li>
-        </ul>
-        <p><strong>Recommendation:</strong> A. This is an installation-scope rule, not a Tool-controlled exception. A missing, unsafe or replaced selected Executor still prevents Tool launch; an existing unsafe sibling must not be silently treated as absent. No weaker native protection or third-party certification follows.</p>
-        <p><strong>Acceptance criterion:</strong> Approve A or B, reconcile the inventory and installation contracts, then prove the selected behavior using standard and Custom-only native installations, default reset, missing/unsafe selected programs and direct Tool/child writes to every admitted program. Complete this before claiming the replacement start check is implemented.</p>
-      </details>
       <details id="d-066" class="decision" style="grid-column:1/-1">
         <summary><h3>D-066 - Standard Tools And Executable-Code Trust</h3></summary>
         <p><strong>Status:</strong> Discussion required before the first Flow Agent release. Default Tools should be replaceable; their catalog, behavior and trust presentation are not yet specified. The <a href="../../SECURITY.md#accepted-flow-agent-security-target">security contract</a> remains canonical.</p>
