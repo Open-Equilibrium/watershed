@@ -52,7 +52,8 @@ class NativeObservation(unittest.TestCase):
             if "SystemRoot" in os.environ:
                 environment["SystemRoot"] = os.environ["SystemRoot"]
                 environment["PATH"] += os.pathsep + str(Path(os.environ["SystemRoot"]) / "System32")
-            result = subprocess.run(command, cwd=project, env=environment, capture_output=True, text=True, timeout=30)
+            # App Sandbox changes the initial directory; npm must select the fixture explicitly.
+            result = subprocess.run(command, cwd=root, env=environment, capture_output=True, text=True, timeout=30)
             observation = {"launched": True, "returncode": result.returncode, "timeout": False,
                            "output": result.stdout + result.stderr}
             self.assertEqual(result.returncode, 0, observation["output"])

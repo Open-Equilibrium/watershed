@@ -169,7 +169,7 @@ if (settings.protected) {
   catch (error) { console.log(`npm_protected_write=${error.code}`); }
 }
 ''', encoding="utf-8")
-    command = [host["node"], host["npm"], "--userconfig", str(project / "user.npmrc"),
+    command = [host["node"], host["npm"], "--prefix", str(project), "--userconfig", str(project / "user.npmrc"),
                "--globalconfig", str(project / "global.npmrc"), "--cache", str(project / "cache"),
                "--offline", "--no-audit", "--no-fund", "run", "build"]
     return project, command
