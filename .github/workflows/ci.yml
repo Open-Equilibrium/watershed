@@ -191,11 +191,25 @@ jobs:
           target/m12-standard/release/flow-executor --probe |
             python3 -c 'import json, sys; probe=json.load(sys.stdin); assert probe["ready"] is True, probe'
 
+      - name: Stage native Executor installation
+        if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
+        shell: python
+        run: |
+          import os, pathlib, shutil, tempfile
+          installation = pathlib.Path(tempfile.mkdtemp(prefix="m12-executor-", dir=os.environ["RUNNER_TEMP"])).resolve()
+          executor = installation / "flow-executor"
+          # Cargo artifacts can have aliases in deps; install distinct bytes before admission.
+          shutil.copyfile("target/m12-standard/release/flow-executor", executor)
+          executor.chmod(0o755)
+          assert executor.stat().st_nlink == 1
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as environment:
+              environment.write(f"M12_INSTALLED_EXECUTOR={executor}\n")
+
       - name: Run native release Executor acceptance
         if: steps.scope.outputs.product == 'true' && (matrix.os != 'windows-latest')
         shell: bash
         run: |
-          FLOW_EXECUTOR_UNDER_TEST="$PWD/target/m12-standard/release/flow-executor" \
+          FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR" \
             cargo nextest run --locked -p flow-agent-executor --test native_contract --test native_self_protection
 
       - name: Run public Custom Executor conformance
@@ -204,7 +218,7 @@ jobs:
         run: |
           cargo run --locked -p flow-agent-core --features m12-startup-evidence \
             --example custom_executor_conformance -- \
-            --executor "$PWD/target/m12-standard/release/flow-executor"
+            --executor "$M12_INSTALLED_EXECUTOR"
 
       - name: Run M1.1 performance evidence
         id: m11_evidence
@@ -239,7 +253,7 @@ jobs:
           mkdir -p target/m12-startup
           cargo run --locked -p flow-agent-core --release \
             --features m12-startup-evidence --example m12_executor_startup \
-            -- --executor "$PWD/target/m12-standard/release/flow-executor" \
+            -- --executor "$M12_INSTALLED_EXECUTOR" \
             > target/m12-startup/m12-executor-startup.jsonl
 
       - name: Upload M1.2 executor startup evidence

@@ -8,17 +8,17 @@ This file is the single source for the M1.2 startup workload, evidence and regre
 
 The evidence is independent of the closed M1.1 matrix and uses schema `flow-m12-executor-startup-v0`. Each sample runs in a fresh measurement child and invokes the deterministic `/bin/echo` Tool once with no arguments or environment through the selected and prepared Executor boundary. The exact successful result is exit code `0`, stdout containing one LF and empty stderr. The existing 5,000 ms Tool deadline is a liveness bound, not a performance threshold. Mandatory native protection covers this installation's admitted own-file inventory; there is no runtime profile or process/thread capacity input.
 
-CI builds each host's native release Executor in `target/m12-standard` and measures directly on that host, without a container. Each measurement controller is copied to a separate single-link executable in its temporary installation, outside the measured interval; Cargo's potentially hardlinked example output is not an admitted installed program. The required absolute Executor path is registered and preflighted in the child's isolated configuration before the interval. The measured path then independently selects and prepares the Executor again. The unadjusted `executor_elapsed_ns` interval covers that readiness, canonical invocation and own-file protection preparation, the one-shot Executor/Tool lifecycle through its terminal result, and exact request-hash and policy-digest-bound receipt validation. It does not infer complete hostile-descendant cleanup. The protocol carries no independent Tool clock, so the evidence does not invent or subtract one.
+CI builds each host's native release Executor in `target/m12-standard` and measures directly on that host, without a container. Before acceptance and measurement, CI copies the release bytes into a fresh, single-link installation and records its absolute path as `M12_INSTALLED_EXECUTOR`. Each measurement controller is likewise copied to its temporary installation, outside the measured interval; Cargo's potentially hardlinked outputs are not admitted installed programs. The required absolute Executor path is registered and preflighted in the child's isolated configuration before the interval. The measured path then independently selects and prepares the Executor again. The unadjusted `executor_elapsed_ns` interval covers that readiness, canonical invocation and own-file protection preparation, the one-shot Executor/Tool lifecycle through its terminal result, and exact request-hash and policy-digest-bound receipt validation. It does not infer complete hostile-descendant cleanup. The protocol carries no independent Tool clock, so the evidence does not invent or subtract one.
 
 Metadata and aggregate/failure inputs declare `self_protection_required: true`; each measured sample retains receipt-derived `self_protection_active: true` alongside its unadjusted elapsed time. Schema mismatch, missing/inactive guard evidence and legacy child fields reject rather than becoming ignored settings. Every warmup and measured child is validated before its observation is accepted. Reports retain environment metadata, all 30 raw observations plus p50, p95 and maximum; obsolete runtime-profile, process-capacity and systemd/cgroup metadata are not emitted. Report metadata declares the requirement, not a successful protection observation before any child runs.
 
-Each Ubuntu 24.04 x64 and macOS 26 ARM64 CI job runs five warmups followed by 30 measured children, one process at a time:
+Each Ubuntu 24.04 x64 and macOS 26 ARM64 CI job runs five warmups followed by 30 measured children, one process at a time. For a local run, set `M12_INSTALLED_EXECUTOR` to the absolute path of your installed native Executor; do not supply a hardlinked Cargo output directly.
 
 ```sh
 mkdir -p target/m12-startup
 cargo run --locked -p flow-agent-core --release \
   --features m12-startup-evidence --example m12_executor_startup \
-  -- --executor "$PWD/target/m12-standard/release/flow-executor" \
+  -- --executor "$M12_INSTALLED_EXECUTOR" \
   > target/m12-startup/m12-executor-startup.jsonl
 ```
 

@@ -1,6 +1,10 @@
 import json
+import os
 import re
 import shlex
+import subprocess
+import sys
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -282,7 +286,9 @@ class CiWorkflowContractTest(unittest.TestCase):
             workflow.replace("pnpm run docs:render-check", "true", 1),
             workflow.replace("--example m11_budgets", "--example m12_executor_startup", 1),
             workflow.replace("--example m12_executor_startup", "--example m11_budgets", 1),
-            workflow.replace(f'-- --executor "$PWD/{M12_EXECUTOR}"', "--", 1),
+            workflow.replace('-- --executor "$M12_INSTALLED_EXECUTOR"', "--", 1),
+            workflow.replace('--executor "$M12_INSTALLED_EXECUTOR"',
+                             f'--executor "$PWD/{M12_EXECUTOR}"', 1),
             workflow.replace("--test native_contract", "--test absent", 1),
             workflow.replace("--test native_self_protection", "--test absent", 1),
             workflow.replace("cargo llvm-cov show-env --sh", "true", 1),
@@ -460,7 +466,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         self.assertIn("cargo run --locked -p flow-agent-core --release", run)
         self.assertIn(f"--features {feature} --example {example}", run)
         if milestone == "M1.2":
-            self.assertIn(f'-- --executor "$PWD/{M12_EXECUTOR}"', run)
+            self.assertIn('-- --executor "$M12_INSTALLED_EXECUTOR"', run)
             artifact += "-${{ matrix.os }}"
         self.assertIn(f"> {output}", run)
 
@@ -495,9 +501,16 @@ class CiWorkflowContractTest(unittest.TestCase):
                       "--features m12-install-acceptance --target-dir target/m12-acceptance", build)
         self.assertIn(f"{M12_EXECUTOR} --probe", build)
         self.assertIn('assert probe["ready"] is True', build)
+        stage = "Stage native Executor installation"
+        stage_lines = assert_step_state(self, workflow, stage, condition=NATIVE)
+        self.assertIn("        shell: python", stage_lines)
+        self.assertLess(workflow.index("      - name: Build native installation artifacts"),
+                        workflow.index(f"      - name: {stage}"))
+        self.assertLess(workflow.index(f"      - name: {stage}"),
+                        workflow.index("      - name: Run native release Executor acceptance"))
         assert_step_state(self, workflow, "Run native release Executor acceptance", condition=NATIVE)
         release = step_run(workflow, "Run native release Executor acceptance")
-        self.assertIn(f'FLOW_EXECUTOR_UNDER_TEST="$PWD/{M12_EXECUTOR}"', release)
+        self.assertIn('FLOW_EXECUTOR_UNDER_TEST="$M12_INSTALLED_EXECUTOR"', release)
         self.assertIn("cargo nextest run --locked -p flow-agent-executor "
                       "--test native_contract --test native_self_protection", release)
         self.assertNotIn("--skip", release)
@@ -508,7 +521,7 @@ class CiWorkflowContractTest(unittest.TestCase):
         assert_step_state(self, workflow, "Run public Custom Executor conformance", condition=NATIVE)
         conformance = step_run(workflow, "Run public Custom Executor conformance")
         self.assertIn("--example custom_executor_conformance", conformance)
-        self.assertIn(f'--executor "$PWD/{M12_EXECUTOR}"', conformance)
+        self.assertIn('--executor "$M12_INSTALLED_EXECUTOR"', conformance)
 
         # CI provisioning is explicit; the product installer never performs it.
         assert_step_state(self, workflow, "Provision native Linux protection prerequisites",
@@ -545,6 +558,46 @@ class CiWorkflowContractTest(unittest.TestCase):
             for forbidden in ("systemctl ", "runuser ", "useradd ", "chown ", "/root/", "/work/",
                               "sysctl ", "apparmor_parser", "static-self-reexec"):
                 self.assertNotIn(forbidden, source)
+
+    def test_m12_evidence_installs_unique_bytes_from_a_hardlinked_cargo_artifact(self):
+        command = step_run(workflow_text(), "Stage native Executor installation")
+        with tempfile.TemporaryDirectory(prefix="m12 staging ") as temporary:
+            root = Path(temporary).resolve()
+            source = root / M12_EXECUTOR
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"synthetic release executable\x00\xff")
+            alias = source.parent / "deps" / "flow-executor-hash"
+            alias.parent.mkdir()
+            os.link(source, alias)
+            runner = root / "runner temp"
+            runner.mkdir()
+            environment_file = root / "github-env"
+            environment_file.write_text("EXISTING=value\n", encoding="utf-8")
+            environment = {**os.environ, "RUNNER_TEMP": str(runner),
+                           "GITHUB_ENV": str(environment_file)}
+            installed = []
+            for _ in range(2):
+                result = subprocess.run([sys.executable, "-c", command], cwd=root,
+                                        env=environment, capture_output=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                lines = environment_file.read_text(encoding="utf-8").splitlines()
+                self.assertEqual(lines[0], "EXISTING=value")
+                key, value = lines[-1].split("=", 1)
+                self.assertEqual(key, "M12_INSTALLED_EXECUTOR")
+                target = Path(value)
+                self.assertTrue(target.is_absolute())
+                self.assertEqual(target.parent.parent, runner)
+                self.assertEqual(target.stat().st_nlink, 1)
+                self.assertFalse(target.samefile(source))
+                self.assertEqual(target.read_bytes(), source.read_bytes())
+                if os.name == "posix":
+                    self.assertEqual(target.stat().st_mode & 0o777, 0o755)
+                installed.append(target)
+            self.assertNotEqual(*installed)
+            self.assertEqual(source.stat().st_nlink, 2)
+            alias.write_bytes(b"later Cargo rebuild")
+            for target in installed:
+                self.assertEqual(target.read_bytes(), b"synthetic release executable\x00\xff")
 
     def test_m12_installer_acceptance_prepares_fixture_home_before_init(self):
         installer_acceptance = M12_INSTALLER_ACCEPTANCE.read_text(encoding="utf-8")
