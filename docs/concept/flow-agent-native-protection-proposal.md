@@ -1,6 +1,6 @@
 # Native Flow-file protection proposal
 
-**Mac mechanism, overlap policy and first-release inventory selected (ADR-0172/ADR-0174); product implementation pending.** The accepted guarantees and exclusions belong to [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). This document specifies the checked Seatbelt design for this installation's required objects. Later features and discussion context belong to the [roadmap](../../PLAN.md#later-flow-agent-roadmap), not this design. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167) owns reproducible commands, native observations and their limits. The existing Linux implementation and fail-closed Mac product behavior remain unchanged.
+**Mac mechanism, overlap policy and first-release inventory selected; product integration pending.** The accepted guarantees and exclusions belong to [SECURITY.md](../../SECURITY.md#accepted-flow-agent-security-target). This document specifies the checked Seatbelt design for this installation's required objects. Later features and discussion context belong to the [roadmap](../../PLAN.md#later-flow-agent-roadmap), not this design. [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167) owns reproducible commands, native observations and their limits. Linux Tool execution still uses the legacy isolation boundary; macOS Tool execution still fails closed.
 
 ## Recommendation and user consequences
 
