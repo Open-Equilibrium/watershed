@@ -3,10 +3,12 @@
 import importlib.util
 import json
 import os
+import plistlib
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -17,6 +19,19 @@ SPEC.loader.exec_module(PROBE)
 
 
 class NativeObservation(unittest.TestCase):
+    def test_runtime_grant_is_read_only_and_helper_only_inherits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "fixture"; binary.write_bytes(b"synthetic")
+            project, runtime = root / "project", root / "node-runtime"
+            with patch.object(PROBE, "require"):
+                PROBE.bundle(None, root / "app", binary, True, project, True, runtime_reads=[runtime])
+            launcher = plistlib.loads((root / "app/launcher.entitlements").read_bytes())
+            helper = plistlib.loads((root / "app/helper.entitlements").read_bytes())
+            self.assertEqual(launcher["com.apple.security.temporary-exception.files.absolute-path.read-only"], [str(runtime) + "/"])
+            self.assertEqual(launcher["com.apple.security.temporary-exception.files.absolute-path.read-write"], [str(project) + "/"])
+            self.assertEqual(helper, {"com.apple.security.app-sandbox": True, "com.apple.security.inherit": True})
+
     def test_npm_baseline_requires_lifecycle_and_protected_write(self):
         rows = [{"case": "npm_javascript", "observation": "completed", "protected_changed": True,
                  "command": {"output": "npm_protected_write=allowed\n"}},

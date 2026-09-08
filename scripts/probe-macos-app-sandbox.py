@@ -197,7 +197,7 @@ def npm_baseline_completed(rows):
         for row in by_case.values())
 
 
-def bundle(api, root, binary, sandboxed, grant, executable):
+def bundle(api, root, binary, sandboxed, grant, executable, runtime_reads=()):
     identifier = "org.watershed.probe." + root.parent.name.replace("-", ".") + "." + root.name
     app = root / "Probe.app"
     contents = app / "Contents"; executables = contents / "MacOS"
@@ -217,6 +217,8 @@ def bundle(api, root, binary, sandboxed, grant, executable):
                 if executable: entitlements["com.apple.security.files.user-selected.executable"] = True
                 if grant:
                     entitlements["com.apple.security.temporary-exception.files.absolute-path.read-write"] = [str(grant) + "/"]
+                if runtime_reads:
+                    entitlements["com.apple.security.temporary-exception.files.absolute-path.read-only"] = [str(path) + "/" for path in runtime_reads]
         path = root / f"{name}.entitlements"
         with path.open("wb") as output: plistlib.dump(entitlements, output)
         require(api, ["/usr/bin/codesign", "--force", "--sign", "-", "--options", "runtime", "--identifier",
@@ -230,8 +232,9 @@ def compare(api, root, binary, mode, host):
     protected = root / "flow-parent" / "flow-owned"; protected.mkdir(parents=True)
     nested = project / "flow-owned"; nested.mkdir()
     sandboxed = mode.startswith("app-")
+    runtime_reads = [Path(host["node"]).parent.parent, Path(host["npm"]).parent.parent] if mode == "app-project-runtime" else []
     launcher, helper = bundle(api, root, binary, sandboxed, project if mode.startswith("app-project") else None,
-                              mode == "app-project-executable")
+                              mode in {"app-project-executable", "app-project-runtime"}, runtime_reads)
     external = project / "unmodified-program"; shutil.copyfile(binary, external); external.chmod(0o700)
     prefix = [str(launcher)]
     if mode == "profile-guard":
@@ -323,7 +326,7 @@ def compare(api, root, binary, mode, host):
                         "command": result, "elapsed_ns": time.perf_counter_ns() - started,
                         "protected_changed": not api.unchanged(target),
                         "native_artifact_exists": (npm_project / "dist/program").is_file()})
-    return {"mode": mode, "cases": results}
+    return {"mode": mode, "runtime_read_grants": [str(path) for path in runtime_reads], "cases": results}
 
 
 def main():
@@ -352,7 +355,7 @@ def main():
             evidence["node"] = require(api, [host["node"], "--version"], root, "node-version")["output"].strip()
             evidence["host_tool_paths"] = host
             evidence["results"] = []
-            for mode in ("unprotected", "profile-guard", "app-minimal", "app-project-exception", "app-project-executable"):
+            for mode in ("unprotected", "profile-guard", "app-minimal", "app-project-exception", "app-project-executable", "app-project-runtime"):
                 result = compare(api, root / mode, binary, mode, host)
                 evidence["results"].append(result)
                 print(json.dumps({"experiment": evidence["experiment"], **result}, separators=(",", ":")), flush=True)
