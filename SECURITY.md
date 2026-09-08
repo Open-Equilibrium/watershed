@@ -6,7 +6,7 @@ Product targets, available capabilities and native release requirements are cano
 
 ## Accepted Flow Agent security target
 
-**ADR-0166–ADR-0174 define the approved, unimplemented replacement.** This section owns that Flow Agent contract. The Mac mechanism and first-release protected set are decided; Tool-initiated configuration changes are deferred. Existing M0/M1 policy artifacts, M1.2 wire fields, Ubuntu enforcement and their tests remain the **legacy implementation**, not the future release promise. They must remain functional until a coherent, tested migration replaces them. Native macOS Tool execution remains unavailable. Approval is not completed product integration or release evidence.
+**ADR-0166–ADR-0175 define the approved, unimplemented replacement.** This section owns that Flow Agent contract. The Mac mechanism and first-release protected set are decided; Tool-initiated configuration changes are deferred. Existing M0/M1 policy artifacts, M1.2 wire fields, Ubuntu enforcement and their tests remain the **legacy implementation**, not the future release promise. They must remain functional until a coherent, tested migration replaces them. Native macOS Tool execution remains unavailable. Approval is not completed product integration or release evidence.
 
 ### Guarantees and owners
 

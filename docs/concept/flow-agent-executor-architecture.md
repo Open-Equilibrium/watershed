@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-**Status: accepted first-release replacement architecture, not implemented (ADR-0166–ADR-0174).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Mac Seatbelt, protected overlapping locations and this installation's protected inventory are selected. Later features and discussion context belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap). Diagrams specify intended first-release outcomes, not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
+**Status: accepted first-release replacement architecture, not implemented.** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Mac Seatbelt, protected overlapping locations and this installation's protected inventory are selected. Later features and discussion context belong only to the [roadmap](../../PLAN.md#later-flow-agent-roadmap). Diagrams specify intended first-release outcomes, not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
 
 ## Responsibility and architecture
 
