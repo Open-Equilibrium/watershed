@@ -154,10 +154,13 @@ fn preflight_one_shot_with_deadline(
         });
     }
     let hard_deadline = deadline()?;
-    let child = command.spawn().map_err(|_| {
+    let child = command.spawn().map_err(|error| {
         super::executor_error(
             proto::ExecutorErrorCodeV0::Unavailable,
-            "one-shot Executor process could not start",
+            format!(
+                "one-shot Executor process could not start (OS error {:?})",
+                error.raw_os_error()
+            ),
         )
     })?;
     let mut child = ChildGuard::new(child);

@@ -89,9 +89,12 @@ fn probe_native_executor(
     unsafe {
         command.pre_exec(move || configure_executor_child(expected_parent));
     }
-    let mut child = command
-        .spawn()
-        .map_err(|_| executor_unavailable("Executor readiness process could not start"))?;
+    let mut child = command.spawn().map_err(|error| {
+        executor_unavailable(&format!(
+            "Executor readiness process could not start (OS error {:?})",
+            error.raw_os_error()
+        ))
+    })?;
     let stdout = child
         .stdout
         .take()
