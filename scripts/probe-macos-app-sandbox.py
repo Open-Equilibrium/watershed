@@ -187,6 +187,16 @@ def classify_npm_build(result, project):
     return "completed" if valid else "failure"
 
 
+def npm_baseline_completed(rows):
+    expected = {"npm_javascript", "npm_native-xcrun", "npm_native-direct"}
+    by_case = {row.get("case"): row for row in rows}
+    return set(by_case) == expected and all(
+        row.get("observation") == "completed"
+        and row.get("protected_changed") is True
+        and "npm_protected_write=allowed" in row.get("command", {}).get("output", "").splitlines()
+        for row in by_case.values())
+
+
 def bundle(api, root, binary, sandboxed, grant, executable):
     identifier = "org.watershed.probe." + root.parent.name.replace("-", ".") + "." + root.name
     app = root / "Probe.app"
@@ -352,7 +362,7 @@ def main():
     rows = [row for result in evidence["results"] for row in result["cases"]]
     baseline_npm = [row for row in evidence["results"][0]["cases"] if row["case"].startswith("npm_")]
     evidence["measurement_complete"] = (not any(row["observation"] == "failure" for row in rows)
-                                        and all(row["observation"] == "completed" for row in baseline_npm))
+                                        and npm_baseline_completed(baseline_npm))
     del evidence["results"]
     print(json.dumps(evidence, separators=(",", ":")))
     return 0 if evidence["measurement_complete"] else 2

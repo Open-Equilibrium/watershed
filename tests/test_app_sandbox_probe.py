@@ -17,6 +17,17 @@ SPEC.loader.exec_module(PROBE)
 
 
 class NativeObservation(unittest.TestCase):
+    def test_npm_baseline_requires_lifecycle_and_protected_write(self):
+        rows = [{"case": "npm_javascript", "observation": "completed", "protected_changed": True,
+                 "command": {"output": "npm_protected_write=allowed\n"}},
+                {"case": "npm_native-xcrun", "observation": "completed", "protected_changed": True,
+                 "command": {"output": "npm_protected_write=allowed\n"}},
+                {"case": "npm_native-direct", "observation": "completed", "protected_changed": True,
+                 "command": {"output": "npm_protected_write=allowed\n"}}]
+        self.assertTrue(PROBE.npm_baseline_completed(rows))
+        rows[0]["protected_changed"] = False
+        self.assertFalse(PROBE.npm_baseline_completed(rows))
+
     def test_npm_build_requires_successful_lifecycle_and_verified_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
