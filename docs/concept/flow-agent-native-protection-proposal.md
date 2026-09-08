@@ -27,12 +27,13 @@ The models differ: the profile candidate starts from host access and subtracts p
 - **Minimal App Sandbox:** signed app and bundled helper, app-sandbox entitlement, helper inheritance, and user-selected read/write entitlement without an actual selection. Its own synthetic app container is the positive control; refusing an unselected project is expected, not a product defect.
 - **App Sandbox with project exception:** add Apple's documented temporary absolute-path read/write exception for one synthetic project directory. This is a fixed grant in the locally signed experiment, not a real file-selection or persistent-bookmark workflow.
 - **App Sandbox with executable-write permission:** retain that project exception and additionally enable `com.apple.security.files.user-selected.executable`; report its effect separately rather than assuming a failed build workflow cannot be configured correctly.
+- **App Sandbox with runtime-read permission:** retain the project and executable-write grants and add read-only access to the already installed Node/npm runtime. This separates runtime-access denial from npm-script compatibility; the runtime is not copied or re-signed.
 
 The [Apple file-access guide](https://developer.apple.com/documentation/security/accessing-files-from-the-macos-app-sandbox) describes container access, recursive folder selection and executable-write permission. Its restriction on execution outside app/container locations is specifically stated for **user-selected-file entitlements**, not proof that all host execution is impossible under every App Sandbox configuration. The [helper guide](https://developer.apple.com/documentation/xcode/embedding-a-helper-tool-in-a-sandboxed-app) supplies bundled-helper inheritance and local ad-hoc signing. The [temporary-exception reference](https://developer.apple.com/library/archive/documentation/Miscellaneous/Reference/EntitlementKeyReference/Chapters/AppSandboxTemporaryExceptionEntitlements.html) documents the separate path grant used here. Temporary exceptions are not established as a suitable release design merely because they work locally.
 
 ### Observed security and compatibility
 
-The completed five-way comparison contains 133 observations: 26 each for the unprotected and checked-profile configurations, and 27 each for the three App Sandbox configurations, including their own-container controls. All unprotected mutation/control operations succeeded. No table entry is a general application-certification claim. Both project-exception variants produced the same functional outcomes below.
+The initial complete five-way comparison contained 133 observations; the npm extension adds three workloads per configuration and a sixth runtime-read configuration. Exact revisions and outcome counts belong to [TESTING.md](../../TESTING.md#authorized-mac-feasibility-evaluation-adr-0167). All unprotected mutation/control operations succeeded. No table entry is a general application-certification claim. Both original project-exception variants produced the same functional outcomes below.
 
 | Case | Checked profile | App Sandbox with project exception |
 |---|---|---|
@@ -60,7 +61,17 @@ The nested-directory case is an overlap check, not evidence that ordinary projec
 
 The generated program's launch returned `EPERM` in both project-exception variants; its file existed and the compiler exited 0. Adding executable-write permission to the app did not fix this compiler/helper workload. The experiment does not identify the precise quarantine/signature/helper-entitlement cause or prove that every supported execution arrangement is impossible. A container-based build/output arrangement would be a different, untested workflow, not transparent compatibility with arbitrary project commands.
 
-`npm run build`, Node and Python Tool workloads were not tested in this App Sandbox comparison; Python only drives the experiment outside the sandbox. A package script may only process files, or may invoke native compilers, generated executables and other helpers. Likewise, Python file processing, native imports and subprocess-based workflows need different evidence. The measured `xcrun` refusal and generated-executable denial identify compatibility risks for those dependencies, not a blanket ban on JavaScript or Python. Access to interpreters, dependencies, project files, caches and required services must also be established. Build scripts execute project/dependency code, which remains part of the Engineer's trust responsibility even when npm or Python itself is trusted.
+The npm extension tests real offline `prebuild`, `build` and `postbuild` scripts with verified outputs. Original App Sandbox variants refused Node startup; granting read access to the installed runtime allowed Node/npm to start. Explicit project selection then corrected the app's initial container directory. The resulting comparison is:
+
+| `npm run build` workload | Checked profile | App Sandbox with project, executable-write and runtime-read grants |
+|---|---|---|
+| Generate JavaScript, execute it in a Node child, verify output and complete lifecycle | Completes; synthetic Flow write denied | Completes; synthetic Flow write denied |
+| Compile and run native program through `xcrun` | Completes; synthetic Flow write denied | Fails at `xcrun`, exit 1; protected write not reached |
+| Compile through direct compiler/SDK/linker paths, then run output | Completes; synthetic Flow write denied | Compilation succeeds; new program launch returns `EPERM`; protected write not reached |
+
+All three unprotected controls completed and performed their deliberate writes. The final six-configuration matrix contains 178 observations; its successful completion does not turn the measured App restrictions or raw-profile counterexamples into passing security tests. A general claim that npm cannot work in App Sandbox would be false.
+
+No React/Vite/Next.js project, dependency installation or Python Tool workload has been tested; Python only drives the experiment outside the sandbox. These need their own interpreter, dependency, cache and service access. Native compiler/helper restrictions matter only when a workflow uses them. Build scripts execute project/dependency code, which remains part of the Engineer's trust responsibility even when npm or Python itself is trusted.
 
 ### User experience, terminal interaction and remaining proof
 
@@ -72,13 +83,44 @@ Both approaches stay native, with no VM-induced Linux/host split. The probe reco
 
 For the approved broad host-tool use case, the checked profile remains the more direct candidate, with explicit deprecated-interface maintenance risk. App Sandbox is a real alternative with working protection and some native development operations, but still requires a separately approved grant/layout/compatibility design. This comparison authorizes neither shipping mechanism and does not make either release-ready.
 
+## Codex CLI approach and reuse boundary
+
+Source inspection on 2026-09-08 covers published [Codex CLI 0.153.4](https://github.com/openai/codex/releases/tag/rust-v0.153.4), commit `3d2ee51ca2d5db578f328aa75e20aa22c0197c9a`, and current main `d6489472f3c15e87d2d7763a5fde033545c530f8`. The [official security guide](https://learn.chatgpt.com/docs/agent-approvals-security) and [permission guide](https://learn.chatgpt.com/docs/permissions) describe OS sandboxing separately from approval policy. Codex CLI uses **Seatbelt through `/usr/bin/sandbox-exec` on macOS**, not seccomp or entitlement-based App Sandbox. Its use does not reverse Apple's deprecation or certify Watershed's contract.
+
+The release's [launcher implementation](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/sandboxing/src/seatbelt.rs) constructs a profile from filesystem and network permissions, binds path parameters and invokes the absolute system executable with `-p`, `-D` and the command argument vector. It supports narrower read-only exceptions within writable roots, protects their ancestors against relocation, and treats policy-preparation failures as errors. This is OS enforcement around programs, not a checker that recognizes safe shell command names.
+
+| Concern | Codex CLI | Proposed Flow-specific profile | Evaluated App Sandbox |
+|---|---|---|---|
+| Scope | Configurable broader filesystem/network policy plus separate approvals | Narrow mandatory Flow-owned direct-write and review-channel protection; Tool effects otherwise trusted | Restricted app authority plus explicit resource grants |
+| Overlapping directories | Read-only exceptions under writable roots and ancestor protections | Same OS mechanism can express protected Flow objects inside a writable parent | Tested containing-directory grant also allowed the nested Flow file |
+| Children | Base profile permits process creation; children inherit the sandbox | Must inherit own-file protection, even after parent exit | Bundled/inherited and external helper behavior measured separately |
+| Terminals | Base policy supports created private pseudo-terminals using a scoped extension | Direct terminal-device denial accepted for the first release; private Tool terminal not implemented | Tested controller-terminal access denied; no completed Flow review UI |
+| Authority expansion | Approval and full-access modes are configurable product policies | Never lift own-file protection; configuration proposals use controller-owned publication | No automatic unsandboxed fallback is approved |
+| Integration cost | A larger permission engine with platform and tool compatibility rules | Smaller contract, but still requires anchored admission, handle hygiene, safe review and native tests | App packaging, entitlements, resource grants and host-workflow adaptations |
+| Maintenance | Uses the deprecated profile command | Shares that OS-interface risk; OS updates require revalidation | Documented Apple model, but no transparent arbitrary-host-tool compatibility demonstrated |
+
+The release [base profile](https://github.com/openai/codex/blob/3d2ee51ca2d5db578f328aa75e20aa22c0197c9a/codex-rs/sandboxing/src/seatbelt_base_policy.sbpl) includes specific Node/Python system-query allowances and private pseudo-terminal rules. Its terminal access is not an unrestricted grant to other sessions' terminals. These are useful design references, not native proof for Flow's approval channel. Codex protects selected metadata directories such as `.git`, `.agents` and `.codex`; that is not a rule protecting every `AGENTS.md` filename.
+
+**Test distinction:** Watershed's native probes exercise the same OS mechanism with Watershed's own profile and launcher checks. Neither the Codex CLI binary nor Codex's generated profiles/test suite were run on the Mac runner. Source inspection is not execution evidence, and no claim is made that Codex establishes Flow's complete protected-object/alias/publication invariant. No Codex source was incorporated into Watershed.
+
+**Recommendation:** reuse the architectural pattern, not the complete permission product. Retain Flow's one-shot Default Executor, generate only the approved narrow policy, and independently prove Flow-specific invariants. A broader Codex-like sandbox would add a different product contract and maintenance work without removing the shared deprecation risk. Copying upstream code would require a separate dependency/licensing review; it is unnecessary for evaluating the mechanism. Neither native approach has a measured general performance advantage here; both avoid a Linux guest, while their different permissions primarily affect compatibility.
+
+## Overlapping homes and editable instructions
+
+The maintainer requested allowing deliberate home/installation placement inside a Tool-writable directory with a clear warning. The remaining question is **what stays writable**, not whether administrators understand paths:
+
+- **Recommended:** allow the overlapping location, warn which Flow objects remain protected and which parent-folder moves are unavailable, and retain those narrower restrictions. The nested-path profile test demonstrates this primitive; safe production admission is still required. This does not turn an outside hardlink or incomplete inventory into an acceptable start condition.
+- **Contract change, not recommended:** warn once and then allow Tools to overwrite Flow configuration/programs. A warning does not prevent later background or compromised helper writes, and other Runs sharing that home can be affected. This would remove mandatory self-protection and bypass controlled configuration proposals; it is not merely an advanced-user installation option.
+
+The first option is compatible with the current guarantee but still needs the maintainer's precise overlap decision in D-063. The second is not approved. The instruction-file exclusion is already approved in [SECURITY.md](../../SECURITY.md#native-self-protection-and-its-limits): the proposed protected set below must not indirectly protect those inputs. Editable instructions can steer future requests; they cannot expand available Tools or turn Tool output into consent.
+
 ## Complete proposed protected set
 
 Resolve the following from trusted controller/installation configuration before Tool launch, never from model output or a Tool-supplied exclusion. Anchor canonical objects using the existing no-follow filesystem discipline; do not later resolve authority again through mutable path text.
 
 | Object class | Proposed coverage and update rule |
 |---|---|
-| Selected `FLOW_AGENT_HOME` | Entire directory tree: Global Flow configuration, registry, instructions stored there, runtime history, context/objects, locks and staging files. Directory coverage also protects files created later. |
+| Selected `FLOW_AGENT_HOME` | Global Flow configuration, registry, runtime history, context/objects, locks and staging files, including future publications. Exclude the legitimate global `AGENTS.md` instruction input under the canonical security contract; blanket whole-home denial without that exclusion is no longer the proposal. Protect adjacent configuration and directory ancestry. |
 | Additional Flow homes | An explicit administrator-owned set fixed before execution. The default shared home covers concurrent Runs using that home; there is no whole-disk search or automatic promise for undisclosed independent homes. The administrator must admit every home needing mutual protection before starting those Tools. |
 | Platform credential/selection store | Entire Flow-owned platform directory, including `credentials.json`, `executor.json`, locks and staging names. These are outside the selected home today; their locations remain canonical in [PROTOCOL.md](../../PROTOCOL.md). The inventory inspects metadata, never credential contents. |
 | Installed program objects | Current `flow`, the official sibling `flow-executor` and any explicitly selected Custom Executor, including every covered name of the same file. Reject missing or unresolved objects. Custom code still belongs to the trusted installation, not third-party certification. |

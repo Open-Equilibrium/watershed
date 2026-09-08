@@ -6,7 +6,7 @@ Product targets, available capabilities and native release requirements are cano
 
 ## Accepted Flow Agent security target
 
-**ADR-0166–ADR-0170 are approved, not implemented.** This section owns the replacement Flow Agent contract. Existing M0/M1 policy artifacts, M1.2 wire fields, Ubuntu enforcement and their tests remain the **legacy implementation**, not the future release promise. They must remain functional until a coherent, tested migration replaces them. Native macOS Tool execution remains unavailable. [D-063](docs/decisions/open-decisions.html#d-063) owns the remaining native shipping-mechanism and protected-object choices; the evaluation permission below is not product approval of an undocumented OS interface, dependency or privileged service.
+**ADR-0166–ADR-0171 are approved, not implemented.** This section owns the replacement Flow Agent contract. Existing M0/M1 policy artifacts, M1.2 wire fields, Ubuntu enforcement and their tests remain the **legacy implementation**, not the future release promise. They must remain functional until a coherent, tested migration replaces them. Native macOS Tool execution remains unavailable. [D-063](docs/decisions/open-decisions.html#d-063) owns the remaining native shipping-mechanism and protected-object choices; the evaluation permission below is not product approval of an undocumented OS interface, dependency or privileged service.
 
 ### Guarantees and owners
 
@@ -23,6 +23,8 @@ Product targets, available capabilities and native release requirements are cano
 Flow's own configuration, context, provider and storage operations are internal runtime responsibilities, not model-selected Tools. The promise is **controlled invocations and workflows with trusted Tool implementations**, not that every runtime file access appears as a Building Block command.
 
 ### Native self-protection and its limits
+
+ADR-0171 excludes both global-home and Workspace `AGENTS.md` instruction inputs from Flow-owned write protection, including implicit protection through a containing Flow directory. They remain editable when the configured Tool permits it. Their text can influence model behavior but cannot grant technical authority; editing instructions is therefore not risk-free. This excludes instruction objects, not arbitrary protected configuration renamed or aliased to that filename. The native implementation must test editable instructions alongside protected adjacent configuration; an existing protected-file alias still follows ADR-0169.
 
 Tools and newly started helpers must inherit the direct-write restriction, including when a helper is compromised. Ordinary helper creation must not escape it. A trusted Tool that asks an already-running editor, automation service or remote system to act delegates to that system's separate authority; such effects are not brought inside the boundary by the request. The Engineer must trust that integration. The narrow protection does not certify malicious Tools as safe, their outputs as truthful or project files as confidential.
 

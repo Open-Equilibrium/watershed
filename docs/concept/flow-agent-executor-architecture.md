@@ -53,6 +53,7 @@ The cases partition the supported authority paths and failure classes. They are 
 
 ```mermaid
 flowchart TD
+  Instructions["Editable AGENTS.md: context, not authority"] --> Input
   Input["Model requests Tool with parameters"] --> Check{"Available here and valid?"}
   Check -->|No| Reject["Reject before Tool effects"]
   Check -->|Yes| Ready{"Mandatory native boundary ready?"}
@@ -63,6 +64,8 @@ flowchart TD
 ```
 
 A read Tool must enforce its own promised project scope, including links, replacement races and hostile path input relevant to its implementation. Flow's parameter validation does not inspect every later file operation. A build Tool's dependency chain includes build scripts, plugins and project code, including code the model may have edited. A correct implementation must not confuse untrusted text with new execution authority.
+
+The [instruction-file exclusion](../../SECURITY.md#native-self-protection-and-its-limits) applies to global and Workspace inputs. Changed instructions may steer the model toward a harmful but authorized request; this diagram promises unchanged permission checks, not harmless intent.
 
 ### 2. Direct protected write
 
