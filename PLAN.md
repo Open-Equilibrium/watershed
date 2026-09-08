@@ -127,6 +127,8 @@ No implementation or release claim follows from a documentation decision alone. 
 
 **Approved replacement:** Implement the [security contract](SECURITY.md#accepted-flow-agent-security-target) and [execution/security architecture](docs/concept/flow-agent-executor-architecture.md), retaining the Default Executor and migrating unreleased runtime, definitions, schemas and tests coherently without ignored security settings or compatibility aliases.
 
+**Current implementation blocker:** [D-068](docs/decisions/open-decisions.html#d-068) resolves the required-program inventory for the existing Custom-only installation path. The first-release own-installation scope and later-roadmap deferrals remain decided; this does not reopen them.
+
 **DoD:** Implement and verify the accepted boundary on both native Flow Agent targets in [PLATFORMS.md](PLATFORMS.md), prove the prebuilt installation contract, and complete the canonical test, performance and review gates. Current Linux tests, Mac refusal tests and diagrams do not prove the replacement. Meta-Harness and Liquid never acquire ownership of Flow's Executor or Tool protection.
 
 ### M2 — Meta-Harness MVP + AgentPulse
