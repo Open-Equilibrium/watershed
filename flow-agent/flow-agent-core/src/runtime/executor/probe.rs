@@ -73,7 +73,12 @@ fn probe_native_executor(
 ) -> Result<ProbedExecutor, RuntimeError> {
     let programs = open_validated_executable(selection, installation_flow)?;
     programs.verify_aliases(protected_directories)?;
-    let inherited_path = super::process::executor_image_path(programs.selected.image.as_raw_fd());
+    let image = programs
+        .selected
+        .image
+        .try_clone()
+        .map_err(|_| executor_unavailable("Executor readiness image could not be retained"))?;
+    let inherited_path = super::process::executor_image_path(image.as_raw_fd());
     let mut command = Command::new(inherited_path);
     command
         .arg("--probe")
@@ -87,7 +92,14 @@ fn probe_native_executor(
     }
     let expected_parent = rustix::process::getpid();
     unsafe {
-        command.pre_exec(move || configure_executor_child(expected_parent));
+        command.pre_exec(move || {
+            configure_executor_child(expected_parent)?;
+            // Keep the pinned image available during Darwin's /dev/fd activation.
+            // This changes only the forked child's descriptor flags.
+            #[cfg(target_os = "macos")]
+            rustix::io::fcntl_setfd(&image, rustix::io::FdFlags::empty())?;
+            Ok(())
+        });
     }
     let mut child = command.spawn().map_err(|error| {
         executor_unavailable(&format!(
