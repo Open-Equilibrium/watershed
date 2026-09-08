@@ -144,6 +144,17 @@ Elapsed time covers exactly one real `verify_protected_aliases` call, including 
 
 The reference remains Ubuntu 24.04 x64 with the existing sampling, schema and observational timing/RSS rules. The call uses the verifier's existing Linux x86_64-or-test export; other production targets return an unavailable-workload error without creating a fixture.
 
+### Initial inventory observations
+
+[CI run 34227029253](https://github.com/Open-Equilibrium/watershed/actions/runs/34227029253) retained the complete 16-workload report for `78d5ca66fabfb80d6ef89616e96ddb2aebeb638e`, before installed-image alias integration. The directory-only verifier then had the name `verify_protected_directory_aliases`; the fixture inputs above are unchanged. Each row contains 30 fresh-child samples after five warmups, on Rust 1.98.1, Ubuntu runner image `20260831.293.1`, four logical Intel Xeon Platinum 8573C CPUs and 16,765,378,560 bytes of memory.
+
+| Single-link files | p50 (ns) | p95 (ns) | Maximum (ns) | Maximum RSS growth (bytes) |
+|---|---:|---:|---:|---:|
+| 512 | 847,140 | 1,145,406 | 1,195,908 | 1,073,152 |
+| 16,384 | 25,619,586 | 26,682,329 | 26,850,333 | 1,118,208 |
+
+RSS includes preparation. These warm-cache observations establish neither a supported inventory maximum nor cold-cache/concurrent-admission performance; they do not prove native write protection.
+
 ## Completion criterion
 
 The matrix is finite: every hard selected contract has a named functional proof, and the 16 fixed observational workloads including the RSS detection fixture cover the representative paths above. A new hard boundary requires a maintainer decision; an evidence-workload change must remain fixed and documented.
