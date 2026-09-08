@@ -1,6 +1,10 @@
 """Evidence classification must not mistake a broken helper for protection."""
 
 import importlib.util
+import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +17,27 @@ SPEC.loader.exec_module(PROBE)
 
 
 class NativeObservation(unittest.TestCase):
+    def test_npm_build_requires_successful_lifecycle_and_verified_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            host = PROBE.npm_host()
+            project, command = PROBE.npm_fixture(root, host, "javascript")
+            environment = {"PATH": str(Path(host["node"]).parent) + os.pathsep + os.defpath}
+            if "SystemRoot" in os.environ:
+                environment["SystemRoot"] = os.environ["SystemRoot"]
+                environment["PATH"] += os.pathsep + str(Path(os.environ["SystemRoot"]) / "System32")
+            result = subprocess.run(command, cwd=project, env=environment, capture_output=True, text=True, timeout=30)
+            observation = {"launched": True, "returncode": result.returncode, "timeout": False,
+                           "output": result.stdout + result.stderr}
+            self.assertEqual(result.returncode, 0, observation["output"])
+            self.assertEqual(PROBE.classify_npm_build(observation, project), "completed")
+            (project / "dist" / "result.json").write_text(json.dumps({"answer": 0}), encoding="utf-8")
+            self.assertEqual(PROBE.classify_npm_build(observation, project), "failure")
+            observation["returncode"] = 1
+            self.assertEqual(PROBE.classify_npm_build(observation, project), "not_completed")
+            observation.update(returncode=0, timeout=True)
+            self.assertEqual(PROBE.classify_npm_build(observation, project), "not_completed")
+
     def test_permission_denial_requires_started_helper_explicit_errno_and_intact_file(self):
         for code, output, changed, timeout, expected in (
             (0, "probe_started\n", True, False, "allowed"),

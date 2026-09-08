@@ -103,6 +103,90 @@ def require(api, command, root, name):
     return result
 
 
+def npm_host():
+    node = shutil.which("node")
+    if not node: raise RuntimeError("Existing Node installation required; nothing is installed by this probe.")
+    node = Path(node).resolve()
+    candidates = [node.parent / "node_modules/npm/bin/npm-cli.js",
+                  node.parent.parent / "lib/node_modules/npm/bin/npm-cli.js"]
+    npm = shutil.which("npm")
+    if npm and Path(npm).resolve().name == "npm-cli.js": candidates.insert(0, Path(npm).resolve())
+    for candidate in candidates:
+        if candidate.is_file():
+            candidate = candidate.resolve()
+            return {"node": str(node), "npm": str(candidate),
+                    "npm_version": json.loads((candidate.parent.parent / "package.json").read_text(encoding="utf-8"))["version"]}
+    raise RuntimeError("Existing npm CLI required; nothing is installed by this probe.")
+
+
+def npm_fixture(root, host, kind, protected=None):
+    """Offline npm lifecycle fixture; no dependency installation or ambient npm configuration."""
+    project = root / ("npm-" + kind); project.mkdir()
+    for name in ("user.npmrc", "global.npmrc"): (project / name).write_text("", encoding="utf-8")
+    (project / "package.json").write_text(json.dumps({"name": "native-build-probe", "version": "1.0.0", "private": True,
+        "scripts": {"prebuild": "node lifecycle.mjs pre", "build": "node build.mjs", "postbuild": "node lifecycle.mjs post"}}), encoding="utf-8")
+    (project / "settings.json").write_text(json.dumps({"kind": kind, "host": host,
+        "protected": str(protected) if protected else None}), encoding="utf-8")
+    (project / "input.mjs").write_text("export const answer = 6 * 7;\n", encoding="utf-8")
+    (project / "hello.c").write_text('#include <stdio.h>\nint main(void) { puts("42"); return 0; }\n', encoding="utf-8")
+    (project / "lifecycle.mjs").write_text('''import {readFileSync, writeFileSync} from 'node:fs';
+if (process.argv[2] === 'pre') writeFileSync('prebuild.done', 'pre');
+else {
+  if (readFileSync('prebuild.done', 'utf8') !== 'pre' || JSON.parse(readFileSync('dist/result.json', 'utf8')).answer !== 42) throw Error('Incomplete build');
+  writeFileSync('postbuild.done', 'post');
+  console.log('npm_lifecycle_complete');
+}
+''', encoding="utf-8")
+    (project / "build.mjs").write_text('''import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {join, dirname} from 'node:path';
+import {answer} from './input.mjs';
+const settings = JSON.parse(readFileSync('settings.json', 'utf8'));
+if (readFileSync('prebuild.done', 'utf8') !== 'pre') throw Error('Prebuild did not run');
+mkdirSync('dist');
+function run(command, args) {
+  const result = spawnSync(command, args, {encoding: 'utf8', timeout: 10000, maxBuffer: 65536});
+  if (result.error || result.status !== 0) {
+    console.error(JSON.stringify({stage: command, status: result.status, error: result.error?.code, stderr: result.stderr}));
+    process.exit(1);
+  }
+  return result.stdout.trim();
+}
+let value;
+if (settings.kind === 'javascript') {
+  writeFileSync('dist/program.mjs', `console.log(${answer});\\n`);
+  value = run(process.execPath, ['dist/program.mjs']);
+} else {
+  const output = join(process.cwd(), 'dist', 'program');
+  if (settings.kind === 'native-xcrun') run('/usr/bin/xcrun', ['clang', 'hello.c', '-o', output]);
+  else run(settings.host.clang, ['-isysroot', settings.host.sdk, '-B', dirname(settings.host.ld), 'hello.c', '-o', output]);
+  value = run(output, []);
+}
+if (value !== '42') throw Error('Wrong generated-program result');
+writeFileSync('dist/result.json', JSON.stringify({answer: Number(value)}));
+if (settings.protected) {
+  try { writeFileSync(settings.protected, 'changed-by-probe\\n'); console.log('npm_protected_write=allowed'); }
+  catch (error) { console.log(`npm_protected_write=${error.code}`); }
+}
+''', encoding="utf-8")
+    command = [host["node"], host["npm"], "--userconfig", str(project / "user.npmrc"),
+               "--globalconfig", str(project / "global.npmrc"), "--cache", str(project / "cache"),
+               "--offline", "--no-audit", "--no-fund", "run", "build"]
+    return project, command
+
+
+def classify_npm_build(result, project):
+    if not result.get("launched") or result.get("timeout") or result.get("returncode") != 0:
+        return "not_completed"
+    try:
+        valid = ((project / "prebuild.done").read_text(encoding="utf-8") == "pre"
+                 and (project / "postbuild.done").read_text(encoding="utf-8") == "post"
+                 and json.loads((project / "dist/result.json").read_text(encoding="utf-8")) == {"answer": 42}
+                 and "npm_lifecycle_complete" in result.get("output", "").splitlines())
+    except (OSError, ValueError): valid = False
+    return "completed" if valid else "failure"
+
+
 def bundle(api, root, binary, sandboxed, grant, executable):
     identifier = "org.watershed.probe." + root.parent.name.replace("-", ".") + "." + root.name
     app = root / "Probe.app"
@@ -219,6 +303,16 @@ def compare(api, root, binary, mode, host):
                         "artifact_exists": built.is_file() if name in {"host_build", "built_program", "direct_host_build", "direct_built_program"}
                             else (project / "synthetic-repo" / ".git").is_dir() if name == "direct_git_project"
                             else (project / "program-output").is_file() if name == "project_program" else None})
+    for kind in ("javascript", "native-xcrun", "native-direct"):
+        target = protected / ("npm-" + kind + ".bin"); target.write_bytes(api.ORIGINAL)
+        npm_project, command = npm_fixture(project, host, kind, target)
+        started = time.perf_counter_ns()
+        result = api.invoke([*prefix, "exec", *command], npm_project, root / ("npm-" + kind + ".log"),
+                            timeout_seconds=30, file_limit=4*1024*1024)
+        results.append({"case": "npm_" + kind, "observation": classify_npm_build(result, npm_project),
+                        "command": result, "elapsed_ns": time.perf_counter_ns() - started,
+                        "protected_changed": not api.unchanged(target),
+                        "native_artifact_exists": (npm_project / "dist/program").is_file()})
     return {"mode": mode, "cases": results}
 
 
@@ -243,6 +337,9 @@ def main():
             host = {name: require(api, ["/usr/bin/xcrun", "--find", name], root, "find-" + name)["output"].strip()
                     for name in ("git", "clang", "ld")}
             host["sdk"] = require(api, ["/usr/bin/xcrun", "--show-sdk-path"], root, "find-sdk")["output"].strip()
+            host.update(npm_host())
+            api.CHILD_ENV["PATH"] = str(Path(host["node"]).parent) + os.pathsep + api.CHILD_ENV["PATH"]
+            evidence["node"] = require(api, [host["node"], "--version"], root, "node-version")["output"].strip()
             evidence["host_tool_paths"] = host
             evidence["results"] = []
             for mode in ("unprotected", "profile-guard", "app-minimal", "app-project-exception", "app-project-executable"):
@@ -253,7 +350,9 @@ def main():
         evidence["error"] = str(error)
         print(json.dumps(evidence, separators=(",", ":"))); return 2
     rows = [row for result in evidence["results"] for row in result["cases"]]
-    evidence["measurement_complete"] = not any(row["observation"] == "failure" for row in rows)
+    baseline_npm = [row for row in evidence["results"][0]["cases"] if row["case"].startswith("npm_")]
+    evidence["measurement_complete"] = (not any(row["observation"] == "failure" for row in rows)
+                                        and all(row["observation"] == "completed" for row in baseline_npm))
     del evidence["results"]
     print(json.dumps(evidence, separators=(",", ":")))
     return 0 if evidence["measurement_complete"] else 2
