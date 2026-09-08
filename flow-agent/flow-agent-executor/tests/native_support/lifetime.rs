@@ -37,6 +37,9 @@ impl Channel {
         loop {
             match self.listener.accept() {
                 Ok((stream, _)) => {
+                    // Darwin inherits the listener's nonblocking flag; the
+                    // connected protocol uses blocking I/O with bounded waits.
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(10)))
                         .unwrap();
