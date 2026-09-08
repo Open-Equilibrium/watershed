@@ -508,8 +508,11 @@ class PrefixInstallerTest(unittest.TestCase):
             installer = bundle / "install.sh"
             source = installer.read_text(encoding="utf-8")
             self.assertEqual(source.count("/usr/bin/pgrep"), 1)
+            self.assertEqual(source.count("signal_exit() {\n"), 1)
             installer.write_text(
-                source.replace("/usr/bin/pgrep", "/missing/pgrep"),
+                source.replace("/usr/bin/pgrep", "/missing/pgrep").replace(
+                    "signal_exit() {\n", "signal_exit() {\n    set -x\n"
+                ),
                 encoding="utf-8",
             )
             marker = root / "readiness-started"
@@ -537,20 +540,52 @@ class PrefixInstallerTest(unittest.TestCase):
                 stderr=subprocess.PIPE,
             )
             descendant = None
-            for _ in range(200):
-                if marker.exists() and marker.read_text(encoding="utf-8").strip():
-                    descendant = int(marker.read_text(encoding="utf-8").strip())
-                    break
-                if process.poll() is not None:
-                    self.fail(process.stderr.read().decode("utf-8", errors="replace"))
-                time.sleep(0.01)
-            else:
-                process.kill()
-                self.fail("installer did not enter readiness")
-
+            descendant_group = None
+            descendant_gone = False
             try:
+                for _ in range(200):
+                    if marker.exists() and marker.read_text(encoding="utf-8").strip():
+                        descendant = int(marker.read_text(encoding="utf-8").strip())
+                        descendant_group = os.getpgid(descendant)
+                        break
+                    if process.poll() is not None:
+                        self.fail("installer exited before entering readiness")
+                    time.sleep(0.01)
+                else:
+                    self.fail("installer did not enter readiness")
+
+                self.assertNotEqual(
+                    descendant_group, os.getpgrp(), "readiness shares the test process group"
+                )
                 process.send_signal(signal.SIGTERM)
-                _, stderr = process.communicate(timeout=5)
+                try:
+                    _, stderr = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired as error:
+                    installer_status = process.poll()
+                    try:
+                        state = subprocess.run(
+                            [
+                                "/bin/ps", "-o", "pid,ppid,pgid,stat,wchan,comm", "-p",
+                                f"{process.pid},{descendant_group},{descendant}",
+                            ],
+                            env={"PATH": ""},
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            timeout=1,
+                            check=False,
+                        )
+                        state_text = f"ps exit={state.returncode}\n" + state.stdout.decode(
+                            "utf-8", errors="replace"
+                        )
+                    except (OSError, subprocess.TimeoutExpired) as diagnostic_error:
+                        state_text = f"process-state diagnostic failed: {diagnostic_error}"
+                    self.fail(
+                        "installer did not finish within 5s after SIGTERM; "
+                        f"pid={process.pid}, status={installer_status}, "
+                        f"readiness_pgid={descendant_group}, descendant={descendant}\n"
+                        f"{state_text}\ninstaller stderr tail:\n"
+                        + (error.stderr or b"")[-16384:].decode("utf-8", errors="replace")
+                    )
 
                 self.assertEqual(process.returncode, 128 + signal.SIGTERM, stderr)
                 self.assertEqual(list((prefix / "bin").iterdir()), [])
@@ -558,15 +593,30 @@ class PrefixInstallerTest(unittest.TestCase):
                     try:
                         os.kill(descendant, 0)
                     except ProcessLookupError:
+                        descendant_gone = True
                         break
                     time.sleep(0.01)
                 else:
                     self.fail(f"readiness descendant {descendant} survived cleanup")
             finally:
+                # Rescue only a still-bound fixture group; never signal after proving exit.
+                if descendant is not None and not descendant_gone:
+                    try:
+                        if (
+                            descendant_group is not None
+                            and descendant_group != os.getpgrp()
+                            and os.getpgid(descendant) == descendant_group
+                        ):
+                            os.killpg(descendant_group, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                if process.poll() is None:
+                    process.kill()
                 try:
-                    os.kill(descendant, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                    process.wait(timeout=5)
+                finally:
+                    process.stdout.close()
+                    process.stderr.close()
 
 
 if __name__ == "__main__":
