@@ -1,6 +1,6 @@
 # Flow Agent execution and security architecture
 
-**Status: accepted replacement architecture, not implemented (ADR-0166–ADR-0168).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. The bounded Mac feasibility evaluation and initial configuration review lifecycle are authorized; [D-063](../decisions/open-decisions.html#d-063) still blocks shipping-mechanism and protected-object selection. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
+**Status: accepted replacement architecture, not implemented (ADR-0166–ADR-0172).** The [security contract](../../SECURITY.md#accepted-flow-agent-security-target) is normative. Mac Seatbelt, protected overlapping locations and the initial configuration review lifecycle are selected; [D-063](../decisions/open-decisions.html#d-063) retains the protected-inventory choice. Diagrams below specify intended outcomes; they are not evidence that the new boundary exists. Current Ubuntu execution still uses the legacy one-shot Bubblewrap/seccomp/cgroup implementation. macOS Tool execution still fails closed.
 
 ## Responsibility and architecture
 
@@ -53,7 +53,8 @@ The cases partition the supported authority paths and failure classes. They are 
 
 ```mermaid
 flowchart TD
-  Instructions["Editable AGENTS.md: context, not authority"] --> Input
+  Instructions["Editable Workspace AGENTS.md: context, not authority"] --> Input
+  Global["Protected global AGENTS.md: context, not authority"] --> Input
   Input["Model requests Tool with parameters"] --> Check{"Available here and valid?"}
   Check -->|No| Reject["Reject before Tool effects"]
   Check -->|Yes| Ready{"Mandatory native boundary ready?"}
@@ -65,7 +66,7 @@ flowchart TD
 
 A read Tool must enforce its own promised project scope, including links, replacement races and hostile path input relevant to its implementation. Flow's parameter validation does not inspect every later file operation. A build Tool's dependency chain includes build scripts, plugins and project code, including code the model may have edited. A correct implementation must not confuse untrusted text with new execution authority.
 
-The [instruction-file exclusion](../../SECURITY.md#native-self-protection-and-its-limits) applies to global and Workspace inputs. Changed instructions may steer the model toward a harmful but authorized request; this diagram promises unchanged permission checks, not harmless intent.
+The [instruction-file exclusion](../../SECURITY.md#native-self-protection-and-its-limits) applies only to Workspace-local inputs; the global file stays protected. Changed local instructions may steer the model toward a harmful but authorized request; this diagram promises unchanged permission checks, not harmless intent.
 
 ### 2. Direct protected write
 
@@ -223,4 +224,4 @@ The [native protection proposal](flow-agent-native-protection-proposal.md) speci
 
 The [current wire contract](../../PROTOCOL.md#m12-executor-protocol-adr-0146-adr-0160-adr-0161-adr-0162), [legacy test matrix](../../TESTING.md#m12-transition-and-executor-evidence) and [legacy startup workload](../../flow-agent/benchmarks/M1_2_STARTUP_EVIDENCE.md) remain executable evidence for the code that exists. Do not publish new permission fields while silently retaining incompatible semantics, remove old checks before their replacement, or claim that a mock proves native protection.
 
-D-063 must close the concrete OS mechanism and protected-object identity rules before a coherent schema/runtime/fixture migration; the configuration review lifecycle is accepted in ADR-0168. Native tests must then cover each in-scope outcome above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, conflicting or stale consent, missing protection, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).
+D-063 must close the remaining protected-inventory choice before a coherent schema/runtime/fixture migration; the Mac mechanism and configuration review lifecycle are already selected. Native tests must then cover each in-scope outcome above on the [release targets](../../PLATFORMS.md), including ordinary Mac development workloads, child inheritance, direct write/delete/replacement, conflicting or stale consent, missing protection, cancellation and crash outcomes. Benchmark the new complete invocation lifecycle without estimated thresholds. External-service exclusions must remain visible in user-facing claims. Standard Tools and marketplace decisions remain [D-066](../decisions/open-decisions.html#d-066) and [D-067](../decisions/open-decisions.html#d-067).

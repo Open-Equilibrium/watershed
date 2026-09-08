@@ -1,6 +1,6 @@
 # Protocol
 
-**Flow security transition:** Tool policy/schema/wire fields below describe the current legacy implementation. The approved replacement contract is in [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target) (ADR-0166); its native mechanism and configuration-request protocol remain undecided under [D-063](docs/decisions/open-decisions.html#d-063). No new request fields or ignored legacy requirements are implemented here.
+**Flow security transition:** Tool policy/schema/wire fields below describe the current legacy implementation. The approved replacement contract is in [SECURITY.md](SECURITY.md#accepted-flow-agent-security-target): ADR-0168 selects configuration review and ADR-0172 selects Mac Seatbelt and protected overlapping locations. These decisions are not implemented; [D-063](docs/decisions/open-decisions.html#d-063) retains the protected-inventory choice. No new request fields or ignored legacy requirements are implemented here.
 
 The protocol is the **integration seam** between the tools. Tools are protocol clients, not compiled-in modules. This file is the canonical contract; build tools against it, not against each other's internals. ADR-0029 selects local JSON-RPC over stdio for designed control/RPC surfaces, but M1's implemented runtime stream is bare JSONL events. The envelope is transport-agnostic and all cross-tool state is addressed by IDs.
 
