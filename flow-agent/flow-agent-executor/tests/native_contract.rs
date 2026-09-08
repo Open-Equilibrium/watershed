@@ -27,9 +27,9 @@ if mkdir "$home/created" 2>/dev/null; then exit 13; fi
 if mv "$home" "$home-moved" 2>/dev/null; then exit 14; fi
 ln -s "$home/AGENTS.md" symlink
 if (printf bad > symlink) 2>/dev/null; then exit 15; fi
-if ln "$home/AGENTS.md" hardlink 2>/dev/null; then
-    if (printf bad > hardlink) 2>/dev/null; then exit 16; fi
-fi
+if ln "$home/AGENTS.md" hardlink 2>/dev/null; then exit 16; fi
+ln scratch project-hardlink
+test "$(cat project-hardlink)" = scratch
 if sh -c 'printf bad > "$1/AGENTS.md"' child "$home" 2>/dev/null; then exit 17; fi
 if (printf bad > "$home/../flow-executor") 2>/dev/null; then exit 18; fi
 if mv "$home/.." "$home/../../relocated" 2>/dev/null; then exit 19; fi
@@ -130,48 +130,7 @@ open("python-result", "w").write("host runtime works")
 
 #[test]
 fn npm_build_runs_its_lifecycle_and_generated_child_under_the_same_guard() {
-    let fixture = Fixture::new();
-    fs::write(
-        fixture.project.join("package.json"),
-        r#"{
-"name":"native-guard-build","version":"1.0.0","private":true,
-"scripts":{"prebuild":"node -e \"require('fs').writeFileSync('prebuild', 'ok')\"",
-"build":"node build.cjs","postbuild":"node -e \"require('fs').writeFileSync('postbuild', 'ok')\""}}
-"#,
-    )
-    .unwrap();
-    fs::write(
-        fixture.project.join("build.cjs"),
-        r#"
-const fs = require('node:fs');
-const {execFileSync} = require('node:child_process');
-fs.writeFileSync('generated.cjs', "require('fs').writeFileSync('artifact', 'built')");
-execFileSync(process.execPath, ['generated.cjs']);
-try { fs.writeFileSync(process.env.FLOW_GUARD_TEST_HOME + '/AGENTS.md', 'bad'); process.exit(70); }
-catch (error) { if (!['EPERM', 'EACCES', 'EROFS'].includes(error.code)) throw error; }
-"#,
-    )
-    .unwrap();
-    fs::write(fixture.project.join("user-npmrc"), "").unwrap();
-    fs::write(fixture.project.join("global-npmrc"), "").unwrap();
-    let result = fixture.run(
-        "export FLOW_GUARD_TEST_HOME=$1; export npm_config_cache=$PWD/cache; export npm_config_userconfig=$PWD/user-npmrc; export npm_config_globalconfig=$PWD/global-npmrc; exec npm --offline --no-audit --no-fund run build",
-        limits(16 * 1024, 16 * 1024, 15_000));
-    assert_eq!(result.status, Status::Completed, "{result:?}");
-    for (path, expected) in [
-        ("prebuild", "ok"),
-        ("artifact", "built"),
-        ("postbuild", "ok"),
-    ] {
-        assert_eq!(
-            fs::read_to_string(fixture.project.join(path)).unwrap(),
-            expected
-        );
-    }
-    assert_eq!(
-        fs::read(fixture.home.join("AGENTS.md")).unwrap(),
-        b"global instructions"
-    );
+    native_support::builds::npm_lifecycle("javascript");
 }
 
 #[test]

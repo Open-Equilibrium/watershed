@@ -1,3 +1,9 @@
+mod acceptance;
+mod artifact;
+pub mod builds;
+mod lifetime;
+mod pty;
+
 use proto::{ExecutorLimitsV0, ExecutorRequestV0, ExecutorResponseV0};
 use std::{
     collections::BTreeMap,
@@ -7,8 +13,8 @@ use std::{
         fd::AsRawFd,
         unix::{fs::MetadataExt, process::CommandExt},
     },
-    path::PathBuf,
-    process::{Child, ChildStdin, Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Child, ChildStdin, Command, Output, Stdio},
     sync::{
         atomic::{AtomicU64, Ordering},
         mpsc,
@@ -30,6 +36,10 @@ pub struct Fixture {
 
 impl Fixture {
     pub fn new() -> Self {
+        Self::with_image_name("flow-executor")
+    }
+
+    pub fn with_image_name(image_name: &str) -> Self {
         let root = std::env::temp_dir().join(format!(
             "flow-native-contract-{}-{}",
             std::process::id(),
@@ -42,39 +52,59 @@ impl Fixture {
         fs::create_dir(&home).unwrap();
         fs::create_dir(&project).unwrap();
         fs::write(home.join("AGENTS.md"), b"global instructions").unwrap();
-        let image = root.join("flow-executor");
-        let artifact = std::env::var_os("FLOW_EXECUTOR_UNDER_TEST")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| env!("CARGO_BIN_EXE_flow-executor").into());
-        fs::copy(artifact, &image).unwrap();
-        let mut objects = Vec::new();
-        let mut handles = Vec::new();
-        for (index, path) in [&home, &image].into_iter().enumerate() {
-            let file = File::open(path).unwrap();
-            let metadata = file.metadata().unwrap();
-            handles.push(rustix::io::fcntl_dupfd_cloexec(&file, 256).unwrap());
-            objects.push(proto::ExecutorProtectedObjectV0 {
-                descriptor: proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 + index as u32,
-                path: path.to_str().unwrap().to_owned(),
-                identity: proto::UnixObjectIdentityV0 {
-                    device: metadata.dev(),
-                    inode: metadata.ino(),
-                    kind: if metadata.is_dir() {
-                        proto::ExecutorObjectKindV0::Directory
-                    } else {
-                        proto::ExecutorObjectKindV0::File
-                    },
-                },
-            });
-        }
-        Self {
+        let image = root.join(image_name);
+        fs::copy(artifact::executor_artifact(), &image).unwrap();
+        let mut fixture = Self {
             root,
             home,
             project,
             image,
-            objects,
-            handles,
+            objects: Vec::new(),
+            handles: Vec::new(),
+        };
+        for path in [fixture.home.clone(), fixture.image.clone()] {
+            fixture.protect(&path);
         }
+        fixture
+    }
+
+    pub fn protect(&mut self, path: &Path) {
+        let file = File::open(path).unwrap();
+        let metadata = file.metadata().unwrap();
+        self.handles
+            .push(rustix::io::fcntl_dupfd_cloexec(&file, 256).unwrap());
+        self.objects.push(proto::ExecutorProtectedObjectV0 {
+            descriptor: proto::EXECUTOR_PROTECTED_DESCRIPTOR_BASE_V0 + self.objects.len() as u32,
+            path: path.to_str().unwrap().to_owned(),
+            identity: proto::UnixObjectIdentityV0 {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+                kind: if metadata.is_dir() {
+                    proto::ExecutorObjectKindV0::Directory
+                } else {
+                    proto::ExecutorObjectKindV0::File
+                },
+            },
+        });
+    }
+
+    pub fn operations(&self, rows: serde_json::Value, wait: bool) -> ExecutorRequestV0 {
+        fs::write(
+            self.project.join("operations.py"),
+            include_str!("operations.py"),
+        )
+        .unwrap();
+        fs::write(
+            self.project.join("operations.json"),
+            serde_json::to_vec(&serde_json::json!({"operations": rows, "wait": wait})).unwrap(),
+        )
+        .unwrap();
+        self.request("exec python3 operations.py", limits(4096, 4096, 15_000))
+    }
+
+    pub fn operation_results(&self) -> Vec<serde_json::Value> {
+        serde_json::from_slice(&fs::read(self.project.join("operations-result.json")).unwrap())
+            .unwrap()
     }
 
     pub fn request(&self, script: &str, limits: ExecutorLimitsV0) -> ExecutorRequestV0 {
@@ -105,6 +135,10 @@ impl Fixture {
     }
 
     pub fn spawn(&self, request: &ExecutorRequestV0) -> Running {
+        self.spawn_with_handles(request, &[])
+    }
+
+    pub fn spawn_with_handles(&self, request: &ExecutorRequestV0, extra: &[(i32, i32)]) -> Running {
         let mut command = Command::new(&self.image);
         command
             .env_clear()
@@ -115,22 +149,14 @@ impl Fixture {
         if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
             command.env("LLVM_PROFILE_FILE", profile);
         }
-        let remaps = self
+        let mut remaps = self
             .handles
             .iter()
             .zip(&self.objects)
             .map(|(handle, object)| (handle.as_raw_fd(), object.descriptor as i32))
             .collect::<Vec<_>>();
-        unsafe {
-            command.pre_exec(move || {
-                for &(source, target) in &remaps {
-                    if dup2(source, target) < 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            });
-        }
+        remaps.extend_from_slice(extra);
+        inherit_handles(&mut command, remaps);
         let mut child = command.spawn().unwrap();
         let mut input = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -169,7 +195,114 @@ impl Fixture {
         let mut running = self.spawn(&request);
         running.ready(&request);
         running.start(&request);
-        let response = running.finish(&request);
+        running.completed(&request)
+    }
+
+    pub fn baseline(&self, request: &ExecutorRequestV0, handles: &[(i32, i32)]) -> Output {
+        let policy = &request.resolved_policy;
+        let mut command = Command::new(&policy.executable);
+        command
+            .args(&policy.argv)
+            .env_clear()
+            .envs(&policy.environment)
+            .current_dir(&policy.working_directory)
+            .stdin(Stdio::null());
+        inherit_handles(&mut command, handles.to_vec());
+        // File capture avoids a full pipe blocking the controlled baseline.
+        let stdout = self.project.join("baseline.stdout");
+        let stderr = self.project.join("baseline.stderr");
+        command
+            .stdout(File::create(&stdout).unwrap())
+            .stderr(File::create(&stderr).unwrap());
+        let mut child = command.spawn().expect("unprotected control must launch");
+        let deadline = Instant::now() + Duration::from_millis(policy.limits.timeout_ms + 2000);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("unprotected control exceeded its deadline");
+            }
+            thread::sleep(Duration::from_millis(5));
+        };
+        let read = |path: &Path| {
+            let mut bytes = Vec::new();
+            File::open(path)
+                .unwrap()
+                .take(64 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .unwrap();
+            assert!(
+                bytes.len() <= 64 * 1024,
+                "baseline output must stay bounded"
+            );
+            bytes
+        };
+        let output = Output {
+            status,
+            stdout: read(&stdout),
+            stderr: read(&stderr),
+        };
+        assert!(
+            output.status.success(),
+            "unprotected control failed: {output:?}"
+        );
+        output
+    }
+}
+
+fn inherit_handles(command: &mut Command, remaps: Vec<(i32, i32)>) {
+    // Pin every source above the fixed target slots before any dup2. Parallel
+    // fixtures can otherwise place a source in another remap's destination.
+    let handles = remaps
+        .into_iter()
+        .map(|(source, target)| {
+            // Each source is a live parent-owned fixture handle at this call site.
+            let source = unsafe { std::os::fd::BorrowedFd::borrow_raw(source) };
+            (
+                rustix::io::fcntl_dupfd_cloexec(source, 256).unwrap(),
+                target,
+            )
+        })
+        .collect::<Vec<_>>();
+    unsafe {
+        command.pre_exec(move || {
+            for (source, target) in &handles {
+                if dup2(source.as_raw_fd(), *target) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+            }
+            Ok(())
+        });
+    }
+}
+
+pub fn wait_for_file(path: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !path.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "helper did not publish {}",
+            path.display()
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+pub fn assert_success(result: &proto::ExecutorToolResultV0) {
+    assert_eq!(
+        result.status,
+        proto::ExecutorToolStatusV0::Completed,
+        "{result:?}"
+    );
+    assert_eq!(result.exit_code, Some(0), "{result:?}");
+}
+
+impl Running {
+    pub fn completed(&mut self, request: &ExecutorRequestV0) -> proto::ExecutorToolResultV0 {
+        let response = self.finish(request);
         let ExecutorResponseV0::Completed {
             enforcement,
             tool_result,

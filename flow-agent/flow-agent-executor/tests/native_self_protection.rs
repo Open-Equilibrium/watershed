@@ -3,6 +3,9 @@
     all(target_os = "macos", target_arch = "aarch64")
 ))]
 
+#[path = "native_support/artifact.rs"]
+mod artifact;
+
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File},
@@ -36,7 +39,7 @@ fn native_executor_protects_own_files_and_leaves_project_work_available() {
     let protected = home.join("AGENTS.md");
     fs::write(&protected, b"global instructions").unwrap();
     let image = root.join("flow-executor");
-    fs::copy(env!("CARGO_BIN_EXE_flow-executor"), &image).unwrap();
+    fs::copy(artifact::executor_artifact(), &image).unwrap();
     let installed_flow = root.join("flow");
     fs::write(&installed_flow, b"installed program").unwrap();
     let handles = [
